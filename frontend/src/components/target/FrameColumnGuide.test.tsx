@@ -58,6 +58,21 @@ describe("FrameColumnGuide", () => {
     expect(screen.queryByText(/Full-width-half-maximum/)).not.toBeInTheDocument();
   });
 
+  it("keeps the keyboard shortcuts, one tap down instead of always on screen", () => {
+    // They used to print above the table at every width — a line of key presses
+    // on a device with no keyboard, on the page the owner reads most. Nothing is
+    // removed: they are here, beside the sibling sentence about tapping to sort.
+    renderGuide();
+    expect(screen.queryByText(/j\/k move/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("What do these numbers mean? →"));
+    const keys = screen.getByText(/move between frames/);
+    expect(keys).toBeVisible();
+    expect(keys.textContent).toContain("j");
+    expect(keys.textContent).toContain("k");
+    expect(keys.textContent).toContain("accepts the selected one");
+    expect(keys.textContent).toContain("rejects it");
+  });
+
   it("hugs its own text rather than stretching across the column", () => {
     // Same trap as DarksGuide: a `component="button"` anchor is a real <button>,
     // and a Stack stretches its children, which would centre its text.

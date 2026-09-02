@@ -330,6 +330,7 @@ def stack_estimate(
     drizzle_reject: bool = False, mosaic_canvas: str = "auto",
     min_max_reject: bool = False, min_max_reject_count: int = 1,
     auto_reject: bool = False, sigma_kappa: float = 3.0,
+    sigma_clip: bool = True,
 ) -> dict[str, Any]:
     """Dry-run sizing for a stack: output canvas + estimated peak memory,
     computed without stacking, so the Stack form can warn *before* a run is
@@ -340,14 +341,18 @@ def stack_estimate(
     scale / reject / canvas mode) plus the min/max-reject knobs, because extra
     outlier passes hold ``2k`` extra canvas planes the run-time guard charges — so
     passing them keeps the pre-submit peak honest for a k>1 reject and lets the
-    over-budget fix offer "drop the extra passes". Returns 422 (not 500) when
-    there's nothing solved to size yet, with the same guidance ``run_stack``
-    gives."""
+    over-budget fix offer "drop the extra passes". ``sigma_clip`` is passed for
+    ``rejection_reach`` below rather than for sizing — it cannot move the peak
+    here, since the rejection-map plane it gates is only allocated when
+    ``record_rejection_map`` is set and this dry run never sets it. Returns 422
+    (not 500) when there's nothing solved to size yet, with the same guidance
+    ``run_stack`` gives."""
     from seestack.stack.stacker import (
         StackOptions,
         auto_reject_method,
         auto_reject_switch_frames,
         estimate_stack,
+        rejection_reach,
     )
 
     settings = deps.get_settings(request)
@@ -362,6 +367,7 @@ def stack_estimate(
             min_max_reject_count=int(min_max_reject_count),
             auto_reject=bool(auto_reject),
             sigma_kappa=float(sigma_kappa),
+            sigma_clip=bool(sigma_clip),
         )
         try:
             est = estimate_stack(proj, options,
@@ -371,6 +377,7 @@ def stack_estimate(
     finally:
         proj.close()
         lib.close()
+    reach = rejection_reach(options, est.n_frames)
     return {
         "n_frames": est.n_frames,
         "canvas_w": est.canvas_w,
@@ -431,6 +438,19 @@ def stack_estimate(
             if options.auto_reject and not options.drizzle
             else None
         ),
+        # Can the rejection this stack is configured for actually drop a lone
+        # satellite trail at this frame count? κ-σ dispatches from 4 frames but
+        # is mathematically blind to a single outlier until ``kappa_min_frames``
+        # (11 at the default κ=3), so between the two it runs and clips nothing.
+        # ``seestack.stackhealth`` already tells the user that *after* the stack;
+        # this is the same helper answering *before* it, while the toggles that
+        # would fix it are still on screen. Always present.
+        "rejection_reach": {
+            "method": reach.method,
+            "n_frames": reach.n_frames,
+            "lone_outlier_min_frames": reach.lone_outlier_min_frames,
+            "reaches": reach.reaches,
+        },
     }
 
 

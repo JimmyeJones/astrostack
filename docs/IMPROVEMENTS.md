@@ -10413,6 +10413,54 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-09-02, the half the v0.323.1 rejection-reach fix could not reach) — the same blind
+  κ-σ runs on the *walk-away* path, where there is no form to warn on.** *(Pillar: autonomy + image quality —
+  PRIORITY 2/4; size S for the advisory, **do NOT blind-flip the default**; confidence: traced, mechanism the
+  same as the shipped fix's.)* v0.323.1 makes the Stack form say when the configured rejection cannot remove a
+  lone satellite trail (κ-σ dispatches from 4 subs but is blind until `kappa_min_frames` = 11 at κ=3). **The
+  unattended chain reaches nobody with that sentence.** `webapp/pipeline.py`'s `auto` rejection injection is
+  applied *"only when the user has expressed no rejection choice (no `auto_reject`/`sigma_clip`/
+  `min_max_reject` key in the merged options)"* — which is right, and it means an owner who once saved
+  `sigma_clip: true` into a per-target default or into global `default_stack_options` gets plain κ-σ on
+  **every** walk-away stack, silently reaching nothing on every night thinner than 11 subs. `stackhealth`'s
+  `rejection_blind` note does catch it afterwards, on the finished picture, so this is not invisible — but it
+  is only ever said *after* the picture is made, and the fix ("re-stack with Auto outlier removal on") is a
+  manual round trip on a path whose whole point is that nobody is there.
+  **Do not "fix" it by overriding their saved choice** — that is a default flip on the on-by-default hot path
+  changing pixels for someone who took control of the setting, which is exactly the trade AGENTS.md §1 refuses
+  and which the 3-frame entry under "Image quality" already declined for the same reason. **The shippable
+  shapes, in order:** (a) surface it *before* the night rather than after — the Target page already knows the
+  target's saved defaults and its accepted count, so `rejection_reach` (now public, `seestack/stack/stacker.py`)
+  can answer it there with the same one-click "Turn on Auto outlier removal" the Stack form now offers;
+  (b) if it is ever to change behaviour, make it a **new opt-in setting**, defaulted off, not a widening of the
+  existing `auto` guard. **Grep first:** the session-recap and "How's my stack?" surfaces may already be the
+  right home, and a third place asking this question is the mistake this class keeps making.
+
+- **NEW IDEA (Builder 2026-09-02, spotted while unifying two of the four copies in v0.323.1) — route the
+  remaining two copies of the combine dispatcher's frame-count gates through `combine_method`.** *(Pillar:
+  maintainability in service of correctness — size S; **the hot path, so measure nothing changes**.)* The gates
+  `min_max_reject and n >= 3` / `sigma_clip and n >= 4` were written out **four** times in
+  `seestack/stack/stacker.py`. v0.323.1 gave them one public definition (`combine_method`) and routed the
+  `STACKER` header card through it; the *dispatcher itself* (`run_stack`'s `if/elif` chain) and
+  `_records_rejection_map`'s mirror of the same conditions still carry their own. They agree today — that was
+  checked — but the whole reason v0.323.1 existed is that a *fifth* surface (the Stack form) had drifted from
+  them, and the next gate change has two places left to forget. **Care:** the dispatcher's branches also decide
+  which accumulator is constructed, so this is a rewrite of live control flow rather than a label — take it
+  only with a before/after that a representative stack produces bit-identical output, and leave
+  `_records_rejection_map` alone if folding it needs the memory estimate to change shape.
+
+- **NEW IDEA (Builder 2026-09-02, the third consumer of the same fact, left alone by v0.323.1 deliberately) —
+  the Stack form's `rejectionOn` still asks "did a pass dispatch?", not "can it remove anything?"**
+  *(Pillar: friendliness — PRIORITY 3; size XS; **check the overlap before building — it may be already
+  covered**.)* `frontend/src/routes/Stack.tsx`'s `rejectionOn` (feeding the streaked-frames warning) is hand-
+  written as `(auto_reject && n>=3) || (sigma_clip && n>=4) || (min_max_reject && n>=3)` — the *dispatch*
+  gates, so on a 6-sub stack with streaks and sigma clipping on it reports rejection as "on" while κ-σ will
+  clip nothing. It now has `estimate.data.rejection_reach.reaches` available, which is the honest answer from
+  the engine. **Why it was left:** the gap is currently covered by `minMaxRejectHint`, which fires on exactly
+  that band (3–10 subs, streaks present, min/max and auto both off) and already offers min/max — so today the
+  user is told the right thing by a different note, and swapping the definition changes which of two correct
+  alerts they see. Worth doing as *one definition* rather than as a bug fix, and only with a test that pins
+  which note appears in the overlap.
 - **⭐ QA LEAD (Builder 2026-09-02, generalised from the v0.323.0 empty-slideshow fix) — sweep every *primary
   call to action* that renders on a surface which can legitimately be empty, and ask whether it leads anywhere
   on a fresh install.** *(Pillar: friendliness — PRIORITY 3; size S per candidate, and the *identifying* test
@@ -17179,6 +17227,22 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+> **⚠️ COLLISION — this was built twice in the same hour, and the version below (v0.323.0, branch
+> `claude/zen-mccarthy-2rptmf`) is the one that ships.** *(Builder 2026-09-02, branch
+> `claude/zen-mccarthy-v56oj1` — mine is dropped rather than re-litigated; theirs landed on `main` first.)*
+> The two were indistinguishable in shape — same `hasAnythingToShow` name, same definition *against*
+> `buildSlides`, same `["gallery"]` key shared with the show — which is itself evidence the entry's spec was
+> unambiguous. **Theirs is strictly better on the one point the entry left open**, and it is worth carrying
+> forward as the general rule: a **failed** query is *unknown*, not *empty*, so their gate keeps the button
+> when the gallery errors. Mine treated a rejected query as "nothing to show" and would have hidden a working
+> slideshow from anyone briefly offline — the exact failure mode the entry's own trap warns about, arrived at
+> from the other direction. Nothing of mine is re-applied on top: their tests are a superset of mine (8 to my
+> 6, including that error case).
+> **What it cost, and the lesson:** I claimed nothing in the backlog before starting — the item was an XS
+> dogfood finding and claiming felt like overhead. It is not: the claim is the only signal the other Builder
+> could have seen, and this is now the **tenth** such collision. Claim even the XS ones, in the run's first
+> commit, and push it immediately.
+
 - **NEW IDEA (Builder 2026-09-02, spotted while tracing the editor export path for v0.322.9) — an edited export
   records which run it came from and *nobody ever reads it*, so History gives a beginner two near-identical
   rows and no way to tell which is the original.** *(Pillar: understand + trust — PRIORITY 3; size XS–S.
@@ -17599,7 +17663,15 @@ problems. Dogfood it every big-picture run and fix root causes.
     **Grep first:** confirm whether the height is the catalog's full length rendered eagerly; if so, the cheap
     half may be a windowed / "show more" list rather than an IA rethink.
 
-- **NEW IDEA (Builder 2026-08-29, spotted finishing the v0.292.0 "My map") — let the owner *save* their
+- **🟡 HALF (a) IS ALREADY BUILT — don't re-pick it (Builder 2026-09-02, checked in the code while sizing it).**
+  The **"Save this map"** button exists on `routes/Sky.tsx` (top-right of the My-map panel, `href={api.myMapUrl()}`
+  with a dated `download={myMapFilename()}` → `astrostack-my-map-YYYY-MM-DD.png`), exactly as this entry
+  specifies, with its own exported filename helper and tests. **Only half (b) — the Dashboard preview card — is
+  open**, and it is the half whose own Care note collides with the standing IA priority ("don't append one more
+  always-on card"), so it needs a *grouping* to live inside rather than a slot at the top. Sized and left.
+
+  *(Original spec follows.)* **NEW IDEA (Builder 2026-08-29, spotted finishing the v0.292.0 "My map") — let the
+  owner *save* their
   universe map, and put it where they'd think to look for it.** *(Pillar: enjoy + share — PRIORITY 3.
   Size: S. Confidence: high — the picture already exists at a stable URL.)* "My map" is a pride object:
   the one image that says "here's everywhere I've pointed my scope this year". Right now it only exists
@@ -18048,7 +18120,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Still open:** the same question for History, Stack, the editor and the Dashboard — but each needs its own
   measurement, and this slice deliberately doesn't guess at them.
 
-- **NEW IDEA (Builder 2026-08-19, seen on the phone screenshot while shipping the column guide above) — the Target
+- **✅ SHIPPED (Builder, v0.323.2, branch `claude/zen-mccarthy-v56oj1`) — ~~the Target page prints keyboard
+  shortcuts on a device with no keyboard.~~** Took the entry's own second option, which it called "almost
+  certainly the right answer", and it is: the line is **folded into `FrameColumnGuide`**, one tap down, rather
+  than hidden below `sm`.
+
+  **Why that and not `visibleFrom`:** a media query doesn't hide a thing from a phone user, it deletes it — the
+  reading v0.266.1 already had to undo once — and the standing IA constraint is that nothing is removed. Inside
+  the disclosure the shortcuts are removed from nobody: the guide already ends with *"Tap a heading to sort by
+  it"*, so *"With a keyboard: **j**/**k** move between frames, **a** accepts the selected one, **r** rejects
+  it"* is the same sentence for the other kind of device, sitting directly beside it. It also costs the page
+  **zero height** at every width, on the page whose standing complaint is height — where before it cost a line
+  at every width, on every device.
+
+  The wording was expanded from the terse `Keys: j/k move · a accept · r reject` while it moved: inside a
+  disclosure there is room for a sentence, and the terseness only ever existed to survive a always-on line.
+
+  **Upgrade-safe (§9):** frontend-only, one line of static text moved between two components. No config,
+  schema, on-disk, API or default change. **Tests (+1 in `FrameColumnGuide.test.tsx`, fails before):** the
+  shortcuts are absent until the guide is opened, and present with every key and every verb once it is.
+
+    *(Original spec follows.)* **NEW IDEA (Builder 2026-08-19, seen on the phone screenshot while shipping the
+  column guide above) — the Target
   page prints keyboard shortcuts on a device with no keyboard.** *(Friendliness — PRIORITY 3; size S; **decide,
   don't sweep**.)* Directly above the frames table, at every width, sits *"Keys: **j**/**k** move · **a** accept ·
   **r** reject"*. On a phone that is a line of instructions nobody there can follow, on the page the owner reads
@@ -20694,6 +20787,53 @@ problems. Dogfood it every big-picture run and fix root causes.
   as filed.** If anything is worth building here it is *advisory* — say on the Stack form that κ-σ can't remove a
   lone trail at this sub count and offer the one-click switch, the same shape as the shipped photometric-
   normalization nudge — not a silent change to their combine.
+
+  **✅ THE ADVISORY HALF SHIPPED (Builder, v0.323.1, branch `claude/zen-mccarthy-v56oj1`) — and building it found
+  that the form was giving the *opposite* advice, not merely no advice.** Nothing about anyone's combine changed;
+  no threshold moved; no default flipped.
+
+  **What was actually wrong.** The Stack form's low-frame caution fired below a hard-coded `SIGMA_CLIP_MIN_FRAMES
+  = 5`, said sigma clipping *"can reject real signal as an outlier"*, and offered one button: **"Turn off sigma
+  clipping."** At the default κ=3 every count it fired at (1–4) is a count at which κ-σ **cannot clip anything at
+  all** — a lone point's z-score against statistics that still include it maxes out at `(n−1)/√n`, which does not
+  reach κ=3 until `kappa_min_frames(3.0)` = **11 frames**, and below 4 the dispatcher does not even run the pass.
+  So the app was telling a beginner with a 3-sub first light that their rejection was too aggressive, and offering
+  to swap no rejection for no rejection — while `seestack.stackhealth` told the *same user* on the *finished
+  picture* that sigma clipping "couldn't drop anything" and to re-stack with Auto outlier removal on. Two shipped
+  surfaces, one fact, opposite answers.
+
+  **The fix is a shared answer, not a second opinion** — the shape this project keeps converging on.
+  `rejection_reach(options, n)` (`seestack/stack/stacker.py`) resolves `auto_reject`, asks the new public
+  `combine_method` which combine the dispatcher will *actually* run, and reads the same `kappa_min_frames`
+  `stackhealth` reads. A test asserts the two agree at every frame count: the form's pre-run warning and the note
+  on the finished picture are now mathematically incapable of disagreeing. `combine_method` also replaced the
+  fourth copy of the dispatcher's gates, in `_build_output_header_meta` — so the `STACKER` card and the form's
+  warning can't name different methods either.
+
+  **The copy now says what will happen and points at what helps**, in three shapes decided by the engine, not by
+  the browser: κ-σ on but blind (*"…can't actually drop a passing satellite… a lone outlier only stands out far
+  enough from the average to be clipped from about 11 frames up"*), the sub-4-frame fall-through (*"will combine
+  as a plain average"*), and below min/max's own 3-frame floor, where the honest answer is that **no setting can
+  help** and the button is withheld. The action is **"Turn on Auto outlier removal"** — `stackhealth`'s own
+  advice, verified by a test to actually reach a lone outlier at every count from 3 up. It fires only when the
+  user *asked* for rejection, so it is never a nag at someone who opted out, and it stands down while the
+  streak-specific `minMaxRejectHint` is up rather than stacking a second yellow alert.
+
+  **The old caution is kept, not deleted** — narrowed to the counts where its sentence is true (the clip really
+  will bite), which at the default κ is the empty set and at a user-loosened κ=1 is frames 4. Its "Turn off sigma
+  clipping" button is untouched there.
+
+  **Upgrade-safe (§9):** one additive query param on `stack-estimate` defaulting to `StackOptions`' own
+  `sigma_clip=True` (so an older frontend sees byte-identical answers), one additive response field, and the
+  param provably cannot move `peak_bytes` — the only plane it gates needs `record_rejection_map`, which this dry
+  run never sets, and a test pins the three peaks equal. No config, schema, on-disk, default or engine-behaviour
+  change.
+
+  **Tests: +17 engine (`tests/test_rejection_reach.py`), +2 endpoint (`tests/webapp/test_stack_estimate.py`),
+  +10 unit and +4 rendered frontend.** The two existing tests that pinned the *wrong* advice were rewritten to
+  pin the corrected advice on the same paths. One unrelated print-plan test was matching "2 accepted, solved
+  frames" from the sigma-clip caution rather than the sizing line it was written for; it now asserts the sizing
+  line's own text.
 - **VALIDATION FOLLOW-UP (Scout 2026-07-23) — confirm on real nebula data that the now-live SExtractor skew
   guard (`abs(mean − median) > 0.3·σ → revert to median`) doesn't over-revert on heavy diffuse nebulosity.**
   *(Image-quality / correctness; PRIORITY 4; size S — one real-data check, no blind code change.)* The
