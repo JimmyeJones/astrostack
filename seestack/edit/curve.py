@@ -53,6 +53,17 @@ _HIGH_PCT = 99.5
 _MIN_GAP = 0.02
 _MIN_LIFT = 0.01
 
+#: Minimum number of strictly-positive pixels :func:`_sky_mode` needs before it
+#: will measure the sky on them alone. Below this the image is essentially all
+#: black and the whole (clipped) population is the honest thing to measure.
+_MIN_SKY_SAMPLES = 100
+
+#: Where :func:`fallback_tone_curve` puts its shoulder, and how far it lifts it,
+#: both as a fraction of the headroom between the sky and white. Chosen so a sky
+#: of zero reproduces the old fixed S-curve's shoulder exactly (0.75 → 0.82).
+_FALLBACK_SHOULDER_AT = 0.75
+_FALLBACK_SHOULDER_LIFT = 0.07
+
 
 def _sky_mode(finite: np.ndarray) -> float:
     """Robust estimate of the dominant background (sky) level: the peak of the
@@ -64,14 +75,80 @@ def _sky_mode(finite: np.ndarray) -> float:
     median itself is the sky) or object-dominated (the median has drifted up into
     the object, but the sky is still the dominant peak below it). Searching the
     full range instead lets a *saturated* object plateau (many pixels piled in one
-    bright bin) outvote the noise-spread sky and misreport the sky as near-white."""
-    lo = float(np.percentile(finite, 0.5))
-    hi = float(np.median(finite))
+    bright bin) outvote the noise-spread sky and misreport the sky as near-white.
+
+    Measured over the **strictly positive** pixels. The stretch that runs
+    immediately before the Curves op (``tone.stretch``) hard-clips one to two per
+    cent of the darkest pixels to *exactly* zero, and clipped shadows are not sky
+    — but because they all land on one value they form the tallest bin there is,
+    so counting them made the sky read as ~0.0008 on every real stack instead of
+    the ~0.14 it actually sits at. (That is the whole of the "Auto brightens the
+    sky" bug: with the sky reported near black, the "the median *is* the sky, so
+    decline" gate in :func:`suggest_tone_curve` never fired and the lift landed on
+    the background itself.) An image with no hard-clipped shadows has no zeros to
+    drop, so its measurement is unchanged pixel for pixel."""
+    positive = finite[finite > 0.0]
+    # An image that is *almost all* zero has no positive population to measure —
+    # fall back to the whole thing rather than reading a handful of stray pixels
+    # as the sky. Same floor as the caller's "too few finite pixels" guard.
+    if positive.size < _MIN_SKY_SAMPLES:
+        positive = finite
+    lo = float(np.percentile(positive, 0.5))
+    hi = float(np.median(positive))
     if not (hi > lo):
         return hi
-    counts, edges = np.histogram(finite, bins=128, range=(lo, hi))
+    counts, edges = np.histogram(positive, bins=128, range=(lo, hi))
     i = int(np.argmax(counts))
     return float((edges[i] + edges[i + 1]) / 2.0)
+
+
+def fallback_tone_curve(rgb: np.ndarray) -> list[list[float]]:
+    """The gentle contrast curve auto-contrast falls back to when
+    :func:`suggest_tone_curve` declines — anchored on *this image's* sky.
+
+    The fallback used to be the fixed S-curve ``[[0,0],[0.25,0.2],[0.75,0.82],
+    [1,1]]``, and its lower control point is below the sky of a typical stretched
+    stack: it pulled a 0.19 background down to ~0.15, i.e. it **darkened the sky
+    by a fifth** every time the data-driven suggestion declined. Which branch runs
+    is not something the user chose, so both branches have to obey the same rule —
+    *never move the background* — or the one-click result depends on which side of
+    a gate the stack happened to fall.
+
+    So the shape is kept and re-expressed relative to the measured sky: the sky
+    and both endpoints sit on the identity, and a single shoulder above the sky is
+    lifted a touch to add contrast to the structure. At a sky of zero it reduces
+    to the old curve's shoulder exactly (``0.75 → 0.82``); the old lower point is
+    simply gone, because "pull 0.25 down" *is* the bug. Returns the identity when
+    the image is too bright or too degenerate to place a shoulder — doing nothing
+    is the right answer there, and is still better than moving the background.
+    """
+    finite = rgb[np.isfinite(rgb)]
+    identity = [[0.0, 0.0], [1.0, 1.0]]
+    if finite.size < 100:
+        return identity
+    sky = min(max(_sky_mode(finite), 0.0), 1.0)
+    headroom = 1.0 - sky
+    if headroom <= _MIN_GAP:
+        return identity
+
+    x_shoulder = sky + _FALLBACK_SHOULDER_AT * headroom
+    y_shoulder = x_shoulder + _FALLBACK_SHOULDER_LIFT * headroom
+
+    points: list[list[float]] = [[0.0, 0.0]]
+    if round(sky, 3) > 0.0:
+        points.append([round(sky, 3), round(sky, 3)])
+    points.append([round(x_shoulder, 3), round(y_shoulder, 3)])
+    if round(y_shoulder, 3) < 1.0:
+        points.append([1.0, 1.0])
+
+    # Same strict-monotone safety net as the suggested curve: rounding at a very
+    # high sky could collide two points, and a non-monotone LUT would posterise.
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    if (any(b <= a for a, b in zip(xs, xs[1:], strict=False))
+            or any(b <= a for a, b in zip(ys, ys[1:], strict=False))):
+        return identity
+    return points
 
 
 def suggest_tone_curve(
