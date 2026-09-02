@@ -602,3 +602,24 @@ def test_the_stub_astap_really_would_litter(tmp_path):
 
     text = wcs_text_from_sidecar(victim_dir / "frame.wcs")
     assert text and "CRVAL1" in text
+
+
+def test_the_settings_form_cannot_point_the_library_inside_incoming(client, data_root):
+    """Layer 5: a **configuration** guard. Layers 1–4 all ask "does this code
+    write into ``incoming/``?" of the folder the settings *currently* name — so
+    every one of them stays green while the settings themselves move the library
+    tree inside the raw folder, after which the app's own correctly-scoped
+    cleanups resolve in there. The save is refused, in plain language, and
+    nothing is created under ``incoming/``. Fails before (200, and the folder
+    appeared)."""
+    incoming = data_root / "incoming"
+    before = sorted(p.name for p in incoming.iterdir())
+
+    r = client.put("/api/settings", json={"library_root": str(incoming / "library")})
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert "incoming folder" in detail and "raw frames" in detail
+
+    assert sorted(p.name for p in incoming.iterdir()) == before
+    assert client.get("/api/settings").json()["resolved_library_root"] \
+        == str(data_root / "library")

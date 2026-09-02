@@ -832,6 +832,49 @@ _(nothing else claimed — claim an item here with your branch name)_
     silently diverging. Note the backlog's existing parity claims ("sharpen bit-exact", "RMSE ≈0 for sharpen")
     are **disproved** by this on any scene with sub-proxy-pixel stars.
 
+- **✅ SHIPPED (Builder, v0.327.7, branch `claude/sweet-babbage-xgi198`) — ~~A7: pre-v0.184.9 Seestar on-device
+  outputs stay accepted *inside* the owner's real targets, and can be picked as the alignment reference.~~**
+  Fixed the way the entry's own ⚠️ note said it had to be — **by filename, not by folder or by count** — so the
+  regression test it collides with passes untouched rather than being rewritten.
+
+  **The count guard was answering a question the data doesn't ask.** `_MAX_SEESTAR_OUTPUT_FRAMES = 2` encodes
+  "the device's output folder holds a single stacked image", which is true *per session* and false *per
+  folder*: the owner's bare `M 3/` holds 22 of them, `M 13` 9, `M 101` 11 — every one sailing past the cap,
+  averaging into the stack and sitting in the reference pool where `pick_central_frame` (dither centre, high
+  SNR) prefers it. But the cap cannot simply be raised: the folder it exists to protect — a user's own raw subs
+  in a plainly-named `<T>/` beside a Seestar `<T>_sub/` — is *also* a big folder, and the owner has one
+  (`NGC 6888` 4,815 beside `NGC 6888_SUB` 3,110, holding genuinely different frames). Count cannot separate
+  them. The **filename** can, and the convention was already all over the repo's fixtures while **no production
+  module matched on it** (`grep -rn "Stacked" --include=*.py seestack/ webapp/` returned nothing): the device
+  writes `Stacked*.fit`, its raw subs `Light_<T>_<exp>_<filter>_….fit`.
+
+  **The change is one extra way in, not a looser gate.** `reject_seestar_output_frames` now rejects a bare
+  `<T>/` frame whose *name* is on-device output at **any** count, and every other frame in that folder still
+  answers to the count guard on the folder's **whole** population, exactly as before — so a `Light_*` sub is
+  never newly rejected, however many `Stacked` images sit next to it. `_is_seestar_output_filename` is
+  deliberately strict about what may follow the prefix (`Stacked.fit`, `Stacked_60s.fit`, `Stacked-01.fit`
+  match; `StackedRegion.fit` does not), because this is the on-by-default ingest path where an over-broad
+  match silently drops real subs from a stack.
+
+  **Upgrade-safe (§9):** nothing is deleted (§10 untouched — this is a DB `accept` flag), a `user_override`
+  accept is still honoured, a re-scan is still idempotent, no schema/config/API/on-disk change, and the frames
+  are re-acceptable in the UI like any other auto-reject.
+
+  **Tests (+4 in `tests/test_scanner.py`, 3 of which fail before).** The owner's shape at unit level (22
+  outputs beside 30 subs → 22 rejected, subs untouched, still idempotent); the **mixed** folder both guards
+  must survive at once (8 `Light_*` + 22 `Stacked_*` in one folder → only the 22 go, which fails just as
+  loudly if a future fix rejects by folder again); an end-to-end re-scan healing nine sessions' outputs and
+  asserting the accepted pool is the three raw subs; and a positive control that a user's own
+  `StackedRegion*.fit` in an over-cap folder is left alone. The colliding
+  `test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_name` is **unchanged and still
+  green** — its 8 subs are `Light_*`, which is exactly the discriminator.
+
+  **Deliberately not done:** the header-based second discriminator the entry floats (`EXPTIME` = N×10 s, or a
+  stack-count card). The filename settles every case in the owner's library and a header rule would need real
+  data to calibrate; filed as a follow-on only if a naming variant ever turns up.
+
+  *(Original entry follows.)*
+
 - **🟠 A7 — PRE-v0.184.9 SEESTAR ON-DEVICE OUTPUTS STAY ACCEPTED *INSIDE* THE OWNER'S REAL TARGETS, AND CAN BE
   PICKED AS THE ALIGNMENT REFERENCE.** *(Severity: wrong reference frame / mild contamination on his biggest
   targets. Confidence: guard behaviour verified by reproduction; downstream reference-pick effect likely.)*
@@ -1185,9 +1228,41 @@ _(nothing else claimed — claim an item here with your branch name)_
   `3.2 h` — a form a comment in `Library.tsx` **explicitly forbids**); the baked nameplate is a fourth.
   **Fix:** one caption model served by the backend; History passes the **display name**, not the basename.
 
-- **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** No validator
+- **✅ SHIPPED (Builder, v0.327.8, branch `claude/sweet-babbage-xgi198`) — ~~A-MINOR's first item: no validator
+  stops `library_root` being set inside `incoming_dir`.~~** The §10 hole the audit spotted and correctly called
+  "one settings edit away". Every destructive call in the app is *correctly scoped to its own tree* — which is
+  precisely why the **layout** was the risk rather than any one call site: point the library (or the data root,
+  which carries `state/config.json`) at somewhere under `incoming/` and a perfectly correct `rmtree` resolves
+  inside the owner's only copy of their raws.
+
+  **The guard refuses to *enter* the layout, and deliberately nothing more.** A pure
+  `webapp.config.nested_incoming_conflict(incoming, library, data_root)` returns a plain-language reason or
+  `None`; `SettingsStore.update` raises it as a `ValueError` **before** `ensure_dirs` can create a folder inside
+  `incoming/` and before anything is persisted, and the settings PUT passes the message straight through as a
+  422 (`ValidationError` is caught first — in pydantic v2 it *is* a `ValueError`). It is **not** a model
+  validator, on purpose: an install already in this state must still boot, and a model-level error sends
+  `_load_resilient` down the path that drops fields — or, with an empty `loc`, resets the whole file (§9). Such
+  an install loads exactly as before and logs one warning per boot instead.
+
+  **One-directional and narrow.** `incoming/` sitting *inside* the library root is not flagged: that is the
+  app's own default shape one level up (both are children of the data root) and nothing deletes outside
+  `targets/`. Only "the library folder, or the data root, would sit inside the incoming folder" is refused.
+
+  **Upgrade-safe (§9):** no schema, no config field, no on-disk change, no default flipped, no response shape
+  changed; the import endpoint already skips `_HOST_KEYS`, so this can only ever fire on a deliberate PUT.
+
+  **Tests (+6, 4 of which fail before).** The two directions of the conflict at store level; the ordinary moves
+  that must keep working (a library elsewhere, and `incoming/` nested *under* the library); an install already
+  in the unsafe layout still loading with its other settings intact; the pure helper on paths that need not
+  exist (including a sibling whose name merely shares the prefix); and a fifth layer on
+  `tests/webapp/test_incoming_readonly_guard.py` — its four existing layers all ask "does this code write into
+  `incoming/`?" of the folder the settings *currently* name, so every one of them stays green while the
+  settings themselves move the library in there.
+
+- **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** ~~No validator
   stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
-  resolves inside the raw tree — *not* the owner's current state, but one settings edit away); the scanner's
+  resolves inside the raw tree — *not* the owner's current state, but one settings edit away)~~ *(shipped
+  v0.327.8, see above)*; the scanner's
   bare-`<T>/` skip is **silent** even when the folder holds thousands of FITS (the owner's `NGC 6888` 4,815 vs
   `NGC 6888_SUB` 3,110 is exactly that shape — see open questions); the plate-solve-failed screen shows a
   blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"; the Stack page
@@ -16092,6 +16167,29 @@ problems. Dogfood it every big-picture run and fix root causes.
   fix) — so check whether an existing endpoint can take a rectangle before adding one. **Cautions:** it must
   never load the whole FITS to serve a window (memory bounds), and it is a *view*, not a recipe change.
 
+  **⚠️ SIZED AND NOT STARTED — Builder 2026-09-02 (branch `claude/sweet-babbage-xgi198`), because the filed
+  shape has a defect that would ship a *second* lie in place of the four honest apologies. Read this before
+  picking it up.** The spec says "runs the current recipe over it with `proxy_scale = 1`". That is right for
+  every op the loupe exists to show — sharpen, deconv, star-reduce, hot-pixels are all **local**, so a window
+  is all they need. It is wrong for every op in the recipe *upstream* of them, because those read **global**
+  statistics: `tone.stretch`'s STF takes the median/MAD of the array it is handed, `background.subtract` fits a
+  mesh over it, `tone.color_calibrate` detects stars across it, and the auto contrast curve reads the sky mode.
+  Handed a 512×512 window those all fit *the window*, not the picture — so a loupe on a bright core would come
+  back stretched differently from both the preview and the export, and a beginner tuning sharpening by eye
+  would be reading it through the wrong tone curve. The four advisories are at least honest; this would not be.
+
+  **The shape that is actually correct** is "global parameters from the whole image, local pixels at full
+  res": run the recipe on the cached proxy first to *fit* the global ops, freeze what they fitted, then re-run
+  over the full-res window with those values held. The proxy is a faithful strided sample of the whole canvas
+  — it is already what every suggester (`levels-suggestion`, `stretch-suggestion`, `curve-suggestion`) fits
+  on — so its fitted parameters are the right ones. What that needs is a way for an op to be handed its fit
+  instead of computing one, which today does not exist: `EditContext` carries scale/coverage/stage and nothing
+  else. **So the first slice is not the loupe** — it is a fitted-parameter channel on `EditContext` (an op
+  writes what it fitted, exactly as it already writes `op_notes`, and reads a frozen value back when one is
+  supplied), pinned by a test that fitting on the whole image and freezing onto a *crop* of it reproduces the
+  full render's pixels inside that crop. With that in place the loupe is small and honest; without it, it is
+  a new parity bug wearing the fix's name.
+
 - **✅ SHIPPED (Builder, v0.322.9, branch `claude/zen-mccarthy-2rptmf`) — ~~the editor's export panel asks the
   beginner a question whose own help text says the answer doesn't matter.~~** **Shape (b), and the reasoning
   the entry asked for is here rather than only in the commit.** Shape (a) was considered first and is not
@@ -16505,6 +16603,26 @@ problems. Dogfood it every big-picture run and fix root causes.
   display image to `neutral`. Off by default (only shown when a cast is measured), reversible, additive — a clean
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
+
+- **NEW IDEA (Builder 2026-09-02, the reach the A7 fix left open) — give the *junk-target cleanup nudge* the
+  same filename evidence the ingest reject just learned, so a pre-convention library's leftover output targets
+  stop hiding behind a frame count.** *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: S.)* A7
+  (v0.327.7) taught the on-ingest reject to recognise the device's own picture by its **name**
+  (`Stacked*.fit` vs `Light_*.fit`) rather than by how many of them a folder holds, because "the output folder
+  holds one image" is true per *session* and false per folder. `classify_seestar_junk_target`
+  (`seestack/io/scanner.py`) — the read-only classifier behind the "we found some leftover folders" cleanup
+  card — still gates purely on count: `junk_output_frame_cap()` allows 2 for a single field and 32 for a
+  mosaic (v0.319.3, sized from the owner's real 11- and 7-frame mosaic leftovers). A target holding a
+  *season* of on-device outputs sails past both caps and is never offered for cleanup, which is exactly the
+  shape A7 found on the owner's `M 3`. **Shape:** where every frame in the candidate target is named like
+  on-device output, treat that as the positive evidence and let the count cap go; where the names are mixed or
+  `Light_*`, keep today's cap unchanged. The existing "the `<T>_sub/` sibling really is on disk" requirement
+  stays — this only ever *adds* confidence, and cleanup is a confirmed action, never automatic. **Reuse, do
+  not re-derive:** `seestack.io.project._is_seestar_output_filename` is the single definition; a second copy is
+  the copy that eventually disagrees, which is the mistake `junk_output_frame_cap` was itself created to undo
+  (the webapp used to carry its own `_MAX_CLEANUP_FRAMES`). **Care:** this offers a *deletion* to the user, so
+  the bar is higher than the ingest reject's (which is reversible and deletes nothing) — require *every* frame
+  to match, not a majority.
 
 - **NEW IDEA (Scout 2026-08-27 #17) — surface calibration *match confidence* on the interactive Stack form, so a
   watching beginner gets the same smart dark/flat matching the walk-away path already does — and understands why
@@ -18314,6 +18432,25 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **NEW IDEA (Builder 2026-09-02, the follow-on to the v0.327.8 folder guard) — the Settings page should say
+  "that folder won't work" *while you type it*, not after you press Save.** *(Pillar: approachable —
+  PRIORITY 3. Size: XS–S.)* v0.327.8 refuses a settings save that would put the library (or the data root)
+  inside `incoming/`, with a plain-language reason. But the reason arrives as a red toast reading
+  `Save failed: 422: Your library folder would sit inside…` — the raw status code is in the user's face, and
+  the two fields that caused it are left looking fine. Both path fields are free-text `TextInput`s with a
+  helper line already (`incoming_dir` / `library_root` in `routes/Settings.tsx`), so the natural shape is a
+  pure client-side `folderConflict(incoming, library, dataRoot)` in a small module beside `calibrationFit.ts`,
+  rendering Mantine's own `error=` on the offending field and disabling Save while it holds — the server guard
+  stays the authority, this just stops the user finding out the hard way. **Grep first:** the settings form
+  already has a `dropEmptyFields` patch builder and the GET already returns `resolved_incoming_dir` /
+  `resolved_library_root`, so the resolved defaults for a blank field are on hand without re-deriving them.
+  **Care:** the client check must be *advisory only* — string prefix comparison in a browser cannot resolve
+  symlinks or case-insensitive mounts, so it must never be the thing that decides, and a case it cannot judge
+  must fall through to the save rather than block it. **Related, worth the same pass:** the toast prefixes
+  every settings failure with the HTTP status (`client.ts` builds `${res.status}: ${detail}`); a
+  `friendlyJobError`-style strip for a 422 whose detail is already a sentence would improve every settings
+  error at once, not just this one.
 
 - **NEW IDEA (Builder 2026-09-02, left rather than churned while standing down the A5 collision) — the
   Target page's Edit button is still labelled "Edit latest stack" while it now edits the *cover*.**
