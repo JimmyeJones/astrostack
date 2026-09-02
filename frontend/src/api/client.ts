@@ -1862,10 +1862,11 @@ export interface Histogram {
   // export applies. Surfaced as an honest advisory (the sub-pixel blur simply
   // isn't representable on the proxy grid — see deconvUnderstatesCaption).
   deconv_preview_understates?: boolean;
-  // True when an enabled Star-reduction op's star size collapses below one proxy
-  // pixel on the decimated preview, so its erosion footprint clamps up and the
-  // live preview *over*-reduces the stars relative to the full-res export.
-  // Surfaced as an honest advisory (see starReduceOverstatesCaption).
+  // True when an enabled Star-reduction op runs on a decimated preview, where its
+  // erosion footprint rounds to whole proxy pixels and the stars themselves are
+  // partly decimated away — so the preview's star reduction is not the export's
+  // (measured 0.63x–1.58x, no consistent direction). Surfaced as an honest
+  // advisory (see starReduceDiffersCaption). Key name kept for compatibility.
   star_reduce_preview_overstates?: boolean;
   // True when an enabled Sharpen op's radius, shrunk by proxy_scale, goes
   // sub-pixel on the decimated preview, so the unsharp mask collapses towards the
