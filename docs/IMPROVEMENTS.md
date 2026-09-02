@@ -43,6 +43,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-09-02, branch `claude/zen-mccarthy-olkjpm` — second claim released, shipped as v0.326.1.**
+> **A3** (plate-solving writes sidecars into `incoming/`). Sites: `seestack/solve/astap.py`
+> (`_solve_once` → a scratch copy + a new `_run_astap`, `ASTAPResult.wcs_sidecar_raw`),
+> `seestack/io/wcs_io.py` (`wcs_text_from_raw` split out), `seestack/solve/runner.py` (`solve_one`),
+> `tests/test_astap.py` (fakes rewired to write beside `-f`) and
+> `tests/webapp/test_incoming_readonly_guard.py` (a fourth layer: a stub `astap` binary). See the Shipped entry.
+
 > **Builder 2026-09-02, branch `claude/zen-mccarthy-olkjpm` — claim released, shipped as v0.326.0.** **A1**,
 > the audit's highest-value finding. Claimed **by site**, in the run's first commit, pushed before a line of
 > code was written, per the collision-NINE process note below — and the extra fetch that note recommends was
@@ -530,27 +537,68 @@ _(nothing else claimed — claim an item here with your branch name)_
       regression test that feeds real `autostretch` output**, not a synthesised approximation of it. Re-check the
       "did Auto improve this?" claims elsewhere in the backlog that were measured through this same curve.
 
-- **🔴 A3 — PLATE-SOLVING WRITES FILES INTO `incoming/`, AND THE CI GUARD STRUCTURALLY CANNOT SEE IT.**
-  *(Severity: **broken guarantee** — §10's read-only rule. **No data loss**: the owner's FITS are not modified.
-  Confidence: verified by code reading; **not** reproduced — no ASTAP binary in the audit container.)*
+- **✅ SHIPPED (Builder, v0.326.1, branch `claude/zen-mccarthy-olkjpm`) — ~~A3: plate-solving writes files into
+  `incoming/`, and the CI guard structurally cannot see it.~~** Fixed, and **reproduced first** — the audit
+  filed this "verified by code reading, not reproduced (no ASTAP binary)", and reproducing it turned out to be
+  the whole trick: a **stub `astap` executable** that writes its sidecars beside whatever `-f` names, which is
+  all the real binary does that matters here. With it, the old code leaves
+  `Light_M 31_10.0s_IRCUT_0001.wcs` and `.ini` sitting in the raw folder; the new code leaves the directory
+  listing byte-identical, three re-solves included.
 
-  With the webapp default `copy_to_cache = False` (`webapp/config.py`, confirmed in `docs/webapp.md`),
-  `cached_path` is NULL, so `readable_frame_path` (`seestack/io/project.py`) returns **the source path**, and
-  `ASTAPSolver._run` (`seestack/solve/astap.py`) invokes ASTAP as `-f <source> -wcs`, then reads
-  `fits_path.with_suffix(".wcs")` and `.ini`. **ASTAP therefore creates — and on every re-solve overwrites —
-  two sidecar files beside each raw sub in `incoming/<T>_sub/`.** The FITS themselves are untouched (`-update`
-  is deliberately not passed), so this is not corruption; but §10 permits only *read* and *create-new*, this is
-  create-then-**overwrite**, and it accumulates thousands of non-FITS files in the owner's raw tree.
-  - **Why the guard misses it:** both layers of `tests/webapp/test_incoming_readonly_guard.py` are blind here —
-    the stdlib sentinel cannot see **subprocess** writes, and the snapshot layer never runs a solve because CI
-    installs ffmpeg but **no ASTAP**. The 2026-09-02 Scout sweep marked `astap.py` and `runner.py` "traced,
-    clean" for exactly this reason: reading the code cannot reveal what another process does to the filesystem.
-  - **Fix direction:** solve a **temp copy** the way `seestack/solve/bootstrap.py` already does
-    (`TemporaryDirectory`), or redirect the sidecars into the target's cache via ASTAP's output-basename
-    option. **Add a CI test with a stub `astap` executable** that writes sidecars next to `-f` and asserts the
-    `incoming/` listing is byte-identical afterwards — that closes the whole class, not just this instance.
-  - **Owner check that settles it in one line:** `ls incoming/<any target>_sub | grep -c '\.wcs$'` — non-zero
-    confirms it on the live box.
+  **The fix is a scratch copy, not `-o`.** ASTAP does have an output-basename option, but a §10 guarantee on
+  data with no backup should not rest on a CLI flag whose support varies by version and whose failure mode is
+  silent. `ASTAPSolver._solve_once` now copies the frame into a `TemporaryDirectory` and runs there, so the
+  guarantee holds *whatever* ASTAP does with the path it is given. A symlink or a hardlink would have been
+  cheaper and was rejected for the same reason: both lead any write straight back to the original. The copy is
+  a few milliseconds against a solve measured in seconds, and it happens once per `solve()`, not once per
+  ladder rung.
+
+  **The consequence worth knowing:** the sidecars now die with the scratch directory, so the solver reads them
+  before returning. `ASTAPResult` gained `wcs_sidecar_raw` (additive; `wcs_sidecar_path` stays for a caller that
+  solved a file it owns), `wcs_io` grew a pure `wcs_text_from_raw` split out of `wcs_text_from_sidecar` so both
+  paths normalise identically, and `solve_one` prefers the content and falls back to the path. The ASTAP log
+  tail has the scratch path substituted back to the source path, so a failure a user reads still names their
+  frame.
+
+  **The guard file gained a fourth layer, and that is the durable half.** Layers 1–3 are all structurally blind
+  to a subprocess — the stdlib sentinel wraps only Python's own calls, and CI installs ffmpeg but no ASTAP, so
+  no solve had ever run in it. `test_plate_solving_writes_no_sidecars_into_incoming` and
+  `test_a_re_solve_of_the_same_frame_still_leaves_incoming_alone` close the class, not the instance: any future
+  code that hands an external process a path inside `incoming/` fails them.
+
+  **Three fixtures in `tests/test_astap.py` were rewired, not weakened.** Their fake `subprocess.run` wrote
+  sidecars beside the *original* frame — i.e. modelled a binary that does not exist, and would have gone on
+  passing if the solver started handing over the source path again. They now derive the sidecar paths from the
+  command's own `-f` argument (a shared `_sidecar_paths`/`_write_solved_sidecars`), which is what the real
+  binary does; every assertion is unchanged.
+
+  **The owner check from the entry still stands** and is worth running once on the live box:
+  `ls incoming/<any target>_sub | grep -c '\.wcs$'`. A non-zero count is the litter this fix stops *adding to*
+  — v0.326.1 does not remove what is already there, and must not: §10 permits no deletion inside `incoming/`,
+  and the app has no business deciding those files are unwanted. If the owner wants them gone it is his own
+  `find … -delete`, not ours.
+
+  - **~~🔴 A3 — PLATE-SOLVING WRITES FILES INTO `incoming/`, AND THE CI GUARD STRUCTURALLY CANNOT SEE IT.~~**
+    *(Severity: **broken guarantee** — §10's read-only rule. **No data loss**: the owner's FITS are not modified.
+    Confidence: verified by code reading; **not** reproduced — no ASTAP binary in the audit container.)*
+
+    With the webapp default `copy_to_cache = False` (`webapp/config.py`, confirmed in `docs/webapp.md`),
+    `cached_path` is NULL, so `readable_frame_path` (`seestack/io/project.py`) returns **the source path**, and
+    `ASTAPSolver._run` (`seestack/solve/astap.py`) invokes ASTAP as `-f <source> -wcs`, then reads
+    `fits_path.with_suffix(".wcs")` and `.ini`. **ASTAP therefore creates — and on every re-solve overwrites —
+    two sidecar files beside each raw sub in `incoming/<T>_sub/`.** The FITS themselves are untouched (`-update`
+    is deliberately not passed), so this is not corruption; but §10 permits only *read* and *create-new*, this is
+    create-then-**overwrite**, and it accumulates thousands of non-FITS files in the owner's raw tree.
+    - **Why the guard misses it:** both layers of `tests/webapp/test_incoming_readonly_guard.py` are blind here —
+      the stdlib sentinel cannot see **subprocess** writes, and the snapshot layer never runs a solve because CI
+      installs ffmpeg but **no ASTAP**. The 2026-09-02 Scout sweep marked `astap.py` and `runner.py` "traced,
+      clean" for exactly this reason: reading the code cannot reveal what another process does to the filesystem.
+    - **Fix direction:** solve a **temp copy** the way `seestack/solve/bootstrap.py` already does
+      (`TemporaryDirectory`), or redirect the sidecars into the target's cache via ASTAP's output-basename
+      option. **Add a CI test with a stub `astap` executable** that writes sidecars next to `-f` and asserts the
+      `incoming/` listing is byte-identical afterwards — that closes the whole class, not just this instance.
+    - **Owner check that settles it in one line:** `ls incoming/<any target>_sub | grep -c '\.wcs$'` — non-zero
+      confirms it on the live box.
 
 - **🟠 A2 — PREVIEW AND EXPORT DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
   PROXY FACTOR — worst exactly on the owner's mosaics.** *(Severity: wrong picture (colour) + a preview that

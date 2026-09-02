@@ -27,6 +27,12 @@ Three layers, deliberately overlapping, because each catches what the others mis
 3. :func:`test_ingest_still_copies_and_never_moves` — a **source** check on the
    one function where the tempting "optimisation" lives, so the classic
    `copy2` → `move` regression is caught at the line that would introduce it.
+4. :func:`test_plate_solving_writes_no_sidecars_into_incoming` — a **stub
+   binary**. Layers 1–3 are all blind to a *subprocess*: the sentinel wraps only
+   Python's own calls, and CI installs no ASTAP so no solve ever ran in it. A
+   stub executable that writes where the real one writes closes that gap, and it
+   is not a hypothetical — the 2026-09-02 audit found ASTAP creating (and on
+   every re-solve overwriting) a `.wcs` and an `.ini` beside each raw sub.
 
 The only writes ever permitted under ``incoming/`` are the upload endpoints
 *adding* new files (they skip a name that already exists — pinned below), and the
@@ -443,3 +449,119 @@ def test_the_scanner_only_reads_the_incoming_tree():
         assert banned not in src, (
             f"scanner.py contains {banned!r} — the scanner may only read the "
             "incoming folder (AGENTS.md §10).")
+
+
+# --------------------------------------------------------------------------- #
+# Layer 4 — external processes, driven by a stub binary that writes where the
+# real one writes
+# --------------------------------------------------------------------------- #
+#
+# The three layers above are all blind to a *subprocess*. The stdlib sentinel
+# only wraps Python's own destructive calls, and the behavioural snapshot only
+# sees what actually ran — and CI installs ffmpeg but no ASTAP, so no solve ever
+# happened in it. That gap is not hypothetical: the 2026-09-02 external audit
+# (finding A3) traced ASTAP being invoked as ``-f <source in incoming/> -wcs``,
+# which makes it create — and on every re-solve *overwrite* — a ``.wcs`` and an
+# ``.ini`` beside each of the owner's raw subs. §10 permits read and create-new
+# only, and a code-reading sweep had marked these very modules "traced, clean"
+# a few hours earlier, because reading Python cannot reveal what another process
+# does to the filesystem.
+#
+# The closer is a *stub executable* that writes exactly where the real binary
+# writes. It runs in CI with no ASTAP installed, and it fails on the mechanism
+# rather than on one instance of it.
+
+_STUB_ASTAP = '''#!/usr/bin/env python3
+"""A stand-in for ASTAP that writes its sidecars beside the ``-f`` file."""
+import sys
+from pathlib import Path
+
+argv = sys.argv[1:]
+target = Path(argv[argv.index("-f") + 1])
+# ASTAP's .wcs is a bare FITS header: 80-character records, no newlines.
+cards = [
+    "SIMPLE  =                    T",
+    "BITPIX  =                  -32",
+    "NAXIS   =                    2",
+    "NAXIS1  =                   64",
+    "NAXIS2  =                   48",
+    "CTYPE1  = 'RA---TAN'",
+    "CTYPE2  = 'DEC--TAN'",
+    "CRPIX1  =                 32.0",
+    "CRPIX2  =                 24.0",
+    "CRVAL1  =              10.6847",
+    "CRVAL2  =              41.2687",
+    "CDELT1  =        -0.0008333333",
+    "CDELT2  =         0.0008333333",
+    "END",
+]
+Path(str(target.parent / (target.stem + ".wcs"))).write_text(
+    "".join(c.ljust(80) for c in cards))
+Path(str(target.parent / (target.stem + ".ini"))).write_text(
+    "CRVAL1=10.6847\\nCRVAL2=41.2687\\nCDELT2=0.0008333\\nCROTA2=0.0\\n")
+print("Solution found: 10.6847 41.2687")
+'''
+
+
+def _write_stub_astap(where: Path) -> Path:
+    exe = where / "astap"
+    exe.write_text(_STUB_ASTAP)
+    exe.chmod(0o755)
+    return exe
+
+
+def test_plate_solving_writes_no_sidecars_into_incoming(tmp_path):
+    """A solve must leave the owner's raw folder byte-for-byte identical.
+
+    Driven with a stub ASTAP that behaves like the real one — sidecars written
+    beside whatever ``-f`` names — so this fails if the solver ever goes back to
+    handing ASTAP a path inside ``incoming/``. The assertion is the *directory
+    listing*, not just the FITS: two extra files per sub, rewritten on every
+    re-solve, is a create-then-overwrite inside a read-only tree, and at the
+    owner's scale it is thousands of stray files in his only copy of the data.
+    """
+    from seestack.solve.runner import solve_one
+
+    incoming = tmp_path / "incoming" / "M_31_sub"
+    incoming.mkdir(parents=True)
+    frame = incoming / "Light_M 31_10.0s_IRCUT_0001.fit"
+    write_seestar_fits(frame, width=64, height=48, n_stars=8, seed=3)
+    before = _snapshot(tmp_path / "incoming")
+    listing_before = sorted(p.name for p in incoming.iterdir())
+
+    result = solve_one(
+        frame_id=1, fits_path=str(frame),
+        astap_path=str(_write_stub_astap(tmp_path)), fov_deg=2.1, timeout_s=30.0)
+
+    # The solve genuinely ran and produced a WCS — otherwise "nothing was written"
+    # would be true for the boring reason that nothing happened.
+    assert result.solved, f"the stub solve should succeed: {result.error}"
+    assert result.wcs_text and "CRVAL1" in result.wcs_text
+    assert result.ra_center_deg == pytest.approx(10.6847, abs=1e-3)
+
+    _assert_unchanged(before, tmp_path / "incoming", "a plate solve")
+    assert sorted(p.name for p in incoming.iterdir()) == listing_before, (
+        "the solve left files behind in the incoming folder — ASTAP writes its "
+        ".wcs/.ini beside the file it is given, so it must never be given a path "
+        "inside incoming/ (AGENTS.md §10)")
+
+
+def test_a_re_solve_of_the_same_frame_still_leaves_incoming_alone(tmp_path):
+    """The overwrite half: re-solving is routine (the ladder, a re-scan, a retry
+    after raising the timeout), and an overwrite of a file the app created is
+    still a write into a tree it may only read."""
+    from seestack.solve.runner import solve_one
+
+    incoming = tmp_path / "incoming" / "M_31_sub"
+    incoming.mkdir(parents=True)
+    frame = incoming / "Light_M 31_10.0s_IRCUT_0002.fit"
+    write_seestar_fits(frame, width=64, height=48, n_stars=8, seed=4)
+    astap = str(_write_stub_astap(tmp_path))
+    before = _snapshot(tmp_path / "incoming")
+
+    for _ in range(3):
+        assert solve_one(frame_id=2, fits_path=str(frame), astap_path=astap,
+                         fov_deg=2.1, timeout_s=30.0).solved
+
+    _assert_unchanged(before, tmp_path / "incoming", "three plate solves")
+    assert sorted(p.name for p in incoming.iterdir()) == [frame.name]
