@@ -98,6 +98,11 @@ def update_settings(patch: dict[str, Any], request: Request) -> dict[str, Any]:
         s = store.update(clean)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        # An unsafe folder layout (the library or the data root landing inside
+        # ``incoming/``). Already plain-language — pass it straight through so the
+        # settings form can show it as-is.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     # Apply the (possibly changed) history cap to the running JobManager so it
     # takes effect without a restart. Best-effort: never fail the settings save
     # if the manager isn't wired up (e.g. in a lightweight test app).

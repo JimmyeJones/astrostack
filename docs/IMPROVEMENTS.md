@@ -1228,9 +1228,41 @@ _(nothing else claimed — claim an item here with your branch name)_
   `3.2 h` — a form a comment in `Library.tsx` **explicitly forbids**); the baked nameplate is a fourth.
   **Fix:** one caption model served by the backend; History passes the **display name**, not the basename.
 
-- **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** No validator
+- **✅ SHIPPED (Builder, v0.327.8, branch `claude/sweet-babbage-xgi198`) — ~~A-MINOR's first item: no validator
+  stops `library_root` being set inside `incoming_dir`.~~** The §10 hole the audit spotted and correctly called
+  "one settings edit away". Every destructive call in the app is *correctly scoped to its own tree* — which is
+  precisely why the **layout** was the risk rather than any one call site: point the library (or the data root,
+  which carries `state/config.json`) at somewhere under `incoming/` and a perfectly correct `rmtree` resolves
+  inside the owner's only copy of their raws.
+
+  **The guard refuses to *enter* the layout, and deliberately nothing more.** A pure
+  `webapp.config.nested_incoming_conflict(incoming, library, data_root)` returns a plain-language reason or
+  `None`; `SettingsStore.update` raises it as a `ValueError` **before** `ensure_dirs` can create a folder inside
+  `incoming/` and before anything is persisted, and the settings PUT passes the message straight through as a
+  422 (`ValidationError` is caught first — in pydantic v2 it *is* a `ValueError`). It is **not** a model
+  validator, on purpose: an install already in this state must still boot, and a model-level error sends
+  `_load_resilient` down the path that drops fields — or, with an empty `loc`, resets the whole file (§9). Such
+  an install loads exactly as before and logs one warning per boot instead.
+
+  **One-directional and narrow.** `incoming/` sitting *inside* the library root is not flagged: that is the
+  app's own default shape one level up (both are children of the data root) and nothing deletes outside
+  `targets/`. Only "the library folder, or the data root, would sit inside the incoming folder" is refused.
+
+  **Upgrade-safe (§9):** no schema, no config field, no on-disk change, no default flipped, no response shape
+  changed; the import endpoint already skips `_HOST_KEYS`, so this can only ever fire on a deliberate PUT.
+
+  **Tests (+6, 4 of which fail before).** The two directions of the conflict at store level; the ordinary moves
+  that must keep working (a library elsewhere, and `incoming/` nested *under* the library); an install already
+  in the unsafe layout still loading with its other settings intact; the pure helper on paths that need not
+  exist (including a sibling whose name merely shares the prefix); and a fifth layer on
+  `tests/webapp/test_incoming_readonly_guard.py` — its four existing layers all ask "does this code write into
+  `incoming/`?" of the folder the settings *currently* name, so every one of them stays green while the
+  settings themselves move the library in there.
+
+- **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** ~~No validator
   stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
-  resolves inside the raw tree — *not* the owner's current state, but one settings edit away); the scanner's
+  resolves inside the raw tree — *not* the owner's current state, but one settings edit away)~~ *(shipped
+  v0.327.8, see above)*; the scanner's
   bare-`<T>/` skip is **silent** even when the folder holds thousands of FITS (the owner's `NGC 6888` 4,815 vs
   `NGC 6888_SUB` 3,110 is exactly that shape — see open questions); the plate-solve-failed screen shows a
   blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"; the Stack page

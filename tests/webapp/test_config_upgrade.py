@@ -162,3 +162,81 @@ def test_pre_drizzle_reject_stack_options_still_coerce(tmp_path):
     _write_cfg(tmp_path, {"default_stack_options": old_payload})
     s = SettingsStore(str(tmp_path)).get()
     assert s.default_stack_options == old_payload  # survives verbatim
+
+
+# --- the library may never be pointed inside incoming/ (AGENTS.md §10) --------
+#
+# Every destructive call in the app is correctly scoped to the library's own
+# trees today — which is exactly why the *layout* is the risk: nest the library
+# (or the data root, which carries state/) under incoming/ and a perfectly
+# correctly-scoped rmtree resolves inside the owner's only copy of their raws.
+# Nothing stopped a settings save from doing that.
+
+
+def test_settings_store_refuses_to_put_the_library_inside_incoming(tmp_path):
+    """Fails before: the save was accepted, ``ensure_dirs`` created the folder
+    inside ``incoming/``, and every library cleanup then resolved in there."""
+    import pytest
+
+    from webapp.config import SettingsStore
+
+    store = SettingsStore(str(tmp_path))
+    incoming = str(tmp_path / "incoming")
+    with pytest.raises(ValueError, match="incoming folder"):
+        store.update({"library_root": str(tmp_path / "incoming" / "library")})
+    # Nothing was persisted, and nothing was created under incoming/.
+    assert store.get().library_root == ""
+    assert not (tmp_path / "incoming" / "library").exists()
+    assert store.get().resolved_incoming_dir == Path(incoming)
+
+
+def test_settings_store_refuses_incoming_that_would_swallow_the_library(tmp_path):
+    """The same conflict reached from the other field: widening ``incoming_dir``
+    to the data root puts the library (and state/) inside it."""
+    import pytest
+
+    from webapp.config import SettingsStore
+
+    store = SettingsStore(str(tmp_path))
+    with pytest.raises(ValueError, match="incoming folder"):
+        store.update({"incoming_dir": str(tmp_path)})
+    assert store.get().incoming_dir == ""
+
+
+def test_settings_store_still_accepts_ordinary_folder_moves(tmp_path):
+    """The guard is one-directional and narrow: separate trees are fine, and so
+    is ``incoming/`` sitting inside the library root — that is the app's own
+    default shape one level up, and nothing deletes outside ``targets/``."""
+    from webapp.config import SettingsStore
+
+    store = SettingsStore(str(tmp_path))
+    s = store.update({"library_root": str(tmp_path / "elsewhere" / "library")})
+    assert s.resolved_library_root == tmp_path / "elsewhere" / "library"
+    s = store.update({"incoming_dir": str(tmp_path / "elsewhere" / "library" / "drop")})
+    assert s.resolved_incoming_dir == tmp_path / "elsewhere" / "library" / "drop"
+
+
+def test_an_install_already_in_the_unsafe_layout_still_loads(tmp_path):
+    """§9: the guard refuses to *enter* the layout; it must never stop an install
+    that is already in it from booting, or reset its config to defaults."""
+    _write_cfg(tmp_path, {
+        "library_root": str(tmp_path / "incoming" / "library"),
+        "cpu_workers": 6,
+    })
+    s = SettingsStore(str(tmp_path)).get()
+    assert s.library_root == str(tmp_path / "incoming" / "library")
+    assert s.cpu_workers == 6  # nothing was reset
+
+
+def test_nested_incoming_conflict_is_a_pure_check(tmp_path):
+    """The helper itself, on paths that need not exist."""
+    from webapp.config import nested_incoming_conflict
+
+    incoming = tmp_path / "incoming"
+    assert nested_incoming_conflict(incoming, tmp_path / "library", tmp_path) is None
+    assert nested_incoming_conflict(incoming, incoming, tmp_path) is not None
+    assert nested_incoming_conflict(incoming, incoming / "deep" / "lib", tmp_path) is not None
+    # The data root carries state/config.json, so it counts too.
+    assert nested_incoming_conflict(incoming, tmp_path / "library", incoming / "d") is not None
+    # A sibling whose name merely starts the same way is not "inside".
+    assert nested_incoming_conflict(incoming, tmp_path / "incoming2", tmp_path) is None
