@@ -89,7 +89,7 @@ def before_after_caption(
     integration_s: float | None,
 ) -> str:
     """The one-line caption under the pair — e.g.
-    ``"M 42 · one 30-second frame vs 505 frames stacked · 4h 12m of light"``.
+    ``"M 42 · one 30-second frame vs 505 frames stacked · 4.2 h of light"``.
 
     Every clause is optional and drops out cleanly when its datum is missing, so
     an older run with thin provenance gets a shorter sentence rather than one

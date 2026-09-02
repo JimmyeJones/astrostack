@@ -41,7 +41,7 @@ def test_the_guard_catches_the_character_that_started_all_this():
 def test_the_guard_passes_what_the_app_actually_uses():
     # The separators the drawing modules settled on, and the degree sign the
     # scale bar keeps: all present in the bundled face.
-    assert missing_glyphs("M 42 · 3h 12m · 505 subs · 2° · 30' · 15\"") == []
+    assert missing_glyphs("M 42 · 3.2 h · 505 subs · 2° · 30' · 15\"") == []
 
 
 # ---- every caption builder that ends up in a picture ---------------------

@@ -75,7 +75,7 @@ def montage_grid(n: int, columns: int | None = None) -> tuple[int, int]:
 
 
 def montage_caption(name: str | None, exposure_s: float | None) -> str:
-    """``"M 42 · 3h 12m"`` — the tile's own label, or just the name when the
+    """``"M 42 · 3.2 h"`` — the tile's own label, or just the name when the
     integration is unknown, or ``""`` when even the name is missing (which the
     label drawer treats as "no label", not as an empty box)."""
     from seestack.sharecard import format_duration

@@ -32,7 +32,7 @@ def test_nameplate_line_full():
         date_iso="2026-07-19T21:03:00", camera="ZWO Seestar S50",
     )
     assert nameplate_line(fields) == (
-        "M 31 · 4h 12m (505x30s) · 19 Jul 2026 · ZWO Seestar S50"
+        "M 31 · 4.2 h (505x30s) · 19 Jul 2026 · ZWO Seestar S50"
     )
 
 
@@ -104,15 +104,15 @@ def test_nameplate_line_folds_the_sub_detail_and_degrades_gracefully():
     # Integration + subs but no per-sub exposure → count only.
     assert nameplate_line(NameplateFields(
         target="M 42", integration_s=11520, n_frames=152,
-    )) == "M 42 · 3h 12m (152 subs)"
+    )) == "M 42 · 3.2 h (152 subs)"
     # A single sub reads "(1 sub)".
     assert nameplate_line(NameplateFields(
         target="NGC 7000", integration_s=75, n_frames=1,
-    )) == "NGC 7000 · 1m (1 sub)"
+    )) == "NGC 7000 · 1 min (1 sub)"
     # Integration only (no sub count) → just the duration.
     assert nameplate_line(NameplateFields(
         target="M 51", integration_s=3600,
-    )) == "M 51 · 1h"
+    )) == "M 51 · 1.0 h"
     # Sub-exposure without a count is not enough to show a detail.
     assert nameplate_line(NameplateFields(
         target="M 13", sub_exposure_s=30,
@@ -218,7 +218,7 @@ def test_the_caption_carries_the_span():
         target="M 31", integration_s=15150, n_frames=505, sub_exposure_s=30,
         date_iso="2024-11-15", date_end_iso="2024-11-18",
         camera="ZWO Seestar S50",
-    )) == "M 31 · 4h 12m (505x30s) · 15-18 Nov 2024 · ZWO Seestar S50"
+    )) == "M 31 · 4.2 h (505x30s) · 15-18 Nov 2024 · ZWO Seestar S50"
 
 
 def test_a_span_says_how_many_nights_when_the_run_recorded_it():
@@ -228,7 +228,7 @@ def test_a_span_says_how_many_nights_when_the_run_recorded_it():
         target="M 31", integration_s=15150, n_frames=505, sub_exposure_s=30,
         date_iso="2024-11-15", date_end_iso="2024-11-18", nights=4,
         camera="ZWO Seestar S50",
-    )) == "M 31 · 4h 12m (505x30s) · 15-18 Nov 2024 (4 nights) · ZWO Seestar S50"
+    )) == "M 31 · 4.2 h (505x30s) · 15-18 Nov 2024 (4 nights) · ZWO Seestar S50"
 
 
 def test_the_night_count_is_omitted_when_it_would_say_nothing():

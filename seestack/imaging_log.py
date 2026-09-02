@@ -60,16 +60,16 @@ def _format_date(iso: str | None) -> str:
 
 
 def _format_integration(seconds: float | None) -> str:
-    """``"3h 24m"`` / ``"18m"`` / ``""`` — a legible duration, never raw seconds."""
-    if seconds is None or seconds <= 0:
-        return ""
-    total_min = int(round(seconds / 60.0))
-    hours, minutes = divmod(total_min, 60)
-    if hours and minutes:
-        return f"{hours}h {minutes}m"
-    if hours:
-        return f"{hours}h"
-    return f"{minutes}m"
+    """``"3.4 h"`` / ``"18 min"`` / ``""`` — a legible duration, never raw seconds.
+
+    Delegates to the app's one integration vocabulary (``sharecard`` mirrors the
+    SPA's ``formatIntegration``) rather than spelling a third one: this log is
+    the row a beginner pastes into a forum post beside the very picture whose
+    page said "3.4 h", and it used to say "3h 24m".
+    """
+    from seestack.sharecard import format_duration
+
+    return format_duration(seconds)
 
 
 def _format_calibration(calstat: str | None) -> str:

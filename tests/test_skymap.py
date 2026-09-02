@@ -38,11 +38,15 @@ def test_ra_to_aitoff_wraps():
     assert _ra_to_aitoff_rad(90.0) < _ra_to_aitoff_rad(30.0)
 
 
-def test_format_duration_friendly():
-    assert _format_duration(0) == "0s"
-    assert _format_duration(45) == "45s"
-    assert _format_duration(120) == "2m 0s"
-    assert _format_duration(3725) == "1h 2m 5s"
+def test_format_duration_speaks_the_app_s_one_integration_vocabulary():
+    """The poster subtitle used to spell the campaign total "1h 2m 5s" where
+    every screen said "1.0 h". It now delegates to `sharecard.format_duration`
+    — see `tests/fixtures/integration_format.json` for the shared table."""
+    assert _format_duration(45) == "45 s"
+    assert _format_duration(120) == "2 min"
+    assert _format_duration(3725) == "1.0 h"
+    # Nothing to say → "", so the caller drops the clause instead of "0s".
+    assert _format_duration(0) == ""
 
 
 def test_render_empty_library_does_not_raise(tmp_path):

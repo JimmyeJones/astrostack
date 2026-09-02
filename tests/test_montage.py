@@ -44,7 +44,7 @@ def test_grid_honours_and_clamps_an_explicit_column_count():
 
 
 def test_caption_names_the_target_and_its_integration():
-    assert montage_caption("M 42", 11520) == "M 42 · 3h 12m"
+    assert montage_caption("M 42", 11520) == "M 42 · 3.2 h"
     # No integration yet → the name alone, never a dangling separator or "0s".
     assert montage_caption("M 42", None) == "M 42"
     assert montage_caption("M 42", 0) == "M 42"
@@ -53,8 +53,8 @@ def test_caption_names_the_target_and_its_integration():
 
 
 def test_title_says_what_the_wall_holds():
-    assert montage_title(14, 136800) == "My deep-sky wall · 14 targets, 38h of light"
-    assert montage_title(1, 3600) == "My deep-sky wall · 1 target, 1h of light"
+    assert montage_title(14, 136800) == "My deep-sky wall · 14 targets, 38 h of light"
+    assert montage_title(1, 3600) == "My deep-sky wall · 1 target, 1.0 h of light"
     # Nothing to report about integration → the count alone, not a hole.
     assert montage_title(3, None) == "My deep-sky wall · 3 targets"
 
@@ -119,7 +119,7 @@ def test_captions_are_burned_onto_their_own_tiles():
     """The label is what makes the wall readable ("which one is which?"), and it
     must land on the picture, not on the background between them."""
     labelled = build_montage(
-        [_tile(200, 150, caption="M 42 · 3h 12m"), _tile(200, 150, caption="M 31")],
+        [_tile(200, 150, caption="M 42 · 3.2 h"), _tile(200, 150, caption="M 31")],
         width=800)
     plain = build_montage([_tile(200, 150), _tile(200, 150)], width=800)
     assert labelled is not None and plain is not None

@@ -186,7 +186,7 @@ def acquisition_parts(fields: NameplateFields, *,
 
 def nameplate_line(fields: NameplateFields) -> str:
     """The single ``·``-joined caption baked onto the image, e.g.
-    ``"M 31 · 4h 12m (505x30s) · 19 Jul 2026 · ZWO Seestar S50"``.
+    ``"M 31 · 4.2 h (505x30s) · 19 Jul 2026 · ZWO Seestar S50"``.
 
     Each part is included only when it carries real information — the integration
     part folds in the ``(N x exp)`` detail when both are known, degrading to just

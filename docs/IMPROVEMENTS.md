@@ -1221,12 +1221,76 @@ _(nothing else claimed — claim an item here with your branch name)_
     `FOCALLEN`/`XPIXSZ` (`seestack/io/fits_loader.py`): 150 mm = S30, 250 mm = S50. **Fix:** derive it, or read
     it from the new Owner Facts block in `AGENTS.md` §1 — do not hard-code either model.
 
-- **🟢 A10 — four caption builders and two duration formats for one picture, chosen by which page you share
-  from.** Target/lightbox use `share.ts` `sharePictureText` (`M 42 · 15 Nov 2024`); History feeds it
-  `output_basename` and overrides with `postCaption.ts` (`M_42_stack · 15 Nov 2024`); Editor share/print uses
-  `seestack/sharecard.py` `share_blurb` (`M 42 · 3h 12m · 152 subs`, no date, and `3h 12m` where the SPA prints
-  `3.2 h` — a form a comment in `Library.tsx` **explicitly forbids**); the baked nameplate is a fourth.
-  **Fix:** one caption model served by the backend; History passes the **display name**, not the basename.
+- **✅ SHIPPED, BOTH NAMED HALVES (Builder, v0.327.9, branch `claude/sweet-babbage-hrh7bu`) — ~~A10: four
+  caption builders and two duration formats for one picture, chosen by which page you share from.~~** The
+  entry's own fix line asked for exactly two things and both are done: **History passes the display name, not
+  the basename**, and there is now **one duration format**. What is *not* done — and deliberately, see the
+  bottom — is folding the four caption *builders* into one backend model.
+
+  **The basename half was the sharper defect, and it only bit on one page.** `History.tsx` fed
+  `run.output_basename` to `sharePictureText` at both of its share sites (the Save/share menu item and the
+  lightbox), so a picture posted to a group chat from History arrived titled **`M42_stack_01`** and saved as
+  `m42-stack-01.jpg` — the app's filing convention, underscores and `_stack` suffix intact — while the
+  *identical run* shared from Gallery or Best pictures went out as `M 42` / `m-42.jpg` (both pass
+  `target_name`). It is the same class as the v0.2xx "the two screens you reach from the Target page titled
+  themselves with the raw safe name" fix, one layer further out. The card still *heads* itself with the
+  basename, which is how you tell one of a target's stacks from another in there; only what leaves the app
+  changed. `target.data?.name` was already fetched on that page for the heading, so the fix is a prop.
+
+  **The duration half turned out to be four spellings, not two.** The audit found the SPA's `3.2 h` against
+  `sharecard.share_blurb`'s `3h 12m`. Grepping the rest of the Python side found two more private formatters
+  for the *same fact*: `seestack/imaging_log.py::_format_integration` (`1h 24m`) in the downloadable log a
+  beginner pastes into a forum post, and `seestack/post/skymap.py::_format_duration` (`3h 25m 45s`) in the
+  "My map" poster subtitle that carries the campaign totals the Dashboard also prints. All three Python
+  spellings now go through one `sharecard.format_duration`, which **mirrors `formatIntegration` in
+  `frontend/src/format.ts`** — the vocabulary the comment on `Library.tsx`'s `expo` helper already declared
+  app-wide ("a beginner shouldn't see '1h 30m' on a card and '1.5 h' for the same target elsewhere"). So the
+  baked nameplate, the montage strip, the recap poster, the before/after labels, the keepsake, the imaging
+  log, the sky-map poster and the copyable caption all now say `3.2 h`.
+
+  **The durable half is the shared table, not the rewrite.** `tests/fixtures/integration_format.json` holds
+  18 (seconds → expected) cases and is read by **both** suites — `tests/test_sharecard.py` and
+  `frontend/src/format.test.ts` — so neither formatter can drift again without reddening the other's gate.
+  Two implementations of one user-visible rule is the condition that produced this bug; a shared table is
+  what makes "one vocabulary" a test rather than a comment. Rounding was matched deliberately, not
+  approximately: Python's `round` is banker's rounding, so a `_round_half_up` helper reproduces JS
+  `Math.round`/`toFixed` (150 s is "3 min" on both sides, not "2 min" on one). The one **deliberate**
+  divergence is the nothing-to-say case and it is documented in the fixture: a stat tile renders `—`, a
+  caption must drop the clause rather than post a placeholder, so the table covers positive durations only
+  and each side pins its own zero branch.
+
+  **Upgrade-safe (§9):** display strings only. No config key, no schema, no on-disk change, no API shape
+  change, no default flipped. Nothing already exported is touched — a nameplate baked into a JPEG last week
+  keeps the words it was baked with; only newly-rendered captions change.
+
+  **Tests (+2 python, +3 vitest; the 2 History ones fail before, verified by reverting the two call sites).**
+  `tests/test_sharecard.py` reads the shared table and pins the nothing-to-say branch (including `NaN`, `inf`
+  and a non-numeric string, which the old `int(round(...))` would have raised on); `format.test.ts` reads the
+  same table; `History.test.tsx` gains the two share cases — the display name, and the URL-slug fallback when
+  the target can't be loaded — asserted through a stubbed OS share sheet on the real menu item, so they pin
+  the *wiring* rather than a helper. Seventeen existing expectations across `test_nameplate` / `test_montage`
+  / `test_recap` / `test_beforeafter` / `test_keepsake` / `test_imaging_log` / `test_skymap` were rewritten to
+  the new vocabulary — a contract change, not a weakening; each still asserts the same structure.
+
+  **Still open, and sized honestly: the four *builders*.** `share.ts::sharePictureText`,
+  `components/postCaption.ts`, `sharecard.share_blurb` and `nameplate.nameplate_line` remain four
+  implementations, and the audit's "one caption model served by the backend" is the right end state. It is an
+  **M–L**, not a leftover: they have genuinely different constraints (the nameplate is ASCII-only because the
+  bundled Pillow face has no en dash — see `nameplate.py`'s header; `share_blurb` has no capture window
+  plumbed to it; `postCaption` is a full sentence where the others are `·`-joined fragments), so collapsing
+  them is a design job with a real risk of regressing baked output. The **cheapest genuinely-useful next
+  slice** is narrower: give `share_blurb` the run's capture window (the data is on the run since schema 18 —
+  `webapp/pipeline.py::submit_editor_share` has `run` in hand), so the Editor's copyable caption stops being
+  the only one of the four with **no date at all**. Filed under Ideas → "Friendliness".
+
+  *(Original audit entry follows.)*
+
+  - **~~🟢 A10 — four caption builders and two duration formats for one picture, chosen by which page you
+    share from.~~** Target/lightbox use `share.ts` `sharePictureText` (`M 42 · 15 Nov 2024`); History feeds it
+    `output_basename` and overrides with `postCaption.ts` (`M_42_stack · 15 Nov 2024`); Editor share/print uses
+    `seestack/sharecard.py` `share_blurb` (`M 42 · 3h 12m · 152 subs`, no date, and `3h 12m` where the SPA prints
+    `3.2 h` — a form a comment in `Library.tsx` **explicitly forbids**); the baked nameplate is a fourth.
+    **Fix:** one caption model served by the backend; History passes the **display name**, not the basename.
 
 - **✅ SHIPPED (Builder, v0.327.8, branch `claude/sweet-babbage-xgi198`) — ~~A-MINOR's first item: no validator
   stops `library_root` being set inside `incoming_dir`.~~** The §10 hole the audit spotted and correctly called
@@ -18432,6 +18496,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **NEW IDEA (Builder 2026-09-02, the slice A10's duration half deliberately left) — the Editor's copyable
+  caption is the only one of the four with *no date at all*.** *(Pillar: approachable / trust — PRIORITY 3.
+  Size: S.)* v0.327.9 gave every caption builder one duration vocabulary, but not one *set of facts*:
+  `sharecard.share_blurb` still takes only `(name, n_frames, integration_s)`, so the sentence a beginner
+  copies off the Editor's share panel reads `M 42 · 3.2 h · 152 subs` while the same picture shared from
+  Target, History, Gallery or the baked nameplate carries the night it was shot. The date is the fact a
+  caption is *for* — a post that says when you were out is the one people reply to. **The data is already in
+  hand:** `capture_night_start` / `capture_night_end` have been on the run since schema 18, and
+  `webapp/pipeline.py::submit_editor_share` holds the `run` two lines above the `share_blurb` call. Shape: an
+  optional `capture_label` argument (a formatted string, so the pure module keeps no date logic and cannot
+  drift from the SPA's `formatCaptureNights`), appended as one more `·` part and dropped when absent — which
+  is every run recorded before the app knew, captioning exactly as it does today. **Care:** it must be a
+  *label*, not a `timestamp_utc` — the whole v0.313.0 class was captions asserting the moment the stack ran
+  as when the picture was shot; and the nameplate's own span helper (`format_acq_range`) is ASCII-only for a
+  font reason that does not apply here, so don't reuse it without reading `nameplate.py`'s header. The
+  larger "one caption model served by the backend" (four builders → one) stays filed on the A10 entry as an
+  M–L; this is the slice that pays most of its user-visible value for a fraction of the risk.
 
 - **NEW IDEA (Builder 2026-09-02, the follow-on to the v0.327.8 folder guard) — the Settings page should say
   "that folder won't work" *while you type it*, not after you press Save.** *(Pillar: approachable —

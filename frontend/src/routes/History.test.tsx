@@ -2107,6 +2107,75 @@ describe("HistoryView heading", () => {
   });
 });
 
+describe("HistoryView — what a shared picture is called", () => {
+  // The same class as the heading above, one layer further out: History shared a
+  // run under `output_basename` — a *filename* — so a picture posted to a group
+  // chat arrived titled "M42_stack_01" and saved as `m42-stack-01.jpg`, while
+  // the identical run shared from Gallery or Best pictures went out as "M 42".
+  function stubShare(share: (d?: ShareData) => Promise<void>) {
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    nav.share = share;
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob([new Uint8Array([1])], { type: "image/jpeg" }),
+    })));
+    return () => { delete nav.canShare; delete nav.share; };
+  }
+
+  function stubTarget(name: string) {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue({
+      safe_name: "M_42", name,
+      ra_deg: null, dec_deg: null, n_frames: 6, n_frames_accepted: 6,
+      total_exposure_s: 60, last_activity_utc: null, has_preview: true,
+      notes: null, tags: [],
+    });
+  }
+
+  it("shares the target's display name, not the stack's filename", async () => {
+    const share = vi.fn(async (_d?: ShareData) => {});
+    const restore = stubShare(share);
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, capture_night_start: "2024-11-15",
+              capture_night_end: "2024-11-15" }),
+    ]);
+    stubTarget("M 42");
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openSaveShare();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Share picture" }));
+
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    const data = share.mock.calls[0][0] as ShareData;
+    expect(data.title).toBe("M 42 · 15 Nov 2024");
+    expect(data.files?.[0].name).toBe("m-42.jpg");
+    // The card still *heads* itself with the basename — that is how you tell one
+    // of a target's stacks from another in here. Only what leaves the app changed.
+    expect(screen.getByText("M42_stack_01")).toBeInTheDocument();
+    restore();
+  });
+
+  it("falls back to the URL slug when the target can't be loaded", async () => {
+    const share = vi.fn(async (_d?: ShareData) => {});
+    const restore = stubShare(share);
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ has_preview: true })]);
+    vi.spyOn(client.api, "getTarget").mockRejectedValue(new Error("gone"));
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openSaveShare();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Share picture" }));
+
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    const data = share.mock.calls[0][0] as ShareData;
+    expect(data.title).toBe("M_42");
+    expect(data.files?.[0].name).toBe("m-42.jpg");
+    restore();
+  });
+});
+
 describe("HistoryView — the run's two dates, each labelled", () => {
   it("says both when the run knows when its subs were shot", async () => {
     // This row's stamp is *which run* it is; the capture window is what the

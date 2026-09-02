@@ -180,11 +180,17 @@ def render_skymap(library: Library, options: SkyMapOptions | None = None):
 
     if options.title:
         stats = library.campaign_stats()
-        subtitle = (
-            f"{stats['n_targets']} targets · "
-            f"{stats['n_frames_accepted']} accepted frames · "
-            f"{_format_duration(stats['total_exposure_s'])}"
-        )
+        # The integration clause is dropped rather than printed as "0s" when
+        # there is none — `_format_duration` says "" for nothing, so joining
+        # unconditionally would leave a dangling separator.
+        bits = [
+            f"{stats['n_targets']} targets",
+            f"{stats['n_frames_accepted']} accepted frames",
+        ]
+        exposure = _format_duration(stats["total_exposure_s"])
+        if exposure:
+            bits.append(exposure)
+        subtitle = " · ".join(bits)
         fig.suptitle(options.title, color=fg, fontsize=14)
         ax.set_title(subtitle, color=fg, fontsize=9, pad=18)
 
@@ -516,12 +522,14 @@ def my_map_png(pictures: list[MapPicture], *,
 
 
 def _format_duration(seconds: float) -> str:
-    """Friendly duration string. e.g. 12345 -> '3h 25m 45s'."""
-    s = int(round(seconds))
-    h, rem = divmod(s, 3600)
-    m, sec = divmod(rem, 60)
-    if h:
-        return f"{h}h {m}m {sec}s"
-    if m:
-        return f"{m}m {sec}s"
-    return f"{sec}s"
+    """Friendly duration string, e.g. 12345 -> ``'3.4 h'``.
+
+    The app's one integration vocabulary (``sharecard.format_duration``, which
+    mirrors the SPA's ``formatIntegration``) rather than a local spelling: this
+    subtitle sits under the same campaign totals the Dashboard prints, and it
+    used to render them as ``'3h 25m 45s'``. Returns ``""`` when there is nothing
+    to say — the caller drops the clause rather than printing ``"0s"``.
+    """
+    from seestack.sharecard import format_duration
+
+    return format_duration(seconds)

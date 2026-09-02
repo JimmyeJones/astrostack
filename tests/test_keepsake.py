@@ -36,14 +36,14 @@ def test_caption_splits_the_name_off_as_a_title():
     assert title == "M 31"
     # Everything the nameplate says, minus the name — same wording, same order,
     # because both go through `acquisition_parts`.
-    assert details == "4h 12m (505x30s) · 19 Jul 2026 · ZWO Seestar S50"
+    assert details == "4.2 h (505x30s) · 19 Jul 2026 · ZWO Seestar S50"
     assert "M 31" not in details
 
 
 def test_caption_degrades_to_one_half_or_neither():
     assert keepsake_caption(NameplateFields(target="NGC 7000")) == ("NGC 7000", "")
     title, details = keepsake_caption(NameplateFields(integration_s=3600))
-    assert title == "" and details == "1h"
+    assert title == "" and details == "1.0 h"
     assert keepsake_caption(NameplateFields()) == ("", "")
 
 
