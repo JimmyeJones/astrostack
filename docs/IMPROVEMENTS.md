@@ -937,6 +937,33 @@ _(nothing else claimed — claim an item here with your branch name)_
   (`pointing_groups` already exists) or per-pixel from the coverage plane; extend `stackhealth`'s
   `rejection_blind` note the same way.~~
 
+- **✅ SHIPPED (Builder, v0.326.9, branch `claude/zen-mccarthy-2ss60a`) — ~~A5: the Target page's "Your
+  picture" ignores the pinned cover that every other surface honours.~~** Fixed with the same precedence
+  `_representative_run` uses, *including its degrade*: a cover whose preview has gone falls back to the newest
+  picture rather than blanking the page.
+
+  **What moved and what deliberately didn't.** The page now resolves a `pictureRun` — pinned cover first, then
+  newest — and uses it for the hero card, the Edit button, the whole Save/share menu (downloads, keepsake,
+  both shares, the zoom clip, the wallpaper items and the North-up suggestion behind them) and the share
+  sheet's capture date. `latestRun` stays exactly where it was for the *analysis* notes — thin-stack warning,
+  noise badge, "sharpest yet", integration trend, framing verdict — because those are statements about the
+  latest stack, and pinning an old favourite must not silently make them describe it.
+
+  **One line of new copy, because the confusing case is real.** When the pinned cover is *not* the newest run
+  the card is headed "Your picture (cover)" and carries a dimmed line — "This is the version you pinned as
+  this target's cover, so it's the one shown everywhere. You have a newer stack too — see all versions" —
+  rather than leaving a beginner to wonder where the stack they just made went. Silent in every other case,
+  including a cover that *is* the newest run.
+
+  **Upgrade-safe (§9):** frontend only, reading a field (`cover_stack_run_id`) the target API already
+  returned. No config, no schema, no endpoint, no default.
+
+  **Tests (+4 vitest, 2 of which fail before):** `Target.test.tsx` — the cover is what the Edit button and the
+  JPEG download point at; the note appears with the heading; a pruned cover degrades to the newest picture
+  with no note; and a cover that is the newest run says nothing.
+
+  *(Original entry follows.)*
+
 - **🟡 A5 — the Target page's "Your picture" ignores the pinned cover that every other surface honours.**
   `frontend/src/routes/Target.tsx` takes `runs.data?.[0]` (newest run) for the hero, its share caption and its
   Edit button, while the Library tile, Best wall, montage and `grainier-newest` all resolve **pinned cover
@@ -15873,6 +15900,26 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
+- **NEW IDEA (Builder 2026-09-02, from finishing A2) — "check it at full size": a 1:1 loupe on the editor
+  preview, so the four ops the proxy *cannot* show honestly can be judged instead of apologised for.**
+  *(Pillar: a better editor — PRIORITY 1. Size: M.)* The editor now carries **four** separate advisories
+  saying some version of "this preview isn't what you'll get": deconvolution understates, sharpening
+  understates, star reduction differs, hot-pixel removal is skipped entirely — plus colour-cal's
+  proxy-fallback caption. Every one of them is honest, and every one of them leaves the beginner with a slider
+  they cannot set by eye. They are all the *same* limitation (the preview is a ≤1500 px strided decimation of
+  a mosaic canvas) and all of them vanish at `proxy_scale == 1`. **The shape:** a "check at full size" control
+  that takes one modest region — say 512×512 *full-resolution* pixels around where the user clicked, or the
+  frame centre — reads that window out of the source FITS, runs the current recipe over it with
+  `proxy_scale = 1`, and shows it beside (or swapped with) the proxy preview. That is one small render, not a
+  full-res one, so it is affordable on the owner's largest canvas, and it needs no new engine op: the
+  `EditContext` already carries the scale, and every op already behaves correctly at 1. **Why it's worth
+  more than another caption:** it turns four apologies into one answer, and it is the only way a beginner can
+  actually tune sharpening or star reduction on a mosaic. **Grep before building:** `webapp/routers/editor.py`
+  already renders full-res previews (`render_preview_png_full_res`) and the proxy machinery already clamps a
+  crop rectangle to a proxy slice (`docs/IMPROVEMENTS.md` records a "real full-res crop that rounds sub-pixel"
+  fix) — so check whether an existing endpoint can take a rectangle before adding one. **Cautions:** it must
+  never load the whole FITS to serve a window (memory bounds), and it is a *view*, not a recipe change.
+
 - **✅ SHIPPED (Builder, v0.322.9, branch `claude/zen-mccarthy-2rptmf`) — ~~the editor's export panel asks the
   beginner a question whose own help text says the answer doesn't matter.~~** **Shape (b), and the reasoning
   the entry asked for is here rather than only in the commit.** Shape (a) was considered first and is not
@@ -20555,6 +20602,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **NEW IDEA (Builder 2026-09-02, checked while standing down A6's duplicate — NOT a pixel bug, a reporting
+  one) — a drizzled mosaic can report that outlier rejection ran when no pixel could be clipped.**
+  *(Pillar: image quality / trust — PRIORITY 4. Size: S.)* A6 fixed `auto_reject` reading a frame count where
+  the honest number is a panel's depth — but `_resolve_auto_reject` returns early when `options.drizzle` is
+  on, so none of it applies to a **drizzled** run, and the owner drizzles mosaics. Checked, and the pixels are
+  fine: `drizzle_path` gates its two-pass clip on the *per-output-pixel* effective count
+  (`_MIN_REJECT_NEFF = 3.0`), which is already the right quantity. What isn't fine is what the run then
+  **says**: `_afford_drizzle_reject`'s `n >= 4` reads the whole target's frame count, so a 2×2 mosaic three
+  subs deep takes the pass, stamps its provenance, and clips nothing anywhere — the same "it ran and rejected
+  0" that A6's health note now catches on the non-drizzle path. Its own module docstring already records the
+  reason ("below ~11 frames a κ=3 clip can't fire"), it just isn't wired to anything the user reads.
+  **Shape:** feed `auto_reject_depth` (or, better, the coverage plane the pass already computes) into the
+  `DRZREJ*` provenance and into `stackhealth`'s `rejection_blind` note, so a drizzled shallow mosaic gets the
+  same honest line as a non-drizzled one. No change to any pixel — this is the "say what it did" half.
 
 - **Let a mosaic choose its rejection method *per pixel*, not once for the whole canvas.** *(Pillar: image
   quality — PRIORITY 4; size L; opened by the A6 fix, v0.326.7.)* A6 fixed `auto_reject` reading the target's
