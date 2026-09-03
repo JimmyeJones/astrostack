@@ -56,7 +56,8 @@ def rejection_choice_expressed(opts: Mapping[str, Any]) -> bool:
     return any(k in opts for k in AUTO_REJECT_OPT_KEYS)
 
 
-def apply_unattended_rejection(opts: dict[str, Any]) -> dict[str, Any]:
+def apply_unattended_rejection(opts: dict[str, Any], *,
+                               override_saved_choice: bool = False) -> dict[str, Any]:
     """Fill in the rejection choices an unattended run's user never made.
 
     Mutates and returns ``opts``. Two injections, both gated on the merged
@@ -75,8 +76,34 @@ def apply_unattended_rejection(opts: dict[str, Any]) -> dict[str, Any]:
       later, in the engine (``stacker._afford_drizzle_reject``) — it holds ~7
       canvas planes against the single pass's 4, and only ``run_stack`` knows the
       real (for a mosaic, union) canvas it would allocate them on.
+
+    ``override_saved_choice`` (the opt-in ``Settings.auto_reject_on_unattended``,
+    **off** by default) lifts the first gate only: the unattended chain then
+    picks the method on *every* walk-away stack, even when a saved default names
+    one. It exists because a method saved once is a decision made at one depth
+    and then applied to every night after it — an owner who saved ``sigma_clip``
+    gets plain κ-σ on every unattended stack, silently reaching nothing on any
+    night, or any mosaic panel, thinner than ``kappa_min_frames``. Nothing else
+    changes: the interactive Stack form and reprocess-all never pass this,
+    ``drizzle_reject``'s own gate is untouched, and with the setting off the
+    built options are byte-for-byte what they are today.
+
+    The superseded ``sigma_clip``/``min_max_reject`` keys are **dropped** when
+    the override fires, so the blob reads exactly as a target that never chose —
+    which is the whole meaning of the flag. ``_resolve_auto_reject`` would
+    overwrite both from the frame count regardless, so no pixel moves either way;
+    what the drop buys is that everything *downstream of this function* reads the
+    live answer instead of a superseded one. Concretely, ``_stack_target``'s
+    quality-weighting guard skips weighting when the options ask for min/max
+    (that combine works by rank and ignores weights) — left in place, a saved
+    ``min_max_reject`` would go on suppressing weighting for a run that is now
+    free to resolve to κ-σ.
     """
-    if not rejection_choice_expressed(opts):
+    if override_saved_choice:
+        opts["auto_reject"] = True
+        opts.pop("sigma_clip", None)
+        opts.pop("min_max_reject", None)
+    elif not rejection_choice_expressed(opts):
         opts["auto_reject"] = True
     if opts.get("drizzle") and "drizzle_reject" not in opts:
         opts["drizzle_reject"] = True

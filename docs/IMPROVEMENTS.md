@@ -12287,21 +12287,70 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-09-03, the gap the v0.335.0 rejection-outlook note deliberately left) — answer the
-  reach question at the moment the default is *saved*, not only when a trail turns up later.** *(Pillar:
-  autonomy — PRIORITY 2; size S; the machinery all exists, this is placement.)* v0.335.0 tells the Target page
-  when the target's **saved** rejection cannot drop a lone trail — but it is gated on
-  `streak_detected > 0`, deliberately, so it only speaks on a night a satellite happened to be *flagged*. A
-  mosaic owner whose panels sit at 5 subs has a permanently blind saved setting and hears about it only by
-  luck. The un-gated version does **not** want another banner (the standing IA priority); it wants to be at the
-  **decision**: `PUT /api/targets/{safe}/stack-defaults` already has the blob in hand, so it could return the
-  same `rejection_reach` answer for what was just saved, and the Stack form's save confirmation could add one
-  clause — *"saved — note that at this target's depth this won't take out a lone satellite trail"* — with the
-  Auto toggle still on screen. **Cautions:** it must read the *saved* blob rather than the live form values
-  (the form already has its own `rejectionReachNudge` for those, and two sentences saying the same thing about
-  different option sets is worse than one), and it must stay silent when the user's choice does reach.
-  **Grep first:** `rejectionReachNudge` (form) and `rejectionOutlookNote` (page) are the two existing homes —
-  the third must be a *clause on the save*, not a fourth surface.
+- **✅ SHIPPED (Builder, v0.336.0, branch `claude/sweet-babbage-76t8i3`) — ~~answer the reach question at the
+  moment the default is *saved*, not only when a trail turns up later.~~** Built exactly as the entry shapes
+  it, and at the entry's size: the *Save as defaults* confirmation now carries one clause when what was just
+  stored will be blind to a lone satellite trail on the unattended path.
+
+  **The placement, and why nothing new was added to the page.** The entry's own cautions decided the design.
+  It reads the **stored** blob, not the live form values — `saveDefaults`' mutation now does the `PUT` and then
+  asks `GET /api/targets/{safe}/rejection-outlook`, which re-resolves the saved defaults through the same
+  `webapp.walkaway` merge and injections the overnight chain uses. That matters beyond tidiness:
+  `put_stack_defaults` drops cleared (`null`) fields, and the global `default_stack_options` merge sits under
+  the per-target blob, so what will actually run overnight is *not* always what the form estimated. No new
+  endpoint, no new surface, no fourth home for the fact — the clause rides the confirmation the button already
+  showed.
+
+  **It is deliberately about a different stack from the form's own caution**, which is the only thing that
+  keeps two sentences about outlier rejection from being one too many. `rejectionReachNudge` speaks for the
+  run you are about to trigger by hand; this speaks for *"overnight and one-click stacks"* — the walk-away
+  auto-stack and **Process target** — which is the path a saved default actually governs and the one neither
+  existing surface reached. `rejectionOutlookNote` on the Target page stays gated on `streak_detected > 0`
+  exactly as filed; this is the un-gated half, and it is un-gated only because saving *is* the decision and
+  the confirmation is transient rather than a standing banner.
+
+  **Silence is the default, on five branches** (`savedRejectionClause`): the saved rejection does reach; the
+  method was picked by the chain rather than the user (`user_chose === false` — saving with Auto on is the app
+  doing its job); a drizzled run, whose two-pass rejection is settled by the memory budget at run time; no
+  verdict at all (older backend, nothing solved yet, or the request simply failed); and no depth to talk about.
+  A failed outlook is **not** a failed save — the confirmation still reads "Saved as defaults" in teal, pinned
+  by its own test, because the one thing worse than not answering the question is implying the save didn't
+  land.
+
+  **Upgrade-safe (§9):** frontend-only. No new endpoint, no response-shape change (`PUT` still returns the
+  clean saved blob; the outlook `GET` already existed and is unchanged), no config key, no schema, no on-disk
+  change, no default flipped. Against an older backend the extra request 404s, the `.catch` swallows it, and
+  the save reads exactly as it does today.
+
+  **Cost, priced rather than assumed:** one `estimate_stack` per *explicit save press* — the same call the
+  Target page already pays on every load, on a user action rather than a poll.
+
+  **Tests (+13 vitest; the wiring test fails before).** `savedRejectionClause.test.ts` (+10) pins both
+  sentences, the mosaic per-spot depth winning over the frame count (the 20-frame/5-deep case), the singular,
+  and all five silences. `Stack.test.tsx` (+3) drives the real button: the blind save warns *and* still
+  confirms (yellow, with "overnight and one-click stacks", and the outlook asked of the stored blob), a
+  reaching save says only the plain confirmation (teal, no "Heads-up"), and an outlook that can't be had still
+  confirms in teal rather than reading as a failure.
+
+  *(Original entry follows.)*
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-03, the gap the v0.335.0 rejection-outlook note deliberately left) — answer the
+    reach question at the moment the default is *saved*, not only when a trail turns up later.** *(Pillar:
+    autonomy — PRIORITY 2; size S; the machinery all exists, this is placement.)* v0.335.0 tells the Target page
+    when the target's **saved** rejection cannot drop a lone trail — but it is gated on
+    `streak_detected > 0`, deliberately, so it only speaks on a night a satellite happened to be *flagged*. A
+    mosaic owner whose panels sit at 5 subs has a permanently blind saved setting and hears about it only by
+    luck. The un-gated version does **not** want another banner (the standing IA priority); it wants to be at the
+    **decision**: `PUT /api/targets/{safe}/stack-defaults` already has the blob in hand, so it could return the
+    same `rejection_reach` answer for what was just saved, and the Stack form's save confirmation could add one
+    clause — *"saved — note that at this target's depth this won't take out a lone satellite trail"* — with the
+    Auto toggle still on screen. **Cautions:** it must read the *saved* blob rather than the live form values
+    (the form already has its own `rejectionReachNudge` for those, and two sentences saying the same thing about
+    different option sets is worse than one), and it must stay silent when the user's choice does reach.
+    **Grep first:** `rejectionReachNudge` (form) and `rejectionOutlookNote` (page) are the two existing homes —
+    the third must be a *clause on the save*, not a fourth surface.
 
 - **MEASURED, RECORDED SO NOBODY RE-MEASURES (Builder 2026-09-03, while sizing the rejection-outlook
   endpoint) — `cluster_pointings` costs 1.58 s at the owner's largest target, and a mosaic stack pays it
@@ -12529,6 +12578,60 @@ to **Shipped**.)_
   > *sentence* was the whole bug. **Test:** `Target.test.tsx` pins the presence of "Auto outlier removal"
   > **and the absence of "sigma-clip"**, so nobody re-adds a method name; verified to fail on the pre-fix
   > wording before it passed on the new one.
+
+  > **✅ (b) SHIPPED TOO — v0.337.0 (Builder 2026-09-03, branch `claude/sweet-babbage-76t8i3`), which closes
+  > this entry.** The new opt-in setting **`auto_reject_on_unattended`** — *"Let AstroStack pick outlier
+  > removal on hands-off stacks"*, **off by default** — lets the walk-away chain choose the method even for a
+  > target whose saved defaults name one. Built exactly as the entry demanded: **a new setting, not a widening
+  > of the existing "nobody chose" guard**, so with it off every built option blob is byte-for-byte what it is
+  > today and no pixel on the live install moves.
+  >
+  > **One line in `walkaway.apply_unattended_rejection`,** which is where it has to be — the Target page's
+  > outlook and the Stack form's save clause resolve through that same function, so they cannot drift from
+  > what the job does. When the override fires, the superseded `sigma_clip`/`min_max_reject` keys are
+  > **dropped** rather than left beside `auto_reject`: `_resolve_auto_reject` would overwrite both from the
+  > frame count regardless (so no pixel moves either way), but everything *downstream* then reads the live
+  > answer — concretely, `_stack_target`'s quality-weighting guard, which skips weighting when the options ask
+  > for rank-based min/max, no longer suppresses it for a run that is now free to resolve to κ-σ. Pinned.
+  >
+  > **The three surfaces stay honest, which is the half that is easy to miss.** With the setting on, the app is
+  > choosing again, so `/rejection-outlook` reports the app's pick and `user_chose` goes `False` — and both the
+  > Target-page note and the v0.336.0 save clause, which gate on `user_chose`, correctly fall silent instead of
+  > warning about a setting no longer in force. A test drives exactly that transition on one 6-sub target:
+  > sigma-clip / `reaches: false` / user's, then min-max-reject / `reaches: true` / the app's.
+  >
+  > **Deliberately NOT bundled into Walk-away mode** (pinned by a test): that switch turns the unattended
+  > pipeline *on*, and overruling a method the owner deliberately saved is a different kind of decision. It
+  > stays its own choice.
+  >
+  > **Upgrade-safe (§9):** one additive `Settings` field defaulting `False`; an old `config.json` without the
+  > key loads and reads off (pinned); no schema, on-disk, API-shape or default change; the interactive Stack
+  > form and reprocess-all are untouched by construction — neither passes the flag.
+  >
+  > **Tests (+17 Python, +3 vitest).** `tests/webapp/test_auto_reject_on_unattended.py` (+14): the option-blob
+  > rule (off is byte-for-byte today's; on supersedes a saved κ-σ, a saved min/max and an explicit *no*
+  > rejection; on changes nothing for a target that never chose; the `drizzle_reject` gate untouched either
+  > way), the setting itself (defaults off, round-trips, an old config upgrades to off), the outlook
+  > transition, and the wiring — a hands-off stack of a target that saved a method is built **identically** to
+  > one whose owner never chose (asserted as an identity, because `sigma_clip`'s own engine default is `True`
+  > and a field-by-field check would read as "the pick survived"), while a manual Stack-form run keeps exactly
+  > what was picked. `Settings.test.tsx` (+3): off for a fresh install, reads a saved value back, and not in
+  > `WALK_AWAY_KEYS`.
+  >
+  > **✅ AND ITS DISCOVERABILITY — v0.337.1, same branch.** A setting nobody can find is a setting nobody has,
+  > and the beginner this is for will never go looking through Settings for a switch by name. The Target
+  > page's rejection-outlook note — the one surface that already describes exactly the problem the setting
+  > solves — now offers **two** ways out: *"Change how this target stacks"* (the Stack form, the narrow
+  > answer) and *"Let AstroStack choose on every hands-off stack"*, linking to `settingsLink("automation")`,
+  > which is the one a walk-away owner actually wants because it covers every target at once.
+  > **It needs no gate**, which is the neat part: the note only speaks when the method is the user's own, and
+  > turning the setting on hands the choice back to the app — so on an install that already has it,
+  > `user_chose` is false and the whole note is silent. The link is typed through `settingsSections.ts`, so a
+  > renamed section is a compile error rather than a link landing on the wrong tab. **Test (+1):** the second
+  > link exists and resolves to `/settings/automation`.
+  > **Deliberately not done:** the same pointer on the v0.336.0 save clause. That clause is a transient
+  > notification, and a link inside a toast the user may not catch is worse than the note that stays on the
+  > page they are already reading.
   > **What is still open from (a):** the *depth-aware* half — actually calling `rejection_reach` on the
   > target's saved defaults and its accepted count, so the page can say "your saved setting will not reach
   > this" with the one-click fix, rather than giving advice that is merely always-correct. That still wants
@@ -19877,6 +19980,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   fallback for an older backend) belongs in the frontend, and the "self-hides against an older backend" rule
   applies to any sentence that moves. And file the survey's findings **before** building any of them; the
   value here is knowing how many there are.
+
+  **⚪ FIRST DATA POINT, MEASURED NOT ASSUMED (Builder 2026-09-03, while sizing this) — the mosaic/low-noise
+  pair is *already* out of sync, so "word for word" above is no longer true, and that is the argument for
+  doing the survey.** Read side by side, `seestack/stackhealth.py:578` says *"which should cut the
+  **background** noise about N×"* while `frontend/src/components/oneFrameVsStack.ts:164` says *"which should
+  cut the noise about N×"* — the health note kept the qualifier, the reveal card dropped it. Same run, same
+  number, two screens, two sentences. **Nothing is wrong in either**, which is exactly why nobody caught it:
+  this class does not fail loudly, it drifts. The numbers still agree (both go through the shared
+  `factorLabel` table v0.332.1 pinned), so the divergence today is pure wording — but the wording is what a
+  beginner reads, and one of the two is measurably about the *sky background* while the other is about
+  "noise" in general. **This is one finding, not the survey** — the other three siblings the entry names are
+  still unwalked. It is filed here so the survey starts from "at least one has already drifted" rather than
+  from the entry's original "word for word", and so whoever does walk them knows the failure mode is a
+  qualifier quietly going missing, not a number disagreeing.
 
     *(Original entry follows.)* *(Pillar:
   maintainability in service of trust — size XS.)* "Stacking cut the background noise about 15×" is written

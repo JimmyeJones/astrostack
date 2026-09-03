@@ -299,6 +299,12 @@ def rejection_outlook(safe: str, request: Request) -> dict[str, Any]:
 
     ``reaches`` is ``null`` — "no opinion", the caller says nothing — when the
     target has nothing solved to size a stack from yet.
+
+    With ``Settings.auto_reject_on_unattended`` on (opt-in, off by default) the
+    chain picks the method again even for a target that saved one, so this
+    reports the app's pick and ``user_chose`` goes ``False`` — which is what
+    makes every surface gated on "is this the user's own setting?" fall silent
+    rather than warn about a setting no longer in force.
     """
     from seestack.stack.stacker import estimate_stack, rejection_reach
     from webapp.walkaway import (
@@ -315,8 +321,13 @@ def rejection_outlook(safe: str, request: Request) -> dict[str, Any]:
         # Whether the *user* chose the method, or the chain is about to choose it
         # for them — asked before the injection, because the injection is what
         # makes the answer stop being visible in the merged options.
-        user_chose = rejection_choice_expressed(opts_dict)
-        apply_unattended_rejection(opts_dict)
+        # ``auto_reject_on_unattended`` (opt-in, off by default) hands the choice
+        # back to the chain even when a saved default names a method — so with it
+        # on the answer is the app's again, and every surface that gates on
+        # "is this the user's own setting?" correctly falls silent.
+        override = settings.auto_reject_on_unattended
+        user_chose = rejection_choice_expressed(opts_dict) and not override
+        apply_unattended_rejection(opts_dict, override_saved_choice=override)
         options = coerce_stack_options(opts_dict)
         try:
             est = estimate_stack(proj, options,

@@ -22,6 +22,7 @@ import {
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
 import { rejectionReachNudge } from "../rejectionReachNudge";
+import { savedRejectionClause } from "../savedRejectionClause";
 import { memoryFixAction } from "../stackMemoryFix";
 import { printBiggerAction } from "../stackPrintBigger";
 import { minMaxIgnoresWeightingHint as minMaxIgnoresWeighting } from "../weightingHint";
@@ -256,12 +257,31 @@ export function StackView() {
   });
 
   const saveDefaults = useMutation({
-    mutationFn: () => api.putStackDefaults(safe, values),
-    onSuccess: () => notifications.show({
-      title: "Saved as defaults",
-      message: "These options — including your calibration picks — will pre-fill this form and drive auto-stacking for this target.",
-      color: "teal",
-    }),
+    // Save, then ask the server what the blob it just *stored* resolves to on
+    // the unattended path. Deliberately a second read rather than the form's own
+    // estimate: `put_stack_defaults` drops cleared fields, and the walk-away
+    // chain merges the global defaults and its own injections over the result,
+    // so what will actually run overnight is not always what is on screen. A
+    // failure here (older backend, nothing solved yet) is not a save failure —
+    // it just means there is nothing extra to say.
+    mutationFn: async () => {
+      await api.putStackDefaults(safe, values);
+      return await api.rejectionOutlook(safe).catch(() => null);
+    },
+    onSuccess: (outlook) => {
+      const clause = savedRejectionClause(outlook);
+      notifications.show({
+        title: "Saved as defaults",
+        message: "These options — including your calibration picks — will pre-fill this form and drive auto-stacking for this target."
+          + (clause ? ` ${clause}` : ""),
+        color: clause ? "yellow" : "teal",
+        // Long enough to read the caution before it goes; the plain
+        // confirmation keeps the default dwell.
+        ...(clause ? { autoClose: 15000 } : {}),
+      });
+      // The Target page's standing note reads the same saved blob.
+      qc.invalidateQueries({ queryKey: ["rejection-outlook", safe] });
+    },
     onError: (e: Error) => notifications.show({ message: `Save failed: ${e.message}`, color: "red" }),
   });
 

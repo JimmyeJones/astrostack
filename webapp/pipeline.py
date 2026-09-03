@@ -2763,7 +2763,15 @@ def _stack_target(
             # ``webapp/walkaway.py`` because the Target page has to be able to say
             # what this chain will do *before* the night, and a second copy of the
             # rule is how the two would come to disagree.
-            apply_unattended_rejection(opts_dict)
+            # ``auto_reject_on_unattended`` (opt-in, off by default) additionally
+            # lets the chain pick the method for a target whose saved defaults
+            # name one — a method saved once is a decision made at one depth and
+            # then applied to every night after it. Off ⇒ this call is exactly
+            # what it has always been.
+            apply_unattended_rejection(
+                opts_dict,
+                override_saved_choice=settings.auto_reject_on_unattended,
+            )
         if (auto and "quality_weighted" not in opts_dict
                 and not (opts_dict.get("min_max_reject") and not opts_dict.get("drizzle"))):
             # Same walk-away reasoning: with no user choice, weight each sub by the
