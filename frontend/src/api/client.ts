@@ -1834,6 +1834,20 @@ export interface PresetSuggestion {
   confidence: number;        // 0..1 (0 when declined)
 }
 
+/** Whether "check it at full size" can answer for a run + recipe, and what it
+ *  would show. `available: false` always carries a plain-language `reason` — the
+ *  preview is already 1:1, or the recipe's geometry makes "which part of the
+ *  picture is this?" unanswerable. Absent on an older backend, which the caller
+ *  reads as "don't offer it". */
+export interface LoupeInfo {
+  available: boolean;
+  reason: string | null;
+  proxy_scale: number;
+  size_px: number;
+  canvas_width: number | null;
+  canvas_height: number | null;
+}
+
 export interface Histogram {
   bins: number;
   edges: number[];
@@ -2903,6 +2917,16 @@ export const api = {
   editPreviewUrl: (safe: string, runId: number, recipe: Recipe, bust = 0) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/preview?recipe=${encodeRecipe(recipe)}`
     + (bust ? `&v=${bust}` : ""),
+  // "Check it at full size": whether one window of this picture can be rendered
+  // at 1:1 for the current recipe, and the window itself. See LoupeInfo.
+  loupeInfo: (safe: string, runId: number, recipe: Recipe) =>
+    req<LoupeInfo>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/loupe-info`
+      + `?recipe=${encodeRecipe(recipe)}`),
+  editLoupeUrl: (safe: string, runId: number, recipe: Recipe,
+                 fx: number, fy: number, size: number) =>
+    `/api/targets/${safe}/stack-runs/${runId}/editor/loupe?recipe=${encodeRecipe(recipe)}`
+    + `&fx=${fx.toFixed(4)}&fy=${fy.toFixed(4)}&size=${Math.round(size)}`,
   editStarMaskUrl: (safe: string, runId: number, sizePx?: number,
                     recipe?: Recipe, uid?: string) => {
     const q = new URLSearchParams();

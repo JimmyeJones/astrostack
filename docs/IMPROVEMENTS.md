@@ -16458,7 +16458,11 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
-- **NEW IDEA (Builder 2026-09-02, from finishing A2) — "check it at full size": a 1:1 loupe on the editor
+- **✅ SHIPPED, ALL THREE SLICES (v0.328.2 → v0.328.6 → v0.329.0) — ~~"check it at full size": a 1:1 loupe on
+  the editor preview, so the four ops the proxy *cannot* show honestly can be judged instead of apologised
+  for.~~** Read the three ✅ blocks below in order — the fitted-parameter channel, the additive-field channel,
+  and the endpoint + control. *(Original idea and the two sizing notes that shaped it follow.)*
+  - **NEW IDEA (Builder 2026-09-02, from finishing A2) — "check it at full size": a 1:1 loupe on the editor
   preview, so the four ops the proxy *cannot* show honestly can be judged instead of apologised for.**
   *(Pillar: a better editor — PRIORITY 1. Size: M.)* The editor now carries **four** separate advisories
   saying some version of "this preview isn't what you'll get": deconvolution understates, sharpening
@@ -16577,7 +16581,57 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Upgrade-safe (§9):** engine-internal; no config, schema, on-disk, API or default change, and no
   behaviour change on any path the app takes today. **Tests +14** in `tests/test_edit_field_replay.py`.
 
-  **What is still missing before the loupe itself:** the endpoint and the UI (the third slice). The user
+  **✅ AND THE LOUPE ITSELF IS SHIPPED (Builder, v0.329.0, same branch) — "Check it at full size", end to
+  end.** The third slice, built on the two above in the same run. Two endpoints and one self-hiding control:
+
+  * `GET …/editor/loupe-info` — *may* this be offered here? A header read and a look at the recipe, no
+    pixels. `available: false` always carries a plain-language reason.
+  * `GET …/editor/loupe?fx=&fy=&size=` — a `size × size` window of the picture at 1:1, through the current
+    recipe. `fx`/`fy` are fractions of the *rendered* preview, which is the only thing a browser can honestly
+    report — it knows neither the canvas size nor what the recipe cropped — and the server maps them back
+    through `preview_crop_of_recipe`. The source rectangle comes back in `X-Loupe-Window`.
+  * `FullSizeCheck` — one `compact-xs` button under the "downscaled ×N" caption it answers, opening a modal
+    with the window beside a small navigator: the same preview with the window marked, tap to move it.
+
+  **The measurement is the whole point, and it is the sharpest number in this entry.** With the two channels
+  wired in, the loupe and the live preview are **byte-identical (0 of 255)** at every source pixel the two
+  show — the proxy is a strided decimation, so proxy pixel `(i, j)` *is* full pixel `(i·step, j·step)`, and
+  the window's render of that pixel is the preview's. The control, rendering the same window at
+  `proxy_scale = 1` without frozen fits or a replayed field — the shape the original spec would have shipped
+  — differs from the preview by **22.1 mean / 117 max of 255**. That is not a subtlety; it is a different
+  picture, and it is what a beginner would have been tuning sharpening against.
+
+  **Three refusals rather than three guesses.** A canvas that already fits the proxy (`proxy_scale ≤ 1`) is
+  told there is nothing to check — the preview *is* the picture. A `geometry.rotate` makes "which part of the
+  picture is this?" unanswerable, and `preview_crop_of_recipe` already says so with `UNKNOWN`. And a geometry
+  op placed *before* an additive background pass moves the replayed field's origin, so it is refused too —
+  Auto puts its `geometry.crop` last, after every tone and detail op, so the ordinary path never sees this.
+  All three refusals name the fix in plain language.
+
+  **Costs, stated.** The window read is a real window: `read_window_rgb` uses `hdu.section`, so serving a few
+  hundred pixels of a 150 MP mosaic reads a few hundred pixels. The request does pay one whole-image *proxy*
+  render to make the measurements the window borrows — the same render the live preview already does, done
+  again rather than plumbed through, which keeps the endpoint stateless. The control is self-hiding, so the
+  editor gains no line on a picture where it cannot act.
+
+  **Upgrade-safe (§9):** two new GET endpoints and one additive client type; no config, schema, on-disk or
+  default change, nothing existing altered. A frontend served by an older backend gets a failed `loupe-info`
+  and renders nothing, which is pinned by its own test.
+
+  **Tests (+12 python, +14 vitest).** `tests/webapp/test_editor_loupe.py`: offered only where the preview is
+  decimated; both geometry refusals *and* the ordinary crop-last shape not being refused; the window centred
+  on the click and clamped inside the canvas at every edge; the click read through the recipe's own crop
+  (a crop whose centre is 0.8/0.2 of the canvas, not 0.5/0.5); the parity claim and its control above; and
+  `read_window_rgb`/`source_shape` over both a colour cube and a mono plane. `loupe.test.ts` (9) over the
+  marker geometry and the caption's wording; `FullSizeCheck.test.tsx` (5) over the offer, both self-hiding
+  cases (nothing to check, and an older backend), and tapping the navigator moving the window.
+
+  **What is left, and it is small:** the modal shows the window at its natural size and scrolls on a phone;
+  a "compare with the preview at this spot" split would be the obvious next tap, and a spatial op's behaviour
+  at the window's own edge is still the window's, not the picture's — which is a property of any crop and is
+  why the recipe's local ops are exactly what the loupe is for.
+
+  *(The note that specified this slice, kept for the reasoning.)* The user
   clicks the *rendered* preview, which a `geometry.crop` may have reframed — map through
   `preview_crop_of_recipe` (`seestack/edit/recipe.py`), and decline on a real `geometry.rotate`, which
   already returns `UNKNOWN`. The window read must come out of the FITS as a window (never load the whole

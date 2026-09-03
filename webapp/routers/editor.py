@@ -34,8 +34,8 @@ from seestack.edit.proxy import (
     load_coverage,
     load_frame_coverage,
 )
-from seestack.edit.recipe import Recipe, recipe_from_dict
-from seestack.edit.registry import EditContext
+from seestack.edit.recipe import Recipe, preview_crop_of_recipe, recipe_from_dict
+from seestack.edit.registry import EditContext, get_op
 from seestack.edit import auto_prefs as auto_prefs_mod
 from seestack.edit import presets as presets_mod
 from webapp import deps
@@ -1248,6 +1248,226 @@ def put_recipe(safe: str, run_id: int, body: dict, request: Request) -> dict:
         proj.close()
         lib.close()
     return recipe.to_dict()
+
+
+# ---- "check it at full size" (the loupe) -----------------------------------
+#
+# The live preview is a ≤1500 px strided decimation of what may be a 150 MP
+# mosaic, and four editor controls carry an advisory saying so: deconvolution
+# understates, sharpening understates, star reduction differs, hot-pixel removal
+# is skipped entirely. Every one of those is honest, and every one leaves a
+# beginner with a slider they cannot set by eye. They are all the *same*
+# limitation, and all of them vanish at ``proxy_scale == 1``.
+#
+# So: render one small window of the picture at full resolution, through the same
+# recipe, and show it. What makes that honest rather than a second lie is the two
+# channels shipped in v0.328.2 and v0.328.6 — the ops that measure the *whole*
+# image (stretch, auto contrast, colour calibration, background neutralize) are
+# handed the fits the whole-image render made, and the ops that fit a *sky model*
+# (the three ``background.*`` passes) have the field they subtracted replayed onto
+# the window instead of re-fitted there. Without those a window of a bright core
+# would come back stretched and flattened differently from the picture it was cut
+# out of, and the beginner would be tuning sharpening through the wrong tone curve.
+
+#: How big a full-resolution window the loupe reads, in source pixels. Small on
+#: purpose: it is one modest render on the request path, affordable on the owner's
+#: largest canvas precisely because it does not scale with the canvas.
+LOUPE_SIZE_PX = 512
+LOUPE_MAX_SIZE_PX = 1024
+
+
+def _loupe_geometry_problem(rec: Recipe) -> str | None:
+    """Why this recipe's preview can't be mapped back to source pixels, or ``None``.
+
+    Two distinct refusals, and both are refusals rather than guesses:
+
+    * **A rotation.** ``preview_crop_of_recipe`` returns ``UNKNOWN`` for an enabled
+      ``geometry.rotate`` with a real angle — the render simply isn't a crop of the
+      canvas any more, so where the user clicked is not answerable.
+    * **A geometry op *before* an additive background pass.** The replayed sky
+      field remembers where it was measured in source coordinates; a crop or resize
+      upstream of the pass moves that origin, and the field would land in the wrong
+      place. Auto puts its ``geometry.crop`` last, after every tone and detail op,
+      so the ordinary path is unaffected — this only fires on a hand-built recipe
+      that reorders them.
+    """
+    from seestack.previewcrop import UNKNOWN
+
+    if preview_crop_of_recipe(rec) is UNKNOWN:
+        return ("This picture is rotated, so we can't tell which part of the "
+                "original frame you're looking at. Turn the rotation off to check "
+                "it at full size.")
+    seen_geometry = False
+    for op in rec.ops:
+        if not op.enabled:
+            continue
+        if op.id.startswith("geometry."):
+            seen_geometry = True
+        elif seen_geometry and (spec := get_op(op.id)) is not None and spec.additive_field:
+            return ("This recipe crops or resizes before its background pass, so "
+                    "the full-size view can't line up with the preview. Move the "
+                    "crop after the background steps to check it at full size.")
+    return None
+
+
+def _loupe_window(full_h: int, full_w: int, rec: Recipe,
+                  fx: float, fy: float, size: int) -> tuple[int, int, int, int]:
+    """The source rectangle ``(y0, x0, h, w)`` behind a click on the preview.
+
+    ``fx``/``fy`` are fractions of the *rendered* preview, which is the only thing
+    the browser can honestly report — it does not know the canvas size and the
+    preview may have been cropped. They are mapped through the recipe's own
+    composed crop (``geometry.resize`` is a uniform rescale, so fractions survive
+    it untouched) and then clamped so the window is always wholly inside the
+    canvas, and never larger than it.
+    """
+    crop = preview_crop_of_recipe(rec)
+    x0f, y0f, x1f, y1f = (0.0, 0.0, 1.0, 1.0) if crop is None else crop.as_tuple()
+    sx = x0f + min(max(fx, 0.0), 1.0) * (x1f - x0f)
+    sy = y0f + min(max(fy, 0.0), 1.0) * (y1f - y0f)
+
+    w = min(size, full_w)
+    h = min(size, full_h)
+    x0 = int(round(sx * full_w - w / 2.0))
+    y0 = int(round(sy * full_h - h / 2.0))
+    x0 = min(max(x0, 0), full_w - w)
+    y0 = min(max(y0, 0), full_h - h)
+    return y0, x0, h, w
+
+
+def _without_geometry(rec: Recipe) -> Recipe:
+    """``rec`` with its geometry ops disabled, for rendering a window.
+
+    The window is *already* the region the crop selects — running the crop again
+    would cut a crop out of a crop, and a resize would shrink the very pixels the
+    loupe exists to show at 1:1. Everything else runs exactly as it does on the
+    preview.
+    """
+    from dataclasses import replace
+
+    return replace(rec, ops=[
+        replace(op, enabled=False) if op.id.startswith("geometry.") else op
+        for op in rec.ops
+    ])
+
+
+def _render_loupe_png(project_dir: Path, run, rec: Recipe,
+                      fx: float, fy: float, size: int) -> tuple[bytes, dict]:
+    """The full-resolution window as PNG bytes, plus what it shows."""
+    import io
+
+    from PIL import Image
+
+    from seestack.edit.proxy import read_window_rgb, source_shape
+
+    shape = source_shape(run.fits_path)
+    if shape is None:
+        raise HTTPException(status_code=404, detail="This run has no image file to read.")
+    full_h, full_w = shape
+
+    # 1. The whole picture, exactly as the live preview renders it — this is the
+    #    render whose measurements the window must borrow, so it has to be the
+    #    same one, geometry ops and all.
+    proxy, scale = get_proxy(project_dir, run.id, run.fits_path)
+    whole = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
+                        coverage=_proxy_coverage(run.fits_path, scale),
+                        frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
+                        already_display=_run_display_space(run),
+                        capture_fields=True)
+    apply_recipe(proxy, rec, whole, for_preview=True)
+
+    # 2. The window, at 1:1, with those measurements frozen onto it.
+    y0, x0, h, w = _loupe_window(full_h, full_w, rec, fx, fy, size)
+    window = read_window_rgb(run.fits_path, y0, x0, h, w)
+    ctx = EditContext(proxy_scale=1.0, is_proxy=False, wcs=None,
+                      already_display=_run_display_space(run),
+                      source_origin=(float(y0), float(x0)),
+                      frozen_fits=whole.fitted, frozen_deltas=whole.field_deltas)
+    out = apply_recipe(window, _without_geometry(rec), ctx)
+
+    u8 = (np.clip(np.nan_to_num(out), 0.0, 1.0) * 255).astype(np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
+    return buf.getvalue(), {"x": x0, "y": y0, "width": w, "height": h,
+                            "canvas_width": full_w, "canvas_height": full_h,
+                            "proxy_scale": round(float(scale), 3)}
+
+
+class LoupeInfoOut(BaseModel):
+    """Whether a full-size check is available here, and what it would show.
+
+    ``available`` is ``False`` with a plain-language ``reason`` when the recipe's
+    geometry makes the mapping unanswerable, and when the preview is already 1:1
+    — on a small stack the proxy *is* the picture, so there is nothing to check.
+    """
+
+    available: bool
+    reason: str | None = None
+    proxy_scale: float = 1.0
+    size_px: int = LOUPE_SIZE_PX
+    canvas_width: int | None = None
+    canvas_height: int | None = None
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/loupe-info",
+            response_model=LoupeInfoOut)
+async def loupe_info(safe: str, run_id: int, request: Request,
+                     recipe: str | None = None) -> LoupeInfoOut:
+    """Whether "check it at full size" can answer for this run and recipe.
+
+    Cheap: a header read and a look at the recipe — no pixels. The editor asks
+    before it offers the control, so a beginner is never given a button that
+    explains itself only after being pressed.
+    """
+    project_dir, run = _run_info(request, safe, run_id)
+    rec = _decode_recipe_query(request, safe, run_id, recipe)
+
+    def work() -> LoupeInfoOut:
+        from seestack.edit.proxy import source_shape
+
+        shape = source_shape(run.fits_path)
+        if shape is None:
+            return LoupeInfoOut(available=False,
+                                reason="This run has no image file to read.")
+        _proxy, scale = get_proxy(project_dir, run.id, run.fits_path)
+        if scale <= 1.0:
+            return LoupeInfoOut(
+                available=False, proxy_scale=float(scale),
+                canvas_height=shape[0], canvas_width=shape[1],
+                reason="This picture is small enough that the preview already "
+                       "shows every pixel — what you see is what you'll get.")
+        problem = _loupe_geometry_problem(rec)
+        return LoupeInfoOut(available=problem is None, reason=problem,
+                            proxy_scale=float(scale),
+                            canvas_height=shape[0], canvas_width=shape[1])
+
+    return await run_in_threadpool(work)
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/loupe")
+async def edit_loupe(safe: str, run_id: int, request: Request,
+                     recipe: str | None = None,
+                     fx: float = 0.5, fy: float = 0.5,
+                     size: int = LOUPE_SIZE_PX) -> Response:
+    """A ``size × size`` window of the picture at **full resolution**, through the
+    current recipe — the answer to "is that sharpening actually doing what I
+    think?", which the decimated preview cannot give.
+
+    ``fx``/``fy`` are fractions of the rendered preview (0..1); they default to its
+    centre. The window's source rectangle comes back in ``X-Loupe-Window`` so the
+    caller can say *where* in the picture it is looking.
+    """
+    project_dir, run = _run_info(request, safe, run_id)
+    rec = _decode_recipe_query(request, safe, run_id, recipe)
+    problem = _loupe_geometry_problem(rec)
+    if problem is not None:
+        raise HTTPException(status_code=409, detail=problem)
+    size = max(64, min(int(size), LOUPE_MAX_SIZE_PX))
+    png, where = await run_in_threadpool(
+        _render_loupe_png, project_dir, run, rec, fx, fy, size)
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "no-store",
+                             "X-Loupe-Window": json.dumps(where)})
 
 
 # ---- live preview + histogram ---------------------------------------------
