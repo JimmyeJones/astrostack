@@ -1,10 +1,10 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FullSizeCheck } from "./FullSizeCheck";
 import * as client from "../../api/client";
-import type { LoupeInfo, Recipe } from "../../api/client";
+import type { LoupeInfo, LoupeWindow, Recipe } from "../../api/client";
 
 const RECIPE: Recipe = { ops: [{ uid: "st", id: "tone.stretch", enabled: true, params: {} }] };
 
@@ -13,8 +13,34 @@ const AVAILABLE: LoupeInfo = {
   canvas_width: 6000, canvas_height: 4000,
 };
 
+/** The window the server says it cut, centred in a 6000 × 4000 canvas. */
+const CENTRED: LoupeWindow = {
+  x: 2744, y: 1744, width: 512, height: 512,
+  canvas_width: 6000, canvas_height: 4000, proxy_scale: 4,
+};
+
+/** Record the loupe requests the component makes, and answer them. Fetched (not
+ *  hung off an `<img src>`) because the source rectangle only exists as a
+ *  response header, so the URL is what the assertions have to read. */
+let loupeCalls: string[] = [];
+
+function mockLoupe(window_: LoupeWindow | null = CENTRED) {
+  return vi.spyOn(client.api, "fetchLoupe").mockImplementation(
+    async (safe, runId, recipe, fx, fy, size) => {
+      loupeCalls.push(client.api.editLoupeUrl(safe, runId, recipe, fx, fy, size));
+      return { url: `blob:loupe-${fx}-${fy}`, window: window_ };
+    });
+}
+
+beforeEach(() => {
+  loupeCalls = [];
+  // jsdom has no revokeObjectURL; the component revokes every blob it shows.
+  vi.stubGlobal("URL", Object.assign(URL, { revokeObjectURL: () => {} }));
+});
+
 function wrap(info: Partial<LoupeInfo> = {}) {
   vi.spyOn(client.api, "loupeInfo").mockResolvedValue({ ...AVAILABLE, ...info });
+  mockLoupe();
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <MantineProvider>
@@ -61,14 +87,59 @@ describe("FullSizeCheck", () => {
     wrap();
     fireEvent.click(await screen.findByTestId("full-size-check-open"));
 
-    const img = await screen.findByTestId("full-size-check-image");
-    expect(img.getAttribute("src")).toContain("/editor/loupe?");
-    expect(img.getAttribute("src")).toContain("fx=0.5000&fy=0.5000&size=512");
-    expect(img).toHaveAttribute("width", "512");
+    await screen.findByTestId("full-size-check-image");
+    expect(loupeCalls[0]).toContain("/editor/loupe?");
+    expect(loupeCalls[0]).toContain("fx=0.5000&fy=0.5000&size=512");
+    expect(screen.getByTestId("full-size-check-image")).toHaveAttribute("width", "512");
     // Explained in the words the reader uses — the four advisories this replaces
     // were all honest and all useless to someone who can't act on them.
     expect(screen.getByText(/512 × 512 piece of your finished picture/))
       .toBeInTheDocument();
+  });
+
+  it("says where in the picture it is looking, from the server's own answer", async () => {
+    // The click only ever reports a fraction of the *preview*; with a crop in the
+    // recipe that maps somewhere the browser cannot compute. The server sends the
+    // rectangle it actually cut in `X-Loupe-Window`, and this is its reader.
+    wrap();
+    fireEvent.click(await screen.findByTestId("full-size-check-open"));
+    expect(await screen.findByTestId("full-size-check-where"))
+      .toHaveTextContent("This is the middle of your picture.");
+  });
+
+  it("shows the window but no location when the backend sends no rectangle", async () => {
+    // An older backend (or an unreadable header) must cost the picture nothing —
+    // it just stops naming the spot rather than guessing one.
+    vi.spyOn(client.api, "loupeInfo").mockResolvedValue(AVAILABLE);
+    mockLoupe(null);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <FullSizeCheck safe="M_42" runId={7} recipe={RECIPE}
+            shownSourceW={6000} shownSourceH={4000} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    fireEvent.click(await screen.findByTestId("full-size-check-open"));
+    await screen.findByTestId("full-size-check-image");
+    expect(screen.queryByTestId("full-size-check-where")).not.toBeInTheDocument();
+  });
+
+  it("says so plainly when the window cannot be rendered", async () => {
+    vi.spyOn(client.api, "loupeInfo").mockResolvedValue(AVAILABLE);
+    vi.spyOn(client.api, "fetchLoupe").mockRejectedValue(new Error("Cropped away"));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <FullSizeCheck safe="M_42" runId={7} recipe={RECIPE} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    fireEvent.click(await screen.findByTestId("full-size-check-open"));
+    expect(await screen.findByTestId("full-size-check-error"))
+      .toHaveTextContent("Cropped away");
   });
 
   it("moves the window when the navigator is tapped, and marks where it is", async () => {
@@ -80,9 +151,7 @@ describe("FullSizeCheck", () => {
 
     fireEvent.click(nav, { clientX: 50, clientY: 75 });
 
-    await waitFor(() => expect(
-      screen.getByTestId("full-size-check-image").getAttribute("src"))
-      .toContain("fx=0.2500&fy=0.7500"));
+    await waitFor(() => expect(loupeCalls[loupeCalls.length - 1]).toContain("fx=0.2500&fy=0.7500"));
     // …and the marker follows, at the window's true share of the picture
     // (512 of 6000 px wide).
     const marker = screen.getByTestId("full-size-check-marker");
