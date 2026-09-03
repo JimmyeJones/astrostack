@@ -950,6 +950,10 @@ export interface Frame {
   id: number;
   name: string;
   timestamp_utc: string | null;
+  /** The observing night this sub belongs to (`YYYY-MM-DD`), bucketed
+   *  noon-to-noon in the observer's local time — the same night the picture
+   *  above the table is dated by. Optional: an older backend omits it. */
+  night_date?: string | null;
   exposure_s: number | null;
   gain: number | null;
   width_px: number | null;
@@ -1828,6 +1832,20 @@ export interface PresetSuggestion {
   label: string | null;      // that preset's display label
   reason: string | null;     // short plain-language "why" (e.g. "mostly point-like stars…")
   confidence: number;        // 0..1 (0 when declined)
+}
+
+/** Whether "check it at full size" can answer for a run + recipe, and what it
+ *  would show. `available: false` always carries a plain-language `reason` — the
+ *  preview is already 1:1, or the recipe's geometry makes "which part of the
+ *  picture is this?" unanswerable. Absent on an older backend, which the caller
+ *  reads as "don't offer it". */
+export interface LoupeInfo {
+  available: boolean;
+  reason: string | null;
+  proxy_scale: number;
+  size_px: number;
+  canvas_width: number | null;
+  canvas_height: number | null;
 }
 
 export interface Histogram {
@@ -2899,6 +2917,16 @@ export const api = {
   editPreviewUrl: (safe: string, runId: number, recipe: Recipe, bust = 0) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/preview?recipe=${encodeRecipe(recipe)}`
     + (bust ? `&v=${bust}` : ""),
+  // "Check it at full size": whether one window of this picture can be rendered
+  // at 1:1 for the current recipe, and the window itself. See LoupeInfo.
+  loupeInfo: (safe: string, runId: number, recipe: Recipe) =>
+    req<LoupeInfo>(
+      `/api/targets/${safe}/stack-runs/${runId}/editor/loupe-info`
+      + `?recipe=${encodeRecipe(recipe)}`),
+  editLoupeUrl: (safe: string, runId: number, recipe: Recipe,
+                 fx: number, fy: number, size: number) =>
+    `/api/targets/${safe}/stack-runs/${runId}/editor/loupe?recipe=${encodeRecipe(recipe)}`
+    + `&fx=${fx.toFixed(4)}&fy=${fy.toFixed(4)}&size=${Math.round(size)}`,
   editStarMaskUrl: (safe: string, runId: number, sizePx?: number,
                     recipe?: Recipe, uid?: string) => {
     const q = new URLSearchParams();

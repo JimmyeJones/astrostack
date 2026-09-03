@@ -35,6 +35,7 @@ import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { starReduceDiffersCaption } from "../components/editor/starReducePreview";
 import { sharpenUnderstatesCaption } from "../components/editor/sharpenPreview";
 import { hotPixelsSkippedCaption } from "../components/editor/hotPixelsPreview";
+import { FullSizeCheck } from "../components/editor/FullSizeCheck";
 import { canNeutraliseSkyCast, neutraliseBackgroundOps, skyCastCaption }
   from "../components/editor/skyCast";
 import { autoColorCalCaption, colorCalProxyFallbackCaption } from "../components/editor/colorCal";
@@ -1639,6 +1640,22 @@ export function EditorView() {
                 {previewScaleCaption(hist.data)}
               </Text>
             ) : null}
+            {/* …and the answer to that caption, rather than four more apologies
+                for it: one window of the picture rendered at 1:1, through this
+                same recipe. Self-hiding when the preview already shows every
+                pixel, or when the recipe's geometry makes "which part of the
+                picture is this?" unanswerable. */}
+            <FullSizeCheck
+              safe={safe} runId={rid} recipe={recipe}
+              shownSourceW={(hist.data?.render_width ?? hist.data?.proxy_width)
+                != null && hist.data?.proxy_scale
+                ? (hist.data.render_width ?? hist.data.proxy_width!) * hist.data.proxy_scale
+                : null}
+              shownSourceH={(hist.data?.render_height ?? hist.data?.proxy_height)
+                != null && hist.data?.proxy_scale
+                ? (hist.data.render_height ?? hist.data.proxy_height!) * hist.data.proxy_scale
+                : null} />
+
             {/* A geometry.crop op silently shrinks the visible frame — an
                 auto-applied trim or a forgotten manual crop just looks like "my
                 image got smaller". Flag any *enabled* crop with how much is left

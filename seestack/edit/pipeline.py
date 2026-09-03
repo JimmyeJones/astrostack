@@ -70,7 +70,23 @@ def apply_recipe(
         # than to its op id: a recipe may legitimately carry the same op twice.
         ctx.op_uid = op.uid
         try:
-            out = as_rgb(spec.apply(out, op.params, ctx))
+            frozen = ctx.frozen_field() if spec.additive_field else None
+            if frozen is not None:
+                # This op fitted a sky model on the whole picture; re-fitting it
+                # on a window would fit *the window*. Replay what it did there
+                # instead — it only ever added a smooth field, which is why it may
+                # declare `additive_field` at all.
+                out = as_rgb(out + ctx.replay_field(frozen, out.shape))
+                ctx.field_deltas[op.uid] = frozen  # so it travels on unchanged
+            elif spec.additive_field and ctx.capture_fields:
+                # A copy, and only when the caller asked: the export renders the
+                # native canvas, where holding a second copy of a mosaic is real
+                # memory. The proxy render that feeds a loupe is ≤1500 px.
+                before = out.copy()
+                out = as_rgb(spec.apply(out, op.params, ctx))
+                ctx.record_field(out - before)
+            else:
+                out = as_rgb(spec.apply(out, op.params, ctx))
         except Exception as exc:  # noqa: BLE001 — one bad op must not blank the render
             msg = f"{spec.label}: {type(exc).__name__}: {exc}"
             log.warning("edit op failed: %s", msg)

@@ -49,6 +49,59 @@ def _load_fits_rgb(fits_path: str | Path) -> np.ndarray:
     return rgb
 
 
+def source_shape(fits_path: str | Path) -> tuple[int, int] | None:
+    """``(height, width)`` of a stack FITS, from its header alone.
+
+    Header-only, so asking "how big is the picture?" costs no pixels — the point
+    of the exercise being a window read on a canvas too big to hold. ``None`` when
+    the file is unreadable or carries no image.
+    """
+    from astropy.io import fits as _fits
+
+    try:
+        with _fits.open(fits_path, memmap=False) as hdul:
+            hdr = hdul[0].header
+            naxis = int(hdr.get("NAXIS", 0))
+            if naxis < 2:
+                return None
+            return int(hdr["NAXIS2"]), int(hdr["NAXIS1"])
+    except (OSError, KeyError, ValueError, TypeError):
+        return None
+
+
+def read_window_rgb(fits_path: str | Path, y0: int, x0: int,
+                    height: int, width: int) -> np.ndarray:
+    """One rectangle of a stack FITS as float32 ``(h, w, 3)``, read *as a window*.
+
+    The whole point is that the file is never loaded: a 150 MP mosaic is
+    gigabytes, and the loupe wants a few hundred pixels of it. ``hdu.section``
+    reads only the requested slice off disk, so the cost is the window, not the
+    canvas. Channel handling matches :func:`_load_fits_rgb` exactly, so a window
+    holds the same numbers the proxy would have at those pixels.
+
+    The rectangle must already be inside the canvas — :func:`source_shape` is how
+    a caller clamps it.
+    """
+    from astropy.io import fits as _fits
+
+    with _fits.open(fits_path, memmap=False) as hdul:
+        hdu = hdul[0]
+        ndim = int(hdu.header.get("NAXIS", 0))
+        if ndim == 3:
+            arr = np.asarray(hdu.section[:, y0:y0 + height, x0:x0 + width],
+                             dtype=np.float32)
+            rgb = np.transpose(arr, (1, 2, 0))
+            if rgb.shape[2] == 1:
+                rgb = np.repeat(rgb, 3, axis=2)
+            elif rgb.shape[2] > 3:
+                rgb = rgb[..., :3]
+        else:
+            plane = np.asarray(hdu.section[y0:y0 + height, x0:x0 + width],
+                               dtype=np.float32)
+            rgb = np.stack([plane, plane, plane], axis=-1)
+    return np.ascontiguousarray(rgb, dtype=np.float32)
+
+
 def build_proxy(fits_path: str | Path, max_px: int = PROXY_MAX_PX) -> tuple[np.ndarray, float]:
     """Return ``(proxy_rgb, proxy_scale)`` where ``proxy_scale = full_w / proxy_w``."""
     rgb = _load_fits_rgb(fits_path)
