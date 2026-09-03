@@ -14,6 +14,7 @@ from seestack.io.ingest import find_fits_files
 from seestack.io.library import Library
 from seestack.io.project import REJECT_REASON_SEESTAR_OUTPUT, FrameRow, Project
 from seestack.io.scanner import (
+    SkippedOutputFolder,
     _apply_seestar_convention,
     _ingest_into_target,
     _seestar_output_bases,
@@ -1239,3 +1240,144 @@ def test_a_mosaics_on_device_output_never_reaches_the_mosaic_target(tmp_path):
     finally:
         lib.close()
 
+
+
+# --- The bare-"<T>/" skip stops being silent ---------------------------------
+#
+# Skipping a bare "<T>/" beside "<T>_sub/" is right for the Seestar's on-device
+# picture and wrong for a plainly-named folder of a user's own subs — and the
+# skip never looked at what was inside, nor said anything. The owner's library
+# has one of exactly the second shape ("NGC 6888" of 4,815 files beside
+# "NGC 6888_SUB" of 3,110, holding genuinely different frames).
+
+def _folder(name: str, *filenames: str) -> tuple[str, list[Path]]:
+    return (name, [Path(name) / f for f in filenames])
+
+
+def test_the_skip_reports_what_it_passed_over():
+    """The skip's behaviour is unchanged; it now leaves a record behind."""
+    skips: list[SkippedOutputFolder] = []
+    units = _apply_seestar_convention(
+        [_folder("M 31_sub", "Light_M 31_10.0s_IRCUT_0001.fit"),
+         _folder("M 31", "Stacked.fit", "Stacked_60s.fit")],
+        None, skips,
+    )
+    assert [n for n, _ in units] == ["M 31"]          # unchanged
+    assert [(s.name, s.n_files, s.n_device_output) for s in skips] == [("M 31", 2, 2)]
+
+
+def test_a_skipped_folder_of_device_pictures_needs_no_word_said():
+    """Every file is the device's own output: the convention is doing exactly
+    what it is for, and reporting it on every scan would be pure noise."""
+    skips: list[SkippedOutputFolder] = []
+    _apply_seestar_convention(
+        [_folder("M 31_sub", "Light_M 31_10.0s_IRCUT_0001.fit"),
+         _folder("M 31", "Stacked.fit", "Stacked_10.0s_M 31_0002.fit")],
+        None, skips,
+    )
+    assert [s.n_unvouched for s in skips] == [0]
+
+
+def test_a_skipped_folder_of_raw_subs_is_flagged_as_unvouched():
+    """The owner's shape: a plainly-named folder holding real "Light_*" subs,
+    silently passed over because a "_sub" folder shares its name."""
+    skips: list[SkippedOutputFolder] = []
+    _apply_seestar_convention(
+        [_folder("NGC 6888_SUB", "Light_NGC 6888_10.0s_IRCUT_0001.fit"),
+         _folder("NGC 6888", *[f"Light_NGC 6888_10.0s_IRCUT_{i:04d}.fit"
+                               for i in range(5)])],
+        None, skips,
+    )
+    [s] = skips
+    assert (s.n_files, s.n_device_output, s.n_unvouched) == (5, 0, 5)
+
+
+def test_a_mixed_skipped_folder_counts_only_what_it_cannot_vouch_for():
+    """Both together — the device's own pictures *and* subs in one folder. The
+    subs are the part nothing can account for."""
+    skips: list[SkippedOutputFolder] = []
+    _apply_seestar_convention(
+        [_folder("M 13_sub", "Light_M 13_10.0s_IRCUT_0001.fit"),
+         _folder("M 13", "Stacked_01.fit", "Stacked_02.fit",
+                 "Light_M 13_10.0s_IRCUT_0009.fit")],
+        None, skips,
+    )
+    [s] = skips
+    assert (s.n_files, s.n_device_output, s.n_unvouched) == (3, 2, 1)
+
+
+def test_nothing_but_a_skip_is_ever_recorded():
+    """The record is about the sibling skip and nothing else: an ingested bare
+    folder, a video folder and a mosaic must not appear in it."""
+    skips: list[SkippedOutputFolder] = []
+    _apply_seestar_convention(
+        [_folder("Andromeda", "Light_x_10.0s_IRCUT_0001.fit"),   # no _sub sibling
+         _folder("Lunar_video", "clip.fit"),
+         _folder("M 3_mosaic_sub", "Light_M 3_10.0s_IRCUT_0001.fit"),
+         _folder("M 3_mosaic", "Stacked.fit")],
+        None, skips,
+    )
+    assert [s.name for s in skips] == ["M 3_mosaic"]
+
+
+def test_the_skip_record_is_parent_scoped_like_the_skip_itself():
+    """A bare root-level folder is only skipped when its "_sub" sibling shares
+    its parent — so the record must be scoped identically, or the report would
+    name a folder that in fact ingested."""
+    skips: list[SkippedOutputFolder] = []
+    units = _apply_seestar_convention(
+        [_folder("M 31", "Light_M 31_10.0s_IRCUT_0001.fit"),
+         _folder("M 31_sub", "Light_M 31_10.0s_IRCUT_0002.fit")],
+        ["/incoming", "/incoming/MyWorks"], skips,
+    )
+    assert "M 31" in [n for n, _ in units]   # ingested: the sibling is elsewhere
+    assert skips == []
+
+
+def test_collecting_the_record_is_optional_and_off_by_default():
+    """Existing callers pass two arguments and must keep working untouched."""
+    units = _apply_seestar_convention(
+        [_folder("M 31_sub", "Light_x.fit"), _folder("M 31", "Stacked.fit")])
+    assert [n for n, _ in units] == ["M 31"]
+
+
+def test_scan_and_organize_reports_the_skip_it_could_not_account_for(tmp_path):
+    """End to end: a real folder tree, and the scan result says what it walked
+    past. Nothing on disk is touched and the units are exactly as before."""
+    root = tmp_path / "incoming"
+    (root / "NGC 6888_sub").mkdir(parents=True)
+    (root / "NGC 6888").mkdir()
+    for i in range(3):
+        write_seestar_fits(root / "NGC 6888_sub" / f"Light_NGC 6888_10.0s_IRCUT_{i:04d}.fit")
+    for i in range(4):
+        write_seestar_fits(root / "NGC 6888" / f"Light_NGC 6888_10.0s_IRCUT_{i+100:04d}.fit")
+    lib = Library.open_or_create(tmp_path / "library")
+    try:
+        result = scan_and_organize(lib, root)
+        assert [t.target_name for t in result.targets] == ["NGC 6888"]
+        assert result.total_added == 3          # the skip still skips
+        [s] = result.unvouched_skips
+        assert (s.name, s.n_files, s.n_unvouched) == ("NGC 6888", 4, 4)
+        # And every one of those files is still sitting there, untouched (§10).
+        assert len(list((root / "NGC 6888").iterdir())) == 4
+    finally:
+        lib.close()
+
+
+def test_a_healthy_seestar_library_reports_no_skips_worth_saying(tmp_path):
+    """The other half, and the one that keeps this quiet: a normal Seestar drop
+    skips its on-device picture and says nothing about it."""
+    root = tmp_path / "incoming"
+    (root / "M 42_sub").mkdir(parents=True)
+    (root / "M 42").mkdir()
+    for i in range(3):
+        write_seestar_fits(root / "M 42_sub" / f"Light_M 42_10.0s_IRCUT_{i:04d}.fit")
+    write_seestar_fits(root / "M 42" / "Stacked.fit")
+    lib = Library.open_or_create(tmp_path / "library")
+    try:
+        result = scan_and_organize(lib, root)
+        assert result.unvouched_skips == []
+        assert [(s.name, s.n_unvouched) for s in result.skipped_output_folders] \
+            == [("M 42", 0)]
+    finally:
+        lib.close()
