@@ -470,6 +470,66 @@ _(nothing else claimed — claim an item here with your branch name)_
 > (backlog bloat, collisions, QA-rotation aim) are filed as the R-items further below; `AGENTS.md` §1 and §11
 > have already been updated for the highest-value ones.**
 
+- **✅ SHIPPED (Builder, v0.331.2, branch `claude/sweet-babbage-i16c1c`) — ~~the "your stack came in under
+  what its subs should give" nudge fires on every healthy MOSAIC, at every depth.~~** *(Severity: **a wrong
+  "your picture underperformed" on the owner's main shooting style**, on an on-by-default surface, since
+  v0.327.0. Confidence: **verified by reading the measurement's own crop**, then pinned end to end. Found
+  while moving the same verdict onto the Target page in v0.330.0 — which would have made it far more
+  prominent.)*
+
+  **The denominator was the whole target's frame count; the measurement is a panel's.**
+  `_measure_noise_ratio` (`webapp/routers/stack.py`) bounds both sides to an equal **central 1024² crop**
+  (`_crop_origin`, deliberately, for memory). On a mosaic canvas no pixel in that crop ever saw more than its
+  own panel's subs, while `n_frames_used` counts every sub across every panel. So a four-panel mosaic 100
+  subs deep per panel *achieves* about √100 = 10× and was asked for √400 = 20× — 10 is below the 0.7 · 20
+  threshold, so it read **"low" at every depth however well it was shot**. Deeper mosaics are worse, not
+  better: the shortfall is √(panels), so it is structural rather than a threshold that could be moved.
+
+  **This is the same wrong denominator `rejection_blind` already learned about** ("a 2x2 mosaic three subs
+  deep presents 12 frames to a test whose real answer is 3"), in a different note. Worth carrying forward as
+  a class: *any* per-pixel or per-crop quantity compared against `n_frames_used` is wrong on a mosaic, and
+  the owner is a heavy mosaic user, so the mosaic case is the one to check first, not last.
+
+  **Fixed by silence, not by a different number.** `noise_vs_expected` takes `is_mosaic` and returns `None`
+  for one — both branches, so the *reassurance* is withheld too (it rests on the same denominator). The
+  honest fix needs the depth **at the crop the ratio was measured over**, which nothing records; filed as the
+  follow-on below. Until then, the note's own rule decides it: being told a healthy picture underperformed is
+  far worse than being told nothing. A run stacked before the flag existed (schema < 8, so `is_mosaic` is
+  NULL) withholds too, by the same rule — "might be a mosaic" is not a licence to accuse it — while a
+  *recorded* `0` is judged as the single field it is; the check asks those two questions separately rather
+  than leaning on truthiness.
+
+  **One fix, both surfaces — which is the dividend of moving the judgement engine-side in v0.330.0.** The
+  History reveal card had carried this false alarm since v0.327.0 with its own copy of the threshold in
+  TypeScript; it now reads the server's verdict, so it went quiet without a line of frontend logic changing.
+
+  **Upgrade-safe (§9):** one keyword with a `False` default, so every existing call is unchanged; no config,
+  schema, on-disk or API-shape change. The `ratio` itself is still measured and still served — only the √N
+  reading of it is withheld.
+
+  **Tests (+3; all fail before).** `tests/test_stackhealth.py` (+2): the exact 10×-achieved-vs-400-frames
+  shape, asserted **both ways** so the false alarm is documented rather than merely absent, the withheld
+  reassurance, and a single field unaffected however the flag arrives (`False`/`None`/omitted); plus the
+  health note off a mosaic and on the byte-identical single-field run, so the suppression is provably the
+  mosaic flag and nothing else. `tests/webapp/test_stack_health_noise.py` (+1): end to end on a master noisy
+  enough that the sibling test proves it *would* read "low" as a single field.
+
+- **NEW IDEA (Builder 2026-09-03, the honest version of the mosaic suppression above) — record the frame
+  depth at the crop the noise ratio was measured over, so a mosaic can be judged instead of skipped.**
+  *(Pillar: trust + image quality — PRIORITY 4; size S; **do not do this by swapping in `coverage_max`** —
+  read on.)* v0.331.2 withholds the √N verdict on every mosaic because the ratio's central 1024² crop sees
+  one panel's subs while `n_frames_used` counts them all. The measurement is fine; only its yardstick is
+  missing. The run already writes a per-pixel coverage map beside its master (`<stem>_framecov.fits`, the
+  same sibling `backfill_coverage_thin_frac` reads), so the honest N is the **median coverage over exactly
+  the crop `_crop_origin` takes** — a few lines, on a map that is already open in the one place that needs
+  it. **Why not `coverage_max`:** it is the deepest pixel *anywhere* on the canvas, so on a lopsided mosaic
+  (a 200-sub panel beside a 3-sub one, the shape A6 was about) it over-expects and puts the false alarm
+  straight back, just less often — which is worse than today, because it would be false only sometimes and
+  so much harder to notice. **Care:** it must stay a *read of an existing sibling file*, never a new
+  measurement on a page render — the whole reason the note is affordable is that it reads a stamp; if the
+  depth can't be had that cheaply, stamp it beside the ratio at measure time instead. Silence must remain
+  the fallback whenever the map is missing (an older run, a deleted output).
+
 - **✅ SHIPPED (Builder, v0.328.0, branch `claude/sweet-babbage-hrh7bu`) — ~~your imaging log dates every night
   you shot by the day you *processed* it.~~** *(Found while unifying the caption vocabulary for A10; verified
   by reading and then by reproduction. Severity: **a wrong fact on a record the owner downloads and pastes into
@@ -19305,6 +19365,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **NEW IDEA (Builder 2026-09-03, measured while sweeping the display-space statistics for A1's blindness) —
+  Levels' "From your image" button silently leaves the black point at 0, and nothing says why.** *(Pillar:
+  friendliness — PRIORITY 3; size XS; **copy, not arithmetic** — do NOT change the number, and read the
+  swept-and-closed entry under "Image quality" before touching this.)* Measured on real `autostretch`
+  output: the image entering Levels has **1.08 % of its pixels at exactly 0** (the STF's shadow clip), so
+  `suggest_levels_points`' 1st percentile lands inside that spike and the button returns
+  `black = 0.000, white = 0.892, gamma = 1.079`. That black **is the honest answer** — the function's job is
+  "put black where 1 % of pixels fall below", and 1.08 % are already there, so the picture has the shadow
+  clipping the button was asked for; excluding the zeros would clip roughly *twice* the intended share on the
+  on-by-default path. But from the beginner's seat it reads as a half-broken button: two sliders move, one
+  doesn't, and nothing accounts for it. **Shape:** one line beside the suggestion — *"your blacks are already
+  where they should be, so only the white point moved"* — on the branch where the suggested black equals the
+  current one. Not a banner; the other "From your image" buttons already name what they solved for
+  (`gamma_target`, `target_bg`), so this is the same idiom rather than a new element. **Grep first:** the
+  Levels control's existing suggestion copy in the editor, and check whether the button already renders
+  anything on a no-change suggestion.
+
+- **NEW IDEA (Builder 2026-09-03, opened by the v0.330.0 note that needed the same wording twice) — pin the
+  noise-reduction factor's formatter, which is now hand-mirrored in two languages.** *(Pillar:
+  maintainability in service of trust — size XS.)* "Stacking cut the background noise about 15×" is written
+  by `factorLabel` (`frontend/src/components/oneFrameVsStack.ts`) and, since v0.330.0, by `_factor_label`
+  (`seestack/stackhealth.py`) for the health note about the same run. The rule is fiddly on purpose —
+  whole numbers at/above 10, one decimal below, trailing `.0` dropped — so the same stack can end up
+  described as "10×" on one screen and "10.0×" on the other after one careless edit, on two surfaces a user
+  reads minutes apart. The repo already has the right idiom for exactly this
+  (`tests/test_pace_constants_mirror.py`, for a pair of hand-synced pace constants): a test that drives both
+  implementations over the same values and asserts identical output. **Note this is a *formatter*, not a
+  constant**, so the mirror test has to run the TypeScript — either by reading and re-deriving the rule from
+  the source the way the pace test does, or (cleaner) by pinning both against one shared table of
+  value → string cases, so a change to either side has to touch the table.
 
 - **✅ SHIPPED — BOTH, AS ONE CHANGE (Builder, v0.328.3, branch `claude/sweet-babbage-2xguh9`) — ~~a capture
   window is spelled three different ways~~ and ~~the Editor's copyable caption is the only one of the four with
