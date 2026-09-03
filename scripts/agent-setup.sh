@@ -59,3 +59,9 @@ else
   echo "  tests:    QT_QPA_PLATFORM=offscreen python -m pytest -q"
 fi
 echo "  frontend: (cd frontend && npx tsc --noEmit && npx vitest run && npx vite build)"
+# Printed because a run copies its command from here, and the obvious tool-call
+# shape for it is the one that lies: `pytest … | tail -15` reports *tail's* exit
+# status, so a suite that never collected a test (an unrecognised flag exits 4
+# with a `rootdir:` block that looks nothing like a summary) reads as a pass.
+echo "  NB:       redirect, never pipe — a pipeline's exit status is the last"
+echo "            command's:  python -m pytest -q > run.log 2>&1; echo \$?"

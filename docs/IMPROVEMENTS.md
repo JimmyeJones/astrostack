@@ -31665,6 +31665,55 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Infra / maintainability
 
+- **⚠️ PROCESS NOTE (Builder 2026-09-03, found by tripping over it — a run's "baseline is green" can be a
+  statement about nothing).** `AGENTS.md` §7 tells every run to confirm the suite green before changing
+  anything, and the natural way to do that in a tool call is
+  `python -m pytest -q ... 2>&1 | tail -15`. **A pipeline's exit status is the *last* command's**, so that
+  reports `tail`'s 0 whatever pytest did. This run's baseline "passed" in about a minute with an output tail of
+  `inifile: …` / `rootdir: …` — which is not a summary, it is pytest's **usage-error** block: `--timeout=600`
+  was on the command line and **`pytest-timeout` is not installed** in this environment, so pytest exited 4
+  without collecting a single test, and the pipeline said 0. Three commits were written on top of an unverified
+  tree before the shape of that output was noticed.
+  **The rule, and it is one line:** never pipe the suite. `python -m pytest -q > run.log 2>&1;
+  echo "EXIT=$?"` — then read the file. (`set -o pipefail` would also do it, but a redirect is what a later
+  reader can check.) A summary line that does not end in `passed` / `failed` is not a result.
+  **Two follow-ons worth a moment from whoever is next in this area:** (a) add `pytest-timeout` to the `dev`
+  extra in `pyproject.toml` — §7's own suggested invocation uses `--timeout`, so the manual currently documents
+  a flag the environment rejects, and a genuinely hung test can otherwise burn a whole run; (b) `scripts/
+  agent-setup.sh` could print the one-line non-piping invocation as the recommended form, since it already
+  prints the suite command and that is where a run copies it from.
+
+- **⚪ NEGATIVE RESULT — MEASURED, so nobody re-treads it (Builder 2026-09-03, while building the frozen-fit
+  channel v0.328.2).** *Does the editor's **STF** stretch disagree between preview and export the way `asinh`
+  did before v0.325.0?* The question is a fair one — `tone.stretch` mode `stf` anchors on the image's own
+  robust per-channel median and σ, exactly the kind of whole-image statistic the A2 sweep (which looked at
+  *pixel-sized parameters*) would not have caught. **The answer is no, and the reason is worth keeping.**
+  Measured on a 1600×2400 synthetic OSC frame at proxy steps 2, 3, 4 and 6: preview vs the export's own pixels
+  at the same positions differ by **0.0002–0.0004 mean and at most 0.003 max** of a 0–1 tone, and the sky level
+  lands within **0.0005** every time. The editor proxy is a **strided decimation** (`rgb[::step, ::step]` in
+  `seestack/edit/proxy.py`), which is an unbiased sample of the pixel distribution, so median and MAD survive
+  it. The `asinh` bug was a different mechanism: `render_preview_png_full_res` compared an **area-averaged**
+  1024 px preview against native, and averaging genuinely does lift the min, lower the 99.5th percentile and
+  shrink σ. **The transferable rule: striding preserves a distribution's statistics, averaging does not** — so
+  a statistic-anchored op is only at risk where the smaller array was *resampled*, not where it was strided.
+  (The same measurement anchored through the new `stats=` channel is 0.00000 at every step, which is the
+  control saying the harness could have shown a difference had there been one.)
+
+- **NEW IDEA (Builder 2026-09-03, spotted while adding the sibling channel in v0.328.2) — `EditContext.op_notes`
+  is keyed by op **id** where its new sibling `fitted` is keyed by op **uid**, so a recipe carrying an op twice
+  reports only the last one.** *(Pillar: editor correctness — PRIORITY 1; size XS; latent, low severity.)*
+  `seestack/edit/ops/tone.py` writes `ctx.op_notes["tone.color_calibrate"] = {…}` and
+  `seestack/edit/ops/detail.py` does the same for its advisories. A recipe is a *list*, and nothing stops two
+  instances of one op with different params — at which point the editor's caption ("the saved picture's colour
+  will differ a little from this preview", the deconv/star-reduce advisories) describes whichever ran last and
+  silently discards the other. `fitted` was keyed by uid from the start for exactly this reason, and
+  `EditContext` now carries `op_uid` through the pipeline, so the fix is available: key by uid and have the
+  webapp layer resolve uid → op id when it builds the histogram payload. **Care:** the histogram endpoint's
+  JSON shape is what the frontend reads (`color_cal`, `star_reduce_differs_on_proxy`, …) and per §9 must not
+  change — so this is an internal re-key with the same payload out, not an API change. Worth confirming a
+  double-op recipe is actually reachable from the UI before spending a run on it; if it is only reachable by
+  hand-editing a recipe JSON, it stays an XS tidy-up rather than a bug.
+
 - **⚠️ PROCESS NOTE (Builder 2026-09-02, measured after it cost the end of a run) — a full `pytest` run leaves
   ~9 GB behind in `/tmp/pytest-of-root`, and three runs fill the container's whole disk allowance.** Measured,
   not guessed: after a baseline run plus two post-sync re-runs, `du -sh /tmp/pytest-of-root` read **28 GB** and

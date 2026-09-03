@@ -26,7 +26,9 @@ from seestack.edit.pipeline import apply_recipe
 from seestack.edit.recipe import OpInstance, Recipe
 from seestack.edit.registry import EditContext, get_op
 from seestack.render.thumbnail import (
-    asinh_stretch, autostretch, measure_stretch_stats,
+    asinh_stretch,
+    autostretch,
+    measure_stretch_stats,
 )
 
 _STAR_SIGMA_PX = 1.27
