@@ -2598,8 +2598,12 @@ export const api = {
     }>(`/api/targets/${safe}/stack-runs/${id}/one-sub-vs-stack`),
   // The concrete "stacking cut your noise ~N×" number (lazy, best-effort — null
   // for an edited/older run or an unmeasurable image).
+  // `expected_verdict` is the engine's reading of the ratio against √N
+  // ("expected" | "low" | null, from `seestack.stackhealth.noise_vs_expected`) —
+  // the same judgement the "How's my stack?" note uses, so the threshold lives
+  // in one place rather than being re-typed here.
   oneSubVsStackNoise: (safe: string, id: number) =>
-    req<{ ratio: number | null }>(
+    req<{ ratio: number | null; expected_verdict?: string | null }>(
       `/api/targets/${safe}/stack-runs/${id}/one-sub-vs-stack/noise`),
   stackReferenceSubUrl: (safe: string, id: number) =>
     `/api/targets/${safe}/stack-runs/${id}/reference-sub`,

@@ -70,27 +70,6 @@ function factorLabel(value: number): string {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
-/** Fewest frames for which √N is a meaningful yardstick at all. Below this a
- *  single unlucky reference sub swings the measured ratio more than the physics
- *  does, so the app says nothing rather than judging a five-frame stack. */
-export const NOISE_EXPECTED_MIN_FRAMES = 10;
-
-/** Fraction of √N below which a stack is doing materially worse than the frames
- *  it used should allow.
- *
- *  **Measured, not guessed** (agent repro against the real
- *  `seestack.qc.noise_ratio` estimator, synthetic sky + stars + extended
- *  object): an ideal mean stack of independent-noise subs measures
- *  `ratio/√N` = **0.996–1.012** across N = 12…400, and a *weighted* mean with
- *  weights as spread as U(0.1, 1) still measures **0.93** (its effective frame
- *  count really is lower — the yardstick is honest, not the measurement).
- *  Stacks whose subs share correlated noise — the shape soft alignment, a
- *  drifting gradient or a duplicated sub produces — fall to **0.58 at 2 %
- *  shared variance and 0.30 at 10 %**. So 0.7 sits in a wide empty gap: it
- *  cannot fire on a healthy or heavily-weighted stack, and it catches the
- *  correlated ones early. */
-export const NOISE_EXPECTED_LOW_FRACTION = 0.7;
-
 /** The plain-language reading of a measured noise reduction against what the
  *  frames used *should* have bought. */
 export interface NoiseVsExpected {
@@ -104,9 +83,16 @@ export interface NoiseVsExpected {
 /** "Is ~18× any good?" — the context a beginner needs to read the badge above.
  *
  * A weighted-mean stack of `N` frames cuts background noise by about √N, so the
- * honest yardstick is √(frames actually used). Returns null when there is
- * nothing trustworthy to say: no measurement, or too few frames for √N to mean
- * anything (`NOISE_EXPECTED_MIN_FRAMES`).
+ * honest yardstick is √(frames actually used). **The judgement is the server's**:
+ * `verdict` comes straight from the noise endpoint's `expected_verdict`, which
+ * is `seestack.stackhealth.noise_vs_expected` — the same call behind the "How's
+ * my stack?" note, so the two surfaces can never disagree about the same stack
+ * and the 0.7 factor (and the 10-frame floor under it) is never re-typed here.
+ * This function only writes the sentence for it.
+ *
+ * Returns null when there is nothing trustworthy to say: no verdict (no
+ * measurement, or too few frames for √N to mean anything), or a ratio/count the
+ * sentence can't name.
  *
  * The healthy sentence assumes the badge is beside it (it is: anything at or
  * above 0.7·√10 also clears the badge's own 1.5× floor), so it doesn't repeat
@@ -115,16 +101,17 @@ export interface NoiseVsExpected {
  * case worth saying something about. It suggests, never asserts: legitimate
  * rejection and quality weighting both lower the effective frame count. */
 export function noiseVsExpectedNote(
+  verdict: string | null | undefined,
   ratio: number | null | undefined,
   nFrames: number | null | undefined,
 ): NoiseVsExpected | null {
+  if (verdict !== "expected" && verdict !== "low") return null;
   if (ratio == null || !Number.isFinite(ratio) || ratio <= 0) return null;
   if (nFrames == null || !Number.isFinite(nFrames)) return null;
   const n = Math.trunc(nFrames);
-  if (n < NOISE_EXPECTED_MIN_FRAMES) return null;
-  const expected = Math.sqrt(n);
-  const expLabel = factorLabel(expected);
-  if (ratio >= NOISE_EXPECTED_LOW_FRACTION * expected) {
+  if (n <= 0) return null;
+  const expLabel = factorLabel(Math.sqrt(n));
+  if (verdict === "expected") {
     return {
       text: `That's about what ${n} subs should give (√${n} ≈ ${expLabel}×).`,
       concern: false,
