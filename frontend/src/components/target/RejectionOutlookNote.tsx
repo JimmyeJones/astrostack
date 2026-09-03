@@ -3,6 +3,7 @@ import { IconSatellite } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../../api/client";
+import { settingsLink } from "../../settingsSections";
 import { rejectionOutlookNote } from "./rejectionOutlookNote";
 
 /**
@@ -24,6 +25,14 @@ import { rejectionOutlookNote } from "./rejectionOutlookNote";
  *
  * Best-effort and self-hiding: a failed fetch, an older backend, or a target
  * with nothing solved renders nothing at all.
+ *
+ * Two ways out, and the second is the one a walk-away owner actually wants. The
+ * Stack form fixes *this* target; `auto_reject_on_unattended` fixes every
+ * hands-off stack at once, and a beginner will never find a Settings switch by
+ * name. Offering it here needs no gate: the note only speaks when the method is
+ * the user's own, and turning that setting on hands the choice back to the app —
+ * so on an install that already has it, `user_chose` is false and this whole
+ * note is silent.
  */
 export function RejectionOutlookNote(
   { safe, streaked }: { safe: string; streaked: number },
@@ -47,6 +56,10 @@ export function RejectionOutlookNote(
         <Button size="xs" variant="light" color="orange" component={Link}
           to={`/targets/${encodeURIComponent(safe)}/stack`}>
           Change how this target stacks
+        </Button>
+        <Button size="xs" variant="subtle" color="orange" component={Link}
+          to={settingsLink("automation")}>
+          Let AstroStack choose on every hands-off stack
         </Button>
       </Group>
     </Alert>
