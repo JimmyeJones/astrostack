@@ -1489,6 +1489,15 @@ _(nothing else claimed — claim an item here with your branch name)_
     K scans over N days. **Also:** the "healing an already-degraded picture is deliberately left open" note in
     `AGENTS.md` §1 is **stale** — `_auto_stack_degraded_recheck` shipped.
 
+    **✅ THAT NOTE IS NOW CORRECTED (Builder 2026-09-03, branch `claude/sweet-babbage-2mtrwu`)**, along with
+    the two siblings in the same `AGENTS.md` paragraph, which were also stale and were still being called
+    "the front of the bug queue": the mosaic **auto-grade population** bug (shipped v0.270.2, per-panel) and
+    **`photometric_normalize` on the walk-away mosaic path** (shipped v0.271.0 — the guard
+    `if options.photometric_normalize or is_mosaic_canvas:` is live at `stacker.py:2234`). The editor
+    paragraph's A1 and A2 were corrected in the same pass (shipped v0.326.1 / v0.327.2). Each was verified
+    **against the code**, not merely against a Shipped heading. The §1 priority order and the "don't believe a
+    well-hardened claim" warning are untouched — only the *facts about what is still open* moved.
+
 - **✅ SHIPPED (Builder, v0.327.4, branch `claude/sweet-babbage-35yfmt`) — ~~A9: editor exports drop the
   WCS.~~** Fixed in all three parts the entry named — carry it when nothing moved, *move it* for crop and
   resize, drop it only for rotate — and reproduced first through the real export job.
