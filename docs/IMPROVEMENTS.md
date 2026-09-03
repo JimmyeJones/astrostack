@@ -16691,6 +16691,32 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
+- **NEW IDEA (Builder 2026-09-03, the half v0.329.5 deliberately did NOT build) — let the server say where the
+  window is **on the preview**, so the marker stops being a guess.** *(Pillar: a better editor — PRIORITY 1;
+  size XS server + XS frontend.)* v0.329.5 gave `X-Loupe-Window` a reader, but only for the *sentence*: its
+  `{x, y, width, height}` are full-canvas pixels, and the navigator marker is drawn against what the **preview**
+  covers. With a crop in the recipe those are different coordinate systems, and `loupe.ts` has always said so —
+  *"they can differ by up to half a window at the very edge"*. The frontend cannot close that without
+  re-deriving `preview_crop_of_recipe`, which would be a second copy of `_loupe_window`'s mapping and exactly
+  the drift this class keeps producing. **The server already has both numbers**: `_loupe_window` computes `sx`,
+  `sy` (the click mapped through the crop) and knows the crop's extent, so it can add
+  `preview_x/preview_y/preview_width/preview_height` — the same rectangle expressed as fractions of the
+  *rendered* preview — to the header it already sends. The frontend then draws the marker from those and
+  deletes the clamping guesswork in `loupeMarkerRect`. **Care:** keep `loupeMarkerRect` as the fallback for the
+  first paint (the marker must not disappear while the render is in flight) and for a backend that doesn't send
+  the new keys; and add the header keys, never rename the existing ones (§9).
+
+- **NEW IDEA (Builder 2026-09-04, the gap v0.329.4 left behind it) — a drift guard that every webapp caller of
+  `recent_night_pace_s` passes a `night_of`.** *(Pillar: maintainability in service of correctness — size XS.)*
+  v0.329.4 made the pace night-aware through an **optional** `night_of`, defaulted to the old session split so
+  a caller with no longitude to hand doesn't silently change. That default is right and it is also a trap: a
+  fourth surface that wants a pace gets the halved figure by simply not knowing to pass it, which is the bug
+  that just shipped a fix. Two of the three current callers are one line apart in `stats.py`/`plan.py`, so this
+  is cheap to pin: a test that walks the webapp package for `recent_night_pace_s(` calls and asserts each
+  passes `night_of=`, in the shape of the existing `StackOptions` form-descriptor drift test. **Grep first:**
+  if a caller ever legitimately wants sessions (the last-session recap does), the guard needs an opt-out marker
+  rather than a blanket rule — write it so the exception is stated, not silent.
+
 - **NEW IDEA (Builder 2026-09-03, the obvious next tap on the v0.329.0 loupe) — split the full-size window
   against the preview at the *same spot*, so the reader sees what the shrunk view was hiding.** *(Pillar: a
   better editor — PRIORITY 1; size S; frontend-only, on machinery that now exists.)* The loupe answers *"what
@@ -16705,16 +16731,46 @@ problems. Dogfood it every big-picture run and fix root causes.
   building:** the split machinery is shared with the per-op compare; reuse it rather than adding a second
   divider.
 
-- **NEW IDEA (Builder 2026-09-03, filed the moment after adding it, so it doesn't become another
-  `POST /api/targets`) — the loupe's `X-Loupe-Window` header has no reader.** *(Pillar: friendliness —
-  PRIORITY 3; size XS.)* `GET …/editor/loupe` returns the source rectangle it rendered
-  (`{x, y, width, height, canvas_width, canvas_height, proxy_scale}`) as a response header, and nothing
-  consumes it: `FullSizeCheck` draws its marker from its own client-side `loupeMarkerRect`, which is a *guide*
-  and can differ from the server's clamped answer by up to half a window at the very edge of a cropped
-  preview. Two honest resolutions, in order: (a) have the modal say **where** it is looking in words — *"from
-  the upper-left of your frame"* — which is the thing a reader actually wants and would make the header carry
-  its weight; or (b) drop the header. Do not leave it as it is: the A-MINOR audit already lists one endpoint
-  with no caller, and this is the same shape one layer down.
+- **✅ SHIPPED, RESOLUTION (a) (Builder, v0.329.5, branch `claude/sweet-babbage-fwtqxh`) — ~~the loupe's
+  `X-Loupe-Window` header has no reader.~~** The modal now says, under the window, *"This is the top-left of
+  your picture."* — named from the **server's** own clamped rectangle, in thirds so "the middle" can be said
+  when it is true and the redundant half of a centred edge is dropped ("the top", not "the top-centre").
+
+  **Reading a header means reading the response**, so the window moved from an `<img src>` to the same
+  blob-URL query shape the live preview already uses — `gcTime: 0` included, without which an undo/redo back
+  to a prior recipe could re-serve an already-revoked URL and blank the window (the failure
+  `blobRevoke.test.tsx` exists for). That also bought the two things the `src` form could not have: a real
+  error state (a 409 from a geometry the recipe made unanswerable now reads as a sentence rather than a broken
+  image icon), and the honest `width`/`height` — the server's, so a window clamped smaller than
+  `size` on a small canvas is not stretched.
+
+  **The marker deliberately stays a guide**, drawn client-side against what the *preview* covers. It is not
+  the same quantity: the server's rectangle is in **full-canvas** coordinates, and mapping it onto a cropped
+  preview needs the crop the frontend would have to re-derive — a second copy of `_loupe_window`'s mapping,
+  which is the mistake this class keeps making. The sentence is the authoritative answer, the marker points at
+  roughly where, and `loupe.ts` now says which is which.
+
+  **Upgrade-safe (§9):** frontend-only; no endpoint, response shape, config or default change. A backend that
+  sends no header (or an unreadable one) simply doesn't get the sentence — pinned by a test, since that is
+  what an in-place upgrade looks like for the minutes the old container is still serving.
+  **Tests (+5 in `loupe.test.ts` for the pure helper, +3 in `FullSizeCheck.test.tsx`):** the corner/edge/middle
+  namings, silence on a whole-canvas window and on nonsense, the sentence appearing from a mocked header, no
+  sentence when the header is absent, and the error state. The two existing tests that read the loupe's URL
+  off the `<img>` now read it off the recorded request instead — the same assertion against the request that
+  is actually made.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-09-03, filed the moment after adding it, so it doesn't become another
+    `POST /api/targets`) — the loupe's `X-Loupe-Window` header has no reader.** *(Pillar: friendliness —
+    PRIORITY 3; size XS.)* `GET …/editor/loupe` returns the source rectangle it rendered
+    (`{x, y, width, height, canvas_width, canvas_height, proxy_scale}`) as a response header, and nothing
+    consumes it: `FullSizeCheck` draws its marker from its own client-side `loupeMarkerRect`, which is a *guide*
+    and can differ from the server's clamped answer by up to half a window at the very edge of a cropped
+    preview. Two honest resolutions, in order: (a) have the modal say **where** it is looking in words — *"from
+    the upper-left of your frame"* — which is the thing a reader actually wants and would make the header carry
+    its weight; or (b) drop the header. Do not leave it as it is: the A-MINOR audit already lists one endpoint
+    with no caller, and this is the same shape one layer down.
 
 - **✅ SHIPPED, ALL THREE SLICES (v0.328.2 → v0.328.6 → v0.329.0) — ~~"check it at full size": a 1:1 loupe on
   the editor preview, so the four ops the proxy *cannot* show honestly can be judged instead of apologised

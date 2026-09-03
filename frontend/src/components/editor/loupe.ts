@@ -70,6 +70,50 @@ export function clickFraction(
 }
 
 /**
+ * Where in the whole picture the shown window actually sits, in words — from the
+ * **server's** own clamped rectangle, not from the click.
+ *
+ * This is the thing the marker cannot promise. The marker is drawn against what
+ * the *preview* covers, while the window is cut from the full canvas through the
+ * recipe's crop, so with a crop the two can differ by up to half a window at the
+ * very edge (see `loupeMarkerRect`). The sentence is the authoritative answer,
+ * and it is the one a beginner asked for anyway: not "27.4 % across" but "the
+ * top-left of your picture".
+ *
+ * Returns `null` — say nothing — when there is no window to describe, when the
+ * numbers aren't finite, or when the window covers the whole canvas (there is no
+ * "where" to name, and "all of it" is already obvious from the picture).
+ */
+export function loupeWhereText(
+  win: {
+    x: number; y: number; width: number; height: number;
+    canvas_width: number; canvas_height: number;
+  } | null | undefined,
+): string | null {
+  if (!win) return null;
+  const { x, y, width, height, canvas_width: cw, canvas_height: ch } = win;
+  const finite = [x, y, width, height, cw, ch].every((v) =>
+    typeof v === "number" && Number.isFinite(v));
+  if (!finite || !(cw > 0) || !(ch > 0) || !(width > 0) || !(height > 0)) return null;
+  if (width >= cw && height >= ch) return null;
+
+  // Thirds of the canvas, decided on the window's own centre. Thirds (not halves)
+  // so "the middle" can be said when it is true — a beginner reading "the left"
+  // about a centred window would trust the next sentence less.
+  const band = (centre: number, span: number, names: [string, string, string]) => {
+    const f = centre / span;
+    return f < 1 / 3 ? names[0] : f < 2 / 3 ? names[1] : names[2];
+  };
+  const row = band(y + height / 2, ch, ["top", "middle", "bottom"]);
+  const col = band(x + width / 2, cw, ["left", "centre", "right"]);
+  const where = row === "middle" && col === "centre" ? "middle"
+    : row === "middle" ? col
+      : col === "centre" ? row
+        : `${row}-${col}`;
+  return `This is the ${where} of your picture.`;
+}
+
+/**
  * The one-line explanation under the full-size view: what it is, and why it is
  * not the same thing as the preview. Plain language, no jargon — "1:1" and
  * "decimation" mean nothing to the reader this is for.
