@@ -16691,20 +16691,50 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
-- **NEW IDEA (Builder 2026-09-03, the half v0.329.5 deliberately did NOT build) — let the server say where the
-  window is **on the preview**, so the marker stops being a guess.** *(Pillar: a better editor — PRIORITY 1;
-  size XS server + XS frontend.)* v0.329.5 gave `X-Loupe-Window` a reader, but only for the *sentence*: its
-  `{x, y, width, height}` are full-canvas pixels, and the navigator marker is drawn against what the **preview**
-  covers. With a crop in the recipe those are different coordinate systems, and `loupe.ts` has always said so —
-  *"they can differ by up to half a window at the very edge"*. The frontend cannot close that without
-  re-deriving `preview_crop_of_recipe`, which would be a second copy of `_loupe_window`'s mapping and exactly
-  the drift this class keeps producing. **The server already has both numbers**: `_loupe_window` computes `sx`,
-  `sy` (the click mapped through the crop) and knows the crop's extent, so it can add
-  `preview_x/preview_y/preview_width/preview_height` — the same rectangle expressed as fractions of the
-  *rendered* preview — to the header it already sends. The frontend then draws the marker from those and
-  deletes the clamping guesswork in `loupeMarkerRect`. **Care:** keep `loupeMarkerRect` as the fallback for the
-  first paint (the marker must not disappear while the render is in flight) and for a backend that doesn't send
-  the new keys; and add the header keys, never rename the existing ones (§9).
+- **✅ SHIPPED (Builder, v0.329.6, branch `claude/sweet-babbage-fwtqxh`) — ~~let the server say where the
+  window is **on the preview**, so the marker stops being a guess.~~** Filed by this run an hour earlier as
+  the half v0.329.5 deliberately did not build, and taken here rather than left, because the sentence
+  v0.329.5 added made the *disagreement* visible: the words name a corner from the canvas while the marker
+  points at a rectangle derived from the click.
+
+  `X-Loupe-Window` now also carries `preview_x/preview_y/preview_width/preview_height` — the same window as
+  fractions of the **rendered preview** — and `FullSizeCheck` draws the marker from those, falling back to
+  the old client-side guide for the first paint and for a container too old to send them. `_preview_extent`
+  is now the one definition of what the preview covers, read by both the code that maps the click *through*
+  the crop and the code that reports the window back *relative to* it, so the two cannot drift.
+
+  **The fractions are deliberately not clamped to 0..1**, and that is the part worth reading before
+  "tidying" it: the window is clamped inside the **canvas**, not inside the crop, so on a crop flush against
+  a canvas edge it genuinely hangs over the side. Reporting `preview_x < 0` lets the navigator (which already
+  clips, `overflow: hidden`) draw it overhanging — the truth. Clamping would slide the marker inward and
+  point it at somewhere the window is not.
+
+  **Upgrade-safe (§9):** header keys **added**, never renamed; no endpoint, response-shape, config, schema or
+  default change, and a frontend that ignores them behaves exactly as before.
+  **Tests (+3 in `tests/webapp/test_editor_loupe.py`, +3 in `loupe.test.ts`, +2 in `FullSizeCheck.test.tsx`):**
+  the no-crop case where the two frames agree (which is why the disagreement went unnoticed); the cropped case
+  where a click at the preview's centre is 0.8 across the canvas and still 0.5 across the preview, and the
+  window is a *bigger* share of the cropped preview than of the canvas; the flush-against-the-edge case
+  asserting `preview_x < 0` while the canvas-frame answer stays inside the canvas; the pure helper's
+  percentages, overhang pass-through and every "didn't answer" shape; and the component preferring the
+  server's rectangle over the guide, then falling back to the guide when there is none.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-09-03, the half v0.329.5 deliberately did NOT build) — let the server say where the
+    window is **on the preview**, so the marker stops being a guess.** *(Pillar: a better editor — PRIORITY 1;
+    size XS server + XS frontend.)* v0.329.5 gave `X-Loupe-Window` a reader, but only for the *sentence*: its
+    `{x, y, width, height}` are full-canvas pixels, and the navigator marker is drawn against what the **preview**
+    covers. With a crop in the recipe those are different coordinate systems, and `loupe.ts` has always said so —
+    *"they can differ by up to half a window at the very edge"*. The frontend cannot close that without
+    re-deriving `preview_crop_of_recipe`, which would be a second copy of `_loupe_window`'s mapping and exactly
+    the drift this class keeps producing. **The server already has both numbers**: `_loupe_window` computes `sx`,
+    `sy` (the click mapped through the crop) and knows the crop's extent, so it can add
+    `preview_x/preview_y/preview_width/preview_height` — the same rectangle expressed as fractions of the
+    *rendered* preview — to the header it already sends. The frontend then draws the marker from those and
+    deletes the clamping guesswork in `loupeMarkerRect`. **Care:** keep `loupeMarkerRect` as the fallback for the
+    first paint (the marker must not disappear while the render is in flight) and for a backend that doesn't send
+    the new keys; and add the header keys, never rename the existing ones (§9).
 
 - **NEW IDEA (Builder 2026-09-04, the gap v0.329.4 left behind it) — a drift guard that every webapp caller of
   `recent_night_pace_s` passes a `night_of`.** *(Pillar: maintainability in service of correctness — size XS.)*

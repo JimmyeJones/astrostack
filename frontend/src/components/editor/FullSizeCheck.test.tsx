@@ -158,4 +158,49 @@ describe("FullSizeCheck", () => {
     expect(marker.style.width).toMatch(/^8\.53/);
     expect(marker.style.left).toMatch(/^20\.7/);
   });
+
+  it("draws the marker where the server says the window is, not where it guessed", async () => {
+    // The guide re-derives the rectangle from the click and clamps it inside the
+    // preview; the server reports the window it actually cut, mapped back through
+    // the recipe's crop. With a crop those disagree, and the server is right.
+    vi.spyOn(client.api, "loupeInfo").mockResolvedValue(AVAILABLE);
+    mockLoupe({ ...CENTRED, preview_x: 0.6, preview_y: 0.1,
+                preview_width: 0.25, preview_height: 0.25 });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <FullSizeCheck safe="M_42" runId={7} recipe={RECIPE}
+            shownSourceW={6000} shownSourceH={4000} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    fireEvent.click(await screen.findByTestId("full-size-check-open"));
+    await screen.findByTestId("full-size-check-image");
+
+    const marker = screen.getByTestId("full-size-check-marker");
+    // 60 % across, a quarter wide — not the guide's 8.53 % of a 6000 px canvas.
+    expect(marker.style.left).toMatch(/^60/);
+    expect(marker.style.width).toMatch(/^25/);
+  });
+
+  it("keeps the client-side guide when the server sends no rectangle", async () => {
+    // Both halves of the fallback matter: the marker must not vanish while the
+    // render is in flight, nor on a container too old to send the fractions.
+    vi.spyOn(client.api, "loupeInfo").mockResolvedValue(AVAILABLE);
+    mockLoupe(CENTRED);   // no preview_* keys
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <FullSizeCheck safe="M_42" runId={7} recipe={RECIPE}
+            shownSourceW={6000} shownSourceH={4000} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    fireEvent.click(await screen.findByTestId("full-size-check-open"));
+    await screen.findByTestId("full-size-check-image");
+    expect(screen.getByTestId("full-size-check-marker").style.width)
+      .toMatch(/^8\.53/);
+  });
 });

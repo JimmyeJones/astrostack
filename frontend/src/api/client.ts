@@ -1854,6 +1854,15 @@ export interface LoupeWindow {
   canvas_width: number;
   canvas_height: number;
   proxy_scale: number;
+  /** The same rectangle as 0..1 fractions of the **rendered preview**, which is a
+   *  different frame whenever the recipe crops. Deliberately not clamped: a
+   *  window clamped inside the canvas can hang over a crop's edge, and saying so
+   *  lets the marker be drawn clipped rather than slid inward. Absent on a
+   *  backend older than v0.329.6, and on a degenerate crop. */
+  preview_x?: number;
+  preview_y?: number;
+  preview_width?: number;
+  preview_height?: number;
 }
 
 export interface LoupeInfo {

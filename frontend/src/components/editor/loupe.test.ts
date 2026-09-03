@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { clickFraction, loupeCaption, loupeMarkerRect, loupeWhereText } from "./loupe";
+import {
+  clickFraction, loupeCaption, loupeMarkerFromWindow, loupeMarkerRect, loupeWhereText,
+} from "./loupe";
 
 describe("loupeMarkerRect", () => {
   it("draws the window as its true share of the picture", () => {
@@ -105,5 +107,40 @@ describe("loupeWhereText", () => {
     expect(loupeWhereText({ ...win(0, 0), canvas_width: 0 })).toBeNull();
     expect(loupeWhereText({ ...win(0, 0), x: Number.NaN })).toBeNull();
     expect(loupeWhereText({ ...win(0, 0), width: 0 })).toBeNull();
+  });
+});
+
+describe("loupeMarkerFromWindow", () => {
+  it("uses the server's own preview-frame rectangle, as CSS percentages", () => {
+    const r = loupeMarkerFromWindow({
+      preview_x: 0.2, preview_y: 0.35, preview_width: 0.16, preview_height: 0.28,
+    })!;
+    expect(r.left).toBeCloseTo(20);
+    expect(r.top).toBeCloseTo(35);
+    expect(r.width).toBeCloseTo(16);
+    expect(r.height).toBeCloseTo(28);
+  });
+
+  it("passes a window that hangs over a crop's edge through unclamped", () => {
+    // The window is clamped inside the *canvas*, not inside the crop, so at the
+    // edge of a narrow crop it really does overhang. Drawing it clipped is the
+    // truth; sliding it inward would point at somewhere it is not.
+    const r = loupeMarkerFromWindow({
+      preview_x: -1.4, preview_y: -1.4, preview_width: 3.2, preview_height: 3.2,
+    })!;
+    expect(r.left).toBe(-140);
+    expect(r.width).toBe(320);
+  });
+
+  it("returns null whenever the server didn't answer, so the guide stands in", () => {
+    expect(loupeMarkerFromWindow(null)).toBeNull();
+    expect(loupeMarkerFromWindow(undefined)).toBeNull();
+    expect(loupeMarkerFromWindow({})).toBeNull();               // older backend
+    expect(loupeMarkerFromWindow({
+      preview_x: 0.2, preview_y: 0.2, preview_width: 0, preview_height: 0.2,
+    })).toBeNull();
+    expect(loupeMarkerFromWindow({
+      preview_x: Number.NaN, preview_y: 0.2, preview_width: 0.2, preview_height: 0.2,
+    })).toBeNull();
   });
 });

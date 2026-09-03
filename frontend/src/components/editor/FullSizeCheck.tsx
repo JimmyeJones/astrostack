@@ -3,7 +3,9 @@ import { IconZoomScan } from "@tabler/icons-react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api, type Recipe } from "../../api/client";
-import { clickFraction, loupeCaption, loupeMarkerRect, loupeWhereText } from "./loupe";
+import {
+  clickFraction, loupeCaption, loupeMarkerFromWindow, loupeMarkerRect, loupeWhereText,
+} from "./loupe";
 
 /**
  * "Check it at full size" — one window of the picture rendered at 1:1.
@@ -71,7 +73,10 @@ export function FullSizeCheck({
   }, [window_.data?.url]);
 
   if (!info.data?.available) return null;
-  const marker = loupeMarkerRect(spot.fx, spot.fy, size, shownSourceW, shownSourceH);
+  // The server's own rectangle when it has answered; the client-side guide while
+  // the render is in flight, and on a backend that doesn't send one.
+  const marker = loupeMarkerFromWindow(window_.data?.window)
+    ?? loupeMarkerRect(spot.fx, spot.fy, size, shownSourceW, shownSourceH);
   const where = loupeWhereText(window_.data?.window);
 
   return (
@@ -141,8 +146,8 @@ export function FullSizeCheck({
                   <Group justify="center" p="lg"><Loader size="sm" /></Group>
                 )}
               </div>
-              {/* Where it is, in the server's own words about the whole canvas —
-                  the marker beside it is only a guide (see `loupeMarkerRect`). */}
+              {/* Where it is, named against the whole canvas — the frame the
+                  reader thinks in, and the one the marker beside it is not. */}
               {where ? (
                 <Text size="xs" c="dimmed" data-testid="full-size-check-where">
                   {where}

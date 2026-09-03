@@ -31,7 +31,9 @@ export interface MarkerRect {
  * The rectangle is clamped to stay inside the box, mirroring the server clamping
  * its window inside the canvas. The two agree exactly when the recipe has no
  * crop; with one they can differ by up to half a window at the very edge, which
- * is why this is drawn as a guide and the picture itself carries the answer.
+ * is why this is only a guide — prefer :func:`loupeMarkerFromWindow` whenever the
+ * server has answered, and keep this for the first paint (the marker must not
+ * vanish while the render is in flight) and for a backend that doesn't send it.
  */
 export function loupeMarkerRect(
   fx: number,
@@ -66,6 +68,37 @@ export function clickFraction(
   return {
     fx: clampUnit((clientX - box.left) / box.width),
     fy: clampUnit((clientY - box.top) / box.height),
+  };
+}
+
+/**
+ * The marker rectangle the **server** measured, when it sent one — its window
+ * expressed as fractions of the rendered preview, which is the frame the marker
+ * is drawn in.
+ *
+ * This is what `loupeMarkerRect` below can only approximate. That one re-derives
+ * the rectangle from the click and clamps it inside the preview; the server's is
+ * the window it actually cut, mapped back through the recipe's own crop, and it
+ * is deliberately *not* clamped — a window clamped inside the canvas can hang
+ * over a crop's edge, and drawing it clipped is the truth where sliding it inward
+ * is not. Returns `null` when the backend didn't send it (older container, or a
+ * degenerate crop), which is what keeps the guide below worth having.
+ */
+export function loupeMarkerFromWindow(
+  win: {
+    preview_x?: number; preview_y?: number;
+    preview_width?: number; preview_height?: number;
+  } | null | undefined,
+): MarkerRect | null {
+  if (!win) return null;
+  const { preview_x: x, preview_y: y, preview_width: w, preview_height: h } = win;
+  if (![x, y, w, h].every((v) => typeof v === "number" && Number.isFinite(v))) {
+    return null;
+  }
+  if (!((w as number) > 0) || !((h as number) > 0)) return null;
+  return {
+    left: (x as number) * 100, top: (y as number) * 100,
+    width: (w as number) * 100, height: (h as number) * 100,
   };
 }
 
