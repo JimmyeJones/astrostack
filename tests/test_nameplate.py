@@ -184,9 +184,15 @@ def test_a_span_writes_its_shared_parts_once():
     from seestack.nameplate import format_acq_range
 
     assert format_acq_range("2024-11-15", "2024-11-18") == "15-18 Nov 2024"
-    assert format_acq_range("2024-10-28", "2024-11-03") == "28 Oct-3 Nov 2024"
+    # The dash is *spaced* between multi-word sides and closed up between two
+    # bare numbers — the typographic half of the rule, which this spelling gained
+    # when the four capture-window renderers were folded onto one
+    # (`seestack/nightrange.py`; `tests/fixtures/night_range_format.json` is the
+    # shared table). Before that it closed the dash up in every case, so a
+    # nameplate read "28 Oct-3 Nov 2024" where the screen read "28 Oct – 3 Nov".
+    assert format_acq_range("2024-10-28", "2024-11-03") == "28 Oct - 3 Nov 2024"
     assert format_acq_range("2024-12-28", "2025-01-03") == (
-        "28 Dec 2024-3 Jan 2025")
+        "28 Dec 2024 - 3 Jan 2025")
 
 
 def test_one_night_captions_exactly_as_it_always_did():

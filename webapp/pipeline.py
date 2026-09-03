@@ -1708,8 +1708,10 @@ def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: i
         from datetime import datetime, timezone
 
         from seestack.io.project import Project
+        from seestack.nightrange import format_night_range
         from seestack.sharecard import share_blurb
         from seestack.stack.output import safe_basename, write_share_jpeg
+        from webapp.capture_nights import capture_night_range
 
         lib = Library.open_or_create(settings.resolved_library_root)
         try:
@@ -1731,7 +1733,15 @@ def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: i
                 plate = _nameplate_fields(
                     run.fits_path, entry, run, settings.site_lon) if nameplate else None
                 write_share_jpeg(jpeg, out, nameplate=plate)
-                blurb = share_blurb(entry.name, run.n_frames_used, run.total_exposure_s)
+                # The night it was shot — the one fact the copyable caption was
+                # missing while Target, History, Gallery and the baked nameplate
+                # all carried it. Read off the run's capture window, never off
+                # `timestamp_utc` (which is when the *stack* ran).
+                night_start, night_end = capture_night_range(
+                    run.capture_start_utc, run.capture_end_utc, settings.site_lon)
+                blurb = share_blurb(
+                    entry.name, run.n_frames_used, run.total_exposure_s,
+                    format_night_range(night_start, night_end))
             finally:
                 proj.close()
             return {"safe": safe, "run_id": run_id,
