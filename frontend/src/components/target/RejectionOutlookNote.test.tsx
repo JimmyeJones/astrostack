@@ -47,6 +47,18 @@ describe("RejectionOutlookNote", () => {
       .toHaveAttribute("href", "/targets/m_42/stack");
   });
 
+  it("also offers the one-time fix that covers every target", async () => {
+    // Per-target is the narrow answer; a walk-away owner wants the switch that
+    // hands the choice back to the app on every hands-off stack — and will never
+    // find a Settings toggle by name. It must land on the section that holds it.
+    vi.spyOn(client.api, "rejectionOutlook").mockResolvedValue(outlook());
+    renderNote(2);
+
+    const link = await screen.findByRole(
+      "link", { name: /Let AstroStack choose on every hands-off stack/ });
+    expect(link).toHaveAttribute("href", "/settings/automation");
+  });
+
   it("never asks the question when nothing carries a trail", async () => {
     const spy = vi.spyOn(client.api, "rejectionOutlook")
       .mockResolvedValue(outlook());

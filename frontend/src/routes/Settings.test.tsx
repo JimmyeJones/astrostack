@@ -601,3 +601,28 @@ describe("folder conflict, while you type", () => {
     expect(screen.getAllByRole("button", { name: "Save settings" })[0]).not.toBeDisabled();
   });
 });
+
+// A method saved once is a decision made at one depth and applied to every night
+// after it — and sigma clipping, the one most owners save, cannot pick out a lone
+// satellite trail below about 11 subs. `auto_reject_on_unattended` is the opt-in
+// that hands that choice back to the app on hands-off stacks only.
+describe("Automatic pipeline — let AstroStack pick outlier removal", () => {
+  const LABEL = /Let AstroStack pick outlier removal on hands-off stacks/;
+
+  it("is off for an install that has never set it", async () => {
+    renderSettingsWith({}, "automation");
+    const sw = await screen.findByLabelText(LABEL);
+    expect(sw).not.toBeChecked();
+  });
+
+  it("reads the saved value back", async () => {
+    renderSettingsWith({}, "automation", { auto_reject_on_unattended: true });
+    await waitFor(() => expect(screen.getByLabelText(LABEL)).toBeChecked());
+  });
+
+  it("is not bundled into Walk-away mode", () => {
+    // Walk-away turns the unattended pipeline *on*; it must not also overrule a
+    // rejection method the owner deliberately saved. That stays its own choice.
+    expect([...WALK_AWAY_KEYS]).not.toContain("auto_reject_on_unattended");
+  });
+});
