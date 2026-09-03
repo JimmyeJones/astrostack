@@ -12578,6 +12578,45 @@ to **Shipped**.)_
   > *sentence* was the whole bug. **Test:** `Target.test.tsx` pins the presence of "Auto outlier removal"
   > **and the absence of "sigma-clip"**, so nobody re-adds a method name; verified to fail on the pre-fix
   > wording before it passed on the new one.
+
+  > **✅ (b) SHIPPED TOO — v0.337.0 (Builder 2026-09-03, branch `claude/sweet-babbage-76t8i3`), which closes
+  > this entry.** The new opt-in setting **`auto_reject_on_unattended`** — *"Let AstroStack pick outlier
+  > removal on hands-off stacks"*, **off by default** — lets the walk-away chain choose the method even for a
+  > target whose saved defaults name one. Built exactly as the entry demanded: **a new setting, not a widening
+  > of the existing "nobody chose" guard**, so with it off every built option blob is byte-for-byte what it is
+  > today and no pixel on the live install moves.
+  >
+  > **One line in `walkaway.apply_unattended_rejection`,** which is where it has to be — the Target page's
+  > outlook and the Stack form's save clause resolve through that same function, so they cannot drift from
+  > what the job does. When the override fires, the superseded `sigma_clip`/`min_max_reject` keys are
+  > **dropped** rather than left beside `auto_reject`: `_resolve_auto_reject` would overwrite both from the
+  > frame count regardless (so no pixel moves either way), but everything *downstream* then reads the live
+  > answer — concretely, `_stack_target`'s quality-weighting guard, which skips weighting when the options ask
+  > for rank-based min/max, no longer suppresses it for a run that is now free to resolve to κ-σ. Pinned.
+  >
+  > **The three surfaces stay honest, which is the half that is easy to miss.** With the setting on, the app is
+  > choosing again, so `/rejection-outlook` reports the app's pick and `user_chose` goes `False` — and both the
+  > Target-page note and the v0.336.0 save clause, which gate on `user_chose`, correctly fall silent instead of
+  > warning about a setting no longer in force. A test drives exactly that transition on one 6-sub target:
+  > sigma-clip / `reaches: false` / user's, then min-max-reject / `reaches: true` / the app's.
+  >
+  > **Deliberately NOT bundled into Walk-away mode** (pinned by a test): that switch turns the unattended
+  > pipeline *on*, and overruling a method the owner deliberately saved is a different kind of decision. It
+  > stays its own choice.
+  >
+  > **Upgrade-safe (§9):** one additive `Settings` field defaulting `False`; an old `config.json` without the
+  > key loads and reads off (pinned); no schema, on-disk, API-shape or default change; the interactive Stack
+  > form and reprocess-all are untouched by construction — neither passes the flag.
+  >
+  > **Tests (+17 Python, +3 vitest).** `tests/webapp/test_auto_reject_on_unattended.py` (+14): the option-blob
+  > rule (off is byte-for-byte today's; on supersedes a saved κ-σ, a saved min/max and an explicit *no*
+  > rejection; on changes nothing for a target that never chose; the `drizzle_reject` gate untouched either
+  > way), the setting itself (defaults off, round-trips, an old config upgrades to off), the outlook
+  > transition, and the wiring — a hands-off stack of a target that saved a method is built **identically** to
+  > one whose owner never chose (asserted as an identity, because `sigma_clip`'s own engine default is `True`
+  > and a field-by-field check would read as "the pick survived"), while a manual Stack-form run keeps exactly
+  > what was picked. `Settings.test.tsx` (+3): off for a fresh install, reads a saved value back, and not in
+  > `WALK_AWAY_KEYS`.
   > **What is still open from (a):** the *depth-aware* half — actually calling `rejection_reach` on the
   > target's saved defaults and its accepted count, so the page can say "your saved setting will not reach
   > this" with the one-click fix, rather than giving advice that is merely always-correct. That still wants

@@ -139,6 +139,29 @@ class Settings(BaseModel):
     # one-click "Process target" button still stack whatever the user explicitly
     # asks for.
     auto_stack_min_frames: int = Field(default=3, ge=1, le=1000)
+    # Let the *unattended* chains (the watcher's auto-stack and the one-click
+    # "Process target") pick the outlier-removal method themselves, even for a
+    # target whose saved defaults already name one.
+    #
+    # Why this is worth a setting. The chain already picks a method when nobody
+    # chose — but a saved choice is honoured verbatim, and that is a decision
+    # made once, at one depth, then applied to every night after it. κ-σ
+    # *dispatches* from 4 subs and is blind to a lone satellite trail until
+    # ``kappa_min_frames`` (11 at the default κ=3), so an owner who once saved
+    # ``sigma_clip`` gets plain κ-σ on every walk-away stack, removing nothing on
+    # any night — or, for a mosaic, any panel — thinner than that. The app can
+    # now *say* so before the night (the Target page's rejection-outlook note and
+    # the Stack form's save confirmation); this is the opt-in that lets it act,
+    # by handing the choice back to ``auto_reject``, which picks min/max below
+    # the κ-σ floor and κ-σ above it, per stack, from the real per-pixel depth.
+    #
+    # **Off by default, and deliberately not a widening of the existing "nobody
+    # chose" guard** — overruling a setting the user took control of is a pixel
+    # change on the hot path, so it only ever happens because they asked. With it
+    # off, every built option blob is byte-for-byte what it is today. The
+    # interactive Stack form is never affected either way (it is not unattended),
+    # and neither is reprocess-all, which replays a prior run's own options.
+    auto_reject_on_unattended: bool = False
     # Should the one-click Auto edit trim the ragged, low-coverage border off a
     # mosaic/dithered result? On (the historical behaviour) Auto ends with a
     # ``geometry.crop`` to the largest well-covered rectangle, so the picture is
