@@ -16448,6 +16448,47 @@ problems. Dogfood it every big-picture run and fix root causes.
   full render's pixels inside that crop. With that in place the loupe is small and honest; without it, it is
   a new parity bug wearing the fix's name.
 
+  **✅ THE FIRST SLICE IS SHIPPED (Builder, v0.328.2, branch `claude/sweet-babbage-2xguh9`) — the
+  fitted-parameter channel exists, in the shape the note above specified, with the crop test it asked for.**
+  `EditContext` gained `fitted` / `frozen_fits` / `op_uid` and a `fit(name, compute)` that returns the frozen
+  value when the caller supplied one and measures otherwise, recording either way — so a whole-image render's
+  `ctx.fitted` feeds straight back as the next render's `frozen_fits`. Keyed by the recipe op's **uid**, not
+  its id, because a recipe may legitimately carry the same op twice. Wired into the four ops that fit from the
+  whole image: `tone.stretch` (via a new `stats=` on `autostretch`, mirroring the `AsinhStats` pin that
+  already existed on `asinh_stretch` — the two stretches turn out to normalise identically and anchor on the
+  same robust per-channel median/σ, so one `measure_stretch_stats` serves both), `tone.curves` with `auto`,
+  `tone.neutralize_background`, and `tone.color_calibrate` (a frozen solve is *re-applied* through a new
+  public `color_cal.apply_scale`, never re-derived — that also skips the star detection, the op's dominant
+  cost).
+
+  **Measured, and the control matters more than the result.** On a 700×1000 synthetic OSC frame with a bright
+  object deliberately *inside* the window, re-running the recipe over a 256×256 crop — the shape the filed
+  spec would have shipped — differs from the same pixels of the full render by **0.397 mean / 0.570 max** of a
+  0–1 tone. Frozen, the difference is **exactly 0.0**, at three different window positions. The unfrozen
+  measurement is a standing test, not a note: without it the parity test could pass on a fixture that cannot
+  exhibit the problem, which is the A1 failure mode.
+
+  **Nothing on the ordinary path moved.** With no `frozen_fits` every op measures for itself as before;
+  `autostretch(x, stats=measure_stretch_stats(x))` is byte-for-byte `autostretch(x)` across three stretch
+  targets × two highlight settings, pinned so the two measurement sites can't drift. Five `_curves(…, None)`
+  call sites in `tests/test_edit_curve.py` now pass a real `EditContext()` — the op's declared contract, which
+  they got away with ignoring only while `_curves` never touched `ctx`; no assertion changed. **Tests +20** in
+  `tests/test_edit_frozen_fits.py`.
+
+  **What is still missing before the loupe can be built, and it is the whole of the next slice:** the three
+  **`background.*` ops fit a spatial model, not a scalar**, so this channel cannot carry them — and Auto
+  always contains `background.final_gradient`, so a loupe today would still be honest only for a recipe
+  without one. `background.subtract` / `final_gradient` / `level_coverage` are all *additive* (each subtracts
+  or offsets a smooth field), which suggests the cheap shape: capture the **delta** the op made on the proxy
+  (`after − before`, at the pipeline level, needing no change to any `seestack/bg/` module — those are on the
+  stack hot path and should not be reshaped for this), and replay it onto the window by bilinear-sampling the
+  proxy delta at the window's full-res coordinates. The proxy is a plain strided decimation
+  (`rgb[::step, ::step]` in `seestack/edit/proxy.py`), so proxy pixel `(i, j)` *is* full pixel `(i·step,
+  j·step)` and the mapping needs no guessing. That plus a window rectangle on `EditContext` is the second
+  slice; the endpoint and the UI are the third. **Also unresolved for the UI slice:** the user clicks the
+  *rendered* preview, which a `geometry.crop` may have reframed — map through `preview_crop_of_recipe`
+  (`seestack/edit/recipe.py`), and decline on a real `geometry.rotate`, which already returns `UNKNOWN`.
+
 - **✅ SHIPPED (Builder, v0.322.9, branch `claude/zen-mccarthy-2rptmf`) — ~~the editor's export panel asks the
   beginner a question whose own help text says the answer doesn't matter.~~** **Shape (b), and the reasoning
   the entry asked for is here rather than only in the commit.** Shape (a) was considered first and is not
