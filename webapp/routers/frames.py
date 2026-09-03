@@ -27,7 +27,6 @@ from seestack.solve.astap import (
 )
 from webapp import deps
 from webapp.rejection_summary import summarize_rejections
-from webapp.site_location import resolve_site_lon
 from webapp.schemas import (
     BulkFrameAction,
     FrameOut,
@@ -37,6 +36,7 @@ from webapp.schemas import (
     GradeReportOut,
     NightSetAside,
 )
+from webapp.site_location import resolve_site_lon
 
 router = APIRouter(prefix="/api/targets/{safe}/frames", tags=["frames"])
 

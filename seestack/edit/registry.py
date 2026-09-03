@@ -88,6 +88,28 @@ class EditContext:
     #   The ``uid`` of the op currently being applied; set by the pipeline so
     #   :meth:`fit` can key a fit to one op instance rather than to an op *id*
     #   (a recipe may legitimately carry the same op twice with different params).
+    source_origin: tuple[float, float] = (0.0, 0.0)
+    #   Where this render's pixel ``[0, 0]`` sits in the **source** image, in
+    #   full-resolution pixels. ``(0, 0)`` — the default — is the whole picture,
+    #   which is every render the app makes today. A render of one *window* of the
+    #   picture sets it to the window's top-left, which is what lets an additive
+    #   field measured on the whole image be replayed at the right place. Together
+    #   with :attr:`proxy_scale` it is the full mapping: this render's pixel
+    #   ``(r, c)`` is source pixel ``origin + (r, c) · proxy_scale``.
+    field_deltas: dict[str, FieldDelta] = field(default_factory=dict)
+    #   What each *additive* op (the three ``background.*`` ones) actually
+    #   subtracted or added this render, with the geometry it was measured at —
+    #   see :meth:`replay_field`. Written by the pipeline, keyed by op ``uid``;
+    #   nothing in the pipeline reads it, exactly like :attr:`fitted`.
+    frozen_deltas: dict[str, FieldDelta] | None = None
+    #   Fields measured by an *earlier*, whole-image render of the same recipe, to
+    #   be resampled onto this render instead of re-fitted.
+    capture_fields: bool = False
+    #   Whether to record :attr:`field_deltas` at all. Off by default because
+    #   capturing one costs a copy of the image per additive op, and the export
+    #   renders the native canvas — where a second copy of a mosaic is real
+    #   memory. The whole-image *proxy* render that feeds a windowed one turns it
+    #   on; nothing else needs to.
 
     def scaled_px(self, px: float) -> float:
         """Convert a *full-resolution* pixel measure to this render's pixel scale.
@@ -146,6 +168,116 @@ class EditContext:
         frozen = self.frozen_fit(name, _UNSET)
         return self.record_fit(name, compute() if frozen is _UNSET else frozen)
 
+    # --- fitted *fields*: the same trick for an op that fits a picture --------
+    #
+    # ``fit`` above carries a scalar (or a small solve). The three
+    # ``background.*`` ops can't use it: what they fit is a **spatial model** — a
+    # mesh over the whole canvas, a per-coverage-level offset — and the number of
+    # values in it is the number of pixels. But all three are *additive*: each
+    # returns the input minus (or plus) a smooth field, and nothing else. So the
+    # thing worth carrying is the field itself, measured as ``after − before``,
+    # which needs no change to any ``seestack/bg/`` module (those are on the stack
+    # hot path and must not be reshaped for the editor).
+    #
+    # A field is not a number, so it has to remember *where* it was measured: the
+    # whole-image render that captures it is usually the decimated proxy, and the
+    # render replaying it is usually a small full-resolution window. Both are
+    # described by ``(source_origin, proxy_scale)``, and the proxy is a plain
+    # strided decimation (``rgb[::step, ::step]``), so proxy pixel ``(i, j)`` *is*
+    # full pixel ``(i·step, j·step)`` — the mapping needs no guessing.
+
+    def record_field(self, delta: np.ndarray) -> None:
+        """Record what the current op added to the image, with its geometry."""
+        if self.op_uid is None:
+            return
+        self.field_deltas[self.op_uid] = FieldDelta(
+            delta=np.asarray(delta, dtype=np.float32),
+            origin=self.source_origin,
+            scale=float(self.proxy_scale),
+        )
+
+    def frozen_field(self) -> FieldDelta | None:
+        """The field frozen for the current op, or ``None`` on an ordinary render."""
+        if not self.frozen_deltas or self.op_uid is None:
+            return None
+        return self.frozen_deltas.get(self.op_uid)
+
+    def replay_field(self, fd: FieldDelta, shape: tuple[int, ...]) -> np.ndarray:
+        """``fd`` resampled onto *this* render's grid, as a ``(H, W, 3)`` array.
+
+        Both grids are described in the same source coordinates, so this is a
+        straight affine lookup with bilinear interpolation. When the two grids
+        coincide — a crop of the same array at the same scale — every lookup lands
+        on an exact sample and the result is the recorded field itself.
+
+        Non-finite entries are filled from their nearest finite neighbour before
+        interpolating. A field is ``NaN`` exactly where the picture is uncovered,
+        and interpolation spreads a ``NaN`` into its neighbours — which would turn
+        covered pixels at a mosaic's edge into holes. The filled values only ever
+        land on pixels that are themselves uncovered (adding anything to ``NaN``
+        leaves ``NaN``), so this cannot invent coverage.
+        """
+        from scipy.ndimage import map_coordinates
+
+        h, w = int(shape[0]), int(shape[1])
+        src = _fill_nonfinite_nearest(fd.delta)
+        # This render's pixel (r, c) → source coords → the field's own grid.
+        rows = (self.source_origin[0] + np.arange(h, dtype=np.float64) * self.proxy_scale
+                - fd.origin[0]) / fd.scale
+        cols = (self.source_origin[1] + np.arange(w, dtype=np.float64) * self.proxy_scale
+                - fd.origin[1]) / fd.scale
+        rr, cc = np.meshgrid(rows, cols, indexing="ij")
+        out = np.empty((h, w, 3), dtype=np.float32)
+        for c in range(3):
+            plane = src[..., c] if src.ndim == 3 else src
+            out[..., c] = map_coordinates(
+                plane.astype(np.float32, copy=False), [rr, cc],
+                order=1, mode="nearest", prefilter=False)
+        return out
+
+
+@dataclass
+class FieldDelta:
+    """An additive correction one op made, and the grid it was measured on.
+
+    ``delta`` is ``after − before`` in the units of the stage the op ran at;
+    ``origin`` is where ``delta[0, 0]`` sits in full-resolution source pixels, and
+    ``scale`` how many source pixels one of its own pixels spans.
+    """
+
+    delta: np.ndarray
+    origin: tuple[float, float] = (0.0, 0.0)
+    scale: float = 1.0
+
+
+def _fill_nonfinite_nearest(arr: np.ndarray) -> np.ndarray:
+    """``arr`` with every non-finite entry replaced by its nearest finite one.
+
+    All-non-finite (an entirely uncovered field) becomes zeros — the honest
+    "correct nothing", and those pixels are ``NaN`` in the picture anyway.
+    """
+    bad = ~np.isfinite(arr)
+    if not bad.any():
+        return arr
+    if bad.all():
+        return np.zeros_like(arr)
+    from scipy.ndimage import distance_transform_edt
+
+    out = np.array(arr, dtype=np.float32, copy=True)
+    # One 2-D fill per channel: the uncovered region is the same for all three in
+    # practice, but a per-channel walk needs no such assumption.
+    planes = [out] if out.ndim == 2 else [out[..., c] for c in range(out.shape[2])]
+    for plane in planes:
+        holes = ~np.isfinite(plane)
+        if not holes.any():
+            continue
+        if holes.all():
+            plane[...] = 0.0
+            continue
+        idx = distance_transform_edt(holes, return_distances=False, return_indices=True)
+        plane[holes] = plane[tuple(idx)][holes]
+    return out
+
 
 #: Distinguishes "no fit was frozen for this op" from a fit whose value is
 #: legitimately ``None`` (a measurement that gave up — a degenerate image the
@@ -170,6 +302,14 @@ class OpSpec:
     is_stretch: bool = False                  # the single tone-mapping boundary op
     heavy: bool = False                       # expensive on the proxy (iterative/restoration);
                                               # the UI settles its preview debounce longer for these
+    additive_field: bool = False
+    #   This op only ever *adds a smooth field* to the image (the background /
+    #   gradient / coverage-leveling passes all subtract a fitted sky model and do
+    #   nothing else). The pipeline can therefore record what it did as
+    #   ``after − before`` and replay that onto a window of the same picture
+    #   instead of re-fitting there — see :meth:`EditContext.replay_field`. Set it
+    #   only for an op that is genuinely additive: a multiplicative or
+    #   pixel-reordering op replayed this way would be wrong.
 
     def defaults(self) -> dict[str, Any]:
         return {p.key: p.default for p in self.params}

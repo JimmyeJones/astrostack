@@ -43,17 +43,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
-> **Builder 2026-09-03, branch `claude/sweet-babbage-axt93w` — claim, by site, pushed before the first line of
-> code (the mitigation collision NINE's note asked the next Builder for).** The top open item under
-> "⭐ Editor — make it excellent": **the second slice of the full-size loupe — an additive-field channel for
-> the three `background.*` ops**, which the v0.328.2 fitted-parameter channel explicitly could not carry
-> because they fit a *spatial model*, not a scalar. Sites I am editing: `seestack/edit/registry.py`
-> (`EditContext`: a source-window origin, `field_deltas` / `frozen_deltas`, and the capture/replay helpers
-> beside `fit`; `OpSpec.additive_field`), `seestack/edit/pipeline.py` (capture `after − before` for an
-> additive op, and replay a frozen one *instead of* re-running it), `seestack/edit/ops/background.py` (the
-> three registrations declare themselves additive — no `seestack/bg/` module is touched: those are on the
-> stack hot path), and `tests/test_edit_field_replay.py`. Guard: with no frozen deltas every render is
-> byte-for-byte what it is today.
+> **Builder 2026-09-03, branch `claude/sweet-babbage-axt93w` — claim released, shipped as v0.328.6.** The
+> second slice of the full-size loupe — an additive-field channel for the three `background.*` ops, which the
+> v0.328.2 fitted-parameter channel explicitly could not carry. Full write-up on the loupe entry under
+> "⭐ Editor — make it excellent".
 
 > **⚠️ PROCESS NOTE + Builder 2026-09-02, branch `claude/zen-mccarthy-olkjpm` — collision TEN, two of three
 > tasks duplicated by one other Builder inside the same hour, and the first where the *stand-down decision was
@@ -16535,7 +16528,64 @@ problems. Dogfood it every big-picture run and fix root causes.
   they got away with ignoring only while `_curves` never touched `ctx`; no assertion changed. **Tests +20** in
   `tests/test_edit_frozen_fits.py`.
 
-  **What is still missing before the loupe can be built, and it is the whole of the next slice:** the three
+  **✅ THE SECOND SLICE IS SHIPPED TOO (Builder, v0.328.6, branch `claude/sweet-babbage-axt93w`) — the
+  additive-field channel, in the shape the note below specified, with the geometry made explicit.** The
+  remaining gap was that the three `background.*` ops fit a **spatial model**, so `fit` cannot carry them.
+  They are, however, *purely additive* — checked in the engine code rather than assumed, and written into
+  `ops/background.py`'s header so the claim is auditable: `final_gradient` does `out[..., c] - bg` (and
+  `- sky` in the channel-matching tail), `coverage_leveling` does `out[..., c][region] -= offset`,
+  `subtract_background` documents itself as the input minus a per-channel 2-D fit. **No `seestack/bg/`
+  module was touched** — those are on the stack hot path, exactly as the note required.
+
+  **What shipped.** `OpSpec.additive_field` (an op declaring that it only ever adds a smooth field);
+  `EditContext.field_deltas` / `frozen_deltas` / `capture_fields` / `source_origin`, plus `record_field`,
+  `frozen_field` and `replay_field`; and the pipeline capturing `after − before` for such an op, or — when a
+  field was frozen for it — **replaying it instead of running the op at all**, which is both the correct
+  answer and cheaper than a re-fit.
+
+  **The one thing the filed note left implicit and this had to make explicit is the geometry.** A scalar fit
+  travels as a number; a field has to remember *where it was measured*, because the render that captures it
+  is the decimated proxy and the render that replays it is a small full-resolution window. So a `FieldDelta`
+  carries `(origin, scale)` and `EditContext` carries the render's own `source_origin` — this render's pixel
+  `(r, c)` is source pixel `origin + (r, c)·proxy_scale` — and the replay is then a plain affine lookup with
+  bilinear interpolation. The proxy being a strided decimation is what makes it exact where it matters:
+  proxy pixel `(i, j)` **is** full pixel `(i·step, j·step)`, so every proxy sample inside a loupe window has
+  a full-res pixel holding the very same data, and the lookup there lands on an exact sample.
+
+  **Measured, with both controls.** On a 700×1000 synthetic OSC frame with an asymmetric, per-channel
+  light-pollution gradient: re-running the recipe over a 256×256 crop — the shape the original spec would
+  have shipped — differs from the same pixels of the full render by **0.207 mean / 0.520 max** of a 0–1 tone.
+  Replayed, the difference is **exactly 0.0**, at four different window positions. The second control is the
+  loupe's real geometry: a full-resolution window opened from a ×2 proxy preview disagrees with that preview
+  by **0.040 mean / 0.140 max** when the sky is re-fitted on the window, and by **0.0** when it is replayed.
+  Both controls are standing tests: without them the parity assertions could pass on a fixture too flat to
+  exhibit the problem, which is the A1 failure mode.
+
+  **Coverage holes are the one trap, and it is handled.** A field is `NaN` exactly where the picture is
+  uncovered, and bilinear interpolation spreads a `NaN` into its neighbours — which would punch holes in
+  covered pixels at a mosaic's edge. Non-finite entries are filled from their nearest finite neighbour before
+  interpolating; the filled values only ever land on pixels that are `NaN` in the picture anyway (adding
+  anything to `NaN` leaves `NaN`), so this cannot invent coverage. Pinned by a test over a strip-uncovered
+  frame whose crop straddles the edge.
+
+  **Nothing on the ordinary path moved, and deliberately not by accident.** Capture is **off by default**
+  (`capture_fields`), because recording a field costs a copy of the image per additive op and the *export*
+  renders the native canvas, where a second copy of a mosaic is real memory (§10's OOM history). The
+  whole-image proxy render that feeds a windowed one turns it on; nothing else needs to. A render with
+  neither flag is byte-for-byte what it was, pinned against a hand-run of the same ops.
+
+  **Upgrade-safe (§9):** engine-internal; no config, schema, on-disk, API or default change, and no
+  behaviour change on any path the app takes today. **Tests +14** in `tests/test_edit_field_replay.py`.
+
+  **What is still missing before the loupe itself:** the endpoint and the UI (the third slice). The user
+  clicks the *rendered* preview, which a `geometry.crop` may have reframed — map through
+  `preview_crop_of_recipe` (`seestack/edit/recipe.py`), and decline on a real `geometry.rotate`, which
+  already returns `UNKNOWN`. The window read must come out of the FITS as a window (never load the whole
+  canvas to serve one), and the whole-image proxy render that supplies `fitted` + `field_deltas` is the same
+  render the live preview already makes — so the endpoint's job is to keep that context, not to make a
+  second one.
+
+  *(The note that specified this slice, kept for the reasoning.)* The three
   **`background.*` ops fit a spatial model, not a scalar**, so this channel cannot carry them — and Auto
   always contains `background.final_gradient`, so a loupe today would still be honest only for a recipe
   without one. `background.subtract` / `final_gradient` / `level_coverage` are all *additive* (each subtracts
