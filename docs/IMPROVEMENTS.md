@@ -1489,6 +1489,15 @@ _(nothing else claimed — claim an item here with your branch name)_
     K scans over N days. **Also:** the "healing an already-degraded picture is deliberately left open" note in
     `AGENTS.md` §1 is **stale** — `_auto_stack_degraded_recheck` shipped.
 
+    **✅ THAT NOTE IS NOW CORRECTED (Builder 2026-09-03, branch `claude/sweet-babbage-2mtrwu`)**, along with
+    the two siblings in the same `AGENTS.md` paragraph, which were also stale and were still being called
+    "the front of the bug queue": the mosaic **auto-grade population** bug (shipped v0.270.2, per-panel) and
+    **`photometric_normalize` on the walk-away mosaic path** (shipped v0.271.0 — the guard
+    `if options.photometric_normalize or is_mosaic_canvas:` is live at `stacker.py:2234`). The editor
+    paragraph's A1 and A2 were corrected in the same pass (shipped v0.326.1 / v0.327.2). Each was verified
+    **against the code**, not merely against a Shipped heading. The §1 priority order and the "don't believe a
+    well-hardened claim" warning are untouched — only the *facts about what is still open* moved.
+
 - **✅ SHIPPED (Builder, v0.327.4, branch `claude/sweet-babbage-35yfmt`) — ~~A9: editor exports drop the
   WCS.~~** Fixed in all three parts the entry named — carry it when nothing moved, *move it* for crop and
   resize, drop it only for rotate — and reproduced first through the real export job.
@@ -12278,6 +12287,51 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-09-03, the gap the v0.335.0 rejection-outlook note deliberately left) — answer the
+  reach question at the moment the default is *saved*, not only when a trail turns up later.** *(Pillar:
+  autonomy — PRIORITY 2; size S; the machinery all exists, this is placement.)* v0.335.0 tells the Target page
+  when the target's **saved** rejection cannot drop a lone trail — but it is gated on
+  `streak_detected > 0`, deliberately, so it only speaks on a night a satellite happened to be *flagged*. A
+  mosaic owner whose panels sit at 5 subs has a permanently blind saved setting and hears about it only by
+  luck. The un-gated version does **not** want another banner (the standing IA priority); it wants to be at the
+  **decision**: `PUT /api/targets/{safe}/stack-defaults` already has the blob in hand, so it could return the
+  same `rejection_reach` answer for what was just saved, and the Stack form's save confirmation could add one
+  clause — *"saved — note that at this target's depth this won't take out a lone satellite trail"* — with the
+  Auto toggle still on screen. **Cautions:** it must read the *saved* blob rather than the live form values
+  (the form already has its own `rejectionReachNudge` for those, and two sentences saying the same thing about
+  different option sets is worse than one), and it must stay silent when the user's choice does reach.
+  **Grep first:** `rejectionReachNudge` (form) and `rejectionOutlookNote` (page) are the two existing homes —
+  the third must be a *clause on the save*, not a fourth surface.
+
+- **MEASURED, RECORDED SO NOBODY RE-MEASURES (Builder 2026-09-03, while sizing the rejection-outlook
+  endpoint) — `cluster_pointings` costs 1.58 s at the owner's largest target, and a mosaic stack pays it
+  twice.** *(No code change wanted yet — this is a perf note with numbers, not a task. Pillar: performance,
+  and only with a measurement.)* Timed on a synthetic 4-panel mosaic with the owner's real sub count: 500
+  subs → 0.01 s, 1,000 → 0.05 s, 2,000 → 0.21 s, **5,477 → 1.58 s** (the clean O(n²), pure Python). That
+  confirms the `auto_reject_depth` docstring's "~2.4 s" order of magnitude and its decision to grid-snap
+  before clustering (which takes it to under a millisecond). **What the note adds:** on a mosaic canvas the
+  *unsnapped* path still runs twice per stack — `compute_frame_weights` and `compute_photometric_scales` each
+  call `pointing_groups` over the full frame list, with the same radecs and the same
+  `PANEL_LINK_DIST_DEG`, so a 5,477-sub mosaic spends ~3 s clustering the identical points into the identical
+  labels. Beside a stack that runs for many minutes this is noise, which is why nothing is filed as a task.
+  **If a future run ever wants it:** the fix is to compute the labels once in `run_stack` (where
+  `is_mosaic_canvas` is already known) and pass them down, *not* to grid-snap those two — their soundness gate
+  is `min_members` over the real population, and snapping changes which frames count toward it. Do not start
+  this without a profile showing the stack is actually pointing-bound.
+
+- **NEW IDEA (Builder 2026-09-03, the cost the v0.335.0 endpoint knowingly accepted) — `/rejection-outlook`
+  pays for a whole `estimate_stack` to learn two numbers.** *(Pillar: performance — size XS; **only if the
+  note is ever un-gated**, see the entry two above.)* It needs the accepted+solved count and the mosaic's
+  per-pixel depth, and takes both off `estimate_stack`, which also picks a reference frame and computes the
+  union canvas. That is the right call today — one definition of `panel_depth`, and the query is only issued
+  when a streak is present, so a target page normally never asks. But if the note is ever shown unconditionally
+  it becomes a per-page-load canvas computation across the library's biggest targets, and the cheap
+  equivalent already exists: `auto_reject_depth(_frame_radecs(frames))` (grid-snapped, sub-millisecond — see
+  the measurement above) plus a plain count, no canvas at all. **Care:** the two are not identical —
+  `estimate_stack` drops the gross plate-solve outliers `compute_mosaic_canvas` excludes before counting, and
+  the cheap path would not, so a target with a few wild solves would report a slightly higher `n_frames`.
+  Pin that difference in a test before swapping, or the "reaches" answer moves for a reason nobody can see.
+
 - **✅ SHIPPED (Builder, v0.329.4, branch `claude/sweet-babbage-fwtqxh`) — ~~the "about N more clear nights"
   estimate still counts *sessions*, so a night shot in two goes halves what it thinks a clear night is
   worth.~~** Measured before it was written, exactly as the entry's last paragraph asked, and both errors
@@ -12481,6 +12535,48 @@ to **Shipped**.)_
   > the estimate on the Target page and a placement decision inside the existing notice grouping (§1's
   > standing IA priority — **not** one more always-on banner), which is why it was not bundled into a copy
   > fix. **Size is now S–M rather than M:** the surface exists, and it is the streaked badge.
+
+  > **✅ SHIPPED — the depth-aware half of (a), i.e. the whole of this entry (Builder, v0.335.0, branch
+  > `claude/sweet-babbage-2mtrwu`).** `GET /api/targets/{safe}/rejection-outlook` resolves the options the
+  > *unattended* chain will actually stack this target with and asks the engine's own `rejection_reach`,
+  > sized by `estimate_stack`'s `panel_depth` rather than the target's frame count. A `RejectionOutlookNote`
+  > in the Target page's existing `NoticeBoard` (a `warning`, **not** a new always-on banner) then says so in
+  > plain language, with a link to the form where the setting lives.
+  >
+  > **The entry's "do not overrule their saved choice" is honoured literally: nothing writes anything.** The
+  > endpoint is read-only, the note is advisory, and no default is flipped — option (b) (a new opt-in setting)
+  > stays unbuilt because it turned out not to be needed: *saying* the thing is the whole fix, since the owner
+  > can already change it on a form they own.
+  >
+  > **One definition, not a second copy — which is the part worth carrying forward.** The chain's merge and
+  > its two "the user chose nothing" injections moved into a new pure `webapp/walkaway.py`
+  > (`parse_saved_stack_defaults`, `rejection_choice_expressed`, `apply_unattended_rejection`), and
+  > `pipeline._stack_target` now *calls* them. So the sentence on the page and the options the job runs
+  > cannot describe different stacks; a test asserts the endpoint's resolved method against the chain's own
+  > merge rather than against a restatement of the rule. The `drizzle_reject` injection moved with it (from
+  > after the `quality_weighted` block to beside its sibling) — checked to be behaviour-identical, since
+  > `quality_weighted`'s guard reads `min_max_reject`/`drizzle` and never `drizzle_reject`.
+  >
+  > **Gated three ways, because this is the page the owner already calls busy.** It speaks only when subs on
+  > this target *actually* carry a trail (`streak_detected`, the same evidence the badge fires on — and the
+  > query is not even issued otherwise), only when the method is the **user's own** saved choice (when the
+  > chain picked it, it picked one that works, and saying so would be noise), and only when it genuinely
+  > cannot reach. A drizzled run is silent too: its two-pass rejection is settled by the memory budget at run
+  > time, which a pure pre-run answer cannot know.
+  >
+  > **Upgrade-safe (§9):** one new read-only endpoint, one new pure module, one new client method, one notice
+  > inside an existing board. No config key, no schema, no on-disk change, no default flipped, no existing
+  > response shape touched. A never-solved target answers `reaches: null` (a 200 with no verdict, not a 422 a
+  > page would render as an error); an older backend or a failed fetch renders nothing.
+  >
+  > **Tests (+9 Python, +17 vitest).** `tests/webapp/test_rejection_outlook.py` — the 6-sub saved-κ-σ case
+  > that names 11, the same target deep enough to reach, the no-saved-choice auto pick, **a four-panel mosaic
+  > 5 deep whose 20 frames would have read "reaches" and whose pixels do not**, the single-field `panel_depth`
+  > of `null`, the nothing-solved silence, a malformed meta row degrading like the job does, agreement with
+  > the chain's own merge, and that asking the question writes nothing and starts no job.
+  > `rejectionOutlookNote.test.ts` (+9) pins the copy and all five silences; `RejectionOutlookNote.test.tsx`
+  > (+4) the render, the link, and that no request is made with no trail; `Target.test.tsx` (+2) that the note
+  > reaches the real page's notes area and stays away without one.
 
 - **NEW IDEA (Builder 2026-09-02, spotted while unifying two of the four copies in v0.323.1) — route the
   remaining two copies of the combine dispatcher's frame-count gates through `combine_method`.** *(Pillar:

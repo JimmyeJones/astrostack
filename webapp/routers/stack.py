@@ -28,7 +28,9 @@ from webapp.schemas import (
     STACK_DEFAULTS_META_KEY,
     StackOptionField,
     StackRunOut,
+    coerce_stack_options,
     stack_option_fields,
+    strip_non_form_keys,
     validate_stack_options,
 )
 from webapp.site_location import resolve_site_lon
@@ -271,6 +273,78 @@ def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dic
         proj.close()
         lib.close()
     return clean
+
+
+@router.get("/api/targets/{safe}/rejection-outlook")
+def rejection_outlook(safe: str, request: Request) -> dict[str, Any]:
+    """Will the outlier rejection this target's *saved* settings resolve to be
+    able to drop a lone satellite trail on the next unattended stack?
+
+    The Stack form already asks this question of the values on screen
+    (``/estimate`` → ``rejection_reach``) and ``seestack.stackhealth`` answers it
+    on the finished picture. Neither reaches the path that matters most here: the
+    watcher's auto-stack and the one-click **Process target** button both stack
+    with ``pipeline._stack_target(auto=True)``, which only picks a method when the
+    user picked none — so an owner who once saved ``sigma_clip`` into a per-target
+    default or into the global ``default_stack_options`` gets plain κ-σ on *every*
+    unattended stack, silently reaching nothing on any night (or any mosaic panel)
+    thinner than ``kappa_min_frames``. Today that is only ever said afterwards, on
+    a picture that already has the trail in it.
+
+    So this endpoint resolves exactly what the chain would resolve — the same
+    merge, through the same ``webapp.walkaway`` injections — and asks the engine's
+    own :func:`~seestack.stack.stacker.rejection_reach`, sized by the mosaic's
+    per-pixel ``panel_depth`` rather than the target's frame count. Read-only:
+    nothing is stacked, nothing is saved, no default is changed.
+
+    ``reaches`` is ``null`` — "no opinion", the caller says nothing — when the
+    target has nothing solved to size a stack from yet.
+    """
+    from seestack.stack.stacker import estimate_stack, rejection_reach
+    from webapp.walkaway import (
+        apply_unattended_rejection,
+        parse_saved_stack_defaults,
+        rejection_choice_expressed,
+    )
+
+    settings = deps.get_settings(request)
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        opts_dict = strip_non_form_keys(settings.default_stack_options)
+        opts_dict.update(parse_saved_stack_defaults(proj.get_meta(STACK_DEFAULTS_META_KEY)))
+        # Whether the *user* chose the method, or the chain is about to choose it
+        # for them — asked before the injection, because the injection is what
+        # makes the answer stop being visible in the merged options.
+        user_chose = rejection_choice_expressed(opts_dict)
+        apply_unattended_rejection(opts_dict)
+        options = coerce_stack_options(opts_dict)
+        try:
+            est = estimate_stack(proj, options,
+                                 memory_budget_gb=settings.max_stack_memory_gb)
+        except ValueError:
+            # Nothing solved yet — there is no stack to have an opinion about.
+            # A 200 with no verdict rather than a 422: this is a background
+            # question a page asks on load, not something the user submitted.
+            return {"reaches": None, "user_chose": user_chose}
+    finally:
+        proj.close()
+        lib.close()
+
+    reach = rejection_reach(options, est.n_frames, depth=est.panel_depth)
+    return {
+        "method": reach.method,
+        "n_frames": reach.n_frames,
+        # The per-pixel depth the reach question is really about: a mosaic panel
+        # three subs deep is blind to a lone trail however many frames the target
+        # holds in total. ``null`` on a single field, where it *is* the frame count.
+        "panel_depth": est.panel_depth,
+        "lone_outlier_min_frames": reach.lone_outlier_min_frames,
+        "reaches": reach.reaches,
+        # True when the setting came from the user (a saved per-target default or
+        # the global one); False when the chain picked it. Only the first is worth
+        # telling anyone about — the second is the app doing its job.
+        "user_chose": user_chose,
+    }
 
 
 @router.post("/api/targets/{safe}/stack")
