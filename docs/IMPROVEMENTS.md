@@ -16736,16 +16736,45 @@ problems. Dogfood it every big-picture run and fix root causes.
     first paint (the marker must not disappear while the render is in flight) and for a backend that doesn't send
     the new keys; and add the header keys, never rename the existing ones (§9).
 
-- **NEW IDEA (Builder 2026-09-04, the gap v0.329.4 left behind it) — a drift guard that every webapp caller of
-  `recent_night_pace_s` passes a `night_of`.** *(Pillar: maintainability in service of correctness — size XS.)*
-  v0.329.4 made the pace night-aware through an **optional** `night_of`, defaulted to the old session split so
-  a caller with no longitude to hand doesn't silently change. That default is right and it is also a trap: a
-  fourth surface that wants a pace gets the halved figure by simply not knowing to pass it, which is the bug
-  that just shipped a fix. Two of the three current callers are one line apart in `stats.py`/`plan.py`, so this
-  is cheap to pin: a test that walks the webapp package for `recent_night_pace_s(` calls and asserts each
-  passes `night_of=`, in the shape of the existing `StackOptions` form-descriptor drift test. **Grep first:**
-  if a caller ever legitimately wants sessions (the last-session recap does), the guard needs an opt-out marker
-  rather than a blanket rule — write it so the exception is stated, not silent.
+- **✅ SHIPPED (Builder, v0.331.1, branch `claude/sweet-babbage-i16c1c`) — ~~a drift guard that every webapp
+  caller of `recent_night_pace_s` passes a `night_of`.~~** Built as filed, including the part the entry told
+  the next agent to check first.
+
+  **The grep the entry asked for, and its answer.** Both current webapp callers (`routers/stats.py`,
+  `routers/plan.py`) already pass `night_of`, so the guard changes no behaviour today — it exists for the
+  *fourth* surface, which gets the halved figure by simply not knowing to pass it. That is the bug v0.329.4
+  just fixed, and the optional default that made the fix safe is what leaves the door open.
+
+  **The exception is stated, not silent** — the second thing the entry asked for. A caller that genuinely
+  means *sessions* rather than observing nights opts out with a marker comment naming its reason
+  (`# night-pace: sessions — <why>`) on the call or the line above, so the guard is a prompt to decide rather
+  than a rule to work around. Nothing opts out today; the last-session recap the entry had in mind lives in
+  the engine, not in `webapp/`.
+
+  **It walks the AST, not a regex** — `mod.f(...)` and `f(...)` both resolve, and `f(proj, **opts)` is
+  explicitly *not* mistaken for a keyword (a starred call hides whether `night_of` is there, and reading it
+  as present would let the guard pass on the one shape that can smuggle the default through).
+
+  **A positive control, because a guard that stops finding call sites sits permanently green while checking
+  nothing** — the same failure the A3 stub-binary guard had to close, and the same one A1 was. The first test
+  asserts the walk still finds calls *and* still finds them in `stats.py` and `plan.py`; and the guard was
+  verified to fail by actually removing a `night_of` from `stats.py` before shipping, message and all.
+
+  **Upgrade-safe (§9):** one new test file and one docstring paragraph pointing at it. No behaviour, no
+  config, no schema, no API.
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-04, the gap v0.329.4 left behind it) — a drift guard that every webapp caller of
+    `recent_night_pace_s` passes a `night_of`.** *(Pillar: maintainability in service of correctness — size XS.)*
+    v0.329.4 made the pace night-aware through an **optional** `night_of`, defaulted to the old session split so
+    a caller with no longitude to hand doesn't silently change. That default is right and it is also a trap: a
+    fourth surface that wants a pace gets the halved figure by simply not knowing to pass it, which is the bug
+    that just shipped a fix. Two of the three current callers are one line apart in `stats.py`/`plan.py`, so this
+    is cheap to pin: a test that walks the webapp package for `recent_night_pace_s(` calls and asserts each
+    passes `night_of=`, in the shape of the existing `StackOptions` form-descriptor drift test. **Grep first:**
+    if a caller ever legitimately wants sessions (the last-session recap does), the guard needs an opt-out marker
+    rather than a blanket rule — write it so the exception is stated, not silent.
 
 - **✅ SHIPPED (Builder, v0.331.0, branch `claude/sweet-babbage-i16c1c`) — ~~split the full-size window
   against the preview at the *same* spot, so the reader sees what the shrunk view was hiding.~~** Built as
