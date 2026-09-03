@@ -131,8 +131,49 @@ NOISE_EXPECTED_MIN_FRAMES = 10
 NOISE_EXPECTED_LOW_FRACTION = 0.7
 
 
+def noise_yardstick_frames(n_frames: int | None,
+                           is_mosaic: bool | None = False,
+                           crop_depth: int | None = None) -> int | None:
+    """How many frames the √N yardstick may honestly be held against, or ``None``
+    when this run has no such number.
+
+    **The measurement and its yardstick have to describe the same pixels.** The
+    noise ratio is measured over a bounded *central crop* of the master, so the
+    only honest N is how many subs actually cover that crop. On a single field
+    those are the same thing — every pixel saw every frame — so ``n_frames_used``
+    is used directly and nothing changes.
+
+    On a **mosaic** they are not. No pixel in the crop ever saw more than its own
+    panel's subs, while ``n_frames_used`` counts the whole target's: a four-panel
+    mosaic 100 subs deep per panel achieves about √100 = 10× and, judged against
+    √400 = 20×, reads "low" at every depth however well it was shot (the same
+    wrong denominator ``rejection_blind`` learned about, in a different note). So
+    a mosaic is judged **only** against ``crop_depth`` — the frame depth measured
+    at that same crop — and stays silent without one. Being told a healthy
+    picture underperformed is far worse than being told nothing, and a run stacked
+    before the mosaic flag was recorded (schema < 8, ``is_mosaic`` is ``None``)
+    withholds by the same rule: "might be a mosaic" is not a licence to accuse it.
+
+    ``crop_depth`` is **deliberately ignored on a single field**, so an install
+    that starts measuring one cannot quietly re-grade every stack it already had.
+    """
+    # ``is None`` and truthiness are separate questions here: an unrecorded flag
+    # withholds, a recorded 0/False is judged as the single field it is.
+    if is_mosaic is None:
+        return None
+    source = crop_depth if bool(is_mosaic) else n_frames
+    if source is None:
+        return None
+    try:
+        n = int(source)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
 def noise_vs_expected(ratio: float | None, n_frames: int | None,
-                      is_mosaic: bool | None = False) -> str | None:
+                      is_mosaic: bool | None = False,
+                      crop_depth: int | None = None) -> str | None:
     """How a run's measured noise reduction reads against what its frames should
     have bought, or ``None`` when there is nothing honest to say.
 
@@ -143,33 +184,23 @@ def noise_vs_expected(ratio: float | None, n_frames: int | None,
     legitimate rejection and quality weighting both lower the effective count.
     ``None`` — no measurement (an edited/display-space export, an unmeasurable
     image, a run whose ratio was never stamped), fewer than
-    :data:`NOISE_EXPECTED_MIN_FRAMES` frames, where √N means nothing, or a
-    **mosaic**, for the reason below.
+    :data:`NOISE_EXPECTED_MIN_FRAMES` frames, where √N means nothing, or no
+    honest N at all (see :func:`noise_yardstick_frames` — chiefly a mosaic whose
+    crop depth nothing has measured).
 
-    **A mosaic has no single N, so it is never judged.** The ratio is measured
-    over a *central crop* of the master, and on a mosaic canvas no pixel there
-    ever saw more than its own panel's subs — while ``n_frames_used`` counts the
-    whole target's. A four-panel mosaic 100 subs deep per panel therefore
-    achieves about √100 = 10× and is asked for √400 = 20×, so it reads "low" at
-    every depth however well it was shot. The same wrong denominator that
-    ``rejection_blind`` learned about, in a different note. Being told a healthy
-    picture underperformed is far worse than being told nothing, so a mosaic gets
-    no verdict at all until something records the depth *at the crop the ratio
-    was measured over* (filed in ``docs/IMPROVEMENTS.md``). ``None`` — a run
-    stacked before the flag was recorded (schema < 8) — withholds too, by the
-    same rule: "might be a mosaic" is not a licence to accuse it.
+    ``crop_depth`` is the frame depth **at the crop the ratio was measured over**;
+    it is what lets a mosaic be judged rather than skipped. See
+    :func:`noise_yardstick_frames` for which of the two counts is used and why.
 
     Shared by the "How's my stack?" note and the "One frame vs your stack" card
     so the two surfaces read one threshold and can never disagree — the card must
     not re-type these numbers in TypeScript. Mirrors :func:`seam_verdict`.
     """
-    # ``is None`` and truthiness are separate questions here: an unrecorded flag
-    # withholds, a recorded 0/False is judged as the single field it is.
-    if ratio is None or n_frames is None or is_mosaic is None or bool(is_mosaic):
+    n = noise_yardstick_frames(n_frames, is_mosaic, crop_depth)
+    if ratio is None or n is None:
         return None
     try:
         r = float(ratio)
-        n = int(n_frames)
     except (TypeError, ValueError):
         return None
     if not math.isfinite(r) or r <= 0:
@@ -239,8 +270,19 @@ def _factor_label(value: float) -> str:
     a big reduction as a whole number ("15"), a smaller one to one decimal
     ("3.5"), dropping a trailing ``.0`` so 10.04 reads "10" rather than "10.0".
     Kept identical to the card's ``factorLabel`` so the same stack is never
-    described two ways on two screens."""
-    rounded = round(value) if value >= 10 else round(value * 10) / 10
+    described two ways on two screens — enforced by
+    ``tests/test_factor_label_mirror.py`` against the shared case table in
+    ``frontend/src/components/factorLabel.cases.json``.
+
+    **``floor(x + 0.5)``, not ``round()``.** That is JavaScript's ``Math.round``
+    written out: Python rounds a half to *even* and JavaScript rounds it *up*, so
+    ``round()`` here made the health note call a ratio of 10.5 "10" while the card
+    beside it called the same number "11" — a user reads both about one picture,
+    minutes apart. The card's rule is the older and the conventional one, so this
+    side moved.
+    """
+    rounded = (math.floor(value + 0.5) if value >= 10
+               else math.floor(value * 10 + 0.5) / 10)
     return str(int(rounded)) if float(rounded).is_integer() else f"{rounded:.1f}"
 
 
@@ -320,7 +362,8 @@ def _median_sub_fwhm(accepted: list[FrameRow]) -> float | None:
 
 
 def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
-                 noise_ratio: float | None = None) -> list[HealthNote]:
+                 noise_ratio: float | None = None,
+                 noise_crop_depth: int | None = None) -> list[HealthNote]:
     """Return a ranked list of plain-language health notes for ``run``.
 
     ``frames`` is the target's frame records (the run doesn't store which frames
@@ -332,7 +375,11 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     figure when the caller already has it to hand (the webapp reads the stamp the
     reveal card left behind — it never measures for a health check). ``None``
     simply means the yardstick note self-hides, which is the state every run sits
-    in until something measures it once."""
+    in until something measures it once.
+
+    ``noise_crop_depth`` is the frame depth at the crop that ratio was measured
+    over, stamped beside it. It is what lets a **mosaic** be graded at all (see
+    :func:`noise_yardstick_frames`); a single field ignores it."""
     frame_list = list(frames)
     accepted = [f for f in frame_list if f.accept]
     rejected = [f for f in frame_list if not f.accept]
@@ -519,18 +566,28 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # subs, bloated stars): when one of those fires it is the better advice, and
     # this note is the one to show when nothing else explains the shortfall.
     # Silent with no stamped measurement, so a page view never triggers one.
-    if noise_vs_expected(noise_ratio, run.n_frames_used, run.is_mosaic) == "low":
-        n_subs = run.n_frames_used
+    # On a mosaic the yardstick is the depth at the crop the ratio was measured
+    # over, not the whole target's frame count — and the sentence says so, since
+    # "400 subs should give 20×" is simply not a claim about a panel.
+    if noise_vs_expected(noise_ratio, run.n_frames_used, run.is_mosaic,
+                         noise_crop_depth) == "low":
+        n_subs = noise_yardstick_frames(run.n_frames_used, run.is_mosaic,
+                                        noise_crop_depth)
         expected = _factor_label(math.sqrt(n_subs))
+        measured = _factor_label(float(noise_ratio))
+        lead = (f"About {n_subs} subs cover the middle of this mosaic, which "
+                f"should cut the background noise about {expected}× (√{n_subs}), "
+                f"and it came in nearer {measured}×."
+                if run.is_mosaic else
+                f"{n_subs} subs should cut the background noise about "
+                f"{expected}× (√{n_subs}), and this stack came in nearer "
+                f"{measured}×.")
         scored.append((38, HealthNote(
             kind="noise_low",
             severity="info",
-            message=(f"{n_subs} subs should cut the background noise about "
-                     f"{expected}× (√{n_subs}), and this stack came in nearer "
-                     f"{_factor_label(float(noise_ratio))}×. That usually means "
-                     "the subs didn't line up tightly, or a lot of them were "
-                     "dropped — worth checking focus and alignment on your next "
-                     "night."),
+            message=(f"{lead} That usually means the subs didn't line up "
+                     "tightly, or a lot of them were dropped — worth checking "
+                     "focus and alignment on your next night."),
             action=None,
         )))
 
