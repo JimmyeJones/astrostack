@@ -12287,21 +12287,70 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-09-03, the gap the v0.335.0 rejection-outlook note deliberately left) — answer the
-  reach question at the moment the default is *saved*, not only when a trail turns up later.** *(Pillar:
-  autonomy — PRIORITY 2; size S; the machinery all exists, this is placement.)* v0.335.0 tells the Target page
-  when the target's **saved** rejection cannot drop a lone trail — but it is gated on
-  `streak_detected > 0`, deliberately, so it only speaks on a night a satellite happened to be *flagged*. A
-  mosaic owner whose panels sit at 5 subs has a permanently blind saved setting and hears about it only by
-  luck. The un-gated version does **not** want another banner (the standing IA priority); it wants to be at the
-  **decision**: `PUT /api/targets/{safe}/stack-defaults` already has the blob in hand, so it could return the
-  same `rejection_reach` answer for what was just saved, and the Stack form's save confirmation could add one
-  clause — *"saved — note that at this target's depth this won't take out a lone satellite trail"* — with the
-  Auto toggle still on screen. **Cautions:** it must read the *saved* blob rather than the live form values
-  (the form already has its own `rejectionReachNudge` for those, and two sentences saying the same thing about
-  different option sets is worse than one), and it must stay silent when the user's choice does reach.
-  **Grep first:** `rejectionReachNudge` (form) and `rejectionOutlookNote` (page) are the two existing homes —
-  the third must be a *clause on the save*, not a fourth surface.
+- **✅ SHIPPED (Builder, v0.336.0, branch `claude/sweet-babbage-76t8i3`) — ~~answer the reach question at the
+  moment the default is *saved*, not only when a trail turns up later.~~** Built exactly as the entry shapes
+  it, and at the entry's size: the *Save as defaults* confirmation now carries one clause when what was just
+  stored will be blind to a lone satellite trail on the unattended path.
+
+  **The placement, and why nothing new was added to the page.** The entry's own cautions decided the design.
+  It reads the **stored** blob, not the live form values — `saveDefaults`' mutation now does the `PUT` and then
+  asks `GET /api/targets/{safe}/rejection-outlook`, which re-resolves the saved defaults through the same
+  `webapp.walkaway` merge and injections the overnight chain uses. That matters beyond tidiness:
+  `put_stack_defaults` drops cleared (`null`) fields, and the global `default_stack_options` merge sits under
+  the per-target blob, so what will actually run overnight is *not* always what the form estimated. No new
+  endpoint, no new surface, no fourth home for the fact — the clause rides the confirmation the button already
+  showed.
+
+  **It is deliberately about a different stack from the form's own caution**, which is the only thing that
+  keeps two sentences about outlier rejection from being one too many. `rejectionReachNudge` speaks for the
+  run you are about to trigger by hand; this speaks for *"overnight and one-click stacks"* — the walk-away
+  auto-stack and **Process target** — which is the path a saved default actually governs and the one neither
+  existing surface reached. `rejectionOutlookNote` on the Target page stays gated on `streak_detected > 0`
+  exactly as filed; this is the un-gated half, and it is un-gated only because saving *is* the decision and
+  the confirmation is transient rather than a standing banner.
+
+  **Silence is the default, on five branches** (`savedRejectionClause`): the saved rejection does reach; the
+  method was picked by the chain rather than the user (`user_chose === false` — saving with Auto on is the app
+  doing its job); a drizzled run, whose two-pass rejection is settled by the memory budget at run time; no
+  verdict at all (older backend, nothing solved yet, or the request simply failed); and no depth to talk about.
+  A failed outlook is **not** a failed save — the confirmation still reads "Saved as defaults" in teal, pinned
+  by its own test, because the one thing worse than not answering the question is implying the save didn't
+  land.
+
+  **Upgrade-safe (§9):** frontend-only. No new endpoint, no response-shape change (`PUT` still returns the
+  clean saved blob; the outlook `GET` already existed and is unchanged), no config key, no schema, no on-disk
+  change, no default flipped. Against an older backend the extra request 404s, the `.catch` swallows it, and
+  the save reads exactly as it does today.
+
+  **Cost, priced rather than assumed:** one `estimate_stack` per *explicit save press* — the same call the
+  Target page already pays on every load, on a user action rather than a poll.
+
+  **Tests (+13 vitest; the wiring test fails before).** `savedRejectionClause.test.ts` (+10) pins both
+  sentences, the mosaic per-spot depth winning over the frame count (the 20-frame/5-deep case), the singular,
+  and all five silences. `Stack.test.tsx` (+3) drives the real button: the blind save warns *and* still
+  confirms (yellow, with "overnight and one-click stacks", and the outlook asked of the stored blob), a
+  reaching save says only the plain confirmation (teal, no "Heads-up"), and an outlook that can't be had still
+  confirms in teal rather than reading as a failure.
+
+  *(Original entry follows.)*
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-03, the gap the v0.335.0 rejection-outlook note deliberately left) — answer the
+    reach question at the moment the default is *saved*, not only when a trail turns up later.** *(Pillar:
+    autonomy — PRIORITY 2; size S; the machinery all exists, this is placement.)* v0.335.0 tells the Target page
+    when the target's **saved** rejection cannot drop a lone trail — but it is gated on
+    `streak_detected > 0`, deliberately, so it only speaks on a night a satellite happened to be *flagged*. A
+    mosaic owner whose panels sit at 5 subs has a permanently blind saved setting and hears about it only by
+    luck. The un-gated version does **not** want another banner (the standing IA priority); it wants to be at the
+    **decision**: `PUT /api/targets/{safe}/stack-defaults` already has the blob in hand, so it could return the
+    same `rejection_reach` answer for what was just saved, and the Stack form's save confirmation could add one
+    clause — *"saved — note that at this target's depth this won't take out a lone satellite trail"* — with the
+    Auto toggle still on screen. **Cautions:** it must read the *saved* blob rather than the live form values
+    (the form already has its own `rejectionReachNudge` for those, and two sentences saying the same thing about
+    different option sets is worse than one), and it must stay silent when the user's choice does reach.
+    **Grep first:** `rejectionReachNudge` (form) and `rejectionOutlookNote` (page) are the two existing homes —
+    the third must be a *clause on the save*, not a fourth surface.
 
 - **MEASURED, RECORDED SO NOBODY RE-MEASURES (Builder 2026-09-03, while sizing the rejection-outlook
   endpoint) — `cluster_pointings` costs 1.58 s at the owner's largest target, and a mosaic stack pays it

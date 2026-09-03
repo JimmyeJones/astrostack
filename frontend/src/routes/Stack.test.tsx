@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { notifications } from "@mantine/notifications";
 import { StackView } from "./Stack";
 import * as client from "../api/client";
 import { stackPlacementMismatches } from "../test/stackOptionPlacement";
@@ -2050,5 +2051,90 @@ describe("StackView — a stack that fails says so in plain language", () => {
 
     await screen.findByText("aligning 3/10");
     expect(screen.queryByTestId("stack-job-error")).not.toBeInTheDocument();
+  });
+});
+
+// Saving is the moment the decision is made, and until now it was the one place
+// the app never answered "will this actually remove a satellite trail?". The
+// form's own caution speaks for the run you are about to trigger; the Target
+// page's note is gated on a trail already having been flagged. A saved default
+// drives every *unattended* stack from then on, so the confirmation says what it
+// will do there — with the Auto toggle still on screen.
+describe("StackView — what a saved default will do overnight", () => {
+  /** The Stack form with one saveable option, `n` accepted+solved subs, and the
+   *  server's `/rejection-outlook` answer for whatever ends up stored. */
+  function mockSaveForm(outlook: client.RejectionOutlook | null) {
+    mockSchema([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null,
+        depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    const put = vi.spyOn(client.api, "putStackDefaults")
+      .mockResolvedValue({ sigma_clip: true });
+    const ask = outlook === null
+      ? vi.spyOn(client.api, "rejectionOutlook").mockRejectedValue(new Error("nope"))
+      : vi.spyOn(client.api, "rejectionOutlook").mockResolvedValue(outlook);
+    return { put, ask };
+  }
+
+  const blind: client.RejectionOutlook = {
+    method: "sigma-clip", n_frames: 6, panel_depth: null,
+    lone_outlier_min_frames: 11, reaches: false, user_chose: true,
+  };
+
+  it("warns, on the save, that the saved rejection is blind overnight", async () => {
+    const show = vi.spyOn(notifications, "show").mockImplementation(() => "");
+    const { put, ask } = mockSaveForm(blind);
+
+    renderStack();
+    fireEvent.click(await screen.findByRole("button", { name: "Save as defaults" }));
+
+    await waitFor(() => expect(show).toHaveBeenCalled());
+    const shown = show.mock.calls[show.mock.calls.length - 1][0] as
+      { message: string; color: string };
+    // The save itself still succeeded, and still says so.
+    expect(put).toHaveBeenCalled();
+    expect(shown.message).toContain("will pre-fill this form");
+    expect(shown.message).toContain("overnight and one-click stacks");
+    expect(shown.message).toContain("Auto outlier removal");
+    expect(shown.color).toBe("yellow");
+    // Asked of the *stored* blob, not the values on screen.
+    expect(ask).toHaveBeenCalledWith("M_42");
+  });
+
+  it("says only the plain confirmation when the saved rejection does reach", async () => {
+    const show = vi.spyOn(notifications, "show").mockImplementation(() => "");
+    mockSaveForm({ ...blind, reaches: true });
+
+    renderStack();
+    fireEvent.click(await screen.findByRole("button", { name: "Save as defaults" }));
+
+    await waitFor(() => expect(show).toHaveBeenCalled());
+    const shown = show.mock.calls[show.mock.calls.length - 1][0] as
+      { message: string; color: string };
+    expect(shown.message).toContain("will pre-fill this form");
+    expect(shown.message).not.toContain("Heads-up");
+    expect(shown.color).toBe("teal");
+  });
+
+  it("still confirms the save when the outlook can't be had", async () => {
+    // An older backend, or nothing solved yet: the save worked, so it must not
+    // read as a failure just because the extra question went unanswered.
+    const show = vi.spyOn(notifications, "show").mockImplementation(() => "");
+    const { put } = mockSaveForm(null);
+
+    renderStack();
+    fireEvent.click(await screen.findByRole("button", { name: "Save as defaults" }));
+
+    await waitFor(() => expect(show).toHaveBeenCalled());
+    const shown = show.mock.calls[show.mock.calls.length - 1][0] as
+      { title?: string; message: string; color: string };
+    expect(put).toHaveBeenCalled();
+    expect(shown.title).toBe("Saved as defaults");
+    expect(shown.color).toBe("teal");
+    expect(shown.message).not.toContain("Save failed");
   });
 });
