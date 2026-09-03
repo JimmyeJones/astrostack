@@ -5,6 +5,7 @@ import { IconCalendarPlus, IconSparkles } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type SuggestedTarget } from "../api/client";
+import { withMosaicEffort } from "../mosaicEffort";
 import { difficultyRowBadge, framingRowBadge } from "../tonight";
 import { describeSuggestion, suggestionHeading } from "./suggestTargets";
 
@@ -23,8 +24,14 @@ import { describeSuggestion, suggestionHeading } from "./suggestTargets";
  * library doesn't already cover). So it never nags a user with no site set, and
  * never duplicates the "set a location" prompt the Tonight page already shows.
  */
-function SuggestionRow({ s }: { s: SuggestedTarget }) {
-  const framingBadge = framingRowBadge(s.framing, s.mosaic);
+function SuggestionRow(
+  { s, usualPaceS }: { s: SuggestedTarget; usualPaceS?: number | null },
+) {
+  // The mosaic badge also says, on hover, roughly how many clear nights all
+  // those panels would take at this owner's own measured pace — silent for a
+  // first-timer with no pace yet, and on an older backend.
+  const framingBadge = withMosaicEffort(
+    framingRowBadge(s.framing, s.mosaic), s.mosaic, s.type, usualPaceS);
   const difficultyBadge = difficultyRowBadge(s.difficulty);
   return (
     <Paper withBorder p="sm" radius="sm" bg="var(--mantine-color-body)">
@@ -94,7 +101,9 @@ export function SuggestTargetsCard() {
         <Anchor component={Link} to="/tonight" size="xs" c="grape">See all →</Anchor>
       </Group>
       <Stack gap="xs">
-        {suggestions.map((s) => <SuggestionRow key={s.id} s={s} />)}
+        {suggestions.map((s) => (
+          <SuggestionRow key={s.id} s={s} usualPaceS={q.data?.usual_pace_s} />
+        ))}
       </Stack>
     </Paper>
   );

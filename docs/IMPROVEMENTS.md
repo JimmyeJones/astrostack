@@ -27890,42 +27890,97 @@ problems. Dogfood it every big-picture run and fix root causes.
     bigger sizes; aspect preserved undistorted). **Slices —** (a) the pure `build_print_export` helper + size
     table + tests (a shippable Builder run on its own); (b) wire it into the editor/History share menu (frontend).
 
-- **NEW IDEA (Builder 2026-08-26, the half deliberately left out of "How big a mosaic?" v0.272.0) — tell a
-  beginner roughly how LONG that mosaic will take, not only how many panels.** *(Pillar: autonomy +
-  friendliness — PRIORITY 2–3; size S.)* The panel count now lands where the question is asked ("Needs 3×2
-  mosaic"), but the decision a beginner is actually making is *"can I do that tonight?"* — and 6 panels is a
-  very different evening from 12. The planner already knows this owner's real pace (`recent_pace_s`, the
-  median kept integration per clear night, used by the "how many more clear nights" row), so the row could
-  add *"at your usual pace, about two clear nights"* — never a guess: the sentence must **self-hide** for a
-  first-timer with no pace history, which is exactly why it wasn't bolted onto `mosaic_plan` (a pure catalog
-  helper with no access to the library's history, and no business acquiring one). **Slice:** a pure helper
-  next to the readiness maths that takes `panels` + `recent_pace_s` + the target's own integration goal and
-  returns a sentence or `None`; render it on the Tonight row's mosaic tooltip only (not the object-info card,
-  which has no pace). **Care:** a mosaic's per-panel integration is a fraction of a single-field target's, so
-  don't multiply the whole goal by the panel count — say what it means in *nights*, the unit the owner
-  already thinks in.
+- **✅ SHIPPED (Builder, v0.339.0, branch `claude/sweet-babbage-861nhx`) — ~~tell a beginner roughly how LONG
+  that mosaic will take, not only how many panels.~~** Built in the shape the 2026-08-31 stand-down said to
+  prefer, and only after building the one thing that stand-down said was missing.
 
-  **⚠️ SIZED AND STOOD DOWN — READ THIS BEFORE PICKING IT UP; TWO OF ITS PREMISES ARE WRONG (Builder
-  2026-08-31, branch `claude/wizardly-feynman-isps6l`).** Not declined on value — the question ("can I do that
-  tonight?") is a real beginner question — but the entry's proposed slice cannot be built as written, and the
-  gap is a *design* call rather than code.
-  1. **The row that carries a mosaic plan has no pace, and never will.** `nightplan.py` fills `mosaic` on
-     **catalog** rows only (the comment on `LibraryTarget.size_arcmin` says why: a library row's framing is
-     already on the Target page) and `recent_pace_s` on **library** rows only — it comes from
-     `recent_night_pace_s(proj)`, which is per-target history for a target you have already shot. A mosaic
-     candidate is by definition one you have *not*. So "the Tonight row's mosaic tooltip" has neither number
-     in hand; the honest source would have to be a new **library-wide** pace (a median of the per-target paces),
-     which is a new statistic, not a plumbing job.
-  2. **"Per-panel integration is a fraction of a single field's" is an assertion with no number behind it.**
-     Covering N panels to the *same* depth costs N× the time — that much is arithmetic — and the entry's
-     caution is really "beginners shoot mosaics shallower", which is true and unquantified. Writing a sentence
-     needs a per-panel depth constant that nothing in the repo supplies, and inventing one puts a fabricated
-     number in front of a beginner deciding how to spend their evening.
-  **If it is picked up, pick a shape first, and prefer the one that states the multiplier instead of hiding
-  it:** "6 panels is about 6× a single target's time — at your usual pace, about N clear nights to give every
-  panel the depth you'd give one field" is honest with no new constant, at the cost of being long for a
-  tooltip on the page the owner already calls busy. The alternative (a per-panel fraction) needs the owner to
-  say what depth they actually shoot mosaics at. **Do not ship a number chosen by an agent for this.**
+  **The stand-down's finding #1 was right, and it is what shipped first.** `nightplan.plan_tonight` fills
+  `framing`/`mosaic` on **catalog** rows only and `recent_pace_s` on **library** rows only, so a mosaic
+  candidate — by definition a target you have *not* shot — had neither number in hand. The honest source it
+  named, "a new library-wide pace (a median of the per-target paces)", is now `webapp.routers.plan
+  .usual_night_pace_s`: the median of the per-target `recent_pace_s` values the annotated library rows already
+  carry, served as one additive `usual_pace_s` field on **both** `/api/plan/tonight` and `/api/plan/suggest`
+  (the Dashboard's "Try something new tonight" card shows the same badge, and a test pins that the two
+  endpoints report the identical figure so they can never quote different night counts for one mosaic). It
+  costs nothing new: those paces were already read, and cached, for the "~1 more clear night finishes this"
+  row.
+
+  **The stand-down's finding #2 decided the wording.** It refused a per-panel depth constant — "do not ship a
+  number chosen by an agent for this" — and asked for the shape that *states* the multiplier instead of
+  hiding it. So the sentence names the assumption rather than burying it: *"At your usual pace (~3.0 h of kept
+  subs per clear night), giving all 6 panels the depth you'd give one field is about 8 clear nights of
+  shooting."* Every quantity in it already existed: the per-object-type goal (`GOAL_HOURS`, now reachable as
+  `goalHoursForType` so there is still one definition of "enough for a clean image"), × the panel count, ÷ the
+  owner's own measured pace. **Panels, not field-fulls, is the right multiplier here** and the comment says
+  why: overlap does not reduce shooting time — the overlapped strips simply end up deeper than the edges —
+  whereas `integrationReadiness` scales by field-fulls because it is asking the other question (how deep is
+  the picture I already have).
+
+  **No new element on a page the owner already calls busy.** It is a clause appended to the framing badge's
+  existing hover (`withMosaicEffort`), on the Tonight table and the Dashboard suggestion card. It lives beside
+  `mosaicEffortText` rather than inside `framingRowBadge` for a concrete reason recorded in the code: the goal
+  table is in `readiness.ts`, which imports the type buckets *from* `tonight.ts`, so folding the clause into
+  the badge would close an import cycle — and both surfaces now compose the sentence in one place instead of
+  each writing their own.
+
+  **Silence is the default, on five branches:** no mosaic plan, a degenerate one-panel "mosaic", no measured
+  pace anywhere in the library (the first-timer this must never lecture), a nonsense pace (0, negative, NaN),
+  and an older backend that sends no `usual_pace_s` at all — in which case `withMosaicEffort` returns the
+  badge object *unchanged*, pinned by an identity assertion, so the hover is exactly what it is today.
+
+  **Upgrade-safe (§9):** one pure webapp function; one additive optional response field on two plan endpoints
+  (present as `null` on the self-hiding "set a location" payloads too, so the shape never varies); two optional
+  frontend parameters with self-hiding fallbacks; no config key, no schema, no on-disk change, no default
+  flipped, no existing field touched.
+
+  **Tests (+13; the 4 endpoint assertions fail before).** `tests/webapp/test_plan.py` (+4) pins the pure
+  median (odd/even, unmeasured paces absent rather than zero, the empty first-timer), that `/tonight` reads
+  `null` until a target has two productive nights and then the library-wide figure, that the no-location
+  payload still carries the key, and that `/suggest` reports exactly what `/tonight` does.
+  `frontend/src/mosaicEffort.test.ts` (+9) pins the sentence, the per-type goal actually mattering (a 3×2 is
+  3 nights as a cluster and 12 as a galaxy), the singular, the unknown-type fallback and all five silences.
+  *(Tooltip copy is tested as a pure function, the way every other badge in this app tests its hover — a
+  first attempt to drive it by hovering the rendered Mantine `Tooltip` in jsdom was dropped rather than
+  fought.)*
+
+  *(Original entry, and the stand-down that shaped it, follow — this is done.)*
+
+  - **NEW IDEA (Builder 2026-08-26, the half deliberately left out of "How big a mosaic?" v0.272.0) — tell a
+    beginner roughly how LONG that mosaic will take, not only how many panels.** *(Pillar: autonomy +
+    friendliness — PRIORITY 2–3; size S.)* The panel count now lands where the question is asked ("Needs 3×2
+    mosaic"), but the decision a beginner is actually making is *"can I do that tonight?"* — and 6 panels is a
+    very different evening from 12. The planner already knows this owner's real pace (`recent_pace_s`, the
+    median kept integration per clear night, used by the "how many more clear nights" row), so the row could
+    add *"at your usual pace, about two clear nights"* — never a guess: the sentence must **self-hide** for a
+    first-timer with no pace history, which is exactly why it wasn't bolted onto `mosaic_plan` (a pure catalog
+    helper with no access to the library's history, and no business acquiring one). **Slice:** a pure helper
+    next to the readiness maths that takes `panels` + `recent_pace_s` + the target's own integration goal and
+    returns a sentence or `None`; render it on the Tonight row's mosaic tooltip only (not the object-info card,
+    which has no pace). **Care:** a mosaic's per-panel integration is a fraction of a single-field target's, so
+    don't multiply the whole goal by the panel count — say what it means in *nights*, the unit the owner
+    already thinks in.
+
+    **⚠️ SIZED AND STOOD DOWN — READ THIS BEFORE PICKING IT UP; TWO OF ITS PREMISES ARE WRONG (Builder
+    2026-08-31, branch `claude/wizardly-feynman-isps6l`).** Not declined on value — the question ("can I do that
+    tonight?") is a real beginner question — but the entry's proposed slice cannot be built as written, and the
+    gap is a *design* call rather than code.
+    1. **The row that carries a mosaic plan has no pace, and never will.** `nightplan.py` fills `mosaic` on
+       **catalog** rows only (the comment on `LibraryTarget.size_arcmin` says why: a library row's framing is
+       already on the Target page) and `recent_pace_s` on **library** rows only — it comes from
+       `recent_night_pace_s(proj)`, which is per-target history for a target you have already shot. A mosaic
+       candidate is by definition one you have *not*. So "the Tonight row's mosaic tooltip" has neither number
+       in hand; the honest source would have to be a new **library-wide** pace (a median of the per-target paces),
+       which is a new statistic, not a plumbing job.
+    2. **"Per-panel integration is a fraction of a single field's" is an assertion with no number behind it.**
+       Covering N panels to the *same* depth costs N× the time — that much is arithmetic — and the entry's
+       caution is really "beginners shoot mosaics shallower", which is true and unquantified. Writing a sentence
+       needs a per-panel depth constant that nothing in the repo supplies, and inventing one puts a fabricated
+       number in front of a beginner deciding how to spend their evening.
+    **If it is picked up, pick a shape first, and prefer the one that states the multiplier instead of hiding
+    it:** "6 panels is about 6× a single target's time — at your usual pace, about N clear nights to give every
+    panel the depth you'd give one field" is honest with no new constant, at the cost of being long for a
+    tooltip on the page the owner already calls busy. The alternative (a per-panel fraction) needs the owner to
+    say what depth they actually shoot mosaics at. **Do not ship a number chosen by an agent for this.**
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-26 #2) — "My deep-sky wall": one-click, share-ready montage of a
   beginner's best finished pictures.**~~ — **SHIPPED v0.275.0** (Builder 2026-08-26, branch

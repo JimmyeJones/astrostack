@@ -203,6 +203,12 @@ export interface NightPlan {
   // windows, so the UI can note that low-sky obstructions were accounted for.
   horizon_active?: boolean;
   targets: PlannedTarget[];
+  // This owner's *typical* clear-night output (median of the per-target paces,
+  // seconds of kept integration), so a row for a target they have not started —
+  // an oversized one needing a mosaic — can still say roughly how many clear
+  // nights it would take. Null when no target has a measured pace yet; absent on
+  // an older backend, and the clause then simply doesn't render.
+  usual_pace_s?: number | null;
 }
 
 // One upcoming night a target is well-placed in a dark window — the forward-
@@ -268,6 +274,12 @@ export interface SuggestResponse {
   // A few famous showpieces the user hasn't captured that are up tonight,
   // best-first; empty when no location is set or nothing new is well-placed.
   suggestions: SuggestedTarget[];
+  // This owner's *typical* clear-night output (median of the per-target paces,
+  // seconds of kept integration), so a row for a target they have not started —
+  // an oversized one needing a mosaic — can still say roughly how many clear
+  // nights it would take. Null when no target has a measured pace yet; absent on
+  // an older backend, and the clause then simply doesn't render.
+  usual_pace_s?: number | null;
 }
 
 // One month's observability for a target (from /api/plan/best-months) — the

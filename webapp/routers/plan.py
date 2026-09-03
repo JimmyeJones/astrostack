@@ -109,6 +109,36 @@ def _resolve_observer(request: Request, settings) -> tuple[Observer | None, str]
     return None, "none"
 
 
+def usual_night_pace_s(targets: list[LibraryTarget]) -> float | None:
+    """This owner's *typical* clear-night output, in seconds of kept integration.
+
+    Each library target already carries its own ``recent_pace_s`` (the median kept
+    integration per productive night **on that target**), which is what the
+    planner's "~1 more clear night finishes this" row is divided by. That figure is
+    per-target by construction, so nothing can answer the question a beginner asks
+    about a target they have *not* started — "a 6-panel mosaic, can I do that
+    tonight?" — because a target with no history has no pace of its own.
+
+    The library-wide answer is the **median of the per-target paces**: half this
+    owner's targets gain more than that on a clear night, half less. Taking the
+    median (rather than the best night ever, or the total across targets) keeps it
+    a *typical* night rather than a best case, which is the honest denominator for
+    "how long would this take me?".
+
+    ``None`` — say nothing rather than guess — when no target has a measured pace
+    yet, which is exactly the first-timer the entry warns about.
+    """
+    paces = [
+        float(t.recent_pace_s) for t in targets
+        if t.recent_pace_s is not None and t.recent_pace_s > 0
+    ]
+    if not paces:
+        return None
+    paces.sort()
+    mid = len(paces) // 2
+    return paces[mid] if len(paces) % 2 else (paces[mid - 1] + paces[mid]) / 2.0
+
+
 def _library_targets(request: Request) -> list[LibraryTarget]:
     """Library targets that have a position, for the 'already targeted' set.
 
@@ -273,6 +303,7 @@ def get_tonight(
             "moon_waxing": None,
             "min_altitude_deg": min_altitude,
             "targets": [],
+            "usual_pace_s": None,
         }
 
     # With the observer's longitude known, aim a calendar-date pick at that night's
@@ -280,13 +311,19 @@ def get_tonight(
     if plan_date is not None and not when:
         ref = _reference_for_date(plan_date, observer.lon_deg)
 
+    lib_targets = _library_targets(request)
     plan = plan_tonight(
         observer, ref, min_altitude_deg=float(min_altitude),
-        library_targets=_library_targets(request),
+        library_targets=lib_targets,
         horizon=HorizonProfile.from_pairs(settings.horizon_profile),
     )
     payload = asdict(plan)
     payload["location_source"] = location_source
+    # The owner's typical clear-night output, so a row for a target they have
+    # *not* started (a mosaic candidate) can still say roughly how many clear
+    # nights it would take. Free: the per-target paces it medians were already
+    # read (and cached) for the "~1 more night finishes this" row.
+    payload["usual_pace_s"] = usual_night_pace_s(lib_targets)
     return payload
 
 
@@ -888,7 +925,10 @@ def get_suggested_targets(
     the curated showpiece whitelist, excluding anything already in the library.
     Read-only and offline. ``suggestions`` is empty (the card self-hides) when no
     location is set, nothing new is well-placed, or the library already covers the
-    whitelist; ``location_source`` lets the UI explain a missing location."""
+    whitelist; ``location_source`` lets the UI explain a missing location.
+    ``usual_pace_s`` carries the owner's typical clear-night output so the card's
+    mosaic badge can price a whole grid in nights (see :func:`usual_night_pace_s`);
+    ``None`` when no target has a measured pace yet."""
     settings = deps.get_settings(request)
 
     start = datetime.now(timezone.utc)
@@ -908,11 +948,14 @@ def get_suggested_targets(
         "observer": asdict(observer) if observer is not None else None,
         "min_altitude_deg": min_altitude,
         "suggestions": [],
+        "usual_pace_s": None,
     }
     if observer is None:
         return base
 
-    lib_coords = [(t.ra_deg, t.dec_deg) for t in _library_targets(request)]
+    lib_targets = _library_targets(request)
+    base["usual_pace_s"] = usual_night_pace_s(lib_targets)
+    lib_coords = [(t.ra_deg, t.dec_deg) for t in lib_targets]
     suggestions = suggest_targets(
         observer, start,
         library_coords=lib_coords,
