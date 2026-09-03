@@ -1376,12 +1376,60 @@ _(nothing else claimed — claim an item here with your branch name)_
   blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"~~ *(shipped
   v0.328.1, see below)*; ~~the Stack
   page prints the **raw engine error** where every other page uses `friendlyJobError`~~ *(shipped v0.328.0,
-  see below)*; the frames table prints raw
-  UTC under a hero that says "Shot &lt;local night&gt;"; "nights" means **6-hour sessions** on the Nights card
+  see below)*; ~~the frames table prints raw
+  UTC under a hero that says "Shot &lt;local night&gt;"~~ *(shipped v0.328.5, see below)*;
+  "nights" means **6-hour sessions** on the Nights card
   but **calendar nights** in captions; three hand-mirrored "is this a genuine run" predicates;
   `POST /api/targets` has **no frontend caller**; ~~share and print JPEGs use 4:2:0 chroma subsampling~~
   *(shipped v0.328.0, see below)*; the "full
   data" TIFF anchors its white point on the single brightest surviving pixel (hypothesis, needs real data).
+
+- **✅ SHIPPED (Builder, v0.328.5, branch `claude/sweet-babbage-axt93w`) — ~~A-MINOR: the frames table prints
+  raw UTC under a hero that says "Shot &lt;local night&gt;".~~** The same date-honesty class as v0.311.3,
+  v0.313.0 and v0.229.4, at the last surface still holding out — and the one the owner reads every session.
+
+  **What was wrong.** `routes/Target.tsx` rendered a sub's `timestamp_utc` raw
+  (`f.timestamp_utc?.replace("T", " ").slice(0, 19)`), which is the instant out of the FITS header. Every
+  *other* date on that page is an **observing night**: bucketed local noon-to-noon by
+  `activity_calendar.night_date_of`, with the observer's longitude resolved by `resolve_site_lon`. The two
+  disagree by a whole day for anyone west of Greenwich — a 21:00 start in the Americas is already tomorrow in
+  UTC — and they disagree for *everyone* after local midnight. The repo's own fixture is the shape: its subs
+  carry `DATE-OBS 2024-09-12T03:14:55` and every caption in the app dates them **11 Sep 2024**, so the page
+  showed a picture captioned "Shot 11 Sep 2024" over a table of subs stamped `2024-09-12` with nothing on
+  screen saying they were the same night. A beginner checking whether last night's subs actually arrived had
+  to do timezone arithmetic to find out.
+
+  **The fix is to send the fact, not to compute it twice.** `FrameOut` gains `night_date`
+  (additive, nullable), filled by a `_frame_night_date` helper in `routers/frames.py` that calls the very
+  same `night_date_of` through the very same `resolve_site_lon` the Nights-card endpoint calls — so the two
+  surfaces cannot name different nights, by construction rather than by two copies of the rule. The longitude
+  is resolved **once per page** (it is app-cached anyway) while the library handle is still open. All three
+  `_to_out` sites pass it — list, `GET /frames/{id}` and `PATCH /frames/{id}` — so a row can't change nights
+  depending on which endpoint fetched it.
+
+  **On the page:** a new shared `formatFrameStamp` renders `11 Sep 2024 · 03:14:55` — the night, then the
+  clock. The clock stays **UTC on purpose**: it is what the header records and what any other astro tool will
+  quote, and only the *date* was ever ambiguous. The heading moves from `Time (UTC)` to `Night · time (UTC)`
+  and — the part that matters — **stops being the column exempted from the guide as "the one that explains
+  itself"**, which is exactly how it came to be the column disagreeing with the picture above it. It now
+  carries a hint, so `FrameColumnGuide` (the phone-visible version of the header tooltips) explains what a
+  night is: *"A night runs noon to noon in your local time … so subs shot after midnight still belong to the
+  night before."*
+
+  **Upgrade-safe (§9):** one additive nullable response field, no schema, no config, no on-disk change, no
+  default flipped, no existing field's meaning changed (`timestamp_utc` is untouched and still the sort key).
+  A frontend served by an older backend gets `undefined` and `formatFrameStamp` returns the **byte-identical
+  old string**, which is pinned by its own test.
+
+  **Tests (+5 python, all 5 fail before — verified by stashing the two backend files; +7 vitest).**
+  `tests/webapp/test_frames_night_date.py`: the two facts differing on the fixture; the same instant
+  belonging to *different* nights at lon −105 and +150 (so the longitude is genuinely honoured, not
+  hard-coded); agreement with `/nights` as a set membership rather than a string; a stamp-less sub sending
+  `null` rather than guessing; and the one-frame GET/PATCH agreeing with the list. `format.test.ts` (+5) over
+  the formatter including the older-backend fallback and the em-dash case; `Target.test.tsx` (+2) that the
+  rendered row says the night and *not* the UTC day; `FrameColumnGuide.test.tsx`'s "the one column that
+  explains itself doesn't get an entry" assertion is **inverted** — a contract change, since that exemption
+  was the bug's hiding place — to require the night explanation instead.
 
 - **✅ SHIPPED (Builder, v0.328.1, branch `claude/sweet-babbage-swvkoa`) — ~~A-MINOR's contradiction: the
   plate-solve-failed screen tells the beginner two opposite things at once~~ — plus the two remnants of A10 and

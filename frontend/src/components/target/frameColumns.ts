@@ -20,12 +20,20 @@ export type SortKey =
 export interface FrameColumn {
   key: SortKey;
   label: string;
-  /** Absent for a column that explains itself (the capture time). */
+  /** Absent only for a column that genuinely explains itself. */
   hint?: string;
 }
 
 export const FRAME_COLUMNS: FrameColumn[] = [
-  { key: "timestamp_utc", label: "Time (UTC)" },
+  {
+    key: "timestamp_utc", label: "Night · time (UTC)",
+    // This column used to be the one "that explains itself" — and it was the one
+    // that quietly disagreed with the picture above it. See `formatFrameStamp`.
+    hint: "Which observing night the sub belongs to, then the clock time it was "
+      + "taken, in UTC. A night runs noon to noon in your local time — the same "
+      + "way the picture above and the Nights card are dated — so subs shot "
+      + "after midnight still belong to the night before.",
+  },
   {
     key: "fwhm_px", label: "FWHM",
     hint: "Full-width-half-maximum: how many pixels wide the stars are. "

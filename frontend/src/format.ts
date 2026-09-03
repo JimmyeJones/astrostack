@@ -56,6 +56,42 @@ export function formatNightDate(iso: string | null | undefined): string {
 }
 
 /**
+ * One sub's row in the frames table: **the night it belongs to**, then the
+ * clock time it was taken, in UTC — `"8 Jul 2026 · 21:14:03"`.
+ *
+ * The table used to print `timestamp_utc` raw, and that is a different fact from
+ * every other date on the page. A raw UTC instant names the *following* day for
+ * anyone west of Greenwich — a 21:00 start in the Americas is already tomorrow
+ * in UTC — so a beginner read "Shot 8 Jul 2026" over a picture and then a whole
+ * table of subs stamped `2026-07-09`, with nothing saying the two were the same
+ * night. The night now comes from the server (`Frame.night_date`), bucketed
+ * noon-to-noon through the very same helper the imaging calendar, the Nights
+ * card and every "Shot …" caption go through, so the table and the picture
+ * cannot disagree.
+ *
+ * The clock is left in UTC on purpose: it is what the FITS header records and
+ * what the rest of the app (and any other astro tool the owner opens the file
+ * in) quotes, and the column heading says so. Only the *date* was ambiguous.
+ *
+ * Falls back to exactly what this cell always printed —
+ * `"2026-07-09 21:14:03"` — when the server sends no night (an older backend
+ * mid-upgrade, or a stamp it could not parse), so nothing is ever lost.
+ */
+export function formatFrameStamp(
+  nightDate: string | null | undefined,
+  timestampUtc: string | null | undefined,
+): string {
+  const night = formatNightDate(nightDate);
+  if (night === "—") {
+    return timestampUtc ? timestampUtc.replace("T", " ").slice(0, 19) : "—";
+  }
+  // Accept either separator: the stored stamp is ISO (`…T21:14:03`), but a
+  // hand-written or re-serialised one can arrive space-separated.
+  const clock = /[T ](\d{2}:\d{2}:\d{2})/.exec(timestampUtc ?? "");
+  return clock ? `${night} · ${clock[1]}` : night;
+}
+
+/**
  * A date label that is a **capture** date — when the light was collected — and
  * not when the app did something. Only {@link formatCaptureNights} can make one.
  *
