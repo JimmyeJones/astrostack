@@ -557,29 +557,31 @@ _(nothing else claimed — claim an item here with your branch name)_
 
   *(Original audit entry follows.)*
 
-- **🔴🔴 A1 — AUTO'S CONTRAST CURVE BRIGHTENS THE SKY BY ~36% ON EVERY AUTO PICTURE, AND THE REGRESSION TEST
-  THAT SHOULD CATCH IT PASSES ON A FIXTURE THAT CANNOT EXHIBIT THE BUG.** *(Severity: **wrong picture, on the
-  on-by-default path, at every stack depth**. Confidence: **verified by reproduction**. This is the single
-  highest-value item in this file — it silently degrades every one-click result the owner has ever made.)*
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
 
-  `_sky_mode` (`seestack/edit/curve.py`) finds the sky as the histogram mode over `[p0.5, median]` in 128 bins.
-  The STF stretch that runs immediately before it (`tone.stretch`, `mode: stf`) **clips 1–2 % of pixels to
-  exactly 0**. That zero spike is always the tallest bin, so `suggest_tone_curve` reads the sky as **0.0008**,
-  its "the median *is* the sky, so decline" gate never fires, and it lifts the median — which *is* the sky —
-  halfway toward `CURVE_TARGET_BG` 0.25.
-  - **Measured** on a synthetic linear stack through the *full* Auto recipe: sky patch **0.130 → 0.178
-    (+36 %)**, with the curve point `[0.14, 0.195]` appearing identically at **every** depth from 4 to 1,000
-    subs. The opposite branch is wrong too: on a bright-nebula frame the suggestion declines and
-    `_AUTO_CONTRAST_FALLBACK` **darkens** the sky by 20 %.
-  - **Why it was never caught:** `test_sky_dominated_frame_does_not_lift_the_sky` (`tests/test_edit_curve.py`)
-    builds its fixture as `clip(sky + normal)` — **no zero spike** — so it never sees real STF output. This is
-    the bug the v0.210.6 fix ("auto-contrast curve lifting the whole sky") claims to have closed; **it is
-    closed only for the fixture.** Treat this as the canonical example of the wider risk that a fix's own test,
-    written by the agent that wrote the fix, confirms the fix's *model* of the bug rather than the bug.
-  - **Fix direction:** compute the mode over **strictly positive** values, or over a luminance sky population
-    at/below the median; make `_AUTO_CONTRAST_FALLBACK` pin `(sky, sky)` rather than move it; and **add a
-    regression test that feeds real `autostretch` output**, not a synthesised approximation of it. Re-check the
-    "did Auto improve this?" claims elsewhere in the backlog that were measured through this same curve.
+  - **🔴🔴 A1 — AUTO'S CONTRAST CURVE BRIGHTENS THE SKY BY ~36% ON EVERY AUTO PICTURE, AND THE REGRESSION TEST
+    THAT SHOULD CATCH IT PASSES ON A FIXTURE THAT CANNOT EXHIBIT THE BUG.** *(Severity: **wrong picture, on the
+    on-by-default path, at every stack depth**. Confidence: **verified by reproduction**. This is the single
+    highest-value item in this file — it silently degrades every one-click result the owner has ever made.)*
+
+    `_sky_mode` (`seestack/edit/curve.py`) finds the sky as the histogram mode over `[p0.5, median]` in 128 bins.
+    The STF stretch that runs immediately before it (`tone.stretch`, `mode: stf`) **clips 1–2 % of pixels to
+    exactly 0**. That zero spike is always the tallest bin, so `suggest_tone_curve` reads the sky as **0.0008**,
+    its "the median *is* the sky, so decline" gate never fires, and it lifts the median — which *is* the sky —
+    halfway toward `CURVE_TARGET_BG` 0.25.
+    - **Measured** on a synthetic linear stack through the *full* Auto recipe: sky patch **0.130 → 0.178
+      (+36 %)**, with the curve point `[0.14, 0.195]` appearing identically at **every** depth from 4 to 1,000
+      subs. The opposite branch is wrong too: on a bright-nebula frame the suggestion declines and
+      `_AUTO_CONTRAST_FALLBACK` **darkens** the sky by 20 %.
+    - **Why it was never caught:** `test_sky_dominated_frame_does_not_lift_the_sky` (`tests/test_edit_curve.py`)
+      builds its fixture as `clip(sky + normal)` — **no zero spike** — so it never sees real STF output. This is
+      the bug the v0.210.6 fix ("auto-contrast curve lifting the whole sky") claims to have closed; **it is
+      closed only for the fixture.** Treat this as the canonical example of the wider risk that a fix's own test,
+      written by the agent that wrote the fix, confirms the fix's *model* of the bug rather than the bug.
+    - **Fix direction:** compute the mode over **strictly positive** values, or over a luminance sky population
+      at/below the median; make `_AUTO_CONTRAST_FALLBACK` pin `(sky, sky)` rather than move it; and **add a
+      regression test that feeds real `autostretch` output**, not a synthesised approximation of it. Re-check the
+      "did Auto improve this?" claims elsewhere in the backlog that were measured through this same curve.
 
 - **✅ SHIPPED (Builder, v0.326.2, branch `claude/zen-mccarthy-olkjpm`) — ~~A3: plate-solving writes files into
   `incoming/`, and the CI guard structurally cannot see it.~~** Fixed, and **reproduced first** — the audit
@@ -791,82 +793,84 @@ _(nothing else claimed — claim an item here with your branch name)_
   the hot-pixel one across a decimated *and* a `proxy_scale == 1` run. Frontend (+3 each in two new files)
   pins the captions.
 
-- **🟠 A2 — PREVIEW AND EXPORT
-  DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
-  PROXY FACTOR — worst exactly on the owner's mosaics.** *(Severity: wrong picture (colour) + a preview that
-  lies. Confidence: verified on synthetic data. Three instances, **one mechanism**.)*
-  **All three named instances are now shipped** (colour-cal below as v0.326.3; hot-pixels and sharpen as
-  v0.326.6, entry above). Only the two "also verified, smaller" items at the foot of this entry are open.
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
 
-  > **⚠️ COLLISION ELEVEN — Builder `claude/zen-mccarthy-mqfxxg`, 2026-09-02, one of two tasks stood down,
-  > decided by measurement in a worktree rather than by argument.** This run built `tone.color_calibrate`
-  > independently and finished it (scaled FWHM + aperture, *and* the sky annulus, floors at 1.5 px, tests
-  > green) before a `git fetch origin main` between tasks showed `…-xesefm` had landed the same fix as
-  > v0.326.3 forty minutes earlier. Applying the standing method from collision ten — **run your own fixture
-  > against their shipped code in a `git worktree` of `origin/main`** — settled it in two minutes and against
-  > me: on the same 600×900 field at proxy step 3 theirs finds **188 stars where mine found 50**, and its
-  > white balance sits within **0.2 %** of the export's (mine, 2.2 %). The difference is their
-  > `MIN_DETECT_FWHM_PX = 1.0` against my 1.5 — I had floored the finder above the size of the stars I wanted
-  > it to find. My one genuinely extra piece, scaling the photometry's **sky annulus** (`r_in = r + 2`,
-  > `r_out = r + 5`, both unscaled on theirs), turns out to buy nothing measurable: theirs already agrees
-  > with the export to 0.2–2.1 % across steps 2–5, so shipping it would have been speculative hardening on
-  > the on-by-default path. Dropped, not re-litigated. **The transferable bit is the floor:** a floor on a
-  > detector's matched-filter width is not a safety rail, it is a *lower bound on what you can detect* — set
-  > it by what the grid can still resolve (one pixel), not by what feels conservative.
-  - **✅ SHIPPED (Builder, v0.326.3, branch `claude/zen-mccarthy-xesefm`) — ~~`tone.color_calibrate`~~**, the
-    instance that changes the picture's **colour**. Reproduced first, then fixed in the direction the entry
-    named. `_detect_calibration_stars`'s `fwhm=3.0` was a hard-coded literal and the 4 px aperture came from
-    a dataclass default, so both described a *full-resolution* star on whatever grid they were handed. They
-    are now `ColorCalibrationOptions.detect_fwhm_px` / `.aperture_radius_px`, and
-    `seestack.edit.ops.tone._color_calibrate` scales both through `ctx.scaled_px` with floors
-    (`MIN_DETECT_FWHM_PX` 1.0, `MIN_APERTURE_RADIUS_PX` 1.5 — below those a star is one pixel and
-    DAOStarFinder's matched filter starts ranking noise). **`min_stars` is deliberately NOT scaled**: it is a
-    count of stars, and the star count does not change with resolution — what changed was detection
-    *efficiency*, and that is what the geometry fixes.
-    **Measured, before → after** on a synthetic OSC field (tinted sky, neutral stars, sensor cast) at proxy
-    step 3: preview detections **35 % of the export's → 100 %**; the preview's white balance
-    `background_neutral` (gains R 1.056, B 0.912) **→ `gray_star`, R 1.250, B 0.800, matching the export
-    exactly**. The old preview was **15.5 % out in red and 14.0 % in blue** — a picture whose colour the
-    export never applies. On the export (`proxy_scale == 1`) the scaling is the identity, pinned by a test
-    that the full-res path is bit-for-bit what the engine defaults produce.
-    **The entry's second half shipped too**, because scaling closes most of the gap but not all of it: a
-    proxy decimated far enough still holds too few resolvable stars for a solve the export will manage. The
-    op now records **`proxy_fallback`** (true only when the render is a *decimated* preview and its
-    star-based request really did land on a different path), the histogram endpoint carries it in the existing
-    `color_cal` object, and the editor captions it in plain language beside the deconv/star-reduce advisories
-    — *"the saved picture's colour will differ a little from this preview"*. `proxy_scale > 1` is the
-    condition, not `is_proxy`: a small stack's "proxy" is the undecimated pixels, where a fallback is the
-    export's own answer and there is nothing to warn about.
-    **Upgrade-safe (§9):** two additive dataclass fields with their existing values as defaults, one additive
-    key inside an existing JSON blob, no schema, no on-disk change, no default flipped. The stacker's own
-    post-stack colour calibration is full-res and untouched.
-    **Tests (+7, 4 of which fail before).** A new `tests/test_edit_proxy_parity.py` measures preview↔export on
-    a **mosaic-shaped canvas at a real proxy step**, which is the only place any of this is visible. Its
-    fixture is built to be *able* to exhibit the bug and says so: the sky carries its own tint (otherwise
-    gray-star and background-neutral give the same answer and the divergence is invisible), and the star
-    density is of a Seestar's order (a field dense enough to clear the 20-star floor at 35 % efficiency cannot
-    show the bug at all — the first fixture this run wrote was exactly that, and passed on the *broken* code).
-    Plus the flag's two directions, the full-res no-flag case, `tests/webapp/test_editor.py` on the endpoint
-    contract, and `colorCal.test.ts` on the caption.
-    **Still open below: the other two instances and the two smaller ones** — they are a different mechanism
-    each (a floor that bites, a fixed 3×3 window) and want a run each.
-  - ~~**`tone.color_calibrate`** (`seestack/post/color_cal.py`): `DAOStarFinder(fwhm=3.0)`, aperture 4 px and
-    `min_stars=20` are **none of them scaled**. On a mosaic canvas at proxy step 3 the proxy finds too few
-    stars and silently falls back to `background_neutral` **while the export runs gray-star** — measured
-    preview/export gain ratio **R 1.157, B 1.287** on a 4000×2400 canvas. A 1920×1080 single field matches
-    within 0.3 %, so this is **a mosaic / large-canvas bug**, i.e. the owner's `_mosaic` targets specifically.~~
-  - ~~**`detail.sharpen`** (`seestack/edit/ops/detail.py`): radius *is* scaled but floors at 0.05 px, so Auto's
-    own 1.5 px radius becomes 0.375 px at step 4 — the preview shows **13–46 %** of the export's sharpening,
-    and unlike deconv and star-reduce it shows **no advisory**.~~ *(Shipped v0.326.6.)*
-  - ~~**`detail.hot_pixels`** (`seestack/bg/hot_pixels.py`): a fixed 3×3 isolation test erased or dimmed **259 of
-    582 bright stars** in a step-3 preview while the export touched none. Not in Auto, but the preview
-    misrepresents what the op does.~~ *(Shipped v0.326.6.)*
-  - Also verified, smaller: SCNR's 3 px noise-protect blur unscaled (cosmetic); `stars.reduce`'s advisory
-    points the **wrong way** for 2–3 px stars.
-  - **Fix direction:** scale every pixel-unit parameter through `ctx.scaled_px` with a sensible floor, and
-    **when a proxy op falls back to a different mode than the export will use, say so in the UI** rather than
-    silently diverging. Note the backlog's existing parity claims ("sharpen bit-exact", "RMSE ≈0 for sharpen")
-    are **disproved** by this on any scene with sub-proxy-pixel stars.
+  - **🟠 A2 — PREVIEW AND EXPORT
+    DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
+    PROXY FACTOR — worst exactly on the owner's mosaics.** *(Severity: wrong picture (colour) + a preview that
+    lies. Confidence: verified on synthetic data. Three instances, **one mechanism**.)*
+    **All three named instances are now shipped** (colour-cal below as v0.326.3; hot-pixels and sharpen as
+    v0.326.6, entry above). Only the two "also verified, smaller" items at the foot of this entry are open.
+
+    > **⚠️ COLLISION ELEVEN — Builder `claude/zen-mccarthy-mqfxxg`, 2026-09-02, one of two tasks stood down,
+    > decided by measurement in a worktree rather than by argument.** This run built `tone.color_calibrate`
+    > independently and finished it (scaled FWHM + aperture, *and* the sky annulus, floors at 1.5 px, tests
+    > green) before a `git fetch origin main` between tasks showed `…-xesefm` had landed the same fix as
+    > v0.326.3 forty minutes earlier. Applying the standing method from collision ten — **run your own fixture
+    > against their shipped code in a `git worktree` of `origin/main`** — settled it in two minutes and against
+    > me: on the same 600×900 field at proxy step 3 theirs finds **188 stars where mine found 50**, and its
+    > white balance sits within **0.2 %** of the export's (mine, 2.2 %). The difference is their
+    > `MIN_DETECT_FWHM_PX = 1.0` against my 1.5 — I had floored the finder above the size of the stars I wanted
+    > it to find. My one genuinely extra piece, scaling the photometry's **sky annulus** (`r_in = r + 2`,
+    > `r_out = r + 5`, both unscaled on theirs), turns out to buy nothing measurable: theirs already agrees
+    > with the export to 0.2–2.1 % across steps 2–5, so shipping it would have been speculative hardening on
+    > the on-by-default path. Dropped, not re-litigated. **The transferable bit is the floor:** a floor on a
+    > detector's matched-filter width is not a safety rail, it is a *lower bound on what you can detect* — set
+    > it by what the grid can still resolve (one pixel), not by what feels conservative.
+    - **✅ SHIPPED (Builder, v0.326.3, branch `claude/zen-mccarthy-xesefm`) — ~~`tone.color_calibrate`~~**, the
+      instance that changes the picture's **colour**. Reproduced first, then fixed in the direction the entry
+      named. `_detect_calibration_stars`'s `fwhm=3.0` was a hard-coded literal and the 4 px aperture came from
+      a dataclass default, so both described a *full-resolution* star on whatever grid they were handed. They
+      are now `ColorCalibrationOptions.detect_fwhm_px` / `.aperture_radius_px`, and
+      `seestack.edit.ops.tone._color_calibrate` scales both through `ctx.scaled_px` with floors
+      (`MIN_DETECT_FWHM_PX` 1.0, `MIN_APERTURE_RADIUS_PX` 1.5 — below those a star is one pixel and
+      DAOStarFinder's matched filter starts ranking noise). **`min_stars` is deliberately NOT scaled**: it is a
+      count of stars, and the star count does not change with resolution — what changed was detection
+      *efficiency*, and that is what the geometry fixes.
+      **Measured, before → after** on a synthetic OSC field (tinted sky, neutral stars, sensor cast) at proxy
+      step 3: preview detections **35 % of the export's → 100 %**; the preview's white balance
+      `background_neutral` (gains R 1.056, B 0.912) **→ `gray_star`, R 1.250, B 0.800, matching the export
+      exactly**. The old preview was **15.5 % out in red and 14.0 % in blue** — a picture whose colour the
+      export never applies. On the export (`proxy_scale == 1`) the scaling is the identity, pinned by a test
+      that the full-res path is bit-for-bit what the engine defaults produce.
+      **The entry's second half shipped too**, because scaling closes most of the gap but not all of it: a
+      proxy decimated far enough still holds too few resolvable stars for a solve the export will manage. The
+      op now records **`proxy_fallback`** (true only when the render is a *decimated* preview and its
+      star-based request really did land on a different path), the histogram endpoint carries it in the existing
+      `color_cal` object, and the editor captions it in plain language beside the deconv/star-reduce advisories
+      — *"the saved picture's colour will differ a little from this preview"*. `proxy_scale > 1` is the
+      condition, not `is_proxy`: a small stack's "proxy" is the undecimated pixels, where a fallback is the
+      export's own answer and there is nothing to warn about.
+      **Upgrade-safe (§9):** two additive dataclass fields with their existing values as defaults, one additive
+      key inside an existing JSON blob, no schema, no on-disk change, no default flipped. The stacker's own
+      post-stack colour calibration is full-res and untouched.
+      **Tests (+7, 4 of which fail before).** A new `tests/test_edit_proxy_parity.py` measures preview↔export on
+      a **mosaic-shaped canvas at a real proxy step**, which is the only place any of this is visible. Its
+      fixture is built to be *able* to exhibit the bug and says so: the sky carries its own tint (otherwise
+      gray-star and background-neutral give the same answer and the divergence is invisible), and the star
+      density is of a Seestar's order (a field dense enough to clear the 20-star floor at 35 % efficiency cannot
+      show the bug at all — the first fixture this run wrote was exactly that, and passed on the *broken* code).
+      Plus the flag's two directions, the full-res no-flag case, `tests/webapp/test_editor.py` on the endpoint
+      contract, and `colorCal.test.ts` on the caption.
+      **Still open below: the other two instances and the two smaller ones** — they are a different mechanism
+      each (a floor that bites, a fixed 3×3 window) and want a run each.
+    - ~~**`tone.color_calibrate`** (`seestack/post/color_cal.py`): `DAOStarFinder(fwhm=3.0)`, aperture 4 px and
+      `min_stars=20` are **none of them scaled**. On a mosaic canvas at proxy step 3 the proxy finds too few
+      stars and silently falls back to `background_neutral` **while the export runs gray-star** — measured
+      preview/export gain ratio **R 1.157, B 1.287** on a 4000×2400 canvas. A 1920×1080 single field matches
+      within 0.3 %, so this is **a mosaic / large-canvas bug**, i.e. the owner's `_mosaic` targets specifically.~~
+    - ~~**`detail.sharpen`** (`seestack/edit/ops/detail.py`): radius *is* scaled but floors at 0.05 px, so Auto's
+      own 1.5 px radius becomes 0.375 px at step 4 — the preview shows **13–46 %** of the export's sharpening,
+      and unlike deconv and star-reduce it shows **no advisory**.~~ *(Shipped v0.326.6.)*
+    - ~~**`detail.hot_pixels`** (`seestack/bg/hot_pixels.py`): a fixed 3×3 isolation test erased or dimmed **259 of
+      582 bright stars** in a step-3 preview while the export touched none. Not in Auto, but the preview
+      misrepresents what the op does.~~ *(Shipped v0.326.6.)*
+    - Also verified, smaller: SCNR's 3 px noise-protect blur unscaled (cosmetic); `stars.reduce`'s advisory
+      points the **wrong way** for 2–3 px stars.
+    - **Fix direction:** scale every pixel-unit parameter through `ctx.scaled_px` with a sensible floor, and
+      **when a proxy op falls back to a different mode than the export will use, say so in the UI** rather than
+      silently diverging. Note the backlog's existing parity claims ("sharpen bit-exact", "RMSE ≈0 for sharpen")
+      are **disproved** by this on any scene with sub-proxy-pixel stars.
 
 - **✅ SHIPPED (Builder, v0.327.7, branch `claude/sweet-babbage-xgi198`) — ~~A7: pre-v0.184.9 Seestar on-device
   outputs stay accepted *inside* the owner's real targets, and can be picked as the alignment reference.~~**
@@ -911,40 +915,42 @@ _(nothing else claimed — claim an item here with your branch name)_
 
   *(Original entry follows.)*
 
-- **🟠 A7 — PRE-v0.184.9 SEESTAR ON-DEVICE OUTPUTS STAY ACCEPTED *INSIDE* THE OWNER'S REAL TARGETS, AND CAN BE
-  PICKED AS THE ALIGNMENT REFERENCE.** *(Severity: wrong reference frame / mild contamination on his biggest
-  targets. Confidence: guard behaviour verified by reproduction; downstream reference-pick effect likely.)*
-  `Project.reject_seestar_output_frames` (`seestack/io/project.py`) only rejects a bare `<T>/` folder's frames
-  when it holds **at most `_MAX_SEESTAR_OUTPUT_FRAMES = 2`** — but the owner's real library has one stacked
-  FITS *per session*: bare `M 3` carries **+22** frames over `M 3_SUB`, `M 13` **+9**, `M 101` **+11**,
-  `NGC 281W` **+10`. Those never get rejected on re-scan, stay in the stack **and in the reference pool**, and
-  `pick_central_frame` scores by distance-to-median-pointing then FWHM — which is exactly where a device-stacked
-  output sits (dither centre, high SNR). Reproduced: 5 outputs beside a `_SUB` sibling → **0 rejected**.
-  **Fix:** when the scan has *positive evidence* a folder is output (a same-parent `_sub` sibling exists on disk
-  in this scan), **lift the cap for that folder**; keep the cap for the no-sibling case. Reversible, never a
-  delete.
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
 
-  > **⚠️ READ BEFORE STARTING — the filed fix collides head-on with an existing regression test, and whoever
-  > takes this has to resolve that first** *(Builder 2026-09-02, found while sizing this after shipping A3;
-  > not started, deliberately — it needs a decision, not a patch.)* The proposed evidence — "a same-parent
-  > `_sub` sibling exists on disk" — is **exactly the scenario**
-  > `test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_name`
-  > (`tests/test_scanner.py`) exists to protect: 8 of a user's *own* raw subs in a plain folder named
-  > `Andromeda/`, sitting beside a Seestar `Andromeda_sub/`. Lift the cap on sibling evidence and that test's
-  > 8 real subs are mass-rejected. (It passes today only because its frames are DB rows with nothing on disk,
-  > so a disk-based sibling check finds no sibling — i.e. it would go green for the wrong reason, which is
-  > worse than failing.) **The discriminator that actually separates the two cases is the filename, not the
-  > folder or the count:** the Seestar's per-session output is `Stacked*.fit`, real subs are
-  > `Light_<T>_<exp>_<filter>_*.fit`. The repo *knows* this convention — every scanner fixture uses it
-  > (`tests/test_scanner.py` writes `Stacked.fit`, `Stacked_60s.fit`, `Stacked_{i:02d}.fit`) — but **no
-  > production module matches on it**: `grep -rn "Stacked" --include=*.py seestack/ webapp/` returns nothing.
-  > So the shape to consider is "reject a bare `<T>/` frame whose *filename* is on-device output, at any
-  > count; keep the ≤2 cap for everything else", which rejects the owner's 22 and keeps the mixed-source test's
-  > 8 without either heuristic having to guess. **Confirm the naming against the owner's real folder listing
-  > before building it** — the listing is already in this file, buried in the `⚪ CLOSED AS A NON-BUG` mosaic
-  > entry (search `"skips a bare"`) — and note this is the **on-by-default ingest path**, so an over-broad
-  > match silently drops real subs from a stack. A second, header-based discriminator (a stacked output's
-  > `EXPTIME` is N×10 s, or it carries a stack-count card) would be stronger still if the DB rows carry it.
+  - **🟠 A7 — PRE-v0.184.9 SEESTAR ON-DEVICE OUTPUTS STAY ACCEPTED *INSIDE* THE OWNER'S REAL TARGETS, AND CAN BE
+    PICKED AS THE ALIGNMENT REFERENCE.** *(Severity: wrong reference frame / mild contamination on his biggest
+    targets. Confidence: guard behaviour verified by reproduction; downstream reference-pick effect likely.)*
+    `Project.reject_seestar_output_frames` (`seestack/io/project.py`) only rejects a bare `<T>/` folder's frames
+    when it holds **at most `_MAX_SEESTAR_OUTPUT_FRAMES = 2`** — but the owner's real library has one stacked
+    FITS *per session*: bare `M 3` carries **+22** frames over `M 3_SUB`, `M 13` **+9**, `M 101` **+11**,
+    `NGC 281W` **+10`. Those never get rejected on re-scan, stay in the stack **and in the reference pool**, and
+    `pick_central_frame` scores by distance-to-median-pointing then FWHM — which is exactly where a device-stacked
+    output sits (dither centre, high SNR). Reproduced: 5 outputs beside a `_SUB` sibling → **0 rejected**.
+    **Fix:** when the scan has *positive evidence* a folder is output (a same-parent `_sub` sibling exists on disk
+    in this scan), **lift the cap for that folder**; keep the cap for the no-sibling case. Reversible, never a
+    delete.
+
+    > **⚠️ READ BEFORE STARTING — the filed fix collides head-on with an existing regression test, and whoever
+    > takes this has to resolve that first** *(Builder 2026-09-02, found while sizing this after shipping A3;
+    > not started, deliberately — it needs a decision, not a patch.)* The proposed evidence — "a same-parent
+    > `_sub` sibling exists on disk" — is **exactly the scenario**
+    > `test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_name`
+    > (`tests/test_scanner.py`) exists to protect: 8 of a user's *own* raw subs in a plain folder named
+    > `Andromeda/`, sitting beside a Seestar `Andromeda_sub/`. Lift the cap on sibling evidence and that test's
+    > 8 real subs are mass-rejected. (It passes today only because its frames are DB rows with nothing on disk,
+    > so a disk-based sibling check finds no sibling — i.e. it would go green for the wrong reason, which is
+    > worse than failing.) **The discriminator that actually separates the two cases is the filename, not the
+    > folder or the count:** the Seestar's per-session output is `Stacked*.fit`, real subs are
+    > `Light_<T>_<exp>_<filter>_*.fit`. The repo *knows* this convention — every scanner fixture uses it
+    > (`tests/test_scanner.py` writes `Stacked.fit`, `Stacked_60s.fit`, `Stacked_{i:02d}.fit`) — but **no
+    > production module matches on it**: `grep -rn "Stacked" --include=*.py seestack/ webapp/` returns nothing.
+    > So the shape to consider is "reject a bare `<T>/` frame whose *filename* is on-device output, at any
+    > count; keep the ≤2 cap for everything else", which rejects the owner's 22 and keeps the mixed-source test's
+    > 8 without either heuristic having to guess. **Confirm the naming against the owner's real folder listing
+    > before building it** — the listing is already in this file, buried in the `⚪ CLOSED AS A NON-BUG` mosaic
+    > entry (search `"skips a bare"`) — and note this is the **on-by-default ingest path**, so an over-broad
+    > match silently drops real subs from a stack. A second, header-based discriminator (a stacked output's
+    > `EXPTIME` is N×10 s, or it carries a stack-count card) would be stronger still if the DB rows carry it.
 
 - **✅ SHIPPED (Builder, v0.326.7, branch `claude/zen-mccarthy-mqfxxg`) — ~~A6: walk-away auto-reject picks its
   method from the whole target's frame count, so a shallow mosaic panel gets a rejection pass that is
@@ -1071,13 +1077,15 @@ _(nothing else claimed — claim an item here with your branch name)_
 
   *(Original entry follows.)*
 
-- **🟡 A5 — the Target page's "Your picture" ignores the pinned cover that every other surface honours.**
-  `frontend/src/routes/Target.tsx` takes `runs.data?.[0]` (newest run) for the hero, its share caption and its
-  Edit button, while the Library tile, Best wall, montage and `grainier-newest` all resolve **pinned cover
-  first** (`webapp/routers/gallery.py` `_representative_run`, `webapp/routers/targets.py`
-  `current_picture_path`). Pin run 3, re-stack to run 4 → the Target page shows a *different picture* from the
-  Library card while its own notes talk about "the cover". **Fix:** same precedence as `_representative_run`;
-  label "Your picture (cover)" vs "Your newest picture".
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **🟡 A5 — the Target page's "Your picture" ignores the pinned cover that every other surface honours.**
+    `frontend/src/routes/Target.tsx` takes `runs.data?.[0]` (newest run) for the hero, its share caption and its
+    Edit button, while the Library tile, Best wall, montage and `grainier-newest` all resolve **pinned cover
+    first** (`webapp/routers/gallery.py` `_representative_run`, `webapp/routers/targets.py`
+    `current_picture_path`). Pin run 3, re-stack to run 4 → the Target page shows a *different picture* from the
+    Library card while its own notes talk about "the cover". **Fix:** same precedence as `_representative_run`;
+    label "Your picture (cover)" vs "Your newest picture".
 
 - **✅ SHIPPED (Builder, v0.327.5, branch `claude/sweet-babbage-35yfmt`) — ~~A8: a target whose missing files
   never return is held back from auto-stacking FOREVER, and the owner has no action to take.~~** Shipped in
