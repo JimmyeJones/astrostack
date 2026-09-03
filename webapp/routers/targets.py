@@ -996,7 +996,14 @@ def target_stack_health(
         # every run stacked since.
         backfill_seam_residual(proj, run)
         frames = list(proj.iter_frames())
-        notes = stack_health(run, frames)
+        # The √N yardstick note reads the measurement the "One frame vs your
+        # stack" reveal already stamped — it never measures one. A run nobody has
+        # revealed yet simply gets no note, and starts getting one the moment the
+        # headline badge measures it once.
+        from webapp.routers.stack import stamped_noise_ratio
+
+        notes = stack_health(run, frames,
+                             noise_ratio=stamped_noise_ratio(proj, run, frames))
         spec = recommended_dark_spec(frames)
     finally:
         proj.close()

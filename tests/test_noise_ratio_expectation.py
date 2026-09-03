@@ -1,10 +1,11 @@
 """Is a measured noise reduction *good*? The √N yardstick the reveal card reads.
 
-The "One frame vs your stack" card now says what a stack's frame count should
-have bought (``noiseVsExpectedNote`` in ``frontend/src/components/oneFrameVsStack.ts``),
-and nudges when the measurement lands below ``NOISE_EXPECTED_LOW_FRACTION`` (0.7)
-of √N. That threshold is a claim about *this* estimator's behaviour on real
-stacking, so it is pinned here rather than only in the copy that quotes it:
+Two surfaces say what a stack's frame count should have bought — the "One frame
+vs your stack" card and the "How's my stack?" panel — and both read one
+judgement, ``seestack.stackhealth.noise_vs_expected``, which nudges when the
+measurement lands below ``NOISE_EXPECTED_LOW_FRACTION`` (0.7) of √N. That
+threshold is a claim about *this* estimator's behaviour on real stacking, so it
+is pinned here rather than only in the copy that quotes it:
 
 * an **ideal** mean stack of independent-noise subs must read ~1.00·√N — if the
   estimator were biased low on healthy data the nudge would fire on good stacks;
@@ -25,10 +26,11 @@ import numpy as np
 import pytest
 
 from seestack.qc.noise_ratio import noise_ratio
+from seestack.stackhealth import NOISE_EXPECTED_LOW_FRACTION, noise_vs_expected
 
-# Mirrors NOISE_EXPECTED_LOW_FRACTION in oneFrameVsStack.ts. A stack measuring
-# below this share of √N is what the card calls "came in nearer …".
-LOW_FRACTION = 0.7
+# The one definition, imported rather than re-typed: a stack measuring below this
+# share of √N is what both surfaces call "came in nearer …".
+LOW_FRACTION = NOISE_EXPECTED_LOW_FRACTION
 
 SHAPE = (320, 320)
 SIGMA = 0.02
@@ -84,9 +86,12 @@ def test_healthy_stack_reads_as_expected(n: int) -> None:
     """An ideal mean stack measures ~1.00·√N, comfortably clear of the nudge."""
     base = _scene(seed=3)
     sub, stack = _stack(base, n, seed=100 + n)
-    share = _measure(sub, stack) / np.sqrt(n)
+    measured = _measure(sub, stack)
+    share = measured / np.sqrt(n)
     assert share == pytest.approx(1.0, abs=0.05)
     assert share > LOW_FRACTION
+    # …and the verdict both surfaces read agrees, rather than only the arithmetic.
+    assert noise_vs_expected(measured, n) == "expected"
 
 
 def test_quality_weighting_stays_well_above_the_nudge() -> None:
@@ -99,10 +104,12 @@ def test_quality_weighting_stays_well_above_the_nudge() -> None:
     w = np.random.default_rng(9).uniform(0.1, 1.0, n)
     effective_n = float(w.sum() ** 2 / (w ** 2).sum())
     sub, stack = _stack(base, n, seed=77, weights=w)
-    share = _measure(sub, stack) / np.sqrt(n)
+    measured = _measure(sub, stack)
+    share = measured / np.sqrt(n)
     # The honest prediction for a weighted mean, and the measurement agrees.
     assert share == pytest.approx(np.sqrt(effective_n / n), abs=0.05)
     assert share > LOW_FRACTION + 0.15
+    assert noise_vs_expected(measured, n) == "expected"
 
 
 @pytest.mark.parametrize("n,shared_var", [(100, 0.02), (100, 0.10)])
@@ -111,5 +118,6 @@ def test_correlated_subs_fall_below_the_nudge(n: int, shared_var: float) -> None
     under √N — the underperforming case the card nudges about."""
     base = _scene(seed=5)
     sub, stack = _stack(base, n, seed=200, shared_var=shared_var)
-    share = _measure(sub, stack) / np.sqrt(n)
-    assert share < LOW_FRACTION
+    measured = _measure(sub, stack)
+    assert measured / np.sqrt(n) < LOW_FRACTION
+    assert noise_vs_expected(measured, n) == "low"

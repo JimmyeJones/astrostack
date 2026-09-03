@@ -922,7 +922,11 @@ def recent_night_pace_s(
     light, which biases the pace *low* and so tells a beginner they need **more**
     clear nights than they do. The default stays session-based only because
     changing it would silently move a number for a caller that hasn't been given a
-    longitude to bucket nights with.
+    longitude to bucket nights with. That default is a kindness and a trap both —
+    a new surface gets the halved figure by simply not knowing to pass this — so
+    ``tests/webapp/test_night_pace_night_of_guard.py`` requires every webapp call
+    site either to pass ``night_of`` or to say in a marker comment that sessions
+    really are what it means.
 
     Only the most recent ``lookback_nights`` count, and within those only the
     *productive* ones (at least ``MIN_PRODUCTIVE_NIGHT_S`` of kept subs). Returns

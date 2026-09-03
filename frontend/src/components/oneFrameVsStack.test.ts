@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  NOISE_EXPECTED_LOW_FRACTION,
-  NOISE_EXPECTED_MIN_FRAMES,
   noiseReductionBadge,
   noiseVsExpectedNote,
   oneFrameCaption,
@@ -81,9 +79,14 @@ describe("noiseReductionBadge", () => {
 });
 
 describe("noiseVsExpectedNote", () => {
+  // The *judgement* is the server's (`seestack.stackhealth.noise_vs_expected`,
+  // where the measured 0.7·√N threshold and its 10-frame floor live and are
+  // pinned against the real estimator). These pin the *sentence* written for it,
+  // and that a missing/unknown verdict renders nothing rather than guessing.
+
   it("says a healthy stack is doing what its frame count should", () => {
     // 505 subs → √505 ≈ 22.5×; a measured 21× is right where it should be.
-    expect(noiseVsExpectedNote(21, 505)).toEqual({
+    expect(noiseVsExpectedNote("expected", 21, 505)).toEqual({
       text: "That's about what 505 subs should give (√505 ≈ 22×).",
       concern: false,
     });
@@ -91,16 +94,16 @@ describe("noiseVsExpectedNote", () => {
 
   it("keeps one decimal on a small stack's yardstick", () => {
     // √16 = 4 exactly; √12 ≈ 3.5 — the same rounding rule as the badge.
-    expect(noiseVsExpectedNote(3.9, 16)?.text).toBe(
+    expect(noiseVsExpectedNote("expected", 3.9, 16)?.text).toBe(
       "That's about what 16 subs should give (√16 ≈ 4×).");
-    expect(noiseVsExpectedNote(3.2, 12)?.text).toBe(
+    expect(noiseVsExpectedNote("expected", 3.2, 12)?.text).toBe(
       "That's about what 12 subs should give (√12 ≈ 3.5×).");
   });
 
-  it("nudges gently when the stack came in well below √N", () => {
+  it("nudges gently when the server reads the stack as low", () => {
     // √400 = 20×; 8× is 0.4·√N — the shape correlated noise (soft alignment,
     // a drifting gradient) produces, measured at 0.45 on real synthetic data.
-    const note = noiseVsExpectedNote(8, 400);
+    const note = noiseVsExpectedNote("low", 8, 400);
     expect(note?.concern).toBe(true);
     expect(note?.text).toContain("400 subs should cut the noise about 20× (√400)");
     expect(note?.text).toContain("came in nearer 8×");
@@ -114,40 +117,29 @@ describe("noiseVsExpectedNote", () => {
     // is precisely the run worth saying something about — so this note carries
     // the measured number itself and stands alone.
     expect(noiseReductionBadge(1.3, 100)).toBeNull();
-    const note = noiseVsExpectedNote(1.3, 100);
+    const note = noiseVsExpectedNote("low", 1.3, 100);
     expect(note?.concern).toBe(true);
     expect(note?.text).toContain("came in nearer 1.3×");
   });
 
-  it("never fires on a healthy or heavily-weighted stack", () => {
-    // Measured against the real estimator: an ideal mean stack reads
-    // ratio/√N = 0.996–1.012, and weights as spread as U(0.1,1) still read
-    // 0.93. Both must read as expected, with margin.
-    for (const n of [12, 25, 100, 400]) {
-      for (const f of [0.93, 1.0, 1.012, 1.2]) {
-        expect(noiseVsExpectedNote(f * Math.sqrt(n), n)?.concern).toBe(false);
-      }
-    }
+  it("renders nothing without a verdict from the server", () => {
+    // No measurement, too few frames for √N to mean anything, or a build that
+    // predates the field: all three arrive as a missing/unknown verdict, and
+    // this file must not second-guess any of them with a threshold of its own.
+    expect(noiseVsExpectedNote(null, 8, 400)).toBeNull();
+    expect(noiseVsExpectedNote(undefined, 8, 400)).toBeNull();
+    expect(noiseVsExpectedNote("", 8, 400)).toBeNull();
+    expect(noiseVsExpectedNote("something_new", 8, 400)).toBeNull();
   });
 
-  it("stays silent when √N would mean nothing, or nothing was measured", () => {
-    expect(noiseVsExpectedNote(2.0, 9)).toBeNull();    // below the 10-frame floor
-    expect(noiseVsExpectedNote(2.0, 3)).toBeNull();
-    expect(noiseVsExpectedNote(null, 100)).toBeNull();
-    expect(noiseVsExpectedNote(undefined, 100)).toBeNull();
-    expect(noiseVsExpectedNote(Number.NaN, 100)).toBeNull();
-    expect(noiseVsExpectedNote(0, 100)).toBeNull();
-    expect(noiseVsExpectedNote(5, null)).toBeNull();
-    expect(noiseVsExpectedNote(5, undefined)).toBeNull();
-    expect(noiseVsExpectedNote(5, Number.NaN)).toBeNull();
-  });
-
-  it("puts the boundary exactly at the measured 0.7·√N", () => {
-    const n = 100;
-    expect(noiseVsExpectedNote(NOISE_EXPECTED_LOW_FRACTION * Math.sqrt(n), n)?.concern)
-      .toBe(false);
-    expect(noiseVsExpectedNote(
-      NOISE_EXPECTED_LOW_FRACTION * Math.sqrt(n) - 0.01, n)?.concern).toBe(true);
-    expect(NOISE_EXPECTED_MIN_FRAMES).toBe(10);
+  it("stays silent when it cannot name the numbers in the sentence", () => {
+    expect(noiseVsExpectedNote("expected", null, 100)).toBeNull();
+    expect(noiseVsExpectedNote("expected", undefined, 100)).toBeNull();
+    expect(noiseVsExpectedNote("low", Number.NaN, 100)).toBeNull();
+    expect(noiseVsExpectedNote("low", 0, 100)).toBeNull();
+    expect(noiseVsExpectedNote("expected", 5, null)).toBeNull();
+    expect(noiseVsExpectedNote("expected", 5, undefined)).toBeNull();
+    expect(noiseVsExpectedNote("expected", 5, Number.NaN)).toBeNull();
+    expect(noiseVsExpectedNote("expected", 5, 0)).toBeNull();
   });
 });

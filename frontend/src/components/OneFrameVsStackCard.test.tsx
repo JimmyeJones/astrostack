@@ -31,7 +31,8 @@ describe("OneFrameVsStackCard", () => {
     vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
       available: true, n_frames: 505, sub_exposure_s: 30, integration_s: 15150,
     });
-    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: 15.3 });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue(
+      { ratio: 15.3, expected_verdict: "expected" });
     renderCard("M_42", 7);
     await waitFor(() =>
       expect(screen.getByText("One frame vs your stack")).toBeInTheDocument());
@@ -100,7 +101,8 @@ describe("OneFrameVsStackCard — is that number any good?", () => {
     vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
       available: true, n_frames: 505, sub_exposure_s: 30, integration_s: 15150,
     });
-    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: 21 });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue(
+      { ratio: 21, expected_verdict: "expected" });
     renderCard("M_42", 7);
     fireEvent.click(await screen.findByRole("button", { name: /see the difference/i }));
     expect(await screen.findByTestId("noise-expected")).toHaveTextContent(
@@ -111,7 +113,8 @@ describe("OneFrameVsStackCard — is that number any good?", () => {
     vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
       available: true, n_frames: 400, sub_exposure_s: 30, integration_s: 12000,
     });
-    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: 8 });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue(
+      { ratio: 8, expected_verdict: "low" });
     renderCard("M_42", 7);
     fireEvent.click(await screen.findByRole("button", { name: /see the difference/i }));
     const note = await screen.findByTestId("noise-expected");
@@ -132,10 +135,13 @@ describe("OneFrameVsStackCard — is that number any good?", () => {
   });
 
   it("doesn't judge a stack too thin for √N to mean anything", async () => {
+    // The server withholds a verdict below its 10-frame floor (measured and
+    // pinned in tests/test_stackhealth.py) — the card just renders the badge.
     vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
       available: true, n_frames: 6, sub_exposure_s: 30, integration_s: 180,
     });
-    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({ ratio: 1.6 });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue(
+      { ratio: 1.6, expected_verdict: null });
     renderCard("M_42", 7);
     fireEvent.click(await screen.findByRole("button", { name: /see the difference/i }));
     expect(await screen.findByTestId("noise-badge")).toBeInTheDocument();
