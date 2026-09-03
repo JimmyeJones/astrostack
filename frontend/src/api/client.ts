@@ -1839,6 +1839,32 @@ export interface PresetSuggestion {
  *  preview is already 1:1, or the recipe's geometry makes "which part of the
  *  picture is this?" unanswerable. Absent on an older backend, which the caller
  *  reads as "don't offer it". */
+/** Which source pixels a rendered full-size window actually covers, as the
+ *  server clamped it — `x`/`y`/`width`/`height` in the **full canvas**'s own
+ *  pixels, alongside that canvas's size. The browser can only ever report a
+ *  fraction of the preview it clicked, and with a crop in the recipe that maps to
+ *  somewhere it cannot compute, so this is the one authoritative answer to "which
+ *  part of my picture am I looking at?". Comes back on the loupe response's
+ *  `X-Loupe-Window` header; `null` on an older backend that doesn't send it. */
+export interface LoupeWindow {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  canvas_width: number;
+  canvas_height: number;
+  proxy_scale: number;
+  /** The same rectangle as 0..1 fractions of the **rendered preview**, which is a
+   *  different frame whenever the recipe crops. Deliberately not clamped: a
+   *  window clamped inside the canvas can hang over a crop's edge, and saying so
+   *  lets the marker be drawn clipped rather than slid inward. Absent on a
+   *  backend older than v0.329.6, and on a degenerate crop. */
+  preview_x?: number;
+  preview_y?: number;
+  preview_width?: number;
+  preview_height?: number;
+}
+
 export interface LoupeInfo {
   available: boolean;
   reason: string | null;
@@ -2927,6 +2953,28 @@ export const api = {
                  fx: number, fy: number, size: number) =>
     `/api/targets/${safe}/stack-runs/${runId}/editor/loupe?recipe=${encodeRecipe(recipe)}`
     + `&fx=${fx.toFixed(4)}&fy=${fy.toFixed(4)}&size=${Math.round(size)}`,
+  /** The full-size window as a blob URL **and** the source rectangle it covers.
+   *  Fetched rather than hung off an `<img src>` because the rectangle only
+   *  exists as a response header — the same blob-URL shape the live preview
+   *  already uses, so the caller must revoke the URL when it changes. */
+  fetchLoupe: async (safe: string, runId: number, recipe: Recipe,
+                     fx: number, fy: number, size: number,
+                     signal?: AbortSignal): Promise<{
+                       url: string; window: LoupeWindow | null }> => {
+    const res = await fetch(
+      api.editLoupeUrl(safe, runId, recipe, fx, fy, size), { signal });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try { detail = (await res.json()).detail ?? detail; } catch { /* ignore */ }
+      throw new Error(detail);
+    }
+    let win: LoupeWindow | null = null;
+    try {
+      const raw = res.headers.get("X-Loupe-Window");
+      if (raw) win = JSON.parse(raw) as LoupeWindow;
+    } catch { /* an unreadable header just means "don't say where" */ }
+    return { url: URL.createObjectURL(await res.blob()), window: win };
+  },
   editStarMaskUrl: (safe: string, runId: number, sizePx?: number,
                     recipe?: Recipe, uid?: string) => {
     const q = new URLSearchParams();

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { clickFraction, loupeCaption, loupeMarkerRect } from "./loupe";
+import {
+  clickFraction, loupeCaption, loupeMarkerFromWindow, loupeMarkerRect, loupeWhereText,
+} from "./loupe";
 
 describe("loupeMarkerRect", () => {
   it("draws the window as its true share of the picture", () => {
@@ -68,5 +70,77 @@ describe("loupeCaption", () => {
   it("drops the shrunk-preview clause when there is no shrinking", () => {
     expect(loupeCaption(512, 1)).not.toContain("shrunk");
     expect(loupeCaption(512, null)).not.toContain("shrunk");
+  });
+});
+
+describe("loupeWhereText", () => {
+  const win = (x: number, y: number, size = 512) => ({
+    x, y, width: size, height: size, canvas_width: 6000, canvas_height: 4000,
+  });
+
+  it("names the corner a window sits in, from the server's own rectangle", () => {
+    expect(loupeWhereText(win(0, 0))).toBe("This is the top-left of your picture.");
+    expect(loupeWhereText(win(5488, 3488)))
+      .toBe("This is the bottom-right of your picture.");
+  });
+
+  it("says 'the middle' when it really is the middle", () => {
+    // Thirds, not halves: a centred window must not be called "the left".
+    expect(loupeWhereText(win(2744, 1744))).toBe("This is the middle of your picture.");
+  });
+
+  it("drops the redundant half of an edge that is centred on the other axis", () => {
+    expect(loupeWhereText(win(2744, 0))).toBe("This is the top of your picture.");
+    expect(loupeWhereText(win(0, 1744))).toBe("This is the left of your picture.");
+  });
+
+  it("says nothing when there is no 'where' to name", () => {
+    expect(loupeWhereText(null)).toBeNull();
+    expect(loupeWhereText(undefined)).toBeNull();
+    // The window covers the whole canvas — "all of it" is obvious from the picture.
+    expect(loupeWhereText({
+      x: 0, y: 0, width: 400, height: 300, canvas_width: 400, canvas_height: 300,
+    })).toBeNull();
+  });
+
+  it("stays quiet on nonsense rather than naming a corner from a NaN", () => {
+    expect(loupeWhereText({ ...win(0, 0), canvas_width: 0 })).toBeNull();
+    expect(loupeWhereText({ ...win(0, 0), x: Number.NaN })).toBeNull();
+    expect(loupeWhereText({ ...win(0, 0), width: 0 })).toBeNull();
+  });
+});
+
+describe("loupeMarkerFromWindow", () => {
+  it("uses the server's own preview-frame rectangle, as CSS percentages", () => {
+    const r = loupeMarkerFromWindow({
+      preview_x: 0.2, preview_y: 0.35, preview_width: 0.16, preview_height: 0.28,
+    })!;
+    expect(r.left).toBeCloseTo(20);
+    expect(r.top).toBeCloseTo(35);
+    expect(r.width).toBeCloseTo(16);
+    expect(r.height).toBeCloseTo(28);
+  });
+
+  it("passes a window that hangs over a crop's edge through unclamped", () => {
+    // The window is clamped inside the *canvas*, not inside the crop, so at the
+    // edge of a narrow crop it really does overhang. Drawing it clipped is the
+    // truth; sliding it inward would point at somewhere it is not.
+    const r = loupeMarkerFromWindow({
+      preview_x: -1.4, preview_y: -1.4, preview_width: 3.2, preview_height: 3.2,
+    })!;
+    expect(r.left).toBe(-140);
+    expect(r.width).toBe(320);
+  });
+
+  it("returns null whenever the server didn't answer, so the guide stands in", () => {
+    expect(loupeMarkerFromWindow(null)).toBeNull();
+    expect(loupeMarkerFromWindow(undefined)).toBeNull();
+    expect(loupeMarkerFromWindow({})).toBeNull();               // older backend
+    expect(loupeMarkerFromWindow({
+      preview_x: 0.2, preview_y: 0.2, preview_width: 0, preview_height: 0.2,
+    })).toBeNull();
+    expect(loupeMarkerFromWindow({
+      preview_x: Number.NaN, preview_y: 0.2, preview_width: 0.2, preview_height: 0.2,
+    })).toBeNull();
   });
 });

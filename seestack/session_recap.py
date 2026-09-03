@@ -739,9 +739,10 @@ def _night_verdict(
 
 
 def _merge_sessions_by_night(
-    sessions: list[list[tuple[datetime, FrameRow]]],
+    sessions: list[list[_TimedT]],
     night_of: NightKeyFn,
-) -> list[list[tuple[datetime, FrameRow]]]:
+    stamp_of: Callable[[_TimedT], str | None],
+) -> list[list[_TimedT]]:
     """Roll adjacent capture sessions that belong to the **same observing night**
     into one group, preserving capture order.
 
@@ -756,11 +757,18 @@ def _merge_sessions_by_night(
     A stamp it can't place (``None``) never merges with anything, including
     another unplaceable one: guessing two undated halves are the same night is
     worse than showing them apart.
+
+    ``stamp_of`` pulls that raw capture stamp back out of whatever rides along
+    with the timestamp, exactly as :func:`_split_sessions` is generic in it: the
+    Nights card passes ``(datetime, FrameRow)`` pairs and the lean pace path
+    passes ``(datetime, exposure_s, accept, stamp)`` rows. Keeping one merge
+    implementation is what stops the two surfaces disagreeing about which two
+    halves are one night.
     """
-    merged: list[list[tuple[datetime, FrameRow]]] = []
+    merged: list[list[_TimedT]] = []
     prev_key: object = None
     for session in sessions:
-        key = night_of(session[0][1].timestamp_utc)
+        key = night_of(stamp_of(session[0]))
         if merged and key is not None and key == prev_key:
             merged[-1].extend(session)
         else:
@@ -803,7 +811,8 @@ def nights_breakdown(
     dated.sort(key=lambda pair: pair[0])
     sessions = _split_sessions(dated, gap_hours)
     if night_of is not None:
-        sessions = _merge_sessions_by_night(sessions, night_of)
+        sessions = _merge_sessions_by_night(
+            sessions, night_of, lambda row: row[1].timestamp_utc)
 
     # Per-night medians, once, for the two things that need to compare nights.
     # They want *different* statistics and used to share one: the "best" nod
@@ -875,6 +884,10 @@ def nights_breakdown(
 # Library-wide overview gets it from the server, computed here. Both must land on
 # the same figure for the same target, or the two screens would quote different
 # ETAs for the same picture — so change them together.
+#
+# That night list is ``/api/targets/{safe}/nights``, whose rows are **observing
+# nights** (halves merged), so the server-side pace has to be handed a
+# ``night_of`` to agree with it — see :func:`recent_night_pace_s`.
 
 # How many recent nights the pace is taken over. Long enough that one short night
 # doesn't dominate, short enough that a change of habit shows up quickly.
@@ -890,6 +903,7 @@ def recent_night_pace_s(
     *,
     gap_hours: float = DEFAULT_SESSION_GAP_HOURS,
     lookback_nights: int = PACE_LOOKBACK_NIGHTS,
+    night_of: NightKeyFn | None = None,
 ) -> float | None:
     """This target's recent productive pace: the **median kept integration per
     clear night**, in seconds, over its most recent nights — or ``None`` when
@@ -900,18 +914,27 @@ def recent_night_pace_s(
     own history knows what a clear night is really worth to *this* owner: this
     sky, this framing, this rejection rate.
 
-    Nights are the same 6 h-gap capture sessions :func:`nights_breakdown` shows,
-    so the number agrees with the "Nights" card. Only the most recent
-    ``lookback_nights`` count, and within those only the *productive* ones (at
-    least ``MIN_PRODUCTIVE_NIGHT_S`` of kept subs). Returns ``None`` unless at
-    least two of them qualify — one session is not a pace, and projecting a whole
-    remaining goal off it would be a confident guess from nothing.
+    Nights are split exactly as :func:`nights_breakdown` splits them, so the
+    number agrees with the "Nights" card — **pass the same ``night_of``** and a
+    night shot in two goes (an evening run, bed, then a pre-dawn run) counts once,
+    carrying its whole integration. Omit it and the split is session-by-session:
+    each half then enters the median on its own, carrying roughly half the night's
+    light, which biases the pace *low* and so tells a beginner they need **more**
+    clear nights than they do. The default stays session-based only because
+    changing it would silently move a number for a caller that hasn't been given a
+    longitude to bucket nights with.
+
+    Only the most recent ``lookback_nights`` count, and within those only the
+    *productive* ones (at least ``MIN_PRODUCTIVE_NIGHT_S`` of kept subs). Returns
+    ``None`` unless at least two of them qualify — one night is not a pace, and
+    projecting a whole remaining goal off it would be a confident guess from
+    nothing.
 
     Read-only and offline; it reads three columns per dated frame and never
     writes anything.
     """
-    dated: list[tuple[datetime, float, bool]] = [
-        (dt, exposure, accept)
+    dated: list[tuple[datetime, float, bool, str | None]] = [
+        (dt, exposure, accept, ts)
         for ts, exposure, accept in project.iter_frame_capture_rows()
         if (dt := _parse(ts)) is not None
     ]
@@ -919,12 +942,14 @@ def recent_night_pace_s(
         return None
     dated.sort(key=lambda row: row[0])
     sessions = _split_sessions(dated, gap_hours)
+    if night_of is not None:
+        sessions = _merge_sessions_by_night(sessions, night_of, lambda row: row[3])
 
     # Newest first, then the same window + productivity filter the Target page's
     # client-side estimate applies.
     recent = sessions[-lookback_nights:] if lookback_nights > 0 else []
     kept_per_night = [
-        sum(exposure for _dt, exposure, accept in s if accept) for s in recent
+        sum(exposure for _dt, exposure, accept, _ts in s if accept) for s in recent
     ]
     productive = [k for k in kept_per_night if k >= MIN_PRODUCTIVE_NIGHT_S]
     if len(productive) < 2:

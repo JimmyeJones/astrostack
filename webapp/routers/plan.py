@@ -44,6 +44,7 @@ from webapp.goals import read_goal_s
 from webapp.ics import IcsEvent, to_ics
 from webapp.registry_cache import cached_for_registry, registry_signature
 from webapp.site_location import detect_site_from_library as _detect_site_from_library
+from webapp.site_location import resolve_night_key
 
 log = logging.getLogger(__name__)
 
@@ -133,19 +134,25 @@ def _library_targets(request: Request) -> list[LibraryTarget]:
     alone), so the whole annotated list is cached behind the shared
     registry-signature cache the Dashboard roll-up uses.
     """
+    settings = deps.get_settings(request)
     lib = deps.open_library(request)
     try:
         targets = lib.list_targets()
+        night_key = resolve_night_key(request, lib, settings.site_lon)
         return cached_for_registry(
             request.app, "plan_library_targets", registry_signature(targets),
-            lambda: _annotate_library_targets(lib, targets),
+            lambda: _annotate_library_targets(lib, targets, night_key),
         )
     finally:
         lib.close()
 
 
-def _annotate_library_targets(lib, targets) -> list[LibraryTarget]:  # noqa: ANN001
-    """Build the annotated 'already targeted' rows (see :func:`_library_targets`)."""
+def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget]:  # noqa: ANN001
+    """Build the annotated 'already targeted' rows (see :func:`_library_targets`).
+
+    ``night_of`` buckets the recent pace by observing night, so the row's "~1 more
+    clear night finishes this" is the same figure the Target page and the
+    Dashboard quote (see :func:`webapp.routers.stats._collect_progress`)."""
     from seestack.objectinfo import identify_object
     from seestack.session_recap import recent_night_pace_s
     from webapp.framing_advice import newest_picture_nudge
@@ -164,7 +171,7 @@ def _annotate_library_targets(lib, targets) -> list[LibraryTarget]:  # noqa: ANN
         try:
             proj = lib.open_target(t.safe_name)
             goal_s = read_goal_s(proj)
-            pace_s = recent_night_pace_s(proj)
+            pace_s = recent_night_pace_s(proj, night_of=night_of)
             # "Nudge a little south before you start" — the framing advice from
             # this target's newest picture, brought forward from the morning-after
             # card to the screen someone reads while pointing the scope. One more

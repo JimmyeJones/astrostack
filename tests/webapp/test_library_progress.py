@@ -95,3 +95,74 @@ def test_progress_pace_is_absent_for_a_single_night_target(client, built_library
     for row in body:
         assert "recent_pace_s" in row
         assert row["recent_pace_s"] is None
+
+
+def _seed_split_nights(data_root, safe: str, nights: list[int], *, subs: int = 20) -> None:
+    """Give one target ``len(nights)`` capture nights that were each shot in *two
+    goes* — 21:00, then 05:00 the next morning — which is one observing night but
+    two 6 h-gap capture sessions."""
+    from datetime import datetime, timedelta
+
+    from seestack.io.library import Library
+    from seestack.io.project import FrameRow
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            for day in nights:
+                evening = datetime(2026, 7, day, 21, 0, 0)
+                for half, base in ((0, evening), (1, evening + timedelta(hours=8))):
+                    for i in range(subs):
+                        ts = base + timedelta(seconds=30 * i)
+                        proj.add_frame(FrameRow(
+                            source_path=f"/seed/{safe}-{day}-{half}-{i}.fit",
+                            timestamp_utc=ts.isoformat(),
+                            exposure_s=30.0,
+                            accept=True,
+                        ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_progress_pace_counts_a_split_night_once(client, built_library):
+    """A night shot in two goes is one clear night's worth of light, not two
+    half-nights. Counting the halves separately halved the pace, and the pace is
+    the divisor behind "about N more clear nights" — so the card told a beginner
+    they needed twice as many clear nights as they really did."""
+    # Pin the observing-night bucketing so the assertion doesn't depend on
+    # whatever longitude the fixture's headers happen to carry.
+    assert client.put("/api/settings", json={"site_lon": 0.0}).status_code == 200
+    _seed_split_nights(built_library, "M_42", [1, 8, 15])
+
+    body = client.get("/api/library-progress").json()
+    by_safe = {row["safe"]: row for row in body}
+    # 2 × 20 subs × 30 s = 1200 s per night; each half alone is only 600 s.
+    assert by_safe["M_42"]["recent_pace_s"] == 1200.0
+
+
+def test_progress_pace_agrees_with_the_targets_nights_card(client, built_library):
+    """The two surfaces quote the same ETA for the same picture: the Dashboard
+    divides by this server-side pace, the Target page derives its own from the
+    rows of ``/api/targets/{safe}/nights``. Both must see the same nights."""
+    from statistics import median
+
+    assert client.put("/api/settings", json={"site_lon": 0.0}).status_code == 200
+    _seed_split_nights(built_library, "M_42", [1, 8, 15])
+
+    nights = client.get("/api/targets/M_42/nights").json()
+    # One row per observing night, each spanning both of its halves (plus the
+    # fixture library's own small ingest night).
+    assert [n["night_date"] for n in nights][:3] == [
+        "2026-07-15", "2026-07-08", "2026-07-01",
+    ]
+    # The same window + productivity filter ``clearNights.ts`` applies to these
+    # rows client-side (PACE_LOOKBACK_NIGHTS = 5, MIN_PRODUCTIVE_NIGHT_S = 120).
+    client_side = [n["kept_exposure_s"] for n in nights[:5]
+                   if n["kept_exposure_s"] >= 120.0]
+    server_pace = {r["safe"]: r["recent_pace_s"]
+                   for r in client.get("/api/library-progress").json()}["M_42"]
+    assert server_pace == median(client_side)
