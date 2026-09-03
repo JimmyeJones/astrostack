@@ -1,10 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
   noiseReductionBadge,
+  factorLabel,
   noiseVsExpectedNote,
   oneFrameCaption,
   subExposureLabel,
 } from "./oneFrameVsStack";
+import factorLabelCases from "./factorLabel.cases.json";
+
+describe("factorLabel", () => {
+  // The *same* table `tests/test_factor_label_mirror.py` drives
+  // `seestack.stackhealth._factor_label` against, so the badge here and the
+  // "How's my stack?" note there cannot describe one stack two ways. Change the
+  // rule and you have to change the table, which fails both sides at once.
+  it.each(factorLabelCases.cases as [number, string][])(
+    "spells %p as %p, the same as the health note does",
+    (value, want) => {
+      expect(factorLabel(value)).toBe(want);
+    });
+});
 
 describe("subExposureLabel", () => {
   it("labels whole and fractional exposures", () => {

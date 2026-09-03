@@ -64,8 +64,16 @@ export function noiseReductionBadge(
 
 /** Big reductions read as a whole number ("15×"); smaller ones keep one decimal
  *  ("2.4×") — but drop a trailing ".0" so a value that rounds up to a whole
- *  number ("10.0") shows cleanly as "10×". */
-function factorLabel(value: number): string {
+ *  number ("10.0") shows cleanly as "10×".
+ *
+ *  Mirrored by hand in `seestack.stackhealth._factor_label`, which writes the
+ *  "How's my stack?" note about the *same* run — a user reads both minutes
+ *  apart, so a drift shows up as the app contradicting itself about one picture.
+ *  The two are pinned against one shared table, `factorLabel.cases.json`, driven
+ *  from this file's test and from `tests/test_factor_label_mirror.py`: change the
+ *  rule and you have to change the table, on both sides. Exported for that test
+ *  only. */
+export function factorLabel(value: number): string {
   const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }

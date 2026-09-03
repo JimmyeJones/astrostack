@@ -270,8 +270,19 @@ def _factor_label(value: float) -> str:
     a big reduction as a whole number ("15"), a smaller one to one decimal
     ("3.5"), dropping a trailing ``.0`` so 10.04 reads "10" rather than "10.0".
     Kept identical to the card's ``factorLabel`` so the same stack is never
-    described two ways on two screens."""
-    rounded = round(value) if value >= 10 else round(value * 10) / 10
+    described two ways on two screens — enforced by
+    ``tests/test_factor_label_mirror.py`` against the shared case table in
+    ``frontend/src/components/factorLabel.cases.json``.
+
+    **``floor(x + 0.5)``, not ``round()``.** That is JavaScript's ``Math.round``
+    written out: Python rounds a half to *even* and JavaScript rounds it *up*, so
+    ``round()`` here made the health note call a ratio of 10.5 "10" while the card
+    beside it called the same number "11" — a user reads both about one picture,
+    minutes apart. The card's rule is the older and the conventional one, so this
+    side moved.
+    """
+    rounded = (math.floor(value + 0.5) if value >= 10
+               else math.floor(value * 10 + 0.5) / 10)
     return str(int(rounded)) if float(rounded).is_integer() else f"{rounded:.1f}"
 
 
