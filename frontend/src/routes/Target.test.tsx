@@ -1326,6 +1326,41 @@ describe("TargetView streaked badge", () => {
     expect(tip.textContent).not.toContain("sigma-clip");
   });
 
+  it("warns in the notes area when the saved rejection can't reach those trails", async () => {
+    // The walk-away half of the same fact: the badge says a trail is present,
+    // and this says the settings this target is *saved* with will leave it in
+    // the picture on the next Process/overnight stack. Gated on the streak
+    // count, so it can only ever appear beside the badge.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { streak_detected: true }),
+    ]);
+    vi.spyOn(client.api, "rejectionOutlook").mockResolvedValue({
+      method: "sigma-clip", n_frames: 6, panel_depth: null,
+      lone_outlier_min_frames: 11, reaches: false, user_chose: true,
+    });
+
+    renderTarget();
+
+    const note = await screen.findByTestId("rejection-outlook-note");
+    expect(note.textContent).toContain("Auto outlier removal");
+  });
+
+  it("says nothing about the saved rejection when no sub carries a trail", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    const outlook = vi.spyOn(client.api, "rejectionOutlook");
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.queryByText(/streaked/)).not.toBeInTheDocument());
+    expect(screen.queryByTestId("rejection-outlook-note")).toBeNull();
+    expect(outlook).not.toHaveBeenCalled();
+  });
+
   it("gives the metric column headers plain-language hint tooltips", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
