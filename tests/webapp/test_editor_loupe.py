@@ -233,6 +233,67 @@ def test_the_click_is_read_through_the_recipes_own_crop(client, built_library):
     assert abs(win["y"] + 128 - 0.2 * BIG_H) <= 1
 
 
+def test_the_window_is_also_reported_where_the_preview_would_draw_it(
+        client, built_library):
+    """The marker's own coordinate system. ``x``/``y`` are full-canvas pixels,
+    which is the right frame for "which part of my picture is this?" and the
+    wrong one for a rectangle drawn on the preview — with no crop the two agree,
+    which is exactly why the disagreement went unnoticed."""
+    run_id = _big(client, built_library, basename="onpreview")
+    r = client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe",
+                   params={"recipe": _enc(FLAT_RECIPE), "fx": 0.25, "fy": 0.75,
+                           "size": 256})
+    assert r.status_code == 200, r.text
+    win = _window(r)
+    assert win["preview_width"] == round(256 / BIG_W, 6)
+    assert win["preview_height"] == round(256 / BIG_H, 6)
+    # Centred on the click, in the preview's own fractions.
+    assert abs(win["preview_x"] + win["preview_width"] / 2 - 0.25) < 0.002
+    assert abs(win["preview_y"] + win["preview_height"] / 2 - 0.75) < 0.002
+
+
+def test_the_preview_rectangle_is_measured_against_the_crop_not_the_canvas(
+        client, built_library):
+    """With a crop the two frames genuinely differ, and this is the pair of
+    numbers that cannot be derived in the browser without a second copy of the
+    mapping. A click at the centre of a preview cropped to the last 40 % of the
+    width is 0.8 across the *canvas* and still 0.5 across the *preview*."""
+    run_id = _big(client, built_library, basename="onpreviewcrop")
+    cropped = _enc([*FLAT_RECIPE,
+                    {"uid": "cr", "id": "geometry.crop", "enabled": True,
+                     "params": {"x0": 0.6, "y0": 0.0, "x1": 1.0, "y1": 0.4}}])
+    r = client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe",
+                   params={"recipe": cropped, "fx": 0.5, "fy": 0.5, "size": 256})
+    assert r.status_code == 200, r.text
+    win = _window(r)
+    # Canvas-frame: 0.8 across. Preview-frame: still the middle.
+    assert abs(win["x"] + 128 - 0.8 * BIG_W) <= 1
+    assert abs(win["preview_x"] + win["preview_width"] / 2 - 0.5) < 0.005
+    assert abs(win["preview_y"] + win["preview_height"] / 2 - 0.5) < 0.005
+    # …and the window is a bigger share of a cropped preview than of the canvas.
+    assert win["preview_width"] > win["width"] / BIG_W
+
+
+def test_a_window_clamped_past_a_crops_edge_says_so_rather_than_sliding_inward(
+        client, built_library):
+    """The window is clamped inside the **canvas**, not inside the crop, so at the
+    edge of a crop that touches the canvas edge it genuinely hangs over the side.
+    Reporting a fraction outside 0..1 lets the caller draw it clipped, which is
+    the truth; clamping here would draw it somewhere it is not."""
+    run_id = _big(client, built_library, basename="onpreviewedge")
+    # A crop flush against the right/bottom edge, narrower than the 256 px window.
+    cropped = _enc([*FLAT_RECIPE,
+                    {"uid": "cr", "id": "geometry.crop", "enabled": True,
+                     "params": {"x0": 0.95, "y0": 0.95, "x1": 1.0, "y1": 1.0}}])
+    r = client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe",
+                   params={"recipe": cropped, "fx": 1.0, "fy": 1.0, "size": 256})
+    assert r.status_code == 200, r.text
+    win = _window(r)
+    assert win["preview_x"] < 0 and win["preview_width"] > 1
+    # The canvas-frame answer is still correct and still inside the canvas.
+    assert 0 <= win["x"] <= BIG_W - win["width"]
+
+
 # --- the point of it: the window is the same picture --------------------------
 
 def _overlap(preview: np.ndarray, loupe: np.ndarray, win: dict):
