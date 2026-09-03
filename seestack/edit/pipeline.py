@@ -66,6 +66,9 @@ def apply_recipe(
         spec = get_op(op.id)
         if spec is None:
             continue
+        # Key this op's fitted values (EditContext.fit) to *this instance* rather
+        # than to its op id: a recipe may legitimately carry the same op twice.
+        ctx.op_uid = op.uid
         try:
             out = as_rgb(spec.apply(out, op.params, ctx))
         except Exception as exc:  # noqa: BLE001 — one bad op must not blank the render
@@ -74,6 +77,8 @@ def apply_recipe(
             if errors is not None:
                 errors.append(msg)
             continue
+        finally:
+            ctx.op_uid = None
         if spec.is_stretch:
             stretched = True
             ctx.stage = "nonlinear"

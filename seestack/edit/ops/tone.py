@@ -15,7 +15,9 @@ _MODE_CC = ["gray_star", "gaia"]
 # --- the single stretch boundary -------------------------------------------
 
 def _stretch(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
-    from seestack.render.thumbnail import asinh_stretch, autostretch
+    from seestack.render.thumbnail import (
+        asinh_stretch, autostretch, measure_stretch_stats,
+    )
 
     src = as_rgb(rgb)
     mode = str(params.get("mode", "asinh"))
@@ -25,13 +27,22 @@ def _stretch(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     # applies to both curves — the blow-out is a property of the shared shoulder,
     # not of the tone mapping above it.
     highlights = float(params.get("highlights", 0.0) or 0.0)
+    # Both curves are anchored on the *whole picture's* robust sky level and
+    # spread. Measured here they come from whatever array this render was handed,
+    # which is right for the preview and the export (both are the whole frame) and
+    # wrong for a render of one region — a crop of the bright core has a different
+    # median, so it would come back stretched differently from the picture it was
+    # cut out of. `ctx.fit` hands back the whole-image measurement when the caller
+    # supplied one, and is a plain self-measurement otherwise (byte-for-byte the
+    # historical stretch, pinned by a test).
+    stats = ctx.fit("stretch_stats", lambda: measure_stretch_stats(src))
     if mode == "stf":
         out = autostretch(src, target_bg=float(params.get("target_bg", 0.20)),
-                          highlight_protect=highlights)
+                          highlight_protect=highlights, stats=stats)
     else:
         out = asinh_stretch(src, stretch=float(params.get("stretch", 0.5)),
                             black=float(params.get("black", 0.35)),
-                            highlight_protect=highlights)
+                            highlight_protect=highlights, stats=stats)
     # asinh_stretch/autostretch fill uncovered (NaN) pixels with 0. Restore the
     # NaN so "no coverage" stays distinct from real black through the rest of the
     # pipeline: the histogram and Levels/gamma suggestions exclude it (no false
@@ -80,10 +91,17 @@ def _curves(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     if params.get("auto") and _points_are_identity(pts):
         from seestack.edit.curve import fallback_tone_curve, suggest_tone_curve
         src = as_rgb(rgb)
-        suggested = suggest_tone_curve(src)
-        # Both branches obey the same rule — never move the sky — so which side of
-        # the suggestion's gate a stack falls on can't change its background.
-        pts = suggested if suggested is not None else fallback_tone_curve(src)
+
+        def _derive():
+            suggested = suggest_tone_curve(src)
+            # Both branches obey the same rule — never move the sky — so which side
+            # of the suggestion's gate a stack falls on can't change its background.
+            return suggested if suggested is not None else fallback_tone_curve(src)
+
+        # The curve is anchored on the whole image's sky mode and median, so a
+        # render of one region must be handed the *picture's* curve rather than
+        # deriving a different one from a crop of it (see EditContext.fit).
+        pts = ctx.fit("points", _derive)
     xs = np.array([p[0] for p in pts], dtype=np.float64)
     ys = np.array([p[1] for p in pts], dtype=np.float64)
     # A tone curve needs at least two control points spanning a range of x. A
@@ -167,7 +185,11 @@ def _neutralize_background(rgb: np.ndarray, params: dict, ctx: EditContext) -> n
     out = as_rgb(rgb).copy()
     if strength <= 0.0:
         return out
-    medians = sky_channel_medians(out)
+    # The sky's per-channel medians are a property of the whole frame; measured on
+    # a region they describe that region's sky, so a crop would be neutralised
+    # toward a different grey. `ctx.fit` reuses the whole-image measurement when
+    # the caller supplied one (see EditContext.fit) and measures as before otherwise.
+    medians = ctx.fit("sky_medians", lambda: sky_channel_medians(out))
     if medians is None:
         return out
     lo = min(medians)
@@ -243,6 +265,8 @@ def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndar
         MODE_GAIA,
         MODE_GRAY_STAR,
         ColorCalibrationOptions,
+        ColorCalibrationResult,
+        apply_scale,
         calibrate_color,
     )
 
@@ -263,7 +287,19 @@ def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndar
         aperture_radius_px=max(MIN_APERTURE_RADIUS_PX,
                                ctx.scaled_px(DEFAULT_APERTURE_RADIUS_PX)),
     )
-    calibrated, result = calibrate_color(rgb, ctx.wcs, opts)
+    # The white balance is solved from the *star field*, so it belongs to the whole
+    # picture: a region holding a handful of stars (or none) would solve a different
+    # balance, or fall back to background-neutral, and come back a different colour
+    # from the picture it was cut out of. When the caller froze a whole-image solve
+    # (see EditContext.fit) re-apply exactly those gains instead of re-solving —
+    # which also skips the detection, by far the op's dominant cost.
+    frozen: ColorCalibrationResult | None = ctx.frozen_fit("white_balance")
+    if frozen is not None:
+        result = frozen
+        calibrated = apply_scale(rgb, result.scale_rgb)
+    else:
+        calibrated, result = calibrate_color(rgb, ctx.wcs, opts)
+    ctx.record_fit("white_balance", result)
     # Record which white-balance path actually ran (star-based, background-neutral
     # fallback, or gave up) so a caller can tell the user whether their image was
     # really colour-calibrated. Best-effort, JSON-safe scalars only.

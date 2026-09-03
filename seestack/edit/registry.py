@@ -77,6 +77,17 @@ class EditContext:
     #   caller may want to surface (e.g. which colour-calibration path actually ran
     #   and on how many stars). Keyed by op id. Ops write it; nothing reads it in the
     #   pipeline itself, so leaving it unread is harmless.
+    fitted: dict[str, Any] = field(default_factory=dict)
+    #   What each op *measured from the image* this render — see :meth:`fit`.
+    #   Written by the ops, keyed by the recipe op's ``uid``; nothing in the
+    #   pipeline reads it, exactly like ``op_notes``.
+    frozen_fits: dict[str, Any] | None = None
+    #   Fits measured by an *earlier* render of the same recipe, to be reused
+    #   instead of measured. See :meth:`fit`.
+    op_uid: str | None = None
+    #   The ``uid`` of the op currently being applied; set by the pipeline so
+    #   :meth:`fit` can key a fit to one op instance rather than to an op *id*
+    #   (a recipe may legitimately carry the same op twice with different params).
 
     def scaled_px(self, px: float) -> float:
         """Convert a *full-resolution* pixel measure to this render's pixel scale.
@@ -88,6 +99,59 @@ class EditContext:
         full-res export. On the export (``proxy_scale == 1``) this is a no-op.
         """
         return px / max(1.0, self.proxy_scale)
+
+    # --- fitted values: measuring on one array, rendering another -------------
+    #
+    # Several ops don't just transform pixels — they first *measure the whole
+    # image* and derive a number from it: the stretch takes each channel's robust
+    # median and σ, auto-contrast reads the sky mode, colour calibration solves a
+    # white balance from the star field, "Neutralize background" takes the sky's
+    # per-channel medians. Handed a *window* of the picture those all fit the
+    # window, so a 512×512 crop comes back stretched and colour-balanced
+    # differently from the picture it was cut out of — which is why a render of a
+    # region can't simply re-run the recipe at ``proxy_scale = 1``.
+    #
+    # ``fit`` is the channel that fixes it: an op asks for its fitted value by
+    # name and gets either the value a previous whole-image render measured (when
+    # the caller supplied one) or its own fresh measurement, which is recorded so
+    # the caller *can* supply it next time. Every default leaves behaviour exactly
+    # as it was: with no ``frozen_fits``, every op measures for itself as always,
+    # and ``fitted`` is simply written and ignored.
+
+    def _fit_key(self, name: str) -> str:
+        return f"{self.op_uid}:{name}" if self.op_uid else name
+
+    def frozen_fit(self, name: str, default: Any = None) -> Any:
+        """The value frozen for this op's ``name``, or ``default`` when the caller
+        supplied no fits (the ordinary render) or none for this op."""
+        if not self.frozen_fits:
+            return default
+        return self.frozen_fits.get(self._fit_key(name), default)
+
+    def record_fit(self, name: str, value: Any) -> Any:
+        """Record ``value`` as what this op fitted, and return it unchanged."""
+        self.fitted[self._fit_key(name)] = value
+        return value
+
+    def fit(self, name: str, compute: Callable[[], Any]) -> Any:
+        """This op's fitted ``name``: the frozen one if one was supplied for it,
+        otherwise ``compute()``. Either way it lands in :attr:`fitted`, so the
+        result of a whole-image render can be fed straight back as
+        ``frozen_fits`` for a render of one region of the same picture.
+
+        ``compute`` is not called when a frozen value is present — measuring a
+        window would be the very thing this exists to avoid — so it is also the
+        place to keep an expensive measurement (a star solve, a mesh fit).
+        """
+        frozen = self.frozen_fit(name, _UNSET)
+        return self.record_fit(name, compute() if frozen is _UNSET else frozen)
+
+
+#: Distinguishes "no fit was frozen for this op" from a fit whose value is
+#: legitimately ``None`` (a measurement that gave up — a degenerate image the
+#: stretch can't anchor, a sky whose medians can't be taken). A frozen ``None``
+#: must stay ``None`` rather than silently re-measuring on the window.
+_UNSET: Any = object()
 
 
 ApplyFn = Callable[[np.ndarray, dict[str, Any], EditContext], np.ndarray]
