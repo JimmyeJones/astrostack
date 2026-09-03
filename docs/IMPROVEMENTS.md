@@ -573,8 +573,44 @@ _(nothing else claimed — claim an item here with your branch name)_
   `noise_yardstick_frames` is now the place to route a third through. **And there is a third — see the entry
   immediately below, found by looking for it.**
 
-- **NEW IDEA (Builder 2026-09-03, the third instance of the wrong-denominator class, found while shipping the
-  second) — the *celebratory badge* still attributes a one-panel measurement to the whole target's subs.**
+- **✅ SHIPPED (Builder, v0.332.2, branch `claude/sweet-babbage-8j6maq`) — ~~the *celebratory badge* still
+  attributes a one-panel measurement to the whole target's subs.~~** The third instance of the
+  wrong-denominator class, and the last of the three the reveal card carries.
+
+  **The copy decision, made on purpose.** The filed entry offered two rewrites and preferred dropping the
+  count; that is what shipped, and it turned out to need **no new sentence at all** — the badge already had a
+  countless form for a run whose frame count is unknown (*"Stacking your subs cut the background noise about
+  10×."*), shipped and tested since it was written. A mosaic now takes that branch. So the celebratory line
+  stays celebratory, the ×-figure it names is unchanged and still right, and nothing on the card turns into a
+  caveat. The rejected alternative — naming the panel depth here — would have said the same thing twice, the
+  second time in the *reassuring* voice, directly above a yardstick sentence that already says it properly.
+
+  **The flag had to be served in its own right, which is the one non-obvious part.** `expected_basis` already
+  distinguishes `"mosaic_centre"` from `"stack"` — but it is `null` whenever the *verdict* is, and a mosaic
+  with no coverage sibling (an older run, a tidied output dir) has no verdict. That is precisely a mosaic
+  still showing a badge, so reading the canvas off the basis would have left the wrong denominator standing on
+  exactly the runs v0.331.2 chose to stay silent about. The endpoint therefore serves `is_mosaic` beside the
+  basis, and both surfaces that render the badge (the History reveal card and the `StackNoiseBadge` on the
+  Target headline / Jobs summary) read it.
+
+  **A `null` flag keeps the count, and the asymmetry with the yardstick is deliberate.** v0.331.2 withheld its
+  *judgement* on a pre-schema-8 run because "might be a mosaic" is not a licence to accuse a healthy picture.
+  This withholds only a compliment's subject, and nearly every NULL is a legacy *single field* — so dropping
+  the count there would cost far more than the rare legacy mosaic's overstatement does. Pinned as a decision
+  rather than left to fall out of truthiness.
+
+  **Upgrade-safe (§9):** one *added* response field, one optional third argument defaulting to today's
+  behaviour. No config, schema, on-disk or default change; a frontend on a backend too old to send the field
+  renders exactly today's sentence.
+
+  **Tests (+9; all fail before).** `tests/webapp/test_noise_crop_depth.py` (+2): the flag is served on the
+  mosaic whose verdict is withheld (the case `expected_basis` structurally cannot cover), and `false` / `null`
+  are told apart. `oneFrameVsStack.test.ts` (+3): the 400-frames-400-vs-100-deep shape asserted **both ways**,
+  the unknown-canvas cases, and a joint test that the badge and the yardstick sentence beneath it name no
+  contradictory count. `StackNoiseBadge.test.tsx` (+2) and `OneFrameVsStackCard.test.tsx` (+1) pin the same at
+  the two rendering sites, the card's asserting that **neither** of its two lines contains "400".
+
+  *(Original entry follows.)*
   *(Pillar: trust — PRIORITY 3/4; size XS **for the code**, and the whole of it is the wording; the honest
   number is already on the response.)* `noiseReductionBadge`
   (`frontend/src/components/oneFrameVsStack.ts`) writes the card's headline: *"Stacking **your 400 subs** cut
