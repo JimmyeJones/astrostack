@@ -671,9 +671,19 @@ export function TargetView() {
   const list = frames.data ?? [];
   // Accepted frames still carrying a streak flag (satellite/plane trail). With
   // "keep streaked frames" on, QC flags rather than rejects these, so per-pixel
-  // rejection (sigma-clip / drizzle reject) can clean the trail while keeping
-  // the frame's good signal. Surfacing the count tells the user at a glance what
-  // that rejection will need to handle.
+  // rejection can clean the trail while keeping the frame's good signal.
+  // Surfacing the count tells the user at a glance what that rejection will
+  // need to handle.
+  //
+  // The badge's tooltip deliberately names **Auto outlier removal** rather than
+  // sigma-clip: κ-σ dispatches from 4 subs but is mathematically blind to a
+  // *lone* trail until `kappa_min_frames` (11 at the default κ=3), so naming it
+  // told an owner with a handful of streaked subs to pick the one setting that
+  // would clip nothing. Auto resolves to min/max down there (which removes an
+  // extreme from 3 frames up) and to κ-σ once the stack is deep enough, so it
+  // is the honest advice at *every* depth — including a mosaic panel, where the
+  // per-pixel depth is the panel's and not the target's. See
+  // `rejection_reach` / `_resolve_auto_reject` (seestack/stack/stacker.py).
   const streakedAccepted = list.filter((f) => f.accept && f.streak_detected).length;
   // Accepted frames whose stars are a strong eccentricity outlier for this
   // target — a bad-tracking / wind / bumped-mount sub. A frame counts as
@@ -1208,7 +1218,7 @@ export function TargetView() {
               <Tooltip
                 multiline
                 w={260}
-                label={`${streakedAccepted} accepted frame${streakedAccepted === 1 ? "" : "s"} carry a satellite/plane trail. Stack with sigma-clip or drizzle outlier rejection to remove the trail while keeping the frame, or reject them all here.`}
+                label={`${streakedAccepted} accepted frame${streakedAccepted === 1 ? "" : "s"} carry a satellite/plane trail. Stack with Auto outlier removal to take the trail out while keeping the frame — it picks a method that works at your stack's depth. Or reject them all here.`}
               >
                 <Badge variant="light" color="orange">
                   {streakedAccepted} streaked
