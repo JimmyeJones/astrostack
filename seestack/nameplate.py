@@ -109,28 +109,15 @@ def format_acq_range(start_iso: str | None, end_iso: str | None = None) -> str:
 
     **ASCII only, deliberately.** The bundled font has no en dash — see this
     module's header — so the span uses a plain ``-``; ``test_nameplate.py`` pins
-    that every character a caption can produce has a real glyph.
+    that every character a caption can produce has a real glyph. That is the
+    *only* thing this spelling has to itself: the rest of the rule (which parts
+    to write once, when the dash is spaced, reading a reversed window forwards)
+    is :func:`seestack.nightrange.format_night_range`, shared with the screen and
+    the imaging log so one night can't read three ways.
     """
-    start = format_acq_date(start_iso)
-    end = format_acq_date(end_iso)
-    if not end or end == start:
-        return start
-    if not start:
-        return end
-    s_day, s_mon, s_year = start.split(" ")
-    e_day, e_mon, e_year = end.split(" ")
-    # Order the two ends by date, so a window recorded (or hand-edited) the wrong
-    # way round still reads forwards.
-    if (int(s_year), _MONTHS.index(s_mon), int(s_day)) > (
-            int(e_year), _MONTHS.index(e_mon), int(e_day)):
-        start, end = end, start
-        s_day, s_mon, s_year = start.split(" ")
-        e_day, e_mon, e_year = end.split(" ")
-    if s_year != e_year:
-        return f"{start}-{end}"
-    if s_mon != e_mon:
-        return f"{s_day} {s_mon}-{end}"
-    return f"{s_day}-{end}"
+    from seestack.nightrange import ASCII, format_night_range
+
+    return format_night_range(start_iso, end_iso, style=ASCII)
 
 
 def acquisition_parts(fields: NameplateFields, *,

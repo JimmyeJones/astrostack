@@ -89,18 +89,16 @@ def _format_night_range(start: str | None, end: str | None) -> str:
     where ``2024-11-15 – 2024-11-18`` reads as arithmetic. A single night (or an
     end equal to, or missing from, the start) degrades to the one date, so a
     normal night's row is a plain ISO date any spreadsheet will parse.
+
+    That — and keeping both dates in full — is all this spelling has to itself.
+    Everything else about naming a window is
+    :func:`seestack.nightrange.format_night_range`, shared with the screen and the
+    baked caption, so the row a beginner exports describes the same night the
+    same way the picture beside it does.
     """
-    first = (start or "").strip()[:10]
-    last = (end or "").strip()[:10]
-    if not first:
-        return last
-    if not last or last == first:
-        return first
-    # Recorded (or hand-edited) end-first still describes a real range; name it
-    # in the order a reader expects rather than printing it backwards.
-    if last < first:
-        first, last = last, first
-    return f"{first} to {last}"
+    from seestack.nightrange import ISO, format_night_range
+
+    return format_night_range(start, end, style=ISO)
 
 
 def _format_integration(seconds: float | None) -> str:

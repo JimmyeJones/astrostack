@@ -18,7 +18,8 @@ from seestack.io.project import StackRunRow
 
 def _make_run(data_root, safe, basename="master", h=80, w=100,
               coverage_min=1, coverage_max=5, is_mosaic=None,
-              ts="2026-05-02T00:00:00Z"):
+              ts="2026-05-02T00:00:00Z",
+              capture_start_utc=None, capture_end_utc=None):
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -37,6 +38,8 @@ def _make_run(data_root, safe, basename="master", h=80, w=100,
                 fits_path=str(fp), tiff_path=None, preview_path=None, n_frames_used=5,
                 canvas_h=h, canvas_w=w, coverage_min=coverage_min,
                 coverage_max=coverage_max, options_json="{}", is_mosaic=is_mosaic,
+                capture_start_utc=capture_start_utc,
+                capture_end_utc=capture_end_utc,
             ))
         finally:
             proj.close()
@@ -1908,6 +1911,28 @@ def test_export_share_jpeg_download_and_blurb(client, solved_library):
     img = Image.open(io.BytesIO(dl.content))
     assert img.format == "JPEG"
     assert max(img.size) == 2048  # downscaled from the 2500 px native width
+
+
+def test_the_share_caption_names_the_night_it_was_shot(client, solved_library):
+    """The copyable caption used to be the only one of the app's four with no date
+    at all. The fixture's capture window and its stack stamp are deliberately
+    **years apart** — a same-day run would let the processing stamp pass for the
+    capture date, which is exactly the class of bug the v0.313.0 sweep closed
+    everywhere else."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, ts="2026-05-02T00:00:00Z",
+                    capture_start_utc="2024-11-15T22:03:00Z",
+                    capture_end_utc="2024-11-18T04:10:00Z")
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/share",
+                    json={"recipe": {"ops": []}})
+    assert r.status_code == 200
+    blurb = _wait_job(client, r.json()["job_id"])["result"]["blurb"]
+    # 18 Nov 04:10 UTC belongs to the *night of the 17th* — the same noon-to-noon
+    # bucket every other night surface uses, so the caption and the Nights card
+    # name the same last night rather than one being a day ahead.
+    assert "15–17 Nov 2024" in blurb
+    assert "2026" not in blurb, f"the stack's own timestamp leaked in: {blurb}"
 
 
 def test_print_sizes_offers_only_what_the_picture_can_print_sharply(client, solved_library):

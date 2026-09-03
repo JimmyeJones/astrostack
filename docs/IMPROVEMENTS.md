@@ -18732,44 +18732,88 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-09-02, the same defect as A10's duration half, one field over) — a capture window
-  is spelled three different ways, and the fix now has a worked template.** *(Pillar: approachable / trust —
-  PRIORITY 3. Size: S.)* v0.327.9 gave the app one vocabulary for *how much light*; **when it was shot** is
-  still three: `frontend/src/format.ts::formatCaptureNights` says `15–18 Nov 2024` (en dash, spaced only when
-  both sides are multi-word), `seestack/nameplate.py::format_acq_range` says `15-18 Nov 2024` (ASCII), and
-  `seestack/imaging_log.py::_format_night_range` (v0.328.0) says `2024-11-15 to 2024-11-18`. All three read
-  the *same two ISO dates off the same run*, and a beginner comparing the picture on screen with the caption
-  they copied and the log row they exported sees three renderings of one night.
-  **Two of the three divergences are justified and must survive any unification:** the nameplate is ASCII
-  because the bundled Pillow face has no en dash (`nameplate.py`'s header pins this with a glyph test), and
-  the log is ISO because it is a spreadsheet cell that should stay sortable and parseable. So this is **not**
-  "make them identical" — it is *one* function with an explicit style argument (`display` / `ascii` / `iso`),
-  so the three renderings are three deliberate outputs of one rule rather than three implementations of three
-  slightly different rules. Today only one of them knows that "15–18 Nov" and "28 Oct – 3 Nov" space the dash
-  differently, and only one knows that a reversed window should be printed in reader order.
-  **The template already exists:** `tests/fixtures/integration_format.json` — one table of cases read by both
-  `pytest` and `vitest`, which is what turned "one vocabulary" from a comment into a gate. Do the same with a
-  window table (start, end, style) → expected. **Grep before building:** `pictureDateLabel`,
-  `captureNightsClause` and `capture_night_range` are all in this neighbourhood and at least one of them is
-  about the *night count*, not the window — don't fold them in by accident.
+- **✅ SHIPPED — BOTH, AS ONE CHANGE (Builder, v0.328.3, branch `claude/sweet-babbage-2xguh9`) — ~~a capture
+  window is spelled three different ways~~ and ~~the Editor's copyable caption is the only one of the four with
+  no date at all~~.** Filed as two entries; they are one job, because the second needs a *display*-styled
+  Python renderer that did not exist and the first is exactly the job of making one.
 
-- **NEW IDEA (Builder 2026-09-02, the slice A10's duration half deliberately left) — the Editor's copyable
-  caption is the only one of the four with *no date at all*.** *(Pillar: approachable / trust — PRIORITY 3.
-  Size: S.)* v0.327.9 gave every caption builder one duration vocabulary, but not one *set of facts*:
-  `sharecard.share_blurb` still takes only `(name, n_frames, integration_s)`, so the sentence a beginner
-  copies off the Editor's share panel reads `M 42 · 3.2 h · 152 subs` while the same picture shared from
-  Target, History, Gallery or the baked nameplate carries the night it was shot. The date is the fact a
-  caption is *for* — a post that says when you were out is the one people reply to. **The data is already in
-  hand:** `capture_night_start` / `capture_night_end` have been on the run since schema 18, and
-  `webapp/pipeline.py::submit_editor_share` holds the `run` two lines above the `share_blurb` call. Shape: an
-  optional `capture_label` argument (a formatted string, so the pure module keeps no date logic and cannot
-  drift from the SPA's `formatCaptureNights`), appended as one more `·` part and dropped when absent — which
-  is every run recorded before the app knew, captioning exactly as it does today. **Care:** it must be a
-  *label*, not a `timestamp_utc` — the whole v0.313.0 class was captions asserting the moment the stack ran
-  as when the picture was shot; and the nameplate's own span helper (`format_acq_range`) is ASCII-only for a
-  font reason that does not apply here, so don't reuse it without reading `nameplate.py`'s header. The
-  larger "one caption model served by the backend" (four builders → one) stays filed on the A10 entry as an
-  M–L; this is the slice that pays most of its user-visible value for a fraction of the risk.
+  **`seestack/nightrange.py` is the rule, and the three spellings are now three styles of it.**
+  `format_night_range(start, end, style=DISPLAY|ASCII|ISO)`. `nameplate.format_acq_range` and
+  `imaging_log._format_night_range` are two-line delegations. The two divergences the entry said must survive
+  do: **ASCII** because the bundled nameplate font has no en dash (`test_nameplate.py` pins that every
+  character a caption can produce has a real glyph), **ISO** because a spreadsheet cell must stay sortable and
+  must not read as arithmetic. What was *not* deliberate — and is now shared — is the rest: write a span's
+  common parts once, print a reversed window forwards, and **space the dash only between multi-word sides**.
+
+  **One deliberate output change, and it is the point rather than a side effect.** The baked caption closed the
+  dash up in every case, so a nameplate read `28 Oct-3 Nov 2024` where the screen read `28 Oct – 3 Nov 2024`.
+  It now reads `28 Oct - 3 Nov 2024` — the same rule, in ASCII. Two assertions in `test_nameplate.py` were
+  updated to the new string with the reason written beside them; nothing was weakened, and the unspaced
+  same-month form (`15-18 Nov 2024`) is unchanged, which is the common case.
+
+  **The Editor's caption gets its date.** `share_blurb` takes an optional pre-formatted `capture_label` —
+  pre-formatted on purpose, so the pure `sharecard` module keeps no date logic of its own to drift — placed
+  second, right after the target, because the object and the night are what a reader wants before the exposure
+  arithmetic. `submit_editor_share` derives it from `capture_night_range(run.capture_start_utc, …,
+  settings.site_lon)`, the same noon-to-noon bucket every other night surface uses, **never** from
+  `timestamp_utc`. Omitted, the caption is byte-for-byte what it always was, which is every run from before
+  schema 18.
+
+  **A fourth renderer that cannot import Python is held by a table.**
+  `tests/fixtures/night_range_format.json` — 14 cases × 3 styles — is read by `tests/test_nightrange.py` and by
+  `frontend/src/format.test.ts` against `formatCaptureNights`, exactly as `integration_format.json` already
+  holds the two duration formatters together. A change to either side that isn't a change to the other reddens
+  a suite. The table also carries the properties, not just the cases: every case lists all three styles, ASCII
+  is `display.replace("–", "-")` for *all* of them, and every ASCII rendering `.isascii()`.
+
+  **One incidental fix.** The ISO spelling took `(start or "").strip()[:10]` with no validation, so `"not a
+  date"` printed as `"not a da"` in an exported spreadsheet. It parses now, and anything not confidently a date
+  is blank — the date-honesty rule the v0.311.3 / v0.313.0 / v0.328.0 fixes established. **Tests +33**
+  (`tests/test_nightrange.py`, plus four in `test_sharecard.py` and one end-to-end in
+  `tests/webapp/test_editor.py` whose fixture puts the capture window and the stack stamp **years apart**, so a
+  regression to the processing stamp fails it).
+
+  Original specs, for the record — **both are done**; they are indented so a triage pass can see that by shape:
+
+
+  - **NEW IDEA (Builder 2026-09-02, the same defect as A10's duration half, one field over) — a capture window
+    is spelled three different ways, and the fix now has a worked template.** *(Pillar: approachable / trust —
+    PRIORITY 3. Size: S.)* v0.327.9 gave the app one vocabulary for *how much light*; **when it was shot** is
+    still three: `frontend/src/format.ts::formatCaptureNights` says `15–18 Nov 2024` (en dash, spaced only when
+    both sides are multi-word), `seestack/nameplate.py::format_acq_range` says `15-18 Nov 2024` (ASCII), and
+    `seestack/imaging_log.py::_format_night_range` (v0.328.0) says `2024-11-15 to 2024-11-18`. All three read
+    the *same two ISO dates off the same run*, and a beginner comparing the picture on screen with the caption
+    they copied and the log row they exported sees three renderings of one night.
+    **Two of the three divergences are justified and must survive any unification:** the nameplate is ASCII
+    because the bundled Pillow face has no en dash (`nameplate.py`'s header pins this with a glyph test), and
+    the log is ISO because it is a spreadsheet cell that should stay sortable and parseable. So this is **not**
+    "make them identical" — it is *one* function with an explicit style argument (`display` / `ascii` / `iso`),
+    so the three renderings are three deliberate outputs of one rule rather than three implementations of three
+    slightly different rules. Today only one of them knows that "15–18 Nov" and "28 Oct – 3 Nov" space the dash
+    differently, and only one knows that a reversed window should be printed in reader order.
+    **The template already exists:** `tests/fixtures/integration_format.json` — one table of cases read by both
+    `pytest` and `vitest`, which is what turned "one vocabulary" from a comment into a gate. Do the same with a
+    window table (start, end, style) → expected. **Grep before building:** `pictureDateLabel`,
+    `captureNightsClause` and `capture_night_range` are all in this neighbourhood and at least one of them is
+    about the *night count*, not the window — don't fold them in by accident.
+
+  - **NEW IDEA (Builder 2026-09-02, the slice A10's duration half deliberately left) — the Editor's copyable
+    caption is the only one of the four with *no date at all*.** *(Pillar: approachable / trust — PRIORITY 3.
+    Size: S.)* v0.327.9 gave every caption builder one duration vocabulary, but not one *set of facts*:
+    `sharecard.share_blurb` still takes only `(name, n_frames, integration_s)`, so the sentence a beginner
+    copies off the Editor's share panel reads `M 42 · 3.2 h · 152 subs` while the same picture shared from
+    Target, History, Gallery or the baked nameplate carries the night it was shot. The date is the fact a
+    caption is *for* — a post that says when you were out is the one people reply to. **The data is already in
+    hand:** `capture_night_start` / `capture_night_end` have been on the run since schema 18, and
+    `webapp/pipeline.py::submit_editor_share` holds the `run` two lines above the `share_blurb` call. Shape: an
+    optional `capture_label` argument (a formatted string, so the pure module keeps no date logic and cannot
+    drift from the SPA's `formatCaptureNights`), appended as one more `·` part and dropped when absent — which
+    is every run recorded before the app knew, captioning exactly as it does today. **Care:** it must be a
+    *label*, not a `timestamp_utc` — the whole v0.313.0 class was captions asserting the moment the stack ran
+    as when the picture was shot; and the nameplate's own span helper (`format_acq_range`) is ASCII-only for a
+    font reason that does not apply here, so don't reuse it without reading `nameplate.py`'s header. The
+    larger "one caption model served by the backend" (four builders → one) stays filed on the A10 entry as an
+    M–L; this is the slice that pays most of its user-visible value for a fraction of the risk.
 
 - **NEW IDEA (Builder 2026-09-02, the follow-on to the v0.327.8 folder guard) — the Settings page should say
   "that folder won't work" *while you type it*, not after you press Save.** *(Pillar: approachable —
