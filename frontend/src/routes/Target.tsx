@@ -50,6 +50,7 @@ import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
 import { UnsolvedHelp } from "../components/target/UnsolvedHelp";
 import { SkyBrightnessNote } from "../components/target/SkyBrightnessNote";
+import { RejectionOutlookNote } from "../components/target/RejectionOutlookNote";
 import { thinStackWarning } from "../components/target/thinStack";
 import { missingFilesNote } from "../components/target/missingFiles";
 import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
@@ -968,6 +969,13 @@ export function TargetView() {
               night the owner simply finished. */
           { key: "capture-quiet", priority: NOTICE_PRIORITY.warning,
             node: <CaptureQuietNote safe={safe} /> },
+          /* The trails this target already has, against the rejection its *saved*
+             settings will actually run on the next unattended stack — the one
+             surface that can say so before the picture is made rather than after.
+             Self-hides unless subs really carry a trail and the saved method
+             really cannot reach it; see RejectionOutlookNote. */
+          { key: "rejection-outlook", priority: NOTICE_PRIORITY.warning,
+            node: <RejectionOutlookNote safe={safe} streaked={streakedAccepted} /> },
           { key: "missing-files", priority: NOTICE_PRIORITY.warning, node: missingFiles !== null ? (
             <Alert color="orange" variant="light" icon={<IconAlertTriangle size={18} />}
               title={missingFiles.title}>

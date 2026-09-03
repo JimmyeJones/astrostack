@@ -1487,6 +1487,26 @@ export interface StackEstimate {
   } | null;
 }
 
+/** What the *unattended* chain's outlier rejection will be able to do.
+ *
+ * `StackEstimate.rejection_reach` answers this for the values on the Stack form;
+ * this answers it for the settings the watcher's auto-stack and the one-click
+ * **Process target** button will actually use — the target's saved defaults,
+ * with the chain's own "the user chose nothing" injection applied. Sized by a
+ * mosaic's per-pixel `panel_depth`, not by its frame count.
+ */
+export interface RejectionOutlook {
+  method?: "drizzle" | "min-max-reject" | "sigma-clip" | "mean";
+  n_frames?: number;
+  /** Subs on one spot of a mosaic; null on a single field, where it is `n_frames`. */
+  panel_depth?: number | null;
+  lone_outlier_min_frames?: number | null;
+  /** null = no verdict (nothing solved yet, or an older backend). */
+  reaches: boolean | null;
+  /** True when the method came from the user's own saved defaults. */
+  user_chose: boolean;
+}
+
 export interface GalleryItem {
   safe: string;
   target_name: string;
@@ -2524,6 +2544,8 @@ export const api = {
     if (opts.sigma_clip != null) p.set("sigma_clip", opts.sigma_clip ? "true" : "false");
     return req<StackEstimate>(`/api/targets/${safe}/stack-estimate?${p.toString()}`);
   },
+  rejectionOutlook: (safe: string) =>
+    req<RejectionOutlook>(`/api/targets/${safe}/rejection-outlook`),
   stackArtifactUrl: (
     safe: string, id: number, kind: "preview" | "jpeg" | "fits" | "tiff",
     northUp = false, nameplate = false, keepsake = false, scale = false,
