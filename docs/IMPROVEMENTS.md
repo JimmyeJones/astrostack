@@ -1388,7 +1388,32 @@ _(nothing else claimed — claim an item here with your branch name)_
   three hand-mirrored "is this a genuine run" predicates;
   `POST /api/targets` has **no frontend caller**; ~~share and print JPEGs use 4:2:0 chroma subsampling~~
   *(shipped v0.328.0, see below)*; the "full
-  data" TIFF anchors its white point on the single brightest surviving pixel (hypothesis, needs real data).
+  data" TIFF anchors its white point on the single brightest surviving pixel *(traced 2026-09-03 — the
+  mechanism is confirmed, but read the note below before "fixing" it)*.
+
+- **⚪ TRACED, DELIBERATELY NOT BUILT (Builder 2026-09-03) — the "full data" TIFF's white point *is* the
+  brightest surviving pixel, and moving it would trade a documented guarantee for an unmeasured gain.**
+  *(Recorded so the next run starts from the code and does not re-derive this. Size of the *measurement*: S.
+  Size of any fix: unknown until the measurement exists.)*
+  **Confirmed by reading.** `linear_scale_anchors` (`seestack/stack/output.py`) is exactly
+  `lo = covered.min()`, `hi = covered.max()` over the finite pixels, and `_write_tiff` maps that range onto
+  0–65535. So one cosmic ray, hot pixel or saturated core that survives rejection *does* set the white point
+  for the whole file. (Checked the sibling while I was there: the Moon/Sun path's `normalize_for_display`
+  already anchors at the 1st/99.9th percentiles for precisely this reason, and its docstring says so — the
+  two paths disagree, which is what made this look like an oversight.)
+  **But it is not the same call, and the difference is the point.** The Moon/Sun render is a *picture*; this
+  file is billed as the data. `_write_tiff` writes the two anchors into the TIFF description
+  (`float = black + dn / 65535 * (white - black)`), so the file is **losslessly reversible** back to the
+  stack's own float levels, with **no clipping and no curve** — which is what "the full data" ought to mean,
+  and is stated in the description the user can read. A percentile white point would clip the brightest real
+  pixels and silently break that claim. The *actual* cost of min/max is **quantisation**: if the top pixel
+  sits far above the real signal ceiling, the sky and faint structure share far fewer than 65,536 levels.
+  **What would settle it, and it needs the owner's data, not a synthetic.** On a real deep OSC stack, compute
+  `(p99.99 − p1) / (max − min)`. If the real signal occupies most of the range there is nothing to fix. If it
+  occupies a few percent, the honest fix is *not* to move the white point but to **say so** — or to offer the
+  percentile-anchored file as a clearly-labelled second option beside the reversible one, never in place of
+  it. **Do not blind-flip the anchors**: this is an export a user may already have archived and reversed with
+  the recipe the description gave them.
 
 - **✅ SHIPPED (Builder, v0.329.2, branch `claude/sweet-babbage-s16wgp`) — ~~A-MINOR: the scanner's bare-`<T>/`
   skip is silent even when the folder holds thousands of FITS.~~** Made honest without touching the skip, and
@@ -11928,6 +11953,50 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **⭐ NEW, TRACED (Builder 2026-09-03, the half v0.329.1 could not reach) — the "about N more clear nights"
+  estimate still counts *sessions*, so a night shot in two goes halves what it thinks a clear night is worth.**
+  *(Pillar: autonomy + trust — PRIORITY 2/3; size S–M; confidence: **traced in code**, mechanism identical to
+  the one v0.329.1 just fixed one surface up; the fixture that exhibits it is the one that entry added.)*
+  v0.329.1 made a **Nights-card row** mean one observing night. `recent_night_pace_s`
+  (`seestack/session_recap.py`) — *"the median kept integration per clear night"*, and the number behind the
+  goal card's **"about 2 more clear nights"** — still calls `_split_sessions` and takes the last
+  `PACE_LOOKBACK_NIGHTS` (5) of them. So an evening run, bed, then a pre-dawn run contributes **two** entries
+  to the median, each carrying roughly half the night's integration. The median is therefore biased *low*, and
+  the error runs in the direction that matters: the app tells a beginner they need **more** clear nights than
+  they do, on a plan whose whole point is knowing when to stop. Its own docstring already claims the two
+  agree — *"Nights are the same 6 h-gap capture sessions `nights_breakdown` shows, so the number agrees with
+  the Nights card"* — and after v0.329.1 that sentence is simply false.
+  **Why it wasn't done with v0.329.1, and what it actually needs.** Three things, none of them hard, all of
+  them wider than the endpoint that fix touched:
+  1. The pace path reads `iter_frame_capture_rows` — `(datetime, exposure_s, accept)` **triples**, not
+     `FrameRow`s — so `nights_breakdown`'s `night_of(timestamp_utc)` signature does not fit it. It wants a key
+     taken from the `datetime` it already has.
+  2. `PACE_LOOKBACK_NIGHTS` and `MIN_PRODUCTIVE_NIGHT_S` are **mirrored by hand** into the frontend's
+     `clearNights.ts`, which derives the same pace client-side from the night list the Target page already
+     fetched. The module comment says in terms that both must land on the same figure for the same target, so
+     a server-side merge without the client-side one leaves two screens quoting different ETAs — worse than
+     the bug.
+  3. The lookback window changes meaning: five sessions and five nights are not the same five, and on a
+     habitual split-night observer the old window reached back half as far.
+  **The check that settles it before writing anything:** `MIN_PRODUCTIVE_NIGHT_S` (120 s) is a floor on a
+  *session*; halving a night's integration can push a genuinely short-but-real night's halves under it, in
+  which case the night vanishes from the pace entirely rather than merely counting light. Measure which of the
+  two errors is larger on a fixture before choosing whether the fix is grouping or a re-floored session.
+
+- **NEW IDEA (Builder 2026-09-03, the obvious sibling of the v0.329.2 skip report) — a `*_video/` folder
+  dropped in `incoming/` is skipped just as silently, and the app *does* have a home for it.**
+  *(Pillar: friendliness — PRIORITY 3; size XS; frontend copy plus one summary key.)* v0.329.2 made the bare
+  `<T>/` skip report itself. `_apply_seestar_convention` skips `*_video/` and `*_photo/` folders with the same
+  `continue`, and that skip is *right* — they hold no stackable deep-sky subs. But a beginner who copies their
+  whole Seestar share in and sees "40 subs added" has no way to know their `Lunar_video/` was passed over, and
+  unlike the bare-folder case **there is somewhere to send them**: the Moon & Sun page stacks exactly those
+  clips. The machinery is already there — `skipped_out` just needs a second kind, and the Jobs summary a
+  second, cheerful line: *"Your Lunar_video folder isn't deep-sky subs — stack it on the Moon & Sun page"*,
+  linked. **Cautions:** this must stay one line, not a second alert (the standing "the UI is extremely busy"
+  priority), and it should fire only when the folder is not already a known capture on the Moon & Sun page, or
+  it nags on every scan forever. Grep `seestack/video/discover.py` and `webapp/video.py` first — the capture
+  list may already answer "have I dealt with this one?".
 
 - **✅ SHIPPED (Builder, v0.326.2, branch `claude/zen-mccarthy-olkjpm`) — ~~the editor's ghost curve now has two
   possible shapes and only explains one of them.~~** Filed by the `…-t59xya` Builder as the gap its A1 fix
