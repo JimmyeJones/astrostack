@@ -2602,8 +2602,18 @@ export const api = {
   // ("expected" | "low" | null, from `seestack.stackhealth.noise_vs_expected`) —
   // the same judgement the "How's my stack?" note uses, so the threshold lives
   // in one place rather than being re-typed here.
+  // `expected_frames` is the N that verdict was made against and
+  // `expected_basis` says which count it is: "stack" (the run's own frames) or
+  // "mosaic_centre" (the depth at the crop the ratio was measured over, the only
+  // honest yardstick on a mosaic canvas). Both optional, so an older backend
+  // still reads as the plain single-field case.
   oneSubVsStackNoise: (safe: string, id: number) =>
-    req<{ ratio: number | null; expected_verdict?: string | null }>(
+    req<{
+      ratio: number | null;
+      expected_verdict?: string | null;
+      expected_frames?: number | null;
+      expected_basis?: string | null;
+    }>(
       `/api/targets/${safe}/stack-runs/${id}/one-sub-vs-stack/noise`),
   stackReferenceSubUrl: (safe: string, id: number) =>
     `/api/targets/${safe}/stack-runs/${id}/reference-sub`,

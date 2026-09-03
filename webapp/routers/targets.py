@@ -1000,10 +1000,14 @@ def target_stack_health(
         # stack" reveal already stamped — it never measures one. A run nobody has
         # revealed yet simply gets no note, and starts getting one the moment the
         # headline badge measures it once.
-        from webapp.routers.stack import stamped_noise_ratio
+        # The depth rides along on the same stamp: it is what lets a *mosaic* be
+        # graded at all, since the ratio's crop only ever saw one panel's subs.
+        from webapp.routers.stack import stamped_noise_measurement
 
-        notes = stack_health(run, frames,
-                             noise_ratio=stamped_noise_ratio(proj, run, frames))
+        noise_ratio, noise_crop_depth = stamped_noise_measurement(
+            proj, run, frames)
+        notes = stack_health(run, frames, noise_ratio=noise_ratio,
+                             noise_crop_depth=noise_crop_depth)
         spec = recommended_dark_spec(frames)
     finally:
         proj.close()

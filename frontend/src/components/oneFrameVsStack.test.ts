@@ -142,4 +142,48 @@ describe("noiseVsExpectedNote", () => {
     expect(noiseVsExpectedNote("expected", 5, Number.NaN)).toBeNull();
     expect(noiseVsExpectedNote("expected", 5, 0)).toBeNull();
   });
+
+  // ---- the mosaic yardstick -------------------------------------------------
+  // A mosaic's ratio is measured over a central crop that only ever saw its own
+  // panel's subs, so the server judges it against the depth *there* and sends
+  // that count. Naming the target's total instead would be a sentence about
+  // pixels the measurement never touched.
+
+  it("names the panel depth, not the target total, on a mosaic", () => {
+    const note = noiseVsExpectedNote("low", 4, 400, 100, "mosaic_centre");
+    expect(note?.concern).toBe(true);
+    expect(note?.text).toContain(
+      "About 100 subs cover the middle of this mosaic");
+    expect(note?.text).toContain("about 10× (√100)");
+    expect(note?.text).toContain("came in nearer 4×");
+    expect(note?.text).toContain("usually means");
+    // The whole-target count must not appear anywhere in the sentence.
+    expect(note?.text).not.toContain("400");
+  });
+
+  it("reassures a healthy mosaic in the same voice", () => {
+    expect(noiseVsExpectedNote("expected", 10, 400, 100, "mosaic_centre")).toEqual({
+      text:
+        "That's about what the 100 subs covering the middle of this mosaic " +
+        "should give (√100 ≈ 10×).",
+      concern: false,
+    });
+  });
+
+  it("uses the server's count whenever it sends one", () => {
+    // A single field sends its own frame count as the yardstick; the sentence
+    // must read off what the verdict was actually made against, never off a
+    // second number the card happens to have.
+    expect(noiseVsExpectedNote("expected", 10, 100, 100, "stack")?.text).toBe(
+      "That's about what 100 subs should give (√100 ≈ 10×).");
+  });
+
+  it("falls back to the run's frame count for a backend that sends neither", () => {
+    // Upgrade safety in the other direction: a half-upgraded install must show
+    // exactly today's single-field sentence, not nothing.
+    expect(noiseVsExpectedNote("expected", 21, 505)?.text).toBe(
+      "That's about what 505 subs should give (√505 ≈ 22×).");
+    expect(noiseVsExpectedNote("expected", 21, 505, null, null)?.text).toBe(
+      "That's about what 505 subs should give (√505 ≈ 22×).");
+  });
 });

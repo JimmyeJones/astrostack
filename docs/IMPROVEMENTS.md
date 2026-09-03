@@ -514,8 +514,65 @@ _(nothing else claimed — claim an item here with your branch name)_
   mosaic flag and nothing else. `tests/webapp/test_stack_health_noise.py` (+1): end to end on a master noisy
   enough that the sibling test proves it *would* read "low" as a single field.
 
-- **NEW IDEA (Builder 2026-09-03, the honest version of the mosaic suppression above) — record the frame
-  depth at the crop the noise ratio was measured over, so a mosaic can be judged instead of skipped.**
+- **✅ SHIPPED (Builder, v0.332.0, branch `claude/sweet-babbage-61auhj`) — ~~record the frame depth at the
+  crop the noise ratio was measured over, so a mosaic can be judged instead of skipped.~~** Built to the
+  filed shape, including both of its "do nots".
+
+  **What shipped.** `_measure_crop_depth` (`webapp/routers/stack.py`) reads the run's own
+  `<stem>_framecov.fits` and takes the **median over exactly the crop `_crop_origin` takes** — a windowed
+  read off the memory map, so a 150 MP mosaic costs the same 1024² patch the ratio itself does. Engine-side,
+  the rule about *which* count may be used is one public function, `noise_yardstick_frames`, and
+  `noise_vs_expected` grew a `crop_depth` keyword that only a mosaic reads. So the four-panel shape that
+  read "low" at every depth however well it was shot — 10× achieved, √400 = 20× demanded — now reads
+  **"expected"**, judged against the 100 subs that actually cover the pixels the ratio was measured over.
+
+  **`coverage_max` was refused, as filed.** The median is the depth of the pixels the measurement rests on;
+  the max is the deepest pixel *anywhere*, so on a lopsided mosaic it would over-expect and put the false
+  alarm back, just less often — which is worse than always, because a warning wrong only sometimes is far
+  harder to notice. Pinned by a test on a canvas whose 200-deep border sits outside the crop and whose
+  100-deep centre sits inside it, which fails on a `coverage_max` implementation.
+
+  **It stays a read of a stamp, not a measurement on a page render.** The depth rides along on the existing
+  `NOISE_RATIO_META_PREFIX` stamp, so "How's my stack?" reads it exactly the way it already reads the ratio
+  and still never measures anything. The cache version is **deliberately not bumped**: a stamp written
+  before the depth existed is a *hit with an unknown depth*, not a miss, so no single-field run re-measures
+  a ratio it already has, and a **mosaic heals its own stamp lazily** on the one request that needs the
+  depth — one windowed map read, never a re-debayer. A single field never opens the sibling at all.
+
+  **Silence is still the fallback, everywhere it was.** No sibling (any run stacked before it existed, a
+  tidied output dir), an unreadable one, a sibling from a *different canvas* (checked against the master's
+  own shape — a hand-tidied dir must not have one picture judged by another's map), a wholly uncovered crop,
+  or a depth under the 10-frame floor: every one leaves the mosaic as quiet as v0.331.2 left it.
+
+  **Both surfaces say the panel's number, in the panel's voice.** The note reads *"About 100 subs cover the
+  middle of this mosaic, which should cut the background noise about 10× (√100), and it came in nearer 4×"*
+  — "400 subs should give 20×" is simply not a claim about a panel. The endpoint serves `expected_frames`
+  and `expected_basis` (`"stack"` | `"mosaic_centre"`) so the card renders the sentence for a judgement made
+  in one place rather than inferring which count it holds; both are `null` whenever the verdict is.
+
+  **Upgrade-safe (§9):** two optional keyword arguments with `None` defaults (so every existing call is
+  unchanged), two *added* response fields, one added optional key on a cache payload, and a `stamped_noise_ratio`
+  kept as a wrapper over the new `stamped_noise_measurement`. No config key, no schema, no on-disk change,
+  no default flipped, no existing response field touched. A frontend on a backend too old to send the new
+  fields falls back to the run's frame count, i.e. exactly today's single-field sentence.
+
+  **Tests (+23; all 19 Python ones fail before).** `tests/test_stackhealth.py` (+7): the false alarm
+  asserted in all three states (fires / silenced / answered), the yardstick's own rule including that a
+  crop depth may **not** re-grade a single field, every way the depth can be unknown, the sub-floor panel,
+  the mosaic wording (and that the target's 400 appears nowhere in it), and the direction that matters most
+  — measuring the depth must not turn the suppression into a *warning* on a healthy mosaic.
+  `tests/webapp/test_noise_crop_depth.py` (+12, new): median-not-max on a canvas built to tell them apart,
+  uncovered pixels excluded (NaN is "no coverage", not "no frames"), the four decline paths, the healthy and
+  the genuinely-low mosaic end to end, a single field reading no sibling *at all*, the lazy heal of a
+  pre-depth stamp without re-measuring the ratio, and the health note reading the same depth the card does.
+  `frontend/src/components/oneFrameVsStack.test.ts` (+4): the mosaic sentence both ways, the server's count
+  being what the sentence names, and the old-backend fallback.
+
+  **Carried forward:** the entry's own class note still holds — *any* per-pixel or per-crop quantity compared
+  against `n_frames_used` is wrong on a mosaic. This closes the second instance (after `rejection_blind`);
+  `noise_yardstick_frames` is now the place to route a third through.
+
+  *(Original entry follows.)*
   *(Pillar: trust + image quality — PRIORITY 4; size S; **do not do this by swapping in `coverage_max`** —
   read on.)* v0.331.2 withholds the √N verdict on every mosaic because the ratio's central 1024² crop sees
   one panel's subs while `n_frames_used` counts them all. The measurement is fine; only its yardstick is
