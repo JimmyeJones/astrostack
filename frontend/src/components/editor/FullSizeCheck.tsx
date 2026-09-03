@@ -4,8 +4,18 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api, type Recipe } from "../../api/client";
 import {
-  clickFraction, loupeCaption, loupeMarkerFromWindow, loupeMarkerRect, loupeWhereText,
+  clickFraction, loupeCaption, loupeMarkerFromWindow, loupeMarkerRect,
+  loupePreviewCrop, loupeWhereText,
 } from "./loupe";
+import { splitClipLeft, splitFraction, splitLeftPct } from "./splitCompare";
+
+/** What the split's left half is, said plainly. It is the preview blown up, not
+ *  a second render, so it *will* look soft — and that softness is the answer to
+ *  "what was the shrunk view hiding?", not a defect to apologise for. */
+export const LOUPE_SPLIT_CAPTION =
+  "Left of the line is the preview, blown up to the same size; right is the "
+  + "real thing. The left side looks soft because that is exactly what the "
+  + "shrunk preview was hiding.";
 
 /**
  * "Check it at full size" — one window of the picture rendered at 1:1.
@@ -46,7 +56,14 @@ export function FullSizeCheck({
 }) {
   const [open, setOpen] = useState(false);
   const [spot, setSpot] = useState({ fx: 0.5, fy: 0.5 });
+  // The split starts **off**: the window on its own is what the modal is for,
+  // and an always-on divider would be one more thing on a surface whose standing
+  // complaint is that it is too busy.
+  const [split, setSplit] = useState(false);
+  const [frac, setFrac] = useState(0.5);
+  const dragging = useRef(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
+  const windowRef = useRef<HTMLDivElement | null>(null);
 
   const info = useQuery({
     queryKey: ["loupe-info", safe, runId, JSON.stringify(recipe)],
@@ -78,6 +95,17 @@ export function FullSizeCheck({
   const marker = loupeMarkerFromWindow(window_.data?.window)
     ?? loupeMarkerRect(spot.fx, spot.fy, size, shownSourceW, shownSourceH);
   const where = loupeWhereText(window_.data?.window);
+  // The rendered window's own pixel size — the box both halves of the split are
+  // drawn in, so the preview blow-up lands on the same patch at the same scale.
+  const winW = window_.data?.window?.width ?? size;
+  const winH = window_.data?.window?.height ?? size;
+  // Null on a backend that sends no rectangle, or a degenerate crop: then no
+  // comparison is offered at all, because a misaligned one is worse than none.
+  const crop = window_.data ? loupePreviewCrop(window_.data.window, winW, winH) : null;
+  const moveDivider = (clientX: number) => {
+    const r = windowRef.current?.getBoundingClientRect();
+    if (r) setFrac(splitFraction(clientX, r.left, r.width));
+  };
 
   return (
     <>
@@ -130,13 +158,56 @@ export function FullSizeCheck({
               <div style={{ maxWidth: "100%", overflow: "auto", background: "#000",
                             borderRadius: 6, minWidth: 120, minHeight: 40 }}>
                 {window_.data ? (
-                  <img
-                    data-testid="full-size-check-image"
-                    src={window_.data.url}
-                    alt="A piece of your picture at full size"
-                    width={window_.data.window?.width ?? size}
-                    height={window_.data.window?.height ?? size}
-                    style={{ display: "block" }} />
+                  <div
+                    ref={windowRef}
+                    data-testid="full-size-check-window"
+                    style={{ position: "relative", width: winW, height: winH,
+                             cursor: split ? "ew-resize" : undefined,
+                             touchAction: split ? "none" : undefined,
+                             userSelect: split ? "none" : undefined }}
+                    onPointerDown={split ? (e) => {
+                      dragging.current = true;
+                      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                      moveDivider(e.clientX);
+                    } : undefined}
+                    onPointerMove={split
+                      ? (e) => { if (dragging.current) moveDivider(e.clientX); }
+                      : undefined}
+                    onPointerUp={split ? () => { dragging.current = false; } : undefined}
+                  >
+                    <img
+                      data-testid="full-size-check-image"
+                      src={window_.data.url}
+                      alt="A piece of your picture at full size"
+                      width={winW}
+                      height={winH}
+                      style={{ display: "block" }} />
+                    {/* The same patch, taken from the preview and blown up — a
+                        plain CSS transform of the navigator image beside it, not
+                        a second render. Clipped to the left of the divider so the
+                        real render below shows through on the right. */}
+                    {split && crop ? (
+                      <>
+                        <div data-testid="full-size-check-split-before"
+                          style={{ position: "absolute", inset: 0,
+                                   overflow: "hidden", pointerEvents: "none",
+                                   clipPath: splitClipLeft(frac) }}>
+                          <img src={api.editPreviewUrl(safe, runId, recipe)}
+                            alt="The same piece as the preview shows it"
+                            style={{ position: "absolute",
+                                     left: crop.left, top: crop.top,
+                                     width: crop.width, height: crop.height,
+                                     maxWidth: "none", display: "block" }} />
+                        </div>
+                        <div data-testid="full-size-check-split-divider"
+                          style={{ position: "absolute", top: 0, bottom: 0,
+                                   left: splitLeftPct(frac), width: 2,
+                                   marginLeft: -1, pointerEvents: "none",
+                                   background: "rgba(255,255,255,0.9)",
+                                   boxShadow: "0 0 4px rgba(0,0,0,0.8)" }} />
+                      </>
+                    ) : null}
+                  </div>
                 ) : window_.isError ? (
                   <Text size="sm" c="red" p="sm" data-testid="full-size-check-error">
                     That window couldn&rsquo;t be rendered:{" "}
@@ -151,6 +222,24 @@ export function FullSizeCheck({
               {where ? (
                 <Text size="xs" c="dimmed" data-testid="full-size-check-where">
                   {where}
+                </Text>
+              ) : null}
+              {/* "…and how different is that from what I've been looking at?" —
+                  the question a beginner asks straight after "what will I get?".
+                  Offered only when the two halves can actually be lined up. */}
+              {crop ? (
+                <Group gap={6} wrap="nowrap" align="center">
+                  <Button size="compact-xs" variant="subtle" color="grape"
+                    data-testid="full-size-check-split-toggle"
+                    onClick={() => setSplit((s) => !s)}>
+                    {split ? "Hide the preview comparison"
+                      : "Compare with the preview"}
+                  </Button>
+                </Group>
+              ) : null}
+              {split && crop ? (
+                <Text size="xs" c="dimmed" data-testid="full-size-check-split-caption">
+                  {LOUPE_SPLIT_CAPTION}
                 </Text>
               ) : null}
             </Stack>
