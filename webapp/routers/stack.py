@@ -2615,7 +2615,10 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
     :func:`seestack.stackhealth.noise_vs_expected` the "How's my stack?" note
     uses — so the card renders a *sentence* for a judgement made in one place
     rather than re-typing the threshold in TypeScript. Additive: an older client
-    simply ignores the field.
+    simply ignores the field. It is ``null`` on a **mosaic**, whose central crop
+    only ever saw one panel's subs while ``n_frames_used`` counts them all — see
+    that function. The ``ratio`` itself is still measured and served there; it is
+    only the √N reading of it that has no honest answer.
 
     The first measurement for a run is **remembered** (``NOISE_RATIO_META_PREFIX``,
     fingerprinted on the master and the representative sub) so the repeat views
@@ -2632,6 +2635,10 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
             raise HTTPException(status_code=404, detail="No such run")
         fits_path = run.fits_path
         n_frames = run.n_frames_used
+        # A mosaic has no single N to hold the ratio against — see
+        # `noise_vs_expected`, which also withholds on the NULL an older run
+        # carries. Read here so both return paths below have it.
+        is_mosaic = run.is_mosaic
         ref = _pick_reference_sub(proj)
         ref_id = getattr(ref, "id", None) if ref is not None else None
         src = readable_frame_path(ref) if ref is not None else None
@@ -2645,7 +2652,8 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
             hit, cached = _cached_noise_ratio(proj, run_id, fingerprint)
             if hit:
                 return {"ratio": cached,
-                        "expected_verdict": noise_vs_expected(cached, n_frames)}
+                        "expected_verdict": noise_vs_expected(
+                            cached, n_frames, is_mosaic)}
     finally:
         proj.close()
         lib.close()
@@ -2668,7 +2676,8 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
             finally:
                 wproj.close()
                 wlib.close()
-    return {"ratio": ratio, "expected_verdict": noise_vs_expected(ratio, n_frames)}
+    return {"ratio": ratio,
+            "expected_verdict": noise_vs_expected(ratio, n_frames, is_mosaic)}
 
 
 # Human-relevant provenance cards, in display order. Keys not present in a

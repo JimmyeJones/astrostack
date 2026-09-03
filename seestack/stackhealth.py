@@ -131,7 +131,8 @@ NOISE_EXPECTED_MIN_FRAMES = 10
 NOISE_EXPECTED_LOW_FRACTION = 0.7
 
 
-def noise_vs_expected(ratio: float | None, n_frames: int | None) -> str | None:
+def noise_vs_expected(ratio: float | None, n_frames: int | None,
+                      is_mosaic: bool | None = False) -> str | None:
     """How a run's measured noise reduction reads against what its frames should
     have bought, or ``None`` when there is nothing honest to say.
 
@@ -141,14 +142,30 @@ def noise_vs_expected(ratio: float | None, n_frames: int | None) -> str | None:
     or a lot of frames effectively dropped. A *suggestion*, never an assertion —
     legitimate rejection and quality weighting both lower the effective count.
     ``None`` — no measurement (an edited/display-space export, an unmeasurable
-    image, a run whose ratio was never stamped), or fewer than
-    :data:`NOISE_EXPECTED_MIN_FRAMES` frames, where √N means nothing.
+    image, a run whose ratio was never stamped), fewer than
+    :data:`NOISE_EXPECTED_MIN_FRAMES` frames, where √N means nothing, or a
+    **mosaic**, for the reason below.
+
+    **A mosaic has no single N, so it is never judged.** The ratio is measured
+    over a *central crop* of the master, and on a mosaic canvas no pixel there
+    ever saw more than its own panel's subs — while ``n_frames_used`` counts the
+    whole target's. A four-panel mosaic 100 subs deep per panel therefore
+    achieves about √100 = 10× and is asked for √400 = 20×, so it reads "low" at
+    every depth however well it was shot. The same wrong denominator that
+    ``rejection_blind`` learned about, in a different note. Being told a healthy
+    picture underperformed is far worse than being told nothing, so a mosaic gets
+    no verdict at all until something records the depth *at the crop the ratio
+    was measured over* (filed in ``docs/IMPROVEMENTS.md``). ``None`` — a run
+    stacked before the flag was recorded (schema < 8) — withholds too, by the
+    same rule: "might be a mosaic" is not a licence to accuse it.
 
     Shared by the "How's my stack?" note and the "One frame vs your stack" card
     so the two surfaces read one threshold and can never disagree — the card must
     not re-type these numbers in TypeScript. Mirrors :func:`seam_verdict`.
     """
-    if ratio is None or n_frames is None:
+    # ``is None`` and truthiness are separate questions here: an unrecorded flag
+    # withholds, a recorded 0/False is judged as the single field it is.
+    if ratio is None or n_frames is None or is_mosaic is None or bool(is_mosaic):
         return None
     try:
         r = float(ratio)
@@ -502,7 +519,7 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # subs, bloated stars): when one of those fires it is the better advice, and
     # this note is the one to show when nothing else explains the shortfall.
     # Silent with no stamped measurement, so a page view never triggers one.
-    if noise_vs_expected(noise_ratio, run.n_frames_used) == "low":
+    if noise_vs_expected(noise_ratio, run.n_frames_used, run.is_mosaic) == "low":
         n_subs = run.n_frames_used
         expected = _factor_label(math.sqrt(n_subs))
         scored.append((38, HealthNote(

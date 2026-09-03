@@ -91,8 +91,9 @@ export interface NoiseVsExpected {
  * This function only writes the sentence for it.
  *
  * Returns null when there is nothing trustworthy to say: no verdict (no
- * measurement, or too few frames for √N to mean anything), or a ratio/count the
- * sentence can't name.
+ * measurement, too few frames for √N to mean anything, or a mosaic — whose
+ * central crop only ever saw one panel's subs while the frame count is the whole
+ * target's), or a ratio/count the sentence can't name.
  *
  * The healthy sentence assumes the badge is beside it (it is: anything at or
  * above 0.7·√10 also clears the badge's own 1.5× floor), so it doesn't repeat

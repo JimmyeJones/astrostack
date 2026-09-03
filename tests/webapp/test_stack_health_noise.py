@@ -38,7 +38,8 @@ def _write_master(path: Path, sigma: float, seed: int = 0) -> None:
     fits.PrimaryHDU(cube).writeto(path, overwrite=True)
 
 
-def _register(data_root, safe: str, master: Path, *, n_frames: int = 42) -> int:
+def _register(data_root, safe: str, master: Path, *, n_frames: int = 42,
+              is_mosaic: bool = False) -> int:
     lib = Library.open_or_create(data_root / "library")
     try:
         preview = master.with_suffix(".png")
@@ -53,6 +54,7 @@ def _register(data_root, safe: str, master: Path, *, n_frames: int = 42) -> int:
                 coverage_max=n_frames, coverage_thin_frac=0.0,
                 options_json=json.dumps({"sigma_clip": True}),
                 calstat="dark+flat", total_exposure_s=1260.0,
+                is_mosaic=is_mosaic,
             ))
         finally:
             proj.close()
@@ -177,4 +179,20 @@ def test_a_small_stack_is_never_judged_by_the_yardstick(client, solved_library):
     run_id = _register(solved_library, safe, master, n_frames=6)
 
     assert _measure(client, safe, run_id)["expected_verdict"] is None
+    assert "noise_low" not in _kinds(client, safe, run_id)
+
+
+def test_a_mosaic_gets_no_verdict_on_either_surface(client, solved_library):
+    """The owner shoots mosaics. The ratio is measured over a central crop, whose
+    depth is a *panel's* subs, while `n_frames_used` counts the whole target's —
+    so a perfectly healthy mosaic reads "low" at every depth. Both the card and
+    the note therefore say nothing at all rather than something wrong."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    master = _master_path(solved_library, safe, "master_mosaic.fits")
+    _write_master(master, sigma=50.0)          # would read "low" as a single field
+    run_id = _register(solved_library, safe, master, is_mosaic=True)
+
+    measured = _measure(client, safe, run_id)
+    assert measured["ratio"] is not None, "the number itself is still measured"
+    assert measured["expected_verdict"] is None
     assert "noise_low" not in _kinds(client, safe, run_id)

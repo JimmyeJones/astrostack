@@ -728,3 +728,36 @@ def test_a_small_stack_is_never_judged_by_the_yardstick():
     assert "noise_low" not in _kinds(
         stack_health(_run(n_frames_used=6, coverage_min=6, coverage_max=6),
                      frames, noise_ratio=1.0))
+
+
+def test_a_mosaic_is_never_judged_against_its_whole_frame_count():
+    """The ratio is measured over a *central crop* of the master, and on a mosaic
+    canvas no pixel there ever saw more than its own panel's subs — while
+    n_frames_used counts the whole target's. A four-panel mosaic 100 subs deep
+    per panel achieves ~√100 = 10× and would be asked for √400 = 20×, so it reads
+    "low" at every depth however well it was shot. The owner shoots mosaics, and
+    a wrong "your picture underperformed" is far worse than saying nothing."""
+    from seestack.stackhealth import noise_vs_expected
+
+    # The exact shape above: healthy per panel, "low" against the target total.
+    assert noise_vs_expected(10.0, 400) == "low"          # the false alarm…
+    assert noise_vs_expected(10.0, 400, is_mosaic=True) is None   # …suppressed
+    # The reassurance is withheld too — the same denominator is behind it.
+    assert noise_vs_expected(20.0, 400, is_mosaic=True) is None
+    # A single field is unaffected.
+    assert noise_vs_expected(20.0, 400, is_mosaic=False) == "expected"
+    assert noise_vs_expected(20.0, 400) == "expected"
+    # A run stacked before the flag existed (schema < 8) withholds too: "might be
+    # a mosaic" is not a licence to accuse it.
+    assert noise_vs_expected(20.0, 400, is_mosaic=None) is None
+    assert noise_vs_expected(10.0, 400, is_mosaic=None) is None
+
+
+def test_the_health_note_stays_off_a_mosaic():
+    frames = [_frame() for _ in range(40)]
+    mosaic = _run(n_frames_used=400, is_mosaic=True, coverage_min=1, coverage_max=100)
+    assert "noise_low" not in _kinds(stack_health(mosaic, frames, noise_ratio=10.0))
+    # …and the identical run as a single field still gets the nudge, so the
+    # suppression is the mosaic flag and nothing else.
+    single = _run(n_frames_used=400, is_mosaic=False, coverage_min=1, coverage_max=100)
+    assert "noise_low" in _kinds(stack_health(single, frames, noise_ratio=10.0))
