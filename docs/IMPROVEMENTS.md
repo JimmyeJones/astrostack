@@ -19981,6 +19981,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   applies to any sentence that moves. And file the survey's findings **before** building any of them; the
   value here is knowing how many there are.
 
+  **⚪ FIRST DATA POINT, MEASURED NOT ASSUMED (Builder 2026-09-03, while sizing this) — the mosaic/low-noise
+  pair is *already* out of sync, so "word for word" above is no longer true, and that is the argument for
+  doing the survey.** Read side by side, `seestack/stackhealth.py:578` says *"which should cut the
+  **background** noise about N×"* while `frontend/src/components/oneFrameVsStack.ts:164` says *"which should
+  cut the noise about N×"* — the health note kept the qualifier, the reveal card dropped it. Same run, same
+  number, two screens, two sentences. **Nothing is wrong in either**, which is exactly why nobody caught it:
+  this class does not fail loudly, it drifts. The numbers still agree (both go through the shared
+  `factorLabel` table v0.332.1 pinned), so the divergence today is pure wording — but the wording is what a
+  beginner reads, and one of the two is measurably about the *sky background* while the other is about
+  "noise" in general. **This is one finding, not the survey** — the other three siblings the entry names are
+  still unwalked. It is filed here so the survey starts from "at least one has already drifted" rather than
+  from the entry's original "word for word", and so whoever does walk them knows the failure mode is a
+  qualifier quietly going missing, not a number disagreeing.
+
     *(Original entry follows.)* *(Pillar:
   maintainability in service of trust — size XS.)* "Stacking cut the background noise about 15×" is written
   by `factorLabel` (`frontend/src/components/oneFrameVsStack.ts`) and, since v0.330.0, by `_factor_label`
