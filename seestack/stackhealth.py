@@ -109,6 +109,75 @@ _SOFT_STARS_MIN_SUB_FWHM = 5
 _SEAM_FLAT_RATIO = 1.0
 _SEAM_VISIBLE_RATIO = 1.5
 
+# Fewest frames for which √N is a meaningful yardstick at all. Below this a
+# single unlucky reference sub swings the measured ratio more than the physics
+# does, so we say nothing rather than judge a five-frame stack.
+NOISE_EXPECTED_MIN_FRAMES = 10
+
+# Fraction of √N below which a stack is doing materially worse than the frames it
+# used should allow.
+#
+# **Measured, not guessed** (against the real ``seestack.qc.noise_ratio``
+# estimator on a synthetic sky + stars + extended object — the sweep lives in
+# ``tests/test_noise_ratio_expectation.py``): an ideal mean stack of
+# independent-noise subs measures ``ratio/√N`` = **0.996–1.012** across
+# N = 12…400, and a *weighted* mean with weights as spread as U(0.1, 1) still
+# measures **0.93** (its effective frame count really is lower — the yardstick is
+# honest, not the measurement). Stacks whose subs share correlated noise — the
+# shape soft alignment, a drifting gradient or a duplicated sub produces — fall
+# to **0.58 at 2 % shared variance and 0.30 at 10 %**. So 0.7 sits in a wide
+# empty gap: it cannot fire on a healthy or heavily-weighted stack, and it
+# catches the correlated ones early.
+NOISE_EXPECTED_LOW_FRACTION = 0.7
+
+
+def noise_vs_expected(ratio: float | None, n_frames: int | None,
+                      is_mosaic: bool | None = False) -> str | None:
+    """How a run's measured noise reduction reads against what its frames should
+    have bought, or ``None`` when there is nothing honest to say.
+
+    ``"expected"`` — at or above :data:`NOISE_EXPECTED_LOW_FRACTION`·√N, i.e. what
+    a healthy (even a heavily weighted) stack of that many subs gives.
+    ``"low"`` — materially below it: usually soft alignment, a drifting gradient,
+    or a lot of frames effectively dropped. A *suggestion*, never an assertion —
+    legitimate rejection and quality weighting both lower the effective count.
+    ``None`` — no measurement (an edited/display-space export, an unmeasurable
+    image, a run whose ratio was never stamped), fewer than
+    :data:`NOISE_EXPECTED_MIN_FRAMES` frames, where √N means nothing, or a
+    **mosaic**, for the reason below.
+
+    **A mosaic has no single N, so it is never judged.** The ratio is measured
+    over a *central crop* of the master, and on a mosaic canvas no pixel there
+    ever saw more than its own panel's subs — while ``n_frames_used`` counts the
+    whole target's. A four-panel mosaic 100 subs deep per panel therefore
+    achieves about √100 = 10× and is asked for √400 = 20×, so it reads "low" at
+    every depth however well it was shot. The same wrong denominator that
+    ``rejection_blind`` learned about, in a different note. Being told a healthy
+    picture underperformed is far worse than being told nothing, so a mosaic gets
+    no verdict at all until something records the depth *at the crop the ratio
+    was measured over* (filed in ``docs/IMPROVEMENTS.md``). ``None`` — a run
+    stacked before the flag was recorded (schema < 8) — withholds too, by the
+    same rule: "might be a mosaic" is not a licence to accuse it.
+
+    Shared by the "How's my stack?" note and the "One frame vs your stack" card
+    so the two surfaces read one threshold and can never disagree — the card must
+    not re-type these numbers in TypeScript. Mirrors :func:`seam_verdict`.
+    """
+    # ``is None`` and truthiness are separate questions here: an unrecorded flag
+    # withholds, a recorded 0/False is judged as the single field it is.
+    if ratio is None or n_frames is None or is_mosaic is None or bool(is_mosaic):
+        return None
+    try:
+        r = float(ratio)
+        n = int(n_frames)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(r) or r <= 0:
+        return None
+    if n < NOISE_EXPECTED_MIN_FRAMES:
+        return None
+    return "expected" if r >= NOISE_EXPECTED_LOW_FRACTION * math.sqrt(n) else "low"
+
 
 def seam_verdict(seam_residual: float | None) -> str | None:
     """The panel-flatness verdict for a run, or ``None`` when there is nothing
@@ -163,6 +232,16 @@ def _run_sigma_kappa(options_json: str | None) -> float:
     if isinstance(kappa, (int, float)) and math.isfinite(kappa) and kappa > 0:
         return float(kappa)
     return _DEFAULT_SIGMA_KAPPA
+
+
+def _factor_label(value: float) -> str:
+    """A noise-reduction factor as the "One frame vs your stack" badge writes it:
+    a big reduction as a whole number ("15"), a smaller one to one decimal
+    ("3.5"), dropping a trailing ``.0`` so 10.04 reads "10" rather than "10.0".
+    Kept identical to the card's ``factorLabel`` so the same stack is never
+    described two ways on two screens."""
+    rounded = round(value) if value >= 10 else round(value * 10) / 10
+    return str(int(rounded)) if float(rounded).is_integer() else f"{rounded:.1f}"
 
 
 def _format_reject_pct(frac: float) -> str:
@@ -240,13 +319,20 @@ def _median_sub_fwhm(accepted: list[FrameRow]) -> float | None:
     return statistics.median(vals)
 
 
-def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNote]:
+def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
+                 noise_ratio: float | None = None) -> list[HealthNote]:
     """Return a ranked list of plain-language health notes for ``run``.
 
     ``frames`` is the target's frame records (the run doesn't store which frames
     it combined, so we read the currently-accepted set for star-shape — the same
     approximation the readiness/session cards make). Best-first; the caller shows
-    the top one or two. Always returns at least one note (a positive fallback)."""
+    the top one or two. Always returns at least one note (a positive fallback).
+
+    ``noise_ratio`` is the run's measured "stacking cut the background noise ~N×"
+    figure when the caller already has it to hand (the webapp reads the stamp the
+    reveal card left behind — it never measures for a health check). ``None``
+    simply means the yardstick note self-hides, which is the state every run sits
+    in until something measures it once."""
     frame_list = list(frames)
     accepted = [f for f in frame_list if f.accept]
     rejected = [f for f in frame_list if not f.accept]
@@ -419,6 +505,32 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow]) -> list[HealthNot
                      "usually small alignment drift building up over the night; a "
                      "steadier mount, or re-solving the roughly-aligned subs, keeps "
                      "them tight."),
+            action=None,
+        )))
+
+    # --- Did the stack get what its subs should have bought? ------------------
+    # A weighted-mean stack of N frames cuts background noise by about √N. When
+    # the measured reduction lands materially below that, something ate the
+    # benefit — soft alignment, a drifting gradient, or a lot of frames
+    # effectively dropped. It is the single most useful early warning a beginner
+    # never gets, and until now it lived only behind the History page's collapsed
+    # "See the difference" reveal, which the person who needs it never opens.
+    # Ranked *below* the two notes that name a concrete cause (roughly-aligned
+    # subs, bloated stars): when one of those fires it is the better advice, and
+    # this note is the one to show when nothing else explains the shortfall.
+    # Silent with no stamped measurement, so a page view never triggers one.
+    if noise_vs_expected(noise_ratio, run.n_frames_used, run.is_mosaic) == "low":
+        n_subs = run.n_frames_used
+        expected = _factor_label(math.sqrt(n_subs))
+        scored.append((38, HealthNote(
+            kind="noise_low",
+            severity="info",
+            message=(f"{n_subs} subs should cut the background noise about "
+                     f"{expected}× (√{n_subs}), and this stack came in nearer "
+                     f"{_factor_label(float(noise_ratio))}×. That usually means "
+                     "the subs didn't line up tightly, or a lot of them were "
+                     "dropped — worth checking focus and alignment on your next "
+                     "night."),
             action=None,
         )))
 

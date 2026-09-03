@@ -55,7 +55,8 @@ export function OneFrameVsStackCard({
   // "…and is that any good?" — the √N yardstick beside the measured number, so
   // a beginner can tell a healthy stack from an underperforming one instead of
   // reading a factor with nothing to compare it to.
-  const expected = noiseVsExpectedNote(noise.data?.ratio, info.data.n_frames);
+  const expected = noiseVsExpectedNote(
+    noise.data?.expected_verdict, noise.data?.ratio, info.data.n_frames);
 
   const moveTo = (clientX: number) => {
     const rect = boxRef.current?.getBoundingClientRect();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  clickFraction, loupeCaption, loupeMarkerFromWindow, loupeMarkerRect, loupeWhereText,
+  clickFraction, loupeCaption, loupeMarkerFromWindow, loupeMarkerRect,
+  loupePreviewCrop, loupeWhereText,
 } from "./loupe";
 
 describe("loupeMarkerRect", () => {
@@ -142,5 +143,59 @@ describe("loupeMarkerFromWindow", () => {
     expect(loupeMarkerFromWindow({
       preview_x: Number.NaN, preview_y: 0.2, preview_width: 0.2, preview_height: 0.2,
     })).toBeNull();
+  });
+});
+
+describe("loupePreviewCrop", () => {
+  it("blows the preview up so the window fills the box, at the right offset", () => {
+    // The window is 1/8th of the preview wide and 1/4 of it tall, starting a
+    // fifth of the way across and a tenth of the way down. To fill a 512 × 512
+    // box, the whole preview has to be drawn 8× (and 4×) that box…
+    const c = loupePreviewCrop({
+      preview_x: 0.2, preview_y: 0.1, preview_width: 0.125, preview_height: 0.25,
+    }, 512, 512)!;
+    expect(c.width).toBeCloseTo(512 * 8);
+    expect(c.height).toBeCloseTo(512 * 4);
+    // …and slid back by the window's own offset in that blown-up frame, so the
+    // patch under the divider is the patch the render shows.
+    expect(c.left).toBeCloseTo(-0.2 * 512 * 8);
+    expect(c.top).toBeCloseTo(-0.1 * 512 * 4);
+  });
+
+  it("draws a window at the preview's own corner with no offset", () => {
+    const c = loupePreviewCrop({
+      preview_x: 0, preview_y: 0, preview_width: 0.5, preview_height: 0.5,
+    }, 400, 300)!;
+    expect(c.left).toBe(-0);
+    expect(c.top).toBe(-0);
+    expect(c.width).toBeCloseTo(800);
+    expect(c.height).toBeCloseTo(600);
+  });
+
+  it("keeps a window that overhangs a crop's edge where it really is", () => {
+    // Same unclamped rectangle the marker draws clipped: the blow-up slides the
+    // preview the other way rather than pretending the window moved inward.
+    const c = loupePreviewCrop({
+      preview_x: -0.1, preview_y: 0.2, preview_width: 0.4, preview_height: 0.4,
+    }, 512, 512)!;
+    expect(c.left).toBeCloseTo(0.1 * 512 / 0.4);
+    expect(c.top).toBeCloseTo(-0.2 * 512 / 0.4);
+  });
+
+  it("offers nothing when the halves could not be lined up", () => {
+    // No rectangle from the server (older container), a degenerate one, or an
+    // unmeasured box: a misaligned comparison is worse than none at all.
+    expect(loupePreviewCrop(null, 512, 512)).toBeNull();
+    expect(loupePreviewCrop(undefined, 512, 512)).toBeNull();
+    expect(loupePreviewCrop({}, 512, 512)).toBeNull();
+    expect(loupePreviewCrop({
+      preview_x: 0.2, preview_y: 0.2, preview_width: 0, preview_height: 0.2,
+    }, 512, 512)).toBeNull();
+    expect(loupePreviewCrop({
+      preview_x: Number.NaN, preview_y: 0.2, preview_width: 0.2, preview_height: 0.2,
+    }, 512, 512)).toBeNull();
+    const ok = { preview_x: 0.2, preview_y: 0.2, preview_width: 0.2, preview_height: 0.2 };
+    expect(loupePreviewCrop(ok, 0, 512)).toBeNull();
+    expect(loupePreviewCrop(ok, 512, 0)).toBeNull();
   });
 });

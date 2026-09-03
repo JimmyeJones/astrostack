@@ -470,6 +470,66 @@ _(nothing else claimed — claim an item here with your branch name)_
 > (backlog bloat, collisions, QA-rotation aim) are filed as the R-items further below; `AGENTS.md` §1 and §11
 > have already been updated for the highest-value ones.**
 
+- **✅ SHIPPED (Builder, v0.331.2, branch `claude/sweet-babbage-i16c1c`) — ~~the "your stack came in under
+  what its subs should give" nudge fires on every healthy MOSAIC, at every depth.~~** *(Severity: **a wrong
+  "your picture underperformed" on the owner's main shooting style**, on an on-by-default surface, since
+  v0.327.0. Confidence: **verified by reading the measurement's own crop**, then pinned end to end. Found
+  while moving the same verdict onto the Target page in v0.330.0 — which would have made it far more
+  prominent.)*
+
+  **The denominator was the whole target's frame count; the measurement is a panel's.**
+  `_measure_noise_ratio` (`webapp/routers/stack.py`) bounds both sides to an equal **central 1024² crop**
+  (`_crop_origin`, deliberately, for memory). On a mosaic canvas no pixel in that crop ever saw more than its
+  own panel's subs, while `n_frames_used` counts every sub across every panel. So a four-panel mosaic 100
+  subs deep per panel *achieves* about √100 = 10× and was asked for √400 = 20× — 10 is below the 0.7 · 20
+  threshold, so it read **"low" at every depth however well it was shot**. Deeper mosaics are worse, not
+  better: the shortfall is √(panels), so it is structural rather than a threshold that could be moved.
+
+  **This is the same wrong denominator `rejection_blind` already learned about** ("a 2x2 mosaic three subs
+  deep presents 12 frames to a test whose real answer is 3"), in a different note. Worth carrying forward as
+  a class: *any* per-pixel or per-crop quantity compared against `n_frames_used` is wrong on a mosaic, and
+  the owner is a heavy mosaic user, so the mosaic case is the one to check first, not last.
+
+  **Fixed by silence, not by a different number.** `noise_vs_expected` takes `is_mosaic` and returns `None`
+  for one — both branches, so the *reassurance* is withheld too (it rests on the same denominator). The
+  honest fix needs the depth **at the crop the ratio was measured over**, which nothing records; filed as the
+  follow-on below. Until then, the note's own rule decides it: being told a healthy picture underperformed is
+  far worse than being told nothing. A run stacked before the flag existed (schema < 8, so `is_mosaic` is
+  NULL) withholds too, by the same rule — "might be a mosaic" is not a licence to accuse it — while a
+  *recorded* `0` is judged as the single field it is; the check asks those two questions separately rather
+  than leaning on truthiness.
+
+  **One fix, both surfaces — which is the dividend of moving the judgement engine-side in v0.330.0.** The
+  History reveal card had carried this false alarm since v0.327.0 with its own copy of the threshold in
+  TypeScript; it now reads the server's verdict, so it went quiet without a line of frontend logic changing.
+
+  **Upgrade-safe (§9):** one keyword with a `False` default, so every existing call is unchanged; no config,
+  schema, on-disk or API-shape change. The `ratio` itself is still measured and still served — only the √N
+  reading of it is withheld.
+
+  **Tests (+3; all fail before).** `tests/test_stackhealth.py` (+2): the exact 10×-achieved-vs-400-frames
+  shape, asserted **both ways** so the false alarm is documented rather than merely absent, the withheld
+  reassurance, and a single field unaffected however the flag arrives (`False`/`None`/omitted); plus the
+  health note off a mosaic and on the byte-identical single-field run, so the suppression is provably the
+  mosaic flag and nothing else. `tests/webapp/test_stack_health_noise.py` (+1): end to end on a master noisy
+  enough that the sibling test proves it *would* read "low" as a single field.
+
+- **NEW IDEA (Builder 2026-09-03, the honest version of the mosaic suppression above) — record the frame
+  depth at the crop the noise ratio was measured over, so a mosaic can be judged instead of skipped.**
+  *(Pillar: trust + image quality — PRIORITY 4; size S; **do not do this by swapping in `coverage_max`** —
+  read on.)* v0.331.2 withholds the √N verdict on every mosaic because the ratio's central 1024² crop sees
+  one panel's subs while `n_frames_used` counts them all. The measurement is fine; only its yardstick is
+  missing. The run already writes a per-pixel coverage map beside its master (`<stem>_framecov.fits`, the
+  same sibling `backfill_coverage_thin_frac` reads), so the honest N is the **median coverage over exactly
+  the crop `_crop_origin` takes** — a few lines, on a map that is already open in the one place that needs
+  it. **Why not `coverage_max`:** it is the deepest pixel *anywhere* on the canvas, so on a lopsided mosaic
+  (a 200-sub panel beside a 3-sub one, the shape A6 was about) it over-expects and puts the false alarm
+  straight back, just less often — which is worse than today, because it would be false only sometimes and
+  so much harder to notice. **Care:** it must stay a *read of an existing sibling file*, never a new
+  measurement on a page render — the whole reason the note is affordable is that it reads a stamp; if the
+  depth can't be had that cheaply, stamp it beside the ratio at measure time instead. Silence must remain
+  the fallback whenever the map is missing (an older run, a deleted output).
+
 - **✅ SHIPPED (Builder, v0.328.0, branch `claude/sweet-babbage-hrh7bu`) — ~~your imaging log dates every night
   you shot by the day you *processed* it.~~** *(Found while unifying the caption vocabulary for A10; verified
   by reading and then by reproduction. Severity: **a wrong fact on a record the owner downloads and pastes into
@@ -16736,30 +16796,96 @@ problems. Dogfood it every big-picture run and fix root causes.
     first paint (the marker must not disappear while the render is in flight) and for a backend that doesn't send
     the new keys; and add the header keys, never rename the existing ones (§9).
 
-- **NEW IDEA (Builder 2026-09-04, the gap v0.329.4 left behind it) — a drift guard that every webapp caller of
-  `recent_night_pace_s` passes a `night_of`.** *(Pillar: maintainability in service of correctness — size XS.)*
-  v0.329.4 made the pace night-aware through an **optional** `night_of`, defaulted to the old session split so
-  a caller with no longitude to hand doesn't silently change. That default is right and it is also a trap: a
-  fourth surface that wants a pace gets the halved figure by simply not knowing to pass it, which is the bug
-  that just shipped a fix. Two of the three current callers are one line apart in `stats.py`/`plan.py`, so this
-  is cheap to pin: a test that walks the webapp package for `recent_night_pace_s(` calls and asserts each
-  passes `night_of=`, in the shape of the existing `StackOptions` form-descriptor drift test. **Grep first:**
-  if a caller ever legitimately wants sessions (the last-session recap does), the guard needs an opt-out marker
-  rather than a blanket rule — write it so the exception is stated, not silent.
+- **✅ SHIPPED (Builder, v0.331.1, branch `claude/sweet-babbage-i16c1c`) — ~~a drift guard that every webapp
+  caller of `recent_night_pace_s` passes a `night_of`.~~** Built as filed, including the part the entry told
+  the next agent to check first.
 
-- **NEW IDEA (Builder 2026-09-03, the obvious next tap on the v0.329.0 loupe) — split the full-size window
-  against the preview at the *same spot*, so the reader sees what the shrunk view was hiding.** *(Pillar: a
-  better editor — PRIORITY 1; size S; frontend-only, on machinery that now exists.)* The loupe answers *"what
-  will I actually get?"*. The question a beginner asks straight afterwards is *"and how different is that from
-  what I've been looking at?"* — which is the whole reason the four advisories existed. Both images are
-  already on screen in the modal, and the pieces are all shipped: `splitClipLeft` / `splitFraction` /
-  `splitLeftPct` (`components/editor/split*`) drive the editor's existing before/after divider, and the
-  preview crop of the same window is a plain CSS transform of the navigator image the modal already renders
-  (`scale = proxy_scale`, offset from the window rect the endpoint already returns in `X-Loupe-Window`).
-  **Care:** label it honestly — the left half is *the preview, enlarged*, not a second render, so it will look
-  soft by construction and the caption must say that is the point rather than a defect. **Grep before
-  building:** the split machinery is shared with the per-op compare; reuse it rather than adding a second
-  divider.
+  **The grep the entry asked for, and its answer.** Both current webapp callers (`routers/stats.py`,
+  `routers/plan.py`) already pass `night_of`, so the guard changes no behaviour today — it exists for the
+  *fourth* surface, which gets the halved figure by simply not knowing to pass it. That is the bug v0.329.4
+  just fixed, and the optional default that made the fix safe is what leaves the door open.
+
+  **The exception is stated, not silent** — the second thing the entry asked for. A caller that genuinely
+  means *sessions* rather than observing nights opts out with a marker comment naming its reason
+  (`# night-pace: sessions — <why>`) on the call or the line above, so the guard is a prompt to decide rather
+  than a rule to work around. Nothing opts out today; the last-session recap the entry had in mind lives in
+  the engine, not in `webapp/`.
+
+  **It walks the AST, not a regex** — `mod.f(...)` and `f(...)` both resolve, and `f(proj, **opts)` is
+  explicitly *not* mistaken for a keyword (a starred call hides whether `night_of` is there, and reading it
+  as present would let the guard pass on the one shape that can smuggle the default through).
+
+  **A positive control, because a guard that stops finding call sites sits permanently green while checking
+  nothing** — the same failure the A3 stub-binary guard had to close, and the same one A1 was. The first test
+  asserts the walk still finds calls *and* still finds them in `stats.py` and `plan.py`; and the guard was
+  verified to fail by actually removing a `night_of` from `stats.py` before shipping, message and all.
+
+  **Upgrade-safe (§9):** one new test file and one docstring paragraph pointing at it. No behaviour, no
+  config, no schema, no API.
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-04, the gap v0.329.4 left behind it) — a drift guard that every webapp caller of
+    `recent_night_pace_s` passes a `night_of`.** *(Pillar: maintainability in service of correctness — size XS.)*
+    v0.329.4 made the pace night-aware through an **optional** `night_of`, defaulted to the old session split so
+    a caller with no longitude to hand doesn't silently change. That default is right and it is also a trap: a
+    fourth surface that wants a pace gets the halved figure by simply not knowing to pass it, which is the bug
+    that just shipped a fix. Two of the three current callers are one line apart in `stats.py`/`plan.py`, so this
+    is cheap to pin: a test that walks the webapp package for `recent_night_pace_s(` calls and asserts each
+    passes `night_of=`, in the shape of the existing `StackOptions` form-descriptor drift test. **Grep first:**
+    if a caller ever legitimately wants sessions (the last-session recap does), the guard needs an opt-out marker
+    rather than a blanket rule — write it so the exception is stated, not silent.
+
+- **✅ SHIPPED (Builder, v0.331.0, branch `claude/sweet-babbage-i16c1c`) — ~~split the full-size window
+  against the preview at the *same* spot, so the reader sees what the shrunk view was hiding.~~** Built as
+  filed, frontend-only, on the machinery that already existed.
+
+  **The alignment is arithmetic, not a second render.** v0.329.5 made the modal read `X-Loupe-Window`, and
+  that header already says where the window landed **as fractions of the rendered preview**
+  (`preview_x/y/width/height`) — which is exactly what is needed to blow the navigator image up by
+  `1/preview_width` and slide its corner off-box so the same patch fills the same 512² box. A new pure
+  `loupePreviewCrop(win, boxW, boxH)` (`components/editor/loupe.ts`) is that arithmetic and nothing else; the
+  divider is the editor's existing `splitClipLeft` / `splitFraction` / `splitLeftPct`, not a second one.
+
+  **The Care note is the copy, and it is load-bearing.** The left half *will* look soft — it is a decimated
+  preview enlarged — and on a surface whose entire purpose is "can I trust what I am seeing?", an
+  unexplained soft half reads as a rendering defect. The caption says it outright: *"The left side looks soft
+  because that is exactly what the shrunk preview was hiding."* Pinned by its own test, because it is the one
+  sentence that turns the finding into an answer instead of a bug report.
+
+  **Off by default, and absent rather than wrong.** The split starts hidden behind one compact-xs button in
+  the modal (the editor's standing complaint is that it is too busy, and the window on its own is what the
+  modal is *for*). And when the server sends no preview rectangle — a container older than v0.329.6, or a
+  degenerate crop — `loupePreviewCrop` returns `null` and **no comparison is offered at all**: a misaligned
+  split would be worse than none, and the window itself is unaffected either way. The overhanging-window case
+  the marker already draws clipped is carried through unclamped for the same reason it is there.
+
+  **Upgrade-safe (§9):** frontend-only. No engine, endpoint, response shape, config, schema or default
+  touched; every existing loupe interaction renders exactly as before until the button is pressed.
+
+  **Tests (+11; all fail before).** `loupe.test.ts` (+4): the blow-up factor and offset for an off-centre
+  window, the no-offset corner case, an overhanging window kept where it really is, and `null` on every shape
+  that cannot be aligned (no rectangle, an older backend's empty one, a degenerate or non-finite one, an
+  unmeasured box). `FullSizeCheck.test.tsx` (+7): starts off; the clipped overlay's image is the preview at
+  the computed size and offset; the caption names both halves and the softness; the divider drags (with a
+  `MouseEvent` — jsdom has no `PointerEvent`, so `fireEvent.pointerDown` drops `clientX` and a drag test
+  written with it passes while measuring nothing); it toggles back off; and an older backend gets no button.
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-03, the obvious next tap on the v0.329.0 loupe) — split the full-size window
+    against the preview at the *same spot*, so the reader sees what the shrunk view was hiding.** *(Pillar: a
+    better editor — PRIORITY 1; size S; frontend-only, on machinery that now exists.)* The loupe answers *"what
+    will I actually get?"*. The question a beginner asks straight afterwards is *"and how different is that from
+    what I've been looking at?"* — which is the whole reason the four advisories existed. Both images are
+    already on screen in the modal, and the pieces are all shipped: `splitClipLeft` / `splitFraction` /
+    `splitLeftPct` (`components/editor/split*`) drive the editor's existing before/after divider, and the
+    preview crop of the same window is a plain CSS transform of the navigator image the modal already renders
+    (`scale = proxy_scale`, offset from the window rect the endpoint already returns in `X-Loupe-Window`).
+    **Care:** label it honestly — the left half is *the preview, enlarged*, not a second render, so it will look
+    soft by construction and the caption must say that is the point rather than a defect. **Grep before
+    building:** the split machinery is shared with the per-op compare; reuse it rather than adding a second
+    divider.
 
 - **✅ SHIPPED, RESOLUTION (a) (Builder, v0.329.5, branch `claude/sweet-babbage-fwtqxh`) — ~~the loupe's
   `X-Loupe-Window` header has no reader.~~** The modal now says, under the window, *"This is the top-left of
@@ -19239,6 +19365,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **NEW IDEA (Builder 2026-09-03, measured while sweeping the display-space statistics for A1's blindness) —
+  Levels' "From your image" button silently leaves the black point at 0, and nothing says why.** *(Pillar:
+  friendliness — PRIORITY 3; size XS; **copy, not arithmetic** — do NOT change the number, and read the
+  swept-and-closed entry under "Image quality" before touching this.)* Measured on real `autostretch`
+  output: the image entering Levels has **1.08 % of its pixels at exactly 0** (the STF's shadow clip), so
+  `suggest_levels_points`' 1st percentile lands inside that spike and the button returns
+  `black = 0.000, white = 0.892, gamma = 1.079`. That black **is the honest answer** — the function's job is
+  "put black where 1 % of pixels fall below", and 1.08 % are already there, so the picture has the shadow
+  clipping the button was asked for; excluding the zeros would clip roughly *twice* the intended share on the
+  on-by-default path. But from the beginner's seat it reads as a half-broken button: two sliders move, one
+  doesn't, and nothing accounts for it. **Shape:** one line beside the suggestion — *"your blacks are already
+  where they should be, so only the white point moved"* — on the branch where the suggested black equals the
+  current one. Not a banner; the other "From your image" buttons already name what they solved for
+  (`gamma_target`, `target_bg`), so this is the same idiom rather than a new element. **Grep first:** the
+  Levels control's existing suggestion copy in the editor, and check whether the button already renders
+  anything on a no-change suggestion.
+
+- **NEW IDEA (Builder 2026-09-03, opened by the v0.330.0 note that needed the same wording twice) — pin the
+  noise-reduction factor's formatter, which is now hand-mirrored in two languages.** *(Pillar:
+  maintainability in service of trust — size XS.)* "Stacking cut the background noise about 15×" is written
+  by `factorLabel` (`frontend/src/components/oneFrameVsStack.ts`) and, since v0.330.0, by `_factor_label`
+  (`seestack/stackhealth.py`) for the health note about the same run. The rule is fiddly on purpose —
+  whole numbers at/above 10, one decimal below, trailing `.0` dropped — so the same stack can end up
+  described as "10×" on one screen and "10.0×" on the other after one careless edit, on two surfaces a user
+  reads minutes apart. The repo already has the right idiom for exactly this
+  (`tests/test_pace_constants_mirror.py`, for a pair of hand-synced pace constants): a test that drives both
+  implementations over the same values and asserts identical output. **Note this is a *formatter*, not a
+  constant**, so the mirror test has to run the TypeScript — either by reading and re-deriving the rule from
+  the source the way the pace test does, or (cleaner) by pinning both against one shared table of
+  value → string cases, so a change to either side has to touch the table.
 
 - **✅ SHIPPED — BOTH, AS ONE CHANGE (Builder, v0.328.3, branch `claude/sweet-babbage-2xguh9`) — ~~a capture
   window is spelled three different ways~~ and ~~the Editor's copyable caption is the only one of the four with
@@ -21908,29 +22065,78 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Shape:** feed `auto_reject_depth` (or, better, the coverage plane the pass already computes) into the
   `DRZREJ*` provenance and into `stackhealth`'s `rejection_blind` note, so a drizzled shallow mosaic gets the
   same honest line as a non-drizzled one. No change to any pixel — this is the "say what it did" half.
-- **NEW IDEA (Builder 2026-09-02, the reach the v0.327.0 √N verdict deliberately did not buy) — the
-  "your stack came in well under what its subs should give" nudge lives inside a collapsed reveal, so the one
-  person who needs it never opens it.** *(Pillar: trust + autonomy — PRIORITY 4/2; size S–M; **read the cache
-  note before sizing, it is what makes this cheap**.)* v0.327.0 added an honest early warning — a stack
-  measuring below 0.7·√(frames used) usually means soft alignment, a drifting gradient, or a lot of frames
-  dropped — but it renders on the "One frame vs your stack" card, behind a *See the difference* button on the
-  History page. A beginner whose stacks are quietly underperforming is exactly the person who never clicks it.
-  **The right home for a warning is "How's my stack?"** (`seestack/stackhealth.py`), which the Target page
-  already shows unprompted and which already ranks notes of precisely this shape (`rejection_blind`,
-  the coverage and seam notes). **Why this is S–M and not L:** the measurement is *already cached
-  server-side per run* — `NOISE_RATIO_META_PREFIX` (`webapp/routers/stack.py`), fingerprinted on the master and
-  the reference sub — and `StackNoiseBadge` fetches it eagerly on the Target result headline and the Jobs
-  completion summary, so by the time anyone reads the health notes the number is usually already sitting in the
-  project's meta table. **So the shape is: read the cache, never measure.** A health note that fired a master
-  reload + debayer on every Target page view would be a real regression on a page that must stay cheap; one
-  that says nothing when the stamp is absent costs nothing and self-heals the moment the headline badge
-  measures. **Care:** (1) keep *one* definition of the threshold — 0.7 and the 10-frame floor are currently in
-  `frontend/src/components/oneFrameVsStack.ts` with the measurement behind them in
-  `tests/test_noise_ratio_expectation.py`; moving the verdict engine-side means the card should read the
-  engine's answer rather than a second copy, exactly as `seam_verdict` and `rejection_reach` already do.
-  (2) The fingerprint must be honoured — a stale stamp from before a re-stack must not raise a note about a
-  picture that no longer exists. (3) Stay gentle: legitimate rejection and quality weighting lower the
-  effective frame count, and the copy already says "usually means", not "is".
+- **✅ SHIPPED (Builder, v0.330.0, branch `claude/sweet-babbage-i16c1c`) — ~~the "your stack came in well
+  under what its subs should give" nudge lives inside a collapsed reveal, so the one person who needs it never
+  opens it.~~** Moved to "How's my stack?", which the Target page shows unprompted, exactly as the entry asked
+  — and built the way it said to: **read the cache, never measure**.
+
+  **The judgement moved engine-side; the copy stayed where it was.** `noise_vs_expected(ratio, n_frames)`
+  (`seestack/stackhealth.py`) is now the one answer to "is that reduction any good?", shaped as a sibling of
+  `seam_verdict`: `"expected"` | `"low"` | `None`. `NOISE_EXPECTED_LOW_FRACTION` (0.7) and
+  `NOISE_EXPECTED_MIN_FRAMES` (10) came with it — they were TypeScript constants describing a **measured
+  property of a Python estimator**, which is the wrong side of the wire for a number
+  `tests/test_noise_ratio_expectation.py` pins. That file now *imports* the constant instead of re-typing it,
+  and each of its three cases asserts the verdict as well as the arithmetic, so the sweep and the threshold
+  cannot drift apart. The reveal card keeps writing the sentence, but for a verdict the server hands it
+  (`expected_verdict`, additive on `/one-sub-vs-stack/noise`) — the same shape `PanelSeamsBadge` already uses,
+  so the two surfaces provably cannot describe one stack two ways.
+
+  **Cost on the Target page: one `get_meta` and one `stat`.** `stamped_noise_ratio` reads the stamp the reveal
+  card leaves behind, with the existing fingerprint honoured in full, and **never measures** — a run nobody has
+  revealed yet simply gets no note and starts getting one the moment the headline badge measures it once.
+  Pinned by a test that counts calls to `_measure_noise_ratio` across a health request and asserts zero, both
+  before the stamp exists and after. The frame-list the endpoint had already loaded is reused to pick the
+  representative sub (a pure `reference_sub_from_frames` split out of `_pick_reference_sub`), so the note costs
+  no extra query either.
+
+  **Care (2) has its own test, and it is the one that matters on a live install:** a re-stack writes a new
+  master at the same path, and the old number then describes a picture that no longer exists. Rewriting the
+  master makes the stamp a **miss**, so the note disappears rather than accusing the new stack of the old
+  one's shortfall — and the miss stays silent instead of measuring.
+
+  **Ranked below the notes that name a cause.** `roughly_aligned` and `soft_stars` say *why* a stack
+  underperformed; when either fires it is the better advice, so the yardstick note sits at priority 38, after
+  them and before the seam notes. It is what the card shows when nothing else explains the shortfall.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no setting flipped; one optional keyword
+  on `stack_health`, one added response field, one added note `kind` the card already renders generically
+  (`action` is `None` — the fix is on the next clear night, not a button). Every existing run reads exactly as
+  before until something measures it.
+
+  **Tests (+18; all fail before).** `tests/test_stackhealth.py` (+7): the verdict at and either side of the
+  0.7·√N boundary, its silence on every unmeasurable/too-thin shape, the note's wording and numbers, its
+  absence on a healthy stack and with no stamp at all, and its rank below `roughly_aligned`.
+  `tests/webapp/test_stack_health_noise.py` (new, +5): the note end to end on a master deliberately left as
+  noisy as a single raw sub, its absence on a quiet one, the zero-measurements guarantee, the replaced-master
+  fingerprint miss, and the below-floor silence. Frontend (+6 net): the sentence for each verdict, and that a
+  missing, empty or unrecognised verdict renders **nothing** rather than the card second-guessing the server
+  with a threshold of its own.
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-02, the reach the v0.327.0 √N verdict deliberately did not buy) — the
+    "your stack came in well under what its subs should give" nudge lives inside a collapsed reveal, so the one
+    person who needs it never opens it.** *(Pillar: trust + autonomy — PRIORITY 4/2; size S–M; **read the cache
+    note before sizing, it is what makes this cheap**.)* v0.327.0 added an honest early warning — a stack
+    measuring below 0.7·√(frames used) usually means soft alignment, a drifting gradient, or a lot of frames
+    dropped — but it renders on the "One frame vs your stack" card, behind a *See the difference* button on the
+    History page. A beginner whose stacks are quietly underperforming is exactly the person who never clicks it.
+    **The right home for a warning is "How's my stack?"** (`seestack/stackhealth.py`), which the Target page
+    already shows unprompted and which already ranks notes of precisely this shape (`rejection_blind`,
+    the coverage and seam notes). **Why this is S–M and not L:** the measurement is *already cached
+    server-side per run* — `NOISE_RATIO_META_PREFIX` (`webapp/routers/stack.py`), fingerprinted on the master and
+    the reference sub — and `StackNoiseBadge` fetches it eagerly on the Target result headline and the Jobs
+    completion summary, so by the time anyone reads the health notes the number is usually already sitting in the
+    project's meta table. **So the shape is: read the cache, never measure.** A health note that fired a master
+    reload + debayer on every Target page view would be a real regression on a page that must stay cheap; one
+    that says nothing when the stamp is absent costs nothing and self-heals the moment the headline badge
+    measures. **Care:** (1) keep *one* definition of the threshold — 0.7 and the 10-frame floor are currently in
+    `frontend/src/components/oneFrameVsStack.ts` with the measurement behind them in
+    `tests/test_noise_ratio_expectation.py`; moving the verdict engine-side means the card should read the
+    engine's answer rather than a second copy, exactly as `seam_verdict` and `rejection_reach` already do.
+    (2) The fingerprint must be honoured — a stale stamp from before a re-stack must not raise a note about a
+    picture that no longer exists. (3) Stay gentle: legitimate rejection and quality weighting lower the
+    effective frame count, and the copy already says "usually means", not "is".
 
 - **✅ SHIPPED (Builder, v0.327.0, branch `claude/zen-mccarthy-gmo0to`) — ~~say what stacking *should* have
   bought, next to what it did, so a beginner can tell a healthy stack from an underperforming one.~~** Built as
@@ -22024,24 +22230,80 @@ problems. Dogfood it every big-picture run and fix root causes.
   say so with the numbers. **Caution:** these are on-by-default constants on a live install — a change alters
   every future picture, so it wants its own commit and a stated before/after, never a fold-in.
 
-- **⭐ NEW IDEA (Builder 2026-09-02, generalised from the A1 fix this run — the strongest follow-on it
-  exposed) — sweep every display-space measurement for the *same* clipped-shadow blindness A1 turned out to
-  be.** *(Pillar: image quality + trust — PRIORITY 4; size S per site, and the identifying test is mechanical.
-  Confidence: the mechanism is proven — one live instance found, reproduced and fixed this run.)*
-  A1 was not "the sky-mode histogram has a bug". It was: **`tone.stretch` hard-clips ~1.5 % of every stretched
-  image to *exactly* zero, and any statistic taken over the whole finite population sees that spike as real
-  data.** One value, 1.5 % of the pixels — it beats a noise-spread sky in a histogram every time, and it drags
-  any low percentile to 0.0. `_sky_mode` was one consumer of that population; it is unlikely to be the only
-  one. **The generative test, which needs no measurement:** *does this statistic run on display-space pixels,
-  and would a spike at exactly 0 change its answer?* If yes, it is a candidate.
-  **Where to look** (each is a read, not yet a finding — check before filing): the Levels black-point
-  suggestion and the histogram's "shadows clipping" readout (both explicitly reason about the low end);
-  `analyze_proxy`'s `sky`, which Auto's own denoise/sharpen decisions are sized from; the gradient
-  background-model fits, which weight by pixel value; and anything measuring a percentile below p5 on a
-  post-stretch array. **Care:** the fix is *not* "drop zeros everywhere" — a readout whose whole job is to
-  report clipping must keep counting them. The rule is that a statistic estimating a *property of the sky*
-  excludes them, and one estimating *how much was clipped* does not. State which kind each site is in the
-  commit.
+- **✅ SWEPT AND CLOSED — every named site walked, NO second instance found; the one live consumer was
+  `_sky_mode` and it is fixed (Builder 2026-09-03, branch `claude/sweet-babbage-i16c1c`). Read this before
+  re-sweeping; the measurements are here so nobody re-derives them.** *(No code change wanted. Recording a
+  clean sweep is the deliverable — the entry's own generative test was applied to every candidate it named,
+  and the answer came back "no" each time, for a different reason each time.)*
+
+  The entry's test is *"does this statistic run on display-space pixels, and would a spike at exactly 0 change
+  its answer?"*. Both halves have to be **yes**. Site by site:
+
+  - **`analyze_proxy`'s `sky` (and the noise σ Auto's denoise/sharpen are sized from) — first half is NO.**
+    Its two callers in `presets.py` pass the **linear** proxy: `auto_recipe`'s whole point is that denoise
+    runs "on linear data, before the stretch", and the stretch it emits is downstream of the analysis. There
+    is no clip to be blind to. (Same for `suggest_asinh_stretch`, `suggest_denoise_strength` — the latter's
+    endpoint passes `auto_stretch=False` *explicitly*, and says why — and `measure_blown_core`'s
+    `linear_has_structure`, whose percentiles are taken on the linear half of the pair by construction.)
+
+  - **The Levels black-point suggestion — first half YES, second half NO, and this one is worth the
+    paragraph because it looks exactly like A1 and is not.** `suggest_levels_points` really does run on
+    post-stretch pixels (`levels_suggestion` applies the recipe with the default `auto_stretch=True`), and
+    on real `autostretch` output it really does return **`black = 0.000`** — measured: 1.08 % of pixels at
+    exactly 0, so `p1.0` lands **inside the zero spike**, where the unclipped answer would have been 0.023.
+    But its semantics are *"put black where 1 % of pixels fall below"*, not *"where is the sky"* — and
+    1.08 % are already there, so **0.0 is the honest answer and the picture already has the shadow clipping
+    the button was asked for**. Excluding the zeros would clip 1.08 % **plus** another 1 %, i.e. roughly
+    double the intended amount, on the on-by-default one-click path. `suggest_levels_gamma` beside it takes a
+    **median**, which 1 % of anything cannot move. **Do not "fix" this**; it is the case that shows the
+    entry's rule needs its own second clause — a percentile *targeting a share of the population* is right to
+    count clipped pixels, the same way a clipping readout is.
+
+  - **The histogram's "shadows clipping" readout — deliberately counts them, as the entry's own Care note
+    predicts.** `clippingCaption`/`clippingEdges` (`frontend/src/components/editor/clipping.ts`) read the
+    **bottom bin** and exist to report how much was crushed, so the spike is the signal. Its 35 % threshold
+    also sits an order of magnitude above the 1–2 % the stretch leaves, so the stretch's own clip cannot make
+    it nag.
+
+  - **The gradient background-model fits — first half is NO.** All three `background.*` ops are
+    `stage="linear"`, and `auto_recipe` puts them ahead of the stretch, so a value-weighted mesh fit never
+    sees a clipped shadow on the path that runs by itself.
+
+  - **The sky-cast readout and its one-click fix — second half is NO, measured.** `sky_channel_medians`
+    (shared by `measure_sky_cast` and `tone.neutralize_background`, both `stage="nonlinear"`, both genuinely
+    on display pixels) takes a **per-channel median of the sub-median population**. Measured on real
+    `autostretch` output carrying a 1.0–1.1 % per-channel zero spike: R/G/B `0.15305 / 0.15318 / 0.15259`
+    with the clipped pixels in, and **the same figures to five decimals** with them excluded — the verdict
+    and its 0.00035 deviation are bit-identical. A median is immune to a 1 % tail by construction; A1's mode
+    was not, which is the whole difference.
+
+  **So the durable finding is the shape of the rule, not another bug.** A1 was specifically a **mode** — the
+  one estimator a single-valued spike can *win* outright, because a spike of one value beats a noise-spread
+  sky in every histogram. Percentiles below the spike are dragged to it but are usually asking a
+  share-of-population question that the spike legitimately answers; medians and MADs don't move at all. **If
+  this is ever re-swept, look for another histogram mode or arg-max over display-space pixels first** — that
+  is where the next instance would be, and there isn't one today.
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **⭐ NEW IDEA (Builder 2026-09-02, generalised from the A1 fix this run — the strongest follow-on it
+    exposed) — sweep every display-space measurement for the *same* clipped-shadow blindness A1 turned out to
+    be.** *(Pillar: image quality + trust — PRIORITY 4; size S per site, and the identifying test is mechanical.
+    Confidence: the mechanism is proven — one live instance found, reproduced and fixed this run.)*
+    A1 was not "the sky-mode histogram has a bug". It was: **`tone.stretch` hard-clips ~1.5 % of every stretched
+    image to *exactly* zero, and any statistic taken over the whole finite population sees that spike as real
+    data.** One value, 1.5 % of the pixels — it beats a noise-spread sky in a histogram every time, and it drags
+    any low percentile to 0.0. `_sky_mode` was one consumer of that population; it is unlikely to be the only
+    one. **The generative test, which needs no measurement:** *does this statistic run on display-space pixels,
+    and would a spike at exactly 0 change its answer?* If yes, it is a candidate.
+    **Where to look** (each is a read, not yet a finding — check before filing): the Levels black-point
+    suggestion and the histogram's "shadows clipping" readout (both explicitly reason about the low end);
+    `analyze_proxy`'s `sky`, which Auto's own denoise/sharpen decisions are sized from; the gradient
+    background-model fits, which weight by pixel value; and anything measuring a percentile below p5 on a
+    post-stretch array. **Care:** the fix is *not* "drop zeros everywhere" — a readout whose whole job is to
+    report clipping must keep counting them. The rule is that a statistic estimating a *property of the sky*
+    excludes them, and one estimating *how much was clipped* does not. State which kind each site is in the
+    commit.
 
 - **NEW IDEA (Builder 2026-08-31, the anchoring question the v0.320.1 per-panel patches deliberately left
   measured-but-unaddressed) — chain each mosaic panel's refine reference to a neighbour it overlaps, so the
