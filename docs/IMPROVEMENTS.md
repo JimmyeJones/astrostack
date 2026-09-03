@@ -13453,6 +13453,27 @@ to **Shipped**.)_
   it, not because anything is stacked badly. One real friction *was* found on it this run and is fixed
   (v0.317.1); nothing else in the screenshots reads as a layout problem.
 
+  **↳ RE-MEASURED four days and ~80 versions later (Builder 2026-09-03, at v0.338.1) — the numbers have not
+  drifted, and the probe is still clean.** Same script, same sample, same two viewports: **phone**
+  `/targets/<t>` **3014 px** (was 3035) · `/life-list` **3008** (unchanged) · `/targets/<t>/edit/1` **2829**
+  (was 2775) · `/` **1785** (was 1813) · `/targets/<t>/stack` **1748** (was 1712); **desktop**
+  `/targets/<t>` **2010** (unchanged) · `/targets/<t>/edit/1` **1805** (was 1767) · `/life-list` **1453**
+  (unchanged). Still **no horizontal overflow on any page and no console errors**. So roughly eighty versions
+  of feature work — every one of which could have appended a banner — moved the worst page by **21 px**, which
+  is the `NoticeBoard`/`InsightTabs` grouping doing exactly the job it was built for. **The conclusion for the
+  next run is the same as last time and now has a second data point behind it: do not open a speculative IA
+  slice.** The two pages that grew (editor +54 px, stack form +36 px) grew inside their existing groupings,
+  which is the intended shape.
+
+  **The eyeball pass over the 42 screenshots found no new friction worth filing**, which is the honest result
+  and is recorded so the next run does not re-walk it. Two things were checked and dismissed rather than
+  filed, with the reason, so they are not re-investigated: (1) the Tonight page's **Night** picker renders as
+  `mm/dd/2026` rather than `mm/dd/yyyy` — that is Chromium pre-filling the one field its `min`/`max` pin to a
+  single value, not a partially-set value, and it is *more* helpful than the placeholder, not less; (2) the
+  Storage page's stacked bar labels its two segments `cache` and `data` while the text above says "cache" and
+  "output", and the `data` segment is the 5 MB remainder (outputs + DBs + thumbs) rather than the 3 MB of
+  outputs — a wording mismatch of a bar nobody reads for numbers, below the bar for a change on a live install.
+
 - **✅ SHIPPED (Builder, v0.317.0, branch `claude/compassionate-galileo-7y6nlj`) — ~~a picture could name the
   first and last night it was shot on, but never how many *nights* it took.~~ It can now say "over 4 nights".**
 
