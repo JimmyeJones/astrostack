@@ -1384,10 +1384,35 @@ _(nothing else claimed — claim an item here with your branch name)_
   see below)*; ~~the frames table prints raw
   UTC under a hero that says "Shot &lt;local night&gt;"~~ *(shipped v0.328.5, see below)*;
   "nights" means **6-hour sessions** on the Nights card
-  but **calendar nights** in captions; three hand-mirrored "is this a genuine run" predicates;
+  but **calendar nights** in captions *(traced 2026-09-03 — read the note below before picking it up)*;
+  three hand-mirrored "is this a genuine run" predicates;
   `POST /api/targets` has **no frontend caller**; ~~share and print JPEGs use 4:2:0 chroma subsampling~~
   *(shipped v0.328.0, see below)*; the "full
   data" TIFF anchors its white point on the single brightest surviving pixel (hypothesis, needs real data).
+
+- **⚪ TRACED, NOT BUILT (Builder 2026-09-03, while shipping the sibling A-MINOR item below) — what the
+  "'nights' means two different things" entry actually costs, and the shape of the fix.** *(Recorded so the
+  next run starts from the code rather than from the one-line summary. Size: S–M.)*
+  **The mechanism.** `nights_breakdown` (`seestack/session_recap.py`) groups a target's frames into
+  **sessions** by a `DEFAULT_SESSION_GAP_HOURS` (6 h) gap split, then labels each session with
+  `night_date_of(start_utc, lon)`. `capture_night_count` (`webapp/capture_nights.py`) counts **distinct
+  observing-night dates**. Those disagree in exactly one direction: two sessions more than 6 h apart *within
+  one observing night* — an evening run, bed, then a pre-dawn run — produce **two Nights-card rows carrying
+  the identical date label**, while the caption on the same page says "over 1 night". They cannot disagree the
+  other way: consecutive nights are always more than 6 h apart, so a session never spans two nights.
+  **Why it is worse than a cosmetic mismatch.** Each row carries a **"Set aside"** button whose copy is about
+  *the night*, and on a split night it sets aside only that row's half — so a beginner who decides a night was
+  clouded out clicks it, re-stacks, and half the bad subs are still in the picture, with the card still
+  showing a second identically-dated row they have no reason to read as a different thing.
+  **Fix direction.** The card's own heading is "Nights" and its copy is "every night that went into this
+  picture", so the honest change is to group the sessions by their observing-night date and roll the group up
+  into one row — the labelling helper is already there, and `set_aside_night(start_utc, end_utc)` takes a
+  window, so a merged row hands it the night's outer bounds. **Cautions:** `nights_breakdown` is shared (the
+  Dashboard's last-session recap reads sessions, and *that* surface genuinely wants sessions, not nights), so
+  bucket at the endpoint rather than reshaping the engine helper; the median-FWHM/verdict statistics must be
+  recomputed over the merged group rather than picked from one half; and the longitude has to come from
+  `resolve_site_lon`, exactly as `/nights` already resolves it. A regression test needs a fixture with two
+  sessions inside one observing night — which is what makes this S–M rather than S.
 
 - **✅ SHIPPED (Builder, v0.328.5, branch `claude/sweet-babbage-axt93w`) — ~~A-MINOR: the frames table prints
   raw UTC under a hero that says "Shot &lt;local night&gt;".~~** The same date-honesty class as v0.311.3,
@@ -16457,6 +16482,31 @@ to **Shipped**.)_
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
+
+- **NEW IDEA (Builder 2026-09-03, the obvious next tap on the v0.329.0 loupe) — split the full-size window
+  against the preview at the *same spot*, so the reader sees what the shrunk view was hiding.** *(Pillar: a
+  better editor — PRIORITY 1; size S; frontend-only, on machinery that now exists.)* The loupe answers *"what
+  will I actually get?"*. The question a beginner asks straight afterwards is *"and how different is that from
+  what I've been looking at?"* — which is the whole reason the four advisories existed. Both images are
+  already on screen in the modal, and the pieces are all shipped: `splitClipLeft` / `splitFraction` /
+  `splitLeftPct` (`components/editor/split*`) drive the editor's existing before/after divider, and the
+  preview crop of the same window is a plain CSS transform of the navigator image the modal already renders
+  (`scale = proxy_scale`, offset from the window rect the endpoint already returns in `X-Loupe-Window`).
+  **Care:** label it honestly — the left half is *the preview, enlarged*, not a second render, so it will look
+  soft by construction and the caption must say that is the point rather than a defect. **Grep before
+  building:** the split machinery is shared with the per-op compare; reuse it rather than adding a second
+  divider.
+
+- **NEW IDEA (Builder 2026-09-03, filed the moment after adding it, so it doesn't become another
+  `POST /api/targets`) — the loupe's `X-Loupe-Window` header has no reader.** *(Pillar: friendliness —
+  PRIORITY 3; size XS.)* `GET …/editor/loupe` returns the source rectangle it rendered
+  (`{x, y, width, height, canvas_width, canvas_height, proxy_scale}`) as a response header, and nothing
+  consumes it: `FullSizeCheck` draws its marker from its own client-side `loupeMarkerRect`, which is a *guide*
+  and can differ from the server's clamped answer by up to half a window at the very edge of a cropped
+  preview. Two honest resolutions, in order: (a) have the modal say **where** it is looking in words — *"from
+  the upper-left of your frame"* — which is the thing a reader actually wants and would make the header carry
+  its weight; or (b) drop the header. Do not leave it as it is: the A-MINOR audit already lists one endpoint
+  with no caller, and this is the same shape one layer down.
 
 - **✅ SHIPPED, ALL THREE SLICES (v0.328.2 → v0.328.6 → v0.329.0) — ~~"check it at full size": a 1:1 loupe on
   the editor preview, so the four ops the proxy *cannot* show honestly can be judged instead of apologised
