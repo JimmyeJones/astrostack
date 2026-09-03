@@ -12,6 +12,7 @@ import { PlanWeekCard } from "../components/tonight/PlanWeekCard";
 import { QueryError } from "../components/QueryError";
 import { WorthMoreTimeList } from "../components/tonight/WorthMoreTimeList";
 import { formatIntegration } from "../format";
+import { withMosaicEffort } from "../mosaicEffort";
 import { readinessRowBadge } from "../readiness";
 import { settingsLink } from "../settingsSections";
 import {
@@ -32,7 +33,7 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
-function TargetRow({ t }: { t: PlannedTarget }) {
+function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | null }) {
   const label = t.name && t.name !== t.id ? `${t.id} — ${t.name}` : t.id;
   // For a target already in the library: how many more clear nights would
   // finish it at the owner's own recent pace on it ("~1 more night"), or — when
@@ -53,7 +54,11 @@ function TargetRow({ t }: { t: PlannedTarget }) {
   // Pre-capture "will it fit?" nudge for a catalog candidate that's bigger than
   // (or as wide as) a single Seestar frame — so a beginner reaches for mosaic
   // mode before pointing. Only the too-big cases badge; "fits" stays silent.
-  const framingBadge = framingRowBadge(t.framing, t.mosaic);
+  // …and, on hover, roughly how many clear nights all those panels would take at
+  // this owner's own measured pace — the question a beginner actually asks next.
+  // Silent for an owner with no pace history yet, and on an older backend.
+  const framingBadge = withMosaicEffort(
+    framingRowBadge(t.framing, t.mosaic), t.mosaic, t.type, usualPaceS);
   // "How hard for a Seestar?" so a beginner sees difficulty while choosing, not
   // only after shooting. Catalog rows only; library/un-vetted rows carry none.
   const difficultyBadge = difficultyRowBadge(t.difficulty);
@@ -172,7 +177,10 @@ function SaveLocationNudge({ lat, lon }: { lat: number; lon: number }) {
   );
 }
 
-function TargetTable({ targets, empty }: { targets: PlannedTarget[]; empty: string }) {
+function TargetTable(
+  { targets, empty, usualPaceS }:
+  { targets: PlannedTarget[]; empty: string; usualPaceS?: number | null },
+) {
   if (targets.length === 0) {
     return <Text size="sm" c="dimmed">{empty}</Text>;
   }
@@ -190,7 +198,7 @@ function TargetTable({ targets, empty }: { targets: PlannedTarget[]; empty: stri
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {targets.map((t) => <TargetRow key={t.id} t={t} />)}
+          {targets.map((t) => <TargetRow key={t.id} t={t} usualPaceS={usualPaceS} />)}
         </Table.Tbody>
       </Table>
     </Table.ScrollContainer>
@@ -395,6 +403,7 @@ export function TonightView() {
         </Text>
         <TargetTable
           targets={alreadyUp}
+          usualPaceS={data?.usual_pace_s}
           empty={already.length === 0
             ? "You haven't shot any targets with a known position yet — start something new below."
             : `None of your targets are up ${whenWord} — lower the minimum altitude to include them.`} />
@@ -419,6 +428,7 @@ export function TonightView() {
         </Text>
         <TargetTable
           targets={freshShown}
+          usualPaceS={data?.usual_pace_s}
           empty={freshShown.length === 0 && freshUp.length > 0
             ? "No targets of that type clear your minimum altitude — try another type or lower the floor."
             : `Nothing in the catalog clears your minimum altitude ${whenWord} — try lowering it above.`} />
