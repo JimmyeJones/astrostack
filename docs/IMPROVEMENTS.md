@@ -12617,6 +12617,21 @@ to **Shipped**.)_
   > and a field-by-field check would read as "the pick survived"), while a manual Stack-form run keeps exactly
   > what was picked. `Settings.test.tsx` (+3): off for a fresh install, reads a saved value back, and not in
   > `WALK_AWAY_KEYS`.
+  >
+  > **✅ AND ITS DISCOVERABILITY — v0.337.1, same branch.** A setting nobody can find is a setting nobody has,
+  > and the beginner this is for will never go looking through Settings for a switch by name. The Target
+  > page's rejection-outlook note — the one surface that already describes exactly the problem the setting
+  > solves — now offers **two** ways out: *"Change how this target stacks"* (the Stack form, the narrow
+  > answer) and *"Let AstroStack choose on every hands-off stack"*, linking to `settingsLink("automation")`,
+  > which is the one a walk-away owner actually wants because it covers every target at once.
+  > **It needs no gate**, which is the neat part: the note only speaks when the method is the user's own, and
+  > turning the setting on hands the choice back to the app — so on an install that already has it,
+  > `user_chose` is false and the whole note is silent. The link is typed through `settingsSections.ts`, so a
+  > renamed section is a compile error rather than a link landing on the wrong tab. **Test (+1):** the second
+  > link exists and resolves to `/settings/automation`.
+  > **Deliberately not done:** the same pointer on the v0.336.0 save clause. That clause is a transient
+  > notification, and a link inside a toast the user may not catch is worse than the note that stays on the
+  > page they are already reading.
   > **What is still open from (a):** the *depth-aware* half — actually calling `rejection_reach` on the
   > target's saved defaults and its accepted count, so the page can say "your saved setting will not reach
   > this" with the one-click fix, rather than giving advice that is merely always-correct. That still wants
