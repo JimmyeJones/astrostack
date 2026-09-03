@@ -36,6 +36,15 @@ class TargetOut(BaseModel):
     # image, or None to show the newest stack (the default). Lets the UI mark
     # which History run is the current cover.
     cover_stack_run_id: int | None = None
+    # How many single-frame field-fulls of sky this target's newest stack
+    # covers — 1.0 for a single field, ~4.0 for a 2×2 no-overlap mosaic. Set
+    # by :func:`webapp.routers.targets.get_target` (the Target-page detail
+    # read) so its "Is it enough yet?" card can scale the per-object-type goal
+    # by the panel count. ``None`` on the light list endpoint (where computing
+    # it O(N) per Library refresh would be wasted work), for a target with no
+    # stack yet, and on an older backend — the card then falls back to the
+    # un-scaled goal (today's behaviour). See :mod:`webapp.field_fulls`.
+    field_fulls: float | None = None
 
 
 class TargetPatch(BaseModel):

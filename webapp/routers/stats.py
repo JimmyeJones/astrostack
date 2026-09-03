@@ -154,6 +154,16 @@ class TargetProgressOut(BaseModel):
     # client-side from its night list. Additive and optional: an older frontend
     # ignores it, and a null simply means the row says nothing about nights.
     recent_pace_s: float | None = None
+    # How many single-frame field-fulls of sky this target's newest stack
+    # covers — 1.0 for a single field, ~4.0 for a 2×2 no-overlap mosaic. Lets
+    # the client-side readiness verdict scale the per-object-type goal (a
+    # per-pixel depth) by the panel count, so a four-panel mosaic at 1 h/panel
+    # is judged against 4 × 4 h rather than told it has "plenty for a clean
+    # image" at a quarter of the light it needs. ``None`` for a target with no
+    # stacked picture yet, on a run predating the native-shape record, or on
+    # an older backend — the frontend then falls back to 1.0 (today's
+    # behaviour). See :mod:`webapp.field_fulls`.
+    field_fulls: float | None = None
 
 
 def _collect_progress(lib, targets, night_of=None) -> list[TargetProgressOut]:  # noqa: ANN001
@@ -172,6 +182,7 @@ def _collect_progress(lib, targets, night_of=None) -> list[TargetProgressOut]:  
     from seestack.nightplan import load_catalog
     from seestack.objectinfo import identify_object
     from seestack.session_recap import recent_night_pace_s
+    from webapp.field_fulls import target_field_fulls
 
     catalog = load_catalog()
     rows: list[TargetProgressOut] = []
@@ -183,11 +194,13 @@ def _collect_progress(lib, targets, night_of=None) -> list[TargetProgressOut]:  
         info = identify_object(t.name, t.ra_deg, t.dec_deg, catalog=catalog)
         goal_s: float | None = None
         pace_s: float | None = None
+        field_fulls: float | None = None
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
             goal_s = read_goal_s(proj)
             pace_s = recent_night_pace_s(proj, night_of=night_of)
+            field_fulls = target_field_fulls(proj)
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
             pass
         finally:
@@ -200,6 +213,7 @@ def _collect_progress(lib, targets, night_of=None) -> list[TargetProgressOut]:  
             object_type=info.type if info is not None else None,
             goal_s=goal_s,
             recent_pace_s=pace_s,
+            field_fulls=field_fulls,
         ))
     return rows
 

@@ -59,6 +59,7 @@ export function rankLibraryProgress(rows: TargetProgress[]): RankedProgress[] {
       row.total_exposure_s,
       row.object_type,
       row.goal_s == null ? null : row.goal_s / 3600,
+      row.field_fulls,
     );
     // integrationReadiness only returns null at zero integration, which the
     // backend already excludes — but guard defensively so a stray row is
