@@ -1375,44 +1375,164 @@ _(nothing else claimed — claim an item here with your branch name)_
 - **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** ~~No validator
   stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
   resolves inside the raw tree — *not* the owner's current state, but one settings edit away)~~ *(shipped
-  v0.327.8, see above)*; the scanner's
+  v0.327.8, see above)*; ~~the scanner's
   bare-`<T>/` skip is **silent** even when the folder holds thousands of FITS (the owner's `NGC 6888` 4,815 vs
-  `NGC 6888_SUB` 3,110 is exactly that shape — see open questions); ~~the plate-solve-failed screen shows a
+  `NGC 6888_SUB` 3,110 is exactly that shape)~~ *(shipped v0.329.2, see below)*; ~~the plate-solve-failed screen shows a
   blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"~~ *(shipped
   v0.328.1, see below)*; ~~the Stack
   page prints the **raw engine error** where every other page uses `friendlyJobError`~~ *(shipped v0.328.0,
   see below)*; ~~the frames table prints raw
   UTC under a hero that says "Shot &lt;local night&gt;"~~ *(shipped v0.328.5, see below)*;
-  "nights" means **6-hour sessions** on the Nights card
-  but **calendar nights** in captions *(traced 2026-09-03 — read the note below before picking it up)*;
+  ~~"nights" means **6-hour sessions** on the Nights card
+  but **calendar nights** in captions~~ *(shipped v0.329.1, see below)*;
   three hand-mirrored "is this a genuine run" predicates;
   `POST /api/targets` has **no frontend caller**; ~~share and print JPEGs use 4:2:0 chroma subsampling~~
   *(shipped v0.328.0, see below)*; the "full
-  data" TIFF anchors its white point on the single brightest surviving pixel (hypothesis, needs real data).
+  data" TIFF anchors its white point on the single brightest surviving pixel *(traced 2026-09-03 — the
+  mechanism is confirmed, but read the note below before "fixing" it)*.
 
-- **⚪ TRACED, NOT BUILT (Builder 2026-09-03, while shipping the sibling A-MINOR item below) — what the
-  "'nights' means two different things" entry actually costs, and the shape of the fix.** *(Recorded so the
-  next run starts from the code rather than from the one-line summary. Size: S–M.)*
-  **The mechanism.** `nights_breakdown` (`seestack/session_recap.py`) groups a target's frames into
-  **sessions** by a `DEFAULT_SESSION_GAP_HOURS` (6 h) gap split, then labels each session with
-  `night_date_of(start_utc, lon)`. `capture_night_count` (`webapp/capture_nights.py`) counts **distinct
-  observing-night dates**. Those disagree in exactly one direction: two sessions more than 6 h apart *within
-  one observing night* — an evening run, bed, then a pre-dawn run — produce **two Nights-card rows carrying
-  the identical date label**, while the caption on the same page says "over 1 night". They cannot disagree the
-  other way: consecutive nights are always more than 6 h apart, so a session never spans two nights.
-  **Why it is worse than a cosmetic mismatch.** Each row carries a **"Set aside"** button whose copy is about
-  *the night*, and on a split night it sets aside only that row's half — so a beginner who decides a night was
-  clouded out clicks it, re-stacks, and half the bad subs are still in the picture, with the card still
-  showing a second identically-dated row they have no reason to read as a different thing.
-  **Fix direction.** The card's own heading is "Nights" and its copy is "every night that went into this
-  picture", so the honest change is to group the sessions by their observing-night date and roll the group up
-  into one row — the labelling helper is already there, and `set_aside_night(start_utc, end_utc)` takes a
-  window, so a merged row hands it the night's outer bounds. **Cautions:** `nights_breakdown` is shared (the
-  Dashboard's last-session recap reads sessions, and *that* surface genuinely wants sessions, not nights), so
-  bucket at the endpoint rather than reshaping the engine helper; the median-FWHM/verdict statistics must be
-  recomputed over the merged group rather than picked from one half; and the longitude has to come from
-  `resolve_site_lon`, exactly as `/nights` already resolves it. A regression test needs a fixture with two
-  sessions inside one observing night — which is what makes this S–M rather than S.
+- **⚪ TRACED, DELIBERATELY NOT BUILT (Builder 2026-09-03) — the "full data" TIFF's white point *is* the
+  brightest surviving pixel, and moving it would trade a documented guarantee for an unmeasured gain.**
+  *(Recorded so the next run starts from the code and does not re-derive this. Size of the *measurement*: S.
+  Size of any fix: unknown until the measurement exists.)*
+  **Confirmed by reading.** `linear_scale_anchors` (`seestack/stack/output.py`) is exactly
+  `lo = covered.min()`, `hi = covered.max()` over the finite pixels, and `_write_tiff` maps that range onto
+  0–65535. So one cosmic ray, hot pixel or saturated core that survives rejection *does* set the white point
+  for the whole file. (Checked the sibling while I was there: the Moon/Sun path's `normalize_for_display`
+  already anchors at the 1st/99.9th percentiles for precisely this reason, and its docstring says so — the
+  two paths disagree, which is what made this look like an oversight.)
+  **But it is not the same call, and the difference is the point.** The Moon/Sun render is a *picture*; this
+  file is billed as the data. `_write_tiff` writes the two anchors into the TIFF description
+  (`float = black + dn / 65535 * (white - black)`), so the file is **losslessly reversible** back to the
+  stack's own float levels, with **no clipping and no curve** — which is what "the full data" ought to mean,
+  and is stated in the description the user can read. A percentile white point would clip the brightest real
+  pixels and silently break that claim. The *actual* cost of min/max is **quantisation**: if the top pixel
+  sits far above the real signal ceiling, the sky and faint structure share far fewer than 65,536 levels.
+  **What would settle it, and it needs the owner's data, not a synthetic.** On a real deep OSC stack, compute
+  `(p99.99 − p1) / (max − min)`. If the real signal occupies most of the range there is nothing to fix. If it
+  occupies a few percent, the honest fix is *not* to move the white point but to **say so** — or to offer the
+  percentile-anchored file as a clearly-labelled second option beside the reversible one, never in place of
+  it. **Do not blind-flip the anchors**: this is an export a user may already have archived and reversed with
+  the recipe the description gave them.
+
+- **✅ SHIPPED (Builder, v0.329.2, branch `claude/sweet-babbage-s16wgp`) — ~~A-MINOR: the scanner's bare-`<T>/`
+  skip is silent even when the folder holds thousands of FITS.~~** Made honest without touching the skip, and
+  the discriminator that makes it *quiet* is the one A7 had already put in the code.
+
+  **What was wrong.** `_apply_seestar_convention` skips a bare `<T>/` folder whenever a `<T>_sub/` sibling
+  shares its parent, because that is the Seestar's on-device stacked picture and stacking a finished image in
+  with the raw subs would be nonsense. The skip never looked at what was *inside* the folder, and it never said
+  anything — so a plainly-named folder of a user's **own** subs that happens to share a name with a Seestar
+  `_sub/` folder vanished from the scan without a word, however many frames it held. The owner's library has
+  exactly that shape: `NGC 6888` of **4,815 files** beside `NGC 6888_SUB` of 3,110, holding genuinely different
+  frames (established by the A7 investigation). Nothing anywhere in the app said those 4,815 were being walked
+  past.
+
+  **The behaviour is unchanged; only the silence is.** Flipping the skip would be a blind change to which
+  frames reach a stack on the on-by-default ingest path, with no way to confirm from the repo which of the two
+  shapes any given folder is — precisely the trade this file declines elsewhere. So the scan now *reports*:
+  `_apply_seestar_convention` optionally collects a `SkippedOutputFolder` per skip (in the same branch that
+  decides it, so the rule that skips and the rule that reports cannot drift), `ScanResult` carries them, and
+  `webapp/pipeline.py` puts them in the scan job's summary.
+
+  **What keeps it quiet is A7's filename rule.** `is_seestar_output_filename` — made public in
+  `seestack/io/project.py` rather than re-spelled in the scanner — already separates the device's own picture
+  (`Stacked*.fit`) from raw subs (`Light_*.fit`), and it is the same rule the ingest-side reject uses. A skipped
+  folder whose files are *all* device output is the convention working as designed and gets no note at all, so
+  a healthy Seestar library sees nothing, ever. `ScanResult.unvouched_skips` is the subset that is genuinely
+  unexplained, and only that subset reaches the summary.
+
+  **On screen** (`Jobs.tsx`, in the same slot as the held / held-files / healed alerts, so no new always-on
+  surface): *"Some folders were skipped as your Seestar's own pictures"*, the folder and its file count, an
+  explicit **"nothing was deleted, moved or renamed"** — §10 is the first thing a user will want to know — and
+  the one action that is theirs to take: rename the folder so it doesn't match the `_sub` folder beside it and
+  it comes in as its own target next scan. The app never touches `incoming/`.
+
+  **Upgrade-safe (§9):** one optional third parameter with a `None` default (existing two-argument callers are
+  pinned by a test), one additive `ScanResult` field with a `default_factory`, one summary key that appears
+  only when non-empty, a frontend reader that returns `[]` for any older or junk payload. No schema, no config,
+  no on-disk change, no default flipped, no endpoint or response shape altered, and the skip itself is
+  bit-for-bit what it was.
+
+  **Tests (+15; 6 python + 4 vitest fail before).** `tests/test_scanner.py` (+8): the record is kept while the
+  units stay identical; a folder of pure device output needs no word said; the owner's raw-subs shape reads as
+  5 of 5 unvouched; a mixed folder counts only what it can't vouch for; videos, mosaics and an ingested bare
+  folder never appear in the record; the record is parent-scoped exactly as the skip is (or the report would
+  name a folder that in fact ingested); the two-argument call still works; and two end-to-end
+  `scan_and_organize` runs — one reporting the skip **and asserting all four files are still on disk**, one
+  ordinary Seestar drop reporting nothing. `tests/webapp/test_pipeline.py` (+2) over the real scan job.
+  `Jobs.test.tsx` (+6) over the pure reader (including junk payloads) and both rendered states.
+
+- **✅ SHIPPED (Builder, v0.329.1, branch `claude/sweet-babbage-s16wgp`) — ~~A-MINOR: "nights" means 6-hour
+  sessions on the Nights card and observing nights everywhere else, and the "Set aside" button pays for the
+  difference.~~** Built exactly to the traced note below, whose two cautions both earned their place.
+
+  **What was wrong.** A row on the Nights card was one **capture session** (`nights_breakdown`'s 6 h gap
+  split); every other date on the page is an **observing night** (local noon-to-noon). They disagree in one
+  direction only — an evening run, bed, then a pre-dawn run is two sessions *inside one night* — and when they
+  did, the card showed **two rows carrying the identical date label** beside a caption saying "over 1 night".
+  The cost is not cosmetic: each row's **"Set aside"** button is worded about *the night* but hands
+  `night_frame_ids` only that row's window, so a beginner who decides a night was clouded out clicks once,
+  re-stacks, and half the bad subs are still in the picture — with a second, identically-dated row on screen
+  that they have no reason to read as a different thing. Pinned as a before/after: the old split reached
+  `[4, 6]` of a ten-sub night; the merged row reaches all 10.
+
+  **The fix groups by the night, and recomputes rather than picking a half.** `nights_breakdown` gains an
+  optional `night_of` — a function from a capture stamp to an observing-night key — and merges adjacent
+  sessions sharing one key **before** the rollup, so the median FWHM, the verdict, the reject buckets and the
+  integration are all measured over the whole night. Omit it and the split is session-by-session, byte for
+  byte as before: the last-session recap and the pace estimate genuinely want sessions, and that default is
+  pinned by its own test rather than left to trust. The key itself is supplied by
+  `routers/targets.py::target_nights`, because only the webapp knows the observer's longitude — resolved
+  through the same `resolve_site_lon` the label already used, so the grouping and the label cannot name
+  different nights.
+
+  **A second defect fell out of it, which is why this is more than tidying.** A split night was counted
+  **twice** in `_typical_other_fwhm`'s leave-one-out baseline — the same night's two halves both sitting in the
+  population a *third* night is judged "soft" against, dragging the baseline toward whichever night happened
+  to be interrupted. That baseline sits directly beside the one-click discard button, which is the same reason
+  the v0.318-era minimum→median change was made. Pinned by
+  `test_a_split_night_no_longer_skews_the_soft_baseline`.
+
+  **Upgrade-safe (§9):** one optional keyword with a `None` default, no response-shape change (the frontend
+  already keys its label off `night_date` and its set-aside window off `start_utc`/`end_utc`, so **no frontend
+  change was needed at all**), no schema, no config, no on-disk change, no default flipped.
+
+  **Tests (+12; 10 fail before — verified by stashing the two source files).** `tests/test_session_recap.py`
+  (+7): the unmerged default pinned as a contract; the merged night's frame count, integration and outer
+  bounds; `night_frame_ids` reaching all ten subs where the split reached `[4, 6]`; statistics recomputed over
+  both halves; the skewed-baseline case above; consecutive nights never merging; and an unplaceable stamp
+  (`None` key) never merging with another unplaceable one — guessing two undated halves are the same night is
+  worse than showing them apart. `tests/webapp/test_target_nights.py` (+5): one row for the split night; **no
+  two rows ever share a night date**; the one-click set-aside now dropping 3 of 3 rather than 2; the card's
+  night set equalling the frames table's; and the same three stamps honestly splitting into *two* nights for
+  an observer at +150°, which is what proves the key is the owner's longitude and not UTC wearing a hat.
+
+  *(Original traced note follows.)*
+
+  - **~~TRACED, NOT BUILT (Builder 2026-09-03, while shipping the sibling A-MINOR item below) — what the
+    "'nights' means two different things" entry actually costs, and the shape of the fix.~~** *(Recorded so the
+    next run starts from the code rather than from the one-line summary. Size: S–M.)*
+    **The mechanism.** `nights_breakdown` (`seestack/session_recap.py`) groups a target's frames into
+    **sessions** by a `DEFAULT_SESSION_GAP_HOURS` (6 h) gap split, then labels each session with
+    `night_date_of(start_utc, lon)`. `capture_night_count` (`webapp/capture_nights.py`) counts **distinct
+    observing-night dates**. Those disagree in exactly one direction: two sessions more than 6 h apart *within
+    one observing night* — an evening run, bed, then a pre-dawn run — produce **two Nights-card rows carrying
+    the identical date label**, while the caption on the same page says "over 1 night". They cannot disagree the
+    other way: consecutive nights are always more than 6 h apart, so a session never spans two nights.
+    **Why it is worse than a cosmetic mismatch.** Each row carries a **"Set aside"** button whose copy is about
+    *the night*, and on a split night it sets aside only that row's half — so a beginner who decides a night was
+    clouded out clicks it, re-stacks, and half the bad subs are still in the picture, with the card still
+    showing a second identically-dated row they have no reason to read as a different thing.
+    **Fix direction.** The card's own heading is "Nights" and its copy is "every night that went into this
+    picture", so the honest change is to group the sessions by their observing-night date and roll the group up
+    into one row — the labelling helper is already there, and `set_aside_night(start_utc, end_utc)` takes a
+    window, so a merged row hands it the night's outer bounds. **Cautions:** `nights_breakdown` is shared (the
+    Dashboard's last-session recap reads sessions, and *that* surface genuinely wants sessions, not nights), so
+    bucket at the endpoint rather than reshaping the engine helper; the median-FWHM/verdict statistics must be
+    recomputed over the merged group rather than picked from one half; and the longitude has to come from
+    `resolve_site_lon`, exactly as `/nights` already resolves it. A regression test needs a fixture with two
+    sessions inside one observing night — which is what makes this S–M rather than S.
 
 - **✅ SHIPPED (Builder, v0.328.5, branch `claude/sweet-babbage-axt93w`) — ~~A-MINOR: the frames table prints
   raw UTC under a hero that says "Shot &lt;local night&gt;".~~** The same date-honesty class as v0.311.3,
@@ -11833,6 +11953,50 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **⭐ NEW, TRACED (Builder 2026-09-03, the half v0.329.1 could not reach) — the "about N more clear nights"
+  estimate still counts *sessions*, so a night shot in two goes halves what it thinks a clear night is worth.**
+  *(Pillar: autonomy + trust — PRIORITY 2/3; size S–M; confidence: **traced in code**, mechanism identical to
+  the one v0.329.1 just fixed one surface up; the fixture that exhibits it is the one that entry added.)*
+  v0.329.1 made a **Nights-card row** mean one observing night. `recent_night_pace_s`
+  (`seestack/session_recap.py`) — *"the median kept integration per clear night"*, and the number behind the
+  goal card's **"about 2 more clear nights"** — still calls `_split_sessions` and takes the last
+  `PACE_LOOKBACK_NIGHTS` (5) of them. So an evening run, bed, then a pre-dawn run contributes **two** entries
+  to the median, each carrying roughly half the night's integration. The median is therefore biased *low*, and
+  the error runs in the direction that matters: the app tells a beginner they need **more** clear nights than
+  they do, on a plan whose whole point is knowing when to stop. Its own docstring already claims the two
+  agree — *"Nights are the same 6 h-gap capture sessions `nights_breakdown` shows, so the number agrees with
+  the Nights card"* — and after v0.329.1 that sentence is simply false.
+  **Why it wasn't done with v0.329.1, and what it actually needs.** Three things, none of them hard, all of
+  them wider than the endpoint that fix touched:
+  1. The pace path reads `iter_frame_capture_rows` — `(datetime, exposure_s, accept)` **triples**, not
+     `FrameRow`s — so `nights_breakdown`'s `night_of(timestamp_utc)` signature does not fit it. It wants a key
+     taken from the `datetime` it already has.
+  2. `PACE_LOOKBACK_NIGHTS` and `MIN_PRODUCTIVE_NIGHT_S` are **mirrored by hand** into the frontend's
+     `clearNights.ts`, which derives the same pace client-side from the night list the Target page already
+     fetched. The module comment says in terms that both must land on the same figure for the same target, so
+     a server-side merge without the client-side one leaves two screens quoting different ETAs — worse than
+     the bug.
+  3. The lookback window changes meaning: five sessions and five nights are not the same five, and on a
+     habitual split-night observer the old window reached back half as far.
+  **The check that settles it before writing anything:** `MIN_PRODUCTIVE_NIGHT_S` (120 s) is a floor on a
+  *session*; halving a night's integration can push a genuinely short-but-real night's halves under it, in
+  which case the night vanishes from the pace entirely rather than merely counting light. Measure which of the
+  two errors is larger on a fixture before choosing whether the fix is grouping or a re-floored session.
+
+- **NEW IDEA (Builder 2026-09-03, the obvious sibling of the v0.329.2 skip report) — a `*_video/` folder
+  dropped in `incoming/` is skipped just as silently, and the app *does* have a home for it.**
+  *(Pillar: friendliness — PRIORITY 3; size XS; frontend copy plus one summary key.)* v0.329.2 made the bare
+  `<T>/` skip report itself. `_apply_seestar_convention` skips `*_video/` and `*_photo/` folders with the same
+  `continue`, and that skip is *right* — they hold no stackable deep-sky subs. But a beginner who copies their
+  whole Seestar share in and sees "40 subs added" has no way to know their `Lunar_video/` was passed over, and
+  unlike the bare-folder case **there is somewhere to send them**: the Moon & Sun page stacks exactly those
+  clips. The machinery is already there — `skipped_out` just needs a second kind, and the Jobs summary a
+  second, cheerful line: *"Your Lunar_video folder isn't deep-sky subs — stack it on the Moon & Sun page"*,
+  linked. **Cautions:** this must stay one line, not a second alert (the standing "the UI is extremely busy"
+  priority), and it should fire only when the folder is not already a known capture on the Moon & Sun page, or
+  it nags on every scan forever. Grep `seestack/video/discover.py` and `webapp/video.py` first — the capture
+  list may already answer "have I dealt with this one?".
 
 - **✅ SHIPPED (Builder, v0.326.2, branch `claude/zen-mccarthy-olkjpm`) — ~~the editor's ghost curve now has two
   possible shapes and only explains one of them.~~** Filed by the `…-t59xya` Builder as the gap its A1 fix
@@ -24288,15 +24452,51 @@ problems. Dogfood it every big-picture run and fix root causes.
   offline Sky viewer's recognisable-star labelling is the precedent. Only worth it if a constellation-line
   dataset is already bundled — check before scoping, and do **not** add one as a dependency for this.
 
-- **NEW IDEA (Builder 2026-08-29, spotted while building "Your universe" v0.296.0) — two targets that are the
-  same object land on exactly the same point, and one hides the other.** *(Pillar: understand — PRIORITY 3;
-  size S; frontend-only.)* The universe map places each target at its *catalog* position, which is right — all
-  of a target's pictures belong where the object actually is. But a library that has both `M_31` and
-  `Andromeda` (or a re-imaged target under a second folder, which the owner's library does accumulate) draws
-  two coincident pictures and two overlapping labels, and the reader can't tell there are two. Cheapest honest
-  fix: group placed objects by `object_id` in the viewer, draw one node, and let the card list the targets
-  behind it ("2 of your targets are this object"). **Don't** fix it by nudging one aside — a fake offset on a
-  map whose whole promise is "placed where they really are" is exactly the wrong trade.
+- **✅ SHIPPED (Builder, v0.329.3, branch `claude/sweet-babbage-s16wgp`) — ~~two targets that are the same
+  object land on exactly the same point, and one hides the other.~~** Built to the filed shape, including its
+  "don't" — nothing is nudged aside.
+
+  **It is not a rare shape; it is the owner's normal one.** The entry frames this as a library that has both
+  `M_31` and `Andromeda`, but the Seestar's own folder convention produces the pair *by design*: `<T>_sub/`
+  and `<T>_mosaic_sub/` become the targets `M 31` and `M 31 (mosaic)`, deliberately kept distinct because
+  their canvases differ. The owner is a heavy mosaic user and their live library carries that pair for
+  `M 3`, `M 31`, `M 44`, `NGC 6960`, `NGC 7000`, `IC 5070` and `IC 1318` — so the map has been drawing seven
+  pairs of coincident pictures and overlapping labels, with nothing on screen saying there were two.
+
+  **Three pure helpers, in `sky/universe.ts`, and the viewer reads them.** `groupByObject` collapses placed
+  targets sharing a catalog `object_id` into one node; the **primary** — the one drawn — is the first member
+  that actually has a picture, because a bare marker drawn over a finished picture would hide the better
+  thing. `sameObjectTargets` gives the read-out your *other* targets of that object, each a link that opens
+  it. `distinctObjectCount` fixes the legend's "N placed" badge, which counted targets and so disagreed with
+  the node count the moment two of them were one thing.
+
+  **The one deliberate refusal, and it is the entry's own:** a target with **no** catalog id never groups —
+  it keys on its own target name instead. Folding on an empty id would pile every unidentified target onto a
+  single point, which is this bug with the sign flipped. Ids are matched trimmed and case-folded.
+
+  **Upgrade-safe (§9):** frontend-only. No endpoint, no response shape, no schema, no config, no on-disk
+  change. `UniverseObjectCard`'s new `alsoTargets` defaults to `[]`, so the component renders byte-identically
+  for a caller that passes nothing (pinned).
+
+  **Tests (+17 vitest, all 17 fail before).** `universe.test.ts` (+13) over the three helpers: the pair
+  becoming one node; the picture-bearing member leading; un-catalogued targets never folding; case/whitespace
+  matching; different objects staying apart and in order; **a no-op on a library with one target per object**
+  (the case that must not change); an empty map; and the count badge from both ends.
+  `Universe.test.tsx` (+4): the read-out naming the sibling and saying why they share the spot, the plural
+  form, clicking a sibling opening *that* target rather than the drawn one, and total silence when the node
+  really is your only target of the object.
+
+  *(Original entry follows.)*
+
+  - **~~NEW IDEA (Builder 2026-08-29, spotted while building "Your universe" v0.296.0) — two targets that are the
+    same object land on exactly the same point, and one hides the other.~~** *(Pillar: understand — PRIORITY 3;
+    size S; frontend-only.)* The universe map places each target at its *catalog* position, which is right — all
+    of a target's pictures belong where the object actually is. But a library that has both `M_31` and
+    `Andromeda` (or a re-imaged target under a second folder, which the owner's library does accumulate) draws
+    two coincident pictures and two overlapping labels, and the reader can't tell there are two. Cheapest honest
+    fix: group placed objects by `object_id` in the viewer, draw one node, and let the card list the targets
+    behind it ("2 of your targets are this object"). **Don't** fix it by nudging one aside — a fake offset on a
+    map whose whole promise is "placed where they really are" is exactly the wrong trade.
 
 - **⚠️ PROCESS NOTE + PROPOSAL (Builder 2026-09-02) — collision TEN, and it was a *clean sweep*: two Builders
   in one hour independently built the **same three items**, and every one of them was the top open entry of

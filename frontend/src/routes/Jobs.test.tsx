@@ -9,6 +9,7 @@ import {
   bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobKindLabel,
   calibrationMismatchNote, missingSubsNote, readErrorsNote, storageTroubleAlert,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
+  skippedFolders,
 } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
@@ -1244,5 +1245,72 @@ describe("storageTroubleAlert", () => {
     const a = storageTroubleAlert(9_000, 9_000, 9_000, 10)!;
     expect(a.message).toContain("10 of 10 subs couldn't be read at all");
     expect(a.message).toContain("Another 10 subs were there");
+  });
+});
+
+// A bare "<T>/" beside "<T>_sub/" is skipped as the Seestar's own on-device
+// picture. Right for a finished picture, wrong for a plainly-named folder of
+// the user's own subs — and it used to happen without a word.
+describe("skippedFolders", () => {
+  it("lists a folder holding files the device's naming can't vouch for", () => {
+    expect(skippedFolders({
+      skipped_folders: [{ name: "NGC 6888", n_files: 4815, n_unrecognised: 4815 }],
+    })).toEqual([{ name: "NGC 6888", nFiles: 4815, nUnrecognised: 4815 }]);
+  });
+
+  it("drops a folder the device's naming fully explains", () => {
+    // The backend already filters these out; the UI must not resurrect one if
+    // an older or chattier backend sends it.
+    expect(skippedFolders({
+      skipped_folders: [{ name: "M 42", n_files: 2, n_unrecognised: 0 }],
+    })).toEqual([]);
+  });
+
+  it("says nothing on an ordinary scan", () => {
+    expect(skippedFolders({ scanned: 40 })).toEqual([]);
+    expect(skippedFolders({ skipped_folders: [] })).toEqual([]);
+  });
+
+  it("tolerates junk rather than printing NaN or a nameless row", () => {
+    expect(skippedFolders({ skipped_folders: "nope" })).toEqual([]);
+    expect(skippedFolders({ skipped_folders: [null, 7, { n_files: 3 }] })).toEqual([]);
+    expect(skippedFolders({
+      skipped_folders: [{ name: "M 13", n_files: "lots", n_unrecognised: 2 }],
+    })).toEqual([{ name: "M 13", nFiles: 0, nUnrecognised: 2 }]);
+  });
+});
+
+describe("the scan's skipped-folder note", () => {
+  it("names the folder, the count, and says nothing was touched", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-skip", kind: "pipeline", target: null, state: "done",
+        result: {
+          scanned: 3110,
+          skipped_folders: [{ name: "NGC 6888", n_files: 4815, n_unrecognised: 4815 }],
+        },
+      }),
+    ]);
+    renderJobs();
+    expect(await screen.findByText(
+      "Some folders were skipped as your Seestar's own pictures",
+    )).toBeInTheDocument();
+    expect(screen.getByText(/NGC 6888: 4,815 files skipped/)).toBeInTheDocument();
+    expect(screen.getByText(/nothing was deleted, moved or renamed/))
+      .toBeInTheDocument();
+  });
+
+  it("stays out of the way on an ordinary scan", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-noskip", kind: "pipeline", target: null, state: "done",
+        result: { scanned: 40 },
+      }),
+    ]);
+    renderJobs();
+    await screen.findByText(/40/);
+    expect(screen.queryByText(
+      "Some folders were skipped as your Seestar's own pictures",
+    )).not.toBeInTheDocument();
   });
 });

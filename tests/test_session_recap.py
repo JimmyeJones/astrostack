@@ -1193,3 +1193,155 @@ def test_one_measurable_panel_alone_levels_nothing(tmp_path):
         assert tr.n_pointings == 0
     finally:
         proj.close()
+
+
+# --- A row is one observing NIGHT, not one capture session -------------------
+#
+# The 6 h gap split and an observing night disagree in exactly one direction: an
+# evening run, bed, then a pre-dawn run are two sessions inside one night. On a
+# card headed "Nights", whose per-row "Set aside" button is worded about *the
+# night*, that split a night's subs across two identically dated rows and let a
+# beginner drop only half of a clouded-out night.
+
+def _night_key_utc(ts):
+    """The stand-in the webapp supplies for real: bucket a stamp into its local
+    noon-to-noon night at longitude 0 (i.e. plain UTC)."""
+    from seestack.activity_calendar import night_date_of
+    if not ts:
+        return None
+    d = night_date_of(ts, 0.0)
+    return d.isoformat() if d is not None else None
+
+
+def _split_night(proj, *, evening_fwhm=3.0, predawn_fwhm=3.0):
+    """One observing night shot in two goes 8 h apart — 21:00 and then 05:00 the
+    next morning, which is the same night by the noon-to-noon rule but two
+    sessions by the 6 h gap rule."""
+    evening = datetime(2026, 7, 1, 21, 0, 0)
+    for i in range(6):
+        proj.add_frame(_frame(evening + timedelta(seconds=30 * i), fwhm_px=evening_fwhm))
+    predawn = datetime(2026, 7, 2, 5, 0, 0)
+    for i in range(4):
+        proj.add_frame(_frame(predawn + timedelta(seconds=30 * i), fwhm_px=predawn_fwhm))
+
+
+def test_a_night_shot_in_two_goes_is_two_sessions_without_the_night_key(tmp_path):
+    """The pre-existing behaviour, pinned so the default cannot drift: the
+    last-session recap and the pace estimate genuinely want sessions."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _split_night(proj)
+        nights = nights_breakdown(proj)
+        assert len(nights) == 2
+        # ...and both halves carry the SAME observing-night label — which is the
+        # bug as the owner saw it: two rows, one date.
+        assert {_night_key_utc(n.start_utc) for n in nights} == {"2026-07-01"}
+    finally:
+        proj.close()
+
+
+def test_a_night_shot_in_two_goes_is_one_row_with_the_night_key(tmp_path):
+    """With the night key, the same frames roll up into one night whose bounds
+    span both halves — so the row's "Set aside" window covers the whole night."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _split_night(proj)
+        [night] = nights_breakdown(proj, night_of=_night_key_utc)
+        assert night.n_frames == 10          # 6 evening + 4 pre-dawn
+        assert night.n_kept == 10
+        assert night.exposure_s == 100.0     # 10 subs × 10 s
+        assert night.start_utc.startswith("2026-07-01T21:00")
+        assert night.end_utc.startswith("2026-07-02T05:01")
+    finally:
+        proj.close()
+
+
+def test_the_merged_night_hands_set_aside_every_sub_in_it(tmp_path):
+    """The point of merging: the window on the row reaches both halves, so the
+    one-click action drops the whole night rather than whichever half was
+    listed. Pinned through ``night_frame_ids``, which is what the endpoint
+    behind the button calls."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _split_night(proj)
+        [night] = nights_breakdown(proj, night_of=_night_key_utc)
+        ids = night_frame_ids(proj, night.start_utc, night.end_utc)
+        assert len(ids) == 10
+        # Before the fix each row reached only its own half.
+        halves = nights_breakdown(proj)
+        assert [len(night_frame_ids(proj, h.start_utc, h.end_utc)) for h in halves] == [4, 6]
+    finally:
+        proj.close()
+
+
+def test_the_merged_night_recomputes_its_statistics_over_the_whole_night(tmp_path):
+    """Not "pick one half's numbers": a night whose halves measured 3.0 and 5.0
+    has a median over all ten subs, not over the six the first session held."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _split_night(proj, evening_fwhm=3.0, predawn_fwhm=5.0)
+        [night] = nights_breakdown(proj, night_of=_night_key_utc)
+        assert night.median_fwhm_px == 3.0   # median of [3,3,3,3,3,3,5,5,5,5]
+        # Its verdict is judged against the *other* nights, of which there are
+        # none — so there is nothing to call it soft against, and a single night
+        # is never nodded "best".
+        assert night.typical_fwhm_px is None
+        assert night.is_best is False
+        assert night.verdict == "sharp"
+    finally:
+        proj.close()
+
+
+def test_a_split_night_no_longer_skews_the_soft_baseline(tmp_path):
+    """The statistical cost of the old split, and the reason this is more than
+    tidying. Two real nights, the first shot in two goes: as sessions the
+    baseline is a median over *three* medians, two of which are the same night
+    counted twice, so it is dragged toward that night. As nights it is the other
+    night's median, full stop."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _split_night(proj, evening_fwhm=3.0, predawn_fwhm=3.0)
+        later = datetime(2026, 7, 8, 22, 0, 0)
+        for i in range(5):
+            proj.add_frame(_frame(later + timedelta(seconds=30 * i), fwhm_px=4.2))
+        nights = nights_breakdown(proj, night_of=_night_key_utc)
+        assert len(nights) == 2
+        newest, first = nights[0], nights[1]
+        assert newest.start_utc.startswith("2026-07-08")
+        assert first.typical_fwhm_px == 4.2   # the *other* night, once
+        assert newest.typical_fwhm_px == 3.0
+        assert newest.verdict == "soft"       # 4.2 ≥ 3.0×1.25 and ≥ 3.0+0.6
+        assert first.is_best is True
+    finally:
+        proj.close()
+
+
+def test_consecutive_nights_are_never_merged(tmp_path):
+    """The direction the two rules *cannot* disagree in, pinned anyway: back-to-
+    back nights are more than 6 h apart and carry different night dates, so no
+    grouping key can fuse them."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for day in (1, 2, 3):
+            base = datetime(2026, 7, day, 22, 0, 0)
+            for i in range(4):
+                proj.add_frame(_frame(base + timedelta(seconds=30 * i), fwhm_px=3.0))
+        nights = nights_breakdown(proj, night_of=_night_key_utc)
+        assert len(nights) == 3
+        assert [_night_key_utc(n.start_utc) for n in nights] == [
+            "2026-07-03", "2026-07-02", "2026-07-01",
+        ]
+    finally:
+        proj.close()
+
+
+def test_an_unplaceable_night_never_merges_with_anything(tmp_path):
+    """A key of ``None`` means "I can't say which night this is" — two of those
+    in a row are not evidence they are the same night, so they stay apart."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _split_night(proj)
+        nights = nights_breakdown(proj, night_of=lambda ts: None)
+        assert len(nights) == 2
+    finally:
+        proj.close()

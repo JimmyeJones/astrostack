@@ -48,7 +48,7 @@ from pathlib import Path
 from seestack.core.cache import CacheManager
 from seestack.io.ingest import FITS_SUFFIXES, find_fits_files, ingest_files
 from seestack.io.library import UNSORTED_TARGET_NAME, Library
-from seestack.io.project import Project
+from seestack.io.project import Project, is_seestar_output_filename
 from seestack.io.wcs_io import wcs_text_is_usable
 
 log = logging.getLogger(__name__)
@@ -100,9 +100,42 @@ def is_mosaic_target_name(target_name: str) -> bool:
 _CAPTURE_SUFFIXES = (_VIDEO_SUFFIX, _PHOTO_SUFFIX)
 
 
+@dataclass
+class SkippedOutputFolder:
+    """A bare ``<T>/`` folder the convention skipped, and what was in it.
+
+    The skip itself is right and stays: a Seestar's on-device output is a
+    finished picture, and stacking it with the raw subs beside it would be
+    nonsense. But it was **silent**, and it does not check what it is skipping —
+    so a plainly-named folder of a user's own raw subs that happens to sit beside
+    a Seestar ``<T>_sub/`` disappears from the scan without a word, however many
+    frames it holds. The owner's library has one of exactly that shape
+    (``NGC 6888`` of 4,815 files beside ``NGC 6888_SUB`` of 3,110, holding
+    genuinely different frames).
+
+    ``n_device_output`` counts the files whose *name* is the device's own picture
+    (``Stacked*.fit`` — see :func:`~seestack.io.project.is_seestar_output_filename`,
+    the same rule the ingest-side reject uses). When it accounts for every file
+    the skip is uncontroversial and nothing needs saying; when it does not, the
+    scan has quietly passed over frames it cannot vouch for, and :attr:`n_unvouched`
+    is how many.
+    """
+
+    name: str                 # the bare folder's name, as it is on disk
+    parent: str               # its parent-directory key (the scan root, or a container)
+    n_files: int              # FITS files in it
+    n_device_output: int      # of those, files named like the device's own picture
+
+    @property
+    def n_unvouched(self) -> int:
+        """Files in the skipped folder that are *not* named like device output."""
+        return max(0, self.n_files - self.n_device_output)
+
+
 def _apply_seestar_convention(
     subdirs_with_fits: list[tuple[str, list[Path]]],
     parents: list[str] | None = None,
+    skipped_out: list[SkippedOutputFolder] | None = None,
 ) -> list[tuple[str, list[Path]]]:
     """
     Map raw scan folders to ``(target_name, files)`` units, honouring the
@@ -133,6 +166,12 @@ def _apply_seestar_convention(
     is omitted, every folder is treated as a sibling of every other (the original
     single-level behaviour), which is exactly right for a flat scan root.
 
+    ``skipped_out``, when given, collects a :class:`SkippedOutputFolder` for every
+    bare folder the sibling rule skipped, so the caller can *say* what it passed
+    over instead of dropping it in silence. Collected here rather than re-derived
+    by a second walk, because the rule that decides the skip and the rule that
+    reports it must not be able to disagree.
+
     Order is preserved. Folder names are compared case-insensitively for the
     suffix tests, but the target name keeps the folder's original casing.
     """
@@ -159,6 +198,15 @@ def _apply_seestar_convention(
         # A bare folder: skip it only when its raw-sub sibling (same parent) is
         # present (then it's the Seestar's own output). Otherwise ingest it.
         if (parent, low + _SUB_SUFFIX) in sibling_names:
+            if skipped_out is not None:
+                skipped_out.append(SkippedOutputFolder(
+                    name=name,
+                    parent=parent,
+                    n_files=len(files),
+                    n_device_output=sum(
+                        1 for f in files if is_seestar_output_filename(str(f))
+                    ),
+                ))
             continue
         units.append((name, files))
     return units
@@ -586,10 +634,27 @@ class ScanResult:
 
     root: str
     targets: list[TargetScanResult] = field(default_factory=list)
+    # Bare "<T>/" folders the Seestar convention passed over because a "<T>_sub/"
+    # sibling was there. Reported rather than dropped: the skip is right for the
+    # device's own finished picture and wrong for a plainly-named folder of a
+    # user's own subs, and nothing downstream could previously tell the user
+    # which one just happened. See :class:`SkippedOutputFolder`.
+    skipped_output_folders: list[SkippedOutputFolder] = field(default_factory=list)
 
     @property
     def n_targets(self) -> int:
         return len(self.targets)
+
+    @property
+    def unvouched_skips(self) -> list[SkippedOutputFolder]:
+        """The skipped folders holding files the device's naming can't vouch for.
+
+        A folder of pure ``Stacked*.fit`` is the convention working exactly as
+        designed and is not worth a word. This is the subset worth telling the
+        user about — and on a healthy Seestar library it is empty, which is the
+        point: the report is silent until something is actually unexplained.
+        """
+        return [s for s in self.skipped_output_folders if s.n_unvouched > 0]
 
     @property
     def total_found(self) -> int:
@@ -679,7 +744,19 @@ def scan_and_organize(
             parents.append(str(root))
     # Fold the Seestar folder convention in (raw "_sub" folders → targets;
     # skip on-device outputs and videos) before turning folders into targets.
-    units = _apply_seestar_convention(subdirs_with_fits, parents)
+    # The skipped bare "<T>/" folders come back with it so the scan can say what
+    # it passed over instead of dropping thousands of files without a word.
+    units = _apply_seestar_convention(
+        subdirs_with_fits, parents, result.skipped_output_folders)
+    for skip in result.unvouched_skips:
+        log.warning(
+            "Skipped %r (%d file(s)) — a %r folder sits beside it, so the "
+            "convention reads it as the Seestar's own finished picture. But %d "
+            "of its files are not named like the device's output, so they may "
+            "be raw subs that are now not being stacked. Nothing was changed on "
+            "disk; look in that folder if the target seems short of frames.",
+            skip.name, skip.n_files, skip.name + _SUB_SUFFIX, skip.n_unvouched,
+        )
     # Upgrade path: a library first scanned before v0.184.9 may already hold the
     # Seestar's on-device output inside a "<T>" target the raw "<T>_sub" subs now
     # map to — additively reject those output frames so they leave the stack pool.

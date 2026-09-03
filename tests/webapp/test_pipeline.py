@@ -476,3 +476,44 @@ def test_auto_edit_crops_by_default_on_an_unchanged_install(
     body = _wait_job(client, r.json()["job_id"], timeout=120)
     assert body["state"] == "done", body
     assert seen == [True], seen
+
+
+# --- The scan says what it walked past ---------------------------------------
+#
+# A bare "<T>/" beside "<T>_sub/" is skipped as the Seestar's own on-device
+# picture. That is right for a finished picture and wrong for a plainly-named
+# folder of the user's own subs, and it used to happen in silence — the owner's
+# library has one of exactly the second shape.
+
+def _drop_a_folder(data_root: Path, name: str, filenames: list[str]) -> None:
+    from synth import write_seestar_fits
+    d = data_root / "incoming" / name
+    d.mkdir(parents=True, exist_ok=True)
+    for i, fn in enumerate(filenames):
+        write_seestar_fits(d / fn, n_stars=20, seed=900 + i)
+
+
+def test_the_scan_reports_a_skipped_folder_it_cannot_account_for(client, data_root):
+    _drop_a_folder(data_root, "NGC 6888_sub",
+                   ["Light_NGC 6888_10.0s_IRCUT_0001.fit"])
+    _drop_a_folder(data_root, "NGC 6888",
+                   [f"Light_NGC 6888_10.0s_IRCUT_{i + 100:04d}.fit" for i in range(4)])
+    body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+    assert body["state"] == "done", body
+    [skip] = body["result"]["skipped_folders"]
+    assert skip == {"name": "NGC 6888", "n_files": 4, "n_unrecognised": 4}
+    # Reported, not acted on: the folder is still skipped and still on disk.
+    safes = {t["safe_name"] for t in client.get("/api/targets").json()}
+    assert "NGC_6888" in safes
+    assert len(client.get("/api/targets/NGC_6888/frames").json()) == 1
+    assert len(list((data_root / "incoming" / "NGC 6888").iterdir())) == 4
+
+
+def test_an_ordinary_seestar_drop_says_nothing_about_its_skips(client, data_root):
+    """The half that keeps this quiet: the device's own picture is skipped as
+    designed, and the result carries no note at all."""
+    _drop_a_folder(data_root, "M 81_sub", ["Light_M 81_10.0s_IRCUT_0001.fit"])
+    _drop_a_folder(data_root, "M 81", ["Stacked.fit", "Stacked_60s.fit"])
+    body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+    assert body["state"] == "done", body
+    assert "skipped_folders" not in body["result"]

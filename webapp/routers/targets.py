@@ -778,30 +778,40 @@ def target_nights(safe: str, request: Request) -> list[NightSummaryOut]:
     calendar does. Labelling from the raw UTC start instead named the *following*
     day for any observer west of UTC — a 21:00 local start in the Americas is
     already tomorrow in UTC — so the two cards disagreed about which night a
-    session was."""
+    session was.
+
+    A row is **one observing night**, not one capture session. Those differ when
+    a night is shot in two goes more than six hours apart — an evening run, bed,
+    then a pre-dawn run — which used to produce two rows carrying the *identical*
+    date label while the caption beside them said "over 1 night". Worse than
+    cosmetic: each row's "Set aside" button is worded about the night but acted on
+    only that row's half, so deciding a night was clouded out dropped half its
+    subs and left the rest in the picture. The bucketing is done here, with the
+    observer's own longitude, because only this layer knows it."""
     from seestack.activity_calendar import night_date_of
     from seestack.session_recap import nights_breakdown
 
     settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
-        nights = nights_breakdown(proj)
         lon = resolve_site_lon(request, lib, settings.site_lon)
+
+        def _night_key(ts: str | None) -> str | None:
+            if not ts:
+                return None
+            d = night_date_of(ts, lon)
+            return d.isoformat() if d is not None else None
+
+        nights = nights_breakdown(proj, night_of=_night_key)
     finally:
         proj.close()
         lib.close()
-
-    def _night_date(ts: str | None) -> str | None:
-        if not ts:
-            return None
-        d = night_date_of(ts, lon)
-        return d.isoformat() if d is not None else None
 
     return [
         NightSummaryOut(
             start_utc=n.start_utc,
             end_utc=n.end_utc,
-            night_date=_night_date(n.start_utc),
+            night_date=_night_key(n.start_utc),
             n_frames=n.n_frames,
             n_kept=n.n_kept,
             n_set_aside=n.n_set_aside,

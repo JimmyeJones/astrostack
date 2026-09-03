@@ -21,12 +21,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from statistics import median
-from typing import Sequence, TypeVar
+from typing import Callable, Hashable, Sequence, TypeVar
 
 from seestack.io.project import FrameRow, Project
 
 # Any row whose first element is its capture time — see ``_split_sessions``.
 _TimedT = TypeVar("_TimedT", bound=Sequence)
+
+# Maps a capture stamp to whatever labels the observing night it belongs to
+# (``None`` when it can't be placed). Deliberately abstract: bucketing a stamp
+# into a local noon-to-noon night needs the observer's longitude, which lives in
+# the webapp's settings, and this module stays free of webapp imports.
+NightKeyFn = Callable[[str | None], Hashable | None]
 
 # A night's subs land minutes apart; the gap to the previous night is many hours.
 # Six hours cleanly separates two nights without splitting a single long session.
@@ -732,8 +738,42 @@ def _night_verdict(
     return "sharp"
 
 
+def _merge_sessions_by_night(
+    sessions: list[list[tuple[datetime, FrameRow]]],
+    night_of: NightKeyFn,
+) -> list[list[tuple[datetime, FrameRow]]]:
+    """Roll adjacent capture sessions that belong to the **same observing night**
+    into one group, preserving capture order.
+
+    A 6 h gap split and an observing night are not the same thing, and they
+    disagree in exactly one direction: an evening run, bed, then a pre-dawn run
+    are two sessions *inside one night*. (They cannot disagree the other way —
+    consecutive nights are always more than 6 h apart, so a session never spans
+    two nights.) A card headed "Nights" must group by the night.
+
+    ``night_of`` maps a capture stamp to whatever labels an observing night — the
+    caller supplies it because only the webapp knows the observer's longitude.
+    A stamp it can't place (``None``) never merges with anything, including
+    another unplaceable one: guessing two undated halves are the same night is
+    worse than showing them apart.
+    """
+    merged: list[list[tuple[datetime, FrameRow]]] = []
+    prev_key: object = None
+    for session in sessions:
+        key = night_of(session[0][1].timestamp_utc)
+        if merged and key is not None and key == prev_key:
+            merged[-1].extend(session)
+        else:
+            merged.append(list(session))
+        prev_key = key
+    return merged
+
+
 def nights_breakdown(
-    project: Project, *, gap_hours: float = DEFAULT_SESSION_GAP_HOURS
+    project: Project,
+    *,
+    gap_hours: float = DEFAULT_SESSION_GAP_HOURS,
+    night_of: NightKeyFn | None = None,
 ) -> list[NightSummary]:
     """Every capture night that went into this target, **newest first**.
 
@@ -743,6 +783,14 @@ def nights_breakdown(
     night's median FWHM over its accepted subs, and a one-word verdict grounded in
     those metrics. Purely informational and read-only — it never rejects anything;
     a later slice can offer an opt-in "set this night aside" on top of it.
+
+    Pass ``night_of`` — a function from a capture stamp to an observing-night key
+    — to make a row mean **one observing night** rather than one capture session:
+    a night split around bedtime then becomes one row instead of two identically
+    dated ones, and every statistic below is computed over the whole night rather
+    than over whichever half happened to be listed. Omit it and the split is
+    session-by-session exactly as before; the last-session recap and the pace
+    estimate genuinely want sessions, so the default does not change under them.
 
     Returns ``[]`` when nothing is datable (no frame carries a capture time).
     """
@@ -754,6 +802,8 @@ def nights_breakdown(
         return []
     dated.sort(key=lambda pair: pair[0])
     sessions = _split_sessions(dated, gap_hours)
+    if night_of is not None:
+        sessions = _merge_sessions_by_night(sessions, night_of)
 
     # Per-night medians, once, for the two things that need to compare nights.
     # They want *different* statistics and used to share one: the "best" nod
