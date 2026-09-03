@@ -372,3 +372,78 @@ def test_flags_a_multi_panel_mosaic_on_device_output(client, data_root: Path):
     by_safe = {s["safe"]: s for s in body}
     assert set(by_safe) == {"M_44_mosaic"}
     assert by_safe["M_44_mosaic"]["reason"] == "on_device_output"
+
+
+def test_flags_a_season_of_on_device_outputs_and_leaves_a_deep_target_alone(
+    client, data_root: Path
+):
+    """The owner's real ``M 3``: 22 of the Seestar's own stacked pictures — one
+    per session — sitting in the bare folder beside ``M 3_sub/``. Every one of
+    them is above the ≤2 count cap, so the nudge never offered the target and it
+    lingers in the library forever. The filenames settle it.
+
+    The deep target in the same library is the guard that matters: 900 real subs
+    in a folder that *also* has a ``_sub`` sibling, i.e. everything the output
+    case has except the filenames."""
+    incoming = data_root / "dump"
+    (incoming / "M 3_sub").mkdir(parents=True)
+    output = incoming / "M 3"
+    output.mkdir()
+
+    (incoming / "NGC 7000_sub").mkdir()
+    deep = incoming / "NGC 7000"
+    deep.mkdir()
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "M 3",
+                    [output / f"Stacked_10.0s_M 3_{i:02d}.fit" for i in range(22)])
+        _add_target(lib, "NGC 7000",
+                    [deep / f"Light_NGC 7000_10.0s_IRCUT_{i:04d}.fit"
+                     for i in range(900)])
+    finally:
+        lib.close()
+
+    body = client.get("/api/targets/cleanup-suggestions").json()
+    by_safe = {s["safe"]: s for s in body}
+    assert set(by_safe) == {"M_3"}
+    assert by_safe["M_3"]["reason"] == "on_device_output"
+    # It says how many it found, rather than calling twenty-two images one.
+    assert "22" in by_safe["M_3"]["detail"]
+
+    # Actionable end to end, and the raw subs folder on disk is untouched.
+    assert client.delete("/api/targets/M_3").status_code == 200
+    assert client.get("/api/targets/cleanup-suggestions").json() == []
+    assert (incoming / "M 3_sub").is_dir() and output.is_dir()
+
+
+def test_does_not_open_a_huge_targets_project_to_read_its_filenames(
+    client, data_root: Path, monkeypatch
+):
+    """The filename check costs one column of one query, which is free on a few
+    hundred rows and not free for the owner's 5,477-sub target on every Library
+    poll. A target above the engine's examine ceiling must never be opened."""
+    from seestack.io.scanner import junk_output_examine_cap
+
+    incoming = data_root / "dump"
+    (incoming / "Huge_sub").mkdir(parents=True)
+    huge = incoming / "Huge"
+    huge.mkdir()
+    n = junk_output_examine_cap() + 1
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "Huge", [huge / f"Stacked_{i:05d}.fit" for i in range(n)])
+    finally:
+        lib.close()
+
+    opened: list[str] = []
+    real_open = Library.open_target
+
+    def spy(self, safe_name):  # noqa: ANN001, ANN202
+        opened.append(safe_name)
+        return real_open(self, safe_name)
+
+    monkeypatch.setattr(Library, "open_target", spy)
+    assert client.get("/api/targets/cleanup-suggestions").json() == []
+    assert "Huge" not in opened

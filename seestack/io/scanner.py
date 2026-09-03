@@ -366,18 +366,47 @@ _MOSAIC_SUFFIX = "_mosaic"
 
 
 def junk_output_frame_cap(target_name: str) -> int:
-    """The largest frame count worth *examining* as a possible on-device output
-    target, given only its name. Two values, because a single field's on-device
+    """The largest frame count that is on-device-output-shaped on the **count**
+    alone, given only its name. Two values, because a single field's on-device
     output is one stacked image while a mosaic's is one image per panel (see
     :data:`_MAX_JUNK_MOSAIC_OUTPUT_FRAMES`).
 
-    Exists so a caller can skip opening a big target's project without keeping —
-    and drifting from — its own copy of the engine's limits. It only decides
-    *whether to look*; :func:`classify_seestar_junk_target` still requires the
-    positive on-disk evidence before anything is flagged."""
+    A count above this is not a verdict of "real target": the Seestar writes one
+    output *per session*, so a folder shot over a season holds a pile of them.
+    That case is decided by the frames' own **filenames** instead — see
+    :func:`junk_output_examine_cap`, which is the ceiling a caller should use to
+    decide whether to open a project at all.
+
+    It only decides *whether the count alone is enough*;
+    :func:`classify_seestar_junk_target` still requires the positive on-disk
+    evidence before anything is flagged."""
     if target_name.strip().lower().endswith(_MOSAIC_SUFFIX):
         return _MAX_JUNK_MOSAIC_OUTPUT_FRAMES
     return _MAX_JUNK_OUTPUT_FRAMES
+
+
+# Above this many frames a target is a real light-frame stack by any plausible
+# reading, so it is never opened to look at its filenames. The device writes one
+# stacked output per *session*, so the count that matters is "how many nights
+# could one folder have collected?" — the owner's real library tops out at 22
+# ("M 3"), and 512 is four panels' worth of output across 128 separate sessions.
+# It exists purely to bound the cost of the filename check on a polled endpoint:
+# reading one column of a few hundred rows is free, reading it for a 5,477-sub
+# target on every Library poll is not.
+_MAX_JUNK_OUTPUT_EXAMINE_FRAMES = 512
+
+
+def junk_output_examine_cap() -> int:
+    """The largest frame count worth *opening a project for* when asking whether
+    a target is Seestar on-device output.
+
+    Distinct from :func:`junk_output_frame_cap`, which is the count that settles
+    the question on its own. Between the two, the answer comes from the frames'
+    filenames (``Stacked*.fit`` vs ``Light_*.fit``) — which is the only evidence
+    that separates a season of on-device outputs from a real target, since a
+    count cannot. Exists so a caller can bound its own work without keeping — and
+    drifting from — its own copy of the engine's limit."""
+    return _MAX_JUNK_OUTPUT_EXAMINE_FRAMES
 
 
 # Scratch folders that some *other* program leaves in a shared astro folder. They
@@ -449,6 +478,22 @@ def _capture_folder_verdict(suffix: str) -> JunkTargetVerdict:
     )
 
 
+def _all_frames_are_seestar_output(source_paths: Sequence[str | Path]) -> bool:
+    """True when **every** registered frame is named like the device's own
+    stacked picture (``Stacked*.fit``), and there is at least one.
+
+    The strict "every" is deliberate and is the difference between this and the
+    ingest-time reject that shares the same predicate: ingest merely declines to
+    register a frame (reversible, nothing is lost), while this feeds a nudge that
+    offers to **delete a target**. One ``Light_*.fit`` in the folder means the
+    folder is not purely on-device output, and the frame-count cap decides
+    instead — which is the conservative answer."""
+    paths = list(source_paths)
+    if not paths:
+        return False
+    return all(is_seestar_output_filename(str(p)) for p in paths)
+
+
 def classify_seestar_junk_target(
     target_name: str,
     source_paths: Sequence[str | Path],
@@ -470,10 +515,14 @@ def classify_seestar_junk_target(
     * ``photo`` — the same, for ``_photo``: the single stills the device takes in
       scenery/planetary photo mode. Same family, same "nothing to stack here"
       verdict, different wording.
-    * ``on_device_output`` — a small (≤ ``_MAX_JUNK_OUTPUT_FRAMES``) target whose
-      frames all sit in a single **bare** ``<T>/`` folder that has a raw-subs
-      ``<T>_sub/`` sibling on disk: the Seestar's own single stacked output, which
-      "stacks" to one lower-resolution frame (colour speckle).
+    * ``on_device_output`` — a target whose frames all sit in a single **bare**
+      ``<T>/`` folder that has a raw-subs ``<T>_sub/`` sibling on disk: the
+      Seestar's own stacked output, which "stacks" to a few lower-resolution
+      frames (colour speckle). Either the count is output-shaped on its own
+      (≤ :func:`junk_output_frame_cap`) **or** every frame is named like the
+      device's own picture (``Stacked*.fit``) — the latter because the device
+      writes one output per *session*, so a folder shot over a season holds a
+      pile of them and no count can separate that from a real target.
     * ``temp_folder`` — the target name, or the one folder all its frames sit in,
       is exactly one of :data:`_TEMP_FOLDER_NAMES`: another program's scratch
       folder sharing the astro share, not a capture folder.
@@ -511,9 +560,16 @@ def classify_seestar_junk_target(
         # output folder is. "_mosaic_sub" ends with "_sub", so one test covers both.
         # The cap comes from the FOLDER's name, which is the actual evidence: a
         # mosaic's output holds one image per panel, a single field's holds one.
+        # A count *above* the cap is not an acquittal, because the device writes
+        # one output per SESSION and a folder shot over a season holds a pile of
+        # them (the owner's "M 3" carries 22). That case is settled by the
+        # frames' own filenames instead, which is the discriminator that survives
+        # any count — and the strictest one available, since every frame must
+        # match before a deletion is offered.
+        by_name = _all_frames_are_seestar_output(source_paths)
         if (
             not low.endswith((_SUB_SUFFIX, *_CAPTURE_SUFFIXES))
-            and n_frames <= junk_output_frame_cap(folder.name)
+            and (n_frames <= junk_output_frame_cap(folder.name) or by_name)
         ):
             sibling = folder.parent / f"{folder.name}{_SUB_SUFFIX}"
             try:
@@ -522,18 +578,31 @@ def classify_seestar_junk_target(
                 is_output = False
             if is_output:
                 is_mosaic = low.endswith(_MOSAIC_SUFFIX)
-                what = (
-                    "its own stacked image of each mosaic panel"
-                    if is_mosaic
-                    else "the Seestar's own single stacked image"
-                )
-                consequence = (
-                    "stacking them just reproduces those few lower-resolution "
-                    "panel images."
-                    if is_mosaic
-                    else "stacking it just reproduces that one lower-resolution "
-                    "frame."
-                )
+                # Three phrasings, because "that one lower-resolution frame" is
+                # simply false about a folder holding a season of them, and a
+                # nudge that miscounts what it is offering to delete is one the
+                # owner is right not to trust.
+                if is_mosaic:
+                    what = "its own stacked image of each mosaic panel"
+                    consequence = (
+                        "stacking them just reproduces those few "
+                        "lower-resolution panel images."
+                    )
+                elif n_frames > _MAX_JUNK_OUTPUT_FRAMES:
+                    what = (
+                        f"the Seestar's own stacked image from each session "
+                        f"({n_frames} of them, all named “Stacked…”)"
+                    )
+                    consequence = (
+                        "stacking them just reproduces those lower-resolution "
+                        "images."
+                    )
+                else:
+                    what = "the Seestar's own single stacked image"
+                    consequence = (
+                        "stacking it just reproduces that one lower-resolution "
+                        "frame."
+                    )
                 return JunkTargetVerdict(
                     "on_device_output",
                     f"Looks like {what} (its “{folder.name}_sub” raw-subs folder "
