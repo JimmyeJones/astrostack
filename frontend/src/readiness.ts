@@ -31,9 +31,27 @@ export type ReadinessLevel = "starting" | "solid" | "close" | "plenty";
 
 export interface IntegrationReadiness {
   bucket: TypeBucket;
+  // The **effective** goal the verdict compares against, in hours — the
+  // per-object-type goal (or user-set override) scaled up by the number of
+  // single-frame field-fulls of sky the target's picture covers. On a single
+  // field this equals ``baseGoalHours``; on a 2×2 no-overlap mosaic it is 4×.
+  // A per-object-type goal is a per-pixel depth ("enough for a clean image");
+  // scaling by ``fieldFulls`` turns it into the honest per-panel yardstick.
   goalHours: number;
+  // The un-scaled goal, so the UI can distinguish "6 h base × 4 fields = 24 h"
+  // from "the user set 24 h" — a mosaic's card can name both figures without
+  // faking a user-set goal.
+  baseGoalHours: number;
+  // How many field-fulls the current stack covers (1.0 for a single field,
+  // ~4.0 for a 2×2 no-overlap mosaic). Falls back to 1.0 when the caller
+  // supplies no figure (older backend / target with no stack), which reproduces
+  // today's behaviour bit-for-bit on single-field targets.
+  fieldFulls: number;
   // True when goalHours came from a user-set goal rather than the per-type
-  // default — lets the card label it "your goal" instead of "goal".
+  // default — lets the card label it "your goal" instead of "goal". A
+  // user-set goal is **not** re-scaled by ``fieldFulls``: the owner naming
+  // their own number for the whole target is a decision, not a per-pixel
+  // depth that needs interpreting.
   customGoal: boolean;
   hours: number;
   // hours / goalHours clamped to [0, 1] — ready to drive a progress bar.
@@ -53,13 +71,26 @@ function fmtGoal(h: number): string {
 // type (from the identify card) or null/empty when the target isn't recognised;
 // `exposureSeconds` is the accepted-sub total the target already reports. When
 // `goalHoursOverride` is a positive number the user has set their own goal for
-// this target and it wins over the per-type default (Galaxy 6 h, …). Returns
-// null when there's no integration yet — nothing useful to say — so the caller
-// can simply render nothing.
+// this target and it wins over the per-type default (Galaxy 6 h, …), and its
+// value is *never* re-scaled by ``fieldFulls`` — an owner setting their own
+// number for the whole target is a decision, not a per-pixel depth to
+// re-interpret.
+//
+// ``fieldFulls`` is how many single-frame field-fulls of sky the target's
+// newest stack covers (see :mod:`webapp.field_fulls`). It scales the per-type
+// default goal so a four-panel mosaic at 1 h/panel is judged against
+// ``4 × 4 h`` (an honest per-panel yardstick) rather than told "plenty for a
+// clean image" at a quarter of the light it needs. Omit/null/1.0 for a single
+// field, and on an older backend that hasn't started sending it — the verdict
+// then matches its pre-scaling behaviour exactly.
+//
+// Returns null when there's no integration yet — nothing useful to say — so
+// the caller can simply render nothing.
 export function integrationReadiness(
   exposureSeconds: number,
   type: string | null | undefined,
   goalHoursOverride?: number | null,
+  fieldFulls?: number | null,
 ): IntegrationReadiness | null {
   if (!Number.isFinite(exposureSeconds) || exposureSeconds <= 0) return null;
   const bucket = objectTypeBucket(type);
@@ -67,7 +98,20 @@ export function integrationReadiness(
     typeof goalHoursOverride === "number" &&
     Number.isFinite(goalHoursOverride) &&
     goalHoursOverride > 0;
-  const goalHours = customGoal ? goalHoursOverride! : GOAL_HOURS[bucket];
+  const baseGoalHours = customGoal ? goalHoursOverride! : GOAL_HOURS[bucket];
+  // A canvas < one native frame or a missing/garbled figure both fall back to
+  // 1.0 — a lower scale would lower the goal, and a beginner nudge that
+  // *lowers* what "plenty" means from a canvas artefact would call a
+  // half-integrated target done. Only a user-set goal is left untouched.
+  const cleanFieldFulls =
+    typeof fieldFulls === "number" &&
+    Number.isFinite(fieldFulls) &&
+    fieldFulls > 1
+      ? fieldFulls
+      : 1;
+  const goalHours = customGoal
+    ? baseGoalHours
+    : baseGoalHours * cleanFieldFulls;
   const hours = exposureSeconds / 3600;
   const ratio = hours / goalHours;
   const fraction = Math.max(0, Math.min(1, ratio));
@@ -94,7 +138,17 @@ export function integrationReadiness(
       ? `${so_far} — ${phrase}.`
       : `${so_far} of ~${fmtGoal(goalHours)} h — ${phrase}.`;
 
-  return { bucket, goalHours, customGoal, hours, fraction, level, verdict };
+  return {
+    bucket,
+    goalHours,
+    baseGoalHours,
+    fieldFulls: cleanFieldFulls,
+    customGoal,
+    hours,
+    fraction,
+    level,
+    verdict,
+  };
 }
 
 // The honest √N truth behind "should I keep shooting?": stacking background
@@ -145,8 +199,10 @@ export function readinessRowHint(
   exposureSeconds: number,
   type: string | null | undefined,
   goalHoursOverride?: number | null,
+  fieldFulls?: number | null,
 ): { label: string; color: string } | null {
-  const r = integrationReadiness(exposureSeconds, type, goalHoursOverride);
+  const r = integrationReadiness(
+    exposureSeconds, type, goalHoursOverride, fieldFulls);
   if (!r) return null;
   if (r.level === "plenty") return { label: "Plenty — try something new", color: "green" };
   if (r.level === "close") return { label: "Nearly there", color: "teal" };
@@ -179,8 +235,10 @@ export function readinessRowBadge(
   type: string | null | undefined,
   goalHoursOverride?: number | null,
   paceSeconds?: number | null,
+  fieldFulls?: number | null,
 ): { label: string; color: string; tooltip: string } | null {
-  const r = integrationReadiness(exposureSeconds, type, goalHoursOverride);
+  const r = integrationReadiness(
+    exposureSeconds, type, goalHoursOverride, fieldFulls);
   if (r && r.level !== "plenty") {
     const est = clearNightsFromPace((r.goalHours - r.hours) * 3600, paceSeconds);
     if (est && est.nights !== null && est.nights <= FINISH_FIRST_MAX_NIGHTS) {
@@ -191,7 +249,8 @@ export function readinessRowBadge(
       };
     }
   }
-  const hint = readinessRowHint(exposureSeconds, type, goalHoursOverride);
+  const hint = readinessRowHint(
+    exposureSeconds, type, goalHoursOverride, fieldFulls);
   // `readinessRowHint` only returns a hint when the readiness itself exists, so
   // `r` is non-null here; the guard keeps the types honest rather than asserting.
   return hint && r ? { ...hint, tooltip: r.verdict } : null;

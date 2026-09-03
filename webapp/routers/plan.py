@@ -155,6 +155,7 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
     Dashboard quote (see :func:`webapp.routers.stats._collect_progress`)."""
     from seestack.objectinfo import identify_object
     from seestack.session_recap import recent_night_pace_s
+    from webapp.field_fulls import target_field_fulls
     from webapp.framing_advice import newest_picture_nudge
 
     catalog = load_catalog()
@@ -166,12 +167,14 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
                                catalog=catalog)
         goal_s: float | None = None
         pace_s: float | None = None
+        field_fulls: float | None = None
         nudge = None
         proj = None
         try:
             proj = lib.open_target(t.safe_name)
             goal_s = read_goal_s(proj)
             pace_s = recent_night_pace_s(proj, night_of=night_of)
+            field_fulls = target_field_fulls(proj)
             # "Nudge a little south before you start" — the framing advice from
             # this target's newest picture, brought forward from the morning-after
             # card to the screen someone reads while pointing the scope. One more
@@ -192,6 +195,7 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
             con=info.constellation_abbr if info is not None else "",
             goal_s=goal_s,
             recent_pace_s=pace_s,
+            field_fulls=field_fulls,
             recentre_nudge=nudge,
         ))
     return out

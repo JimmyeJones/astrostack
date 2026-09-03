@@ -47,6 +47,7 @@ function TargetRow({ t }: { t: PlannedTarget }) {
         t.type,
         t.goal_s == null ? null : t.goal_s / 3600,
         t.recent_pace_s,
+        t.field_fulls,
       )
     : null;
   // Pre-capture "will it fit?" nudge for a catalog candidate that's bigger than

@@ -737,6 +737,7 @@ export function TargetView() {
             target.data.total_exposure_s,
             identity.data?.type,
             goal.data?.goal_s != null ? goal.data.goal_s / 3600 : null,
+            target.data.field_fulls,
           )
         : null,
     [target.data, identity.data, goal.data],
@@ -1497,12 +1498,21 @@ export function TargetView() {
                     ) : (
                       <Text size="xs" c="dimmed"
                         style={{ whiteSpace: "nowrap", cursor: "pointer" }}
-                        title="Set your own integration goal for this target"
+                        title={
+                          !readiness.customGoal && readiness.fieldFulls > 1
+                            ? `${readiness.baseGoalHours} h per field-full of sky, × `
+                              + `${readiness.fieldFulls.toFixed(2).replace(/\.?0+$/, "")} `
+                              + "field-fulls this mosaic covers. Click to set your own."
+                            : "Set your own integration goal for this target"
+                        }
                         onClick={() => {
                           setGoalHoursInput(Number(readiness.goalHours.toFixed(2)));
                           setEditingGoal(true);
                         }}>
                         {readiness.customGoal ? "your goal" : "goal"} ~{readiness.goalHours} h
+                        {!readiness.customGoal && readiness.fieldFulls > 1
+                          ? ` (${readiness.fieldFulls.toFixed(2).replace(/\.?0+$/, "")}-field mosaic)`
+                          : ""}
                         {" "}✎
                       </Text>
                     )}

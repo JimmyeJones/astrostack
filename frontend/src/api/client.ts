@@ -59,6 +59,15 @@ export interface PlannedTarget {
   // it instead of only that it's "Nearly there". null/absent for a catalog row,
   // for a target without enough night history, and on an older backend.
   recent_pace_s?: number | null;
+  // How many single-frame field-fulls of sky this target's newest stack
+  // covers — 1.0 for a single field, ~4.0 for a 2×2 no-overlap mosaic. Lets
+  // the row's readiness hint scale the per-object-type goal by the panel
+  // count, so a four-panel mosaic at 1 h/panel is judged against 4 × 4 h
+  // rather than told "Plenty — try something new" at a quarter of the light
+  // it needs. null/absent for a catalog row, for a target with no stacked
+  // picture yet, and on an older backend — the readiness code then falls back
+  // to the un-scaled goal (today's behaviour).
+  field_fulls?: number | null;
   // "Will it fit in one Seestar frame?" — major-axis size (arcmin) and the
   // verdict, for catalog candidates the bundled catalog has a size for. Absent
   // on library rows and older backends. See FramingHint.
@@ -350,6 +359,13 @@ export interface Target {
   notes: string | null;
   tags: string[];
   cover_stack_run_id?: number | null;
+  // How many single-frame field-fulls of sky this target's newest stack
+  // covers — served by the Target detail endpoint (never on the light Library
+  // list) so the "Is it enough yet?" card can scale the per-object-type goal
+  // by the panel count. null/absent for a target with no stack yet, on an
+  // older backend, or on a list-shape response — the card then falls back to
+  // the un-scaled goal (today's behaviour).
+  field_fulls?: number | null;
 }
 
 export interface MergeSuggestionTarget {
@@ -731,6 +747,13 @@ export interface TargetProgress {
   // older backend simply doesn't send it, and the card then says nothing about
   // how many more nights a target needs.
   recent_pace_s?: number | null;
+  // How many single-frame field-fulls of sky this target's newest stack
+  // covers — the readiness verdict scales its per-object-type goal by this, so
+  // a mosaic is judged against a per-panel depth rather than told "plenty"
+  // when each panel is a fraction of the goal. null/absent for a target with
+  // no stacked picture yet, or on an older backend — the card then falls back
+  // to the un-scaled goal (today's behaviour).
+  field_fulls?: number | null;
 }
 
 export interface NightActivity {

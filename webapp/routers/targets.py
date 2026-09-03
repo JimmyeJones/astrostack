@@ -322,12 +322,28 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
 
 @router.get("/{safe}", response_model=TargetOut)
 def get_target(safe: str, request: Request) -> TargetOut:
+    from webapp.field_fulls import target_field_fulls
+
     lib = deps.open_library(request)
     try:
         entry = lib.find_target(safe)
         if entry is None:
             raise HTTPException(status_code=404, detail=f"No target '{safe}'")
-        return _to_out(entry)
+        out = _to_out(entry)
+        # The Target page's "Is it enough yet?" card scales its per-object-type
+        # goal by this — one extra project open per detail read, so a mosaic
+        # owner is not told "plenty" at a fraction of the light they need. A
+        # broken project must never 500 the page, so a failure to compute is
+        # swallowed and the card falls back to the un-scaled goal.
+        try:
+            proj = lib.open_target(safe)
+            try:
+                out.field_fulls = target_field_fulls(proj)
+            finally:
+                proj.close()
+        except Exception:  # noqa: BLE001
+            pass
+        return out
     finally:
         lib.close()
 
