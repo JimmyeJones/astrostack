@@ -12456,6 +12456,32 @@ to **Shipped**.)_
   existing `auto` guard. **Grep first:** the session-recap and "How's my stack?" surfaces may already be the
   right home, and a third place asking this question is the mistake this class keeps making.
 
+  > **✅ THE GREP WAS DONE, AND IT FOUND A BUG RATHER THAN A HOME (Builder 2026-09-03, v0.334.1, branch
+  > `claude/sweet-babbage-ef4v1l`) — the Target page was ALREADY answering this question, and answering it
+  > wrongly. Half of (a) is therefore shipped; read this before building the rest.**
+  > The entry's own "grep first" instruction is what turned this up, and it is the reason the instruction is
+  > there. The Target page's **streaked-frames badge** (`frontend/src/routes/Target.tsx`, fires whenever
+  > `streakedAccepted > 0`) carried the tooltip *"Stack with **sigma-clip** or drizzle outlier rejection to
+  > remove the trail while keeping the frame"* — which names the one method that is **mathematically blind to
+  > a lone trail** below `kappa_min_frames` (11 at the default κ=3). So an owner with a handful of streaked
+  > subs, or *any* mosaic panel thinner than 11, was pointed by an on-by-default surface straight at the
+  > setting that would clip nothing — the same defect as the filed entry, one surface earlier in the workflow
+  > and stated as advice rather than merely left unsaid.
+  > **Fixed by naming Auto instead of a method:** the tooltip now reads *"Stack with **Auto outlier removal**
+  > to take the trail out while keeping the frame — it picks a method that works at your stack's depth."*
+  > That is honest at *every* depth without needing a number: `_resolve_auto_reject` picks min/max below the
+  > κ-σ floor (min/max removes an extreme from 3 frames up) and κ-σ once the stack is deep enough, so the
+  > advice cannot go stale the way a named method does. No behaviour change, no default flipped — the wrong
+  > *sentence* was the whole bug. **Test:** `Target.test.tsx` pins the presence of "Auto outlier removal"
+  > **and the absence of "sigma-clip"**, so nobody re-adds a method name; verified to fail on the pre-fix
+  > wording before it passed on the new one.
+  > **What is still open from (a):** the *depth-aware* half — actually calling `rejection_reach` on the
+  > target's saved defaults and its accepted count, so the page can say "your saved setting will not reach
+  > this" with the one-click fix, rather than giving advice that is merely always-correct. That still wants
+  > the estimate on the Target page and a placement decision inside the existing notice grouping (§1's
+  > standing IA priority — **not** one more always-on banner), which is why it was not bundled into a copy
+  > fix. **Size is now S–M rather than M:** the surface exists, and it is the streaked badge.
+
 - **NEW IDEA (Builder 2026-09-02, spotted while unifying two of the four copies in v0.323.1) — route the
   remaining two copies of the combine dispatcher's frame-count gates through `combine_method`.** *(Pillar:
   maintainability in service of correctness — size S; **the hot path, so measure nothing changes**.)* The gates
