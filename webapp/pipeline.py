@@ -94,6 +94,44 @@ def _progress(jm: JobManager, job: Job):
     return cb
 
 
+def _unstacked_video_captures(
+    settings: Settings, scan_root: Path,
+) -> list[dict[str, Any]]:
+    """The ``*_video/`` folders under ``scan_root`` the user hasn't dealt with yet.
+
+    The scanner skips these deliberately (they hold no deep-sky subs) and says
+    nothing, so a beginner's lunar clip can sit in ``incoming/`` unmentioned
+    forever while every scan reports only the subs it added. This is the pointer
+    to the page that *can* stack them.
+
+    **Gated on "not already dealt with"**, or it would nag on every scan for the
+    rest of the install's life: a capture that already has a stacked still, or a
+    quicklook from the "Check this capture first" pass, is one the user has
+    plainly found — it drops out of the report and stays out. Both checks are a
+    single ``stat`` of a file the video store already writes, so this costs one
+    cheap directory walk plus two stats per capture and never opens a video.
+
+    Best-effort throughout: a discovery that raises (an unreadable drop, a
+    vanished mount) returns nothing rather than failing a scan that has already
+    ingested the user's frames.
+    """
+    from seestack.video.discover import find_video_captures
+    from webapp.video import has_quicklook, has_result
+
+    out: list[dict[str, Any]] = []
+    with contextlib.suppress(Exception):
+        for cap in find_video_captures(scan_root):
+            if has_result(settings, cap.id) or has_quicklook(settings, cap.id):
+                continue
+            out.append({
+                "id": cap.id,
+                "name": cap.folder_name,
+                "label": cap.label,
+                "n_files": cap.n_files,
+            })
+    return out
+
+
 def submit_pipeline(settings: Settings, jm: JobManager, *, root: str | None = None) -> Job:
     def body(job: Job) -> dict[str, Any]:
         return _pipeline_body(settings, jm, job, root=root)
@@ -144,6 +182,17 @@ def _pipeline_body(
             ]
             if unvouched:
                 summary["skipped_folders"] = unvouched
+            # The *other* silent skip, and the one that has somewhere to go.
+            # ``_apply_seestar_convention`` walks past "<T>_video/" folders with
+            # the same wordless ``continue``, and that skip is right — they hold
+            # no stackable deep-sky subs. But a beginner who copies their whole
+            # Seestar share in and reads "40 subs added" has no way to know their
+            # Lunar_video was passed over, and unlike the bare-folder case the
+            # app *can* do something with it: the Moon & Sun page stacks exactly
+            # these clips. Reported, never acted on.
+            summary_videos = _unstacked_video_captures(settings, scan_root)
+            if summary_videos:
+                summary["video_folders"] = summary_videos
         else:
             touched_names = [t.safe_name for t in lib.list_targets()]
         summary["targets"] = touched_names
