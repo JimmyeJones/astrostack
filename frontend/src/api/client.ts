@@ -2613,6 +2613,9 @@ export const api = {
       expected_verdict?: string | null;
       expected_frames?: number | null;
       expected_basis?: string | null;
+      // The run's own canvas flag, served beside the basis so the celebratory
+      // badge can drop its sub count on a mosaic even when no verdict resolved.
+      is_mosaic?: boolean | null;
     }>(
       `/api/targets/${safe}/stack-runs/${id}/one-sub-vs-stack/noise`),
   stackReferenceSubUrl: (safe: string, id: number) =>

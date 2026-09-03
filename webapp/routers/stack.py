@@ -2733,6 +2733,13 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
     :func:`_measure_crop_depth`). Both are ``null`` whenever the verdict is, so
     the card never has to work out which number its own sentence should name.
 
+    ``is_mosaic`` is the run's own recorded canvas flag (``true`` | ``false`` |
+    ``null`` on a run stacked before schema 8). It is served *separately* from
+    ``expected_basis`` on purpose: the basis only exists when a verdict does, but
+    the **celebratory badge** — which credits the ratio to a sub count — has to
+    know the canvas even on the mosaics whose crop depth nothing has measured,
+    or it goes back to crediting a whole target's subs with one panel's result.
+
     The first measurement for a run is **remembered** (``NOISE_RATIO_META_PREFIX``,
     fingerprinted on the master and the representative sub) so the repeat views
     this endpoint actually gets don't reload the master and re-debayer a sub for
@@ -2780,6 +2787,7 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
             "expected_frames": yardstick,
             "expected_basis": (None if yardstick is None
                                else "mosaic_centre" if is_mosaic else "stack"),
+            "is_mosaic": is_mosaic,
         }
 
     have_master = bool(fits_path) and Path(str(fits_path)).exists()

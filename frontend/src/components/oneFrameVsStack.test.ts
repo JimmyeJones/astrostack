@@ -90,6 +90,45 @@ describe("noiseReductionBadge", () => {
     expect(noiseReductionBadge(9.96, 50)).toBe(
       "Stacking your 50 subs cut the background noise about 10×.");
   });
+
+  it("drops the sub count on a mosaic — the crop only saw one panel's subs", () => {
+    // The exact shape the yardstick fix was about: a four-panel mosaic 100 subs
+    // deep per panel achieves √100 = 10×, and `n_frames_used` is 400. Crediting
+    // 400 frames with a 100-frame result is the same wrong denominator, in the
+    // card's one *celebratory* line.
+    expect(noiseReductionBadge(10, 400, true)).toBe(
+      "Stacking your subs cut the background noise about 10×.");
+    // The measured factor is right and stays exactly as it reads on a single
+    // field — only the count it is attributed to goes.
+    expect(noiseReductionBadge(10, 400, false)).toBe(
+      "Stacking your 400 subs cut the background noise about 10×.");
+  });
+
+  it("keeps the count when the canvas is unknown or the flag is absent", () => {
+    // A run stacked before schema 8 carries a NULL flag, and a backend too old
+    // to send the field sends nothing. Unlike the yardstick — which withholds a
+    // *judgement* rather than risk accusing a healthy mosaic — this only
+    // withholds a compliment's subject, so the legacy single-field runs (which
+    // is nearly all of them) keep their number.
+    const withCount = "Stacking your 228 subs cut the background noise about 15×.";
+    expect(noiseReductionBadge(15.3, 228, null)).toBe(withCount);
+    expect(noiseReductionBadge(15.3, 228, undefined)).toBe(withCount);
+    expect(noiseReductionBadge(15.3, 228)).toBe(withCount);
+  });
+
+  it("agrees with the yardstick sentence rendered directly beneath it", () => {
+    // The two lines sit one above the other on the reveal card, so the badge
+    // must never name a count the sentence under it contradicts. Same run: a
+    // four-panel mosaic, 400 frames used, 100 deep at the measured crop.
+    const badge = noiseReductionBadge(10, 400, true);
+    const note = noiseVsExpectedNote("expected", 10, 400, 100, "mosaic_centre");
+    expect(badge).toBe("Stacking your subs cut the background noise about 10×.");
+    expect(note?.text).toBe(
+      "That's about what the 100 subs covering the middle of this mosaic " +
+      "should give (√100 ≈ 10×).");
+    expect(badge).not.toContain("400");
+    expect(note?.text).not.toContain("400");
+  });
 });
 
 describe("noiseVsExpectedNote", () => {

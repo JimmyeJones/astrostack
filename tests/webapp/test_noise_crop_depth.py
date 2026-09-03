@@ -45,7 +45,7 @@ def _write_framecov(master: Path, counts: np.ndarray) -> Path:
 
 
 def _register_run(data_root, safe: str, master: Path, *,
-                  is_mosaic: bool = False, n_frames_used: int = 400) -> int:
+                  is_mosaic: bool | None = False, n_frames_used: int = 400) -> int:
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -313,6 +313,55 @@ def test_an_older_stamp_gains_its_depth_without_re_measuring_the_ratio(
     again = client.get(url).json()
     assert again["expected_frames"] == 144
     assert depths == []
+
+
+# ---- the canvas flag the celebratory badge needs ----------------------------
+#
+# `expected_basis` only exists when a *verdict* does, and a mosaic whose coverage
+# map is gone has no verdict — but the badge above the yardstick sentence still
+# credits the ratio to a sub count, and on any mosaic that count is the whole
+# target's while the measurement is one panel's. So the raw canvas flag is served
+# in its own right, on every path.
+
+def test_the_canvas_flag_is_served_even_when_the_verdict_is_withheld(
+    client, solved_library, monkeypatch,
+):
+    """The mosaic the yardstick stays silent about is exactly the one the badge
+    must not congratulate on 400 subs."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    master = _master_path(solved_library, safe, "mosaic_flag_bare.fits")
+    _write_linear_master(master)          # no coverage sibling → no depth
+    run_id = _register_run(solved_library, safe, master, is_mosaic=True,
+                           n_frames_used=400)
+    _fixed_ratio(monkeypatch, 10.0)
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise").json()
+    assert body["expected_basis"] is None      # nothing to judge against…
+    assert body["is_mosaic"] is True           # …but the canvas is still known
+
+
+def test_a_single_field_says_so_and_an_older_run_says_nothing(
+    client, solved_library, monkeypatch,
+):
+    """`false` is a fact the badge acts on (keep the count); `null` — a run
+    stacked before schema 8 — is an absence it must not read as either."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    single = _master_path(solved_library, safe, "flag_single.fits")
+    _write_linear_master(single)
+    single_id = _register_run(solved_library, safe, single, is_mosaic=False,
+                              n_frames_used=100)
+    legacy = _master_path(solved_library, safe, "flag_legacy.fits")
+    _write_linear_master(legacy)
+    legacy_id = _register_run(solved_library, safe, legacy, is_mosaic=None,
+                              n_frames_used=100)
+    _fixed_ratio(monkeypatch, 10.0)
+
+    base = f"/api/targets/{safe}/stack-runs"
+    assert client.get(
+        f"{base}/{single_id}/one-sub-vs-stack/noise").json()["is_mosaic"] is False
+    assert client.get(
+        f"{base}/{legacy_id}/one-sub-vs-stack/noise").json()["is_mosaic"] is None
 
 
 def test_the_health_note_reads_the_same_depth_the_card_does(

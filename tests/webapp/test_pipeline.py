@@ -517,3 +517,79 @@ def test_an_ordinary_seestar_drop_says_nothing_about_its_skips(client, data_root
     body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
     assert body["state"] == "done", body
     assert "skipped_folders" not in body["result"]
+
+
+# --- The scan says where a video capture *can* go -----------------------------
+#
+# "<T>_video/" is skipped by the same wordless `continue` as the device's own
+# picture — but unlike that case the app has somewhere to send it, so the silence
+# costs a beginner their lunar clip rather than merely puzzling them.
+
+def _drop_video(data_root: Path, folder: str = "Lunar_video",
+                name: str = "clip.mp4") -> Path:
+    d = data_root / "incoming" / folder
+    d.mkdir(parents=True, exist_ok=True)
+    # Never decoded — discovery is a directory walk that reads extensions only.
+    (d / name).write_bytes(b"")
+    return d
+
+
+def test_the_scan_points_a_video_folder_at_the_page_that_stacks_it(client, data_root):
+    _drop_a_folder(data_root, "M 42_sub", ["Light_M 42_10.0s_IRCUT_0001.fit"])
+    _drop_video(data_root)
+    body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+    assert body["state"] == "done", body
+    [video] = body["result"]["video_folders"]
+    assert video == {"name": "Lunar_video", "label": "Moon"}
+    # Reported, never acted on — the subs beside it still ingested normally and
+    # nothing in incoming/ was touched.
+    assert "M_42" in {t["safe_name"] for t in client.get("/api/targets").json()}
+    assert sorted(p.name for p in (data_root / "incoming" / "Lunar_video").iterdir()) \
+        == ["clip.mp4"]
+
+
+def test_an_unrecognised_capture_gets_no_kind_rather_than_a_guessed_one(
+        client, data_root):
+    """`VideoCapture.label` falls back to the folder's base name, and "that's a
+    stuff video" is worse copy than "that's a video capture" — so the label is
+    served only when the folder's own prefix says Moon or Sun."""
+    _drop_a_folder(data_root, "M 42_sub", ["Light_M 42_10.0s_IRCUT_0001.fit"])
+    _drop_video(data_root, "stuff_video")
+    body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+    assert body["state"] == "done", body
+    [video] = body["result"]["video_folders"]
+    assert video == {"name": "stuff_video", "label": None}
+
+
+def test_a_scan_with_no_video_folders_says_nothing(client, data_root):
+    _drop_a_folder(data_root, "M 42_sub", ["Light_M 42_10.0s_IRCUT_0001.fit"])
+    body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+    assert body["state"] == "done", body
+    assert "video_folders" not in body["result"]
+
+
+def test_a_capture_the_user_has_already_opened_stops_being_mentioned(
+        client, data_root):
+    """The whole difference between a signpost and a nag. Once a capture has a
+    stacked still — or just the quicklook the "Check this capture first" pass
+    writes — the user has plainly found it, and every later scan is quiet."""
+    from webapp.config import Settings
+    from webapp.video import PNG_NAME, QUICKLOOK_NAME, result_dir
+
+    _drop_a_folder(data_root, "M 42_sub", ["Light_M 42_10.0s_IRCUT_0001.fit"])
+    _drop_video(data_root, "Lunar_video")
+    _drop_video(data_root, "Solar_video")
+    settings = Settings(data_root=str(data_root))
+
+    body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+    assert {v["name"] for v in body["result"]["video_folders"]} \
+        == {"Lunar_video", "Solar_video"}
+
+    # One stacked, one merely checked — both drop out.
+    for cid, marker in (("Lunar_video", PNG_NAME), ("Solar_video", QUICKLOOK_NAME)):
+        out = result_dir(settings, cid)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / marker).write_bytes(b"")
+
+    body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+    assert "video_folders" not in body["result"]
