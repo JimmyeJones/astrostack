@@ -1383,36 +1383,83 @@ _(nothing else claimed — claim an item here with your branch name)_
   page prints the **raw engine error** where every other page uses `friendlyJobError`~~ *(shipped v0.328.0,
   see below)*; ~~the frames table prints raw
   UTC under a hero that says "Shot &lt;local night&gt;"~~ *(shipped v0.328.5, see below)*;
-  "nights" means **6-hour sessions** on the Nights card
-  but **calendar nights** in captions *(traced 2026-09-03 — read the note below before picking it up)*;
+  ~~"nights" means **6-hour sessions** on the Nights card
+  but **calendar nights** in captions~~ *(shipped v0.329.1, see below)*;
   three hand-mirrored "is this a genuine run" predicates;
   `POST /api/targets` has **no frontend caller**; ~~share and print JPEGs use 4:2:0 chroma subsampling~~
   *(shipped v0.328.0, see below)*; the "full
   data" TIFF anchors its white point on the single brightest surviving pixel (hypothesis, needs real data).
 
-- **⚪ TRACED, NOT BUILT (Builder 2026-09-03, while shipping the sibling A-MINOR item below) — what the
-  "'nights' means two different things" entry actually costs, and the shape of the fix.** *(Recorded so the
-  next run starts from the code rather than from the one-line summary. Size: S–M.)*
-  **The mechanism.** `nights_breakdown` (`seestack/session_recap.py`) groups a target's frames into
-  **sessions** by a `DEFAULT_SESSION_GAP_HOURS` (6 h) gap split, then labels each session with
-  `night_date_of(start_utc, lon)`. `capture_night_count` (`webapp/capture_nights.py`) counts **distinct
-  observing-night dates**. Those disagree in exactly one direction: two sessions more than 6 h apart *within
-  one observing night* — an evening run, bed, then a pre-dawn run — produce **two Nights-card rows carrying
-  the identical date label**, while the caption on the same page says "over 1 night". They cannot disagree the
-  other way: consecutive nights are always more than 6 h apart, so a session never spans two nights.
-  **Why it is worse than a cosmetic mismatch.** Each row carries a **"Set aside"** button whose copy is about
-  *the night*, and on a split night it sets aside only that row's half — so a beginner who decides a night was
-  clouded out clicks it, re-stacks, and half the bad subs are still in the picture, with the card still
-  showing a second identically-dated row they have no reason to read as a different thing.
-  **Fix direction.** The card's own heading is "Nights" and its copy is "every night that went into this
-  picture", so the honest change is to group the sessions by their observing-night date and roll the group up
-  into one row — the labelling helper is already there, and `set_aside_night(start_utc, end_utc)` takes a
-  window, so a merged row hands it the night's outer bounds. **Cautions:** `nights_breakdown` is shared (the
-  Dashboard's last-session recap reads sessions, and *that* surface genuinely wants sessions, not nights), so
-  bucket at the endpoint rather than reshaping the engine helper; the median-FWHM/verdict statistics must be
-  recomputed over the merged group rather than picked from one half; and the longitude has to come from
-  `resolve_site_lon`, exactly as `/nights` already resolves it. A regression test needs a fixture with two
-  sessions inside one observing night — which is what makes this S–M rather than S.
+- **✅ SHIPPED (Builder, v0.329.1, branch `claude/sweet-babbage-s16wgp`) — ~~A-MINOR: "nights" means 6-hour
+  sessions on the Nights card and observing nights everywhere else, and the "Set aside" button pays for the
+  difference.~~** Built exactly to the traced note below, whose two cautions both earned their place.
+
+  **What was wrong.** A row on the Nights card was one **capture session** (`nights_breakdown`'s 6 h gap
+  split); every other date on the page is an **observing night** (local noon-to-noon). They disagree in one
+  direction only — an evening run, bed, then a pre-dawn run is two sessions *inside one night* — and when they
+  did, the card showed **two rows carrying the identical date label** beside a caption saying "over 1 night".
+  The cost is not cosmetic: each row's **"Set aside"** button is worded about *the night* but hands
+  `night_frame_ids` only that row's window, so a beginner who decides a night was clouded out clicks once,
+  re-stacks, and half the bad subs are still in the picture — with a second, identically-dated row on screen
+  that they have no reason to read as a different thing. Pinned as a before/after: the old split reached
+  `[4, 6]` of a ten-sub night; the merged row reaches all 10.
+
+  **The fix groups by the night, and recomputes rather than picking a half.** `nights_breakdown` gains an
+  optional `night_of` — a function from a capture stamp to an observing-night key — and merges adjacent
+  sessions sharing one key **before** the rollup, so the median FWHM, the verdict, the reject buckets and the
+  integration are all measured over the whole night. Omit it and the split is session-by-session, byte for
+  byte as before: the last-session recap and the pace estimate genuinely want sessions, and that default is
+  pinned by its own test rather than left to trust. The key itself is supplied by
+  `routers/targets.py::target_nights`, because only the webapp knows the observer's longitude — resolved
+  through the same `resolve_site_lon` the label already used, so the grouping and the label cannot name
+  different nights.
+
+  **A second defect fell out of it, which is why this is more than tidying.** A split night was counted
+  **twice** in `_typical_other_fwhm`'s leave-one-out baseline — the same night's two halves both sitting in the
+  population a *third* night is judged "soft" against, dragging the baseline toward whichever night happened
+  to be interrupted. That baseline sits directly beside the one-click discard button, which is the same reason
+  the v0.318-era minimum→median change was made. Pinned by
+  `test_a_split_night_no_longer_skews_the_soft_baseline`.
+
+  **Upgrade-safe (§9):** one optional keyword with a `None` default, no response-shape change (the frontend
+  already keys its label off `night_date` and its set-aside window off `start_utc`/`end_utc`, so **no frontend
+  change was needed at all**), no schema, no config, no on-disk change, no default flipped.
+
+  **Tests (+12; 10 fail before — verified by stashing the two source files).** `tests/test_session_recap.py`
+  (+7): the unmerged default pinned as a contract; the merged night's frame count, integration and outer
+  bounds; `night_frame_ids` reaching all ten subs where the split reached `[4, 6]`; statistics recomputed over
+  both halves; the skewed-baseline case above; consecutive nights never merging; and an unplaceable stamp
+  (`None` key) never merging with another unplaceable one — guessing two undated halves are the same night is
+  worse than showing them apart. `tests/webapp/test_target_nights.py` (+5): one row for the split night; **no
+  two rows ever share a night date**; the one-click set-aside now dropping 3 of 3 rather than 2; the card's
+  night set equalling the frames table's; and the same three stamps honestly splitting into *two* nights for
+  an observer at +150°, which is what proves the key is the owner's longitude and not UTC wearing a hat.
+
+  *(Original traced note follows.)*
+
+  - **~~TRACED, NOT BUILT (Builder 2026-09-03, while shipping the sibling A-MINOR item below) — what the
+    "'nights' means two different things" entry actually costs, and the shape of the fix.~~** *(Recorded so the
+    next run starts from the code rather than from the one-line summary. Size: S–M.)*
+    **The mechanism.** `nights_breakdown` (`seestack/session_recap.py`) groups a target's frames into
+    **sessions** by a `DEFAULT_SESSION_GAP_HOURS` (6 h) gap split, then labels each session with
+    `night_date_of(start_utc, lon)`. `capture_night_count` (`webapp/capture_nights.py`) counts **distinct
+    observing-night dates**. Those disagree in exactly one direction: two sessions more than 6 h apart *within
+    one observing night* — an evening run, bed, then a pre-dawn run — produce **two Nights-card rows carrying
+    the identical date label**, while the caption on the same page says "over 1 night". They cannot disagree the
+    other way: consecutive nights are always more than 6 h apart, so a session never spans two nights.
+    **Why it is worse than a cosmetic mismatch.** Each row carries a **"Set aside"** button whose copy is about
+    *the night*, and on a split night it sets aside only that row's half — so a beginner who decides a night was
+    clouded out clicks it, re-stacks, and half the bad subs are still in the picture, with the card still
+    showing a second identically-dated row they have no reason to read as a different thing.
+    **Fix direction.** The card's own heading is "Nights" and its copy is "every night that went into this
+    picture", so the honest change is to group the sessions by their observing-night date and roll the group up
+    into one row — the labelling helper is already there, and `set_aside_night(start_utc, end_utc)` takes a
+    window, so a merged row hands it the night's outer bounds. **Cautions:** `nights_breakdown` is shared (the
+    Dashboard's last-session recap reads sessions, and *that* surface genuinely wants sessions, not nights), so
+    bucket at the endpoint rather than reshaping the engine helper; the median-FWHM/verdict statistics must be
+    recomputed over the merged group rather than picked from one half; and the longitude has to come from
+    `resolve_site_lon`, exactly as `/nights` already resolves it. A regression test needs a fixture with two
+    sessions inside one observing night — which is what makes this S–M rather than S.
 
 - **✅ SHIPPED (Builder, v0.328.5, branch `claude/sweet-babbage-axt93w`) — ~~A-MINOR: the frames table prints
   raw UTC under a hero that says "Shot &lt;local night&gt;".~~** The same date-honesty class as v0.311.3,
