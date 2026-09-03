@@ -360,9 +360,12 @@ function renderSettingsWith(
   // Settings is split into sections at `/settings/<section>`; the stacking
   // defaults live on this one. `null` renders the bare `/settings` landing.
   section: SettingsSection | null = "stacking",
+  // Extra saved settings for a test that needs real values in the form (the
+  // folder fields, say). Omitted, the fixture is exactly what it always was.
+  extraSettings: Record<string, unknown> = {},
 ) {
   vi.spyOn(client.api, "getSettings").mockResolvedValue({
-    default_stack_options: stackDefaults,
+    default_stack_options: stackDefaults, ...extraSettings,
   } as never);
   vi.spyOn(client.api, "getSystem").mockResolvedValue({
     version: "0.0.0", data_root: "/data", cpu_count: 4, cpu_workers: 3,
@@ -536,5 +539,65 @@ describe("astap_timeout_s hint honesty", () => {
     expect(hint).toMatch(/each solve attempt/i);
     expect(hint).toMatch(/3/); // names the up-to-3× multiplier
     expect(hint).not.toMatch(/solving a single frame after/i); // the old, misleading wording
+  });
+});
+
+// Pointing the library (or the data root, which carries state/config.json) at
+// somewhere inside `incoming/` is the one layout the app must never accept: every
+// clean-up it does is correctly scoped to its own tree, which is exactly why
+// nesting one inside the other would make a correct `rmtree` resolve inside the
+// owner's only copy of their raw subs. The server refuses that save and stays the
+// authority; this is the same question asked while the user types, so the answer
+// lands beside the field instead of arriving as a red toast reading "422: …".
+describe("folder conflict, while you type", () => {
+  it("marks the offending field and holds Save", async () => {
+    renderSettingsWith({}, "folders", {
+      data_root: "/data", incoming_dir: "/data/incoming", library_root: "/data/library",
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("Watched folders")).toBeVisible());
+    const save = screen.getAllByRole("button", { name: "Save settings" })[0];
+    expect(save).not.toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/Library root/), {
+      target: { value: "/data/incoming/library" },
+    });
+
+    await waitFor(() => expect(
+      screen.getByText(/would sit inside the incoming folder/)).toBeVisible());
+    expect(screen.getAllByRole("button", { name: "Save settings" })[0]).toBeDisabled();
+  });
+
+  it("lets go the moment the folder is moved back out", async () => {
+    renderSettingsWith({}, "folders", {
+      data_root: "/data", incoming_dir: "/data/incoming",
+      library_root: "/data/incoming/library",
+    });
+
+    await waitFor(() => expect(
+      screen.getByText(/would sit inside the incoming folder/)).toBeVisible());
+
+    fireEvent.change(screen.getByLabelText(/Library root/), {
+      target: { value: "/data/library" },
+    });
+
+    await waitFor(() => expect(
+      screen.queryByText(/would sit inside the incoming folder/)).toBeNull());
+    expect(screen.getAllByRole("button", { name: "Save settings" })[0]).not.toBeDisabled();
+  });
+
+  it("stays out of the way of a layout it cannot judge", async () => {
+    // A relative path resolves against the server's working directory, which a
+    // browser cannot know — so the client says nothing and lets the server, which
+    // can, decide. Being quieter than the guard is allowed; being louder is not.
+    renderSettingsWith({}, "folders", {
+      data_root: "/data", incoming_dir: "incoming", library_root: "incoming/library",
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("Watched folders")).toBeVisible());
+    expect(screen.queryByText(/would sit inside the incoming folder/)).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Save settings" })[0]).not.toBeDisabled();
   });
 });

@@ -978,6 +978,15 @@ def measure_asinh_stats(rgb: np.ndarray) -> AsinhStats | None:
     return AsinhStats(lo, hi, tuple(chans))
 
 
+#: The same statistics under a stretch-neutral name. :func:`autostretch` (STF) and
+#: :func:`asinh_stretch` normalise identically and anchor on the same per-channel
+#: robust ``(median, σ)``; only the curve applied afterwards differs. Both accept
+#: ``stats=``, so one measurement pins either. The ``Asinh``-named pair predates
+#: the STF one and stays as it is — callers already import it.
+StretchStats = AsinhStats
+measure_stretch_stats = measure_asinh_stats
+
+
 def asinh_stretch(
     rgb: np.ndarray,
     *,
@@ -1075,6 +1084,7 @@ def autostretch(
     sigma_factor: float = -2.0,
     protect_highlights: bool = True,
     highlight_protect: float = 0.0,
+    stats: AsinhStats | None = None,
 ) -> np.ndarray:
     """
     PixInsight-style "Screen Transfer Function" (STF) autostretch.
@@ -1102,6 +1112,14 @@ def autostretch(
     high-dynamic-range core keeps its structure instead of washing out. It moves
     only values *above* the knee, so the sky still lands on ``target_bg``
     unchanged; 0 reproduces the historical output byte-for-byte.
+
+    ``stats`` pins the curve to statistics measured elsewhere, exactly as the
+    sibling :func:`asinh_stretch` already allows — and to the *same* numbers, so
+    :func:`measure_stretch_stats` serves both. Omitted (the default), the curve is
+    derived from ``rgb`` itself, as it always has been. Pass it when you are
+    stretching a different array from the one that should decide the curve: a
+    higher-resolution render of the same picture, or — the editor's case — one
+    *region* of a picture whose sky level is a property of the whole frame.
     """
     knee = highlight_knee_for(highlight_protect)
     img = rgb.astype(np.float32, copy=True)
@@ -1131,12 +1149,12 @@ def autostretch(
     # `np.clip(..., 0, 1)`. This mirrors the 99.5th-percentile scaling already
     # in the sibling `asinh_stretch` (and edit/ops/detail.py), added there for
     # exactly the same reason ("a single hot star sets max(), crushing the sky").
-    lo = float(np.nanmin(img))
-    hi = float(np.nanpercentile(img, 99.5))
-    if not np.isfinite(hi) or hi <= lo:
-        hi = float(np.nanmax(img))          # degenerate/near-flat image
-    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+    # `_asinh_norm_bounds` is these exact bounds, and is what `measure_stretch_stats`
+    # records — so a pinned curve and a self-derived one can't drift apart.
+    bounds = (stats.lo, stats.hi) if stats is not None else _asinh_norm_bounds(img)
+    if bounds is None:
         return np.zeros_like(np.nan_to_num(img))
+    lo, hi = bounds
     img = (img - lo) / (hi - lo)
 
     out = np.zeros_like(img)
@@ -1145,7 +1163,8 @@ def autostretch(
         finite = np.isfinite(chan)
         if not finite.any():
             continue
-        med, sigma = _robust_median_sigma(chan[finite])
+        pinned = stats.channels[c] if stats is not None else None
+        med, sigma = pinned if pinned is not None else _robust_median_sigma(chan[finite])
         # Black point = median - 2σ (clipped at 0).
         shadows = max(0.0, med + sigma_factor * sigma)
         rng = max(1.0 - shadows, 1e-6)

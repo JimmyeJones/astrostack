@@ -78,15 +78,34 @@ def share_blurb(
     target_name: str | None,
     n_frames: int | None,
     integration_s: float | None,
+    capture_label: str | None = None,
 ) -> str:
     """A single ``·``-joined caption line from whatever facts are available, e.g.
-    ``"M 42 · 3.2 h · 152 subs"``. Each part is included only when it carries
-    real information, so a run missing its integration or sub count still yields a
-    tidy line (never a dangling separator or a ``"0 subs"``)."""
+    ``"M 42 · 15–18 Nov 2024 · 3.2 h · 152 subs"``. Each part is included only
+    when it carries real information, so a run missing its integration or sub
+    count still yields a tidy line (never a dangling separator or a ``"0 subs"``).
+
+    ``capture_label`` is **when the light was collected**, already formatted —
+    :func:`seestack.nightrange.format_night_range` is what makes one, and passing
+    an already-rendered string is deliberate so this pure module keeps no date
+    logic of its own to drift. Left out (every caller before the app recorded a
+    capture window, and every run from before schema 18) the caption is exactly
+    what it has always been.
+
+    It must never be a *processing* stamp. A stack's ``timestamp_utc`` is when it
+    ran, which on a re-stack of a back catalogue is years from when it was shot —
+    the whole class of bug the SPA's ``CaptureLabel`` branded type exists to stop
+    on the TypeScript side. It sits second, right after the target: the date is
+    the fact a caption is *for*, and a reader wants the object and the night
+    before the exposure arithmetic.
+    """
     parts: list[str] = []
     name = (target_name or "").strip()
     if name:
         parts.append(name)
+    shot = (capture_label or "").strip()
+    if shot:
+        parts.append(shot)
     dur = format_duration(integration_s)
     if dur:
         parts.append(dur)

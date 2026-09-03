@@ -20,6 +20,7 @@ import { SkylineEditor } from "../components/SkylineEditor";
 import { SectionTabs, type PageSection } from "../components/SectionTabs";
 import type { SettingsSection } from "../settingsSections";
 import { minMaxIgnoresWeightingHint } from "../weightingHint";
+import { folderConflict, settingsErrorMessage } from "../settingsFolders";
 import { formatDiskSize } from "../format";
 
 // Hover hints for every setting (shown via an info icon next to the label).
@@ -531,8 +532,24 @@ export function SettingsView() {
       qc.invalidateQueries({ queryKey: ["settings"] });
       qc.invalidateQueries({ queryKey: ["system"] });
     },
-    onError: (e: Error) => notifications.show({ message: `Save failed: ${e.message}`, color: "red" }),
+    onError: (e: Error) => notifications.show({
+      // The guards on this page already write a plain-language reason; the API
+      // client's `422: ` prefix in front of one is just a status code in the
+      // user's face. Dropped only when the detail really is a sentence.
+      message: `Save failed: ${settingsErrorMessage(e.message)}`, color: "red",
+    }),
   });
+
+  // The one folder layout the app must never be pointed at, answered while you
+  // type instead of as a red toast after Save. Advisory: the server guard
+  // (`nested_incoming_conflict`) stays the authority, and anything a browser
+  // can't judge — a relative path, a symlink, a case-insensitive mount — falls
+  // through to the save rather than blocking it.
+  const conflict = folderConflict(
+    (form.incoming_dir as string) ?? "",
+    (form.library_root as string) ?? "",
+    (form.data_root as string) ?? "",
+  );
 
   if (settings.isError) {
     return <Alert color="red" m="md" title="Could not load settings">{(settings.error as Error)?.message}</Alert>;
@@ -576,7 +593,8 @@ export function SettingsView() {
   const saveRow = (variant?: string) => (
     <Group justify="flex-end">
       <Button variant={variant} leftSection={<IconDeviceFloppy size={16} />}
-        onClick={() => save.mutate(form)} loading={save.isPending}>
+        onClick={() => save.mutate(form)} loading={save.isPending}
+        disabled={conflict !== null}>
         Save settings
       </Button>
     </Group>
@@ -592,6 +610,7 @@ export function SettingsView() {
         <Stack>
           <Text fw={600}>Watched folders</Text>
           <TextInput label={lbl("data_root", "Data root")} value={(form.data_root as string) ?? ""}
+            error={conflict?.field === "data_root" ? conflict.message : undefined}
             onChange={(e) => set("data_root", e.currentTarget.value)} />
           <SimpleGrid cols={{ base: 1, xs: 2 }}>
             <TextInput label={lbl("incoming_dir", "Incoming dir")}
@@ -601,6 +620,7 @@ export function SettingsView() {
             <TextInput label={lbl("library_root", "Library root")}
               value={(form.library_root as string) ?? ""}
               placeholder={settings.data.resolved_library_root}
+              error={conflict?.field === "library_root" ? conflict.message : undefined}
               onChange={(e) => set("library_root", e.currentTarget.value)} />
           </SimpleGrid>
 

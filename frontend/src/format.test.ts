@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import sharedIntegrationCases from "../../tests/fixtures/integration_format.json";
+import sharedNightRangeCases from "../../tests/fixtures/night_range_format.json";
 import {
   captureNightsClause, formatCaptureNights, formatDiskSize, formatIntegration,
   formatMonthYear, formatNightDate, formatNightDayMonth, formatStampDate,
@@ -227,6 +228,22 @@ describe("formatCaptureNights", () => {
     // west of Greenwich, and the app shows these beside server-named nights.
     expect(formatCaptureNights("2024-01-01", "2024-01-01")).toBe("1 Jan 2024");
     expect(formatCaptureNights("2024-12-31", "2024-12-31")).toBe("31 Dec 2024");
+  });
+
+  // The same table `tests/test_nightrange.py` reads. Three other surfaces render
+  // this window — the baked nameplate caption, the exported imaging log, and the
+  // Editor's copyable blurb — all now through one Python rule
+  // (`seestack/nightrange.py`) with a style per destination. This side is the
+  // fourth, and it can't import Python, so the table is what keeps it honest:
+  // the app used to spell one night three ways.
+  it("agrees with the Python renderers on the shared table", () => {
+    const cases = sharedNightRangeCases.cases as
+      [string | null, string | null, Record<string, string>][];
+    expect(cases.length).toBeGreaterThanOrEqual(10);
+    for (const [start, end, styles] of cases) {
+      expect(formatCaptureNights(start, end), `${start} → ${end}`)
+        .toBe(styles.display);
+    }
   });
 });
 

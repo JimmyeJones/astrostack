@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from seestack.edit.curve import CURVE_TARGET_BG, suggest_tone_curve
+from seestack.edit.registry import EditContext
 
 
 def _scene(black_floor=0.10, h=120, w=160, seed=0):
@@ -114,7 +115,7 @@ def test_sky_dominated_frame_does_not_lift_the_sky():
         mid = next(p for p in pts if p[1] > p[0])          # the one lifted point
         assert mid[0] > sky_in                             # lifts structure above the sky
 
-    out = _curves(img, {"points": pts or [[0, 0], [1, 1]]}, None)
+    out = _curves(img, {"points": pts or [[0, 0], [1, 1]]}, EditContext())
     sky_out = float(np.median(out[:60, :60, 1][np.isfinite(out[:60, :60, 1])]))
     assert abs(sky_out - sky_in) / sky_in < 0.03           # sky barely moves
 
@@ -158,7 +159,7 @@ def test_the_curve_applied_by_the_op_preserves_nan_and_stays_in_range():
     img[:10, :, :] = np.nan
     pts = suggest_tone_curve(img)
     assert pts is not None
-    out = _curves(img, {"points": pts}, None)
+    out = _curves(img, {"points": pts}, EditContext())
     covered = np.isfinite(out)
     assert np.all(out[covered] >= 0.0) and np.all(out[covered] <= 1.0)
     # NaN coverage is exactly preserved (no lost/spurious coverage).
@@ -242,7 +243,7 @@ def test_auto_contrast_leaves_the_sky_of_a_real_stretched_stack_alone():
     from seestack.edit.ops.tone import _curves
 
     st = _real_stretched_stack()
-    out = _curves(st.copy(), {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, None)
+    out = _curves(st.copy(), {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
 
     sky_in = float(np.median(st[:60, :60]))
     sky_out = float(np.median(out[:60, :60]))
@@ -327,7 +328,7 @@ def test_auto_contrast_leaves_the_sky_alone_at_every_stretch_target(target_bg):
     from seestack.edit.ops.tone import _curves
 
     st = _real_stretched_stack(target_bg=target_bg)
-    out = _curves(st.copy(), {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, None)
+    out = _curves(st.copy(), {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
     sky_in = float(np.median(st[:60, :60]))
     sky_out = float(np.median(out[:60, :60]))
     assert abs(sky_out - sky_in) / sky_in < 0.02, (
@@ -350,7 +351,7 @@ def test_the_sky_stays_put_at_every_stack_depth(noise):
 
     st = _real_stretched_stack(noise=noise)
     assert float(np.mean(st <= 0.0)) > 0.005, "the clip spike survives at this depth"
-    out = _curves(st.copy(), {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, None)
+    out = _curves(st.copy(), {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
     sky_in = float(np.median(st[:60, :60]))
     sky_out = float(np.median(out[:60, :60]))
     assert abs(sky_out - sky_in) / sky_in < 0.02

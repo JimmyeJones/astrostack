@@ -557,29 +557,31 @@ _(nothing else claimed — claim an item here with your branch name)_
 
   *(Original audit entry follows.)*
 
-- **🔴🔴 A1 — AUTO'S CONTRAST CURVE BRIGHTENS THE SKY BY ~36% ON EVERY AUTO PICTURE, AND THE REGRESSION TEST
-  THAT SHOULD CATCH IT PASSES ON A FIXTURE THAT CANNOT EXHIBIT THE BUG.** *(Severity: **wrong picture, on the
-  on-by-default path, at every stack depth**. Confidence: **verified by reproduction**. This is the single
-  highest-value item in this file — it silently degrades every one-click result the owner has ever made.)*
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
 
-  `_sky_mode` (`seestack/edit/curve.py`) finds the sky as the histogram mode over `[p0.5, median]` in 128 bins.
-  The STF stretch that runs immediately before it (`tone.stretch`, `mode: stf`) **clips 1–2 % of pixels to
-  exactly 0**. That zero spike is always the tallest bin, so `suggest_tone_curve` reads the sky as **0.0008**,
-  its "the median *is* the sky, so decline" gate never fires, and it lifts the median — which *is* the sky —
-  halfway toward `CURVE_TARGET_BG` 0.25.
-  - **Measured** on a synthetic linear stack through the *full* Auto recipe: sky patch **0.130 → 0.178
-    (+36 %)**, with the curve point `[0.14, 0.195]` appearing identically at **every** depth from 4 to 1,000
-    subs. The opposite branch is wrong too: on a bright-nebula frame the suggestion declines and
-    `_AUTO_CONTRAST_FALLBACK` **darkens** the sky by 20 %.
-  - **Why it was never caught:** `test_sky_dominated_frame_does_not_lift_the_sky` (`tests/test_edit_curve.py`)
-    builds its fixture as `clip(sky + normal)` — **no zero spike** — so it never sees real STF output. This is
-    the bug the v0.210.6 fix ("auto-contrast curve lifting the whole sky") claims to have closed; **it is
-    closed only for the fixture.** Treat this as the canonical example of the wider risk that a fix's own test,
-    written by the agent that wrote the fix, confirms the fix's *model* of the bug rather than the bug.
-  - **Fix direction:** compute the mode over **strictly positive** values, or over a luminance sky population
-    at/below the median; make `_AUTO_CONTRAST_FALLBACK` pin `(sky, sky)` rather than move it; and **add a
-    regression test that feeds real `autostretch` output**, not a synthesised approximation of it. Re-check the
-    "did Auto improve this?" claims elsewhere in the backlog that were measured through this same curve.
+  - **🔴🔴 A1 — AUTO'S CONTRAST CURVE BRIGHTENS THE SKY BY ~36% ON EVERY AUTO PICTURE, AND THE REGRESSION TEST
+    THAT SHOULD CATCH IT PASSES ON A FIXTURE THAT CANNOT EXHIBIT THE BUG.** *(Severity: **wrong picture, on the
+    on-by-default path, at every stack depth**. Confidence: **verified by reproduction**. This is the single
+    highest-value item in this file — it silently degrades every one-click result the owner has ever made.)*
+
+    `_sky_mode` (`seestack/edit/curve.py`) finds the sky as the histogram mode over `[p0.5, median]` in 128 bins.
+    The STF stretch that runs immediately before it (`tone.stretch`, `mode: stf`) **clips 1–2 % of pixels to
+    exactly 0**. That zero spike is always the tallest bin, so `suggest_tone_curve` reads the sky as **0.0008**,
+    its "the median *is* the sky, so decline" gate never fires, and it lifts the median — which *is* the sky —
+    halfway toward `CURVE_TARGET_BG` 0.25.
+    - **Measured** on a synthetic linear stack through the *full* Auto recipe: sky patch **0.130 → 0.178
+      (+36 %)**, with the curve point `[0.14, 0.195]` appearing identically at **every** depth from 4 to 1,000
+      subs. The opposite branch is wrong too: on a bright-nebula frame the suggestion declines and
+      `_AUTO_CONTRAST_FALLBACK` **darkens** the sky by 20 %.
+    - **Why it was never caught:** `test_sky_dominated_frame_does_not_lift_the_sky` (`tests/test_edit_curve.py`)
+      builds its fixture as `clip(sky + normal)` — **no zero spike** — so it never sees real STF output. This is
+      the bug the v0.210.6 fix ("auto-contrast curve lifting the whole sky") claims to have closed; **it is
+      closed only for the fixture.** Treat this as the canonical example of the wider risk that a fix's own test,
+      written by the agent that wrote the fix, confirms the fix's *model* of the bug rather than the bug.
+    - **Fix direction:** compute the mode over **strictly positive** values, or over a luminance sky population
+      at/below the median; make `_AUTO_CONTRAST_FALLBACK` pin `(sky, sky)` rather than move it; and **add a
+      regression test that feeds real `autostretch` output**, not a synthesised approximation of it. Re-check the
+      "did Auto improve this?" claims elsewhere in the backlog that were measured through this same curve.
 
 - **✅ SHIPPED (Builder, v0.326.2, branch `claude/zen-mccarthy-olkjpm`) — ~~A3: plate-solving writes files into
   `incoming/`, and the CI guard structurally cannot see it.~~** Fixed, and **reproduced first** — the audit
@@ -791,82 +793,84 @@ _(nothing else claimed — claim an item here with your branch name)_
   the hot-pixel one across a decimated *and* a `proxy_scale == 1` run. Frontend (+3 each in two new files)
   pins the captions.
 
-- **🟠 A2 — PREVIEW AND EXPORT
-  DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
-  PROXY FACTOR — worst exactly on the owner's mosaics.** *(Severity: wrong picture (colour) + a preview that
-  lies. Confidence: verified on synthetic data. Three instances, **one mechanism**.)*
-  **All three named instances are now shipped** (colour-cal below as v0.326.3; hot-pixels and sharpen as
-  v0.326.6, entry above). Only the two "also verified, smaller" items at the foot of this entry are open.
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
 
-  > **⚠️ COLLISION ELEVEN — Builder `claude/zen-mccarthy-mqfxxg`, 2026-09-02, one of two tasks stood down,
-  > decided by measurement in a worktree rather than by argument.** This run built `tone.color_calibrate`
-  > independently and finished it (scaled FWHM + aperture, *and* the sky annulus, floors at 1.5 px, tests
-  > green) before a `git fetch origin main` between tasks showed `…-xesefm` had landed the same fix as
-  > v0.326.3 forty minutes earlier. Applying the standing method from collision ten — **run your own fixture
-  > against their shipped code in a `git worktree` of `origin/main`** — settled it in two minutes and against
-  > me: on the same 600×900 field at proxy step 3 theirs finds **188 stars where mine found 50**, and its
-  > white balance sits within **0.2 %** of the export's (mine, 2.2 %). The difference is their
-  > `MIN_DETECT_FWHM_PX = 1.0` against my 1.5 — I had floored the finder above the size of the stars I wanted
-  > it to find. My one genuinely extra piece, scaling the photometry's **sky annulus** (`r_in = r + 2`,
-  > `r_out = r + 5`, both unscaled on theirs), turns out to buy nothing measurable: theirs already agrees
-  > with the export to 0.2–2.1 % across steps 2–5, so shipping it would have been speculative hardening on
-  > the on-by-default path. Dropped, not re-litigated. **The transferable bit is the floor:** a floor on a
-  > detector's matched-filter width is not a safety rail, it is a *lower bound on what you can detect* — set
-  > it by what the grid can still resolve (one pixel), not by what feels conservative.
-  - **✅ SHIPPED (Builder, v0.326.3, branch `claude/zen-mccarthy-xesefm`) — ~~`tone.color_calibrate`~~**, the
-    instance that changes the picture's **colour**. Reproduced first, then fixed in the direction the entry
-    named. `_detect_calibration_stars`'s `fwhm=3.0` was a hard-coded literal and the 4 px aperture came from
-    a dataclass default, so both described a *full-resolution* star on whatever grid they were handed. They
-    are now `ColorCalibrationOptions.detect_fwhm_px` / `.aperture_radius_px`, and
-    `seestack.edit.ops.tone._color_calibrate` scales both through `ctx.scaled_px` with floors
-    (`MIN_DETECT_FWHM_PX` 1.0, `MIN_APERTURE_RADIUS_PX` 1.5 — below those a star is one pixel and
-    DAOStarFinder's matched filter starts ranking noise). **`min_stars` is deliberately NOT scaled**: it is a
-    count of stars, and the star count does not change with resolution — what changed was detection
-    *efficiency*, and that is what the geometry fixes.
-    **Measured, before → after** on a synthetic OSC field (tinted sky, neutral stars, sensor cast) at proxy
-    step 3: preview detections **35 % of the export's → 100 %**; the preview's white balance
-    `background_neutral` (gains R 1.056, B 0.912) **→ `gray_star`, R 1.250, B 0.800, matching the export
-    exactly**. The old preview was **15.5 % out in red and 14.0 % in blue** — a picture whose colour the
-    export never applies. On the export (`proxy_scale == 1`) the scaling is the identity, pinned by a test
-    that the full-res path is bit-for-bit what the engine defaults produce.
-    **The entry's second half shipped too**, because scaling closes most of the gap but not all of it: a
-    proxy decimated far enough still holds too few resolvable stars for a solve the export will manage. The
-    op now records **`proxy_fallback`** (true only when the render is a *decimated* preview and its
-    star-based request really did land on a different path), the histogram endpoint carries it in the existing
-    `color_cal` object, and the editor captions it in plain language beside the deconv/star-reduce advisories
-    — *"the saved picture's colour will differ a little from this preview"*. `proxy_scale > 1` is the
-    condition, not `is_proxy`: a small stack's "proxy" is the undecimated pixels, where a fallback is the
-    export's own answer and there is nothing to warn about.
-    **Upgrade-safe (§9):** two additive dataclass fields with their existing values as defaults, one additive
-    key inside an existing JSON blob, no schema, no on-disk change, no default flipped. The stacker's own
-    post-stack colour calibration is full-res and untouched.
-    **Tests (+7, 4 of which fail before).** A new `tests/test_edit_proxy_parity.py` measures preview↔export on
-    a **mosaic-shaped canvas at a real proxy step**, which is the only place any of this is visible. Its
-    fixture is built to be *able* to exhibit the bug and says so: the sky carries its own tint (otherwise
-    gray-star and background-neutral give the same answer and the divergence is invisible), and the star
-    density is of a Seestar's order (a field dense enough to clear the 20-star floor at 35 % efficiency cannot
-    show the bug at all — the first fixture this run wrote was exactly that, and passed on the *broken* code).
-    Plus the flag's two directions, the full-res no-flag case, `tests/webapp/test_editor.py` on the endpoint
-    contract, and `colorCal.test.ts` on the caption.
-    **Still open below: the other two instances and the two smaller ones** — they are a different mechanism
-    each (a floor that bites, a fixed 3×3 window) and want a run each.
-  - ~~**`tone.color_calibrate`** (`seestack/post/color_cal.py`): `DAOStarFinder(fwhm=3.0)`, aperture 4 px and
-    `min_stars=20` are **none of them scaled**. On a mosaic canvas at proxy step 3 the proxy finds too few
-    stars and silently falls back to `background_neutral` **while the export runs gray-star** — measured
-    preview/export gain ratio **R 1.157, B 1.287** on a 4000×2400 canvas. A 1920×1080 single field matches
-    within 0.3 %, so this is **a mosaic / large-canvas bug**, i.e. the owner's `_mosaic` targets specifically.~~
-  - ~~**`detail.sharpen`** (`seestack/edit/ops/detail.py`): radius *is* scaled but floors at 0.05 px, so Auto's
-    own 1.5 px radius becomes 0.375 px at step 4 — the preview shows **13–46 %** of the export's sharpening,
-    and unlike deconv and star-reduce it shows **no advisory**.~~ *(Shipped v0.326.6.)*
-  - ~~**`detail.hot_pixels`** (`seestack/bg/hot_pixels.py`): a fixed 3×3 isolation test erased or dimmed **259 of
-    582 bright stars** in a step-3 preview while the export touched none. Not in Auto, but the preview
-    misrepresents what the op does.~~ *(Shipped v0.326.6.)*
-  - Also verified, smaller: SCNR's 3 px noise-protect blur unscaled (cosmetic); `stars.reduce`'s advisory
-    points the **wrong way** for 2–3 px stars.
-  - **Fix direction:** scale every pixel-unit parameter through `ctx.scaled_px` with a sensible floor, and
-    **when a proxy op falls back to a different mode than the export will use, say so in the UI** rather than
-    silently diverging. Note the backlog's existing parity claims ("sharpen bit-exact", "RMSE ≈0 for sharpen")
-    are **disproved** by this on any scene with sub-proxy-pixel stars.
+  - **🟠 A2 — PREVIEW AND EXPORT
+    DISAGREE WHEREVER AN OP HAS A PIXEL-SIZED PARAMETER THAT ISN'T SCALED BY THE
+    PROXY FACTOR — worst exactly on the owner's mosaics.** *(Severity: wrong picture (colour) + a preview that
+    lies. Confidence: verified on synthetic data. Three instances, **one mechanism**.)*
+    **All three named instances are now shipped** (colour-cal below as v0.326.3; hot-pixels and sharpen as
+    v0.326.6, entry above). Only the two "also verified, smaller" items at the foot of this entry are open.
+
+    > **⚠️ COLLISION ELEVEN — Builder `claude/zen-mccarthy-mqfxxg`, 2026-09-02, one of two tasks stood down,
+    > decided by measurement in a worktree rather than by argument.** This run built `tone.color_calibrate`
+    > independently and finished it (scaled FWHM + aperture, *and* the sky annulus, floors at 1.5 px, tests
+    > green) before a `git fetch origin main` between tasks showed `…-xesefm` had landed the same fix as
+    > v0.326.3 forty minutes earlier. Applying the standing method from collision ten — **run your own fixture
+    > against their shipped code in a `git worktree` of `origin/main`** — settled it in two minutes and against
+    > me: on the same 600×900 field at proxy step 3 theirs finds **188 stars where mine found 50**, and its
+    > white balance sits within **0.2 %** of the export's (mine, 2.2 %). The difference is their
+    > `MIN_DETECT_FWHM_PX = 1.0` against my 1.5 — I had floored the finder above the size of the stars I wanted
+    > it to find. My one genuinely extra piece, scaling the photometry's **sky annulus** (`r_in = r + 2`,
+    > `r_out = r + 5`, both unscaled on theirs), turns out to buy nothing measurable: theirs already agrees
+    > with the export to 0.2–2.1 % across steps 2–5, so shipping it would have been speculative hardening on
+    > the on-by-default path. Dropped, not re-litigated. **The transferable bit is the floor:** a floor on a
+    > detector's matched-filter width is not a safety rail, it is a *lower bound on what you can detect* — set
+    > it by what the grid can still resolve (one pixel), not by what feels conservative.
+    - **✅ SHIPPED (Builder, v0.326.3, branch `claude/zen-mccarthy-xesefm`) — ~~`tone.color_calibrate`~~**, the
+      instance that changes the picture's **colour**. Reproduced first, then fixed in the direction the entry
+      named. `_detect_calibration_stars`'s `fwhm=3.0` was a hard-coded literal and the 4 px aperture came from
+      a dataclass default, so both described a *full-resolution* star on whatever grid they were handed. They
+      are now `ColorCalibrationOptions.detect_fwhm_px` / `.aperture_radius_px`, and
+      `seestack.edit.ops.tone._color_calibrate` scales both through `ctx.scaled_px` with floors
+      (`MIN_DETECT_FWHM_PX` 1.0, `MIN_APERTURE_RADIUS_PX` 1.5 — below those a star is one pixel and
+      DAOStarFinder's matched filter starts ranking noise). **`min_stars` is deliberately NOT scaled**: it is a
+      count of stars, and the star count does not change with resolution — what changed was detection
+      *efficiency*, and that is what the geometry fixes.
+      **Measured, before → after** on a synthetic OSC field (tinted sky, neutral stars, sensor cast) at proxy
+      step 3: preview detections **35 % of the export's → 100 %**; the preview's white balance
+      `background_neutral` (gains R 1.056, B 0.912) **→ `gray_star`, R 1.250, B 0.800, matching the export
+      exactly**. The old preview was **15.5 % out in red and 14.0 % in blue** — a picture whose colour the
+      export never applies. On the export (`proxy_scale == 1`) the scaling is the identity, pinned by a test
+      that the full-res path is bit-for-bit what the engine defaults produce.
+      **The entry's second half shipped too**, because scaling closes most of the gap but not all of it: a
+      proxy decimated far enough still holds too few resolvable stars for a solve the export will manage. The
+      op now records **`proxy_fallback`** (true only when the render is a *decimated* preview and its
+      star-based request really did land on a different path), the histogram endpoint carries it in the existing
+      `color_cal` object, and the editor captions it in plain language beside the deconv/star-reduce advisories
+      — *"the saved picture's colour will differ a little from this preview"*. `proxy_scale > 1` is the
+      condition, not `is_proxy`: a small stack's "proxy" is the undecimated pixels, where a fallback is the
+      export's own answer and there is nothing to warn about.
+      **Upgrade-safe (§9):** two additive dataclass fields with their existing values as defaults, one additive
+      key inside an existing JSON blob, no schema, no on-disk change, no default flipped. The stacker's own
+      post-stack colour calibration is full-res and untouched.
+      **Tests (+7, 4 of which fail before).** A new `tests/test_edit_proxy_parity.py` measures preview↔export on
+      a **mosaic-shaped canvas at a real proxy step**, which is the only place any of this is visible. Its
+      fixture is built to be *able* to exhibit the bug and says so: the sky carries its own tint (otherwise
+      gray-star and background-neutral give the same answer and the divergence is invisible), and the star
+      density is of a Seestar's order (a field dense enough to clear the 20-star floor at 35 % efficiency cannot
+      show the bug at all — the first fixture this run wrote was exactly that, and passed on the *broken* code).
+      Plus the flag's two directions, the full-res no-flag case, `tests/webapp/test_editor.py` on the endpoint
+      contract, and `colorCal.test.ts` on the caption.
+      **Still open below: the other two instances and the two smaller ones** — they are a different mechanism
+      each (a floor that bites, a fixed 3×3 window) and want a run each.
+    - ~~**`tone.color_calibrate`** (`seestack/post/color_cal.py`): `DAOStarFinder(fwhm=3.0)`, aperture 4 px and
+      `min_stars=20` are **none of them scaled**. On a mosaic canvas at proxy step 3 the proxy finds too few
+      stars and silently falls back to `background_neutral` **while the export runs gray-star** — measured
+      preview/export gain ratio **R 1.157, B 1.287** on a 4000×2400 canvas. A 1920×1080 single field matches
+      within 0.3 %, so this is **a mosaic / large-canvas bug**, i.e. the owner's `_mosaic` targets specifically.~~
+    - ~~**`detail.sharpen`** (`seestack/edit/ops/detail.py`): radius *is* scaled but floors at 0.05 px, so Auto's
+      own 1.5 px radius becomes 0.375 px at step 4 — the preview shows **13–46 %** of the export's sharpening,
+      and unlike deconv and star-reduce it shows **no advisory**.~~ *(Shipped v0.326.6.)*
+    - ~~**`detail.hot_pixels`** (`seestack/bg/hot_pixels.py`): a fixed 3×3 isolation test erased or dimmed **259 of
+      582 bright stars** in a step-3 preview while the export touched none. Not in Auto, but the preview
+      misrepresents what the op does.~~ *(Shipped v0.326.6.)*
+    - Also verified, smaller: SCNR's 3 px noise-protect blur unscaled (cosmetic); `stars.reduce`'s advisory
+      points the **wrong way** for 2–3 px stars.
+    - **Fix direction:** scale every pixel-unit parameter through `ctx.scaled_px` with a sensible floor, and
+      **when a proxy op falls back to a different mode than the export will use, say so in the UI** rather than
+      silently diverging. Note the backlog's existing parity claims ("sharpen bit-exact", "RMSE ≈0 for sharpen")
+      are **disproved** by this on any scene with sub-proxy-pixel stars.
 
 - **✅ SHIPPED (Builder, v0.327.7, branch `claude/sweet-babbage-xgi198`) — ~~A7: pre-v0.184.9 Seestar on-device
   outputs stay accepted *inside* the owner's real targets, and can be picked as the alignment reference.~~**
@@ -911,40 +915,42 @@ _(nothing else claimed — claim an item here with your branch name)_
 
   *(Original entry follows.)*
 
-- **🟠 A7 — PRE-v0.184.9 SEESTAR ON-DEVICE OUTPUTS STAY ACCEPTED *INSIDE* THE OWNER'S REAL TARGETS, AND CAN BE
-  PICKED AS THE ALIGNMENT REFERENCE.** *(Severity: wrong reference frame / mild contamination on his biggest
-  targets. Confidence: guard behaviour verified by reproduction; downstream reference-pick effect likely.)*
-  `Project.reject_seestar_output_frames` (`seestack/io/project.py`) only rejects a bare `<T>/` folder's frames
-  when it holds **at most `_MAX_SEESTAR_OUTPUT_FRAMES = 2`** — but the owner's real library has one stacked
-  FITS *per session*: bare `M 3` carries **+22** frames over `M 3_SUB`, `M 13` **+9**, `M 101` **+11**,
-  `NGC 281W` **+10`. Those never get rejected on re-scan, stay in the stack **and in the reference pool**, and
-  `pick_central_frame` scores by distance-to-median-pointing then FWHM — which is exactly where a device-stacked
-  output sits (dither centre, high SNR). Reproduced: 5 outputs beside a `_SUB` sibling → **0 rejected**.
-  **Fix:** when the scan has *positive evidence* a folder is output (a same-parent `_sub` sibling exists on disk
-  in this scan), **lift the cap for that folder**; keep the cap for the no-sibling case. Reversible, never a
-  delete.
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
 
-  > **⚠️ READ BEFORE STARTING — the filed fix collides head-on with an existing regression test, and whoever
-  > takes this has to resolve that first** *(Builder 2026-09-02, found while sizing this after shipping A3;
-  > not started, deliberately — it needs a decision, not a patch.)* The proposed evidence — "a same-parent
-  > `_sub` sibling exists on disk" — is **exactly the scenario**
-  > `test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_name`
-  > (`tests/test_scanner.py`) exists to protect: 8 of a user's *own* raw subs in a plain folder named
-  > `Andromeda/`, sitting beside a Seestar `Andromeda_sub/`. Lift the cap on sibling evidence and that test's
-  > 8 real subs are mass-rejected. (It passes today only because its frames are DB rows with nothing on disk,
-  > so a disk-based sibling check finds no sibling — i.e. it would go green for the wrong reason, which is
-  > worse than failing.) **The discriminator that actually separates the two cases is the filename, not the
-  > folder or the count:** the Seestar's per-session output is `Stacked*.fit`, real subs are
-  > `Light_<T>_<exp>_<filter>_*.fit`. The repo *knows* this convention — every scanner fixture uses it
-  > (`tests/test_scanner.py` writes `Stacked.fit`, `Stacked_60s.fit`, `Stacked_{i:02d}.fit`) — but **no
-  > production module matches on it**: `grep -rn "Stacked" --include=*.py seestack/ webapp/` returns nothing.
-  > So the shape to consider is "reject a bare `<T>/` frame whose *filename* is on-device output, at any
-  > count; keep the ≤2 cap for everything else", which rejects the owner's 22 and keeps the mixed-source test's
-  > 8 without either heuristic having to guess. **Confirm the naming against the owner's real folder listing
-  > before building it** — the listing is already in this file, buried in the `⚪ CLOSED AS A NON-BUG` mosaic
-  > entry (search `"skips a bare"`) — and note this is the **on-by-default ingest path**, so an over-broad
-  > match silently drops real subs from a stack. A second, header-based discriminator (a stacked output's
-  > `EXPTIME` is N×10 s, or it carries a stack-count card) would be stronger still if the DB rows carry it.
+  - **🟠 A7 — PRE-v0.184.9 SEESTAR ON-DEVICE OUTPUTS STAY ACCEPTED *INSIDE* THE OWNER'S REAL TARGETS, AND CAN BE
+    PICKED AS THE ALIGNMENT REFERENCE.** *(Severity: wrong reference frame / mild contamination on his biggest
+    targets. Confidence: guard behaviour verified by reproduction; downstream reference-pick effect likely.)*
+    `Project.reject_seestar_output_frames` (`seestack/io/project.py`) only rejects a bare `<T>/` folder's frames
+    when it holds **at most `_MAX_SEESTAR_OUTPUT_FRAMES = 2`** — but the owner's real library has one stacked
+    FITS *per session*: bare `M 3` carries **+22** frames over `M 3_SUB`, `M 13` **+9**, `M 101` **+11**,
+    `NGC 281W` **+10`. Those never get rejected on re-scan, stay in the stack **and in the reference pool**, and
+    `pick_central_frame` scores by distance-to-median-pointing then FWHM — which is exactly where a device-stacked
+    output sits (dither centre, high SNR). Reproduced: 5 outputs beside a `_SUB` sibling → **0 rejected**.
+    **Fix:** when the scan has *positive evidence* a folder is output (a same-parent `_sub` sibling exists on disk
+    in this scan), **lift the cap for that folder**; keep the cap for the no-sibling case. Reversible, never a
+    delete.
+
+    > **⚠️ READ BEFORE STARTING — the filed fix collides head-on with an existing regression test, and whoever
+    > takes this has to resolve that first** *(Builder 2026-09-02, found while sizing this after shipping A3;
+    > not started, deliberately — it needs a decision, not a patch.)* The proposed evidence — "a same-parent
+    > `_sub` sibling exists on disk" — is **exactly the scenario**
+    > `test_reject_seestar_output_frames_keeps_a_real_subs_folder_sharing_the_base_name`
+    > (`tests/test_scanner.py`) exists to protect: 8 of a user's *own* raw subs in a plain folder named
+    > `Andromeda/`, sitting beside a Seestar `Andromeda_sub/`. Lift the cap on sibling evidence and that test's
+    > 8 real subs are mass-rejected. (It passes today only because its frames are DB rows with nothing on disk,
+    > so a disk-based sibling check finds no sibling — i.e. it would go green for the wrong reason, which is
+    > worse than failing.) **The discriminator that actually separates the two cases is the filename, not the
+    > folder or the count:** the Seestar's per-session output is `Stacked*.fit`, real subs are
+    > `Light_<T>_<exp>_<filter>_*.fit`. The repo *knows* this convention — every scanner fixture uses it
+    > (`tests/test_scanner.py` writes `Stacked.fit`, `Stacked_60s.fit`, `Stacked_{i:02d}.fit`) — but **no
+    > production module matches on it**: `grep -rn "Stacked" --include=*.py seestack/ webapp/` returns nothing.
+    > So the shape to consider is "reject a bare `<T>/` frame whose *filename* is on-device output, at any
+    > count; keep the ≤2 cap for everything else", which rejects the owner's 22 and keeps the mixed-source test's
+    > 8 without either heuristic having to guess. **Confirm the naming against the owner's real folder listing
+    > before building it** — the listing is already in this file, buried in the `⚪ CLOSED AS A NON-BUG` mosaic
+    > entry (search `"skips a bare"`) — and note this is the **on-by-default ingest path**, so an over-broad
+    > match silently drops real subs from a stack. A second, header-based discriminator (a stacked output's
+    > `EXPTIME` is N×10 s, or it carries a stack-count card) would be stronger still if the DB rows carry it.
 
 - **✅ SHIPPED (Builder, v0.326.7, branch `claude/zen-mccarthy-mqfxxg`) — ~~A6: walk-away auto-reject picks its
   method from the whole target's frame count, so a shallow mosaic panel gets a rejection pass that is
@@ -1071,13 +1077,15 @@ _(nothing else claimed — claim an item here with your branch name)_
 
   *(Original entry follows.)*
 
-- **🟡 A5 — the Target page's "Your picture" ignores the pinned cover that every other surface honours.**
-  `frontend/src/routes/Target.tsx` takes `runs.data?.[0]` (newest run) for the hero, its share caption and its
-  Edit button, while the Library tile, Best wall, montage and `grainier-newest` all resolve **pinned cover
-  first** (`webapp/routers/gallery.py` `_representative_run`, `webapp/routers/targets.py`
-  `current_picture_path`). Pin run 3, re-stack to run 4 → the Target page shows a *different picture* from the
-  Library card while its own notes talk about "the cover". **Fix:** same precedence as `_representative_run`;
-  label "Your picture (cover)" vs "Your newest picture".
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **🟡 A5 — the Target page's "Your picture" ignores the pinned cover that every other surface honours.**
+    `frontend/src/routes/Target.tsx` takes `runs.data?.[0]` (newest run) for the hero, its share caption and its
+    Edit button, while the Library tile, Best wall, montage and `grainier-newest` all resolve **pinned cover
+    first** (`webapp/routers/gallery.py` `_representative_run`, `webapp/routers/targets.py`
+    `current_picture_path`). Pin run 3, re-stack to run 4 → the Target page shows a *different picture* from the
+    Library card while its own notes talk about "the cover". **Fix:** same precedence as `_representative_run`;
+    label "Your picture (cover)" vs "Your newest picture".
 
 - **✅ SHIPPED (Builder, v0.327.5, branch `claude/sweet-babbage-35yfmt`) — ~~A8: a target whose missing files
   never return is held back from auto-stacking FOREVER, and the owner has no action to take.~~** Shipped in
@@ -16440,6 +16448,47 @@ problems. Dogfood it every big-picture run and fix root causes.
   full render's pixels inside that crop. With that in place the loupe is small and honest; without it, it is
   a new parity bug wearing the fix's name.
 
+  **✅ THE FIRST SLICE IS SHIPPED (Builder, v0.328.2, branch `claude/sweet-babbage-2xguh9`) — the
+  fitted-parameter channel exists, in the shape the note above specified, with the crop test it asked for.**
+  `EditContext` gained `fitted` / `frozen_fits` / `op_uid` and a `fit(name, compute)` that returns the frozen
+  value when the caller supplied one and measures otherwise, recording either way — so a whole-image render's
+  `ctx.fitted` feeds straight back as the next render's `frozen_fits`. Keyed by the recipe op's **uid**, not
+  its id, because a recipe may legitimately carry the same op twice. Wired into the four ops that fit from the
+  whole image: `tone.stretch` (via a new `stats=` on `autostretch`, mirroring the `AsinhStats` pin that
+  already existed on `asinh_stretch` — the two stretches turn out to normalise identically and anchor on the
+  same robust per-channel median/σ, so one `measure_stretch_stats` serves both), `tone.curves` with `auto`,
+  `tone.neutralize_background`, and `tone.color_calibrate` (a frozen solve is *re-applied* through a new
+  public `color_cal.apply_scale`, never re-derived — that also skips the star detection, the op's dominant
+  cost).
+
+  **Measured, and the control matters more than the result.** On a 700×1000 synthetic OSC frame with a bright
+  object deliberately *inside* the window, re-running the recipe over a 256×256 crop — the shape the filed
+  spec would have shipped — differs from the same pixels of the full render by **0.397 mean / 0.570 max** of a
+  0–1 tone. Frozen, the difference is **exactly 0.0**, at three different window positions. The unfrozen
+  measurement is a standing test, not a note: without it the parity test could pass on a fixture that cannot
+  exhibit the problem, which is the A1 failure mode.
+
+  **Nothing on the ordinary path moved.** With no `frozen_fits` every op measures for itself as before;
+  `autostretch(x, stats=measure_stretch_stats(x))` is byte-for-byte `autostretch(x)` across three stretch
+  targets × two highlight settings, pinned so the two measurement sites can't drift. Five `_curves(…, None)`
+  call sites in `tests/test_edit_curve.py` now pass a real `EditContext()` — the op's declared contract, which
+  they got away with ignoring only while `_curves` never touched `ctx`; no assertion changed. **Tests +20** in
+  `tests/test_edit_frozen_fits.py`.
+
+  **What is still missing before the loupe can be built, and it is the whole of the next slice:** the three
+  **`background.*` ops fit a spatial model, not a scalar**, so this channel cannot carry them — and Auto
+  always contains `background.final_gradient`, so a loupe today would still be honest only for a recipe
+  without one. `background.subtract` / `final_gradient` / `level_coverage` are all *additive* (each subtracts
+  or offsets a smooth field), which suggests the cheap shape: capture the **delta** the op made on the proxy
+  (`after − before`, at the pipeline level, needing no change to any `seestack/bg/` module — those are on the
+  stack hot path and should not be reshaped for this), and replay it onto the window by bilinear-sampling the
+  proxy delta at the window's full-res coordinates. The proxy is a plain strided decimation
+  (`rgb[::step, ::step]` in `seestack/edit/proxy.py`), so proxy pixel `(i, j)` *is* full pixel `(i·step,
+  j·step)` and the mapping needs no guessing. That plus a window rectangle on `EditContext` is the second
+  slice; the endpoint and the UI are the third. **Also unresolved for the UI slice:** the user clicks the
+  *rendered* preview, which a `geometry.crop` may have reframed — map through `preview_crop_of_recipe`
+  (`seestack/edit/recipe.py`), and decline on a real `geometry.rotate`, which already returns `UNKNOWN`.
+
 - **✅ SHIPPED (Builder, v0.322.9, branch `claude/zen-mccarthy-2rptmf`) — ~~the editor's export panel asks the
   beginner a question whose own help text says the answer doesn't matter.~~** **Shape (b), and the reasoning
   the entry asked for is here rather than only in the commit.** Shape (a) was considered first and is not
@@ -18683,63 +18732,147 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
-- **NEW IDEA (Builder 2026-09-02, the same defect as A10's duration half, one field over) — a capture window
-  is spelled three different ways, and the fix now has a worked template.** *(Pillar: approachable / trust —
-  PRIORITY 3. Size: S.)* v0.327.9 gave the app one vocabulary for *how much light*; **when it was shot** is
-  still three: `frontend/src/format.ts::formatCaptureNights` says `15–18 Nov 2024` (en dash, spaced only when
-  both sides are multi-word), `seestack/nameplate.py::format_acq_range` says `15-18 Nov 2024` (ASCII), and
-  `seestack/imaging_log.py::_format_night_range` (v0.328.0) says `2024-11-15 to 2024-11-18`. All three read
-  the *same two ISO dates off the same run*, and a beginner comparing the picture on screen with the caption
-  they copied and the log row they exported sees three renderings of one night.
-  **Two of the three divergences are justified and must survive any unification:** the nameplate is ASCII
-  because the bundled Pillow face has no en dash (`nameplate.py`'s header pins this with a glyph test), and
-  the log is ISO because it is a spreadsheet cell that should stay sortable and parseable. So this is **not**
-  "make them identical" — it is *one* function with an explicit style argument (`display` / `ascii` / `iso`),
-  so the three renderings are three deliberate outputs of one rule rather than three implementations of three
-  slightly different rules. Today only one of them knows that "15–18 Nov" and "28 Oct – 3 Nov" space the dash
-  differently, and only one knows that a reversed window should be printed in reader order.
-  **The template already exists:** `tests/fixtures/integration_format.json` — one table of cases read by both
-  `pytest` and `vitest`, which is what turned "one vocabulary" from a comment into a gate. Do the same with a
-  window table (start, end, style) → expected. **Grep before building:** `pictureDateLabel`,
-  `captureNightsClause` and `capture_night_range` are all in this neighbourhood and at least one of them is
-  about the *night count*, not the window — don't fold them in by accident.
+- **✅ SHIPPED — BOTH, AS ONE CHANGE (Builder, v0.328.3, branch `claude/sweet-babbage-2xguh9`) — ~~a capture
+  window is spelled three different ways~~ and ~~the Editor's copyable caption is the only one of the four with
+  no date at all~~.** Filed as two entries; they are one job, because the second needs a *display*-styled
+  Python renderer that did not exist and the first is exactly the job of making one.
 
-- **NEW IDEA (Builder 2026-09-02, the slice A10's duration half deliberately left) — the Editor's copyable
-  caption is the only one of the four with *no date at all*.** *(Pillar: approachable / trust — PRIORITY 3.
-  Size: S.)* v0.327.9 gave every caption builder one duration vocabulary, but not one *set of facts*:
-  `sharecard.share_blurb` still takes only `(name, n_frames, integration_s)`, so the sentence a beginner
-  copies off the Editor's share panel reads `M 42 · 3.2 h · 152 subs` while the same picture shared from
-  Target, History, Gallery or the baked nameplate carries the night it was shot. The date is the fact a
-  caption is *for* — a post that says when you were out is the one people reply to. **The data is already in
-  hand:** `capture_night_start` / `capture_night_end` have been on the run since schema 18, and
-  `webapp/pipeline.py::submit_editor_share` holds the `run` two lines above the `share_blurb` call. Shape: an
-  optional `capture_label` argument (a formatted string, so the pure module keeps no date logic and cannot
-  drift from the SPA's `formatCaptureNights`), appended as one more `·` part and dropped when absent — which
-  is every run recorded before the app knew, captioning exactly as it does today. **Care:** it must be a
-  *label*, not a `timestamp_utc` — the whole v0.313.0 class was captions asserting the moment the stack ran
-  as when the picture was shot; and the nameplate's own span helper (`format_acq_range`) is ASCII-only for a
-  font reason that does not apply here, so don't reuse it without reading `nameplate.py`'s header. The
-  larger "one caption model served by the backend" (four builders → one) stays filed on the A10 entry as an
-  M–L; this is the slice that pays most of its user-visible value for a fraction of the risk.
+  **`seestack/nightrange.py` is the rule, and the three spellings are now three styles of it.**
+  `format_night_range(start, end, style=DISPLAY|ASCII|ISO)`. `nameplate.format_acq_range` and
+  `imaging_log._format_night_range` are two-line delegations. The two divergences the entry said must survive
+  do: **ASCII** because the bundled nameplate font has no en dash (`test_nameplate.py` pins that every
+  character a caption can produce has a real glyph), **ISO** because a spreadsheet cell must stay sortable and
+  must not read as arithmetic. What was *not* deliberate — and is now shared — is the rest: write a span's
+  common parts once, print a reversed window forwards, and **space the dash only between multi-word sides**.
 
-- **NEW IDEA (Builder 2026-09-02, the follow-on to the v0.327.8 folder guard) — the Settings page should say
-  "that folder won't work" *while you type it*, not after you press Save.** *(Pillar: approachable —
-  PRIORITY 3. Size: XS–S.)* v0.327.8 refuses a settings save that would put the library (or the data root)
-  inside `incoming/`, with a plain-language reason. But the reason arrives as a red toast reading
-  `Save failed: 422: Your library folder would sit inside…` — the raw status code is in the user's face, and
-  the two fields that caused it are left looking fine. Both path fields are free-text `TextInput`s with a
-  helper line already (`incoming_dir` / `library_root` in `routes/Settings.tsx`), so the natural shape is a
-  pure client-side `folderConflict(incoming, library, dataRoot)` in a small module beside `calibrationFit.ts`,
-  rendering Mantine's own `error=` on the offending field and disabling Save while it holds — the server guard
-  stays the authority, this just stops the user finding out the hard way. **Grep first:** the settings form
-  already has a `dropEmptyFields` patch builder and the GET already returns `resolved_incoming_dir` /
-  `resolved_library_root`, so the resolved defaults for a blank field are on hand without re-deriving them.
-  **Care:** the client check must be *advisory only* — string prefix comparison in a browser cannot resolve
-  symlinks or case-insensitive mounts, so it must never be the thing that decides, and a case it cannot judge
-  must fall through to the save rather than block it. **Related, worth the same pass:** the toast prefixes
-  every settings failure with the HTTP status (`client.ts` builds `${res.status}: ${detail}`); a
-  `friendlyJobError`-style strip for a 422 whose detail is already a sentence would improve every settings
-  error at once, not just this one.
+  **One deliberate output change, and it is the point rather than a side effect.** The baked caption closed the
+  dash up in every case, so a nameplate read `28 Oct-3 Nov 2024` where the screen read `28 Oct – 3 Nov 2024`.
+  It now reads `28 Oct - 3 Nov 2024` — the same rule, in ASCII. Two assertions in `test_nameplate.py` were
+  updated to the new string with the reason written beside them; nothing was weakened, and the unspaced
+  same-month form (`15-18 Nov 2024`) is unchanged, which is the common case.
+
+  **The Editor's caption gets its date.** `share_blurb` takes an optional pre-formatted `capture_label` —
+  pre-formatted on purpose, so the pure `sharecard` module keeps no date logic of its own to drift — placed
+  second, right after the target, because the object and the night are what a reader wants before the exposure
+  arithmetic. `submit_editor_share` derives it from `capture_night_range(run.capture_start_utc, …,
+  settings.site_lon)`, the same noon-to-noon bucket every other night surface uses, **never** from
+  `timestamp_utc`. Omitted, the caption is byte-for-byte what it always was, which is every run from before
+  schema 18.
+
+  **A fourth renderer that cannot import Python is held by a table.**
+  `tests/fixtures/night_range_format.json` — 14 cases × 3 styles — is read by `tests/test_nightrange.py` and by
+  `frontend/src/format.test.ts` against `formatCaptureNights`, exactly as `integration_format.json` already
+  holds the two duration formatters together. A change to either side that isn't a change to the other reddens
+  a suite. The table also carries the properties, not just the cases: every case lists all three styles, ASCII
+  is `display.replace("–", "-")` for *all* of them, and every ASCII rendering `.isascii()`.
+
+  **One incidental fix.** The ISO spelling took `(start or "").strip()[:10]` with no validation, so `"not a
+  date"` printed as `"not a da"` in an exported spreadsheet. It parses now, and anything not confidently a date
+  is blank — the date-honesty rule the v0.311.3 / v0.313.0 / v0.328.0 fixes established. **Tests +33**
+  (`tests/test_nightrange.py`, plus four in `test_sharecard.py` and one end-to-end in
+  `tests/webapp/test_editor.py` whose fixture puts the capture window and the stack stamp **years apart**, so a
+  regression to the processing stamp fails it).
+
+  Original specs, for the record — **both are done**; they are indented so a triage pass can see that by shape:
+
+
+  - **NEW IDEA (Builder 2026-09-02, the same defect as A10's duration half, one field over) — a capture window
+    is spelled three different ways, and the fix now has a worked template.** *(Pillar: approachable / trust —
+    PRIORITY 3. Size: S.)* v0.327.9 gave the app one vocabulary for *how much light*; **when it was shot** is
+    still three: `frontend/src/format.ts::formatCaptureNights` says `15–18 Nov 2024` (en dash, spaced only when
+    both sides are multi-word), `seestack/nameplate.py::format_acq_range` says `15-18 Nov 2024` (ASCII), and
+    `seestack/imaging_log.py::_format_night_range` (v0.328.0) says `2024-11-15 to 2024-11-18`. All three read
+    the *same two ISO dates off the same run*, and a beginner comparing the picture on screen with the caption
+    they copied and the log row they exported sees three renderings of one night.
+    **Two of the three divergences are justified and must survive any unification:** the nameplate is ASCII
+    because the bundled Pillow face has no en dash (`nameplate.py`'s header pins this with a glyph test), and
+    the log is ISO because it is a spreadsheet cell that should stay sortable and parseable. So this is **not**
+    "make them identical" — it is *one* function with an explicit style argument (`display` / `ascii` / `iso`),
+    so the three renderings are three deliberate outputs of one rule rather than three implementations of three
+    slightly different rules. Today only one of them knows that "15–18 Nov" and "28 Oct – 3 Nov" space the dash
+    differently, and only one knows that a reversed window should be printed in reader order.
+    **The template already exists:** `tests/fixtures/integration_format.json` — one table of cases read by both
+    `pytest` and `vitest`, which is what turned "one vocabulary" from a comment into a gate. Do the same with a
+    window table (start, end, style) → expected. **Grep before building:** `pictureDateLabel`,
+    `captureNightsClause` and `capture_night_range` are all in this neighbourhood and at least one of them is
+    about the *night count*, not the window — don't fold them in by accident.
+
+  - **NEW IDEA (Builder 2026-09-02, the slice A10's duration half deliberately left) — the Editor's copyable
+    caption is the only one of the four with *no date at all*.** *(Pillar: approachable / trust — PRIORITY 3.
+    Size: S.)* v0.327.9 gave every caption builder one duration vocabulary, but not one *set of facts*:
+    `sharecard.share_blurb` still takes only `(name, n_frames, integration_s)`, so the sentence a beginner
+    copies off the Editor's share panel reads `M 42 · 3.2 h · 152 subs` while the same picture shared from
+    Target, History, Gallery or the baked nameplate carries the night it was shot. The date is the fact a
+    caption is *for* — a post that says when you were out is the one people reply to. **The data is already in
+    hand:** `capture_night_start` / `capture_night_end` have been on the run since schema 18, and
+    `webapp/pipeline.py::submit_editor_share` holds the `run` two lines above the `share_blurb` call. Shape: an
+    optional `capture_label` argument (a formatted string, so the pure module keeps no date logic and cannot
+    drift from the SPA's `formatCaptureNights`), appended as one more `·` part and dropped when absent — which
+    is every run recorded before the app knew, captioning exactly as it does today. **Care:** it must be a
+    *label*, not a `timestamp_utc` — the whole v0.313.0 class was captions asserting the moment the stack ran
+    as when the picture was shot; and the nameplate's own span helper (`format_acq_range`) is ASCII-only for a
+    font reason that does not apply here, so don't reuse it without reading `nameplate.py`'s header. The
+    larger "one caption model served by the backend" (four builders → one) stays filed on the A10 entry as an
+    M–L; this is the slice that pays most of its user-visible value for a fraction of the risk.
+
+- **✅ SHIPPED (Builder, v0.328.4, branch `claude/sweet-babbage-2xguh9`) — ~~the Settings page should say
+  "that folder won't work" *while you type it*, not after you press Save.~~** Built in the shape the entry
+  named, including the "related, worth the same pass" half.
+
+  **`frontend/src/settingsFolders.ts`** is a pure `folderConflict(incoming, library, dataRoot)` beside
+  `calibrationFit.ts`, rendering Mantine's own `error=` on the offending field (`library_root` or `data_root`,
+  whichever the user can move) and disabling Save while it holds. It resolves a blank field against the data
+  root **being typed**, so the check follows the edit rather than the last save — which is the case the entry's
+  `resolved_incoming_dir` shortcut would have got wrong.
+
+  **Advisory only, and pinned as such.** The comparison is *segment-wise*, not `startsWith`: `/data/incoming2`
+  and `/data/incoming-old` are siblings of `/data/incoming`, and a string prefix test would have blocked two
+  perfectly good layouts. A relative path or one containing `..` returns `null` and falls through to the
+  server, which can resolve it; a bare `/` in the incoming field is never anyone's parent. The rule is
+  **one-directional** like the server's — `incoming/` inside the library root is the app's own default shape
+  one level up.
+
+  **The two are held together by a shared table**, `tests/fixtures/folder_conflict.json` (12 layouts), read by
+  `tests/webapp/test_config_upgrade.py` against `nested_incoming_conflict` and by
+  `frontend/src/settingsFolders.test.ts` against `folderConflict` — the same device
+  `integration_format.json` and (this run) `night_range_format.json` already use. Each case carries a verdict
+  of `both` / `neither` / `server`, which encodes the asymmetry the entry's "care" note asked for: **the client
+  may be quieter than the guard, never louder.** Claiming a conflict the server would accept blocks a good
+  layout on a guess a browser is not equipped to make, so every `neither` case is pinned on *both* sides.
+
+  **The related half shipped too**, and it improves every settings error rather than this one:
+  `settingsErrorMessage` strips the API client's `${res.status}: ` prefix when what follows really reads as a
+  sentence — starts with a capital, four words or more, and is not an exception's `SomeError:` shape. So the
+  folder guard's own message arrives as itself instead of `Save failed: 422: Your library folder would sit…`,
+  while `500: Internal Server Error` keeps its code, because a beginner reporting "500" is more use to the
+  owner than a beginner reporting nothing. `client.ts` is untouched — every other caller still gets the status.
+
+  **Tests +11:** 8 on the two pure functions (including the shared table), 3 rendering the real Settings page
+  through its real routes — the field marked and Save held, the release the moment the folder moves back out,
+  and silence on the relative path it cannot judge. `renderSettingsWith` gained an optional third argument for
+  saved settings; omitted, its fixture is exactly what it always was.
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+
+  - **NEW IDEA (Builder 2026-09-02, the follow-on to the v0.327.8 folder guard) — the Settings page should say
+    "that folder won't work" *while you type it*, not after you press Save.** *(Pillar: approachable —
+    PRIORITY 3. Size: XS–S.)* v0.327.8 refuses a settings save that would put the library (or the data root)
+    inside `incoming/`, with a plain-language reason. But the reason arrives as a red toast reading
+    `Save failed: 422: Your library folder would sit inside…` — the raw status code is in the user's face, and
+    the two fields that caused it are left looking fine. Both path fields are free-text `TextInput`s with a
+    helper line already (`incoming_dir` / `library_root` in `routes/Settings.tsx`), so the natural shape is a
+    pure client-side `folderConflict(incoming, library, dataRoot)` in a small module beside `calibrationFit.ts`,
+    rendering Mantine's own `error=` on the offending field and disabling Save while it holds — the server guard
+    stays the authority, this just stops the user finding out the hard way. **Grep first:** the settings form
+    already has a `dropEmptyFields` patch builder and the GET already returns `resolved_incoming_dir` /
+    `resolved_library_root`, so the resolved defaults for a blank field are on hand without re-deriving them.
+    **Care:** the client check must be *advisory only* — string prefix comparison in a browser cannot resolve
+    symlinks or case-insensitive mounts, so it must never be the thing that decides, and a case it cannot judge
+    must fall through to the save rather than block it. **Related, worth the same pass:** the toast prefixes
+    every settings failure with the HTTP status (`client.ts` builds `${res.status}: ${detail}`); a
+    `friendlyJobError`-style strip for a 422 whose detail is already a sentence would improve every settings
+    error at once, not just this one.
 
 - **NEW IDEA (Builder 2026-09-02, left rather than churned while standing down the A5 collision) — the
   Target page's Edit button is still labelled "Edit latest stack" while it now edits the *cover*.**
@@ -31531,6 +31664,55 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **⚠️ PROCESS NOTE (Builder 2026-09-03, found by tripping over it — a run's "baseline is green" can be a
+  statement about nothing).** `AGENTS.md` §7 tells every run to confirm the suite green before changing
+  anything, and the natural way to do that in a tool call is
+  `python -m pytest -q ... 2>&1 | tail -15`. **A pipeline's exit status is the *last* command's**, so that
+  reports `tail`'s 0 whatever pytest did. This run's baseline "passed" in about a minute with an output tail of
+  `inifile: …` / `rootdir: …` — which is not a summary, it is pytest's **usage-error** block: `--timeout=600`
+  was on the command line and **`pytest-timeout` is not installed** in this environment, so pytest exited 4
+  without collecting a single test, and the pipeline said 0. Three commits were written on top of an unverified
+  tree before the shape of that output was noticed.
+  **The rule, and it is one line:** never pipe the suite. `python -m pytest -q > run.log 2>&1;
+  echo "EXIT=$?"` — then read the file. (`set -o pipefail` would also do it, but a redirect is what a later
+  reader can check.) A summary line that does not end in `passed` / `failed` is not a result.
+  **Two follow-ons worth a moment from whoever is next in this area:** (a) add `pytest-timeout` to the `dev`
+  extra in `pyproject.toml` — §7's own suggested invocation uses `--timeout`, so the manual currently documents
+  a flag the environment rejects, and a genuinely hung test can otherwise burn a whole run; (b) `scripts/
+  agent-setup.sh` could print the one-line non-piping invocation as the recommended form, since it already
+  prints the suite command and that is where a run copies it from.
+
+- **⚪ NEGATIVE RESULT — MEASURED, so nobody re-treads it (Builder 2026-09-03, while building the frozen-fit
+  channel v0.328.2).** *Does the editor's **STF** stretch disagree between preview and export the way `asinh`
+  did before v0.325.0?* The question is a fair one — `tone.stretch` mode `stf` anchors on the image's own
+  robust per-channel median and σ, exactly the kind of whole-image statistic the A2 sweep (which looked at
+  *pixel-sized parameters*) would not have caught. **The answer is no, and the reason is worth keeping.**
+  Measured on a 1600×2400 synthetic OSC frame at proxy steps 2, 3, 4 and 6: preview vs the export's own pixels
+  at the same positions differ by **0.0002–0.0004 mean and at most 0.003 max** of a 0–1 tone, and the sky level
+  lands within **0.0005** every time. The editor proxy is a **strided decimation** (`rgb[::step, ::step]` in
+  `seestack/edit/proxy.py`), which is an unbiased sample of the pixel distribution, so median and MAD survive
+  it. The `asinh` bug was a different mechanism: `render_preview_png_full_res` compared an **area-averaged**
+  1024 px preview against native, and averaging genuinely does lift the min, lower the 99.5th percentile and
+  shrink σ. **The transferable rule: striding preserves a distribution's statistics, averaging does not** — so
+  a statistic-anchored op is only at risk where the smaller array was *resampled*, not where it was strided.
+  (The same measurement anchored through the new `stats=` channel is 0.00000 at every step, which is the
+  control saying the harness could have shown a difference had there been one.)
+
+- **NEW IDEA (Builder 2026-09-03, spotted while adding the sibling channel in v0.328.2) — `EditContext.op_notes`
+  is keyed by op **id** where its new sibling `fitted` is keyed by op **uid**, so a recipe carrying an op twice
+  reports only the last one.** *(Pillar: editor correctness — PRIORITY 1; size XS; latent, low severity.)*
+  `seestack/edit/ops/tone.py` writes `ctx.op_notes["tone.color_calibrate"] = {…}` and
+  `seestack/edit/ops/detail.py` does the same for its advisories. A recipe is a *list*, and nothing stops two
+  instances of one op with different params — at which point the editor's caption ("the saved picture's colour
+  will differ a little from this preview", the deconv/star-reduce advisories) describes whichever ran last and
+  silently discards the other. `fitted` was keyed by uid from the start for exactly this reason, and
+  `EditContext` now carries `op_uid` through the pipeline, so the fix is available: key by uid and have the
+  webapp layer resolve uid → op id when it builds the histogram payload. **Care:** the histogram endpoint's
+  JSON shape is what the frontend reads (`color_cal`, `star_reduce_differs_on_proxy`, …) and per §9 must not
+  change — so this is an internal re-key with the same payload out, not an API change. Worth confirming a
+  double-op recipe is actually reachable from the UI before spending a run on it; if it is only reachable by
+  hand-editing a recipe JSON, it stays an XS tidy-up rather than a bug.
 
 - **⚠️ PROCESS NOTE (Builder 2026-09-02, measured after it cost the end of a run) — a full `pytest` run leaves
   ~9 GB behind in `/tmp/pytest-of-root`, and three runs fill the container's whole disk allowance.** Measured,

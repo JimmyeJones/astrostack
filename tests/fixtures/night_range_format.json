@@ -1,0 +1,66 @@
+{
+  "_comment": [
+    "One table of capture-window cases, read by BOTH suites, so the app has one",
+    "way of saying *when a picture was shot*.",
+    "",
+    "Four surfaces render a stack's capture window, and they used to be four",
+    "implementations of three slightly different rules: `formatCaptureNights` in",
+    "`frontend/src/format.ts` (every screen), `format_acq_range` in",
+    "`seestack/nameplate.py` (the caption baked onto a shared JPEG),",
+    "`_format_night_range` in `seestack/imaging_log.py` (the exported spreadsheet)",
+    "and — since v0.328.3 — the Editor's copyable caption. All four read the same",
+    "two ISO dates off the same run, so a beginner comparing the picture on screen",
+    "with the caption they copied and the log row they exported saw one night",
+    "spelled three ways.",
+    "",
+    "The three *styles* are deliberate and stay: `ascii` because the bundled",
+    "nameplate font has no en dash, `iso` because a spreadsheet cell must stay",
+    "sortable and must not read as arithmetic. The rest of the rule — write the",
+    "shared parts once, space the dash only between multi-word sides, print a",
+    "reversed window forwards — is `seestack/nightrange.py`, once.",
+    "",
+    "Readers: tests/test_nightrange.py (all three styles) and",
+    "frontend/src/format.test.ts (the `display` style, against",
+    "`formatCaptureNights`). A change to either side that isn't a change to the",
+    "other now reddens a suite.",
+    "",
+    "Each case is [start, end, {style: expected}]. `null` means the app never",
+    "recorded that end."
+  ],
+  "cases": [
+    ["2024-11-18", "2024-11-18", {
+      "display": "18 Nov 2024", "ascii": "18 Nov 2024", "iso": "2024-11-18"}],
+    ["2024-11-18", null, {
+      "display": "18 Nov 2024", "ascii": "18 Nov 2024", "iso": "2024-11-18"}],
+    [null, "2024-11-18", {
+      "display": "18 Nov 2024", "ascii": "18 Nov 2024", "iso": "2024-11-18"}],
+
+    ["2024-11-15", "2024-11-18", {
+      "display": "15–18 Nov 2024", "ascii": "15-18 Nov 2024",
+      "iso": "2024-11-15 to 2024-11-18"}],
+    ["2024-10-28", "2024-11-03", {
+      "display": "28 Oct – 3 Nov 2024", "ascii": "28 Oct - 3 Nov 2024",
+      "iso": "2024-10-28 to 2024-11-03"}],
+    ["2024-12-28", "2025-01-03", {
+      "display": "28 Dec 2024 – 3 Jan 2025", "ascii": "28 Dec 2024 - 3 Jan 2025",
+      "iso": "2024-12-28 to 2025-01-03"}],
+    ["2024-01-01", "2024-01-31", {
+      "display": "1–31 Jan 2024", "ascii": "1-31 Jan 2024",
+      "iso": "2024-01-01 to 2024-01-31"}],
+
+    ["2024-11-18", "2024-11-15", {
+      "display": "15–18 Nov 2024", "ascii": "15-18 Nov 2024",
+      "iso": "2024-11-15 to 2024-11-18"}],
+
+    ["2024-11-15T22:03:00Z", "2024-11-18T04:10:00Z", {
+      "display": "15–18 Nov 2024", "ascii": "15-18 Nov 2024",
+      "iso": "2024-11-15 to 2024-11-18"}],
+
+    [null, null, {"display": "", "ascii": "", "iso": ""}],
+    ["", "", {"display": "", "ascii": "", "iso": ""}],
+    ["not a date", null, {"display": "", "ascii": "", "iso": ""}],
+    ["2024-13-01", null, {"display": "", "ascii": "", "iso": ""}],
+    ["2024-11-15", "not a date", {
+      "display": "15 Nov 2024", "ascii": "15 Nov 2024", "iso": "2024-11-15"}]
+  ]
+}
