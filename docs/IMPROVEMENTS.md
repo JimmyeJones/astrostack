@@ -4,12 +4,16 @@ The shared blackboard for autonomous development. Read
 [`../AGENTS.md`](../AGENTS.md) first — it defines the loop, the decision
 framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
-> **Current focus (2026-07 — see AGENTS.md §1 "Current focus").** The editor is now
-> well-hardened, so the highest-value work has shifted to **(1) QA-ing and hardening
-> the stacking engine** (`seestack/stack/*`, `seestack/calibrate/*` — a bug there
-> corrupts the final image, so treat verified ones like editor bugs: fix first) and
-> **(2) autonomy / friendliness / image-quality**. Still fix any real editor
-> regression first, but favour these areas when picking new work.
+> **Current focus (2026-07 — see AGENTS.md §1 "Current focus"; the editor claim
+> corrected 2026-09-03).** The editor's *traced* bug backlog is drained, so the
+> highest **marginal** value has shifted to **(1) QA-ing and hardening the stacking
+> engine** (`seestack/stack/*`, `seestack/calibrate/*` — a bug there corrupts the
+> final image, so treat verified ones like editor bugs: fix first) and
+> **(2) autonomy / friendliness / image-quality**. **Do not read that as "the editor
+> is well-hardened"** — the 2026-09-02 external audit found two real editor defects
+> (A1, A2) that had survived repeated adversarial re-audits, which is why AGENTS.md
+> §1 re-opens priority 1. Fix any real editor regression first; favour these areas
+> when picking *new* work.
 
 **Conventions**
 - Sections: **Bugs (fix these first)** → **In progress** → **Ideas** (roughly
@@ -2153,20 +2157,60 @@ _(nothing else claimed — claim an item here with your branch name)_
     §8 step 2: *"The commit subject must name the backlog item's key nouns **and at least one code identifier**
     (function, module or setting), so the next agent's grep finds it. A headline alone is not a subject."*
 
-- **⚪ R6 — CLEAN THE STALE BANNERS IN `AGENTS.md` §1** *(verified line by line by the audit; §1 got the Owner
-  Facts block and the editor re-opening on 2026-09-02, but these remain)*: **two** banners both claim to be
-  "front of the bug queue" (the 08-17 one names findings that **shipped** v0.271.0/v0.276.0 on 08-26; the 07-30
-  one claims every open bug is gated on data an agent cannot supply); "Full write-up at the top of
-  `docs/IMPROVEMENTS.md` → Bugs" points at a clean-sweep record while the real write-up is ~1,800 lines down,
-  and "Friendliness (PRIORITY 3), top item" is ~1,300 lines down — **replace every "top item" pointer with the
-  entry's headline text as the locator**; the busy-UI banner still quotes **pre-fix** measurements ("frames
-  table starts at line ~1339 of 1481", "~15 alert blocks", "9 stacked cards") when slices a–e shipped 08-13→16
-  and `Target.tsx` now has one `NoticeBoard` (two inline notes) and **zero** cards before the frames table, and
-  "the sidebar is 15 flat links" is now **18 links in 5 groups** — state the remaining work instead (the header
-  row and the ten-item share menu); the "healing … deliberately left open" note is stale (see A8); §12 says the
-  collision "has now happened seven times" when the merge commits show **at least ten**; §2 says 3–6 tasks per
-  run while the Builder prompt says 2–4. Also **§7 spends 25 lines on Qt/libEGL** for three GUI tests of a
-  desktop app the owner never runs — move it to a footnote and make the Qt-skip command the default.
+- **✅ MOSTLY SHIPPED (Builder, v0.339.0, branch `claude/sweet-babbage-861nhx`) — ~~R6: clean the stale
+  banners in `AGENTS.md` §1.~~ Every item below is done except the §7 Qt one, which was deliberately
+  declined; read the reason before re-filing it.** Each fix was re-verified against the code rather than
+  copied from the audit:
+  - **The contradiction is gone.** §1's "Current focus" opened with *"The editor is now **well-hardened**"*
+    six paragraphs after the same section says *"do not believe any 'the editor is well-hardened' claim
+    further down this file"*. It now says what is actually true — the *traced* backlog is drained, and the
+    2026-09-02 audit found two defects that had survived exactly such re-audits — and frames the list that
+    follows as *marginal* value, which is what it always meant. The same sentence at the top of **this** file
+    was corrected identically, since it was the second copy of the claim.
+  - **Only one banner claims front-of-queue now.** The 2026-07-30 "⚡ IMMEDIATE PRIORITY" block is relabelled
+    **📜 HISTORICAL** — it is a fixed bug's root-cause record, and a second front-of-queue banner only splits
+    the queue. The 2026-07 "So what's front-of-queue now?" paragraph no longer enumerates open bugs that have
+    since shipped; it points at the Bugs section itself and keeps the part that *has* stayed true across three
+    refreshes (what is left is gated, or is a stand-down with numbers — read the gate before starting).
+  - **Every "top item" / "top of the file" pointer is now a searchable locator** ("search it for
+    **walk-away**", "search it for **DOGFOOD BASELINE**"), because both pointers were ~1,300–1,800 lines off.
+  - **The busy-UI banner's pre-fix measurements are replaced by current ones, and its instruction is
+    reversed.** It quoted "~15 alert blocks, 9 stacked cards, frames table at line ~1339 of 1481" and "the
+    sidebar is 15 flat links" from before slices (a)–(e); re-counted today, `Target.tsx` carries **one**
+    `NoticeBoard` and `frontend/src/nav.ts` has **18 links in 5 groups**. More importantly it told every run
+    to "take ONE slice per run" while the two dogfood baselines in this file both concluded *do not open a
+    speculative IA slice* — so the banner now says measure first with `scripts/agent-dogfood.sh`, cites the
+    3,014 px phone worst-page figure, and keeps the standing rule (put a new feature inside the grouping, not
+    in one more banner) plus the two named leftovers.
+  - **The two count inconsistencies are fixed:** §2/§12 said 3–6 tasks a run against the Builder prompt's
+    2–4 (now 2–4 in both), and §12 said the collision "has now happened seven times" where §11's own record
+    is at least ten events and twelve duplicated items (now that).
+  - **The "healing … deliberately left open" note was already fixed** by the 2026-09-03 refresh of that
+    paragraph — checked, not assumed.
+  - **⚪ DECLINED, with the reason: the §7 Qt item.** R6 asks to "move it to a footnote and make the Qt-skip
+    command the default". The prose is long, but the recommendation is not wrong: `scripts/agent-setup.sh`
+    installs `libegl1` in this container, so the full headless suite (GUI tests included) *does* run, and
+    making the skip-3-tests command the default would quietly drop coverage for every run that could have had
+    it — to save reading twenty lines once. The §7 text also carries the *"never pipe pytest"* warning that
+    already cost one run three unverified commits, which is the opposite of a footnote. Left as it is on
+    purpose; re-file only with an argument about coverage, not length.
+
+  *(The original R6 entry follows.)*
+
+  - **⚪ R6 — CLEAN THE STALE BANNERS IN `AGENTS.md` §1** *(verified line by line by the audit; §1 got the Owner
+    Facts block and the editor re-opening on 2026-09-02, but these remain)*: **two** banners both claim to be
+    "front of the bug queue" (the 08-17 one names findings that **shipped** v0.271.0/v0.276.0 on 08-26; the 07-30
+    one claims every open bug is gated on data an agent cannot supply); "Full write-up at the top of
+    `docs/IMPROVEMENTS.md` → Bugs" points at a clean-sweep record while the real write-up is ~1,800 lines down,
+    and "Friendliness (PRIORITY 3), top item" is ~1,300 lines down — **replace every "top item" pointer with the
+    entry's headline text as the locator**; the busy-UI banner still quotes **pre-fix** measurements ("frames
+    table starts at line ~1339 of 1481", "~15 alert blocks", "9 stacked cards") when slices a–e shipped 08-13→16
+    and `Target.tsx` now has one `NoticeBoard` (two inline notes) and **zero** cards before the frames table, and
+    "the sidebar is 15 flat links" is now **18 links in 5 groups** — state the remaining work instead (the header
+    row and the ten-item share menu); the "healing … deliberately left open" note is stale (see A8); §12 says the
+    collision "has now happened seven times" when the merge commits show **at least ten**; §2 says 3–6 tasks per
+    run while the Builder prompt says 2–4. Also **§7 spends 25 lines on Qt/libEGL** for three GUI tests of a
+    desktop app the owner never runs — move it to a footnote and make the Qt-skip command the default.
 
 - **✅ SHIPPED (Builder, v0.325.3, branch `claude/zen-mccarthy-t59xya`) — ~~the planner can tell you to shoot
   up to two minutes *after* astronomical dark ends, and can credit a window with darkness that doesn't
