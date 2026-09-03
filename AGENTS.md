@@ -86,16 +86,18 @@ higher on this list wins — always:
 
 1. **Make the editor excellent.** ⚠️ **RE-OPENED 2026-09-02 — do not believe any
    "the editor is well-hardened" claim further down this file.** An external audit
-   verified by reproduction that (a) Auto's contrast curve **brightens the sky by
-   ~36% on every Auto picture** (`_sky_mode` reads the STF's zero-clip spike as the
-   sky), and (b) several editor ops **disagree between preview and export** because
-   their pixel-unit parameters are not scaled by the proxy factor — worst on the
-   mosaic-size canvases the owner actually has. Both are in "Bugs (fix these first)".
-   **These outrank all share/copy/export-polish work**, which is where recent runs
-   have clustered. The non-destructive editor is where a good stack
-   becomes a good *picture*, and today it has real problems (live preview that
+   verified by reproduction that (a) Auto's contrast curve **brightened the sky by
+   ~36% on every Auto picture** (`_sky_mode` read the STF's zero-clip spike as the
+   sky), and (b) several editor ops **disagreed between preview and export** because
+   their pixel-unit parameters were not scaled by the proxy factor — worst on the
+   mosaic-size canvases the owner actually has. **✅ BOTH ARE NOW FIXED — A1 in
+   v0.326.1, every named A2 instance by v0.327.2 — so don't go looking for them**;
+   the priority itself stands, and so does the warning above (a "well-hardened"
+   claim is a claim about *known* bugs, and two audits have now disproved one).
+   The non-destructive editor is where a good stack
+   becomes a good *picture*, and its recurring problems are a live preview that
    doesn't match/behave, clunky and confusing controls, and a weak default
-   result). **Go deep here: hunt and fix its bugs, make the controls obvious, and
+   result. **Go deep here: hunt and fix its bugs, make the controls obvious, and
    make the out-of-the-box result genuinely good.** Fixing/polishing the editor
    outranks any new feature.
 2. **"Just works" autonomy.** Drop files in and get a great result with minimal
@@ -118,14 +120,15 @@ so it never retried. **Both halves shipped:** a readability preflight that holds
 stamping the marker — when stacking now would land below the minimum-frames floor or *thinner than the best
 stack that target already has*, plus a missing-file count stamped beside the attempt marker so a crippled
 attempt retries once the files return. Gated on there being unreadable files at all, so a healthy install is
-bit-for-bit unaffected. Full write-up at the top of `docs/IMPROVEMENTS.md` → "Bugs (fix these first)". **The
-one follow-on deliberately left open** is *healing* an install already sitting on a degraded picture from
-before the fix (it self-heals the next clear night) — filed under Ideas → "Autonomy & friendliness". Two
-smaller, lower-severity findings from the same audit are still open directly beneath the fixed entry (a
-latent mosaic auto-grade population bug, gated off by default; and a design gap where
-`photometric_normalize` never gets enabled on the walk-away mosaic path even though `level_by_coverage`
-alone can't fix a hazy panel's multiplicative dimming) — **these are now the front of the bug queue**, worth
-a run each.
+bit-for-bit unaffected. Full write-up at the top of `docs/IMPROVEMENTS.md` → "Bugs (fix these first)".
+**✅ EVERY FOLLOW-ON THIS PARAGRAPH USED TO POINT AT HAS SINCE SHIPPED TOO — don't go looking for them
+(refreshed 2026-09-03, after a run found this list still sending work at done items).** *Healing* an install
+already sitting on a degraded picture from before the fix is `pipeline._auto_stack_degraded_recheck`, which
+re-stacks once the data is all readable again rather than waiting for the next clear night. The latent
+mosaic **auto-grade population** bug (a star-poor panel graded target-wide and rejected wholesale as "cloud")
+shipped as **v0.270.2**, per-panel; and **`photometric_normalize` on the walk-away mosaic path** shipped as
+**v0.271.0**, auto-enabled for every mosaic canvas the way `final_gradient_removal` already was. So this
+whole family is closed: pick new work from the live sections of `docs/IMPROVEMENTS.md`, not from here.
 
 **🎨 STANDING OWNER PRIORITY (2026-08-08) — the UI is "extremely busy"; fix the information
 architecture, page by page.** The owner's top complaint about the live build: *"there are like 30
