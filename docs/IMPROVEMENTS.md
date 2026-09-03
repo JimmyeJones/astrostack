@@ -17762,6 +17762,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   floor did. **So this entry is the only remaining pixel-scale divergence, and it stays gated on real-data
   confirmation as filed.**
 
+  **⚪ GATE ANSWERED — MEASURED AND CLOSED; DO NOT BUILD THE ADVISORY (Builder 2026-09-03, branch
+  `claude/sweet-babbage-f00hj6`).** The entry's own condition was *"if confirmed visible on a real large
+  mosaic, add a sibling honest-advisory note"*. It was measured instead of argued, and the answer is that the
+  **floor is not what the divergence is made of** — so an advisory naming it would attribute an inherent
+  proxy limit to a tuning choice, which is a *less* honest caption than saying nothing.
+
+  **The measurement.** A 4000² scene decimated ×10 (the same `proxy_scale` a ~150 MP mosaic gets), sky =
+  0.12 with a linear + curved light-pollution gradient and a residual vignette, 600 stars, noise σ = 0.002.
+  Three subtractions: the export (`box_size=128` at full res), the preview as it is today
+  (`_scaled_box` → **16**), and the preview at the parity value the floor overrides (**13**). Residual sky
+  flatness after subtraction, and the preview's distance from the decimated export:
+
+  | | sky residual σ | vs. export, mean abs | vs. export, p0.5–p99.5 |
+  |---|---|---|---|
+  | export, box 128 @ full res | 0.00211 | — | — |
+  | preview, box **16** (today, floored) | 0.00235 | 0.00039 | 0.00433 (2.2 σ) |
+  | preview, box **13** (parity, unfloored) | 0.00220 | 0.00029 | 0.00275 (1.4 σ) |
+
+  **What that says.** The floor costs **0.00015** of extra sky residual — 7 % of one noise σ, on a sky sitting
+  at 0.12, i.e. about a **tenth of a percent** of the background level. And the preview differs from the
+  export by 1.4 σ *even at exact parity*: most of the gap is decimation itself (a strided proxy is a
+  different image), not the mesh size. Removing the floor entirely would close roughly a third of an already
+  sub-visible difference, while risking the degenerate proxy mesh the floor exists to prevent.
+
+  **One negative result worth keeping, because it was the near miss.** A first pass used a scene carrying
+  200-px-wavelength sinusoids — right between the two mesh sizes — and it *did* manufacture a difference
+  (mean abs 0.00192 floored vs 0.00143 at parity, a 34 % gap). Real light pollution and vignetting have no
+  structure at that scale in a 12,000-px canvas. **A fixture not shaped like the owner's sky manufactures
+  bugs as readily as it hides them** — the same lesson the A1 stand-down recorded, arrived at from the other
+  end. Re-run with an honest sky, the structured scene's *floor* effect vanishes into the noise anyway
+  (0.00092 vs 0.00088) because neither mesh can follow structure that fine.
+
+  **So the entry is closed as a non-defect, not deferred.** If a future run wants to reopen it, the bar is a
+  real large-mosaic frame where the *floored* preview and the export disagree by more than the parity
+  preview does — not a synthetic scene, and not the arithmetic (160 vs 128) on its own, which is real and
+  turns out not to matter.
 - ~~**Give the manual `asinh` stretch the same highlight rolloff STF just got.**~~
   — **SHIPPED v0.119.2** (Builder 2026-07-14, same branch). `asinh_stretch` shared
   the identical hard-clip, so it got the same `_highlight_rolloff` behind a
