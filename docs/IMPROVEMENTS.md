@@ -22966,24 +22966,76 @@ problems. Dogfood it every big-picture run and fix root causes.
   the clustering separates his panels the way the synthetic fixture does, and that no panel of his lands on
   the wrong side of the floor.
 
-- **LEAD (Builder 2026-09-02, the half of A1's last line nobody has done — distinct from the sweep idea below,
-  and worth keeping separate) — every constant that was *tuned by eye* through the old contrast curve was
-  tuned through a curve that moved the sky, so re-measure the ones that decided a default.** *(Pillar: trust +
-  image quality — PRIORITY 4; size M; pure measurement, no behaviour change unless a number turns out wrong.)*
-  The ⭐ entry below asks "which other *statistics* share A1's clipped-shadow blindness?"; this asks the
-  narrower, more concrete question **"which shipped *constants* were chosen by looking at a picture the bug had
-  already altered?"** Until v0.326.1 Auto ended with a curve that brightened a sky-dominated stack's background
-  by **6–33 %** at `target_bg` 0.15–0.22 and *darkened* it ~20 % at 0.25, so any past A/B judged on a finished
-  Auto picture was reading a background Auto had moved. **Where to look, in the order they matter:** the
-  `target_bg` choices themselves (`tone.stretch` 0.18 in `auto_recipe` vs 0.18/0.22/0.25 in the built-in
-  presets — picked to look right *through* the old curve, and the most likely real finding, since the
-  0.15–0.22 band and the 0.25 preset were being pushed in **opposite** directions); then the SCNR amount and
-  the saturation scaling in `auto_recipe` (both chosen relative to measured sky/noise and both applied *before*
-  the curve, so probably safe — confirm rather than assume); then any Shipped entry whose evidence is a
-  before/after sky or brightness number measured on a finished Auto picture. **Method:** re-run the comparison
-  on v0.326.1+ and report the delta; change a constant only if the old choice is *measurably* worse now, and
-  say so with the numbers. **Caution:** these are on-by-default constants on a live install — a change alters
-  every future picture, so it wants its own commit and a stated before/after, never a fold-in.
+- **⚪ ANSWERED AND CLOSED — MEASURED AND DATED, NO CONSTANT CHANGES (Builder 2026-09-03, branch
+  `claude/sweet-babbage-861nhx`). Read this before re-opening it; the whole point is that nobody should
+  blind-flip an on-by-default constant on the strength of the lead's premise.** *(No code change wanted.)*
+  The lead below asks which shipped constants were *tuned by eye through a curve that moved the sky* — Auto's
+  contrast curve brightened a sky-dominated background by 6–33 % until v0.326.1. It names three in
+  `auto_recipe`, in order of suspicion: `target_bg`, then the saturation scaling, then the SCNR amount. **All
+  three predate the curve, so none of them was ever judged through it.**
+
+  | constant | introduced | vs. the auto curve entering Auto |
+  |---|---|---|
+  | `target_bg = clip(0.24 − sky×0.4, 0.14, 0.24)` | `21796d65`, **2026-06-14** | 20 days before |
+  | `saturation = clip(1.25 − sky_sigma×6, 1.05, 1.25)` | `5369c479`, **2026-07-03** | 1 day before |
+  | `tone.scnr amount 0.7` | `c7351d76`, **2026-07-03** | 1 day before |
+  | `tone.curves {auto: True}` in `auto_recipe` | `70fa0138`, **2026-07-04** | — |
+
+  All three carry byte-identical values at `70fa0138` and today, so none was re-tuned in the window either.
+  The lead's fourth candidate — the built-in presets' `0.18 / 0.22 / 0.25` — is a **wrong premise**, and it is
+  the one most likely to send a future run at a live default: those presets ship **fixed-point** curves
+  (`tone.curves {points: […]}`), never `auto: True`, and A1 lived only in the data-driven
+  `suggest_tone_curve`/`_sky_mode` path. Their curves *do* move the sky (galaxy_broadband's `0.25→0.20` pulls
+  a 0.18 background down), but they were chosen in the same commit as their `target_bg`, tuned together, and
+  A1 never touched them. So "the 0.15–0.22 band and the 0.25 preset were pushed in opposite directions" is
+  true of the *auto* curve's arithmetic and simply does not apply to the presets.
+
+  **The lead also asks for the delta re-measured on v0.326.1+, so here it is**, per op, on a realistic linear
+  OSC scene (sky pedestal + broad object + 220 stars + a mild OSC green cast), background read as the median
+  of a star-free corner strip rather than a histogram mode:
+
+  | after | background |
+  |---|---|
+  | `tone.stretch` (`target_bg` 0.2305) | 0.2135 |
+  | `tone.scnr` | 0.2135 |
+  | `tone.saturation` | 0.2135 |
+  | **`tone.curves` (auto)** | **0.2139 — +0.2 %** |
+  | `detail.sharpen` | 0.2135 |
+
+  **The curve now moves the finished background by two parts in a thousand**, i.e. it is on the identity as
+  designed, which is exactly the condition `target_bg` was chosen under three weeks before the curve existed.
+  Nothing to re-tune. *(A measurement trap worth keeping: reading the same background as a histogram **mode**
+  instead makes `detail.sharpen` look like a −6.5 % darkening. It isn't — sharpening widens the histogram and
+  moves the winning bin. Two estimators, one true answer; use the corner median.)*
+
+  **One incidental measurement, recorded so nobody re-derives it and nobody "fixes" it:** `a["sky"]` is the
+  median of the **whole-image-normalised** luminance (`[p0.5, p99.5] → [0, 1]`), so it is deliberately blind
+  to the linear pedestal — `target_bg` read 0.2305 for every sky from 0.005 to 0.15 on the fixture above, a
+  30× range. The knob is not inert, it just responds to how *object-dominated* the frame is rather than how
+  bright the sky is in ADU (0.2314 / 0.2305 / 0.2330 across faint / typical / large-object scenes). Real
+  deep-sky stacks therefore sit around 0.21–0.24 and never approach the 0.14 floor. **That is the design, not
+  a bug** — do not "restore" the pedestal sensitivity.
+
+  *(The original lead follows, for the record — this is answered.)*
+
+  - **LEAD (Builder 2026-09-02, the half of A1's last line nobody has done — distinct from the sweep idea below,
+    and worth keeping separate) — every constant that was *tuned by eye* through the old contrast curve was
+    tuned through a curve that moved the sky, so re-measure the ones that decided a default.** *(Pillar: trust +
+    image quality — PRIORITY 4; size M; pure measurement, no behaviour change unless a number turns out wrong.)*
+    The ⭐ entry below asks "which other *statistics* share A1's clipped-shadow blindness?"; this asks the
+    narrower, more concrete question **"which shipped *constants* were chosen by looking at a picture the bug had
+    already altered?"** Until v0.326.1 Auto ended with a curve that brightened a sky-dominated stack's background
+    by **6–33 %** at `target_bg` 0.15–0.22 and *darkened* it ~20 % at 0.25, so any past A/B judged on a finished
+    Auto picture was reading a background Auto had moved. **Where to look, in the order they matter:** the
+    `target_bg` choices themselves (`tone.stretch` 0.18 in `auto_recipe` vs 0.18/0.22/0.25 in the built-in
+    presets — picked to look right *through* the old curve, and the most likely real finding, since the
+    0.15–0.22 band and the 0.25 preset were being pushed in **opposite** directions); then the SCNR amount and
+    the saturation scaling in `auto_recipe` (both chosen relative to measured sky/noise and both applied *before*
+    the curve, so probably safe — confirm rather than assume); then any Shipped entry whose evidence is a
+    before/after sky or brightness number measured on a finished Auto picture. **Method:** re-run the comparison
+    on v0.326.1+ and report the delta; change a constant only if the old choice is *measurably* worse now, and
+    say so with the numbers. **Caution:** these are on-by-default constants on a live install — a change alters
+    every future picture, so it wants its own commit and a stated before/after, never a fold-in.
 
 - **✅ SWEPT AND CLOSED — every named site walked, NO second instance found; the one live consumer was
   `_sky_mode` and it is fixed (Builder 2026-09-03, branch `claude/sweet-babbage-i16c1c`). Read this before
