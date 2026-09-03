@@ -78,7 +78,8 @@ export function pickContinueTonight(
       typeof goalSec === "number" && Number.isFinite(goalSec) && goalSec > 0
         ? goalSec / 3600
         : null;
-    const readiness = integrationReadiness(t.total_exposure_s ?? 0, t.type, goalHours);
+    const readiness = integrationReadiness(
+      t.total_exposure_s ?? 0, t.type, goalHours, t.field_fulls);
     return { target: t, readiness };
   });
 

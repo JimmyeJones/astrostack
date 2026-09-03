@@ -83,6 +83,68 @@ describe("integrationReadiness", () => {
     expect(integrationReadiness(3 * H, "galaxy")?.customGoal).toBe(false);
   });
 
+  // The mosaic-scaling case — the "fourth wrong-denominator" bug. A per-type
+  // goal is a per-pixel depth, so on a mosaic it has to be multiplied by the
+  // number of single-frame field-fulls the target's canvas covers; otherwise a
+  // four-panel mosaic at 1 h/panel reads as "plenty" at a quarter of the light
+  // it needs, and the Tonight planner tells the owner to shoot something else.
+  describe("scales the per-type goal by the target's field-fulls of sky", () => {
+    it("keeps a single-field verdict bit-for-bit unchanged when fieldFulls=1", () => {
+      const baseline = integrationReadiness(1.8 * H, "galaxy");
+      const scaled = integrationReadiness(1.8 * H, "galaxy", null, 1);
+      expect(scaled).toEqual(baseline);
+      // And absent/null/nonsense all reduce to the same "single field"
+      // behaviour, so an older backend or a target with no stack is safe.
+      for (const noScale of [null, undefined, NaN, Infinity, 0, -1, 0.5]) {
+        const r = integrationReadiness(
+          1.8 * H, "galaxy", null, noScale as number | null);
+        expect(r?.goalHours).toBe(baseline?.goalHours);
+        expect(r?.fieldFulls).toBe(1);
+      }
+    });
+
+    it("scales a four-panel mosaic's galaxy goal by 4 (6 h → 24 h)", () => {
+      const r = integrationReadiness(6 * H, "galaxy", null, 4);
+      expect(r?.baseGoalHours).toBe(6);
+      expect(r?.goalHours).toBe(24);
+      expect(r?.fieldFulls).toBe(4);
+      // 6 h of 24 h = 0.25 — a quarter done, and demonstrably *not* "plenty".
+      expect(r?.fraction).toBeCloseTo(0.25, 5);
+      expect(r?.level).not.toBe("plenty");
+    });
+
+    it("stops the wrong 'plenty' verdict on a mosaic at a quarter of the light", () => {
+      // The canonical bug: 4 h totalled, 1 h per panel, on a 4-h nebula goal.
+      // Today's un-scaled code would call it "plenty" and the planner would
+      // say "try something new" while each panel is a quarter done.
+      const un = integrationReadiness(4 * H, "nebula");
+      expect(un?.level).toBe("plenty"); // documents the shape of the bug
+      const r = integrationReadiness(4 * H, "nebula", null, 4);
+      expect(r?.goalHours).toBe(16); // 4 h × 4 panels
+      expect(r?.level).not.toBe("plenty"); // 4 / 16 = 0.25 — a quarter done
+      expect(r?.verdict).toContain("of ~16 h");
+    });
+
+    it("does NOT scale a user-set goal — a hand-set number is a decision", () => {
+      // An owner who says "I want 12 h on M 31" is naming a whole-target
+      // figure, not a per-pixel depth to re-interpret. Scaling it would
+      // silently turn 12 h into 48 h on a 2×2 mosaic and make every custom
+      // goal impossible to satisfy.
+      const r = integrationReadiness(6 * H, "galaxy", 12, 4);
+      expect(r?.customGoal).toBe(true);
+      expect(r?.baseGoalHours).toBe(12);
+      expect(r?.goalHours).toBe(12);
+      expect(r?.fraction).toBeCloseTo(0.5, 5);
+    });
+
+    it("carries fieldFulls out to the caller so the UI can label the shape", () => {
+      // A card that wants to write "6 h × 4 fields = 24 h" needs the number.
+      const r = integrationReadiness(1 * H, "galaxy", null, 2.25);
+      expect(r?.fieldFulls).toBeCloseTo(2.25, 5);
+      expect(r?.goalHours).toBeCloseTo(6 * 2.25, 5);
+    });
+  });
+
   it("maps each level to a distinct progress colour", () => {
     expect(readinessColor("starting")).toBe("gray");
     expect(readinessColor("solid")).toBe("blue");
@@ -132,6 +194,19 @@ describe("readinessRowHint", () => {
         label: "Plenty — try something new", color: "green",
       });
     }
+  });
+
+  it("stops telling a mosaic owner to shoot something else at a quarter done", () => {
+    // The canonical bug shape, on the planner: 4 h totalled, 1 h per panel,
+    // 4 h nebula goal. Un-scaled: "Plenty — try something new" is what the
+    // owner reads on the night they are choosing where to point.
+    expect(readinessRowHint(4 * H, "nebula")).toEqual({
+      label: "Plenty — try something new", color: "green",
+    });
+    // With field_fulls=4 the row goes quiet — 4 h of a 16 h scaled goal is
+    // "starting", which the row deliberately says nothing about (the row's
+    // integration figure already implies "keep going").
+    expect(readinessRowHint(4 * H, "nebula", null, 4)).toBeNull();
   });
 });
 
@@ -213,6 +288,19 @@ describe("readinessRowBadge", () => {
     });
     expect(readinessRowBadge(7 * H, "galaxy", 12, 2.5 * H)).toMatchObject({
       label: "~2 more nights", color: "teal",
+    });
+  });
+
+  it("measures the gap against the SCALED goal on a mosaic", () => {
+    // 7 h totalled on a 2×2 nebula mosaic = 1.75 h per panel, against a
+    // scaled goal of 16 h. Gap is 9 h; at 3 h a night that's 3 more nights —
+    // the row now says a plan the owner can act on, where without the
+    // scaling it would have said "Plenty — try something new".
+    expect(readinessRowBadge(7 * H, "nebula", null, 3 * H)).toMatchObject({
+      label: "Plenty — try something new", color: "green",
+    });
+    expect(readinessRowBadge(7 * H, "nebula", null, 3 * H, 4)).toMatchObject({
+      label: "~3 more nights", color: "teal",
     });
   });
 });

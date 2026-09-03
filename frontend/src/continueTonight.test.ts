@@ -108,6 +108,25 @@ describe("pickContinueTonight", () => {
     expect(withGoal.pick.target.target_safe).toBe("o"); // "c" is now plenty → excluded
   });
 
+  it("does NOT drop a mosaic as 'plenty' when each panel is a fraction done", () => {
+    // The canonical bug from the picker's own angle: on a 2×2 mosaic 4 h
+    // totalled is 1 h per panel — well *inside* what the goal is about,
+    // so the picker must not treat it as done. Without ``field_fulls`` the
+    // planner would have excluded it as "plenty" and told the owner to
+    // point at something else the very night they were half a mosaic in.
+    const p = plan([
+      target({
+        name: "Mosaic", target_safe: "m",
+        type: "Nebula", total_exposure_s: 4 * 3600, score: 90,
+        field_fulls: 4,
+      }),
+    ]);
+    const out = pickContinueTonight(p)!;
+    expect(out.pick.target.target_safe).toBe("m");
+    expect(out.pick.readiness?.level).not.toBe("plenty");
+    expect(out.pick.readiness?.goalHours).toBe(16);
+  });
+
   it("caps the runners-up list", () => {
     const p = plan([
       target({ name: "A", target_safe: "a", total_exposure_s: 4 * 3600 }),

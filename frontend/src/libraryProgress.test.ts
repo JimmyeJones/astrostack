@@ -17,6 +17,7 @@ function row(over: Partial<TargetProgress> & { safe: string }): TargetProgress {
     object_type: over.object_type ?? null,
     goal_s: over.goal_s ?? null,
     recent_pace_s: over.recent_pace_s ?? null,
+    field_fulls: over.field_fulls ?? null,
   };
 }
 
@@ -49,6 +50,28 @@ describe("rankLibraryProgress", () => {
     ]);
     expect(withGoal[0].readiness.level).toBe("plenty");
     expect(withGoal[0].readiness.customGoal).toBe(true);
+  });
+
+  it("scales a mosaic's per-type goal by its panel count when ranking", () => {
+    // The canonical bug shape: 4 h totalled on a nebula (default 4 h goal)
+    // reads as 'plenty' as a single field — that ranks it below every
+    // in-progress row. On a 2×2 mosaic each panel is a quarter done, so the
+    // scaled goal is 16 h and the row belongs *up* with the in-progress ones.
+    const single = rankLibraryProgress([
+      row({ safe: "S", object_type: "nebula", total_exposure_s: 4 * 3600 }),
+    ]);
+    expect(single[0].readiness.level).toBe("plenty");
+    const mosaic = rankLibraryProgress([
+      row({
+        safe: "M",
+        object_type: "nebula",
+        total_exposure_s: 4 * 3600,
+        field_fulls: 4,
+      }),
+    ]);
+    expect(mosaic[0].readiness.level).not.toBe("plenty");
+    expect(mosaic[0].readiness.goalHours).toBe(16);
+    expect(mosaic[0].readiness.fieldFulls).toBe(4);
   });
 });
 

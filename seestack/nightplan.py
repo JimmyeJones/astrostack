@@ -310,6 +310,13 @@ class PlannedTarget:
     # catalog row, for a target without enough night history, and on an older
     # backend — the row then falls back to the readiness badge as before.
     recent_pace_s: float | None = None
+    # How many single-frame field-fulls of sky this target's newest stack
+    # covers (see :mod:`webapp.field_fulls`), so the row's readiness hint can
+    # scale the per-object-type goal by the panel count. ``None`` for a
+    # catalog row, for a target with no stacked picture yet, and on an older
+    # backend — the row then falls back to the un-scaled goal (today's
+    # behaviour). Purely annotation: it never affects scoring or ranking.
+    field_fulls: float | None = None
     # "Will it fit in one Seestar frame?" — major-axis size (arcmin) and the
     # verdict derived from it, for catalog candidates the bundled catalog has a
     # size for; ``None`` otherwise (library rows carry none — the Target page
@@ -974,6 +981,15 @@ class LibraryTarget:
     # ("~1 more night finishes this"), in the same words the Dashboard and the
     # Target page use. Purely annotation: it never affects scoring or ranking.
     recent_pace_s: float | None = None
+    # How many single-frame field-fulls of sky this target's newest stack
+    # covers (see :mod:`webapp.field_fulls`). Carried so the planner's row hint
+    # can scale the per-object-type goal by the panel count — without it, a
+    # four-panel mosaic at 1 h/panel is told "Plenty — try something new" when
+    # each panel is a quarter done. ``None`` for a catalog row, for a target
+    # with no stacked picture yet, and on an older backend — the row then
+    # falls back to the un-scaled goal (today's behaviour). Purely annotation:
+    # it never affects scoring or ranking.
+    field_fulls: float | None = None
     # "Last time this landed off-centre — nudge a little south before you start."
     # The framing advice from this target's newest finished picture. It exists
     # today only on the card a beginner reads the morning after, by which point
@@ -1078,6 +1094,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 total_exposure_s=round(t.total_exposure_s, 1),
                 goal_s=t.goal_s,
                 recent_pace_s=t.recent_pace_s,
+                field_fulls=t.field_fulls,
                 recentre_nudge=t.recentre_nudge,
             ))
         else:
