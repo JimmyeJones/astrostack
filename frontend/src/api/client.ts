@@ -950,6 +950,10 @@ export interface Frame {
   id: number;
   name: string;
   timestamp_utc: string | null;
+  /** The observing night this sub belongs to (`YYYY-MM-DD`), bucketed
+   *  noon-to-noon in the observer's local time — the same night the picture
+   *  above the table is dated by. Optional: an older backend omits it. */
+  night_date?: string | null;
   exposure_s: number | null;
   gain: number | null;
   width_px: number | null;

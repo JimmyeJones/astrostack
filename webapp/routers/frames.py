@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
+from seestack.activity_calendar import night_date_of
 from seestack.io.project import (
     FrameRow,
     count_unreadable_frames,
@@ -26,6 +27,7 @@ from seestack.solve.astap import (
 )
 from webapp import deps
 from webapp.rejection_summary import summarize_rejections
+from webapp.site_location import resolve_site_lon
 from webapp.schemas import (
     BulkFrameAction,
     FrameOut,
@@ -96,11 +98,30 @@ def trailed_frame_ids(frames: list[FrameRow]) -> list[int]:
     return [f.id for f in measured if f.eccentricity_median > threshold]
 
 
-def _to_out(f: FrameRow) -> FrameOut:
+def _frame_night_date(timestamp_utc: str | None, lon_deg: float | None) -> str | None:
+    """The observing-night date a sub belongs to, as ISO ``YYYY-MM-DD``.
+
+    The same noon-to-noon bucketing (:func:`seestack.activity_calendar.night_date_of`)
+    the imaging calendar, the Nights card and every "Shot …" caption already use,
+    so the frames table can date a sub the way the rest of the app dates it. A
+    sub's own ``timestamp_utc`` is a raw UTC instant: for anyone west of
+    Greenwich an evening's subs carry *tomorrow's* UTC date, so a table showing
+    only that disagreed with the picture right above it about which night it came
+    from. ``None`` when the stamp is missing or unparseable — the caller then
+    shows the clock alone rather than guessing a night.
+    """
+    if not timestamp_utc:
+        return None
+    d = night_date_of(timestamp_utc, lon_deg)
+    return d.isoformat() if d is not None else None
+
+
+def _to_out(f: FrameRow, lon_deg: float | None = None) -> FrameOut:
     return FrameOut(
         id=f.id,
         name=Path(f.source_path).name,
         timestamp_utc=f.timestamp_utc,
+        night_date=_frame_night_date(f.timestamp_utc, lon_deg),
         exposure_s=f.exposure_s,
         gain=f.gain,
         width_px=f.width_px,
@@ -142,9 +163,14 @@ def list_frames(
     # every frame but the last) instead of the requested page.
     offset = max(0, offset)
     limit = max(0, limit)
+    settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
         frames = list(proj.iter_frames(accepted_only=accepted_only))
+        # Resolved once for the whole page (it is cached on the app anyway), and
+        # while the library handle is still open — the same call the Nights card's
+        # endpoint makes, so a sub's night and its night's row can't disagree.
+        lon = resolve_site_lon(request, lib, settings.site_lon)
     finally:
         proj.close()
         lib.close()
@@ -161,7 +187,7 @@ def list_frames(
     unmeasured = [f for f in frames if getattr(f, sort) is None]
     measured.sort(key=lambda f: getattr(f, sort), reverse=reverse)
     frames = measured + unmeasured
-    return [_to_out(f) for f in frames[offset : offset + limit]]
+    return [_to_out(f, lon) for f in frames[offset : offset + limit]]
 
 
 def _solve_setup_problem(counts: dict[str, int]) -> dict | None:
@@ -369,12 +395,13 @@ def auto_grade_apply(
 
 @router.get("/{frame_id}", response_model=FrameOut)
 def get_frame(safe: str, frame_id: int, request: Request) -> FrameOut:
+    settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
         f = proj.get_frame(frame_id)
         if f is None:
             raise HTTPException(status_code=404, detail="No such frame")
-        return _to_out(f)
+        return _to_out(f, resolve_site_lon(request, lib, settings.site_lon))
     finally:
         proj.close()
         lib.close()
@@ -382,6 +409,7 @@ def get_frame(safe: str, frame_id: int, request: Request) -> FrameOut:
 
 @router.patch("/{frame_id}", response_model=FrameOut)
 def patch_frame(safe: str, frame_id: int, body: FramePatch, request: Request) -> FrameOut:
+    settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     # Nest proj-close inside lib-close (as apply_grade above does) so the library
     # handle is released on *every* exit — including the 404/no-such-frame and
@@ -411,7 +439,10 @@ def patch_frame(safe: str, frame_id: int, body: FramePatch, request: Request) ->
                 patch["bayer_pattern"] = bp
             if patch:
                 proj.update_frame(frame_id, **patch)
-            out = _to_out(proj.get_frame(frame_id))
+            out = _to_out(
+                proj.get_frame(frame_id),
+                resolve_site_lon(request, lib, settings.site_lon),
+            )
         finally:
             proj.close()
         if body.accept is not None:

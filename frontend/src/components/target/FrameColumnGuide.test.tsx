@@ -29,13 +29,17 @@ describe("FrameColumnGuide", () => {
     // explaining is what has to appear, so a column added later can't quietly
     // arrive with a phone-invisible tooltip and nothing else.
     const explained = FRAME_COLUMNS.filter((c) => c.hint);
-    expect(explained.length).toBeGreaterThanOrEqual(4);
+    expect(explained.length).toBeGreaterThanOrEqual(5);
     for (const c of explained) {
       expect(screen.getByText(c.label)).toBeVisible();
       expect(screen.getByText(c.hint as string)).toBeVisible();
     }
-    // The one column that explains itself doesn't get a redundant entry.
-    expect(screen.queryByText("Time (UTC)")).not.toBeInTheDocument();
+    // The date column used to be exempt here as "the one that explains itself" —
+    // and it was the column quietly disagreeing with the picture above the table
+    // about which night a sub came from. It now says what a night is.
+    const when = FRAME_COLUMNS.find((c) => c.key === "timestamp_utc");
+    expect(when?.hint).toContain("noon to noon");
+    expect(screen.getByText(when?.hint as string)).toBeVisible();
   });
 
   it("uses the tooltips' own words, so the two can't drift apart", () => {
