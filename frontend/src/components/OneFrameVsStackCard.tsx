@@ -56,7 +56,8 @@ export function OneFrameVsStackCard({
   // a beginner can tell a healthy stack from an underperforming one instead of
   // reading a factor with nothing to compare it to.
   const expected = noiseVsExpectedNote(
-    noise.data?.expected_verdict, noise.data?.ratio, info.data.n_frames);
+    noise.data?.expected_verdict, noise.data?.ratio, info.data.n_frames,
+    noise.data?.expected_frames, noise.data?.expected_basis);
 
   const moveTo = (clientX: number) => {
     const rect = boxRef.current?.getBoundingClientRect();

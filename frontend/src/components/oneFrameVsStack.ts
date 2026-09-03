@@ -64,8 +64,16 @@ export function noiseReductionBadge(
 
 /** Big reductions read as a whole number ("15×"); smaller ones keep one decimal
  *  ("2.4×") — but drop a trailing ".0" so a value that rounds up to a whole
- *  number ("10.0") shows cleanly as "10×". */
-function factorLabel(value: number): string {
+ *  number ("10.0") shows cleanly as "10×".
+ *
+ *  Mirrored by hand in `seestack.stackhealth._factor_label`, which writes the
+ *  "How's my stack?" note about the *same* run — a user reads both minutes
+ *  apart, so a drift shows up as the app contradicting itself about one picture.
+ *  The two are pinned against one shared table, `factorLabel.cases.json`, driven
+ *  from this file's test and from `tests/test_factor_label_mirror.py`: change the
+ *  rule and you have to change the table, on both sides. Exported for that test
+ *  only. */
+export function factorLabel(value: number): string {
   const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
@@ -91,9 +99,16 @@ export interface NoiseVsExpected {
  * This function only writes the sentence for it.
  *
  * Returns null when there is nothing trustworthy to say: no verdict (no
- * measurement, too few frames for √N to mean anything, or a mosaic — whose
- * central crop only ever saw one panel's subs while the frame count is the whole
- * target's), or a ratio/count the sentence can't name.
+ * measurement, too few frames for √N to mean anything, or a mosaic whose crop
+ * depth nothing has measured), or a ratio/count the sentence can't name.
+ *
+ * **Which N.** The yardstick is `expectedFrames` — the count the server actually
+ * judged against — and `basis` says what it counts, so the sentence names the
+ * right thing rather than inferring it. On a single field that is the run's own
+ * frame count; on a **mosaic** it is the frame depth at the crop the ratio was
+ * measured over, because no pixel there ever saw more than its own panel's subs.
+ * A backend too old to send either falls back to `nFrames`, i.e. exactly today's
+ * single-field sentence.
  *
  * The healthy sentence assumes the badge is beside it (it is: anything at or
  * above 0.7·√10 also clears the badge's own 1.5× floor), so it doesn't repeat
@@ -105,25 +120,40 @@ export function noiseVsExpectedNote(
   verdict: string | null | undefined,
   ratio: number | null | undefined,
   nFrames: number | null | undefined,
+  expectedFrames?: number | null,
+  basis?: string | null,
 ): NoiseVsExpected | null {
   if (verdict !== "expected" && verdict !== "low") return null;
   if (ratio == null || !Number.isFinite(ratio) || ratio <= 0) return null;
-  if (nFrames == null || !Number.isFinite(nFrames)) return null;
-  const n = Math.trunc(nFrames);
+  const yardstick =
+    expectedFrames != null && Number.isFinite(expectedFrames)
+      ? expectedFrames
+      : nFrames;
+  if (yardstick == null || !Number.isFinite(yardstick)) return null;
+  const n = Math.trunc(yardstick);
   if (n <= 0) return null;
   const expLabel = factorLabel(Math.sqrt(n));
+  const mosaic = basis === "mosaic_centre";
   if (verdict === "expected") {
     return {
-      text: `That's about what ${n} subs should give (√${n} ≈ ${expLabel}×).`,
+      text: mosaic
+        ? `That's about what the ${n} subs covering the middle of this mosaic ` +
+          `should give (√${n} ≈ ${expLabel}×).`
+        : `That's about what ${n} subs should give (√${n} ≈ ${expLabel}×).`,
       concern: false,
     };
   }
+  const lead = mosaic
+    ? `About ${n} subs cover the middle of this mosaic, which should cut the ` +
+      `noise about ${expLabel}× (√${n}), and it came in nearer ` +
+      `${factorLabel(ratio)}×.`
+    : `${n} subs should cut the noise about ${expLabel}× (√${n}), and this ` +
+      `stack came in nearer ${factorLabel(ratio)}×.`;
   return {
     text:
-      `${n} subs should cut the noise about ${expLabel}× (√${n}), and this ` +
-      `stack came in nearer ${factorLabel(ratio)}×. That usually means the ` +
-      `subs didn't line up tightly, or a lot of them were dropped — worth ` +
-      `checking focus and alignment on your next night.`,
+      `${lead} That usually means the subs didn't line up tightly, or a lot ` +
+      `of them were dropped — worth checking focus and alignment on your next ` +
+      `night.`,
     concern: true,
   };
 }

@@ -2504,6 +2504,90 @@ def _measure_noise_ratio(fits_path: str, sub_path: str, pattern: str) -> float |
     return noise_ratio(sub_rgb, stack_rgb)
 
 
+def _measure_crop_depth(fits_path: str) -> int | None:
+    """How many subs actually cover the crop :func:`_measure_noise_ratio` measures.
+
+    The √N yardstick and the measurement have to describe the same pixels. On a
+    single field they always do — every pixel saw every frame — but on a mosaic
+    the crop only ever saw its own panel's subs, so the run's whole frame count
+    over-expects by √(panels) and reads "low" at every depth (the false alarm
+    v0.331.2 fixed by silence). This is the number that lets the mosaic be graded
+    instead of skipped.
+
+    Read, never measured: the run already wrote a per-pixel frame count beside its
+    master (``{stem}_framecov.fits``), and this takes the **median over exactly
+    the crop** :func:`_crop_origin` takes — a windowed read off the memory map, so
+    a 150 MP mosaic costs the same 1024² patch the ratio itself does.
+
+    The **median**, deliberately, not ``coverage_max``: the deepest pixel anywhere
+    on the canvas belongs to the deepest panel, so on a lopsided mosaic (a 200-sub
+    panel beside a 3-sub one) it would put the same false alarm back, just less
+    often — and a warning that is wrong only sometimes is harder to notice than
+    one that is always wrong. Uncovered pixels (0 or NaN) are excluded: they are
+    "no data", not "zero subs deep".
+
+    ``None`` — no sibling (any run stacked before it existed, or an output dir
+    that has been tidied), an unreadable one, a sibling whose canvas isn't this
+    master's, or a crop with nothing covered. Every one of those leaves the mosaic
+    exactly as silent as it is today.
+    """
+    import numpy as np
+    from astropy.io import fits as _fits
+
+    from seestack.edit.proxy import frame_coverage_path_for
+
+    path = frame_coverage_path_for(fits_path)
+    if not path.exists():
+        return None
+    try:
+        master_shape = _master_canvas_shape(fits_path)
+        with _fits.open(path, memmap=True) as hdul:
+            data = next((h.data for h in hdul if h.data is not None), None)
+            if data is None or data.ndim != 2:
+                return None
+            if master_shape is not None and tuple(data.shape) != master_shape:
+                # A sibling from a different canvas (a hand-tidied output dir, a
+                # restored backup) is not this picture's coverage — say nothing
+                # rather than judge one image by another's map.
+                return None
+            y0, x0 = _crop_origin(data.shape[0], data.shape[1])
+            crop = np.asarray(
+                data[y0:y0 + _NOISE_CROP_PX, x0:x0 + _NOISE_CROP_PX],
+                dtype=np.float32)
+    except Exception:  # noqa: BLE001 — best-effort; no depth just means no verdict
+        return None
+
+    covered = crop[np.isfinite(crop) & (crop > 0)]
+    if covered.size == 0:
+        return None
+    depth = int(round(float(np.median(covered))))
+    return depth if depth > 0 else None
+
+
+def _master_canvas_shape(fits_path: str) -> tuple[int, int] | None:
+    """``(H, W)`` of a master's image plane, without reading a pixel of it.
+
+    Used only to reject a coverage sibling that belongs to some other canvas, so
+    an unreadable master simply declines to check rather than declining the
+    measurement.
+    """
+    from astropy.io import fits as _fits
+
+    try:
+        with _fits.open(fits_path, memmap=True) as hdul:
+            for h in hdul:
+                shape = getattr(h, "shape", None)
+                if not shape:
+                    continue
+                if len(shape) == 3:
+                    return int(shape[1]), int(shape[2])
+                if len(shape) == 2:
+                    return int(shape[0]), int(shape[1])
+    except Exception:  # noqa: BLE001 — an unreadable master skips the check
+        return None
+    return None
+
+
 # Where the measured noise-reduction ratio is remembered, per stack run. The
 # number is a pure function of two immutable things — the finished master and
 # the representative sub it is measured against — but the endpoint that serves
@@ -2543,45 +2627,62 @@ def _noise_ratio_fingerprint(fits_path: str, ref_id: int | None) -> dict[str, An
     }
 
 
-def _cached_noise_ratio(proj: Any, run_id: int,
-                        fingerprint: dict[str, Any]) -> tuple[bool, float | None]:
-    """``(hit, ratio)`` for a stamped measurement matching ``fingerprint``.
+def _cached_noise_ratio(
+    proj: Any, run_id: int, fingerprint: dict[str, Any]
+) -> tuple[bool, float | None, int | None]:
+    """``(hit, ratio, crop_depth)`` for a stamped measurement matching ``fingerprint``.
 
     ``hit`` is False on a missing, unparsable or stale stamp — including one
     written against a different master or a different representative sub — so a
     miss always falls through to a fresh measurement. A stamped ``null`` (an
     edited/display-space export, or an unmeasurable image) is a real hit: it is
     just as stable as a number, and re-deriving it costs the same FITS open.
+
+    ``crop_depth`` is the frame depth at the measured crop, stamped beside the
+    ratio (see :func:`_measure_crop_depth`). It is ``None`` on every stamp written
+    before it existed — which is a **hit with an unknown depth**, not a miss: the
+    ratio those stamps carry is as good as it ever was, and re-measuring a whole
+    library's masters to learn a number only mosaics use would be exactly the
+    disk churn this cache exists to avoid. A mosaic heals its own stamp lazily,
+    on the one request that needs it.
     """
     raw = proj.get_meta(f"{NOISE_RATIO_META_PREFIX}{run_id}")
     if not raw:
-        return False, None
+        return False, None, None
     try:
         stamp = json.loads(raw)
     except (ValueError, TypeError):
-        return False, None
+        return False, None, None
     if not isinstance(stamp, dict):
-        return False, None
+        return False, None, None
     if any(stamp.get(k) != v for k, v in fingerprint.items()):
-        return False, None
+        return False, None, None
+    depth = stamp.get("crop_depth")
+    try:
+        depth = int(depth) if depth is not None else None
+    except (TypeError, ValueError):
+        depth = None
     ratio = stamp.get("ratio")
     if ratio is None:
-        return True, None
+        return True, None, depth
     try:
-        return True, float(ratio)
+        return True, float(ratio), depth
     except (TypeError, ValueError):
-        return False, None
+        return False, None, None
 
 
-def stamped_noise_ratio(proj: Any, run: Any, frames: list[Any]) -> float | None:
-    """The *remembered* "stacking cut your noise ~N×" ratio for ``run``, or ``None``.
+def stamped_noise_measurement(
+    proj: Any, run: Any, frames: list[Any]
+) -> tuple[float | None, int | None]:
+    """The *remembered* ``(ratio, crop_depth)`` for ``run`` — the "stacking cut
+    your noise ~N×" figure and the frame depth at the crop it was measured over.
 
     Read-only and cheap — one ``project_meta`` lookup plus one ``stat`` of the
     master — and it **never measures**: a run nothing has measured yet reads as
-    ``None``, and starts answering the moment the reveal card measures it once.
-    That is what makes the "How's my stack?" note affordable on a page that must
-    stay cheap; a note that reloaded the master and re-debayered a sub on every
-    Target-page view would be a real regression.
+    ``(None, None)``, and starts answering the moment the reveal card measures it
+    once. That is what makes the "How's my stack?" note affordable on a page that
+    must stay cheap; a note that reloaded the master and re-debayered a sub on
+    every Target-page view would be a real regression.
 
     The stamp's fingerprint is honoured in full (see :func:`_cached_noise_ratio`),
     so a number measured against a master that has since been re-stacked, or
@@ -2589,14 +2690,21 @@ def stamped_noise_ratio(proj: Any, run: Any, frames: list[Any]) -> float | None:
     about a picture that no longer exists.
     """
     if not run.fits_path:
-        return None
+        return None, None
     ref = reference_sub_from_frames(frames)
     fingerprint = _noise_ratio_fingerprint(
         run.fits_path, getattr(ref, "id", None) if ref is not None else None)
     if fingerprint is None:
-        return None
-    hit, ratio = _cached_noise_ratio(proj, run.id, fingerprint)
-    return ratio if hit else None
+        return None, None
+    hit, ratio, depth = _cached_noise_ratio(proj, run.id, fingerprint)
+    return (ratio, depth) if hit else (None, None)
+
+
+def stamped_noise_ratio(proj: Any, run: Any, frames: list[Any]) -> float | None:
+    """The remembered noise ratio alone — see :func:`stamped_noise_measurement`,
+    which also carries the depth a mosaic has to be judged against. Kept so any
+    caller that only wants the number is unaffected."""
+    return stamped_noise_measurement(proj, run, frames)[0]
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise")
@@ -2615,10 +2723,15 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
     :func:`seestack.stackhealth.noise_vs_expected` the "How's my stack?" note
     uses — so the card renders a *sentence* for a judgement made in one place
     rather than re-typing the threshold in TypeScript. Additive: an older client
-    simply ignores the field. It is ``null`` on a **mosaic**, whose central crop
-    only ever saw one panel's subs while ``n_frames_used`` counts them all — see
-    that function. The ``ratio`` itself is still measured and served there; it is
-    only the √N reading of it that has no honest answer.
+    simply ignores the field.
+
+    ``expected_frames`` is the N that verdict was made against, and
+    ``expected_basis`` says which count that is: ``"stack"`` (the run's own frame
+    count, on a single field, where every pixel saw every frame) or
+    ``"mosaic_centre"`` (the frame depth measured at the crop the ratio came from,
+    which is the only honest yardstick on a mosaic canvas — see
+    :func:`_measure_crop_depth`). Both are ``null`` whenever the verdict is, so
+    the card never has to work out which number its own sentence should name.
 
     The first measurement for a run is **remembered** (``NOISE_RATIO_META_PREFIX``,
     fingerprinted on the master and the representative sub) so the repeat views
@@ -2626,7 +2739,7 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
     a number that cannot have changed. The stamp is a cache, never a source of
     truth: any mismatch, or a project that can't be written, simply measures.
     """
-    from seestack.stackhealth import noise_vs_expected
+    from seestack.stackhealth import noise_vs_expected, noise_yardstick_frames
 
     lib, proj = deps.open_target_project(request, safe)
     try:
@@ -2635,9 +2748,10 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
             raise HTTPException(status_code=404, detail="No such run")
         fits_path = run.fits_path
         n_frames = run.n_frames_used
-        # A mosaic has no single N to hold the ratio against — see
-        # `noise_vs_expected`, which also withholds on the NULL an older run
-        # carries. Read here so both return paths below have it.
+        # A mosaic is held against the depth at the measured crop, not the whole
+        # target's frame count — see `noise_yardstick_frames`, which also
+        # withholds on the NULL an older run carries. Read here so every return
+        # path below has it.
         is_mosaic = run.is_mosaic
         ref = _pick_reference_sub(proj)
         ref_id = getattr(ref, "id", None) if ref is not None else None
@@ -2648,22 +2762,46 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
         fingerprint = (
             _noise_ratio_fingerprint(fits_path, ref_id) if fits_path else None
         )
-        if fingerprint is not None:
-            hit, cached = _cached_noise_ratio(proj, run_id, fingerprint)
-            if hit:
-                return {"ratio": cached,
-                        "expected_verdict": noise_vs_expected(
-                            cached, n_frames, is_mosaic)}
+        hit, ratio, crop_depth = (
+            _cached_noise_ratio(proj, run_id, fingerprint)
+            if fingerprint is not None else (False, None, None)
+        )
     finally:
         proj.close()
         lib.close()
 
-    if (not fits_path or not Path(fits_path).exists()
-            or not src or not Path(src).exists()):
-        return {"ratio": None, "expected_verdict": None}
+    def _answer(r: float | None, depth: int | None) -> dict[str, Any]:
+        verdict = noise_vs_expected(r, n_frames, is_mosaic, depth)
+        yardstick = (noise_yardstick_frames(n_frames, is_mosaic, depth)
+                     if verdict is not None else None)
+        return {
+            "ratio": r,
+            "expected_verdict": verdict,
+            "expected_frames": yardstick,
+            "expected_basis": (None if yardstick is None
+                               else "mosaic_centre" if is_mosaic else "stack"),
+        }
 
-    ratio = await run_in_threadpool(_measure_noise_ratio, str(fits_path), str(src), pattern)
-    if fingerprint is not None:
+    have_master = bool(fits_path) and Path(str(fits_path)).exists()
+    if not hit:
+        if not have_master or not src or not Path(src).exists():
+            return _answer(None, None)
+        ratio = await run_in_threadpool(
+            _measure_noise_ratio, str(fits_path), str(src), pattern)
+
+    # The crop depth is only ever *used* by a mosaic, so a single field never
+    # opens the coverage sibling at all. A mosaic reads it once — a windowed read
+    # of a map already on disk — and the result rides along on the same stamp, so
+    # a run measured before this existed heals on the request that needs it
+    # instead of re-measuring the ratio it already has. When there is no sibling
+    # to read, the retry costs one `stat` and the mosaic stays silent, as it is
+    # today.
+    healed = False
+    if is_mosaic and crop_depth is None and have_master:
+        crop_depth = await run_in_threadpool(_measure_crop_depth, str(fits_path))
+        healed = crop_depth is not None
+
+    if fingerprint is not None and (not hit or healed):
         # Best-effort stamp — a read-only or busy project must still serve the
         # number it just measured.
         with contextlib.suppress(Exception):
@@ -2671,13 +2809,13 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
             try:
                 wproj.set_meta(
                     f"{NOISE_RATIO_META_PREFIX}{run_id}",
-                    json.dumps({**fingerprint, "ratio": ratio}),
+                    json.dumps({**fingerprint, "ratio": ratio,
+                                "crop_depth": crop_depth}),
                 )
             finally:
                 wproj.close()
                 wlib.close()
-    return {"ratio": ratio,
-            "expected_verdict": noise_vs_expected(ratio, n_frames, is_mosaic)}
+    return _answer(ratio, crop_depth)
 
 
 # Human-relevant provenance cards, in display order. Keys not present in a

@@ -761,3 +761,109 @@ def test_the_health_note_stays_off_a_mosaic():
     # suppression is the mosaic flag and nothing else.
     single = _run(n_frames_used=400, is_mosaic=False, coverage_min=1, coverage_max=100)
     assert "noise_low" in _kinds(stack_health(single, frames, noise_ratio=10.0))
+
+
+# --- the honest mosaic yardstick: the depth at the crop the ratio came from ---
+# v0.331.2 fixed the mosaic false alarm by *silence*, because nothing recorded
+# how deep the measured crop actually was. Now something does, so a mosaic is
+# judged rather than skipped — against its own panel depth, never the target's
+# whole frame count.
+
+def test_a_mosaic_is_judged_against_the_depth_at_the_measured_crop():
+    """The exact shape of the false alarm, now answered rather than dodged: a
+    four-panel mosaic 100 subs deep per panel achieves ~√100 = 10×, which is
+    healthy for the pixels the ratio was measured over — even though the run
+    used 400 frames."""
+    from seestack.stackhealth import noise_vs_expected
+
+    assert noise_vs_expected(10.0, 400) == "low"                  # the alarm…
+    assert noise_vs_expected(10.0, 400, is_mosaic=True) is None    # …silenced…
+    # …and now answered honestly, in both directions.
+    assert noise_vs_expected(10.0, 400, is_mosaic=True, crop_depth=100) \
+        == "expected"
+    assert noise_vs_expected(4.0, 400, is_mosaic=True, crop_depth=100) == "low"
+
+
+def test_the_mosaic_yardstick_is_the_crop_depth_not_the_whole_count():
+    """The number the sentence may name. Getting this wrong is how the false
+    alarm came back in v0.331.2's predecessor."""
+    from seestack.stackhealth import noise_yardstick_frames
+
+    assert noise_yardstick_frames(400, True, 100) == 100
+    # A single field's every pixel saw every frame, so the run's own count is
+    # the honest one — and a stray crop depth may not quietly re-grade it.
+    assert noise_yardstick_frames(400, False, 100) == 400
+    assert noise_yardstick_frames(400, False) == 400
+
+
+def test_a_mosaic_with_no_measured_crop_depth_stays_silent():
+    """Every way the depth can be unavailable — an older run, a tidied output
+    dir, an unreadable sibling — must leave the mosaic exactly as quiet as it is
+    today. Being told a healthy picture underperformed is the expensive error."""
+    from seestack.stackhealth import noise_vs_expected, noise_yardstick_frames
+
+    assert noise_vs_expected(10.0, 400, is_mosaic=True, crop_depth=None) is None
+    assert noise_vs_expected(20.0, 400, is_mosaic=True, crop_depth=None) is None
+    assert noise_yardstick_frames(400, True, None) is None
+    # A nonsense depth is "unknown", not "zero subs deep".
+    assert noise_yardstick_frames(400, True, 0) is None
+    assert noise_yardstick_frames(400, True, -3) is None
+    assert noise_yardstick_frames(400, True, "deep") is None
+    # An unclassified run (schema < 8) still withholds, depth or no depth.
+    assert noise_yardstick_frames(400, None, 100) is None
+    assert noise_vs_expected(10.0, 400, is_mosaic=None, crop_depth=100) is None
+
+
+def test_a_thin_mosaic_panel_is_below_the_floor_like_any_other_stack():
+    """√N means nothing under the floor whichever count supplied the N — a
+    3-sub panel of a 400-frame mosaic is judged no more than a 3-sub stack."""
+    from seestack.stackhealth import NOISE_EXPECTED_MIN_FRAMES, noise_vs_expected
+
+    thin = NOISE_EXPECTED_MIN_FRAMES - 1
+    assert noise_vs_expected(1.0, 400, is_mosaic=True, crop_depth=thin) is None
+    assert noise_vs_expected(1.0, 400, is_mosaic=True,
+                             crop_depth=NOISE_EXPECTED_MIN_FRAMES) == "low"
+
+
+def test_the_mosaic_health_note_names_the_panel_depth_not_the_target_total():
+    """A mosaic that really did underperform now gets the note — and the
+    sentence says "the middle of this mosaic", because "400 subs should give
+    20×" is simply not a claim about a panel."""
+    frames = [_frame() for _ in range(40)]
+    mosaic = _run(n_frames_used=400, is_mosaic=True,
+                  coverage_min=1, coverage_max=100)
+    notes = stack_health(mosaic, frames, noise_ratio=4.0, noise_crop_depth=100)
+    msg = next((n.message for n in notes if n.kind == "noise_low"), None)
+    assert msg is not None
+    assert "About 100 subs cover the middle of this mosaic" in msg
+    assert "about 10× (√100)" in msg
+    assert "nearer 4×" in msg
+    # The whole target's count must not appear anywhere in the sentence.
+    assert "400" not in msg
+    # Still a suggestion with nothing to press, like the single-field note.
+    assert "usually means" in msg
+    assert next(n for n in notes if n.kind == "noise_low").action is None
+
+
+def test_a_healthy_mosaic_gets_no_note_now_that_it_can_be_judged():
+    """The direction that matters most: measuring the depth must not turn the
+    suppression into a warning. 10× on 100-deep panels is healthy."""
+    frames = [_frame() for _ in range(40)]
+    mosaic = _run(n_frames_used=400, is_mosaic=True,
+                  coverage_min=1, coverage_max=100)
+    assert "noise_low" not in _kinds(
+        stack_health(mosaic, frames, noise_ratio=10.0, noise_crop_depth=100))
+
+
+def test_a_single_field_note_is_untouched_by_the_new_argument():
+    """Upgrade safety, stated as a test: a crop depth may never change what a
+    single-field stack is told, however far it is from the frame count."""
+    frames = [_frame() for _ in range(40)]
+    single = _run(n_frames_used=100, is_mosaic=False)
+    plain = stack_health(single, frames, noise_ratio=4.0)
+    withdepth = stack_health(single, frames, noise_ratio=4.0,
+                             noise_crop_depth=9)
+    assert [(n.kind, n.message) for n in plain] == \
+        [(n.kind, n.message) for n in withdepth]
+    assert "100 subs should cut the background noise about 10×" in \
+        next(n.message for n in plain if n.kind == "noise_low")
