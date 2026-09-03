@@ -25,6 +25,7 @@ from seestack.io.scanner import (
     is_capture_mode_target_name,
     is_mosaic_target_name,
     is_temp_folder_target_name,
+    junk_output_examine_cap,
     junk_output_frame_cap,
     mosaic_target_name,
     run_qc_and_solve,
@@ -303,6 +304,79 @@ def test_is_temp_folder_target_name_matches_only_the_listed_names():
     assert is_temp_folder_target_name("  BATCH_STACK_TMP  ")
     assert not is_temp_folder_target_name("M 31")
     assert not is_temp_folder_target_name("M 31_sub")
+
+
+def test_classify_junk_a_season_of_on_device_outputs_named_stacked(tmp_path):
+    """The device writes one stacked output per **session**, so a folder shot
+    across a season holds a pile of them — the owner's real ``M 3`` carries 22,
+    ``M 101`` 11, ``M 13`` 9. Every one of those sails past the ≤2 count cap and
+    the cleanup nudge never offered them, so they linger forever. The filenames
+    are the evidence a count cannot supply."""
+    (tmp_path / "M 3_sub").mkdir()          # the raw-subs sibling
+    output = tmp_path / "M 3"               # the on-device output folder
+    output.mkdir()
+    sessions = [str(output / f"Stacked_10.0s_M 3_{i:02d}.fit") for i in range(22)]
+    v = classify_seestar_junk_target("M 3", sessions, n_frames=22)
+    assert v is not None and v.reason == "on_device_output"
+    # The wording must count what it is offering to delete: "that one
+    # lower-resolution frame" is simply false about twenty-two of them.
+    assert "22" in v.detail and "single stacked image" not in v.detail
+    assert "M 3_sub" in v.detail
+
+
+def test_classify_junk_a_deep_mosaic_pile_of_on_device_outputs(tmp_path):
+    """A mosaic multiplies the same problem — one output per panel *per session*
+    — so even the looser 32-frame mosaic cap runs out. The filename evidence
+    covers it, and the mosaic wording still wins because it is the more specific
+    truth about what those images are."""
+    (tmp_path / "M 44_mosaic_sub").mkdir()
+    output = tmp_path / "M 44_mosaic"
+    output.mkdir()
+    panels = [str(output / f"Stacked_{i:03d}.fit") for i in range(60)]
+    v = classify_seestar_junk_target("M 44_mosaic", panels, n_frames=60)
+    assert v is not None and v.reason == "on_device_output"
+    assert "panel" in v.detail
+
+
+def test_classify_not_junk_when_one_frame_is_a_real_sub(tmp_path):
+    """The bar is **every** frame, not most of them: this nudge offers a
+    deletion, so a single ``Light_*.fit`` in the folder means the count cap
+    decides instead — and above the cap that means "not junk"."""
+    (tmp_path / "M 3_sub").mkdir()
+    output = tmp_path / "M 3"
+    output.mkdir()
+    mixed = [str(output / f"Stacked_{i:02d}.fit") for i in range(21)]
+    mixed.append(str(output / "Light_M 3_10.0s_IRCUT_0001.fit"))
+    assert classify_seestar_junk_target("M 3", mixed, n_frames=22) is None
+
+
+def test_classify_not_junk_by_filename_without_a_sub_sibling(tmp_path):
+    """The filename evidence only ever *adds* to the existing requirement — a
+    bare folder with no ``_sub`` sibling on disk is a non-Seestar layout the
+    scanner deliberately keeps, whatever its files are called."""
+    output = tmp_path / "M 3"
+    output.mkdir()
+    sessions = [str(output / f"Stacked_{i:02d}.fit") for i in range(22)]
+    assert classify_seestar_junk_target("M 3", sessions, n_frames=22) is None
+
+
+def test_classify_not_junk_for_a_stackedbyme_folder(tmp_path):
+    """The filename test is the strict one the ingest reject already uses —
+    ``StackedByMe.fit`` is somebody's own file, not the device's output."""
+    (tmp_path / "M 3_sub").mkdir()
+    output = tmp_path / "M 3"
+    output.mkdir()
+    mine = [str(output / f"StackedByMe{i:02d}.fit") for i in range(22)]
+    assert classify_seestar_junk_target("M 3", mine, n_frames=22) is None
+
+
+def test_junk_output_examine_cap_covers_a_season_but_not_a_real_target():
+    """The ceiling a caller uses to decide whether to open a project at all. It
+    must clear any plausible number of *sessions* (the owner's worst is 22) and
+    stay far below a real light-frame target (hundreds to thousands of subs)."""
+    assert junk_output_examine_cap() >= 22
+    assert junk_output_examine_cap() >= junk_output_frame_cap("M 44_mosaic")
+    assert junk_output_examine_cap() < 1000
 
 
 def test_junk_output_frame_cap_is_looser_only_for_a_mosaic():

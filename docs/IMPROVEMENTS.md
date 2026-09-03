@@ -1718,11 +1718,45 @@ _(nothing else claimed — claim an item here with your branch name)_
   UTC under a hero that says "Shot &lt;local night&gt;"~~ *(shipped v0.328.5, see below)*;
   ~~"nights" means **6-hour sessions** on the Nights card
   but **calendar nights** in captions~~ *(shipped v0.329.1, see below)*;
-  three hand-mirrored "is this a genuine run" predicates;
+  ~~three hand-mirrored "is this a genuine run" predicates~~ *(shipped v0.338.1 — and they **did** disagree;
+  see the note directly below)*;
   `POST /api/targets` has **no frontend caller**; ~~share and print JPEGs use 4:2:0 chroma subsampling~~
   *(shipped v0.328.0, see below)*; the "full
   data" TIFF anchors its white point on the single brightest surviving pixel *(traced 2026-09-03 — the
   mechanism is confirmed, but read the note below before "fixing" it)*.
+
+- **✅ SHIPPED (Builder, v0.338.1, branch `claude/sweet-babbage-f00hj6`) — ~~the three hand-mirrored "is this a
+  genuine run" predicates~~ — and they were not merely duplicated, they *disagreed*, in the direction that
+  shows a user a button nothing is behind.** Filed as a tidy-up; taken as a fix once the disagreement was
+  reproduced.
+
+  **What the three were.** `_is_reusable` (`webapp/routers/gallery.py`, on the Gallery card), `_run_is_reusable`
+  (`webapp/routers/stack.py`, on the History / Target run listing) and an inline copy inside
+  `GET …/stack-runs/{id}/options` — the endpoint the *"Reuse settings"* button those listings render actually
+  calls. All three implemented "not an `editor_recipe` run and not a `channel_combine` run", by hand.
+
+  **Where they parted company: a run that recorded no settings at all.** The Gallery's `_parse_options` reads
+  an empty / unparseable / non-object `options_json` as `{}` and `_is_reusable({})` is **True**; the endpoint's
+  inline copy likewise accepted `{}` and returned an empty form; but `_run_is_reusable` returns **False** on
+  the same run. So the Gallery offered "Reuse settings" on a run the History listing refused to, and the
+  button led to a form with nothing in it. Pinned before the fix, and it is the assertion that failed:
+  `AssertionError: gallery disagrees on empty`.
+
+  **One definition, and the empty case decided once.** `webapp/run_options.py` holds `parse_run_options` and
+  `run_has_reusable_options`, and the three sites call them. The verdict on an option-less run is now
+  **False** everywhere — a button that promises settings and delivers an empty form is worse than no button,
+  and it is the answer the listing the owner sees most (History) already gave. Every run that recorded real
+  options is unaffected: `options_json` is `NOT NULL` and every `run_stack` / editor-export path writes a real
+  object, so this only ever moves the answer for a degenerate row.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk or response-shape change; no endpoint added or removed.
+  The one behaviour change is a `400` (instead of a `200` carrying `{}`) on the options endpoint for a run
+  with no recorded settings — which is what both listings now say about it, and what the endpoint's own
+  docstring already promised for the sibling cases.
+
+  **Tests (+4; the two that matter fail before).** `tests/webapp/test_run_options.py`: the parse's five
+  unusable shapes, the predicate's three "no" cases, **the three surfaces agreeing across five run shapes**
+  (fails before on `empty`), and the symptom stated on its own so a regression names itself (fails before).
 
 - **⚪ TRACED, DELIBERATELY NOT BUILT (Builder 2026-09-03) — the "full data" TIFF's white point *is* the
   brightest surviving pixel, and moving it would trade a documented guarantee for an unmeasured gain.**
@@ -17727,6 +17761,43 @@ problems. Dogfood it every big-picture run and fix root causes.
   in full-res px). None of them can drop a region out of the op's scope the way the coverage-leveling
   floor did. **So this entry is the only remaining pixel-scale divergence, and it stays gated on real-data
   confirmation as filed.**
+
+  **⚪ GATE ANSWERED — MEASURED AND CLOSED; DO NOT BUILD THE ADVISORY (Builder 2026-09-03, branch
+  `claude/sweet-babbage-f00hj6`).** The entry's own condition was *"if confirmed visible on a real large
+  mosaic, add a sibling honest-advisory note"*. It was measured instead of argued, and the answer is that the
+  **floor is not what the divergence is made of** — so an advisory naming it would attribute an inherent
+  proxy limit to a tuning choice, which is a *less* honest caption than saying nothing.
+
+  **The measurement.** A 4000² scene decimated ×10 (the same `proxy_scale` a ~150 MP mosaic gets), sky =
+  0.12 with a linear + curved light-pollution gradient and a residual vignette, 600 stars, noise σ = 0.002.
+  Three subtractions: the export (`box_size=128` at full res), the preview as it is today
+  (`_scaled_box` → **16**), and the preview at the parity value the floor overrides (**13**). Residual sky
+  flatness after subtraction, and the preview's distance from the decimated export:
+
+  | | sky residual σ | vs. export, mean abs | vs. export, p0.5–p99.5 |
+  |---|---|---|---|
+  | export, box 128 @ full res | 0.00211 | — | — |
+  | preview, box **16** (today, floored) | 0.00235 | 0.00039 | 0.00433 (2.2 σ) |
+  | preview, box **13** (parity, unfloored) | 0.00220 | 0.00029 | 0.00275 (1.4 σ) |
+
+  **What that says.** The floor costs **0.00015** of extra sky residual — 7 % of one noise σ, on a sky sitting
+  at 0.12, i.e. about a **tenth of a percent** of the background level. And the preview differs from the
+  export by 1.4 σ *even at exact parity*: most of the gap is decimation itself (a strided proxy is a
+  different image), not the mesh size. Removing the floor entirely would close roughly a third of an already
+  sub-visible difference, while risking the degenerate proxy mesh the floor exists to prevent.
+
+  **One negative result worth keeping, because it was the near miss.** A first pass used a scene carrying
+  200-px-wavelength sinusoids — right between the two mesh sizes — and it *did* manufacture a difference
+  (mean abs 0.00192 floored vs 0.00143 at parity, a 34 % gap). Real light pollution and vignetting have no
+  structure at that scale in a 12,000-px canvas. **A fixture not shaped like the owner's sky manufactures
+  bugs as readily as it hides them** — the same lesson the A1 stand-down recorded, arrived at from the other
+  end. Re-run with an honest sky, the structured scene's *floor* effect vanishes into the noise anyway
+  (0.00092 vs 0.00088) because neither mesh can follow structure that fine.
+
+  **So the entry is closed as a non-defect, not deferred.** If a future run wants to reopen it, the bar is a
+  real large-mosaic frame where the *floored* preview and the export disagree by more than the parity
+  preview does — not a synthetic scene, and not the arithmetic (160 vs 128) on its own, which is real and
+  turns out not to matter.
 - ~~**Give the manual `asinh` stretch the same highlight rolloff STF just got.**~~
   — **SHIPPED v0.119.2** (Builder 2026-07-14, same branch). `asinh_stretch` shared
   the identical hard-clip, so it got the same `_highlight_rolloff` behind a
@@ -18069,25 +18140,77 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
 
-- **NEW IDEA (Builder 2026-09-02, the reach the A7 fix left open) — give the *junk-target cleanup nudge* the
-  same filename evidence the ingest reject just learned, so a pre-convention library's leftover output targets
-  stop hiding behind a frame count.** *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: S.)* A7
-  (v0.327.7) taught the on-ingest reject to recognise the device's own picture by its **name**
-  (`Stacked*.fit` vs `Light_*.fit`) rather than by how many of them a folder holds, because "the output folder
-  holds one image" is true per *session* and false per folder. `classify_seestar_junk_target`
-  (`seestack/io/scanner.py`) — the read-only classifier behind the "we found some leftover folders" cleanup
-  card — still gates purely on count: `junk_output_frame_cap()` allows 2 for a single field and 32 for a
-  mosaic (v0.319.3, sized from the owner's real 11- and 7-frame mosaic leftovers). A target holding a
-  *season* of on-device outputs sails past both caps and is never offered for cleanup, which is exactly the
-  shape A7 found on the owner's `M 3`. **Shape:** where every frame in the candidate target is named like
-  on-device output, treat that as the positive evidence and let the count cap go; where the names are mixed or
-  `Light_*`, keep today's cap unchanged. The existing "the `<T>_sub/` sibling really is on disk" requirement
-  stays — this only ever *adds* confidence, and cleanup is a confirmed action, never automatic. **Reuse, do
-  not re-derive:** `seestack.io.project._is_seestar_output_filename` is the single definition; a second copy is
-  the copy that eventually disagrees, which is the mistake `junk_output_frame_cap` was itself created to undo
-  (the webapp used to carry its own `_MAX_CLEANUP_FRAMES`). **Care:** this offers a *deletion* to the user, so
-  the bar is higher than the ingest reject's (which is reversible and deletes nothing) — require *every* frame
-  to match, not a majority.
+- **✅ SHIPPED (Builder, v0.338.0, branch `claude/sweet-babbage-f00hj6`) — ~~give the *junk-target cleanup
+  nudge* the same filename evidence the ingest reject just learned, so a pre-convention library's leftover
+  output targets stop hiding behind a frame count.~~** Built to the filed shape, including both of its "do
+  nots", and the one design question the entry did not raise turned out to be the whole of the work.
+
+  **What shipped.** `classify_seestar_junk_target` (`seestack/io/scanner.py`) now accepts a count *above*
+  `junk_output_frame_cap` when **every** registered frame is named like the device's own picture —
+  `_all_frames_are_seestar_output`, a thin `all(...)` over the single definition
+  `seestack.io.project.is_seestar_output_filename` that A7 made public for exactly this, so there is no second
+  spelling of "is this the device's own picture?" to drift. The `<T>_sub/`-sibling-on-disk requirement is
+  untouched: the filenames only ever *add* to it, never replace it. So the owner's `M 3` — 22 on-device
+  outputs, one per session, sitting in the bare folder beside `M 3_sub/` — is offered for cleanup for the
+  first time, as are `M 101` (11) and `M 13` (9), and so is the mosaic shape that outgrows even the looser
+  32-frame cap.
+
+  **The design question the entry didn't ask: the filenames are only knowable by opening the project, and the
+  cap was what stopped that happening.** `junk_verdict` (`webapp/library_hygiene.py`) short-circuits on
+  `n_frames > junk_output_frame_cap` precisely so a 5,477-sub target is never read on a Library poll — so
+  "let the count cap go" cannot mean "read everything". It is now two separate limits with two separate jobs:
+  `junk_output_frame_cap` still says *when the count settles it alone*, and a new
+  `junk_output_examine_cap()` (512 — four panels across 128 sessions, an order of magnitude above the
+  owner's worst folder and an order below a real target) says *when it is worth opening a project to look at
+  the filenames at all*. Reading one column of a few hundred rows is free; the ceiling is what keeps it that
+  way, and a test spies on `Library.open_target` to prove a target above it is never opened.
+
+  **The copy counts what it is offering to delete.** "Stacking it just reproduces that one lower-resolution
+  frame" is simply false about twenty-two of them, and a nudge that miscounts what it proposes to remove is
+  one the owner is right not to trust — so there is now a third phrasing beside the single-field and mosaic
+  ones: *"the Seestar's own stacked image from each session (22 of them, all named “Stacked…”)"*.
+
+  **Conservative exactly where the entry said to be.** The bar is **every** frame, not a majority: one
+  `Light_*.fit` in the folder and the count cap decides instead, because this offers a *deletion* where the
+  ingest reject merely declines to register (reversible, nothing lost). `StackedByMe.fit` does not match —
+  the strictness A7 built into the predicate for the on-by-default ingest path is inherited here for free.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no API shape change, no default flipped,
+  nothing deleted automatically (the nudge still requires the user's confirmation, and removal takes only the
+  registry target — a test asserts the raw `_sub/` folder and the output folder are both still on disk after
+  it). `junk_output_frame_cap` keeps its exact behaviour and its callers.
+
+  **Tests (+8; 3 of them fail before).** `tests/test_scanner.py` (+6): the owner's 22-output `M 3` shape and
+  the 60-image mosaic pile (both fail before), plus four guards that must pass *both* ways — one real
+  `Light_*` sub among the outputs, no `_sub` sibling on disk, a `StackedByMe*` folder, and the examine cap's
+  own bounds. `tests/webapp/test_cleanup_suggestions.py` (+2): the endpoint end to end on `M 3` beside a
+  900-sub `NGC 7000` that has *everything* the output case has except the filenames (fails before), including
+  the delete-and-the-nudge-clears loop; and the cost guard, which asserts a target one frame above the
+  ceiling never has its project opened.
+
+  *(Original entry follows.)*
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-02, the reach the A7 fix left open) — give the *junk-target cleanup nudge* the
+    same filename evidence the ingest reject just learned, so a pre-convention library's leftover output targets
+    stop hiding behind a frame count.** *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: S.)* A7
+    (v0.327.7) taught the on-ingest reject to recognise the device's own picture by its **name**
+    (`Stacked*.fit` vs `Light_*.fit`) rather than by how many of them a folder holds, because "the output folder
+    holds one image" is true per *session* and false per folder. `classify_seestar_junk_target`
+    (`seestack/io/scanner.py`) — the read-only classifier behind the "we found some leftover folders" cleanup
+    card — still gates purely on count: `junk_output_frame_cap()` allows 2 for a single field and 32 for a
+    mosaic (v0.319.3, sized from the owner's real 11- and 7-frame mosaic leftovers). A target holding a
+    *season* of on-device outputs sails past both caps and is never offered for cleanup, which is exactly the
+    shape A7 found on the owner's `M 3`. **Shape:** where every frame in the candidate target is named like
+    on-device output, treat that as the positive evidence and let the count cap go; where the names are mixed or
+    `Light_*`, keep today's cap unchanged. The existing "the `<T>_sub/` sibling really is on disk" requirement
+    stays — this only ever *adds* confidence, and cleanup is a confirmed action, never automatic. **Reuse, do
+    not re-derive:** `seestack.io.project._is_seestar_output_filename` is the single definition; a second copy is
+    the copy that eventually disagrees, which is the mistake `junk_output_frame_cap` was itself created to undo
+    (the webapp used to carry its own `_MAX_CLEANUP_FRAMES`). **Care:** this offers a *deletion* to the user, so
+    the bar is higher than the ingest reject's (which is reversible and deletes nothing) — require *every* frame
+    to match, not a majority.
 
 - **NEW IDEA (Scout 2026-08-27 #17) — surface calibration *match confidence* on the interactive Stack form, so a
   watching beginner gets the same smart dark/flat matching the walk-away path already does — and understands why
