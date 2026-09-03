@@ -134,6 +134,31 @@ describe("OneFrameVsStackCard — is that number any good?", () => {
     expect(screen.queryByTestId("noise-expected")).toBeNull();
   });
 
+  it("names no frame count anywhere on a mosaic's card", async () => {
+    // The badge and the yardstick sit one above the other, and on a mosaic the
+    // run's own 400 frames are the wrong denominator for *both*: the ratio was
+    // measured over a central crop only 100 subs deep. The yardstick names the
+    // panel depth; the badge — the card's one celebratory line — simply drops
+    // the count rather than repeating the caveat.
+    vi.spyOn(client.api, "oneSubVsStack").mockResolvedValue({
+      available: true, n_frames: 400, sub_exposure_s: 30, integration_s: 12000,
+    });
+    vi.spyOn(client.api, "oneSubVsStackNoise").mockResolvedValue({
+      ratio: 10, expected_verdict: "expected", expected_frames: 100,
+      expected_basis: "mosaic_centre", is_mosaic: true,
+    });
+    renderCard("M_42", 7);
+    fireEvent.click(await screen.findByRole("button", { name: /see the difference/i }));
+    expect(await screen.findByTestId("noise-badge")).toHaveTextContent(
+      "Stacking your subs cut the background noise about 10×.");
+    expect(screen.getByTestId("noise-expected")).toHaveTextContent(
+      "That's about what the 100 subs covering the middle of this mosaic " +
+      "should give (√100 ≈ 10×).");
+    for (const id of ["noise-badge", "noise-expected"]) {
+      expect(screen.getByTestId(id)).not.toHaveTextContent("400");
+    }
+  });
+
   it("doesn't judge a stack too thin for √N to mean anything", async () => {
     // The server withholds a verdict below its 10-frame floor (measured and
     // pinned in tests/test_stackhealth.py) — the card just renders the badge.
