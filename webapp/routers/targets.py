@@ -232,11 +232,13 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
     confirms via ``DELETE /api/targets/{safe}``), and never touches the real
     ``_sub`` data or the base target. Returns ``[]`` when the library is clean.
 
-    A real light-frame stack has many subs, so only a *tiny* target can be an
-    on-device output. Skipping the big ones by frame count avoids opening their
-    projects and scanning thousands of source paths on every poll; the cap is the
-    engine's own (``junk_output_frame_cap``, looser for a mosaic — whose on-device
-    output is one image *per panel*) so the two can't drift. A ``_video``/``_photo``
+    A real light-frame stack has hundreds or thousands of subs, so skipping the
+    big ones by frame count avoids opening their projects and scanning thousands
+    of source paths on every poll; the ceiling is the engine's own
+    (``junk_output_examine_cap``) so the two can't drift. Below it the verdict
+    comes from the frames' filenames as well as their count — the device writes
+    one stacked output per *session*, so a folder shot over a season holds a pile
+    of them and no count can tell that from a real target. A ``_video``/``_photo``
     capture target is decided by name instead, at any frame count."""
     from webapp.library_hygiene import (
         confirm_duplicate_of_base,

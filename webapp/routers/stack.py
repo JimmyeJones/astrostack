@@ -24,6 +24,7 @@ from webapp.preview_orient import (
     recovered_north_up_deg,
     remaining_north_up_deg,
 )
+from webapp.run_options import parse_run_options, run_has_reusable_options
 from webapp.schemas import (
     STACK_DEFAULTS_META_KEY,
     StackOptionField,
@@ -634,7 +635,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             is_cover=(cover_id is not None and r.id == cover_id),
             notes=r.notes,
             total_exposure_s=r.total_exposure_s,
-            reusable=_run_is_reusable(r.options_json),
+            reusable=run_has_reusable_options(r.options_json),
             capture_night_start=night_start,
             capture_night_end=night_end,
             capture_nights=nights,
@@ -818,20 +819,6 @@ def _unexported_edit(options_json: str | None, recipe_json: str | None,
         return False
     # Already exported *this* look ⇒ finished. Anything else ⇒ still unfinished.
     return not (exported_recipe_json and _recipe_look(exported_recipe_json) == look)
-
-
-def _run_is_reusable(options_json: str | None) -> bool:
-    """A run's settings can pre-fill the Stack form unless it's an editor-recipe
-    or channel-combine run (those carry no stack knobs)."""
-    if not options_json:
-        return False
-    try:
-        parsed = json.loads(options_json)
-    except json.JSONDecodeError:
-        return False
-    return (isinstance(parsed, dict)
-            and "editor_recipe" not in parsed
-            and "channel_combine" not in parsed)
 
 
 _KIND_FIELDS = {
@@ -3214,13 +3201,12 @@ def stack_run_options(safe: str, run_id: int, request: Request) -> dict[str, Any
         lib.close()
     if run is None:
         raise HTTPException(status_code=404, detail="No such run")
-    try:
-        parsed = json.loads(run.options_json) if run.options_json else {}
-    except json.JSONDecodeError:
-        parsed = {}
-    if not isinstance(parsed, dict) or "editor_recipe" in parsed or "channel_combine" in parsed:
+    # Same verdict the listings show on this run, so the form can never be sent
+    # here by a button that this then refuses (nor withhold one it would serve).
+    if not run_has_reusable_options(run.options_json):
         raise HTTPException(status_code=400,
                             detail="This run has no reusable stack settings")
+    parsed = parse_run_options(run.options_json)
 
     from webapp import calibration
 
