@@ -9,7 +9,6 @@ as a browsable grid where each image can show exactly how it was stacked.
 from __future__ import annotations
 
 import io
-import json
 import logging
 import zipfile
 from pathlib import Path
@@ -23,6 +22,7 @@ from seestack.stack.output import save_display_jpeg
 from seestack.stackhealth import seam_verdict
 from webapp import deps
 from webapp.capture_nights import capture_night_count, capture_night_range
+from webapp.run_options import parse_run_options, run_has_reusable_options
 from webapp.site_location import resolve_site_lon
 
 log = logging.getLogger(__name__)
@@ -182,21 +182,6 @@ class GalleryResponse(BaseModel):
     videos: list[VideoStillItem] = []
 
 
-def _parse_options(options_json: str | None) -> dict[str, Any]:
-    if not options_json:
-        return {}
-    try:
-        parsed = json.loads(options_json)
-    except (json.JSONDecodeError, TypeError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _is_reusable(options: dict[str, Any]) -> bool:
-    """A run's settings can pre-fill the Stack form unless it's an editor-recipe
-    or channel-combine run (those carry no stack knobs)."""
-    return "editor_recipe" not in options and "channel_combine" not in options
-
 
 @router.get("/api/gallery", response_model=GalleryResponse)
 def get_gallery(request: Request) -> GalleryResponse:
@@ -265,7 +250,7 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
     """One finished stack's gallery card. Split out so the loop above can skip a
     single unreadable run without losing every other target's pictures."""
     has_preview = bool(run.preview_path and Path(run.preview_path).exists())
-    options = _parse_options(run.options_json)
+    options = parse_run_options(run.options_json)
     night_start, night_end = capture_night_range(
         run.capture_start_utc, run.capture_end_utc, lon_deg)
     nights = capture_night_count(getattr(run, "capture_hours_json", None), lon_deg)
@@ -289,7 +274,7 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
             f"/api/targets/{t.safe_name}/stack-runs/{run.id}/preview"
         ),
         options=options,
-        reusable=_is_reusable(options),
+        reusable=run_has_reusable_options(run.options_json),
         capture_night_start=night_start,
         capture_night_end=night_end,
         capture_nights=nights,

@@ -1718,11 +1718,45 @@ _(nothing else claimed — claim an item here with your branch name)_
   UTC under a hero that says "Shot &lt;local night&gt;"~~ *(shipped v0.328.5, see below)*;
   ~~"nights" means **6-hour sessions** on the Nights card
   but **calendar nights** in captions~~ *(shipped v0.329.1, see below)*;
-  three hand-mirrored "is this a genuine run" predicates;
+  ~~three hand-mirrored "is this a genuine run" predicates~~ *(shipped v0.338.1 — and they **did** disagree;
+  see the note directly below)*;
   `POST /api/targets` has **no frontend caller**; ~~share and print JPEGs use 4:2:0 chroma subsampling~~
   *(shipped v0.328.0, see below)*; the "full
   data" TIFF anchors its white point on the single brightest surviving pixel *(traced 2026-09-03 — the
   mechanism is confirmed, but read the note below before "fixing" it)*.
+
+- **✅ SHIPPED (Builder, v0.338.1, branch `claude/sweet-babbage-f00hj6`) — ~~the three hand-mirrored "is this a
+  genuine run" predicates~~ — and they were not merely duplicated, they *disagreed*, in the direction that
+  shows a user a button nothing is behind.** Filed as a tidy-up; taken as a fix once the disagreement was
+  reproduced.
+
+  **What the three were.** `_is_reusable` (`webapp/routers/gallery.py`, on the Gallery card), `_run_is_reusable`
+  (`webapp/routers/stack.py`, on the History / Target run listing) and an inline copy inside
+  `GET …/stack-runs/{id}/options` — the endpoint the *"Reuse settings"* button those listings render actually
+  calls. All three implemented "not an `editor_recipe` run and not a `channel_combine` run", by hand.
+
+  **Where they parted company: a run that recorded no settings at all.** The Gallery's `_parse_options` reads
+  an empty / unparseable / non-object `options_json` as `{}` and `_is_reusable({})` is **True**; the endpoint's
+  inline copy likewise accepted `{}` and returned an empty form; but `_run_is_reusable` returns **False** on
+  the same run. So the Gallery offered "Reuse settings" on a run the History listing refused to, and the
+  button led to a form with nothing in it. Pinned before the fix, and it is the assertion that failed:
+  `AssertionError: gallery disagrees on empty`.
+
+  **One definition, and the empty case decided once.** `webapp/run_options.py` holds `parse_run_options` and
+  `run_has_reusable_options`, and the three sites call them. The verdict on an option-less run is now
+  **False** everywhere — a button that promises settings and delivers an empty form is worse than no button,
+  and it is the answer the listing the owner sees most (History) already gave. Every run that recorded real
+  options is unaffected: `options_json` is `NOT NULL` and every `run_stack` / editor-export path writes a real
+  object, so this only ever moves the answer for a degenerate row.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk or response-shape change; no endpoint added or removed.
+  The one behaviour change is a `400` (instead of a `200` carrying `{}`) on the options endpoint for a run
+  with no recorded settings — which is what both listings now say about it, and what the endpoint's own
+  docstring already promised for the sibling cases.
+
+  **Tests (+4; the two that matter fail before).** `tests/webapp/test_run_options.py`: the parse's five
+  unusable shapes, the predicate's three "no" cases, **the three surfaces agreeing across five run shapes**
+  (fails before on `empty`), and the symptom stated on its own so a regression names itself (fails before).
 
 - **⚪ TRACED, DELIBERATELY NOT BUILT (Builder 2026-09-03) — the "full data" TIFF's white point *is* the
   brightest surviving pixel, and moving it would trade a documented guarantee for an unmeasured gain.**
