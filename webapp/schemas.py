@@ -468,6 +468,13 @@ class FrameOut(BaseModel):
     id: int
     name: str
     timestamp_utc: str | None = None
+    # The observing night this sub belongs to (ISO ``YYYY-MM-DD``), bucketed
+    # noon-to-noon in the observer's local time exactly as the imaging calendar,
+    # the Nights card and every "Shot …" caption are. `timestamp_utc` alone is a
+    # raw UTC instant, which names the *following* day for anyone west of
+    # Greenwich. Additive/nullable — an older client ignores it, and a frame with
+    # no usable capture stamp sends `null`.
+    night_date: str | None = None
     exposure_s: float | None = None
     gain: float | None = None
     width_px: int | None = None

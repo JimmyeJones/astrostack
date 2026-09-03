@@ -43,6 +43,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-09-03, branch `claude/sweet-babbage-axt93w` — claim released, shipped as v0.328.6.** The
+> second slice of the full-size loupe — an additive-field channel for the three `background.*` ops, which the
+> v0.328.2 fitted-parameter channel explicitly could not carry. Full write-up on the loupe entry under
+> "⭐ Editor — make it excellent".
+
 > **⚠️ PROCESS NOTE + Builder 2026-09-02, branch `claude/zen-mccarthy-olkjpm` — collision TEN, two of three
 > tasks duplicated by one other Builder inside the same hour, and the first where the *stand-down decision was
 > settled by measurement instead of argument*. Run finished; claims released.**
@@ -1376,12 +1381,60 @@ _(nothing else claimed — claim an item here with your branch name)_
   blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"~~ *(shipped
   v0.328.1, see below)*; ~~the Stack
   page prints the **raw engine error** where every other page uses `friendlyJobError`~~ *(shipped v0.328.0,
-  see below)*; the frames table prints raw
-  UTC under a hero that says "Shot &lt;local night&gt;"; "nights" means **6-hour sessions** on the Nights card
+  see below)*; ~~the frames table prints raw
+  UTC under a hero that says "Shot &lt;local night&gt;"~~ *(shipped v0.328.5, see below)*;
+  "nights" means **6-hour sessions** on the Nights card
   but **calendar nights** in captions; three hand-mirrored "is this a genuine run" predicates;
   `POST /api/targets` has **no frontend caller**; ~~share and print JPEGs use 4:2:0 chroma subsampling~~
   *(shipped v0.328.0, see below)*; the "full
   data" TIFF anchors its white point on the single brightest surviving pixel (hypothesis, needs real data).
+
+- **✅ SHIPPED (Builder, v0.328.5, branch `claude/sweet-babbage-axt93w`) — ~~A-MINOR: the frames table prints
+  raw UTC under a hero that says "Shot &lt;local night&gt;".~~** The same date-honesty class as v0.311.3,
+  v0.313.0 and v0.229.4, at the last surface still holding out — and the one the owner reads every session.
+
+  **What was wrong.** `routes/Target.tsx` rendered a sub's `timestamp_utc` raw
+  (`f.timestamp_utc?.replace("T", " ").slice(0, 19)`), which is the instant out of the FITS header. Every
+  *other* date on that page is an **observing night**: bucketed local noon-to-noon by
+  `activity_calendar.night_date_of`, with the observer's longitude resolved by `resolve_site_lon`. The two
+  disagree by a whole day for anyone west of Greenwich — a 21:00 start in the Americas is already tomorrow in
+  UTC — and they disagree for *everyone* after local midnight. The repo's own fixture is the shape: its subs
+  carry `DATE-OBS 2024-09-12T03:14:55` and every caption in the app dates them **11 Sep 2024**, so the page
+  showed a picture captioned "Shot 11 Sep 2024" over a table of subs stamped `2024-09-12` with nothing on
+  screen saying they were the same night. A beginner checking whether last night's subs actually arrived had
+  to do timezone arithmetic to find out.
+
+  **The fix is to send the fact, not to compute it twice.** `FrameOut` gains `night_date`
+  (additive, nullable), filled by a `_frame_night_date` helper in `routers/frames.py` that calls the very
+  same `night_date_of` through the very same `resolve_site_lon` the Nights-card endpoint calls — so the two
+  surfaces cannot name different nights, by construction rather than by two copies of the rule. The longitude
+  is resolved **once per page** (it is app-cached anyway) while the library handle is still open. All three
+  `_to_out` sites pass it — list, `GET /frames/{id}` and `PATCH /frames/{id}` — so a row can't change nights
+  depending on which endpoint fetched it.
+
+  **On the page:** a new shared `formatFrameStamp` renders `11 Sep 2024 · 03:14:55` — the night, then the
+  clock. The clock stays **UTC on purpose**: it is what the header records and what any other astro tool will
+  quote, and only the *date* was ever ambiguous. The heading moves from `Time (UTC)` to `Night · time (UTC)`
+  and — the part that matters — **stops being the column exempted from the guide as "the one that explains
+  itself"**, which is exactly how it came to be the column disagreeing with the picture above it. It now
+  carries a hint, so `FrameColumnGuide` (the phone-visible version of the header tooltips) explains what a
+  night is: *"A night runs noon to noon in your local time … so subs shot after midnight still belong to the
+  night before."*
+
+  **Upgrade-safe (§9):** one additive nullable response field, no schema, no config, no on-disk change, no
+  default flipped, no existing field's meaning changed (`timestamp_utc` is untouched and still the sort key).
+  A frontend served by an older backend gets `undefined` and `formatFrameStamp` returns the **byte-identical
+  old string**, which is pinned by its own test.
+
+  **Tests (+5 python, all 5 fail before — verified by stashing the two backend files; +7 vitest).**
+  `tests/webapp/test_frames_night_date.py`: the two facts differing on the fixture; the same instant
+  belonging to *different* nights at lon −105 and +150 (so the longitude is genuinely honoured, not
+  hard-coded); agreement with `/nights` as a set membership rather than a string; a stamp-less sub sending
+  `null` rather than guessing; and the one-frame GET/PATCH agreeing with the list. `format.test.ts` (+5) over
+  the formatter including the older-backend fallback and the em-dash case; `Target.test.tsx` (+2) that the
+  rendered row says the night and *not* the UTC day; `FrameColumnGuide.test.tsx`'s "the one column that
+  explains itself doesn't get an entry" assertion is **inverted** — a contract change, since that exemption
+  was the bug's hiding place — to require the night explanation instead.
 
 - **✅ SHIPPED (Builder, v0.328.1, branch `claude/sweet-babbage-swvkoa`) — ~~A-MINOR's contradiction: the
   plate-solve-failed screen tells the beginner two opposite things at once~~ — plus the two remnants of A10 and
@@ -16405,7 +16458,11 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
-- **NEW IDEA (Builder 2026-09-02, from finishing A2) — "check it at full size": a 1:1 loupe on the editor
+- **✅ SHIPPED, ALL THREE SLICES (v0.328.2 → v0.328.6 → v0.329.0) — ~~"check it at full size": a 1:1 loupe on
+  the editor preview, so the four ops the proxy *cannot* show honestly can be judged instead of apologised
+  for.~~** Read the three ✅ blocks below in order — the fitted-parameter channel, the additive-field channel,
+  and the endpoint + control. *(Original idea and the two sizing notes that shaped it follow.)*
+  - **NEW IDEA (Builder 2026-09-02, from finishing A2) — "check it at full size": a 1:1 loupe on the editor
   preview, so the four ops the proxy *cannot* show honestly can be judged instead of apologised for.**
   *(Pillar: a better editor — PRIORITY 1. Size: M.)* The editor now carries **four** separate advisories
   saying some version of "this preview isn't what you'll get": deconvolution understates, sharpening
@@ -16475,7 +16532,114 @@ problems. Dogfood it every big-picture run and fix root causes.
   they got away with ignoring only while `_curves` never touched `ctx`; no assertion changed. **Tests +20** in
   `tests/test_edit_frozen_fits.py`.
 
-  **What is still missing before the loupe can be built, and it is the whole of the next slice:** the three
+  **✅ THE SECOND SLICE IS SHIPPED TOO (Builder, v0.328.6, branch `claude/sweet-babbage-axt93w`) — the
+  additive-field channel, in the shape the note below specified, with the geometry made explicit.** The
+  remaining gap was that the three `background.*` ops fit a **spatial model**, so `fit` cannot carry them.
+  They are, however, *purely additive* — checked in the engine code rather than assumed, and written into
+  `ops/background.py`'s header so the claim is auditable: `final_gradient` does `out[..., c] - bg` (and
+  `- sky` in the channel-matching tail), `coverage_leveling` does `out[..., c][region] -= offset`,
+  `subtract_background` documents itself as the input minus a per-channel 2-D fit. **No `seestack/bg/`
+  module was touched** — those are on the stack hot path, exactly as the note required.
+
+  **What shipped.** `OpSpec.additive_field` (an op declaring that it only ever adds a smooth field);
+  `EditContext.field_deltas` / `frozen_deltas` / `capture_fields` / `source_origin`, plus `record_field`,
+  `frozen_field` and `replay_field`; and the pipeline capturing `after − before` for such an op, or — when a
+  field was frozen for it — **replaying it instead of running the op at all**, which is both the correct
+  answer and cheaper than a re-fit.
+
+  **The one thing the filed note left implicit and this had to make explicit is the geometry.** A scalar fit
+  travels as a number; a field has to remember *where it was measured*, because the render that captures it
+  is the decimated proxy and the render that replays it is a small full-resolution window. So a `FieldDelta`
+  carries `(origin, scale)` and `EditContext` carries the render's own `source_origin` — this render's pixel
+  `(r, c)` is source pixel `origin + (r, c)·proxy_scale` — and the replay is then a plain affine lookup with
+  bilinear interpolation. The proxy being a strided decimation is what makes it exact where it matters:
+  proxy pixel `(i, j)` **is** full pixel `(i·step, j·step)`, so every proxy sample inside a loupe window has
+  a full-res pixel holding the very same data, and the lookup there lands on an exact sample.
+
+  **Measured, with both controls.** On a 700×1000 synthetic OSC frame with an asymmetric, per-channel
+  light-pollution gradient: re-running the recipe over a 256×256 crop — the shape the original spec would
+  have shipped — differs from the same pixels of the full render by **0.207 mean / 0.520 max** of a 0–1 tone.
+  Replayed, the difference is **exactly 0.0**, at four different window positions. The second control is the
+  loupe's real geometry: a full-resolution window opened from a ×2 proxy preview disagrees with that preview
+  by **0.040 mean / 0.140 max** when the sky is re-fitted on the window, and by **0.0** when it is replayed.
+  Both controls are standing tests: without them the parity assertions could pass on a fixture too flat to
+  exhibit the problem, which is the A1 failure mode.
+
+  **Coverage holes are the one trap, and it is handled.** A field is `NaN` exactly where the picture is
+  uncovered, and bilinear interpolation spreads a `NaN` into its neighbours — which would punch holes in
+  covered pixels at a mosaic's edge. Non-finite entries are filled from their nearest finite neighbour before
+  interpolating; the filled values only ever land on pixels that are `NaN` in the picture anyway (adding
+  anything to `NaN` leaves `NaN`), so this cannot invent coverage. Pinned by a test over a strip-uncovered
+  frame whose crop straddles the edge.
+
+  **Nothing on the ordinary path moved, and deliberately not by accident.** Capture is **off by default**
+  (`capture_fields`), because recording a field costs a copy of the image per additive op and the *export*
+  renders the native canvas, where a second copy of a mosaic is real memory (§10's OOM history). The
+  whole-image proxy render that feeds a windowed one turns it on; nothing else needs to. A render with
+  neither flag is byte-for-byte what it was, pinned against a hand-run of the same ops.
+
+  **Upgrade-safe (§9):** engine-internal; no config, schema, on-disk, API or default change, and no
+  behaviour change on any path the app takes today. **Tests +14** in `tests/test_edit_field_replay.py`.
+
+  **✅ AND THE LOUPE ITSELF IS SHIPPED (Builder, v0.329.0, same branch) — "Check it at full size", end to
+  end.** The third slice, built on the two above in the same run. Two endpoints and one self-hiding control:
+
+  * `GET …/editor/loupe-info` — *may* this be offered here? A header read and a look at the recipe, no
+    pixels. `available: false` always carries a plain-language reason.
+  * `GET …/editor/loupe?fx=&fy=&size=` — a `size × size` window of the picture at 1:1, through the current
+    recipe. `fx`/`fy` are fractions of the *rendered* preview, which is the only thing a browser can honestly
+    report — it knows neither the canvas size nor what the recipe cropped — and the server maps them back
+    through `preview_crop_of_recipe`. The source rectangle comes back in `X-Loupe-Window`.
+  * `FullSizeCheck` — one `compact-xs` button under the "downscaled ×N" caption it answers, opening a modal
+    with the window beside a small navigator: the same preview with the window marked, tap to move it.
+
+  **The measurement is the whole point, and it is the sharpest number in this entry.** With the two channels
+  wired in, the loupe and the live preview are **byte-identical (0 of 255)** at every source pixel the two
+  show — the proxy is a strided decimation, so proxy pixel `(i, j)` *is* full pixel `(i·step, j·step)`, and
+  the window's render of that pixel is the preview's. The control, rendering the same window at
+  `proxy_scale = 1` without frozen fits or a replayed field — the shape the original spec would have shipped
+  — differs from the preview by **22.1 mean / 117 max of 255**. That is not a subtlety; it is a different
+  picture, and it is what a beginner would have been tuning sharpening against.
+
+  **Three refusals rather than three guesses.** A canvas that already fits the proxy (`proxy_scale ≤ 1`) is
+  told there is nothing to check — the preview *is* the picture. A `geometry.rotate` makes "which part of the
+  picture is this?" unanswerable, and `preview_crop_of_recipe` already says so with `UNKNOWN`. And a geometry
+  op placed *before* an additive background pass moves the replayed field's origin, so it is refused too —
+  Auto puts its `geometry.crop` last, after every tone and detail op, so the ordinary path never sees this.
+  All three refusals name the fix in plain language.
+
+  **Costs, stated.** The window read is a real window: `read_window_rgb` uses `hdu.section`, so serving a few
+  hundred pixels of a 150 MP mosaic reads a few hundred pixels. The request does pay one whole-image *proxy*
+  render to make the measurements the window borrows — the same render the live preview already does, done
+  again rather than plumbed through, which keeps the endpoint stateless. The control is self-hiding, so the
+  editor gains no line on a picture where it cannot act.
+
+  **Upgrade-safe (§9):** two new GET endpoints and one additive client type; no config, schema, on-disk or
+  default change, nothing existing altered. A frontend served by an older backend gets a failed `loupe-info`
+  and renders nothing, which is pinned by its own test.
+
+  **Tests (+12 python, +14 vitest).** `tests/webapp/test_editor_loupe.py`: offered only where the preview is
+  decimated; both geometry refusals *and* the ordinary crop-last shape not being refused; the window centred
+  on the click and clamped inside the canvas at every edge; the click read through the recipe's own crop
+  (a crop whose centre is 0.8/0.2 of the canvas, not 0.5/0.5); the parity claim and its control above; and
+  `read_window_rgb`/`source_shape` over both a colour cube and a mono plane. `loupe.test.ts` (9) over the
+  marker geometry and the caption's wording; `FullSizeCheck.test.tsx` (5) over the offer, both self-hiding
+  cases (nothing to check, and an older backend), and tapping the navigator moving the window.
+
+  **What is left, and it is small:** the modal shows the window at its natural size and scrolls on a phone;
+  a "compare with the preview at this spot" split would be the obvious next tap, and a spatial op's behaviour
+  at the window's own edge is still the window's, not the picture's — which is a property of any crop and is
+  why the recipe's local ops are exactly what the loupe is for.
+
+  *(The note that specified this slice, kept for the reasoning.)* The user
+  clicks the *rendered* preview, which a `geometry.crop` may have reframed — map through
+  `preview_crop_of_recipe` (`seestack/edit/recipe.py`), and decline on a real `geometry.rotate`, which
+  already returns `UNKNOWN`. The window read must come out of the FITS as a window (never load the whole
+  canvas to serve one), and the whole-image proxy render that supplies `fitted` + `field_deltas` is the same
+  render the live preview already makes — so the endpoint's job is to keep that context, not to make a
+  second one.
+
+  *(The note that specified this slice, kept for the reasoning.)* The three
   **`background.*` ops fit a spatial model, not a scalar**, so this channel cannot carry them — and Auto
   always contains `background.final_gradient`, so a loupe today would still be honest only for a recipe
   without one. `background.subtract` / `final_gradient` / `level_coverage` are all *additive* (each subtracts

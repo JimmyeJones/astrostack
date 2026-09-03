@@ -15,7 +15,7 @@ import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
 import { fullResPngLabel } from "../fullres";
-import { formatCaptureNights, formatIntegration } from "../format";
+import { formatCaptureNights, formatFrameStamp, formatIntegration } from "../format";
 import { integrationReadiness, readinessColor, noiseReductionHint } from "../readiness";
 import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
@@ -1629,7 +1629,10 @@ export function TargetView() {
                       </Table.Td>
                       <Table.Td>
                         <Group gap={6} wrap="nowrap">
-                          <span>{f.timestamp_utc?.replace("T", " ").slice(0, 19) ?? "—"}</span>
+                          {/* The observing night, then the UTC clock — not a raw
+                              UTC stamp, which named a different day from the
+                              picture above for anyone west of Greenwich. */}
+                          <span>{formatFrameStamp(f.night_date, f.timestamp_utc)}</span>
                           {!f.accept && f.reject_reason ? (
                             <Tooltip label={`Rejected — ${rejectReasonLabel(f.reject_reason)}`}>
                               <Badge size="xs" color="gray" variant="light" style={{ flexShrink: 0 }}>

@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import sharedIntegrationCases from "../../tests/fixtures/integration_format.json";
 import sharedNightRangeCases from "../../tests/fixtures/night_range_format.json";
 import {
-  captureNightsClause, formatCaptureNights, formatDiskSize, formatIntegration,
-  formatMonthYear, formatNightDate, formatNightDayMonth, formatStampDate,
-  formatStampDateTime, isRecentNight, nightAgeDays, pictureDateLabel,
+  captureNightsClause, formatCaptureNights, formatDiskSize, formatFrameStamp,
+  formatIntegration, formatMonthYear, formatNightDate, formatNightDayMonth,
+  formatStampDate, formatStampDateTime, isRecentNight, nightAgeDays,
+  pictureDateLabel,
 } from "./format";
 
 describe("formatIntegration", () => {
@@ -77,6 +78,48 @@ describe("formatNightDate", () => {
     expect(formatNightDate("nope")).toBe("—");
     expect(formatNightDate("2026-13-01T00:00:00Z")).toBe("—");
     expect(formatNightDate("2026-07-00T00:00:00Z")).toBe("—");
+  });
+});
+
+describe("formatFrameStamp", () => {
+  it("dates a sub by its night, not by the UTC day its stamp falls on", () => {
+    // The bug: the frames table printed the raw stamp, so a page whose picture
+    // said "Shot 11 Sep 2024" listed every one of its subs as 2024-09-12. Both
+    // facts are true; only one of them is the night the owner was outside.
+    expect(formatFrameStamp("2024-09-11", "2024-09-12T03:14:55"))
+      .toBe("11 Sep 2024 · 03:14:55");
+    expect(formatFrameStamp("2026-07-08", "2026-07-08T21:14:03Z"))
+      .toBe("8 Jul 2026 · 21:14:03");
+  });
+
+  it("takes either separator, and keeps the seconds", () => {
+    // Two subs a few seconds apart are two rows; rounding to the minute would
+    // make them look like duplicates of each other.
+    expect(formatFrameStamp("2026-07-08", "2026-07-08 21:14:03.512"))
+      .toBe("8 Jul 2026 · 21:14:03");
+    expect(formatFrameStamp("2026-07-08", "2026-07-08T21:14:09+00:00"))
+      .toBe("8 Jul 2026 · 21:14:09");
+  });
+
+  it("prints exactly what it always printed when the server sends no night", () => {
+    // An older backend mid-upgrade, or a stamp the server could not bucket:
+    // fall back to the old cell rather than dropping the sub's time.
+    expect(formatFrameStamp(null, "2026-07-09T02:14:03.512Z"))
+      .toBe("2026-07-09 02:14:03");
+    expect(formatFrameStamp(undefined, "2026-07-09T02:14:03"))
+      .toBe("2026-07-09 02:14:03");
+    expect(formatFrameStamp("nonsense", "2026-07-09T02:14:03"))
+      .toBe("2026-07-09 02:14:03");
+  });
+
+  it("says the night alone rather than nothing when the clock is unreadable", () => {
+    expect(formatFrameStamp("2026-07-08", "2026-07-08")).toBe("8 Jul 2026");
+    expect(formatFrameStamp("2026-07-08", null)).toBe("8 Jul 2026");
+  });
+
+  it("is an em dash when the sub carries no capture time at all", () => {
+    expect(formatFrameStamp(null, null)).toBe("—");
+    expect(formatFrameStamp(undefined, "")).toBe("—");
   });
 });
 

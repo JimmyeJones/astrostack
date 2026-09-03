@@ -1,4 +1,19 @@
-"""Background & gradient operations — thin wrappers over existing seestack.bg code."""
+"""Background & gradient operations — thin wrappers over existing seestack.bg code.
+
+All three register with ``additive_field=True``, and that is a claim about the
+engine code they wrap, checked rather than assumed: every one of them subtracts a
+fitted sky model and does nothing else — ``final_gradient`` does
+``out[..., c] - bg`` per channel (and ``- sky`` in the channel-matching tail),
+``coverage_leveling`` does ``out[..., c][region] -= offset`` per coverage level,
+and ``subtract_background`` documents itself as returning the input minus a
+per-channel 2-D fit. Nothing here scales, warps or reorders a pixel.
+
+That is what lets the pipeline record ``after − before`` and replay it onto a
+*window* of the same picture instead of re-fitting there — a mesh fitted on a
+512×512 crop is a fit of the crop, not of the picture. See
+:meth:`seestack.edit.registry.EditContext.replay_field`. If one of these ops ever
+gains a non-additive step, drop its flag in the same commit.
+"""
 
 from __future__ import annotations
 
@@ -116,7 +131,7 @@ _MODE = ["per_channel", "luminance"]
 
 register(OpSpec(
     id="background.subtract", label="Background subtract", group="background",
-    stage="linear", apply=_subtract, proxy_safe=True,
+    stage="linear", apply=_subtract, proxy_safe=True, additive_field=True,
     help="Subtract a per-tile sky model to flatten gradients and vignetting.",
     params=[
         EditParam("mode", "Mode", "enum", default="per_channel", options=_MODE,
@@ -131,7 +146,7 @@ register(OpSpec(
 
 register(OpSpec(
     id="background.final_gradient", label="Gradient removal", group="background",
-    stage="linear", apply=_final_gradient, proxy_safe=True,
+    stage="linear", apply=_final_gradient, proxy_safe=True, additive_field=True,
     help="Object-masked gradient removal — protects stars/nebulosity while flattening sky.",
     params=[
         EditParam("mode", "Mode", "enum", default="luminance", options=_MODE,
@@ -161,7 +176,7 @@ register(OpSpec(
 
 register(OpSpec(
     id="background.level_coverage", label="Coverage leveling", group="background",
-    stage="linear", apply=_level_coverage, proxy_safe=True,
+    stage="linear", apply=_level_coverage, proxy_safe=True, additive_field=True,
     help="Equalize sky across mosaic panels with different frame coverage.",
     params=[
         EditParam("object_sigma", "Object σ", "float", default=2.0, min=1.0, max=5.0,

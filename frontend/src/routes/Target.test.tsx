@@ -2199,3 +2199,39 @@ describe("TargetView hero when the newest run has no picture", () => {
       .toHaveAttribute("href", "/targets/M_42/edit/7");
   });
 });
+
+describe("TargetView frames table dates", () => {
+  // The bug: the table printed `timestamp_utc` raw, so a page whose picture is
+  // captioned "Shot 11 Sep 2024" listed every one of its subs as 2024-09-12 —
+  // the same night, named two different ways, a few hundred pixels apart. West
+  // of Greenwich that is every evening's subs, not an edge case.
+  const NIGHT_SUB = { night_date: "2024-09-11", timestamp_utc: "2024-09-12T03:14:55" };
+
+  it("names the observing night a sub belongs to, not its UTC day", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1, NIGHT_SUB)]);
+
+    renderTarget();
+
+    // The night the caption would name, and the clock time from the header.
+    expect(await screen.findByText("11 Sep 2024 · 03:14:55")).toBeInTheDocument();
+    expect(screen.queryByText("2024-09-12 03:14:55")).not.toBeInTheDocument();
+    // And the heading says which of the two the date is, so the reader doesn't
+    // have to work it out from a stamp that no longer looks like a UTC one.
+    expect(screen.getByText("Night · time (UTC)")).toBeInTheDocument();
+  });
+
+  it("falls back to the old raw stamp when the server sends no night", async () => {
+    // An older backend mid-upgrade still renders exactly as it always did.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { night_date: undefined, timestamp_utc: "2024-09-12T03:14:55" }),
+    ]);
+
+    renderTarget();
+
+    expect(await screen.findByText("2024-09-12 03:14:55")).toBeInTheDocument();
+  });
+});
