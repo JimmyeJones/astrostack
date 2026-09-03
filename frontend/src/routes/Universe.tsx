@@ -12,8 +12,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { raDecToVector, type SkyImage, type SkyStar } from "../sky/projection";
 import {
-  FLY_MAX_DISTANCE, FLY_MIN_DISTANCE, flyToCameraPosition, radiusForDepth,
-  scaleCaption, spanSummary, withPictures,
+  FLY_MAX_DISTANCE, FLY_MIN_DISTANCE, distinctObjectCount, flyToCameraPosition,
+  groupByObject, radiusForDepth, sameObjectTargets, scaleCaption, spanSummary,
+  withPictures,
   type PlacedPicture, type UniverseData, type UniverseObject,
 } from "../sky/universe";
 
@@ -223,6 +224,12 @@ function Scene({ data, images, stars, selected, onSelect }: {
   onSelect: (o: UniverseObject | null) => void;
 }) {
   const placed = useMemo(() => withPictures(data.objects, images), [data.objects, images]);
+  // One node per *object*, not per target. Two targets of one object (a mosaic
+  // and its single field, or the same object re-imaged under a second folder)
+  // sit at the same catalog position by design, so without this they draw two
+  // coincident pictures and two overlapping labels and the reader can't tell
+  // there are two. See ``groupByObject``.
+  const groups = useMemo(() => groupByObject(placed), [placed]);
   // A gentle drift so the depth reads as depth the moment the page opens —
   // a still perspective render of points in space is ambiguous until something
   // moves. Handed to OrbitControls rather than done by moving the camera
@@ -249,11 +256,11 @@ function Scene({ data, images, stars, selected, onSelect }: {
       {data.shells.map((s) => (
         <DistanceRing key={s.distance_ly} radius={radiusForDepth(s.depth)} label={s.label} />
       ))}
-      {placed.map((p) => (
+      {groups.map((g) => (
         <ObjectNode
-          key={p.object.safe}
-          placed={p}
-          selected={selected?.safe === p.object.safe}
+          key={g.key}
+          placed={g.primary}
+          selected={selected?.safe === g.primary.object.safe}
           onSelect={onSelect}
         />
       ))}
@@ -286,7 +293,10 @@ export function UniverseLegend({ data }: { data: UniverseData }) {
       <Group gap={8} mb={6}>
         <IconGalaxy size={18} />
         <Text fw={600}>Your universe</Text>
-        <Badge variant="light">{data.objects.length} placed</Badge>
+        {/* Objects, not targets: the map draws one node per object, so counting
+            targets made the badge disagree with what is on screen the moment two
+            of your targets were the same thing. */}
+        <Badge variant="light">{distinctObjectCount(data.objects)} placed</Badge>
       </Group>
       {span ? <Text size="xs" mb={4}>{span}</Text> : null}
       {scale ? <Text size="xs" c="dimmed" mb={4}>{scale}</Text> : null}
@@ -319,9 +329,15 @@ export function UniverseLegend({ data }: { data: UniverseData }) {
   );
 }
 
-/** The read-out for a clicked object. Pure DOM, for the same reason. */
-export function UniverseObjectCard({ object, onOpen, onClose }: {
+/** The read-out for a clicked object. Pure DOM, for the same reason.
+ *
+ * ``alsoTargets`` are your *other* targets of the same object — the ones sharing
+ * this node, because the map draws one node per object. Without them a mosaic
+ * and its single field look like one picture and the second is simply missing.
+ * Optional, so a caller with nothing to add renders exactly as before. */
+export function UniverseObjectCard({ object, alsoTargets = [], onOpen, onClose }: {
   object: UniverseObject;
+  alsoTargets?: UniverseObject[];
   onOpen: (safe: string) => void;
   onClose: () => void;
 }) {
@@ -346,6 +362,22 @@ export function UniverseObjectCard({ object, onOpen, onClose }: {
           something the reader may not recognise. */}
       {object.blurb ? (
         <Text size="xs" c="dimmed" mb={8}>{object.blurb}</Text>
+      ) : null}
+      {alsoTargets.length > 0 ? (
+        <Text size="xs" c="dimmed" mb={8}>
+          {alsoTargets.length === 1
+            ? "You have another target of this object: "
+            : `You have ${alsoTargets.length} more targets of this object: `}
+          {alsoTargets.map((o, i) => (
+            <span key={o.safe}>
+              {i > 0 ? ", " : ""}
+              <Anchor size="xs" component="button" type="button"
+                onClick={() => onOpen(o.safe)}>{o.name}</Anchor>
+            </span>
+          ))}
+          {". They sit at the same place in the sky, so they share this spot on "
+            + "the map."}
+        </Text>
       ) : null}
       <Group gap={8}>
         <Button size="xs" onClick={() => onOpen(object.safe)}>Open target</Button>
@@ -417,6 +449,7 @@ export function UniverseView() {
       {selected ? (
         <UniverseObjectCard
           object={selected}
+          alsoTargets={sameObjectTargets(data?.objects ?? [], selected)}
           onOpen={(safe) => navigate(`/targets/${safe}/history`)}
           onClose={() => setSelected(null)}
         />

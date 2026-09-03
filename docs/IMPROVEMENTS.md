@@ -24383,15 +24383,51 @@ problems. Dogfood it every big-picture run and fix root causes.
   offline Sky viewer's recognisable-star labelling is the precedent. Only worth it if a constellation-line
   dataset is already bundled — check before scoping, and do **not** add one as a dependency for this.
 
-- **NEW IDEA (Builder 2026-08-29, spotted while building "Your universe" v0.296.0) — two targets that are the
-  same object land on exactly the same point, and one hides the other.** *(Pillar: understand — PRIORITY 3;
-  size S; frontend-only.)* The universe map places each target at its *catalog* position, which is right — all
-  of a target's pictures belong where the object actually is. But a library that has both `M_31` and
-  `Andromeda` (or a re-imaged target under a second folder, which the owner's library does accumulate) draws
-  two coincident pictures and two overlapping labels, and the reader can't tell there are two. Cheapest honest
-  fix: group placed objects by `object_id` in the viewer, draw one node, and let the card list the targets
-  behind it ("2 of your targets are this object"). **Don't** fix it by nudging one aside — a fake offset on a
-  map whose whole promise is "placed where they really are" is exactly the wrong trade.
+- **✅ SHIPPED (Builder, v0.329.3, branch `claude/sweet-babbage-s16wgp`) — ~~two targets that are the same
+  object land on exactly the same point, and one hides the other.~~** Built to the filed shape, including its
+  "don't" — nothing is nudged aside.
+
+  **It is not a rare shape; it is the owner's normal one.** The entry frames this as a library that has both
+  `M_31` and `Andromeda`, but the Seestar's own folder convention produces the pair *by design*: `<T>_sub/`
+  and `<T>_mosaic_sub/` become the targets `M 31` and `M 31 (mosaic)`, deliberately kept distinct because
+  their canvases differ. The owner is a heavy mosaic user and their live library carries that pair for
+  `M 3`, `M 31`, `M 44`, `NGC 6960`, `NGC 7000`, `IC 5070` and `IC 1318` — so the map has been drawing seven
+  pairs of coincident pictures and overlapping labels, with nothing on screen saying there were two.
+
+  **Three pure helpers, in `sky/universe.ts`, and the viewer reads them.** `groupByObject` collapses placed
+  targets sharing a catalog `object_id` into one node; the **primary** — the one drawn — is the first member
+  that actually has a picture, because a bare marker drawn over a finished picture would hide the better
+  thing. `sameObjectTargets` gives the read-out your *other* targets of that object, each a link that opens
+  it. `distinctObjectCount` fixes the legend's "N placed" badge, which counted targets and so disagreed with
+  the node count the moment two of them were one thing.
+
+  **The one deliberate refusal, and it is the entry's own:** a target with **no** catalog id never groups —
+  it keys on its own target name instead. Folding on an empty id would pile every unidentified target onto a
+  single point, which is this bug with the sign flipped. Ids are matched trimmed and case-folded.
+
+  **Upgrade-safe (§9):** frontend-only. No endpoint, no response shape, no schema, no config, no on-disk
+  change. `UniverseObjectCard`'s new `alsoTargets` defaults to `[]`, so the component renders byte-identically
+  for a caller that passes nothing (pinned).
+
+  **Tests (+17 vitest, all 17 fail before).** `universe.test.ts` (+13) over the three helpers: the pair
+  becoming one node; the picture-bearing member leading; un-catalogued targets never folding; case/whitespace
+  matching; different objects staying apart and in order; **a no-op on a library with one target per object**
+  (the case that must not change); an empty map; and the count badge from both ends.
+  `Universe.test.tsx` (+4): the read-out naming the sibling and saying why they share the spot, the plural
+  form, clicking a sibling opening *that* target rather than the drawn one, and total silence when the node
+  really is your only target of the object.
+
+  *(Original entry follows.)*
+
+  - **~~NEW IDEA (Builder 2026-08-29, spotted while building "Your universe" v0.296.0) — two targets that are the
+    same object land on exactly the same point, and one hides the other.~~** *(Pillar: understand — PRIORITY 3;
+    size S; frontend-only.)* The universe map places each target at its *catalog* position, which is right — all
+    of a target's pictures belong where the object actually is. But a library that has both `M_31` and
+    `Andromeda` (or a re-imaged target under a second folder, which the owner's library does accumulate) draws
+    two coincident pictures and two overlapping labels, and the reader can't tell there are two. Cheapest honest
+    fix: group placed objects by `object_id` in the viewer, draw one node, and let the card list the targets
+    behind it ("2 of your targets are this object"). **Don't** fix it by nudging one aside — a fake offset on a
+    map whose whole promise is "placed where they really are" is exactly the wrong trade.
 
 - **⚠️ PROCESS NOTE + PROPOSAL (Builder 2026-09-02) — collision TEN, and it was a *clean sweep*: two Builders
   in one hour independently built the **same three items**, and every one of them was the top open entry of
