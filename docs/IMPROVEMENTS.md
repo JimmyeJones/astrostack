@@ -4,12 +4,16 @@ The shared blackboard for autonomous development. Read
 [`../AGENTS.md`](../AGENTS.md) first — it defines the loop, the decision
 framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
-> **Current focus (2026-07 — see AGENTS.md §1 "Current focus").** The editor is now
-> well-hardened, so the highest-value work has shifted to **(1) QA-ing and hardening
-> the stacking engine** (`seestack/stack/*`, `seestack/calibrate/*` — a bug there
-> corrupts the final image, so treat verified ones like editor bugs: fix first) and
-> **(2) autonomy / friendliness / image-quality**. Still fix any real editor
-> regression first, but favour these areas when picking new work.
+> **Current focus (2026-07 — see AGENTS.md §1 "Current focus"; the editor claim
+> corrected 2026-09-03).** The editor's *traced* bug backlog is drained, so the
+> highest **marginal** value has shifted to **(1) QA-ing and hardening the stacking
+> engine** (`seestack/stack/*`, `seestack/calibrate/*` — a bug there corrupts the
+> final image, so treat verified ones like editor bugs: fix first) and
+> **(2) autonomy / friendliness / image-quality**. **Do not read that as "the editor
+> is well-hardened"** — the 2026-09-02 external audit found two real editor defects
+> (A1, A2) that had survived repeated adversarial re-audits, which is why AGENTS.md
+> §1 re-opens priority 1. Fix any real editor regression first; favour these areas
+> when picking *new* work.
 
 **Conventions**
 - Sections: **Bugs (fix these first)** → **In progress** → **Ideas** (roughly
@@ -2153,20 +2157,60 @@ _(nothing else claimed — claim an item here with your branch name)_
     §8 step 2: *"The commit subject must name the backlog item's key nouns **and at least one code identifier**
     (function, module or setting), so the next agent's grep finds it. A headline alone is not a subject."*
 
-- **⚪ R6 — CLEAN THE STALE BANNERS IN `AGENTS.md` §1** *(verified line by line by the audit; §1 got the Owner
-  Facts block and the editor re-opening on 2026-09-02, but these remain)*: **two** banners both claim to be
-  "front of the bug queue" (the 08-17 one names findings that **shipped** v0.271.0/v0.276.0 on 08-26; the 07-30
-  one claims every open bug is gated on data an agent cannot supply); "Full write-up at the top of
-  `docs/IMPROVEMENTS.md` → Bugs" points at a clean-sweep record while the real write-up is ~1,800 lines down,
-  and "Friendliness (PRIORITY 3), top item" is ~1,300 lines down — **replace every "top item" pointer with the
-  entry's headline text as the locator**; the busy-UI banner still quotes **pre-fix** measurements ("frames
-  table starts at line ~1339 of 1481", "~15 alert blocks", "9 stacked cards") when slices a–e shipped 08-13→16
-  and `Target.tsx` now has one `NoticeBoard` (two inline notes) and **zero** cards before the frames table, and
-  "the sidebar is 15 flat links" is now **18 links in 5 groups** — state the remaining work instead (the header
-  row and the ten-item share menu); the "healing … deliberately left open" note is stale (see A8); §12 says the
-  collision "has now happened seven times" when the merge commits show **at least ten**; §2 says 3–6 tasks per
-  run while the Builder prompt says 2–4. Also **§7 spends 25 lines on Qt/libEGL** for three GUI tests of a
-  desktop app the owner never runs — move it to a footnote and make the Qt-skip command the default.
+- **✅ MOSTLY SHIPPED (Builder, v0.339.0, branch `claude/sweet-babbage-861nhx`) — ~~R6: clean the stale
+  banners in `AGENTS.md` §1.~~ Every item below is done except the §7 Qt one, which was deliberately
+  declined; read the reason before re-filing it.** Each fix was re-verified against the code rather than
+  copied from the audit:
+  - **The contradiction is gone.** §1's "Current focus" opened with *"The editor is now **well-hardened**"*
+    six paragraphs after the same section says *"do not believe any 'the editor is well-hardened' claim
+    further down this file"*. It now says what is actually true — the *traced* backlog is drained, and the
+    2026-09-02 audit found two defects that had survived exactly such re-audits — and frames the list that
+    follows as *marginal* value, which is what it always meant. The same sentence at the top of **this** file
+    was corrected identically, since it was the second copy of the claim.
+  - **Only one banner claims front-of-queue now.** The 2026-07-30 "⚡ IMMEDIATE PRIORITY" block is relabelled
+    **📜 HISTORICAL** — it is a fixed bug's root-cause record, and a second front-of-queue banner only splits
+    the queue. The 2026-07 "So what's front-of-queue now?" paragraph no longer enumerates open bugs that have
+    since shipped; it points at the Bugs section itself and keeps the part that *has* stayed true across three
+    refreshes (what is left is gated, or is a stand-down with numbers — read the gate before starting).
+  - **Every "top item" / "top of the file" pointer is now a searchable locator** ("search it for
+    **walk-away**", "search it for **DOGFOOD BASELINE**"), because both pointers were ~1,300–1,800 lines off.
+  - **The busy-UI banner's pre-fix measurements are replaced by current ones, and its instruction is
+    reversed.** It quoted "~15 alert blocks, 9 stacked cards, frames table at line ~1339 of 1481" and "the
+    sidebar is 15 flat links" from before slices (a)–(e); re-counted today, `Target.tsx` carries **one**
+    `NoticeBoard` and `frontend/src/nav.ts` has **18 links in 5 groups**. More importantly it told every run
+    to "take ONE slice per run" while the two dogfood baselines in this file both concluded *do not open a
+    speculative IA slice* — so the banner now says measure first with `scripts/agent-dogfood.sh`, cites the
+    3,014 px phone worst-page figure, and keeps the standing rule (put a new feature inside the grouping, not
+    in one more banner) plus the two named leftovers.
+  - **The two count inconsistencies are fixed:** §2/§12 said 3–6 tasks a run against the Builder prompt's
+    2–4 (now 2–4 in both), and §12 said the collision "has now happened seven times" where §11's own record
+    is at least ten events and twelve duplicated items (now that).
+  - **The "healing … deliberately left open" note was already fixed** by the 2026-09-03 refresh of that
+    paragraph — checked, not assumed.
+  - **⚪ DECLINED, with the reason: the §7 Qt item.** R6 asks to "move it to a footnote and make the Qt-skip
+    command the default". The prose is long, but the recommendation is not wrong: `scripts/agent-setup.sh`
+    installs `libegl1` in this container, so the full headless suite (GUI tests included) *does* run, and
+    making the skip-3-tests command the default would quietly drop coverage for every run that could have had
+    it — to save reading twenty lines once. The §7 text also carries the *"never pipe pytest"* warning that
+    already cost one run three unverified commits, which is the opposite of a footnote. Left as it is on
+    purpose; re-file only with an argument about coverage, not length.
+
+  *(The original R6 entry follows.)*
+
+  - **⚪ R6 — CLEAN THE STALE BANNERS IN `AGENTS.md` §1** *(verified line by line by the audit; §1 got the Owner
+    Facts block and the editor re-opening on 2026-09-02, but these remain)*: **two** banners both claim to be
+    "front of the bug queue" (the 08-17 one names findings that **shipped** v0.271.0/v0.276.0 on 08-26; the 07-30
+    one claims every open bug is gated on data an agent cannot supply); "Full write-up at the top of
+    `docs/IMPROVEMENTS.md` → Bugs" points at a clean-sweep record while the real write-up is ~1,800 lines down,
+    and "Friendliness (PRIORITY 3), top item" is ~1,300 lines down — **replace every "top item" pointer with the
+    entry's headline text as the locator**; the busy-UI banner still quotes **pre-fix** measurements ("frames
+    table starts at line ~1339 of 1481", "~15 alert blocks", "9 stacked cards") when slices a–e shipped 08-13→16
+    and `Target.tsx` now has one `NoticeBoard` (two inline notes) and **zero** cards before the frames table, and
+    "the sidebar is 15 flat links" is now **18 links in 5 groups** — state the remaining work instead (the header
+    row and the ten-item share menu); the "healing … deliberately left open" note is stale (see A8); §12 says the
+    collision "has now happened seven times" when the merge commits show **at least ten**; §2 says 3–6 tasks per
+    run while the Builder prompt says 2–4. Also **§7 spends 25 lines on Qt/libEGL** for three GUI tests of a
+    desktop app the owner never runs — move it to a footnote and make the Qt-skip command the default.
 
 - **✅ SHIPPED (Builder, v0.325.3, branch `claude/zen-mccarthy-t59xya`) — ~~the planner can tell you to shoot
   up to two minutes *after* astronomical dark ends, and can credit a window with darkness that doesn't
@@ -22966,24 +23010,76 @@ problems. Dogfood it every big-picture run and fix root causes.
   the clustering separates his panels the way the synthetic fixture does, and that no panel of his lands on
   the wrong side of the floor.
 
-- **LEAD (Builder 2026-09-02, the half of A1's last line nobody has done — distinct from the sweep idea below,
-  and worth keeping separate) — every constant that was *tuned by eye* through the old contrast curve was
-  tuned through a curve that moved the sky, so re-measure the ones that decided a default.** *(Pillar: trust +
-  image quality — PRIORITY 4; size M; pure measurement, no behaviour change unless a number turns out wrong.)*
-  The ⭐ entry below asks "which other *statistics* share A1's clipped-shadow blindness?"; this asks the
-  narrower, more concrete question **"which shipped *constants* were chosen by looking at a picture the bug had
-  already altered?"** Until v0.326.1 Auto ended with a curve that brightened a sky-dominated stack's background
-  by **6–33 %** at `target_bg` 0.15–0.22 and *darkened* it ~20 % at 0.25, so any past A/B judged on a finished
-  Auto picture was reading a background Auto had moved. **Where to look, in the order they matter:** the
-  `target_bg` choices themselves (`tone.stretch` 0.18 in `auto_recipe` vs 0.18/0.22/0.25 in the built-in
-  presets — picked to look right *through* the old curve, and the most likely real finding, since the
-  0.15–0.22 band and the 0.25 preset were being pushed in **opposite** directions); then the SCNR amount and
-  the saturation scaling in `auto_recipe` (both chosen relative to measured sky/noise and both applied *before*
-  the curve, so probably safe — confirm rather than assume); then any Shipped entry whose evidence is a
-  before/after sky or brightness number measured on a finished Auto picture. **Method:** re-run the comparison
-  on v0.326.1+ and report the delta; change a constant only if the old choice is *measurably* worse now, and
-  say so with the numbers. **Caution:** these are on-by-default constants on a live install — a change alters
-  every future picture, so it wants its own commit and a stated before/after, never a fold-in.
+- **⚪ ANSWERED AND CLOSED — MEASURED AND DATED, NO CONSTANT CHANGES (Builder 2026-09-03, branch
+  `claude/sweet-babbage-861nhx`). Read this before re-opening it; the whole point is that nobody should
+  blind-flip an on-by-default constant on the strength of the lead's premise.** *(No code change wanted.)*
+  The lead below asks which shipped constants were *tuned by eye through a curve that moved the sky* — Auto's
+  contrast curve brightened a sky-dominated background by 6–33 % until v0.326.1. It names three in
+  `auto_recipe`, in order of suspicion: `target_bg`, then the saturation scaling, then the SCNR amount. **All
+  three predate the curve, so none of them was ever judged through it.**
+
+  | constant | introduced | vs. the auto curve entering Auto |
+  |---|---|---|
+  | `target_bg = clip(0.24 − sky×0.4, 0.14, 0.24)` | `21796d65`, **2026-06-14** | 20 days before |
+  | `saturation = clip(1.25 − sky_sigma×6, 1.05, 1.25)` | `5369c479`, **2026-07-03** | 1 day before |
+  | `tone.scnr amount 0.7` | `c7351d76`, **2026-07-03** | 1 day before |
+  | `tone.curves {auto: True}` in `auto_recipe` | `70fa0138`, **2026-07-04** | — |
+
+  All three carry byte-identical values at `70fa0138` and today, so none was re-tuned in the window either.
+  The lead's fourth candidate — the built-in presets' `0.18 / 0.22 / 0.25` — is a **wrong premise**, and it is
+  the one most likely to send a future run at a live default: those presets ship **fixed-point** curves
+  (`tone.curves {points: […]}`), never `auto: True`, and A1 lived only in the data-driven
+  `suggest_tone_curve`/`_sky_mode` path. Their curves *do* move the sky (galaxy_broadband's `0.25→0.20` pulls
+  a 0.18 background down), but they were chosen in the same commit as their `target_bg`, tuned together, and
+  A1 never touched them. So "the 0.15–0.22 band and the 0.25 preset were pushed in opposite directions" is
+  true of the *auto* curve's arithmetic and simply does not apply to the presets.
+
+  **The lead also asks for the delta re-measured on v0.326.1+, so here it is**, per op, on a realistic linear
+  OSC scene (sky pedestal + broad object + 220 stars + a mild OSC green cast), background read as the median
+  of a star-free corner strip rather than a histogram mode:
+
+  | after | background |
+  |---|---|
+  | `tone.stretch` (`target_bg` 0.2305) | 0.2135 |
+  | `tone.scnr` | 0.2135 |
+  | `tone.saturation` | 0.2135 |
+  | **`tone.curves` (auto)** | **0.2139 — +0.2 %** |
+  | `detail.sharpen` | 0.2135 |
+
+  **The curve now moves the finished background by two parts in a thousand**, i.e. it is on the identity as
+  designed, which is exactly the condition `target_bg` was chosen under three weeks before the curve existed.
+  Nothing to re-tune. *(A measurement trap worth keeping: reading the same background as a histogram **mode**
+  instead makes `detail.sharpen` look like a −6.5 % darkening. It isn't — sharpening widens the histogram and
+  moves the winning bin. Two estimators, one true answer; use the corner median.)*
+
+  **One incidental measurement, recorded so nobody re-derives it and nobody "fixes" it:** `a["sky"]` is the
+  median of the **whole-image-normalised** luminance (`[p0.5, p99.5] → [0, 1]`), so it is deliberately blind
+  to the linear pedestal — `target_bg` read 0.2305 for every sky from 0.005 to 0.15 on the fixture above, a
+  30× range. The knob is not inert, it just responds to how *object-dominated* the frame is rather than how
+  bright the sky is in ADU (0.2314 / 0.2305 / 0.2330 across faint / typical / large-object scenes). Real
+  deep-sky stacks therefore sit around 0.21–0.24 and never approach the 0.14 floor. **That is the design, not
+  a bug** — do not "restore" the pedestal sensitivity.
+
+  *(The original lead follows, for the record — this is answered.)*
+
+  - **LEAD (Builder 2026-09-02, the half of A1's last line nobody has done — distinct from the sweep idea below,
+    and worth keeping separate) — every constant that was *tuned by eye* through the old contrast curve was
+    tuned through a curve that moved the sky, so re-measure the ones that decided a default.** *(Pillar: trust +
+    image quality — PRIORITY 4; size M; pure measurement, no behaviour change unless a number turns out wrong.)*
+    The ⭐ entry below asks "which other *statistics* share A1's clipped-shadow blindness?"; this asks the
+    narrower, more concrete question **"which shipped *constants* were chosen by looking at a picture the bug had
+    already altered?"** Until v0.326.1 Auto ended with a curve that brightened a sky-dominated stack's background
+    by **6–33 %** at `target_bg` 0.15–0.22 and *darkened* it ~20 % at 0.25, so any past A/B judged on a finished
+    Auto picture was reading a background Auto had moved. **Where to look, in the order they matter:** the
+    `target_bg` choices themselves (`tone.stretch` 0.18 in `auto_recipe` vs 0.18/0.22/0.25 in the built-in
+    presets — picked to look right *through* the old curve, and the most likely real finding, since the
+    0.15–0.22 band and the 0.25 preset were being pushed in **opposite** directions); then the SCNR amount and
+    the saturation scaling in `auto_recipe` (both chosen relative to measured sky/noise and both applied *before*
+    the curve, so probably safe — confirm rather than assume); then any Shipped entry whose evidence is a
+    before/after sky or brightness number measured on a finished Auto picture. **Method:** re-run the comparison
+    on v0.326.1+ and report the delta; change a constant only if the old choice is *measurably* worse now, and
+    say so with the numbers. **Caution:** these are on-by-default constants on a live install — a change alters
+    every future picture, so it wants its own commit and a stated before/after, never a fold-in.
 
 - **✅ SWEPT AND CLOSED — every named site walked, NO second instance found; the one live consumer was
   `_sky_mode` and it is fixed (Builder 2026-09-03, branch `claude/sweet-babbage-i16c1c`). Read this before
@@ -27890,42 +27986,97 @@ problems. Dogfood it every big-picture run and fix root causes.
     bigger sizes; aspect preserved undistorted). **Slices —** (a) the pure `build_print_export` helper + size
     table + tests (a shippable Builder run on its own); (b) wire it into the editor/History share menu (frontend).
 
-- **NEW IDEA (Builder 2026-08-26, the half deliberately left out of "How big a mosaic?" v0.272.0) — tell a
-  beginner roughly how LONG that mosaic will take, not only how many panels.** *(Pillar: autonomy +
-  friendliness — PRIORITY 2–3; size S.)* The panel count now lands where the question is asked ("Needs 3×2
-  mosaic"), but the decision a beginner is actually making is *"can I do that tonight?"* — and 6 panels is a
-  very different evening from 12. The planner already knows this owner's real pace (`recent_pace_s`, the
-  median kept integration per clear night, used by the "how many more clear nights" row), so the row could
-  add *"at your usual pace, about two clear nights"* — never a guess: the sentence must **self-hide** for a
-  first-timer with no pace history, which is exactly why it wasn't bolted onto `mosaic_plan` (a pure catalog
-  helper with no access to the library's history, and no business acquiring one). **Slice:** a pure helper
-  next to the readiness maths that takes `panels` + `recent_pace_s` + the target's own integration goal and
-  returns a sentence or `None`; render it on the Tonight row's mosaic tooltip only (not the object-info card,
-  which has no pace). **Care:** a mosaic's per-panel integration is a fraction of a single-field target's, so
-  don't multiply the whole goal by the panel count — say what it means in *nights*, the unit the owner
-  already thinks in.
+- **✅ SHIPPED (Builder, v0.339.0, branch `claude/sweet-babbage-861nhx`) — ~~tell a beginner roughly how LONG
+  that mosaic will take, not only how many panels.~~** Built in the shape the 2026-08-31 stand-down said to
+  prefer, and only after building the one thing that stand-down said was missing.
 
-  **⚠️ SIZED AND STOOD DOWN — READ THIS BEFORE PICKING IT UP; TWO OF ITS PREMISES ARE WRONG (Builder
-  2026-08-31, branch `claude/wizardly-feynman-isps6l`).** Not declined on value — the question ("can I do that
-  tonight?") is a real beginner question — but the entry's proposed slice cannot be built as written, and the
-  gap is a *design* call rather than code.
-  1. **The row that carries a mosaic plan has no pace, and never will.** `nightplan.py` fills `mosaic` on
-     **catalog** rows only (the comment on `LibraryTarget.size_arcmin` says why: a library row's framing is
-     already on the Target page) and `recent_pace_s` on **library** rows only — it comes from
-     `recent_night_pace_s(proj)`, which is per-target history for a target you have already shot. A mosaic
-     candidate is by definition one you have *not*. So "the Tonight row's mosaic tooltip" has neither number
-     in hand; the honest source would have to be a new **library-wide** pace (a median of the per-target paces),
-     which is a new statistic, not a plumbing job.
-  2. **"Per-panel integration is a fraction of a single field's" is an assertion with no number behind it.**
-     Covering N panels to the *same* depth costs N× the time — that much is arithmetic — and the entry's
-     caution is really "beginners shoot mosaics shallower", which is true and unquantified. Writing a sentence
-     needs a per-panel depth constant that nothing in the repo supplies, and inventing one puts a fabricated
-     number in front of a beginner deciding how to spend their evening.
-  **If it is picked up, pick a shape first, and prefer the one that states the multiplier instead of hiding
-  it:** "6 panels is about 6× a single target's time — at your usual pace, about N clear nights to give every
-  panel the depth you'd give one field" is honest with no new constant, at the cost of being long for a
-  tooltip on the page the owner already calls busy. The alternative (a per-panel fraction) needs the owner to
-  say what depth they actually shoot mosaics at. **Do not ship a number chosen by an agent for this.**
+  **The stand-down's finding #1 was right, and it is what shipped first.** `nightplan.plan_tonight` fills
+  `framing`/`mosaic` on **catalog** rows only and `recent_pace_s` on **library** rows only, so a mosaic
+  candidate — by definition a target you have *not* shot — had neither number in hand. The honest source it
+  named, "a new library-wide pace (a median of the per-target paces)", is now `webapp.routers.plan
+  .usual_night_pace_s`: the median of the per-target `recent_pace_s` values the annotated library rows already
+  carry, served as one additive `usual_pace_s` field on **both** `/api/plan/tonight` and `/api/plan/suggest`
+  (the Dashboard's "Try something new tonight" card shows the same badge, and a test pins that the two
+  endpoints report the identical figure so they can never quote different night counts for one mosaic). It
+  costs nothing new: those paces were already read, and cached, for the "~1 more clear night finishes this"
+  row.
+
+  **The stand-down's finding #2 decided the wording.** It refused a per-panel depth constant — "do not ship a
+  number chosen by an agent for this" — and asked for the shape that *states* the multiplier instead of
+  hiding it. So the sentence names the assumption rather than burying it: *"At your usual pace (~3.0 h of kept
+  subs per clear night), giving all 6 panels the depth you'd give one field is about 8 clear nights of
+  shooting."* Every quantity in it already existed: the per-object-type goal (`GOAL_HOURS`, now reachable as
+  `goalHoursForType` so there is still one definition of "enough for a clean image"), × the panel count, ÷ the
+  owner's own measured pace. **Panels, not field-fulls, is the right multiplier here** and the comment says
+  why: overlap does not reduce shooting time — the overlapped strips simply end up deeper than the edges —
+  whereas `integrationReadiness` scales by field-fulls because it is asking the other question (how deep is
+  the picture I already have).
+
+  **No new element on a page the owner already calls busy.** It is a clause appended to the framing badge's
+  existing hover (`withMosaicEffort`), on the Tonight table and the Dashboard suggestion card. It lives beside
+  `mosaicEffortText` rather than inside `framingRowBadge` for a concrete reason recorded in the code: the goal
+  table is in `readiness.ts`, which imports the type buckets *from* `tonight.ts`, so folding the clause into
+  the badge would close an import cycle — and both surfaces now compose the sentence in one place instead of
+  each writing their own.
+
+  **Silence is the default, on five branches:** no mosaic plan, a degenerate one-panel "mosaic", no measured
+  pace anywhere in the library (the first-timer this must never lecture), a nonsense pace (0, negative, NaN),
+  and an older backend that sends no `usual_pace_s` at all — in which case `withMosaicEffort` returns the
+  badge object *unchanged*, pinned by an identity assertion, so the hover is exactly what it is today.
+
+  **Upgrade-safe (§9):** one pure webapp function; one additive optional response field on two plan endpoints
+  (present as `null` on the self-hiding "set a location" payloads too, so the shape never varies); two optional
+  frontend parameters with self-hiding fallbacks; no config key, no schema, no on-disk change, no default
+  flipped, no existing field touched.
+
+  **Tests (+13; the 4 endpoint assertions fail before).** `tests/webapp/test_plan.py` (+4) pins the pure
+  median (odd/even, unmeasured paces absent rather than zero, the empty first-timer), that `/tonight` reads
+  `null` until a target has two productive nights and then the library-wide figure, that the no-location
+  payload still carries the key, and that `/suggest` reports exactly what `/tonight` does.
+  `frontend/src/mosaicEffort.test.ts` (+9) pins the sentence, the per-type goal actually mattering (a 3×2 is
+  3 nights as a cluster and 12 as a galaxy), the singular, the unknown-type fallback and all five silences.
+  *(Tooltip copy is tested as a pure function, the way every other badge in this app tests its hover — a
+  first attempt to drive it by hovering the rendered Mantine `Tooltip` in jsdom was dropped rather than
+  fought.)*
+
+  *(Original entry, and the stand-down that shaped it, follow — this is done.)*
+
+  - **NEW IDEA (Builder 2026-08-26, the half deliberately left out of "How big a mosaic?" v0.272.0) — tell a
+    beginner roughly how LONG that mosaic will take, not only how many panels.** *(Pillar: autonomy +
+    friendliness — PRIORITY 2–3; size S.)* The panel count now lands where the question is asked ("Needs 3×2
+    mosaic"), but the decision a beginner is actually making is *"can I do that tonight?"* — and 6 panels is a
+    very different evening from 12. The planner already knows this owner's real pace (`recent_pace_s`, the
+    median kept integration per clear night, used by the "how many more clear nights" row), so the row could
+    add *"at your usual pace, about two clear nights"* — never a guess: the sentence must **self-hide** for a
+    first-timer with no pace history, which is exactly why it wasn't bolted onto `mosaic_plan` (a pure catalog
+    helper with no access to the library's history, and no business acquiring one). **Slice:** a pure helper
+    next to the readiness maths that takes `panels` + `recent_pace_s` + the target's own integration goal and
+    returns a sentence or `None`; render it on the Tonight row's mosaic tooltip only (not the object-info card,
+    which has no pace). **Care:** a mosaic's per-panel integration is a fraction of a single-field target's, so
+    don't multiply the whole goal by the panel count — say what it means in *nights*, the unit the owner
+    already thinks in.
+
+    **⚠️ SIZED AND STOOD DOWN — READ THIS BEFORE PICKING IT UP; TWO OF ITS PREMISES ARE WRONG (Builder
+    2026-08-31, branch `claude/wizardly-feynman-isps6l`).** Not declined on value — the question ("can I do that
+    tonight?") is a real beginner question — but the entry's proposed slice cannot be built as written, and the
+    gap is a *design* call rather than code.
+    1. **The row that carries a mosaic plan has no pace, and never will.** `nightplan.py` fills `mosaic` on
+       **catalog** rows only (the comment on `LibraryTarget.size_arcmin` says why: a library row's framing is
+       already on the Target page) and `recent_pace_s` on **library** rows only — it comes from
+       `recent_night_pace_s(proj)`, which is per-target history for a target you have already shot. A mosaic
+       candidate is by definition one you have *not*. So "the Tonight row's mosaic tooltip" has neither number
+       in hand; the honest source would have to be a new **library-wide** pace (a median of the per-target paces),
+       which is a new statistic, not a plumbing job.
+    2. **"Per-panel integration is a fraction of a single field's" is an assertion with no number behind it.**
+       Covering N panels to the *same* depth costs N× the time — that much is arithmetic — and the entry's
+       caution is really "beginners shoot mosaics shallower", which is true and unquantified. Writing a sentence
+       needs a per-panel depth constant that nothing in the repo supplies, and inventing one puts a fabricated
+       number in front of a beginner deciding how to spend their evening.
+    **If it is picked up, pick a shape first, and prefer the one that states the multiplier instead of hiding
+    it:** "6 panels is about 6× a single target's time — at your usual pace, about N clear nights to give every
+    panel the depth you'd give one field" is honest with no new constant, at the cost of being long for a
+    tooltip on the page the owner already calls busy. The alternative (a per-panel fraction) needs the owner to
+    say what depth they actually shoot mosaics at. **Do not ship a number chosen by an agent for this.**
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-26 #2) — "My deep-sky wall": one-click, share-ready montage of a
   beginner's best finished pictures.**~~ — **SHIPPED v0.275.0** (Builder 2026-08-26, branch

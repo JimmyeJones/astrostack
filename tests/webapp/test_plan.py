@@ -222,6 +222,77 @@ def test_tonight_already_targeted_rows_carry_a_recent_pace(client, solved_librar
     assert catalog_row["recent_pace_s"] is None
 
 
+def test_usual_night_pace_is_the_median_of_the_targets_that_have_one():
+    """The library-wide "your usual pace", from the per-target paces already read.
+
+    Pure arithmetic, so its silences can be pinned without a library: a first-timer
+    (nobody has a pace yet) gets ``None`` rather than a guess, and a target whose
+    pace could not be measured never drags the median down as a zero."""
+    from seestack.nightplan import LibraryTarget
+
+    from webapp.routers.plan import usual_night_pace_s
+
+    def t(pace):
+        return LibraryTarget(
+            safe="x", name="x", ra_deg=0.0, dec_deg=0.0,
+            frames_accepted=0, total_exposure_s=0.0, recent_pace_s=pace,
+        )
+
+    # Odd count → the middle value; even → the mean of the middle two.
+    assert usual_night_pace_s([t(1200.0), t(3600.0), t(2400.0)]) == 2400.0
+    assert usual_night_pace_s([t(1200.0), t(2400.0)]) == 1800.0
+    # Targets with no measurable pace are absent from the median, not zeros in it.
+    assert usual_night_pace_s([t(None), t(3600.0), t(0.0)]) == 3600.0
+    # Nobody has a pace yet: say nothing rather than divide by a guess.
+    assert usual_night_pace_s([]) is None
+    assert usual_night_pace_s([t(None), t(None)]) is None
+
+
+def test_tonight_carries_the_owners_usual_clear_night_pace(client, solved_library):
+    """A row for a target the owner has *not* started — an oversized one needing a
+    mosaic — still needs a pace to answer "can I do that?". The per-target
+    ``recent_pace_s`` cannot serve it (a target never shot has none), so the plan
+    carries the library-wide median alongside."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+
+    # Before any target has two productive nights there is no pace to quote, and
+    # the field is null rather than a guessed number.
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    assert body["usual_pace_s"] is None
+
+    _seed_nights(solved_library, "M_42", [1, 8])
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    # 40 subs x 30 s = 1200 s a night; M 42 is the only target with a pace, so the
+    # library-wide median is its own figure.
+    assert body["usual_pace_s"] == 1200.0
+    by_safe = {t["target_safe"]: t for t in body["targets"] if t["already_targeted"]}
+    assert by_safe["M_42"]["recent_pace_s"] == 1200.0
+
+
+def test_tonight_without_a_location_still_carries_the_pace_key(client, solved_library):
+    """The self-hiding "set a site" payload keeps the same shape, so the frontend
+    reads one field rather than branching on whether it exists."""
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    assert body["location_source"] == "none"
+    assert body["usual_pace_s"] is None
+
+
+def test_suggest_carries_the_owners_usual_clear_night_pace(client, solved_library):
+    """The Dashboard's "Try something new tonight" card shows the same mosaic
+    badge as the planner table, so it needs the same pace to hover with."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    assert client.get("/api/plan/suggest",
+                      params={"when": JAN_EVENING}).json()["usual_pace_s"] is None
+
+    _seed_nights(solved_library, "M_42", [1, 8])
+    body = client.get("/api/plan/suggest", params={"when": JAN_EVENING}).json()
+    assert body["usual_pace_s"] == 1200.0
+    # ...and it is exactly what /tonight reports, so the two surfaces can never
+    # quote different night counts for the same mosaic.
+    tonight = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    assert body["usual_pace_s"] == tonight["usual_pace_s"]
+
+
 def test_tonight_reuses_the_cached_per_target_annotation(
     client, solved_library, monkeypatch
 ):

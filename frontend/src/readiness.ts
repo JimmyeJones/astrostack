@@ -27,6 +27,15 @@ const GOAL_HOURS: Record<TypeBucket, number> = {
   Other: 4,
 };
 
+// The suggested per-field integration goal for an object type, in hours — the
+// same number `integrationReadiness` judges against, exposed so a surface that
+// has no *accumulated* integration to judge (a target the owner has not started)
+// can still say what one field of it would take. Kept here, beside the table, so
+// there is one definition of "how long is enough for a clean image".
+export function goalHoursForType(type: string | null | undefined): number {
+  return GOAL_HOURS[objectTypeBucket(type)];
+}
+
 export type ReadinessLevel = "starting" | "solid" | "close" | "plenty";
 
 export interface IntegrationReadiness {
