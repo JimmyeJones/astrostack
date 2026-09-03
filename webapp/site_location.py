@@ -14,6 +14,7 @@ library with no site header can't turn one request into thousands of reads.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any
 
 # Cap how many frames we probe for a site location so a big library with no
@@ -124,6 +125,34 @@ def resolve_site_lon(request: Any, lib: Any, configured_lon: float | None) -> fl
         return configured_lon
     site = detect_site_cached(request, lib)
     return site[1] if site is not None else None
+
+
+def resolve_night_key(
+    request: Any, lib: Any, configured_lon: float | None
+) -> Callable[[str | None], str | None]:
+    """The observing-night key every "which night was this?" surface buckets by:
+    a capture stamp in, an ISO ``YYYY-MM-DD`` noon-to-noon local night out
+    (``None`` when the stamp is missing or unparseable).
+
+    Wraps :func:`resolve_site_lon` + ``night_date_of`` so the three surfaces that
+    need it — the Target page's Nights card, the Dashboard's target-progress
+    roll-up and the planner's already-targeted rows — cannot hand-mirror slightly
+    different bucketing and quote different nights (or different "N more clear
+    nights" ETAs) for the same target. The longitude is resolved once per call,
+    off the same short app-level cache, so building the key is cheap enough to do
+    per request.
+    """
+    from seestack.activity_calendar import night_date_of
+
+    lon = resolve_site_lon(request, lib, configured_lon)
+
+    def night_key(ts: str | None) -> str | None:
+        if not ts:
+            return None
+        d = night_date_of(ts, lon)
+        return d.isoformat() if d is not None else None
+
+    return night_key
 
 
 def detect_site_cached(request: Any, lib: Any) -> tuple[float, float] | None:

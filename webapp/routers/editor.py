@@ -1321,8 +1321,7 @@ def _loupe_window(full_h: int, full_w: int, rec: Recipe,
     it untouched) and then clamped so the window is always wholly inside the
     canvas, and never larger than it.
     """
-    crop = preview_crop_of_recipe(rec)
-    x0f, y0f, x1f, y1f = (0.0, 0.0, 1.0, 1.0) if crop is None else crop.as_tuple()
+    x0f, y0f, x1f, y1f = _preview_extent(rec)
     sx = x0f + min(max(fx, 0.0), 1.0) * (x1f - x0f)
     sy = y0f + min(max(fy, 0.0), 1.0) * (y1f - y0f)
 
@@ -1333,6 +1332,44 @@ def _loupe_window(full_h: int, full_w: int, rec: Recipe,
     x0 = min(max(x0, 0), full_w - w)
     y0 = min(max(y0, 0), full_h - h)
     return y0, x0, h, w
+
+
+def _preview_extent(rec: Recipe) -> tuple[float, float, float, float]:
+    """What the rendered preview covers, as ``(x0, y0, x1, y1)`` fractions of the
+    canvas — the recipe's own composed crop, or the whole thing when there is
+    none. One definition, because two things read it: the click has to be mapped
+    *through* it, and the window has to be reported back *relative to* it."""
+    crop = preview_crop_of_recipe(rec)
+    return (0.0, 0.0, 1.0, 1.0) if crop is None else crop.as_tuple()
+
+
+def _window_on_preview(y0: int, x0: int, h: int, w: int,
+                       full_h: int, full_w: int, rec: Recipe) -> dict:
+    """Where the window sits **on the rendered preview**, as 0..1 fractions of it.
+
+    The rest of ``X-Loupe-Window`` is in full-canvas pixels, which is the right
+    frame for "which part of my picture is this?" and the wrong one for drawing a
+    marker on the preview: with a crop those are different coordinate systems, and
+    the only other way for the caller to reconcile them is to re-derive
+    :func:`_preview_extent` in the browser — a second copy of this mapping, which
+    is how the two would eventually disagree.
+
+    Deliberately **not clamped to 0..1**. The window is clamped inside the canvas,
+    not inside the crop, so at the very edge of a cropped preview it genuinely
+    does hang over the side; saying so lets the caller draw it clipped, which is
+    the truth, rather than sliding it inward, which is not.
+    """
+    x0f, y0f, x1f, y1f = _preview_extent(rec)
+    span_w = (x1f - x0f) * full_w
+    span_h = (y1f - y0f) * full_h
+    if not (span_w > 0 and span_h > 0):  # a degenerate crop: say nothing
+        return {}
+    return {
+        "preview_x": round((x0 - x0f * full_w) / span_w, 6),
+        "preview_y": round((y0 - y0f * full_h) / span_h, 6),
+        "preview_width": round(w / span_w, 6),
+        "preview_height": round(h / span_h, 6),
+    }
 
 
 def _without_geometry(rec: Recipe) -> Recipe:
@@ -1390,7 +1427,8 @@ def _render_loupe_png(project_dir: Path, run, rec: Recipe,
     Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
     return buf.getvalue(), {"x": x0, "y": y0, "width": w, "height": h,
                             "canvas_width": full_w, "canvas_height": full_h,
-                            "proxy_scale": round(float(scale), 3)}
+                            "proxy_scale": round(float(scale), 3),
+                            **_window_on_preview(y0, x0, h, w, full_h, full_w, rec)}
 
 
 class LoupeInfoOut(BaseModel):
@@ -1455,7 +1493,9 @@ async def edit_loupe(safe: str, run_id: int, request: Request,
 
     ``fx``/``fy`` are fractions of the rendered preview (0..1); they default to its
     centre. The window's source rectangle comes back in ``X-Loupe-Window`` so the
-    caller can say *where* in the picture it is looking.
+    caller can say *where* in the picture it is looking — in full-canvas pixels
+    (``x``/``y``/``width``/``height``) for the sentence, and as fractions of the
+    rendered preview (``preview_*``) for the marker drawn on it.
     """
     project_dir, run = _run_info(request, safe, run_id)
     rec = _decode_recipe_query(request, safe, run_id, recipe)

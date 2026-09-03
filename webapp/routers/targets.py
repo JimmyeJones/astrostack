@@ -48,7 +48,11 @@ from webapp.schemas import (
     TransparencyTrendOut,
     TransparencyTrendPointOut,
 )
-from webapp.site_location import detect_site_cached, resolve_site_lon
+from webapp.site_location import (
+    detect_site_cached,
+    resolve_night_key,
+    resolve_site_lon,
+)
 
 log = logging.getLogger(__name__)
 
@@ -788,20 +792,12 @@ def target_nights(safe: str, request: Request) -> list[NightSummaryOut]:
     only that row's half, so deciding a night was clouded out dropped half its
     subs and left the rest in the picture. The bucketing is done here, with the
     observer's own longitude, because only this layer knows it."""
-    from seestack.activity_calendar import night_date_of
     from seestack.session_recap import nights_breakdown
 
     settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
-        lon = resolve_site_lon(request, lib, settings.site_lon)
-
-        def _night_key(ts: str | None) -> str | None:
-            if not ts:
-                return None
-            d = night_date_of(ts, lon)
-            return d.isoformat() if d is not None else None
-
+        _night_key = resolve_night_key(request, lib, settings.site_lon)
         nights = nights_breakdown(proj, night_of=_night_key)
     finally:
         proj.close()

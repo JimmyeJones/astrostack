@@ -1345,3 +1345,127 @@ def test_an_unplaceable_night_never_merges_with_anything(tmp_path):
         assert len(nights) == 2
     finally:
         proj.close()
+
+
+# --- ...and so is a night the PACE counts ------------------------------------
+#
+# ``recent_night_pace_s`` is the number behind "about 2 more clear nights", and
+# it split the same way the Nights card used to. So a night shot in two goes
+# entered the median twice, each entry carrying roughly half the night's light —
+# biasing the pace low, and in the direction that matters: the app told a
+# beginner they needed *more* clear nights than they did.
+
+_SPLIT_NIGHT_EPOCH = datetime(2026, 7, 1, 21, 0, 0)
+
+
+def _split_night_of(proj, day: int, *, n_evening: int, n_predawn: int,
+                    exposure: float = 10.0) -> None:
+    """One observing night shot in two goes 8 h apart (21:00, then 05:00 the next
+    morning): the same night by the noon-to-noon rule, two sessions by the 6 h
+    gap rule. ``day`` is a whole-day offset from 2026-07-01, so a long run of
+    them can't fall off the end of a month."""
+    evening = _SPLIT_NIGHT_EPOCH + timedelta(days=day)
+    for i in range(n_evening):
+        proj.add_frame(_frame(evening + timedelta(seconds=30 * i), exposure=exposure))
+    predawn = evening + timedelta(hours=8)
+    for i in range(n_predawn):
+        proj.add_frame(_frame(predawn + timedelta(seconds=30 * i), exposure=exposure))
+
+
+def test_pace_counts_a_split_night_once_with_the_night_key(tmp_path):
+    """Three nights, each shot in two 300 s goes. As sessions the pace is 300 s —
+    half a night's worth — and the ETA it feeds is twice as long as the truth.
+    As observing nights it is the 600 s those nights really produced."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for day in (1, 8, 15):
+            _split_night_of(proj, day, n_evening=30, n_predawn=30)
+        assert recent_night_pace_s(proj) == 300.0  # the old, halved figure
+        assert recent_night_pace_s(proj, night_of=_night_key_utc) == 600.0
+    finally:
+        proj.close()
+
+
+def test_pace_agrees_with_the_nights_card_it_claims_to_agree_with(tmp_path):
+    """The docstring's own promise, pinned against the rows the Target page
+    actually fetches (``/api/targets/{safe}/nights`` passes a night key). Both
+    sides must be handed the same key, or the two screens quote different ETAs
+    for one picture."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for day, subs in ((1, (30, 30)), (8, (20, 40)), (15, (45, 45))):
+            _split_night_of(proj, day, n_evening=subs[0], n_predawn=subs[1])
+        nights = nights_breakdown(proj, night_of=_night_key_utc)
+        assert len(nights) == 3
+        assert recent_night_pace_s(proj, night_of=_night_key_utc) == median(
+            [n.kept_exposure_s for n in nights]
+        )
+    finally:
+        proj.close()
+
+
+def test_a_split_short_night_stops_vanishing_under_the_productive_floor(tmp_path):
+    """The second, larger error the halving caused: ``MIN_PRODUCTIVE_NIGHT_S`` is
+    a floor on a *night*, so halving one can push both halves under it and drop a
+    genuinely real night from the pace entirely — leaving too few nights to call
+    it a pace at all. Merged, the night counts for what it produced."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        # 2 × 100 s per night: each half is under the 120 s floor, the night is not.
+        for day in (1, 8, 15):
+            _split_night_of(proj, day, n_evening=10, n_predawn=10)
+        assert recent_night_pace_s(proj) is None
+        assert recent_night_pace_s(proj, night_of=_night_key_utc) == 200.0
+    finally:
+        proj.close()
+
+
+def test_pace_lookback_window_reaches_five_nights_not_two_and_a_half(tmp_path):
+    """``PACE_LOOKBACK_NIGHTS`` is documented as "long enough that one short night
+    doesn't dominate". Counting halves silently halved its reach too: on a
+    habitual split-night observer five *sessions* are two and a half nights, so
+    the newest night or two decided the pace on their own. Six nights, the oldest
+    four long and the newest two short: as nights the median is still the long
+    habit (four of the five in window), as sessions it is the last two nights
+    alone."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for day in (0, 7, 14, 21):
+            _split_night_of(proj, day, n_evening=120, n_predawn=120)  # 2400 s
+        for day in (28, 35):
+            _split_night_of(proj, day, n_evening=30, n_predawn=30)    # 600 s
+        assert PACE_LOOKBACK_NIGHTS == 5
+        # Five nights back = one 600 s night short of the whole long habit.
+        assert recent_night_pace_s(proj, night_of=_night_key_utc) == 2400.0
+        # Five sessions back reaches only two and a half nights: four of the five
+        # entries are the two short nights' halves, so they decide the median on
+        # their own and the long habit is outvoted by a night-and-a-half of data.
+        assert recent_night_pace_s(proj) == 300.0
+    finally:
+        proj.close()
+
+
+def test_pace_with_a_night_key_leaves_ordinary_nights_alone(tmp_path):
+    """No-regression: on the ordinary shape — one unbroken run per night — the
+    key changes nothing, because a session never spans two nights."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _night(proj, 1, n=30)   # 300 s
+        _night(proj, 8, n=60)   # 600 s
+        _night(proj, 15, n=90)  # 900 s
+        assert recent_night_pace_s(proj) == 600.0
+        assert recent_night_pace_s(proj, night_of=_night_key_utc) == 600.0
+    finally:
+        proj.close()
+
+
+def test_pace_with_an_unplaceable_night_key_falls_back_to_sessions(tmp_path):
+    """A key that can never place a stamp (no longitude, unparseable stamps) must
+    degrade to the old session split rather than fusing everything into one."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for day in (1, 8, 15):
+            _split_night_of(proj, day, n_evening=30, n_predawn=30)
+        assert recent_night_pace_s(proj, night_of=lambda ts: None) == 300.0
+    finally:
+        proj.close()

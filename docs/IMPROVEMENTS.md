@@ -11954,35 +11954,79 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **⭐ NEW, TRACED (Builder 2026-09-03, the half v0.329.1 could not reach) — the "about N more clear nights"
-  estimate still counts *sessions*, so a night shot in two goes halves what it thinks a clear night is worth.**
-  *(Pillar: autonomy + trust — PRIORITY 2/3; size S–M; confidence: **traced in code**, mechanism identical to
-  the one v0.329.1 just fixed one surface up; the fixture that exhibits it is the one that entry added.)*
-  v0.329.1 made a **Nights-card row** mean one observing night. `recent_night_pace_s`
-  (`seestack/session_recap.py`) — *"the median kept integration per clear night"*, and the number behind the
-  goal card's **"about 2 more clear nights"** — still calls `_split_sessions` and takes the last
-  `PACE_LOOKBACK_NIGHTS` (5) of them. So an evening run, bed, then a pre-dawn run contributes **two** entries
-  to the median, each carrying roughly half the night's integration. The median is therefore biased *low*, and
-  the error runs in the direction that matters: the app tells a beginner they need **more** clear nights than
-  they do, on a plan whose whole point is knowing when to stop. Its own docstring already claims the two
-  agree — *"Nights are the same 6 h-gap capture sessions `nights_breakdown` shows, so the number agrees with
-  the Nights card"* — and after v0.329.1 that sentence is simply false.
-  **Why it wasn't done with v0.329.1, and what it actually needs.** Three things, none of them hard, all of
-  them wider than the endpoint that fix touched:
-  1. The pace path reads `iter_frame_capture_rows` — `(datetime, exposure_s, accept)` **triples**, not
-     `FrameRow`s — so `nights_breakdown`'s `night_of(timestamp_utc)` signature does not fit it. It wants a key
-     taken from the `datetime` it already has.
-  2. `PACE_LOOKBACK_NIGHTS` and `MIN_PRODUCTIVE_NIGHT_S` are **mirrored by hand** into the frontend's
-     `clearNights.ts`, which derives the same pace client-side from the night list the Target page already
-     fetched. The module comment says in terms that both must land on the same figure for the same target, so
-     a server-side merge without the client-side one leaves two screens quoting different ETAs — worse than
-     the bug.
-  3. The lookback window changes meaning: five sessions and five nights are not the same five, and on a
-     habitual split-night observer the old window reached back half as far.
-  **The check that settles it before writing anything:** `MIN_PRODUCTIVE_NIGHT_S` (120 s) is a floor on a
-  *session*; halving a night's integration can push a genuinely short-but-real night's halves under it, in
-  which case the night vanishes from the pace entirely rather than merely counting light. Measure which of the
-  two errors is larger on a fixture before choosing whether the fix is grouping or a re-floored session.
+- **✅ SHIPPED (Builder, v0.329.4, branch `claude/sweet-babbage-fwtqxh`) — ~~the "about N more clear nights"
+  estimate still counts *sessions*, so a night shot in two goes halves what it thinks a clear night is
+  worth.~~** Measured before it was written, exactly as the entry's last paragraph asked, and both errors
+  turned out to be real and to compound:
+  - **The halving, at the endpoint.** On a fixture of three nights each shot in two 600 s goes,
+    `/api/library-progress` reported `recent_pace_s` **600 s** where the nights produced **1200 s** — so the
+    Dashboard's ETA to a goal was exactly **twice** the honest number. Pinned in
+    `tests/webapp/test_library_progress.py` (`…_pace_counts_a_split_night_once`), which fails on pre-fix code
+    with `assert 600.0 == 1200.0`.
+  - **The `MIN_PRODUCTIVE_NIGHT_S` question the entry said to settle first, answered: the floor error is the
+    *larger* one.** A real 200 s night shot in two 100 s goes has *both* halves under the 120 s floor, so it
+    doesn't merely count half — it **vanishes**, and three such nights leave fewer than the two the function
+    needs, so the pace comes back `None` and the app says nothing at all. Merged, the same frames give a 200 s
+    pace. So the fix is grouping, not a re-floored session: the floor is correct, it was being applied to the
+    wrong thing.
+  - **The lookback reach, also real.** Five *sessions* are two and a half nights for a habitual split-night
+    observer, so `PACE_LOOKBACK_NIGHTS`'s documented "long enough that one short night doesn't dominate" was
+    quietly not true for them. Pinned on a six-night fixture: 2400 s as nights, 300 s as sessions.
+
+  **What shipped.** `recent_night_pace_s` takes an optional `night_of` (the same `NightKeyFn`
+  `nights_breakdown` already took) and merges sessions by observing night before windowing;
+  `_merge_sessions_by_night` is now generic in what rides along with the timestamp — a `stamp_of` accessor —
+  so the Nights card's `(datetime, FrameRow)` pairs and the pace's lean `(datetime, exposure_s, accept,
+  stamp)` rows share **one** merge implementation and cannot drift about which two halves are one night.
+  Point 2 of the entry (the hand-mirrored frontend) needed **no frontend change**, and checking that was the
+  cheap part: `clearNights.ts` derives its pace from the rows of `/api/targets/{safe}/nights`, which v0.329.1
+  had *already* made observing nights — so the client was right and the server was the one out of step. The
+  agreement is now pinned end-to-end rather than assumed
+  (`…_pace_agrees_with_the_targets_nights_card` replicates the client-side window + floor against the server's
+  figure).
+
+  **The third copy of the bucketing is gone too.** `targets.py` hand-rolled the `night_date_of` →
+  ISO-date closure; `stats.py` and `plan.py` would each have needed their own. They now share
+  `webapp.site_location.resolve_night_key`, beside the `resolve_site_lon` it wraps — so the Nights card, the
+  Dashboard roll-up and the planner's already-targeted rows cannot bucket a night three slightly different
+  ways. (Filed under A-MINOR as "three hand-mirrored predicates"'s sibling class; this is one of them.)
+
+  **Upgrade-safe (§9):** `night_of` defaults to `None` = the previous session behaviour, so nothing that
+  hasn't been given a longitude changes; no config, schema, on-disk or response-shape change (`recent_pace_s`
+  keeps its name and type — only its value gets more honest). **Tests:** +6 in `tests/test_session_recap.py`,
+  +2 in `tests/webapp/test_library_progress.py`; the two webapp ones fail before and pass after.
+
+  Original spec, for the record:
+
+  - **⭐ NEW, TRACED (Builder 2026-09-03, the half v0.329.1 could not reach) — the "about N more clear nights"
+    estimate still counts *sessions*, so a night shot in two goes halves what it thinks a clear night is worth.**
+    *(Pillar: autonomy + trust — PRIORITY 2/3; size S–M; confidence: **traced in code**, mechanism identical to
+    the one v0.329.1 just fixed one surface up; the fixture that exhibits it is the one that entry added.)*
+    v0.329.1 made a **Nights-card row** mean one observing night. `recent_night_pace_s`
+    (`seestack/session_recap.py`) — *"the median kept integration per clear night"*, and the number behind the
+    goal card's **"about 2 more clear nights"** — still calls `_split_sessions` and takes the last
+    `PACE_LOOKBACK_NIGHTS` (5) of them. So an evening run, bed, then a pre-dawn run contributes **two** entries
+    to the median, each carrying roughly half the night's integration. The median is therefore biased *low*, and
+    the error runs in the direction that matters: the app tells a beginner they need **more** clear nights than
+    they do, on a plan whose whole point is knowing when to stop. Its own docstring already claims the two
+    agree — *"Nights are the same 6 h-gap capture sessions `nights_breakdown` shows, so the number agrees with
+    the Nights card"* — and after v0.329.1 that sentence is simply false.
+    **Why it wasn't done with v0.329.1, and what it actually needs.** Three things, none of them hard, all of
+    them wider than the endpoint that fix touched:
+    1. The pace path reads `iter_frame_capture_rows` — `(datetime, exposure_s, accept)` **triples**, not
+       `FrameRow`s — so `nights_breakdown`'s `night_of(timestamp_utc)` signature does not fit it. It wants a key
+       taken from the `datetime` it already has.
+    2. `PACE_LOOKBACK_NIGHTS` and `MIN_PRODUCTIVE_NIGHT_S` are **mirrored by hand** into the frontend's
+       `clearNights.ts`, which derives the same pace client-side from the night list the Target page already
+       fetched. The module comment says in terms that both must land on the same figure for the same target, so
+       a server-side merge without the client-side one leaves two screens quoting different ETAs — worse than
+       the bug.
+    3. The lookback window changes meaning: five sessions and five nights are not the same five, and on a
+       habitual split-night observer the old window reached back half as far.
+    **The check that settles it before writing anything:** `MIN_PRODUCTIVE_NIGHT_S` (120 s) is a floor on a
+    *session*; halving a night's integration can push a genuinely short-but-real night's halves under it, in
+    which case the night vanishes from the pace entirely rather than merely counting light. Measure which of the
+    two errors is larger on a fixture before choosing whether the fix is grouping or a re-floored session.
 
 - **NEW IDEA (Builder 2026-09-03, the obvious sibling of the v0.329.2 skip report) — a `*_video/` folder
   dropped in `incoming/` is skipped just as silently, and the app *does* have a home for it.**
@@ -16647,6 +16691,62 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
+- **✅ SHIPPED (Builder, v0.329.6, branch `claude/sweet-babbage-fwtqxh`) — ~~let the server say where the
+  window is **on the preview**, so the marker stops being a guess.~~** Filed by this run an hour earlier as
+  the half v0.329.5 deliberately did not build, and taken here rather than left, because the sentence
+  v0.329.5 added made the *disagreement* visible: the words name a corner from the canvas while the marker
+  points at a rectangle derived from the click.
+
+  `X-Loupe-Window` now also carries `preview_x/preview_y/preview_width/preview_height` — the same window as
+  fractions of the **rendered preview** — and `FullSizeCheck` draws the marker from those, falling back to
+  the old client-side guide for the first paint and for a container too old to send them. `_preview_extent`
+  is now the one definition of what the preview covers, read by both the code that maps the click *through*
+  the crop and the code that reports the window back *relative to* it, so the two cannot drift.
+
+  **The fractions are deliberately not clamped to 0..1**, and that is the part worth reading before
+  "tidying" it: the window is clamped inside the **canvas**, not inside the crop, so on a crop flush against
+  a canvas edge it genuinely hangs over the side. Reporting `preview_x < 0` lets the navigator (which already
+  clips, `overflow: hidden`) draw it overhanging — the truth. Clamping would slide the marker inward and
+  point it at somewhere the window is not.
+
+  **Upgrade-safe (§9):** header keys **added**, never renamed; no endpoint, response-shape, config, schema or
+  default change, and a frontend that ignores them behaves exactly as before.
+  **Tests (+3 in `tests/webapp/test_editor_loupe.py`, +3 in `loupe.test.ts`, +2 in `FullSizeCheck.test.tsx`):**
+  the no-crop case where the two frames agree (which is why the disagreement went unnoticed); the cropped case
+  where a click at the preview's centre is 0.8 across the canvas and still 0.5 across the preview, and the
+  window is a *bigger* share of the cropped preview than of the canvas; the flush-against-the-edge case
+  asserting `preview_x < 0` while the canvas-frame answer stays inside the canvas; the pure helper's
+  percentages, overhang pass-through and every "didn't answer" shape; and the component preferring the
+  server's rectangle over the guide, then falling back to the guide when there is none.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-09-03, the half v0.329.5 deliberately did NOT build) — let the server say where the
+    window is **on the preview**, so the marker stops being a guess.** *(Pillar: a better editor — PRIORITY 1;
+    size XS server + XS frontend.)* v0.329.5 gave `X-Loupe-Window` a reader, but only for the *sentence*: its
+    `{x, y, width, height}` are full-canvas pixels, and the navigator marker is drawn against what the **preview**
+    covers. With a crop in the recipe those are different coordinate systems, and `loupe.ts` has always said so —
+    *"they can differ by up to half a window at the very edge"*. The frontend cannot close that without
+    re-deriving `preview_crop_of_recipe`, which would be a second copy of `_loupe_window`'s mapping and exactly
+    the drift this class keeps producing. **The server already has both numbers**: `_loupe_window` computes `sx`,
+    `sy` (the click mapped through the crop) and knows the crop's extent, so it can add
+    `preview_x/preview_y/preview_width/preview_height` — the same rectangle expressed as fractions of the
+    *rendered* preview — to the header it already sends. The frontend then draws the marker from those and
+    deletes the clamping guesswork in `loupeMarkerRect`. **Care:** keep `loupeMarkerRect` as the fallback for the
+    first paint (the marker must not disappear while the render is in flight) and for a backend that doesn't send
+    the new keys; and add the header keys, never rename the existing ones (§9).
+
+- **NEW IDEA (Builder 2026-09-04, the gap v0.329.4 left behind it) — a drift guard that every webapp caller of
+  `recent_night_pace_s` passes a `night_of`.** *(Pillar: maintainability in service of correctness — size XS.)*
+  v0.329.4 made the pace night-aware through an **optional** `night_of`, defaulted to the old session split so
+  a caller with no longitude to hand doesn't silently change. That default is right and it is also a trap: a
+  fourth surface that wants a pace gets the halved figure by simply not knowing to pass it, which is the bug
+  that just shipped a fix. Two of the three current callers are one line apart in `stats.py`/`plan.py`, so this
+  is cheap to pin: a test that walks the webapp package for `recent_night_pace_s(` calls and asserts each
+  passes `night_of=`, in the shape of the existing `StackOptions` form-descriptor drift test. **Grep first:**
+  if a caller ever legitimately wants sessions (the last-session recap does), the guard needs an opt-out marker
+  rather than a blanket rule — write it so the exception is stated, not silent.
+
 - **NEW IDEA (Builder 2026-09-03, the obvious next tap on the v0.329.0 loupe) — split the full-size window
   against the preview at the *same spot*, so the reader sees what the shrunk view was hiding.** *(Pillar: a
   better editor — PRIORITY 1; size S; frontend-only, on machinery that now exists.)* The loupe answers *"what
@@ -16661,16 +16761,46 @@ problems. Dogfood it every big-picture run and fix root causes.
   building:** the split machinery is shared with the per-op compare; reuse it rather than adding a second
   divider.
 
-- **NEW IDEA (Builder 2026-09-03, filed the moment after adding it, so it doesn't become another
-  `POST /api/targets`) — the loupe's `X-Loupe-Window` header has no reader.** *(Pillar: friendliness —
-  PRIORITY 3; size XS.)* `GET …/editor/loupe` returns the source rectangle it rendered
-  (`{x, y, width, height, canvas_width, canvas_height, proxy_scale}`) as a response header, and nothing
-  consumes it: `FullSizeCheck` draws its marker from its own client-side `loupeMarkerRect`, which is a *guide*
-  and can differ from the server's clamped answer by up to half a window at the very edge of a cropped
-  preview. Two honest resolutions, in order: (a) have the modal say **where** it is looking in words — *"from
-  the upper-left of your frame"* — which is the thing a reader actually wants and would make the header carry
-  its weight; or (b) drop the header. Do not leave it as it is: the A-MINOR audit already lists one endpoint
-  with no caller, and this is the same shape one layer down.
+- **✅ SHIPPED, RESOLUTION (a) (Builder, v0.329.5, branch `claude/sweet-babbage-fwtqxh`) — ~~the loupe's
+  `X-Loupe-Window` header has no reader.~~** The modal now says, under the window, *"This is the top-left of
+  your picture."* — named from the **server's** own clamped rectangle, in thirds so "the middle" can be said
+  when it is true and the redundant half of a centred edge is dropped ("the top", not "the top-centre").
+
+  **Reading a header means reading the response**, so the window moved from an `<img src>` to the same
+  blob-URL query shape the live preview already uses — `gcTime: 0` included, without which an undo/redo back
+  to a prior recipe could re-serve an already-revoked URL and blank the window (the failure
+  `blobRevoke.test.tsx` exists for). That also bought the two things the `src` form could not have: a real
+  error state (a 409 from a geometry the recipe made unanswerable now reads as a sentence rather than a broken
+  image icon), and the honest `width`/`height` — the server's, so a window clamped smaller than
+  `size` on a small canvas is not stretched.
+
+  **The marker deliberately stays a guide**, drawn client-side against what the *preview* covers. It is not
+  the same quantity: the server's rectangle is in **full-canvas** coordinates, and mapping it onto a cropped
+  preview needs the crop the frontend would have to re-derive — a second copy of `_loupe_window`'s mapping,
+  which is the mistake this class keeps making. The sentence is the authoritative answer, the marker points at
+  roughly where, and `loupe.ts` now says which is which.
+
+  **Upgrade-safe (§9):** frontend-only; no endpoint, response shape, config or default change. A backend that
+  sends no header (or an unreadable one) simply doesn't get the sentence — pinned by a test, since that is
+  what an in-place upgrade looks like for the minutes the old container is still serving.
+  **Tests (+5 in `loupe.test.ts` for the pure helper, +3 in `FullSizeCheck.test.tsx`):** the corner/edge/middle
+  namings, silence on a whole-canvas window and on nonsense, the sentence appearing from a mocked header, no
+  sentence when the header is absent, and the error state. The two existing tests that read the loupe's URL
+  off the `<img>` now read it off the recorded request instead — the same assertion against the request that
+  is actually made.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-09-03, filed the moment after adding it, so it doesn't become another
+    `POST /api/targets`) — the loupe's `X-Loupe-Window` header has no reader.** *(Pillar: friendliness —
+    PRIORITY 3; size XS.)* `GET …/editor/loupe` returns the source rectangle it rendered
+    (`{x, y, width, height, canvas_width, canvas_height, proxy_scale}`) as a response header, and nothing
+    consumes it: `FullSizeCheck` draws its marker from its own client-side `loupeMarkerRect`, which is a *guide*
+    and can differ from the server's clamped answer by up to half a window at the very edge of a cropped
+    preview. Two honest resolutions, in order: (a) have the modal say **where** it is looking in words — *"from
+    the upper-left of your frame"* — which is the thing a reader actually wants and would make the header carry
+    its weight; or (b) drop the header. Do not leave it as it is: the A-MINOR audit already lists one endpoint
+    with no caller, and this is the same shape one layer down.
 
 - **✅ SHIPPED, ALL THREE SLICES (v0.328.2 → v0.328.6 → v0.329.0) — ~~"check it at full size": a 1:1 loupe on
   the editor preview, so the four ops the proxy *cannot* show honestly can be judged instead of apologised
