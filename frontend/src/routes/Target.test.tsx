@@ -1300,6 +1300,32 @@ describe("TargetView streaked badge", () => {
     expect(screen.queryByText(/streaked/)).not.toBeInTheDocument();
   });
 
+  it("points at Auto outlier removal, never at sigma-clip by name", async () => {
+    // κ-σ dispatches from 4 subs but is mathematically blind to a *lone* trail
+    // until kappa_min_frames (11 at the default κ=3). The tooltip used to read
+    // "Stack with sigma-clip or drizzle outlier rejection to remove the trail",
+    // so an owner with a handful of streaked subs — or any mosaic panel thinner
+    // than 11 — was pointed at the one setting that would clip nothing. Auto
+    // resolves to min/max down there and to κ-σ once the stack is deep enough,
+    // so it is the honest advice at every depth. Naming a method here is the
+    // bug; assert on the absence as well as the presence, so nobody re-adds one.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { streak_detected: true }),
+    ]);
+
+    renderTarget();
+
+    // Mantine renders a tooltip's label only once it opens, so hover the badge.
+    const badge = await screen.findByText("1 streaked");
+    fireEvent.mouseEnter(badge.parentElement as HTMLElement);
+
+    const tip = await screen.findByText(/carry a satellite\/plane trail/);
+    expect(tip.textContent).toContain("Auto outlier removal");
+    expect(tip.textContent).not.toContain("sigma-clip");
+  });
+
   it("gives the metric column headers plain-language hint tooltips", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
