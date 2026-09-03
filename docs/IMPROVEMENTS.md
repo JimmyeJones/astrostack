@@ -16747,19 +16747,56 @@ problems. Dogfood it every big-picture run and fix root causes.
   if a caller ever legitimately wants sessions (the last-session recap does), the guard needs an opt-out marker
   rather than a blanket rule — write it so the exception is stated, not silent.
 
-- **NEW IDEA (Builder 2026-09-03, the obvious next tap on the v0.329.0 loupe) — split the full-size window
-  against the preview at the *same spot*, so the reader sees what the shrunk view was hiding.** *(Pillar: a
-  better editor — PRIORITY 1; size S; frontend-only, on machinery that now exists.)* The loupe answers *"what
-  will I actually get?"*. The question a beginner asks straight afterwards is *"and how different is that from
-  what I've been looking at?"* — which is the whole reason the four advisories existed. Both images are
-  already on screen in the modal, and the pieces are all shipped: `splitClipLeft` / `splitFraction` /
-  `splitLeftPct` (`components/editor/split*`) drive the editor's existing before/after divider, and the
-  preview crop of the same window is a plain CSS transform of the navigator image the modal already renders
-  (`scale = proxy_scale`, offset from the window rect the endpoint already returns in `X-Loupe-Window`).
-  **Care:** label it honestly — the left half is *the preview, enlarged*, not a second render, so it will look
-  soft by construction and the caption must say that is the point rather than a defect. **Grep before
-  building:** the split machinery is shared with the per-op compare; reuse it rather than adding a second
-  divider.
+- **✅ SHIPPED (Builder, v0.331.0, branch `claude/sweet-babbage-i16c1c`) — ~~split the full-size window
+  against the preview at the *same* spot, so the reader sees what the shrunk view was hiding.~~** Built as
+  filed, frontend-only, on the machinery that already existed.
+
+  **The alignment is arithmetic, not a second render.** v0.329.5 made the modal read `X-Loupe-Window`, and
+  that header already says where the window landed **as fractions of the rendered preview**
+  (`preview_x/y/width/height`) — which is exactly what is needed to blow the navigator image up by
+  `1/preview_width` and slide its corner off-box so the same patch fills the same 512² box. A new pure
+  `loupePreviewCrop(win, boxW, boxH)` (`components/editor/loupe.ts`) is that arithmetic and nothing else; the
+  divider is the editor's existing `splitClipLeft` / `splitFraction` / `splitLeftPct`, not a second one.
+
+  **The Care note is the copy, and it is load-bearing.** The left half *will* look soft — it is a decimated
+  preview enlarged — and on a surface whose entire purpose is "can I trust what I am seeing?", an
+  unexplained soft half reads as a rendering defect. The caption says it outright: *"The left side looks soft
+  because that is exactly what the shrunk preview was hiding."* Pinned by its own test, because it is the one
+  sentence that turns the finding into an answer instead of a bug report.
+
+  **Off by default, and absent rather than wrong.** The split starts hidden behind one compact-xs button in
+  the modal (the editor's standing complaint is that it is too busy, and the window on its own is what the
+  modal is *for*). And when the server sends no preview rectangle — a container older than v0.329.6, or a
+  degenerate crop — `loupePreviewCrop` returns `null` and **no comparison is offered at all**: a misaligned
+  split would be worse than none, and the window itself is unaffected either way. The overhanging-window case
+  the marker already draws clipped is carried through unclamped for the same reason it is there.
+
+  **Upgrade-safe (§9):** frontend-only. No engine, endpoint, response shape, config, schema or default
+  touched; every existing loupe interaction renders exactly as before until the button is pressed.
+
+  **Tests (+11; all fail before).** `loupe.test.ts` (+4): the blow-up factor and offset for an off-centre
+  window, the no-offset corner case, an overhanging window kept where it really is, and `null` on every shape
+  that cannot be aligned (no rectangle, an older backend's empty one, a degenerate or non-finite one, an
+  unmeasured box). `FullSizeCheck.test.tsx` (+7): starts off; the clipped overlay's image is the preview at
+  the computed size and offset; the caption names both halves and the softness; the divider drags (with a
+  `MouseEvent` — jsdom has no `PointerEvent`, so `fireEvent.pointerDown` drops `clientX` and a drag test
+  written with it passes while measuring nothing); it toggles back off; and an older backend gets no button.
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-03, the obvious next tap on the v0.329.0 loupe) — split the full-size window
+    against the preview at the *same spot*, so the reader sees what the shrunk view was hiding.** *(Pillar: a
+    better editor — PRIORITY 1; size S; frontend-only, on machinery that now exists.)* The loupe answers *"what
+    will I actually get?"*. The question a beginner asks straight afterwards is *"and how different is that from
+    what I've been looking at?"* — which is the whole reason the four advisories existed. Both images are
+    already on screen in the modal, and the pieces are all shipped: `splitClipLeft` / `splitFraction` /
+    `splitLeftPct` (`components/editor/split*`) drive the editor's existing before/after divider, and the
+    preview crop of the same window is a plain CSS transform of the navigator image the modal already renders
+    (`scale = proxy_scale`, offset from the window rect the endpoint already returns in `X-Loupe-Window`).
+    **Care:** label it honestly — the left half is *the preview, enlarged*, not a second render, so it will look
+    soft by construction and the caption must say that is the point rather than a defect. **Grep before
+    building:** the split machinery is shared with the per-op compare; reuse it rather than adding a second
+    divider.
 
 - **✅ SHIPPED, RESOLUTION (a) (Builder, v0.329.5, branch `claude/sweet-babbage-fwtqxh`) — ~~the loupe's
   `X-Loupe-Window` header has no reader.~~** The modal now says, under the window, *"This is the top-left of

@@ -204,3 +204,104 @@ describe("FullSizeCheck", () => {
       .toMatch(/^8\.53/);
   });
 });
+
+describe("FullSizeCheck — compare with the preview", () => {
+  /** The same window, with the server's preview fractions: a quarter of the
+   *  preview's width and height, six tenths across and one tenth down. */
+  const WITH_FRACTIONS: LoupeWindow = {
+    ...CENTRED,
+    preview_x: 0.6, preview_y: 0.1, preview_width: 0.25, preview_height: 0.25,
+  };
+
+  function open(window_: LoupeWindow | null) {
+    vi.spyOn(client.api, "loupeInfo").mockResolvedValue(AVAILABLE);
+    mockLoupe(window_);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <FullSizeCheck safe="M_42" runId={7} recipe={RECIPE}
+            shownSourceW={6000} shownSourceH={4000} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    return screen.findByTestId("full-size-check-open");
+  }
+
+  it("starts off, so the window is just the window", async () => {
+    fireEvent.click(await open(WITH_FRACTIONS));
+    await screen.findByTestId("full-size-check-image");
+    expect(screen.getByTestId("full-size-check-split-toggle")).toHaveTextContent(
+      "Compare with the preview");
+    expect(screen.queryByTestId("full-size-check-split-before")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("full-size-check-split-divider")).not.toBeInTheDocument();
+  });
+
+  it("puts the preview of the same patch under a divider, blown up to match", async () => {
+    fireEvent.click(await open(WITH_FRACTIONS));
+    await screen.findByTestId("full-size-check-image");
+    fireEvent.click(screen.getByTestId("full-size-check-split-toggle"));
+
+    const before = screen.getByTestId("full-size-check-split-before");
+    // The left half is clipped at the divider, which starts centred.
+    expect(before.style.clipPath).toBe("inset(0 50% 0 0)");
+    expect(screen.getByTestId("full-size-check-split-divider").style.left).toBe("50%");
+    // The preview inside it is blown up 4× (the window is a quarter of it) and
+    // slid back by the window's own offset, so both halves show one patch.
+    const img = before.querySelector("img") as HTMLImageElement;
+    expect(img.src).toContain("/editor/preview");
+    expect(img.style.width).toBe(`${512 / 0.25}px`);
+    expect(img.style.left).toBe(`${-0.6 * 512 / 0.25}px`);
+    expect(img.style.top).toBe(`${-0.1 * 512 / 0.25}px`);
+  });
+
+  it("says which half is which, and why the left one looks soft", async () => {
+    // The whole finding *is* the softness — a caption that didn't say so would
+    // read as a rendering defect in the thing the modal exists to be trusted for.
+    fireEvent.click(await open(WITH_FRACTIONS));
+    await screen.findByTestId("full-size-check-image");
+    fireEvent.click(screen.getByTestId("full-size-check-split-toggle"));
+    const caption = screen.getByTestId("full-size-check-split-caption");
+    expect(caption).toHaveTextContent(/Left of the line is the preview/);
+    expect(caption).toHaveTextContent(/looks soft because that is exactly what the shrunk preview was hiding/);
+  });
+
+  it("drags the divider across the window", async () => {
+    fireEvent.click(await open(WITH_FRACTIONS));
+    await screen.findByTestId("full-size-check-image");
+    fireEvent.click(screen.getByTestId("full-size-check-split-toggle"));
+
+    const box = screen.getByTestId("full-size-check-window");
+    vi.spyOn(box, "getBoundingClientRect").mockReturnValue(
+      { left: 100, top: 0, width: 512, height: 512 } as DOMRect);
+    // jsdom implements no `PointerEvent`, so `fireEvent.pointerDown` silently
+    // drops `clientX` — a drag test written with it passes while measuring
+    // nothing. A `MouseEvent` of the same type carries the coordinate and still
+    // reaches React's pointer handler, which is all this reads.
+    fireEvent(box, new MouseEvent("pointerdown", {
+      bubbles: true, cancelable: true, clientX: 100 + 512 * 0.75 }));
+
+    expect(screen.getByTestId("full-size-check-split-divider").style.left).toBe("75%");
+    expect(screen.getByTestId("full-size-check-split-before").style.clipPath)
+      .toBe("inset(0 25% 0 0)");
+  });
+
+  it("can be turned back off", async () => {
+    fireEvent.click(await open(WITH_FRACTIONS));
+    await screen.findByTestId("full-size-check-image");
+    fireEvent.click(screen.getByTestId("full-size-check-split-toggle"));
+    expect(screen.getByTestId("full-size-check-split-toggle")).toHaveTextContent(
+      "Hide the preview comparison");
+    fireEvent.click(screen.getByTestId("full-size-check-split-toggle"));
+    expect(screen.queryByTestId("full-size-check-split-before")).not.toBeInTheDocument();
+  });
+
+  it("offers no comparison at all when the halves could not be aligned", async () => {
+    // An older container sends no preview fractions, so there is no honest way to
+    // put the two on the same patch — and a misaligned split would be worse than
+    // none. The window itself is unaffected.
+    fireEvent.click(await open(CENTRED));
+    await screen.findByTestId("full-size-check-image");
+    expect(screen.queryByTestId("full-size-check-split-toggle")).not.toBeInTheDocument();
+  });
+});

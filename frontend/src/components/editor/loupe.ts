@@ -160,3 +160,60 @@ export function loupeCaption(sizePx: number, proxyScale: number | null | undefin
   return `Every pixel, full size: a ${px} × ${px} piece of your finished picture, `
     + `edited exactly as the preview is.${shrunk}`;
 }
+
+/** How to draw the *preview* of the very same window, enlarged to sit under the
+ *  full-size render — the CSS box for an `<img>` of the whole preview, in the
+ *  pixel units of a `boxW × boxH` container. */
+export interface LoupePreviewCrop {
+  /** Width/height to render the whole preview image at, in px. */
+  width: number;
+  height: number;
+  /** Where its top-left corner goes, in px, relative to the container (negative
+   *  for every window that isn't at the preview's own top-left corner). */
+  left: number;
+  top: number;
+}
+
+/**
+ * Scale and offset the preview image so the loupe's window fills a `boxW × boxH`
+ * box — the "before" side of the full-size split.
+ *
+ * The question the split answers is *"and how different is that from what I've
+ * been looking at?"*, which only means anything if both halves show the **same
+ * patch of sky at the same size**. The server already says where its window
+ * landed as fractions of the rendered preview (`preview_x/y/width/height`), so
+ * this is arithmetic, not a second render: blow the preview up by `1/preview_width`
+ * and slide its corner off-box by the window's own offset.
+ *
+ * Returns `null` when the server sent no rectangle (an older container, or a
+ * degenerate crop) or the box hasn't been measured — the caller then offers no
+ * comparison at all rather than a misaligned one, which would be worse than none.
+ *
+ * The result is deliberately *soft*: it is the decimated preview enlarged, not a
+ * second render, and that softness is the finding rather than a defect. Say so
+ * where it is drawn. Pure.
+ */
+export function loupePreviewCrop(
+  win: {
+    preview_x?: number; preview_y?: number;
+    preview_width?: number; preview_height?: number;
+  } | null | undefined,
+  boxW: number,
+  boxH: number,
+): LoupePreviewCrop | null {
+  if (!win) return null;
+  const { preview_x: x, preview_y: y, preview_width: w, preview_height: h } = win;
+  if (![x, y, w, h].every((v) => typeof v === "number" && Number.isFinite(v))) {
+    return null;
+  }
+  if (!((w as number) > 0) || !((h as number) > 0)) return null;
+  if (!(boxW > 0) || !(boxH > 0)) return null;
+  const width = boxW / (w as number);
+  const height = boxH / (h as number);
+  return {
+    width,
+    height,
+    left: -(x as number) * width,
+    top: -(y as number) * height,
+  };
+}
