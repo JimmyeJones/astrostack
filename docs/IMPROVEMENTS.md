@@ -12287,6 +12287,51 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-09-03, the gap the v0.335.0 rejection-outlook note deliberately left) — answer the
+  reach question at the moment the default is *saved*, not only when a trail turns up later.** *(Pillar:
+  autonomy — PRIORITY 2; size S; the machinery all exists, this is placement.)* v0.335.0 tells the Target page
+  when the target's **saved** rejection cannot drop a lone trail — but it is gated on
+  `streak_detected > 0`, deliberately, so it only speaks on a night a satellite happened to be *flagged*. A
+  mosaic owner whose panels sit at 5 subs has a permanently blind saved setting and hears about it only by
+  luck. The un-gated version does **not** want another banner (the standing IA priority); it wants to be at the
+  **decision**: `PUT /api/targets/{safe}/stack-defaults` already has the blob in hand, so it could return the
+  same `rejection_reach` answer for what was just saved, and the Stack form's save confirmation could add one
+  clause — *"saved — note that at this target's depth this won't take out a lone satellite trail"* — with the
+  Auto toggle still on screen. **Cautions:** it must read the *saved* blob rather than the live form values
+  (the form already has its own `rejectionReachNudge` for those, and two sentences saying the same thing about
+  different option sets is worse than one), and it must stay silent when the user's choice does reach.
+  **Grep first:** `rejectionReachNudge` (form) and `rejectionOutlookNote` (page) are the two existing homes —
+  the third must be a *clause on the save*, not a fourth surface.
+
+- **MEASURED, RECORDED SO NOBODY RE-MEASURES (Builder 2026-09-03, while sizing the rejection-outlook
+  endpoint) — `cluster_pointings` costs 1.58 s at the owner's largest target, and a mosaic stack pays it
+  twice.** *(No code change wanted yet — this is a perf note with numbers, not a task. Pillar: performance,
+  and only with a measurement.)* Timed on a synthetic 4-panel mosaic with the owner's real sub count: 500
+  subs → 0.01 s, 1,000 → 0.05 s, 2,000 → 0.21 s, **5,477 → 1.58 s** (the clean O(n²), pure Python). That
+  confirms the `auto_reject_depth` docstring's "~2.4 s" order of magnitude and its decision to grid-snap
+  before clustering (which takes it to under a millisecond). **What the note adds:** on a mosaic canvas the
+  *unsnapped* path still runs twice per stack — `compute_frame_weights` and `compute_photometric_scales` each
+  call `pointing_groups` over the full frame list, with the same radecs and the same
+  `PANEL_LINK_DIST_DEG`, so a 5,477-sub mosaic spends ~3 s clustering the identical points into the identical
+  labels. Beside a stack that runs for many minutes this is noise, which is why nothing is filed as a task.
+  **If a future run ever wants it:** the fix is to compute the labels once in `run_stack` (where
+  `is_mosaic_canvas` is already known) and pass them down, *not* to grid-snap those two — their soundness gate
+  is `min_members` over the real population, and snapping changes which frames count toward it. Do not start
+  this without a profile showing the stack is actually pointing-bound.
+
+- **NEW IDEA (Builder 2026-09-03, the cost the v0.335.0 endpoint knowingly accepted) — `/rejection-outlook`
+  pays for a whole `estimate_stack` to learn two numbers.** *(Pillar: performance — size XS; **only if the
+  note is ever un-gated**, see the entry two above.)* It needs the accepted+solved count and the mosaic's
+  per-pixel depth, and takes both off `estimate_stack`, which also picks a reference frame and computes the
+  union canvas. That is the right call today — one definition of `panel_depth`, and the query is only issued
+  when a streak is present, so a target page normally never asks. But if the note is ever shown unconditionally
+  it becomes a per-page-load canvas computation across the library's biggest targets, and the cheap
+  equivalent already exists: `auto_reject_depth(_frame_radecs(frames))` (grid-snapped, sub-millisecond — see
+  the measurement above) plus a plain count, no canvas at all. **Care:** the two are not identical —
+  `estimate_stack` drops the gross plate-solve outliers `compute_mosaic_canvas` excludes before counting, and
+  the cheap path would not, so a target with a few wild solves would report a slightly higher `n_frames`.
+  Pin that difference in a test before swapping, or the "reaches" answer moves for a reason nobody can see.
+
 - **✅ SHIPPED (Builder, v0.329.4, branch `claude/sweet-babbage-fwtqxh`) — ~~the "about N more clear nights"
   estimate still counts *sessions*, so a night shot in two goes halves what it thinks a clear night is
   worth.~~** Measured before it was written, exactly as the entry's last paragraph asked, and both errors
