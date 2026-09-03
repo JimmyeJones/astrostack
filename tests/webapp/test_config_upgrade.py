@@ -240,3 +240,36 @@ def test_nested_incoming_conflict_is_a_pure_check(tmp_path):
     assert nested_incoming_conflict(incoming, tmp_path / "library", incoming / "d") is not None
     # A sibling whose name merely starts the same way is not "inside".
     assert nested_incoming_conflict(incoming, tmp_path / "incoming2", tmp_path) is None
+
+
+def test_the_settings_page_and_this_guard_read_the_same_table():
+    """`folderConflict` (frontend/src/settingsFolders.ts) asks this same question
+    while the user types, so the answer lands beside the field instead of arriving
+    as a red toast after Save. The shared table
+    (``tests/fixtures/folder_conflict.json``, also read by
+    ``settingsFolders.test.ts``) is what stops the two drifting.
+
+    The client is allowed to be *quieter* than this guard — a browser cannot
+    resolve a symlink, a bind mount or a ``..`` segment, so those cases are marked
+    ``server`` and it stays silent. It is never allowed to be louder, which is why
+    every ``neither`` case is pinned here too.
+    """
+    import json
+    from pathlib import Path as _Path
+
+    from webapp.config import nested_incoming_conflict
+
+    table = json.loads(
+        (_Path(__file__).parent.parent / "fixtures" / "folder_conflict.json").read_text()
+    )["cases"]
+    assert len(table) >= 10
+    for case in table:
+        root = _Path(case["data_root"])
+        incoming = _Path(case["incoming"]) if case["incoming"] else root / "incoming"
+        library = _Path(case["library"]) if case["library"] else root / "library"
+        got = nested_incoming_conflict(incoming, library, root)
+        where = f"{case['incoming']} | {case['library']} | {case['data_root']}"
+        if case["verdict"] == "neither":
+            assert got is None, where
+        else:                       # "both" and "server" are both refusals here
+            assert got is not None, where

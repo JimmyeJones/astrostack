@@ -18815,24 +18815,64 @@ problems. Dogfood it every big-picture run and fix root causes.
     larger "one caption model served by the backend" (four builders → one) stays filed on the A10 entry as an
     M–L; this is the slice that pays most of its user-visible value for a fraction of the risk.
 
-- **NEW IDEA (Builder 2026-09-02, the follow-on to the v0.327.8 folder guard) — the Settings page should say
-  "that folder won't work" *while you type it*, not after you press Save.** *(Pillar: approachable —
-  PRIORITY 3. Size: XS–S.)* v0.327.8 refuses a settings save that would put the library (or the data root)
-  inside `incoming/`, with a plain-language reason. But the reason arrives as a red toast reading
-  `Save failed: 422: Your library folder would sit inside…` — the raw status code is in the user's face, and
-  the two fields that caused it are left looking fine. Both path fields are free-text `TextInput`s with a
-  helper line already (`incoming_dir` / `library_root` in `routes/Settings.tsx`), so the natural shape is a
-  pure client-side `folderConflict(incoming, library, dataRoot)` in a small module beside `calibrationFit.ts`,
-  rendering Mantine's own `error=` on the offending field and disabling Save while it holds — the server guard
-  stays the authority, this just stops the user finding out the hard way. **Grep first:** the settings form
-  already has a `dropEmptyFields` patch builder and the GET already returns `resolved_incoming_dir` /
-  `resolved_library_root`, so the resolved defaults for a blank field are on hand without re-deriving them.
-  **Care:** the client check must be *advisory only* — string prefix comparison in a browser cannot resolve
-  symlinks or case-insensitive mounts, so it must never be the thing that decides, and a case it cannot judge
-  must fall through to the save rather than block it. **Related, worth the same pass:** the toast prefixes
-  every settings failure with the HTTP status (`client.ts` builds `${res.status}: ${detail}`); a
-  `friendlyJobError`-style strip for a 422 whose detail is already a sentence would improve every settings
-  error at once, not just this one.
+- **✅ SHIPPED (Builder, v0.328.4, branch `claude/sweet-babbage-2xguh9`) — ~~the Settings page should say
+  "that folder won't work" *while you type it*, not after you press Save.~~** Built in the shape the entry
+  named, including the "related, worth the same pass" half.
+
+  **`frontend/src/settingsFolders.ts`** is a pure `folderConflict(incoming, library, dataRoot)` beside
+  `calibrationFit.ts`, rendering Mantine's own `error=` on the offending field (`library_root` or `data_root`,
+  whichever the user can move) and disabling Save while it holds. It resolves a blank field against the data
+  root **being typed**, so the check follows the edit rather than the last save — which is the case the entry's
+  `resolved_incoming_dir` shortcut would have got wrong.
+
+  **Advisory only, and pinned as such.** The comparison is *segment-wise*, not `startsWith`: `/data/incoming2`
+  and `/data/incoming-old` are siblings of `/data/incoming`, and a string prefix test would have blocked two
+  perfectly good layouts. A relative path or one containing `..` returns `null` and falls through to the
+  server, which can resolve it; a bare `/` in the incoming field is never anyone's parent. The rule is
+  **one-directional** like the server's — `incoming/` inside the library root is the app's own default shape
+  one level up.
+
+  **The two are held together by a shared table**, `tests/fixtures/folder_conflict.json` (12 layouts), read by
+  `tests/webapp/test_config_upgrade.py` against `nested_incoming_conflict` and by
+  `frontend/src/settingsFolders.test.ts` against `folderConflict` — the same device
+  `integration_format.json` and (this run) `night_range_format.json` already use. Each case carries a verdict
+  of `both` / `neither` / `server`, which encodes the asymmetry the entry's "care" note asked for: **the client
+  may be quieter than the guard, never louder.** Claiming a conflict the server would accept blocks a good
+  layout on a guess a browser is not equipped to make, so every `neither` case is pinned on *both* sides.
+
+  **The related half shipped too**, and it improves every settings error rather than this one:
+  `settingsErrorMessage` strips the API client's `${res.status}: ` prefix when what follows really reads as a
+  sentence — starts with a capital, four words or more, and is not an exception's `SomeError:` shape. So the
+  folder guard's own message arrives as itself instead of `Save failed: 422: Your library folder would sit…`,
+  while `500: Internal Server Error` keeps its code, because a beginner reporting "500" is more use to the
+  owner than a beginner reporting nothing. `client.ts` is untouched — every other caller still gets the status.
+
+  **Tests +11:** 8 on the two pure functions (including the shared table), 3 rendering the real Settings page
+  through its real routes — the field marked and Save held, the release the moment the folder moves back out,
+  and silence on the relative path it cannot judge. `renderSettingsWith` gained an optional third argument for
+  saved settings; omitted, its fixture is exactly what it always was.
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+
+  - **NEW IDEA (Builder 2026-09-02, the follow-on to the v0.327.8 folder guard) — the Settings page should say
+    "that folder won't work" *while you type it*, not after you press Save.** *(Pillar: approachable —
+    PRIORITY 3. Size: XS–S.)* v0.327.8 refuses a settings save that would put the library (or the data root)
+    inside `incoming/`, with a plain-language reason. But the reason arrives as a red toast reading
+    `Save failed: 422: Your library folder would sit inside…` — the raw status code is in the user's face, and
+    the two fields that caused it are left looking fine. Both path fields are free-text `TextInput`s with a
+    helper line already (`incoming_dir` / `library_root` in `routes/Settings.tsx`), so the natural shape is a
+    pure client-side `folderConflict(incoming, library, dataRoot)` in a small module beside `calibrationFit.ts`,
+    rendering Mantine's own `error=` on the offending field and disabling Save while it holds — the server guard
+    stays the authority, this just stops the user finding out the hard way. **Grep first:** the settings form
+    already has a `dropEmptyFields` patch builder and the GET already returns `resolved_incoming_dir` /
+    `resolved_library_root`, so the resolved defaults for a blank field are on hand without re-deriving them.
+    **Care:** the client check must be *advisory only* — string prefix comparison in a browser cannot resolve
+    symlinks or case-insensitive mounts, so it must never be the thing that decides, and a case it cannot judge
+    must fall through to the save rather than block it. **Related, worth the same pass:** the toast prefixes
+    every settings failure with the HTTP status (`client.ts` builds `${res.status}: ${detail}`); a
+    `friendlyJobError`-style strip for a 422 whose detail is already a sentence would improve every settings
+    error at once, not just this one.
 
 - **NEW IDEA (Builder 2026-09-02, left rather than churned while standing down the A5 collision) — the
   Target page's Edit button is still labelled "Edit latest stack" while it now edits the *cover*.**
