@@ -486,6 +486,18 @@ def _solve_gaia(
     return ((scale_r, 1.0, scale_b), n_used, note)
 
 
+def apply_scale(rgb: np.ndarray, scale: tuple[float, float, float]) -> np.ndarray:
+    """Apply an *already-solved* :attr:`ColorCalibrationResult.scale_rgb` to an image.
+
+    The public half of :func:`calibrate_color`, for a caller that has a solve in
+    hand and wants it applied to a different array of the same picture — a
+    higher-resolution render, or one region of it — without paying for (or, worse,
+    silently re-deciding) the star detection. Solving on a crop is not the same
+    answer as solving on the frame it came from.
+    """
+    return _apply_scale(rgb, scale)
+
+
 def _apply_scale(rgb: np.ndarray, scale: tuple[float, float, float]) -> np.ndarray:
     """Multiply each channel by the calibration scale factor."""
     out = rgb.astype(np.float32, copy=True)

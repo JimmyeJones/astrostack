@@ -494,6 +494,15 @@ cd frontend && npm install
 
 **Running the tests:** prefer the full suite headless —
 `QT_QPA_PLATFORM=offscreen python -m pytest -q` — so the Qt/GUI tests run too.
+
+> **⚠️ Redirect the output; never pipe it.** `pytest … | tail -15` reports
+> **`tail`'s** exit status, not pytest's, so a run that collected *nothing* —
+> pytest exits 4 on an unrecognised flag, printing an `inifile:` / `rootdir:`
+> block that looks nothing like a summary — reads as a clean pass. That has
+> already cost one run three commits written on top of an unverified tree
+> (2026-09-03). Use `python -m pytest -q > run.log 2>&1; echo "EXIT=$?"` and read
+> the file. **A summary line that does not end in `passed` or `failed` is not a
+> result**, whatever the exit code said.
 If the Qt system libs above can't be installed in your environment (e.g. `apt`
 is blocked, so `libEGL.so.1` is missing), fall back to:
 `python -m pytest tests/ -p no:pytest-qt --ignore=tests/test_compare_dialog.py --ignore=tests/test_end_to_end.py --ignore=tests/test_footprint_view.py -q`

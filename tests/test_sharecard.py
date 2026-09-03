@@ -56,6 +56,30 @@ def test_share_blurb_omits_missing_parts():
     assert share_blurb(None, None, None) == ""
 
 
+def test_share_blurb_carries_the_night_it_was_shot():
+    """The Editor's copyable caption was the only one of the four with no date at
+    all, while Target, History, Gallery and the baked nameplate all carried one —
+    and the date is the fact a caption is *for*."""
+    from seestack.nightrange import format_night_range
+
+    assert share_blurb("M 42", 152, 11520,
+                       format_night_range("2024-11-15", "2024-11-18")) == \
+        "M 42 · 15–18 Nov 2024 · 3.2 h · 152 subs"
+    # Second, right after the target: the object and the night before the
+    # exposure arithmetic.
+    assert share_blurb("M 42", None, None, "15–18 Nov 2024") == "M 42 · 15–18 Nov 2024"
+
+
+def test_share_blurb_without_a_window_is_exactly_what_it_always_was():
+    """Every run recorded before the app knew its capture window — and every
+    caller that doesn't pass one — captions unchanged, with no empty part and no
+    dangling separator."""
+    assert share_blurb("M 42", 152, 11520) == share_blurb("M 42", 152, 11520, None)
+    assert share_blurb("M 42", 152, 11520, "") == "M 42 · 3.2 h · 152 subs"
+    assert share_blurb("M 42", 152, 11520, "   ") == "M 42 · 3.2 h · 152 subs"
+    assert share_blurb(None, None, None, None) == ""
+
+
 def test_write_share_jpeg_downscales_large_image(tmp_path):
     from PIL import Image
 
