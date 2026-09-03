@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { SkyImage } from "./projection";
 import {
   FLY_MARGIN, FLY_MAX_DISTANCE, FLY_MIN_DISTANCE, INNER_RADIUS, OUTER_RADIUS,
-  flyToCameraPosition, radiusForDepth, scaleCaption, spanSummary,
+  distinctObjectCount, flyToCameraPosition, groupByObject, radiusForDepth,
+  sameObjectTargets, scaleCaption, spanSummary,
   withPictures, type UniverseObject, type UniverseShell,
 } from "./universe";
 
@@ -158,5 +159,113 @@ describe("flyToCameraPosition", () => {
     const far = flyToCameraPosition({ x: 0, y: 0, z: radiusForDepth(0.9) })!;
     expect(len(far)).toBeGreaterThan(len(near));
     expect(len(far)).toBeLessThanOrEqual(OUTER_RADIUS + FLY_MARGIN);
+  });
+});
+
+// Two targets of one object sit at the same catalog position by design — all of
+// your pictures of M 31 belong where M 31 is. The Seestar's own folder
+// convention makes that pair routinely: "<T>_sub" and "<T>_mosaic_sub" become
+// "M 31" and "M 31 (mosaic)". Drawn per target they were two coincident
+// pictures and two overlapping labels with nothing saying there were two.
+describe("groupByObject", () => {
+  const single = obj({ safe: "M_31", name: "M 31", object_id: "M31" });
+  const mosaic = obj({ safe: "M_31_mosaic", name: "M 31 (mosaic)", object_id: "M31" });
+
+  it("draws one node for two targets of the same object", () => {
+    const groups = groupByObject(withPictures([single, mosaic], []));
+    expect(groups).toHaveLength(1);
+    expect(groups[0].primary.object.safe).toBe("M_31");
+    expect(groups[0].others.map((o) => o.object.safe)).toEqual(["M_31_mosaic"]);
+  });
+
+  it("leads with the target that actually has a picture", () => {
+    // A bare marker drawn over a finished picture would hide the better thing.
+    const groups = groupByObject(
+      withPictures([single, mosaic], [image("M_31_mosaic")]));
+    expect(groups[0].primary.object.safe).toBe("M_31_mosaic");
+    expect(groups[0].others.map((o) => o.object.safe)).toEqual(["M_31"]);
+  });
+
+  it("never folds together targets with no catalog id", () => {
+    // The same bug with the sign flipped: an empty id is not a claim of
+    // sameness, and grouping on it would pile every unidentified target onto
+    // one point.
+    const groups = groupByObject(withPictures([
+      obj({ safe: "Backyard", object_id: "" }),
+      obj({ safe: "Test_field", object_id: "" }),
+    ], []));
+    expect(groups.map((g) => g.primary.object.safe)).toEqual(["Backyard", "Test_field"]);
+  });
+
+  it("matches ids case- and whitespace-insensitively", () => {
+    const groups = groupByObject(withPictures([
+      obj({ safe: "a", object_id: "M31" }),
+      obj({ safe: "b", object_id: " m31 " }),
+    ], []));
+    expect(groups).toHaveLength(1);
+  });
+
+  it("keeps different objects apart and in order", () => {
+    const groups = groupByObject(withPictures([
+      obj({ safe: "M_42", object_id: "M42" }),
+      obj({ safe: "M_31", object_id: "M31" }),
+      obj({ safe: "M_31_mosaic", object_id: "M31" }),
+    ], []));
+    expect(groups.map((g) => g.primary.object.safe)).toEqual(["M_42", "M_31"]);
+  });
+
+  it("is a no-op on a library with one target per object", () => {
+    const placed = withPictures([
+      obj({ safe: "M_42", object_id: "M42" }),
+      obj({ safe: "M_31", object_id: "M31" }),
+    ], []);
+    expect(groupByObject(placed).map((g) => g.primary)).toEqual(placed);
+    expect(groupByObject(placed).every((g) => g.others.length === 0)).toBe(true);
+  });
+
+  it("handles an empty map", () => {
+    expect(groupByObject([])).toEqual([]);
+  });
+});
+
+describe("sameObjectTargets", () => {
+  const single = obj({ safe: "M_31", name: "M 31", object_id: "M31" });
+  const mosaic = obj({ safe: "M_31_mosaic", name: "M 31 (mosaic)", object_id: "M31" });
+  const other = obj({ safe: "M_42", object_id: "M42" });
+
+  it("lists your other targets of the same object", () => {
+    expect(sameObjectTargets([single, mosaic, other], single).map((o) => o.name))
+      .toEqual(["M 31 (mosaic)"]);
+  });
+
+  it("never lists the object itself", () => {
+    expect(sameObjectTargets([single], single)).toEqual([]);
+  });
+
+  it("claims nothing when the object has no catalog id", () => {
+    const anon = obj({ safe: "Backyard", object_id: "" });
+    expect(sameObjectTargets([anon, obj({ safe: "Other", object_id: "" })], anon))
+      .toEqual([]);
+  });
+});
+
+describe("distinctObjectCount", () => {
+  it("counts what the map draws, not how many targets fed it", () => {
+    expect(distinctObjectCount([
+      obj({ safe: "M_31", object_id: "M31" }),
+      obj({ safe: "M_31_mosaic", object_id: "M31" }),
+      obj({ safe: "M_42", object_id: "M42" }),
+    ])).toBe(2);
+  });
+
+  it("still counts un-catalogued targets one apiece", () => {
+    expect(distinctObjectCount([
+      obj({ safe: "a", object_id: "" }),
+      obj({ safe: "b", object_id: "" }),
+    ])).toBe(2);
+  });
+
+  it("is zero on an empty map", () => {
+    expect(distinctObjectCount([])).toBe(0);
   });
 });

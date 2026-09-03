@@ -246,3 +246,92 @@ def test_configured_longitude_decides_which_night_a_session_belongs_to(
     # +150° (~UTC+10) → 15:00 local, i.e. the afternoon *of* the 9th's night.
     client.put("/api/settings", json={"site_lon": 150.0})
     assert client.get("/api/targets/M_42/nights").json()[0]["night_date"] == "2026-07-09"
+
+
+# ---------------------------------------------------------------------------
+# A row is one observing night, not one capture session
+# ---------------------------------------------------------------------------
+#
+# The 6 h session gap and an observing night disagree in one direction only: an
+# evening run, bed, then a pre-dawn run are two sessions inside one night. The
+# card is headed "Nights" and its per-row "Set aside" button is worded about the
+# night, so the split showed two rows carrying the *identical* date and dropped
+# only half a night when one was clicked.
+
+def _split_night(data_root, client) -> None:
+    """One observing night at Seattle's longitude, shot in two goes 8 h apart:
+    an evening run, bed, then a pre-dawn run. Two sessions by the 6 h gap rule,
+    one night by the noon-to-noon rule."""
+    client.put("/api/settings", json={"site_lon": -122.3})   # UTC−8ish
+    _stamp(data_root, "M_42", {
+        0: {"timestamp_utc": "2026-07-09T01:00:00+00:00"},   # 8 Jul 17:00 local
+        1: {"timestamp_utc": "2026-07-09T01:30:00+00:00"},
+        2: {"timestamp_utc": "2026-07-09T09:00:00+00:00"},   # 9 Jul 01:00 local
+    })
+
+
+def test_a_night_shot_in_two_goes_is_one_row(client, solved_library, data_root):
+    """Regression: this returned two rows both labelled 2026-07-08, beside a
+    caption reading "over 1 night"."""
+    _split_night(data_root, client)
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert len(nights) == 1
+    assert nights[0]["night_date"] == "2026-07-08"
+    assert nights[0]["n_frames"] == 3
+    assert nights[0]["start_utc"].startswith("2026-07-09T01:00")
+    assert nights[0]["end_utc"].startswith("2026-07-09T09:00")
+
+
+def test_no_two_rows_ever_share_a_night_date(client, solved_library, data_root):
+    """The invariant the card's own heading promises, stated directly: a date
+    names one row. This is what the "Set aside" copy relies on to be true."""
+    _split_night(data_root, client)
+    nights = client.get("/api/targets/M_42/nights").json()
+    dates = [n["night_date"] for n in nights]
+    assert len(dates) == len(set(dates))
+
+
+def test_setting_aside_a_split_night_drops_all_of_it(
+    client, solved_library, data_root,
+):
+    """The user-visible cost of the bug: a beginner decides the night was
+    clouded out, clicks once, and every sub from it goes — not just the half
+    that happened to be on the row they clicked."""
+    _split_night(data_root, client)
+    r = client.post("/api/targets/M_42/frames/set-aside-night",
+                    json=_bounds(client, "M_42", 0))
+    assert r.status_code == 200
+    assert r.json()["changed"] == 3          # was 2 — the pre-dawn sub survived
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert nights[0]["n_kept"] == 0
+    assert nights[0]["n_set_aside"] == 3
+
+
+def test_the_card_and_the_frames_table_name_the_same_nights(
+    client, solved_library, data_root,
+):
+    """The mismatch that started this, stated as the agreement it should be: the
+    frames table dates each sub by its observing night, so the set of nights the
+    subs claim and the set of rows on the card are now the *same* set — not
+    merely overlapping, which is all the split version could manage."""
+    _split_night(data_root, client)
+    nights = client.get("/api/targets/M_42/nights").json()
+    frames = client.get("/api/targets/M_42/frames").json()
+    assert {n["night_date"] for n in nights} == {f["night_date"] for f in frames}
+
+
+def test_a_far_east_observers_night_splits_where_his_noon_falls(
+    client, solved_library, data_root, monkeypatch,
+):
+    """Merging is done with the *observer's* longitude, not UTC: the same three
+    stamps that are one night in Seattle straddle local noon at +150°, so they
+    are honestly two nights there. Proof the grouping key isn't UTC by another
+    name."""
+    import webapp.site_location as site_location
+    monkeypatch.setattr(site_location, "detect_site_from_library", lambda lib, **k: None)
+    _split_night(data_root, client)
+    assert len(client.get("/api/targets/M_42/nights").json()) == 1
+    client.put("/api/settings", json={"site_lon": 150.0})   # ~UTC+10
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert len(nights) == 2
+    assert [n["night_date"] for n in nights] == ["2026-07-09", "2026-07-08"]

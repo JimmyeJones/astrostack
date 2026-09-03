@@ -82,6 +82,97 @@ export function withPictures(
   return objects.map((object) => ({ object, image: bySafe.get(object.safe) ?? null }));
 }
 
+/** One *object* on the map, and every target of yours that is that object. */
+export interface PlacedGroup {
+  /** Stable key for the group — the catalog id when there is one. */
+  key: string;
+  /** The one drawn: the picture the reader should see for this object. */
+  primary: PlacedPicture;
+  /** Your other targets of the same object, in the order they arrived. */
+  others: PlacedPicture[];
+}
+
+/** The catalog identity two targets have to share to be one thing on the map.
+ *  Empty when the target has no catalog id — see {@link groupByObject}. */
+function objectKey(p: PlacedPicture): string {
+  return (p.object.object_id ?? "").trim().toLowerCase();
+}
+
+/**
+ * Collapse targets that are the *same catalogue object* into one node.
+ *
+ * Every target is placed at its object's real position, which is right — all of
+ * your pictures of M 31 belong where M 31 actually is. But two targets of one
+ * object (`M 31` and `M 31 (mosaic)`, which is what the Seestar's own folder
+ * convention produces for anyone who shoots a mosaic; or the same object
+ * re-imaged under a second folder name) then land on **exactly** the same point,
+ * drawing two coincident pictures and two overlapping labels with nothing to
+ * tell the reader there are two.
+ *
+ * Grouping is the honest fix. Nudging one aside would be the wrong one on a map
+ * whose whole promise is "placed where they really are".
+ *
+ * The **primary** — the one actually drawn — is the first entry that has a
+ * picture, because a bare marker drawn over a finished picture would hide the
+ * better thing. Failing that it is simply the first, so a group is never empty.
+ * Input order is preserved throughout, so the near→far ordering the rest of this
+ * module relies on survives.
+ *
+ * A target with **no** catalog id never groups: it gets its own node keyed by
+ * its target name. Folding those together on an empty id would pile every
+ * unidentified target onto one point, which is this bug with the sign flipped.
+ */
+export function groupByObject(placed: PlacedPicture[]): PlacedGroup[] {
+  const order: string[] = [];
+  const byKey = new Map<string, PlacedPicture[]>();
+  for (const p of placed) {
+    const id = objectKey(p);
+    const key = id ? `id:${id}` : `safe:${p.object.safe}`;
+    const bucket = byKey.get(key);
+    if (bucket) bucket.push(p);
+    else { byKey.set(key, [p]); order.push(key); }
+  }
+  return order.map((key) => {
+    const members = byKey.get(key) as PlacedPicture[];
+    const lead = members.findIndex((m) => m.image !== null);
+    const at = lead >= 0 ? lead : 0;
+    return {
+      key,
+      primary: members[at],
+      others: members.filter((_, i) => i !== at),
+    };
+  });
+}
+
+/**
+ * Your other targets of the same object as `object` — what the read-out lists
+ * so a reader can tell there is more than one picture behind that node.
+ *
+ * Matches on the catalog id, and returns `[]` when the object has none (see
+ * {@link groupByObject}: no id means no claim of sameness).
+ */
+export function sameObjectTargets(
+  objects: UniverseObject[], object: UniverseObject,
+): UniverseObject[] {
+  const id = (object.object_id ?? "").trim().toLowerCase();
+  if (!id) return [];
+  return objects.filter(
+    (o) => o.safe !== object.safe && (o.object_id ?? "").trim().toLowerCase() === id,
+  );
+}
+
+/** How many distinct objects the map actually draws — which is what the "N
+ *  placed" badge means to someone looking at it, and stops disagreeing with the
+ *  node count the moment two of your targets are one object. */
+export function distinctObjectCount(objects: UniverseObject[]): number {
+  const keys = new Set<string>();
+  for (const o of objects) {
+    const id = (o.object_id ?? "").trim().toLowerCase();
+    keys.add(id ? `id:${id}` : `safe:${o.safe}`);
+  }
+  return keys.size;
+}
+
 /**
  * The scale caption: what the map's radial axis means, in one sentence.
  *

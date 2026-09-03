@@ -51,6 +51,13 @@ describe("UniverseLegend", () => {
     expect(screen.getByText("2 placed")).toBeTruthy();
   });
 
+  it("counts objects, not targets — the map draws one node per object", () => {
+    // A mosaic and its single field are two targets and one thing on the map.
+    renderLegend({ ...DATA, objects: [...DATA.objects,
+      { ...OBJ, safe: "M_31_mosaic", name: "M 31 (mosaic)" }] });
+    expect(screen.getByText("2 placed")).toBeTruthy();
+  });
+
   it("names the targets it could not place, on request — never silently drops them", () => {
     renderLegend();
     expect(screen.queryByText(/Backyard test/)).toBeNull();
@@ -123,5 +130,49 @@ describe("UniverseObjectCard", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Open target" }));
     expect(onOpen).toHaveBeenCalledWith("M_31");
+  });
+});
+
+// The map draws one node per *object*, so a node can stand for more than one of
+// your targets — a mosaic and its single field, which the Seestar's own folder
+// convention routinely produces. Without this the second target is simply
+// missing from the read-out.
+describe("UniverseObjectCard's other targets of the same object", () => {
+  const MOSAIC: UniverseObject = {
+    ...OBJ, safe: "M_31_mosaic", name: "M 31 (mosaic)",
+  };
+
+  function renderCard(alsoTargets: UniverseObject[], onOpen = () => {}) {
+    return render(
+      <MantineProvider>
+        <UniverseObjectCard object={OBJ} alsoTargets={alsoTargets}
+          onOpen={onOpen} onClose={() => {}} />
+      </MantineProvider>,
+    );
+  }
+
+  it("names the other target sharing this spot", () => {
+    renderCard([MOSAIC]);
+    expect(screen.getByText(/You have another target of this object/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "M 31 (mosaic)" })).toBeTruthy();
+    expect(screen.getByText(/share this spot on the map/)).toBeTruthy();
+  });
+
+  it("counts them when there is more than one", () => {
+    renderCard([MOSAIC, { ...OBJ, safe: "M_31_old", name: "M 31 (2024)" }]);
+    expect(screen.getByText(/You have 2 more targets of this object/)).toBeTruthy();
+  });
+
+  it("opens the one you click, not the one that was drawn", () => {
+    const onOpen = vi.fn();
+    renderCard([MOSAIC], onOpen);
+    fireEvent.click(screen.getByRole("button", { name: "M 31 (mosaic)" }));
+    expect(onOpen).toHaveBeenCalledWith("M_31_mosaic");
+  });
+
+  it("says nothing at all when this node is your only target of the object", () => {
+    renderCard([]);
+    expect(screen.queryByText(/target of this object/)).toBeNull();
+    expect(screen.queryByText(/targets of this object/)).toBeNull();
   });
 });
