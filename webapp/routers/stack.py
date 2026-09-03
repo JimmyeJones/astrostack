@@ -2066,6 +2066,21 @@ async def save_stack_preview(
 _BAYER_PATTERNS = {"RGGB", "BGGR", "GRBG", "GBRG"}
 
 
+def reference_sub_from_frames(frames: list[Any]) -> Any | None:
+    """The same choice as :func:`_pick_reference_sub`, made over a frame list the
+    caller already has in hand — so a page that has just read every frame doesn't
+    re-query for one of them. Pure; ``frames`` may be the whole set or just the
+    accepted ones (accepted are preferred either way)."""
+    accepted = [f for f in frames if f.accept]
+    pool = accepted or list(frames)
+    if not pool:
+        return None
+    with_fwhm = [f for f in pool if f.fwhm_px is not None]
+    if with_fwhm:
+        return min(with_fwhm, key=lambda f: (f.fwhm_px, f.id or 0))
+    return pool[0]
+
+
 def _pick_reference_sub(proj: Any) -> Any | None:
     """Choose a *good* single accepted sub to stand in for "one raw frame".
 
@@ -2078,12 +2093,7 @@ def _pick_reference_sub(proj: Any) -> Any | None:
     frames = list(proj.iter_frames(accepted_only=True))
     if not frames:
         frames = list(proj.iter_frames())
-    if not frames:
-        return None
-    with_fwhm = [f for f in frames if f.fwhm_px is not None]
-    if with_fwhm:
-        return min(with_fwhm, key=lambda f: (f.fwhm_px, f.id or 0))
-    return frames[0]
+    return reference_sub_from_frames(frames)
 
 
 def _auto_edit_recipe_json(proj: Any, run: Any) -> str | None:
@@ -2563,6 +2573,32 @@ def _cached_noise_ratio(proj: Any, run_id: int,
         return False, None
 
 
+def stamped_noise_ratio(proj: Any, run: Any, frames: list[Any]) -> float | None:
+    """The *remembered* "stacking cut your noise ~N×" ratio for ``run``, or ``None``.
+
+    Read-only and cheap — one ``project_meta`` lookup plus one ``stat`` of the
+    master — and it **never measures**: a run nothing has measured yet reads as
+    ``None``, and starts answering the moment the reveal card measures it once.
+    That is what makes the "How's my stack?" note affordable on a page that must
+    stay cheap; a note that reloaded the master and re-debayered a sub on every
+    Target-page view would be a real regression.
+
+    The stamp's fingerprint is honoured in full (see :func:`_cached_noise_ratio`),
+    so a number measured against a master that has since been re-stacked, or
+    against a different representative sub, is a miss rather than a stale claim
+    about a picture that no longer exists.
+    """
+    if not run.fits_path:
+        return None
+    ref = reference_sub_from_frames(frames)
+    fingerprint = _noise_ratio_fingerprint(
+        run.fits_path, getattr(ref, "id", None) if ref is not None else None)
+    if fingerprint is None:
+        return None
+    hit, ratio = _cached_noise_ratio(proj, run.id, fingerprint)
+    return ratio if hit else None
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise")
 async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     """The concrete "stacking cut your noise ~N×" number for the reveal card.
@@ -2574,18 +2610,28 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
     edited/display-space export, or an unmeasurable image returns ``null`` and the
     badge simply omits the number.
 
+    ``expected_verdict`` is the engine's reading of that number against √N
+    (``"expected"`` | ``"low"`` | ``null``), from the same
+    :func:`seestack.stackhealth.noise_vs_expected` the "How's my stack?" note
+    uses — so the card renders a *sentence* for a judgement made in one place
+    rather than re-typing the threshold in TypeScript. Additive: an older client
+    simply ignores the field.
+
     The first measurement for a run is **remembered** (``NOISE_RATIO_META_PREFIX``,
     fingerprinted on the master and the representative sub) so the repeat views
     this endpoint actually gets don't reload the master and re-debayer a sub for
     a number that cannot have changed. The stamp is a cache, never a source of
     truth: any mismatch, or a project that can't be written, simply measures.
     """
+    from seestack.stackhealth import noise_vs_expected
+
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
         if run is None:
             raise HTTPException(status_code=404, detail="No such run")
         fits_path = run.fits_path
+        n_frames = run.n_frames_used
         ref = _pick_reference_sub(proj)
         ref_id = getattr(ref, "id", None) if ref is not None else None
         src = readable_frame_path(ref) if ref is not None else None
@@ -2598,14 +2644,15 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
         if fingerprint is not None:
             hit, cached = _cached_noise_ratio(proj, run_id, fingerprint)
             if hit:
-                return {"ratio": cached}
+                return {"ratio": cached,
+                        "expected_verdict": noise_vs_expected(cached, n_frames)}
     finally:
         proj.close()
         lib.close()
 
     if (not fits_path or not Path(fits_path).exists()
             or not src or not Path(src).exists()):
-        return {"ratio": None}
+        return {"ratio": None, "expected_verdict": None}
 
     ratio = await run_in_threadpool(_measure_noise_ratio, str(fits_path), str(src), pattern)
     if fingerprint is not None:
@@ -2621,7 +2668,7 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
             finally:
                 wproj.close()
                 wlib.close()
-    return {"ratio": ratio}
+    return {"ratio": ratio, "expected_verdict": noise_vs_expected(ratio, n_frames)}
 
 
 # Human-relevant provenance cards, in display order. Keys not present in a

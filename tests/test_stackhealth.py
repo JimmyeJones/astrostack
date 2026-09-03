@@ -649,3 +649,82 @@ def test_the_seam_warning_ranks_below_the_actionable_next_steps():
     )
     kinds = _kinds(notes)
     assert kinds.index("calibration") < kinds.index("seams")
+
+
+# --- "did the stack get what its subs should have bought?" (√N yardstick) -----
+# The judgement itself is `noise_vs_expected`, shared with the "One frame vs your
+# stack" card so the two surfaces can never describe the same stack differently;
+# the 0.7 factor under it is measured against the real estimator in
+# tests/test_noise_ratio_expectation.py.
+
+def test_noise_vs_expected_reads_a_healthy_stack_as_expected():
+    import math
+
+    from seestack.stackhealth import noise_vs_expected
+
+    # An ideal 100-sub stack measures ~√100 = 10×.
+    assert noise_vs_expected(10.0, 100) == "expected"
+    # …and anything at or above 0.7·√N is still "expected", boundary included.
+    assert noise_vs_expected(0.7 * math.sqrt(100), 100) == "expected"
+    assert noise_vs_expected(0.7 * math.sqrt(100) - 1e-6, 100) == "low"
+
+
+def test_noise_vs_expected_is_silent_without_something_honest_to_say():
+    from seestack.stackhealth import NOISE_EXPECTED_MIN_FRAMES, noise_vs_expected
+
+    assert noise_vs_expected(None, 100) is None          # never measured
+    assert noise_vs_expected(float("nan"), 100) is None  # unmeasurable image
+    assert noise_vs_expected(0.0, 100) is None
+    assert noise_vs_expected(-2.0, 100) is None
+    assert noise_vs_expected(5.0, None) is None
+    # Below the floor √N is meaningless — one unlucky reference sub swings the
+    # ratio more than the physics does, so we judge nothing.
+    assert noise_vs_expected(1.0, NOISE_EXPECTED_MIN_FRAMES - 1) is None
+    assert noise_vs_expected(1.0, NOISE_EXPECTED_MIN_FRAMES) == "low"
+
+
+def test_underperforming_stack_gets_the_note_on_the_health_card():
+    """The whole point of the move: this warning used to live only behind the
+    History page's collapsed "See the difference" reveal, which the person who
+    needs it never opens."""
+    frames = [_frame() for _ in range(40)]
+    notes = stack_health(_run(n_frames_used=100), frames, noise_ratio=4.0)
+    assert "noise_low" in _kinds(notes)
+    msg = next(n.message for n in notes if n.kind == "noise_low")
+    assert "100 subs should cut the background noise about 10×" in msg
+    assert "nearer 4×" in msg
+    # Gentle: it suggests a cause, never asserts a fault, and offers no action
+    # button (there is nothing to press — the fix is on the next clear night).
+    assert "usually means" in msg
+    assert next(n for n in notes if n.kind == "noise_low").action is None
+
+
+def test_a_healthy_stack_gets_no_underperformance_note():
+    frames = [_frame() for _ in range(40)]
+    assert "noise_low" not in _kinds(
+        stack_health(_run(n_frames_used=100), frames, noise_ratio=10.0))
+
+
+def test_the_note_self_hides_with_no_stamped_measurement():
+    """A Target page view must never trigger a measurement, so a run nothing has
+    measured yet simply says nothing — the default for every existing run."""
+    frames = [_frame() for _ in range(40)]
+    assert "noise_low" not in _kinds(stack_health(_run(n_frames_used=100), frames))
+    assert "noise_low" not in _kinds(
+        stack_health(_run(n_frames_used=100), frames, noise_ratio=None))
+
+
+def test_the_note_ranks_below_a_concrete_cause():
+    """When something names *why* the stack underperformed, that is the better
+    advice — the yardstick note is what to show when nothing else explains it."""
+    frames = [_frame() for _ in range(40)]
+    run = _run(n_frames_used=100, n_roughly_aligned=40)
+    kinds = _kinds(stack_health(run, frames, noise_ratio=4.0))
+    assert kinds.index("roughly_aligned") < kinds.index("noise_low")
+
+
+def test_a_small_stack_is_never_judged_by_the_yardstick():
+    frames = [_frame() for _ in range(5)]
+    assert "noise_low" not in _kinds(
+        stack_health(_run(n_frames_used=6, coverage_min=6, coverage_max=6),
+                     frames, noise_ratio=1.0))
