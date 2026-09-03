@@ -1318,11 +1318,22 @@ describe("the scan's skipped-folder note", () => {
 // The scanner walks past "<T>_video/" as wordlessly as it walks past the
 // device's own picture — but this one has somewhere to go.
 describe("videoFoldersNote", () => {
-  it("names a single capture and says what to do with it", () => {
-    expect(videoFoldersNote({ video_folders: [{ name: "Lunar_video" }] })).toEqual({
-      lead: 'Skipped "Lunar_video" — that\'s a video capture, not deep-sky subs.',
+  it("names a single capture and what kind it is", () => {
+    expect(videoFoldersNote({
+      video_folders: [{ name: "Lunar_video", label: "Moon" }],
+    })).toEqual({
+      lead: 'Skipped "Lunar_video" — that\'s a Moon video, not deep-sky subs.',
       plural: false,
     });
+  });
+
+  it("stays generic when the server isn't confident of the kind", () => {
+    // `label` is null for a folder whose prefix doesn't say Moon or Sun, and
+    // "that's a stuff video" would be worse than saying nothing specific.
+    expect(videoFoldersNote({
+      video_folders: [{ name: "stuff_video", label: null }],
+    })?.lead).toBe(
+      'Skipped "stuff_video" — that\'s a video capture, not deep-sky subs.');
   });
 
   it("counts a few and lists them", () => {
@@ -1354,7 +1365,7 @@ describe("videoFoldersNote", () => {
 
   it("tolerates junk rather than printing a nameless folder", () => {
     expect(videoFoldersNote({ video_folders: "nope" })).toBeNull();
-    expect(videoFoldersNote({ video_folders: [null, 7, { n_files: 3 }] })).toBeNull();
+    expect(videoFoldersNote({ video_folders: [null, 7, { label: "Moon" }] })).toBeNull();
     expect(videoFoldersNote({
       video_folders: [{ name: "" }, { name: "Lunar_video" }],
     })?.plural).toBe(false);
@@ -1366,12 +1377,15 @@ describe("the scan's video-folder signpost", () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({
         id: "pl-video", kind: "pipeline", target: null, state: "done",
-        result: { scanned: 40, video_folders: [{ name: "Lunar_video" }] },
+        result: {
+          scanned: 40,
+          video_folders: [{ name: "Lunar_video", label: "Moon" }],
+        },
       }),
     ]);
     renderJobs();
     const note = await screen.findByText(
-      /Skipped "Lunar_video" — that's a video capture/);
+      /Skipped "Lunar_video" — that's a Moon video/);
     const link = screen.getByRole("link", { name: "Moon & Sun" });
     expect(link).toHaveAttribute("href", "/moon-sun");
     // Nothing is wrong here, so it must not look like the skipped-subs warning

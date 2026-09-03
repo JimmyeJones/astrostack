@@ -12301,19 +12301,28 @@ to **Shipped**.)_
 
   **One dimmed line, not a second alert**, as the caution required — it sits beside the v0.329.2
   skipped-folders warning and must not look like one, because nothing is wrong. *"Skipped "Lunar_video" —
-  that's a video capture, not deep-sky subs. You can stack it on the **Moon & Sun** page."* A whole archive
+  that's a Moon video, not deep-sky subs. You can stack it on the **Moon & Sun** page."* A whole archive
   dropped in at once names the first three and counts the rest, so it stays one sentence.
+
+  **The payload carries exactly what the sentence says, which is a rule this repo learned the hard way.**
+  `X-Loupe-Window` shipped with no reader and had to be answered for later, and the A-MINOR list already
+  carries one endpoint with no caller — so the summary key holds the folder name and a `label`, both read, and
+  the capture id and file count that the first draft served were dropped rather than left for someone to
+  wonder about. The `label` is `null` unless the folder's own prefix says Moon or Sun (`VideoCapture.label`
+  falls back to the base name, and *"that's a stuff video"* is worse copy than *"that's a video capture"*) —
+  decided server-side so the "am I confident?" test isn't a magic-string check in TypeScript.
 
   **Upgrade-safe (§9):** one *added*, optional summary key on a job result; no config, schema, on-disk, API-
   shape or default change, and the skip's own behaviour is untouched — nothing in `incoming/` is read beyond
   a directory listing, let alone written.
 
-  **Tests (+8; all fail before).** `tests/webapp/test_pipeline.py` (+3): a real scan of an `incoming/` holding
-  both subs and a `Lunar_video/` reports the capture *and* still ingests the subs with the folder untouched; a
-  scan with no video folders carries no key at all; and two captures — one given a still, one only a quicklook
-  — both fall silent on the next scan. `Jobs.test.tsx` (+5): the pure note's four shapes (one, several, the
-  three-name cap, junk), and the rendered line, asserting it carries the `/moon-sun` link and is **not** inside
-  a Mantine `Alert`.
+  **Tests (+12; all fail before).** `tests/webapp/test_pipeline.py` (+4): a real scan of an `incoming/` holding
+  both subs and a `Lunar_video/` reports the capture *and* still ingests the subs with the folder untouched; an
+  unrecognised `stuff_video/` gets `label: null` rather than a guessed kind; a scan with no video folders
+  carries no key at all; and two captures — one given a still, one only a quicklook — both fall silent on the
+  next scan. `Jobs.test.tsx` (+8): the pure note's six shapes (a named kind, the generic fallback, several, the
+  three-name cap, and the two silences), plus the rendered line, asserting it carries the `/moon-sun` link and
+  is **not** inside a Mantine `Alert`.
 
   *(Original entry follows.)*
   *(Pillar: friendliness — PRIORITY 3; size XS; frontend copy plus one summary key.)* v0.329.2 made the bare

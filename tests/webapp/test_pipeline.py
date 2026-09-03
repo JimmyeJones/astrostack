@@ -540,13 +540,25 @@ def test_the_scan_points_a_video_folder_at_the_page_that_stacks_it(client, data_
     body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
     assert body["state"] == "done", body
     [video] = body["result"]["video_folders"]
-    assert video == {"id": "Lunar_video", "name": "Lunar_video",
-                     "label": "Moon", "n_files": 1}
+    assert video == {"name": "Lunar_video", "label": "Moon"}
     # Reported, never acted on — the subs beside it still ingested normally and
     # nothing in incoming/ was touched.
     assert "M_42" in {t["safe_name"] for t in client.get("/api/targets").json()}
     assert sorted(p.name for p in (data_root / "incoming" / "Lunar_video").iterdir()) \
         == ["clip.mp4"]
+
+
+def test_an_unrecognised_capture_gets_no_kind_rather_than_a_guessed_one(
+        client, data_root):
+    """`VideoCapture.label` falls back to the folder's base name, and "that's a
+    stuff video" is worse copy than "that's a video capture" — so the label is
+    served only when the folder's own prefix says Moon or Sun."""
+    _drop_a_folder(data_root, "M 42_sub", ["Light_M 42_10.0s_IRCUT_0001.fit"])
+    _drop_video(data_root, "stuff_video")
+    body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+    assert body["state"] == "done", body
+    [video] = body["result"]["video_folders"]
+    assert video == {"name": "stuff_video", "label": None}
 
 
 def test_a_scan_with_no_video_folders_says_nothing(client, data_root):

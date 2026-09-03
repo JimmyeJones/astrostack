@@ -541,26 +541,32 @@ const VIDEO_FOLDERS_NAMED = 3;
  * that have neither a stacked still nor a quicklook, so this goes quiet as soon
  * as the user has actually opened one — it is a signpost, not a standing nag.
  *
+ * A single capture names what it is when the server is confident of the kind
+ * ("that's a Moon video"); `label` is null for a folder whose prefix doesn't
+ * say, and then it stays the generic "a video capture" rather than guessing.
+ *
  * The link text is the caller's, so this stays a pure string: it returns the
  * lead sentence plus whether to say "it" or "them". */
 export function videoFoldersNote(
   r: Record<string, unknown>,
 ): { lead: string; plural: boolean } | null {
   const raw = Array.isArray(r.video_folders) ? r.video_folders : [];
-  const names = raw.flatMap((entry) => {
+  const found = raw.flatMap((entry) => {
     if (!entry || typeof entry !== "object") return [];
-    const name = (entry as Record<string, unknown>).name;
-    return typeof name === "string" && name ? [name] : [];
+    const e = entry as Record<string, unknown>;
+    if (typeof e.name !== "string" || !e.name) return [];
+    return [{ name: e.name, label: typeof e.label === "string" ? e.label : "" }];
   });
-  if (!names.length) return null;
-  const shown = names.slice(0, VIDEO_FOLDERS_NAMED).map((n) => `"${n}"`);
-  const rest = names.length - shown.length;
+  if (!found.length) return null;
+  const shown = found.slice(0, VIDEO_FOLDERS_NAMED).map((f) => `"${f.name}"`);
+  const rest = found.length - shown.length;
   const listed = rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(", ");
-  const lead = names.length === 1
-    ? `Skipped ${listed} — that's a video capture, not deep-sky subs.`
-    : `Skipped ${names.length} video folders (${listed}) — those are video `
+  const kind = found[0].label ? `a ${found[0].label} video` : "a video capture";
+  const lead = found.length === 1
+    ? `Skipped ${listed} — that's ${kind}, not deep-sky subs.`
+    : `Skipped ${found.length} video folders (${listed}) — those are video `
       + "captures, not deep-sky subs.";
-  return { lead, plural: names.length !== 1 };
+  return { lead, plural: found.length !== 1 };
 }
 
 /** Plain-language outcome of a finished "Build master" job (pure, tested). A

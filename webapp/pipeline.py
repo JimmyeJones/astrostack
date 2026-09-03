@@ -114,6 +114,13 @@ def _unstacked_video_captures(
     Best-effort throughout: a discovery that raises (an unreadable drop, a
     vanished mount) returns nothing rather than failing a scan that has already
     ingested the user's frames.
+
+    ``label`` is the plain-language subject for the sentence ("Moon", "Sun") and
+    is **null unless the folder's own prefix says which**, because ``label``
+    falls back to the folder's base name for an unrecognised capture — and
+    "that's a stuff video" is worse copy than "that's a video capture". Deciding
+    that here rather than on the client keeps the "am I confident?" test in one
+    place instead of a magic-string check in TypeScript.
     """
     from seestack.video.discover import find_video_captures
     from webapp.video import has_quicklook, has_result
@@ -124,10 +131,8 @@ def _unstacked_video_captures(
             if has_result(settings, cap.id) or has_quicklook(settings, cap.id):
                 continue
             out.append({
-                "id": cap.id,
                 "name": cap.folder_name,
-                "label": cap.label,
-                "n_files": cap.n_files,
+                "label": cap.label if cap.kind in ("lunar", "solar") else None,
             })
     return out
 
