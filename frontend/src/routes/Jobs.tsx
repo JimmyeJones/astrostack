@@ -525,6 +525,44 @@ export function skippedFolders(r: Record<string, unknown>): SkippedFolder[] {
   });
 }
 
+/** How many video folders the line names before it just counts them. A whole
+ *  archive dropped in at once has to read as one short sentence. */
+const VIDEO_FOLDERS_NAMED = 3;
+
+/** The "your video capture went somewhere useful" signpost (pure, tested).
+ *
+ * The scanner walks past `<T>_video/` folders as deliberately as it walks past
+ * the Seestar's own stacked output, and just as wordlessly — so someone who
+ * copies their whole Seestar share in reads "40 subs added" and never learns
+ * their `Lunar_video` was passed over. Unlike the bare-folder skip there is
+ * somewhere to send them: the Moon & Sun page stacks exactly these clips.
+ *
+ * Returns null once there is nothing to say. The backend only lists captures
+ * that have neither a stacked still nor a quicklook, so this goes quiet as soon
+ * as the user has actually opened one — it is a signpost, not a standing nag.
+ *
+ * The link text is the caller's, so this stays a pure string: it returns the
+ * lead sentence plus whether to say "it" or "them". */
+export function videoFoldersNote(
+  r: Record<string, unknown>,
+): { lead: string; plural: boolean } | null {
+  const raw = Array.isArray(r.video_folders) ? r.video_folders : [];
+  const names = raw.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const name = (entry as Record<string, unknown>).name;
+    return typeof name === "string" && name ? [name] : [];
+  });
+  if (!names.length) return null;
+  const shown = names.slice(0, VIDEO_FOLDERS_NAMED).map((n) => `"${n}"`);
+  const rest = names.length - shown.length;
+  const listed = rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(", ");
+  const lead = names.length === 1
+    ? `Skipped ${listed} — that's a video capture, not deep-sky subs.`
+    : `Skipped ${names.length} video folders (${listed}) — those are video `
+      + "captures, not deep-sky subs.";
+  return { lead, plural: names.length !== 1 };
+}
+
 /** Plain-language outcome of a finished "Build master" job (pure, tested). A
  * beginner building a master from a Dark/Flat folder should see how many of
  * their frames were actually combined — and, when some were set aside (wrong
@@ -750,11 +788,23 @@ function JobResultActions({ job }: { job: Job }) {
     const rescue = bootstrapRescueNote(r);
     const putBack = autoRegradedBackNote(r);
     const skipped = skippedFolders(r);
+    const videos = videoFoldersNote(r);
     return (
       <Stack gap={4} mt="xs">
         <Text size="sm">{line}</Text>
         {rescue ? <Text size="xs" c="dimmed">{rescue}</Text> : null}
         {putBack ? <Text size="xs" c="dimmed">{putBack}</Text> : null}
+        {/* Deliberately one dimmed line and not a second alert: nothing is
+            wrong, and the standing "the UI is extremely busy" priority means a
+            signpost must not look like a warning. */}
+        {videos ? (
+          <Text size="xs" c="dimmed">
+            {videos.lead}{" You can stack "}{videos.plural ? "them" : "it"}
+            {" on the "}
+            <Anchor component={Link} to="/moon-sun">Moon &amp; Sun</Anchor>
+            {" page."}
+          </Text>
+        ) : null}
         {/* Folders the Seestar convention passed over as the device's own
             finished picture, holding files that don't look like one. Silent on
             a healthy Seestar library; loud exactly when a scan has walked past

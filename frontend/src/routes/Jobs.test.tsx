@@ -9,7 +9,7 @@ import {
   bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobKindLabel,
   calibrationMismatchNote, missingSubsNote, readErrorsNote, storageTroubleAlert,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
-  skippedFolders,
+  skippedFolders, videoFoldersNote,
 } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
@@ -1312,5 +1312,82 @@ describe("the scan's skipped-folder note", () => {
     expect(screen.queryByText(
       "Some folders were skipped as your Seestar's own pictures",
     )).not.toBeInTheDocument();
+  });
+});
+
+// The scanner walks past "<T>_video/" as wordlessly as it walks past the
+// device's own picture — but this one has somewhere to go.
+describe("videoFoldersNote", () => {
+  it("names a single capture and says what to do with it", () => {
+    expect(videoFoldersNote({ video_folders: [{ name: "Lunar_video" }] })).toEqual({
+      lead: 'Skipped "Lunar_video" — that\'s a video capture, not deep-sky subs.',
+      plural: false,
+    });
+  });
+
+  it("counts a few and lists them", () => {
+    expect(videoFoldersNote({
+      video_folders: [{ name: "Lunar_video" }, { name: "Solar_video" }],
+    })).toEqual({
+      lead: 'Skipped 2 video folders ("Lunar_video", "Solar_video") — those are '
+        + "video captures, not deep-sky subs.",
+      plural: true,
+    });
+  });
+
+  it("stops naming them once a whole archive lands at once", () => {
+    // The count stays exact; only the list is capped, so one dropped-in archive
+    // can't turn a signpost into a wall of folder names.
+    const note = videoFoldersNote({
+      video_folders: ["a", "b", "c", "d", "e"].map((name) => ({ name })),
+    });
+    expect(note?.lead).toBe(
+      'Skipped 5 video folders ("a", "b", "c" and 2 more) — those are video '
+      + "captures, not deep-sky subs.");
+    expect(note?.plural).toBe(true);
+  });
+
+  it("says nothing on an ordinary scan, or once the captures are dealt with", () => {
+    expect(videoFoldersNote({ scanned: 40 })).toBeNull();
+    expect(videoFoldersNote({ video_folders: [] })).toBeNull();
+  });
+
+  it("tolerates junk rather than printing a nameless folder", () => {
+    expect(videoFoldersNote({ video_folders: "nope" })).toBeNull();
+    expect(videoFoldersNote({ video_folders: [null, 7, { n_files: 3 }] })).toBeNull();
+    expect(videoFoldersNote({
+      video_folders: [{ name: "" }, { name: "Lunar_video" }],
+    })?.plural).toBe(false);
+  });
+});
+
+describe("the scan's video-folder signpost", () => {
+  it("points at the Moon & Sun page, as one line and not an alert", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-video", kind: "pipeline", target: null, state: "done",
+        result: { scanned: 40, video_folders: [{ name: "Lunar_video" }] },
+      }),
+    ]);
+    renderJobs();
+    const note = await screen.findByText(
+      /Skipped "Lunar_video" — that's a video capture/);
+    const link = screen.getByRole("link", { name: "Moon & Sun" });
+    expect(link).toHaveAttribute("href", "/moon-sun");
+    // Nothing is wrong here, so it must not look like the skipped-subs warning
+    // that sits beside it — one dimmed line, never a second alert.
+    expect(note.closest('[class*="mantine-Alert"]')).toBeNull();
+  });
+
+  it("stays out of the way on a scan with no video folders", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-novideo", kind: "pipeline", target: null, state: "done",
+        result: { scanned: 40 },
+      }),
+    ]);
+    renderJobs();
+    await screen.findByText(/40/);
+    expect(screen.queryByRole("link", { name: "Moon & Sun" })).not.toBeInTheDocument();
   });
 });

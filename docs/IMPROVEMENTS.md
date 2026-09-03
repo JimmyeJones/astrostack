@@ -12201,8 +12201,42 @@ to **Shipped**.)_
     which case the night vanishes from the pace entirely rather than merely counting light. Measure which of the
     two errors is larger on a fixture before choosing whether the fix is grouping or a re-floored session.
 
-- **NEW IDEA (Builder 2026-09-03, the obvious sibling of the v0.329.2 skip report) — a `*_video/` folder
-  dropped in `incoming/` is skipped just as silently, and the app *does* have a home for it.**
+- **✅ SHIPPED (Builder, v0.333.0, branch `claude/sweet-babbage-8j6maq`) — ~~a `*_video/` folder dropped in
+  `incoming/` is skipped just as silently, and the app *does* have a home for it.~~** Built to the filed shape,
+  including both cautions — and the entry's own "grep first" changed where it lives.
+
+  **The grep's answer: `skipped_out` was the wrong place.** The entry proposed "a second kind" on the
+  scanner's skip list, but the gate it also asks for — *don't mention a capture the user has already dealt
+  with* — needs the **video result store**, which is a webapp concept the engine deliberately cannot see
+  (`seestack/` never imports `webapp`). And the discovery walk already exists, in the module written as the
+  other half of that same skip: `seestack/video/discover.py` says so in its own first paragraph. So the report
+  is assembled in `webapp/pipeline.py` (`_unstacked_video_captures`) from `find_video_captures` over the scan
+  root, and the scanner is untouched — no engine change at all.
+
+  **The nag gate, which is the whole difference between a signpost and a standing complaint.** A capture drops
+  out of the report the moment it has a stacked still *or* the quicklook the "Check this capture first" pass
+  writes — the user has plainly found it, and every later scan is quiet about it. Both are a single `stat` of
+  a file the store already writes, so the cost is one cheap directory walk plus two stats per capture, and no
+  video is ever opened. Best-effort throughout: a drop that raises mid-walk reports nothing rather than
+  failing a scan that has already ingested the owner's frames.
+
+  **One dimmed line, not a second alert**, as the caution required — it sits beside the v0.329.2
+  skipped-folders warning and must not look like one, because nothing is wrong. *"Skipped "Lunar_video" —
+  that's a video capture, not deep-sky subs. You can stack it on the **Moon & Sun** page."* A whole archive
+  dropped in at once names the first three and counts the rest, so it stays one sentence.
+
+  **Upgrade-safe (§9):** one *added*, optional summary key on a job result; no config, schema, on-disk, API-
+  shape or default change, and the skip's own behaviour is untouched — nothing in `incoming/` is read beyond
+  a directory listing, let alone written.
+
+  **Tests (+8; all fail before).** `tests/webapp/test_pipeline.py` (+3): a real scan of an `incoming/` holding
+  both subs and a `Lunar_video/` reports the capture *and* still ingests the subs with the folder untouched; a
+  scan with no video folders carries no key at all; and two captures — one given a still, one only a quicklook
+  — both fall silent on the next scan. `Jobs.test.tsx` (+5): the pure note's four shapes (one, several, the
+  three-name cap, junk), and the rendered line, asserting it carries the `/moon-sun` link and is **not** inside
+  a Mantine `Alert`.
+
+  *(Original entry follows.)*
   *(Pillar: friendliness — PRIORITY 3; size XS; frontend copy plus one summary key.)* v0.329.2 made the bare
   `<T>/` skip report itself. `_apply_seestar_convention` skips `*_video/` and `*_photo/` folders with the same
   `continue`, and that skip is *right* — they hold no stackable deep-sky subs. But a beginner who copies their
