@@ -470,6 +470,85 @@ _(nothing else claimed — claim an item here with your branch name)_
 > (backlog bloat, collisions, QA-rotation aim) are filed as the R-items further below; `AGENTS.md` §1 and §11
 > have already been updated for the highest-value ones.**
 
+- **⭐ NEW BUG (Builder 2026-09-03, the FOURTH instance of the wrong-denominator class, found by sweeping the
+  class after shipping the third) — "Is it enough yet?" tells a mosaic owner they have PLENTY when each panel
+  is a fraction of the goal, and the Tonight planner tells them to go shoot something else.** *(Severity:
+  **the app actively advises the owner to stop shooting a mosaic that is 1/N done** — on the owner's main
+  shooting style, on three on-by-default surfaces. Confidence: **verified by reading, end to end**; not yet
+  reproduced against a live mosaic target, which is the first thing a run picking this up should do. Size: M,
+  and the sizing below is the reason it is filed rather than shipped in the run that found it.)*
+
+  **The trace.** `integrationReadiness` (`frontend/src/readiness.ts`) compares a target's
+  `total_exposure_s` — the sum over **every accepted sub of every panel** — against a per-object-type goal
+  (`GOAL_HOURS`: Galaxy 6 h, Nebula 4 h, Cluster 1.5 h, Other 4 h). Those goals are *per-pixel* depths: they
+  mean "enough integration for a clean image", and cleanliness is a property of a pixel, not of a target row.
+  On a mosaic no pixel ever sees more than its own panel's subs, so the number compared and the number the
+  goal is about differ by the panel count — the identical mistake the noise yardstick made (`n_frames_used`
+  vs. the crop's depth, v0.331.2 / v0.332.0), one quantity over.
+
+  | shape | total | per panel | verdict today | honest verdict |
+  |---|---|---|---|---|
+  | 4-panel nebula mosaic, 1 h/panel | 4.0 h | 1.0 h | **"plenty for a clean image"** | a quarter done |
+  | 4-panel galaxy mosaic, 1.5 h/panel | 6.0 h | 1.5 h | **"plenty for a clean image"** | a quarter done |
+  | 2-panel nebula mosaic, 2 h/panel | 4.0 h | 2.0 h | **"plenty"** | half done |
+
+  **Three surfaces, and the worst of them is not the card.** The Target page's readiness card and the
+  Dashboard's "Target progress" row merely overstate. `readinessRowHint` on the **Tonight planner** turns the
+  same verdict into an instruction — *"Plenty — try something new"* — so on the night the owner is choosing
+  where to point, the app tells them to abandon a mosaic that has a quarter of the light it needs.
+  `readinessRowBadge`'s "~N more nights" is wrong by the same factor beneath it, and
+  `continueTonight`/`libraryProgress` both read the same helper.
+
+  **`noiseReductionHint` beside it is NOT affected — checked, not assumed.** One more hour on a mosaic is
+  split across its panels too, so the marginal gain is `1 − √(t/(t+1))` in the *total* either way: the N
+  cancels. Leave it alone.
+
+  **Why this was filed rather than fixed on the spot, and what the next run needs to decide.** The fix is
+  arithmetic (scale the goal by the number of field-fulls of sky the target covers) but the **panel count is
+  the whole problem**, and every source has a real cost:
+  - `pointing_groups` / `cluster_pointings` (`seestack/stack/pointings.py`) is the exact answer and is
+    **O(n²) in pure Python** — 5,477 subs (the owner's largest target) is ~15 M distance tests. That is fine
+    inside a stack and unacceptable on `/api/library-progress`, which the Dashboard polls and which walks
+    *every* target.
+  - **The newest run's canvas is cheap and is probably the right answer**: `stack_runs.canvas_w/canvas_h` are
+    already on the row `_collect_progress` could read, and `canvas_area / one_frame_area` is exactly "how many
+    field-fulls of sky is this integration spread over" — which is the quantity the goal needs, not the panel
+    count as such. It degrades correctly on a single field (→ 1) and needs no clustering.
+  - `n_frames_used / coverage_max` is cheaper still but **biased low** (overlaps inflate `coverage_max`), and
+    a low bias here restores the false "plenty" just less often — the failure mode v0.332.0 refused
+    `coverage_max` for. Do not use it.
+  - A **user-set goal already wins** over the default (`goal_s`), so a mosaic shooter who set their own number
+    is unaffected. Only the default is wrong.
+
+  **Care.** This is an on-by-default beginner verdict on three screens; a change wants its own commit and a
+  stated before/after. If the field-fulls number can't be had for a given target, the house rule for this
+  class applies — **withhold the judgement rather than guess** (v0.331.2) — but note that withholding costs a
+  mosaic its progress bar *and* its `fraction`, which is a real loss on the owner's main workflow, so prefer
+  a measured scale over silence where one is available. Whatever ships must pin all three surfaces in one
+  test: the card, the Dashboard row, and the planner's "try something new".
+
+- **⚪ SWEEP RESULT — the rest of the wrong-denominator class is CLEAN; here is the list so nobody re-walks it
+  (Builder 2026-09-03, the same sweep that turned up the readiness bug above).** *(No code change wanted.)*
+  The class's rule, from the v0.331.2 note: *any per-pixel or per-crop quantity compared against a
+  whole-target total is wrong on a mosaic*. Every remaining consumer of `n_frames_used` and of
+  `total_exposure_s` was read against it:
+  - **`stackhealth.rejection_blind`** — already fixed; it compares against `coverage_max`, the deepest pixel,
+    and says *"with no more than N subs overlapping at any one spot"* in the mosaic branch.
+  - **`stackhealth.noise_vs_expected` / `noise_yardstick_frames`** — fixed in v0.331.2 / v0.332.0.
+  - **`noiseReductionBadge`** — fixed in v0.332.2 (the entry further down).
+  - **`stackhealth.roughly_aligned`** — the denominator is `n_frames_used` and that is **right**: a
+    roughly-aligned sub is a whole frame, and the population it comes from is the contributing frames. Not a
+    per-pixel quantity at all.
+  - **`portfolio.py`** (best-picture scoring) and **`restackgain.py`** — both compare target-level facts
+    against other *target-level* facts (frame counts against the library's max, a run's count against the
+    accepted count). Nothing per-pixel enters.
+  - **`imaging_log`'s `n_subs`** — a stated fact about the run, not a claim about a pixel. Correct as it is.
+  - **`readiness.noiseReductionHint`** — measured above: the panel count cancels. Correct on a mosaic.
+  So the only live instance left in the class is the readiness goal directly above. **If it is ever re-swept,
+  the generative question is not "does this use `n_frames_used`?" but "does this compare a
+  *cleanliness/depth* quantity against a *whole-target* total?"** — which is why the fourth instance was in
+  `total_exposure_s` and survived three sweeps that all grepped for the frame count.
+
 - **✅ SHIPPED (Builder, v0.331.2, branch `claude/sweet-babbage-i16c1c`) — ~~the "your stack came in under
   what its subs should give" nudge fires on every healthy MOSAIC, at every depth.~~** *(Severity: **a wrong
   "your picture underperformed" on the owner's main shooting style**, on an on-by-default surface, since
