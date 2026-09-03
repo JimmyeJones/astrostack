@@ -17727,6 +17727,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   in full-res px). None of them can drop a region out of the op's scope the way the coverage-leveling
   floor did. **So this entry is the only remaining pixel-scale divergence, and it stays gated on real-data
   confirmation as filed.**
+
 - ~~**Give the manual `asinh` stretch the same highlight rolloff STF just got.**~~
   — **SHIPPED v0.119.2** (Builder 2026-07-14, same branch). `asinh_stretch` shared
   the identical hard-clip, so it got the same `_highlight_rolloff` behind a
@@ -18069,25 +18070,77 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
 
-- **NEW IDEA (Builder 2026-09-02, the reach the A7 fix left open) — give the *junk-target cleanup nudge* the
-  same filename evidence the ingest reject just learned, so a pre-convention library's leftover output targets
-  stop hiding behind a frame count.** *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: S.)* A7
-  (v0.327.7) taught the on-ingest reject to recognise the device's own picture by its **name**
-  (`Stacked*.fit` vs `Light_*.fit`) rather than by how many of them a folder holds, because "the output folder
-  holds one image" is true per *session* and false per folder. `classify_seestar_junk_target`
-  (`seestack/io/scanner.py`) — the read-only classifier behind the "we found some leftover folders" cleanup
-  card — still gates purely on count: `junk_output_frame_cap()` allows 2 for a single field and 32 for a
-  mosaic (v0.319.3, sized from the owner's real 11- and 7-frame mosaic leftovers). A target holding a
-  *season* of on-device outputs sails past both caps and is never offered for cleanup, which is exactly the
-  shape A7 found on the owner's `M 3`. **Shape:** where every frame in the candidate target is named like
-  on-device output, treat that as the positive evidence and let the count cap go; where the names are mixed or
-  `Light_*`, keep today's cap unchanged. The existing "the `<T>_sub/` sibling really is on disk" requirement
-  stays — this only ever *adds* confidence, and cleanup is a confirmed action, never automatic. **Reuse, do
-  not re-derive:** `seestack.io.project._is_seestar_output_filename` is the single definition; a second copy is
-  the copy that eventually disagrees, which is the mistake `junk_output_frame_cap` was itself created to undo
-  (the webapp used to carry its own `_MAX_CLEANUP_FRAMES`). **Care:** this offers a *deletion* to the user, so
-  the bar is higher than the ingest reject's (which is reversible and deletes nothing) — require *every* frame
-  to match, not a majority.
+- **✅ SHIPPED (Builder, v0.338.0, branch `claude/sweet-babbage-f00hj6`) — ~~give the *junk-target cleanup
+  nudge* the same filename evidence the ingest reject just learned, so a pre-convention library's leftover
+  output targets stop hiding behind a frame count.~~** Built to the filed shape, including both of its "do
+  nots", and the one design question the entry did not raise turned out to be the whole of the work.
+
+  **What shipped.** `classify_seestar_junk_target` (`seestack/io/scanner.py`) now accepts a count *above*
+  `junk_output_frame_cap` when **every** registered frame is named like the device's own picture —
+  `_all_frames_are_seestar_output`, a thin `all(...)` over the single definition
+  `seestack.io.project.is_seestar_output_filename` that A7 made public for exactly this, so there is no second
+  spelling of "is this the device's own picture?" to drift. The `<T>_sub/`-sibling-on-disk requirement is
+  untouched: the filenames only ever *add* to it, never replace it. So the owner's `M 3` — 22 on-device
+  outputs, one per session, sitting in the bare folder beside `M 3_sub/` — is offered for cleanup for the
+  first time, as are `M 101` (11) and `M 13` (9), and so is the mosaic shape that outgrows even the looser
+  32-frame cap.
+
+  **The design question the entry didn't ask: the filenames are only knowable by opening the project, and the
+  cap was what stopped that happening.** `junk_verdict` (`webapp/library_hygiene.py`) short-circuits on
+  `n_frames > junk_output_frame_cap` precisely so a 5,477-sub target is never read on a Library poll — so
+  "let the count cap go" cannot mean "read everything". It is now two separate limits with two separate jobs:
+  `junk_output_frame_cap` still says *when the count settles it alone*, and a new
+  `junk_output_examine_cap()` (512 — four panels across 128 sessions, an order of magnitude above the
+  owner's worst folder and an order below a real target) says *when it is worth opening a project to look at
+  the filenames at all*. Reading one column of a few hundred rows is free; the ceiling is what keeps it that
+  way, and a test spies on `Library.open_target` to prove a target above it is never opened.
+
+  **The copy counts what it is offering to delete.** "Stacking it just reproduces that one lower-resolution
+  frame" is simply false about twenty-two of them, and a nudge that miscounts what it proposes to remove is
+  one the owner is right not to trust — so there is now a third phrasing beside the single-field and mosaic
+  ones: *"the Seestar's own stacked image from each session (22 of them, all named “Stacked…”)"*.
+
+  **Conservative exactly where the entry said to be.** The bar is **every** frame, not a majority: one
+  `Light_*.fit` in the folder and the count cap decides instead, because this offers a *deletion* where the
+  ingest reject merely declines to register (reversible, nothing lost). `StackedByMe.fit` does not match —
+  the strictness A7 built into the predicate for the on-by-default ingest path is inherited here for free.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no API shape change, no default flipped,
+  nothing deleted automatically (the nudge still requires the user's confirmation, and removal takes only the
+  registry target — a test asserts the raw `_sub/` folder and the output folder are both still on disk after
+  it). `junk_output_frame_cap` keeps its exact behaviour and its callers.
+
+  **Tests (+8; 3 of them fail before).** `tests/test_scanner.py` (+6): the owner's 22-output `M 3` shape and
+  the 60-image mosaic pile (both fail before), plus four guards that must pass *both* ways — one real
+  `Light_*` sub among the outputs, no `_sub` sibling on disk, a `StackedByMe*` folder, and the examine cap's
+  own bounds. `tests/webapp/test_cleanup_suggestions.py` (+2): the endpoint end to end on `M 3` beside a
+  900-sub `NGC 7000` that has *everything* the output case has except the filenames (fails before), including
+  the delete-and-the-nudge-clears loop; and the cost guard, which asserts a target one frame above the
+  ceiling never has its project opened.
+
+  *(Original entry follows.)*
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-02, the reach the A7 fix left open) — give the *junk-target cleanup nudge* the
+    same filename evidence the ingest reject just learned, so a pre-convention library's leftover output targets
+    stop hiding behind a frame count.** *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: S.)* A7
+    (v0.327.7) taught the on-ingest reject to recognise the device's own picture by its **name**
+    (`Stacked*.fit` vs `Light_*.fit`) rather than by how many of them a folder holds, because "the output folder
+    holds one image" is true per *session* and false per folder. `classify_seestar_junk_target`
+    (`seestack/io/scanner.py`) — the read-only classifier behind the "we found some leftover folders" cleanup
+    card — still gates purely on count: `junk_output_frame_cap()` allows 2 for a single field and 32 for a
+    mosaic (v0.319.3, sized from the owner's real 11- and 7-frame mosaic leftovers). A target holding a
+    *season* of on-device outputs sails past both caps and is never offered for cleanup, which is exactly the
+    shape A7 found on the owner's `M 3`. **Shape:** where every frame in the candidate target is named like
+    on-device output, treat that as the positive evidence and let the count cap go; where the names are mixed or
+    `Light_*`, keep today's cap unchanged. The existing "the `<T>_sub/` sibling really is on disk" requirement
+    stays — this only ever *adds* confidence, and cleanup is a confirmed action, never automatic. **Reuse, do
+    not re-derive:** `seestack.io.project._is_seestar_output_filename` is the single definition; a second copy is
+    the copy that eventually disagrees, which is the mistake `junk_output_frame_cap` was itself created to undo
+    (the webapp used to carry its own `_MAX_CLEANUP_FRAMES`). **Care:** this offers a *deletion* to the user, so
+    the bar is higher than the ingest reject's (which is reversible and deletes nothing) — require *every* frame
+    to match, not a majority.
 
 - **NEW IDEA (Scout 2026-08-27 #17) — surface calibration *match confidence* on the interactive Stack form, so a
   watching beginner gets the same smart dark/flat matching the walk-away path already does — and understands why
