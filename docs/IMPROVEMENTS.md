@@ -570,7 +570,27 @@ _(nothing else claimed — claim an item here with your branch name)_
 
   **Carried forward:** the entry's own class note still holds — *any* per-pixel or per-crop quantity compared
   against `n_frames_used` is wrong on a mosaic. This closes the second instance (after `rejection_blind`);
-  `noise_yardstick_frames` is now the place to route a third through.
+  `noise_yardstick_frames` is now the place to route a third through. **And there is a third — see the entry
+  immediately below, found by looking for it.**
+
+- **NEW IDEA (Builder 2026-09-03, the third instance of the wrong-denominator class, found while shipping the
+  second) — the *celebratory badge* still attributes a one-panel measurement to the whole target's subs.**
+  *(Pillar: trust — PRIORITY 3/4; size XS **for the code**, and the whole of it is the wording; the honest
+  number is already on the response.)* `noiseReductionBadge`
+  (`frontend/src/components/oneFrameVsStack.ts`) writes the card's headline: *"Stacking **your 400 subs** cut
+  the background noise about 10×."* On a mosaic that ratio was measured over a central crop that saw ~100
+  subs, so the sentence credits 400 frames with a 100-frame result — the identical wrong denominator
+  v0.332.0 just fixed one line below it, in the *yardstick* sentence, and one note over in
+  `rejection_blind`. It is the mildest of the three (it flatters rather than accuses, and the ×-figure itself
+  is right), which is exactly why it survived two sweeps.
+  **Why v0.332.0 deliberately did not do it:** the fix is not arithmetic — `expected_frames` and
+  `expected_basis` are already on the same response the badge reads — it is **tone**. The badge is the card's
+  one celebratory line, and the obvious rewrite ("Stacking the 100 subs on this part of your mosaic cut the
+  noise about 10×") turns a congratulation into a caveat, on a picture that has just been judged healthy by
+  the sentence underneath. Dropping the count entirely on a mosaic ("Stacking cut the background noise about
+  10×") is the cheaper and probably better answer, and is a copy decision worth making on purpose rather than
+  as a side effect. **Care:** whatever it says must not contradict the yardstick sentence directly beneath it,
+  which now names the panel depth — so change them in one commit and pin both in the same test.
 
   *(Original entry follows.)*
   *(Pillar: trust + image quality — PRIORITY 4; size S; **do not do this by swapping in `coverage_max`** —
@@ -19440,8 +19460,73 @@ problems. Dogfood it every big-picture run and fix root causes.
   Levels control's existing suggestion copy in the editor, and check whether the button already renders
   anything on a no-change suggestion.
 
-- **NEW IDEA (Builder 2026-09-03, opened by the v0.330.0 note that needed the same wording twice) — pin the
-  noise-reduction factor's formatter, which is now hand-mirrored in two languages.** *(Pillar:
+  **⚪ CLOSED AS MOSTLY-ALREADY-BUILT — CHECKED, NOT ASSUMED (Builder 2026-09-03, the same day it was filed).
+  Do not build this as written.** The entry's own "grep first" was the whole answer: `OpParamPanel` already
+  handles the no-change suggestion **generically**, for every op, not just Levels. When a param already sits
+  at its suggested value (`matchesSuggestion`, which honours the field's own `step`) the button is
+  **disabled**, is prefixed with a **✓**, and carries the tooltip *"Already set to the value measured from
+  your data"*. So the premise — *"two sliders move, one doesn't, and nothing accounts for it"* — does not
+  hold on the shipped UI: the black button never invited the click, and it already says why.
+  **The measurement in the entry is still worth keeping** (1.08 % of an `autostretch` output's pixels sit at
+  exactly 0, so the 1st percentile lands inside the STF's shadow clip and `black = 0` is the honest answer),
+  and so is its warning that excluding those zeros would clip roughly *twice* the intended share on the
+  on-by-default path — that half stands as a "do not fix the number" note. What is left is only the gap
+  between the generic *"already set from your data"* and a Levels-specific *"because your blacks are already
+  clipped there"*: one extra clause in a tooltip on a **disabled** button. That is below the bar, and adding
+  it would be the already-shipped-item-re-filed churn AGENTS.md §1 warns about. **If a future run wants the
+  specific wording anyway**, it is a conditional tooltip string on `OpParamPanel`'s existing `atSuggestion`
+  branch — not a new element, and not a new branch.
+
+- **✅ SHIPPED (Builder, v0.332.1, branch `claude/sweet-babbage-61auhj`) — ~~pin the noise-reduction factor's
+  formatter, which is now hand-mirrored in two languages.~~ It was already drifting, and the guard caught it
+  the day it was written.** Built as the entry's "cleaner" option: one shared table of value → string cases
+  (`frontend/src/components/factorLabel.cases.json`) driven from **both** sides —
+  `frontend/src/components/oneFrameVsStack.test.ts` over `factorLabel` (now exported for it) and
+  `tests/test_factor_label_mirror.py` over `_factor_label` — so changing the rule means changing the table,
+  which fails both suites at once.
+
+  **The live divergence, measured.** Python's `round()` is half-to-**even**; JavaScript's `Math.round()` is
+  half-**up**. Six of the eleven half-cases first tried disagreed: a measured ratio of **10.5 read "10" on the
+  "How's my stack?" note and "11" on the "One frame vs your stack" card** — two claims about one picture, read
+  minutes apart — and below the 10× switch 2.45 read "2.4" against "2.5", 3.25 "3.2" against "3.3", 0.25 "0.2"
+  against "0.3". **The Python side moved**, to `floor(x + 0.5)`, which is what `Math.round` *is*: the card's
+  rule is both the older one and the conventional one, so the note follows it rather than the other way round.
+
+  **The table is guarded against becoming vacuous**, which is the way a mirror test rots: a second test asserts
+  it still spans a value each side of the 10× boundary, a whole-number and a one-decimal answer, and at least
+  three **exact-half** cases — the only place the two languages ever disagreed, so a table that lost them would
+  pin nothing that matters.
+
+  **Upgrade-safe (§9):** one wording rule on one already-conditional note, no config, schema, on-disk, API or
+  default change. The only outputs that move are the exact-half ones, and they move *towards* what the card
+  beside them already said.
+
+  **Tests (+27; 7 fail before).** 26 shared cases through the Python side plus the anti-vacuity guard, and the
+  same 26 through the TypeScript side.
+
+- **NEW IDEA (Builder 2026-09-03, the generalisation of the entry above, written straight after committing a
+  fresh instance of the problem) — sweep for the *other* hand-mirrored sentences about one stack, and decide
+  each one's home.** *(Pillar: trust + maintainability — size S to survey, then XS–S each; **survey first,
+  do not start unifying**.)* `factorLabel`/`_factor_label` was found because v0.330.0 needed the same
+  *number* twice. The wider pattern is the same **sentence** written twice: v0.332.0 has just added another —
+  the "About 100 subs cover the middle of this mosaic, which should cut the background noise about 10×…"
+  wording now exists in `seestack/stackhealth.py` **and** in `frontend/src/components/oneFrameVsStack.ts`,
+  word for word, because the health note and the reveal card say the same thing about the same run on two
+  screens. Known or suspected siblings to check in one pass: that mosaic/low-noise pair; `_format_reject_pct`
+  against the History Info-panel's rejection wording; `seam_verdict`'s copy against the History chip's; and
+  the calibration summary, which was *already* unified (`components/calibrationSummary.ts`) and is the
+  precedent for what "done" looks like.
+  **The decision each one needs is not "share it" but "which side owns it".** The project has already picked
+  the right answer twice and they were different answers: the *judgement* moved server-side (v0.330.0's
+  `expected_verdict`, so the card renders a sentence for a decision made once), while the *thresholds* stayed
+  in Python with a mirror test over the constants. A sentence a user can read on two screens minutes apart
+  wants the first shape; a formatter wants the second. **Cautions:** do not move copy server-side merely to
+  de-duplicate it — a string that has to be rendered before it is known (an empty state, a client-side
+  fallback for an older backend) belongs in the frontend, and the "self-hides against an older backend" rule
+  applies to any sentence that moves. And file the survey's findings **before** building any of them; the
+  value here is knowing how many there are.
+
+    *(Original entry follows.)* *(Pillar:
   maintainability in service of trust — size XS.)* "Stacking cut the background noise about 15×" is written
   by `factorLabel` (`frontend/src/components/oneFrameVsStack.ts`) and, since v0.330.0, by `_factor_label`
   (`seestack/stackhealth.py`) for the health note about the same run. The rule is fiddly on purpose —
