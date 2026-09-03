@@ -25,7 +25,6 @@ from dataclasses import replace
 from seestack.io.library import Library
 from webapp.walkaway import apply_unattended_rejection
 
-
 # --- the option-blob rule ------------------------------------------------
 
 
@@ -40,9 +39,10 @@ def test_off_by_default_a_saved_method_is_still_honoured_verbatim():
 def test_on_it_hands_a_saved_method_back_to_auto():
     out = apply_unattended_rejection({"sigma_clip": True}, override_saved_choice=True)
     assert out["auto_reject"] is True
-    # The stale pick is dropped, not left to contradict the record.
-    # ``_resolve_auto_reject`` overwrites both from the frame count anyway, so no
-    # pixel moves — but the run record must not claim a method the run didn't use.
+    # The superseded pick is dropped, so the blob reads as a target that never
+    # chose. ``_resolve_auto_reject`` overwrites both from the frame count
+    # regardless, so no pixel moves either way — what the drop buys is that
+    # everything downstream reads the live answer (see the docstring).
     assert "sigma_clip" not in out
     assert "min_max_reject" not in out
 
