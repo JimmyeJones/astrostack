@@ -1375,9 +1375,9 @@ _(nothing else claimed — claim an item here with your branch name)_
 - **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** ~~No validator
   stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
   resolves inside the raw tree — *not* the owner's current state, but one settings edit away)~~ *(shipped
-  v0.327.8, see above)*; the scanner's
+  v0.327.8, see above)*; ~~the scanner's
   bare-`<T>/` skip is **silent** even when the folder holds thousands of FITS (the owner's `NGC 6888` 4,815 vs
-  `NGC 6888_SUB` 3,110 is exactly that shape — see open questions); ~~the plate-solve-failed screen shows a
+  `NGC 6888_SUB` 3,110 is exactly that shape)~~ *(shipped v0.329.2, see below)*; ~~the plate-solve-failed screen shows a
   blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"~~ *(shipped
   v0.328.1, see below)*; ~~the Stack
   page prints the **raw engine error** where every other page uses `friendlyJobError`~~ *(shipped v0.328.0,
@@ -1389,6 +1389,54 @@ _(nothing else claimed — claim an item here with your branch name)_
   `POST /api/targets` has **no frontend caller**; ~~share and print JPEGs use 4:2:0 chroma subsampling~~
   *(shipped v0.328.0, see below)*; the "full
   data" TIFF anchors its white point on the single brightest surviving pixel (hypothesis, needs real data).
+
+- **✅ SHIPPED (Builder, v0.329.2, branch `claude/sweet-babbage-s16wgp`) — ~~A-MINOR: the scanner's bare-`<T>/`
+  skip is silent even when the folder holds thousands of FITS.~~** Made honest without touching the skip, and
+  the discriminator that makes it *quiet* is the one A7 had already put in the code.
+
+  **What was wrong.** `_apply_seestar_convention` skips a bare `<T>/` folder whenever a `<T>_sub/` sibling
+  shares its parent, because that is the Seestar's on-device stacked picture and stacking a finished image in
+  with the raw subs would be nonsense. The skip never looked at what was *inside* the folder, and it never said
+  anything — so a plainly-named folder of a user's **own** subs that happens to share a name with a Seestar
+  `_sub/` folder vanished from the scan without a word, however many frames it held. The owner's library has
+  exactly that shape: `NGC 6888` of **4,815 files** beside `NGC 6888_SUB` of 3,110, holding genuinely different
+  frames (established by the A7 investigation). Nothing anywhere in the app said those 4,815 were being walked
+  past.
+
+  **The behaviour is unchanged; only the silence is.** Flipping the skip would be a blind change to which
+  frames reach a stack on the on-by-default ingest path, with no way to confirm from the repo which of the two
+  shapes any given folder is — precisely the trade this file declines elsewhere. So the scan now *reports*:
+  `_apply_seestar_convention` optionally collects a `SkippedOutputFolder` per skip (in the same branch that
+  decides it, so the rule that skips and the rule that reports cannot drift), `ScanResult` carries them, and
+  `webapp/pipeline.py` puts them in the scan job's summary.
+
+  **What keeps it quiet is A7's filename rule.** `is_seestar_output_filename` — made public in
+  `seestack/io/project.py` rather than re-spelled in the scanner — already separates the device's own picture
+  (`Stacked*.fit`) from raw subs (`Light_*.fit`), and it is the same rule the ingest-side reject uses. A skipped
+  folder whose files are *all* device output is the convention working as designed and gets no note at all, so
+  a healthy Seestar library sees nothing, ever. `ScanResult.unvouched_skips` is the subset that is genuinely
+  unexplained, and only that subset reaches the summary.
+
+  **On screen** (`Jobs.tsx`, in the same slot as the held / held-files / healed alerts, so no new always-on
+  surface): *"Some folders were skipped as your Seestar's own pictures"*, the folder and its file count, an
+  explicit **"nothing was deleted, moved or renamed"** — §10 is the first thing a user will want to know — and
+  the one action that is theirs to take: rename the folder so it doesn't match the `_sub` folder beside it and
+  it comes in as its own target next scan. The app never touches `incoming/`.
+
+  **Upgrade-safe (§9):** one optional third parameter with a `None` default (existing two-argument callers are
+  pinned by a test), one additive `ScanResult` field with a `default_factory`, one summary key that appears
+  only when non-empty, a frontend reader that returns `[]` for any older or junk payload. No schema, no config,
+  no on-disk change, no default flipped, no endpoint or response shape altered, and the skip itself is
+  bit-for-bit what it was.
+
+  **Tests (+15; 6 python + 4 vitest fail before).** `tests/test_scanner.py` (+8): the record is kept while the
+  units stay identical; a folder of pure device output needs no word said; the owner's raw-subs shape reads as
+  5 of 5 unvouched; a mixed folder counts only what it can't vouch for; videos, mosaics and an ingested bare
+  folder never appear in the record; the record is parent-scoped exactly as the skip is (or the report would
+  name a folder that in fact ingested); the two-argument call still works; and two end-to-end
+  `scan_and_organize` runs — one reporting the skip **and asserting all four files are still on disk**, one
+  ordinary Seestar drop reporting nothing. `tests/webapp/test_pipeline.py` (+2) over the real scan job.
+  `Jobs.test.tsx` (+6) over the pure reader (including junk payloads) and both rendered states.
 
 - **✅ SHIPPED (Builder, v0.329.1, branch `claude/sweet-babbage-s16wgp`) — ~~A-MINOR: "nights" means 6-hour
   sessions on the Nights card and observing nights everywhere else, and the "Set aside" button pays for the

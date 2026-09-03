@@ -130,6 +130,20 @@ def _pipeline_body(
                     with contextlib.suppress(OSError):
                         invalidate_frame_thumbs(lib.targets_dir / t.safe_name, fid)
             summary["scanned"] = scan.total_added
+            # Folders the Seestar convention passed over as "the device's own
+            # finished picture" that hold files its naming can't vouch for — i.e.
+            # possibly a user's own raw subs sitting in a plainly-named folder
+            # beside a "<T>_sub/". Empty on a healthy Seestar library (there the
+            # skipped folders are pure "Stacked*.fit"), so this only ever appears
+            # when a scan really has passed over frames unexplained. Reported,
+            # never acted on: the skip's behaviour is unchanged.
+            unvouched = [
+                {"name": s.name, "n_files": s.n_files,
+                 "n_unrecognised": s.n_unvouched}
+                for s in scan.unvouched_skips
+            ]
+            if unvouched:
+                summary["skipped_folders"] = unvouched
         else:
             touched_names = [t.safe_name for t in lib.list_targets()]
         summary["targets"] = touched_names

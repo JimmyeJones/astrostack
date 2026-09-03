@@ -303,19 +303,27 @@ _CAPTURE_FOLDER_SUFFIXES = ("_video", "_photo")
 _SEESTAR_OUTPUT_STEM_PREFIX = "stacked"
 
 
-def _is_seestar_output_filename(source_path: str) -> bool:
+def is_seestar_output_filename(source_path: str) -> bool:
     """True when a frame's *filename* is the Seestar's on-device stacked output.
 
     Deliberately strict about what follows the prefix — ``Stacked.fit``,
     ``Stacked_60s.fit`` and ``Stacked-01.fit`` match, ``StackedByMe.fit`` does
     not — because this runs on the on-by-default ingest path, where an
     over-broad match silently drops a user's real subs from their stack.
+
+    Public because the *scanner* asks the same question of a folder it is about
+    to skip, and two spellings of "is this the device's own picture?" is exactly
+    the drift this file's other shared constants exist to prevent.
     """
     stem = Path(source_path).stem.strip().lower()
     if not stem.startswith(_SEESTAR_OUTPUT_STEM_PREFIX):
         return False
     rest = stem[len(_SEESTAR_OUTPUT_STEM_PREFIX):]
     return rest == "" or not rest[0].isalnum()
+
+
+#: Kept so the module's own call sites read unchanged.
+_is_seestar_output_filename = is_seestar_output_filename
 
 
 class Project:

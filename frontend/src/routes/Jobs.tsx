@@ -496,6 +496,35 @@ export function autoRegradedBackNote(r: Record<string, unknown>): string | null 
       + "no longer outliers.";
 }
 
+/** One folder a scan passed over as "the Seestar's own finished picture" while
+ * holding files the device's naming can't vouch for. */
+export type SkippedFolder = { name: string; nFiles: number; nUnrecognised: number };
+
+/** The folders this scan skipped that it can't fully explain (pure, tested).
+ *
+ * A folder named `<T>/` sitting beside `<T>_sub/` is the Seestar's on-device
+ * stacked picture, and skipping it is right — stacking a finished image in with
+ * the raw subs would be nonsense. But the skip never looked at what was inside,
+ * and it never said anything: a plainly-named folder of a user's *own* subs that
+ * happens to share a name with a Seestar `_sub` folder vanished from the scan
+ * without a word, however many frames it held. The backend only reports a folder
+ * here when some of its files aren't named like the device's own output
+ * (`Stacked*.fit`), so on a healthy Seestar library this is always empty and the
+ * user is told nothing. Behaviour is unchanged either way — this reports, it
+ * doesn't act. */
+export function skippedFolders(r: Record<string, unknown>): SkippedFolder[] {
+  const raw = Array.isArray(r.skipped_folders) ? r.skipped_folders : [];
+  return raw.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const e = entry as Record<string, unknown>;
+    const name = typeof e.name === "string" ? e.name : "";
+    const nFiles = Number(e.n_files ?? 0) || 0;
+    const nUnrecognised = Number(e.n_unrecognised ?? 0) || 0;
+    if (!name || nUnrecognised <= 0) return [];
+    return [{ name, nFiles, nUnrecognised }];
+  });
+}
+
 /** Plain-language outcome of a finished "Build master" job (pure, tested). A
  * beginner building a master from a Dark/Flat folder should see how many of
  * their frames were actually combined — and, when some were set aside (wrong
@@ -720,11 +749,45 @@ function JobResultActions({ job }: { job: Job }) {
     const autoEdited = Number(r.auto_edited ?? 0) || 0;
     const rescue = bootstrapRescueNote(r);
     const putBack = autoRegradedBackNote(r);
+    const skipped = skippedFolders(r);
     return (
       <Stack gap={4} mt="xs">
         <Text size="sm">{line}</Text>
         {rescue ? <Text size="xs" c="dimmed">{rescue}</Text> : null}
         {putBack ? <Text size="xs" c="dimmed">{putBack}</Text> : null}
+        {/* Folders the Seestar convention passed over as the device's own
+            finished picture, holding files that don't look like one. Silent on
+            a healthy Seestar library; loud exactly when a scan has walked past
+            frames it can't account for, which is the only case worth a word. */}
+        {skipped.length ? (
+          <Alert color="yellow" variant="light" p="xs"
+            title="Some folders were skipped as your Seestar's own pictures">
+            <Text size="xs">
+              {"A folder named the same as one of your \"_sub\" folders is "}
+              {"normally the finished picture your Seestar made on the scope, so "}
+              {"it isn't stacked with your raw subs. These ones also hold files "}
+              {"that don't look like the Seestar's own pictures, so they may be "}
+              {"subs that aren't reaching your stack. Nothing on disk was "}
+              {"changed — nothing was deleted, moved or renamed:"}
+            </Text>
+            <Stack gap={0} mt={4}>
+              {skipped.map((s) => (
+                <Text size="xs" key={s.name}>
+                  {`${s.name}: ${s.nFiles.toLocaleString()} file`}
+                  {s.nFiles === 1 ? "" : "s"}
+                  {` skipped, ${s.nUnrecognised.toLocaleString()} of them not `}
+                  {"recognised as your Seestar's own picture."}
+                </Text>
+              ))}
+            </Stack>
+            <Text size="xs" mt={4}>
+              {"If those really are subs you want in your picture, give that "}
+              {"folder a name that doesn't match the \"_sub\" folder next to it "}
+              {"(for example add the date), then scan again — it will come in as "}
+              {"its own target."}
+            </Text>
+          </Alert>
+        ) : null}
         {held.length ? (
           <Alert color="blue" variant="light" p="xs"
             title="Waiting for more of your subs to be located">
