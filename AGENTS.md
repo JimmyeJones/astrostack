@@ -120,7 +120,8 @@ so it never retried. **Both halves shipped:** a readability preflight that holds
 stamping the marker — when stacking now would land below the minimum-frames floor or *thinner than the best
 stack that target already has*, plus a missing-file count stamped beside the attempt marker so a crippled
 attempt retries once the files return. Gated on there being unreadable files at all, so a healthy install is
-bit-for-bit unaffected. Full write-up at the top of `docs/IMPROVEMENTS.md` → "Bugs (fix these first)".
+bit-for-bit unaffected. Full write-up in `docs/IMPROVEMENTS.md` → "Bugs (fix these first)"; search it for
+**"walk-away"** rather than reading from the top — that section is now ~1,800 lines and the entry is not first.
 **✅ EVERY FOLLOW-ON THIS PARAGRAPH USED TO POINT AT HAS SINCE SHIPPED TOO — don't go looking for them
 (refreshed 2026-09-03, after a run found this list still sending work at done items).** *Healing* an install
 already sitting on a degraded picture from before the fix is `pipeline._auto_stack_degraded_recheck`, which
@@ -133,25 +134,39 @@ whole family is closed: pick new work from the live sections of `docs/IMPROVEMEN
 **🎨 STANDING OWNER PRIORITY (2026-08-08) — the UI is "extremely busy"; fix the information
 architecture, page by page.** The owner's top complaint about the live build: *"there are like 30
 different things on the top of some of the pages and I have to scroll a fair bit to get to the actual
-info."* Measured and confirmed — `routes/Target.tsx` renders **~15 consecutive alert/note/badge blocks,
-then 9 stacked analysis cards, before the frames table starts at line ~1339 of 1481**; `Dashboard.tsx`
-is close behind; the sidebar is 15 flat links. **The hard constraint is the owner's own: NOTHING MAY BE
+info."* **Those numbers have been fixed; the *rule* is what survives — corrected 2026-09-03, because the
+banner still quoted the 2026-08-08 pre-fix measurements ("~15 consecutive alert/note/badge blocks, then 9
+stacked analysis cards, before the frames table starts at line ~1339 of 1481", "the sidebar is 15 flat
+links") long after slices (a)–(e) shipped 08-13→16.** Today `routes/Target.tsx` carries **one**
+`NoticeBoard` and the nav is **18 links in 5 groups** (`frontend/src/nav.ts`), and the running-app probe
+re-measured at v0.338.1 puts the tallest page — still the Target page — at **3,014 px on a phone**, down
+from 14,584 px on the worst page before the slices. **So do NOT open a speculative IA slice**: two dogfood
+passes four days and ~80 versions apart agree that nothing is stacked badly and the worst page moved 21 px
+(see `docs/IMPROVEMENTS.md`, search **"DOGFOOD BASELINE"** for both measurements). What is still live is the
+*standing rule* below — when you add a feature, put it inside the existing grouping rather than appending
+one more always-on banner — plus the two named leftovers, the header row and the ten-item share menu.
+**The hard constraint is the owner's own: NOTHING MAY BE
 REMOVED — "don't get rid of features, just move them to a more organized layout."** This is pure
 regrouping (consolidate the banner wall behind one prioritised "N more notes" disclosure, tab/grid the
 stacked cards, put the picture and frames table above the fold, group the nav). **Adding NEW PAGES is
 explicitly allowed** — *"even if they need to add pages, that is fine. I just want the organization to
 be clean, simplistic, and make sense."* Splitting an overloaded page across focused **nested routes**
 (`/library/<target>/insights`) usually beats cramming it back into one screen, and stays bookmarkable;
-just don't over-fragment — one nameable purpose per page, routine things ≤1 click away. **It is a multi-run
-effort: take ONE slice per run**, state the before/after block counts in the commit, and let the owner
-react between slices. Full entry, measurements, slicing order and cautions: `docs/IMPROVEMENTS.md` →
-"Friendliness (PRIORITY 3)", top item. A verified bug still outranks it; feature-piling does not —
+just don't over-fragment — one nameable purpose per page, routine things ≤1 click away. **If a *measured*
+page ever needs another slice, take ONE per run**, state the before/after block counts in the commit, and
+let the owner react between slices — but measure first with `scripts/agent-dogfood.sh`, because the last
+two measurements both said not to. Full entry, measurements, slicing order and cautions:
+`docs/IMPROVEMENTS.md` → "Friendliness (PRIORITY 3)"; search it for **"DOGFOOD BASELINE"** and for the IA
+slices by name rather than reading from the top of the section. A verified bug still outranks it; feature-piling does not —
 **prefer a slice of this over inventing another card**, and when you *do* add a feature, put it inside
 the new grouping rather than appending one more always-on banner.
 
-**⚡ IMMEDIATE PRIORITY (refreshed 2026-07-30, latest) — the owner-reported mosaic
+**📜 HISTORICAL (was "⚡ IMMEDIATE PRIORITY", 2026-07-30; demoted 2026-09-03 because it
+is neither immediate nor a priority any more — it is a fixed bug's write-up, and a second
+banner claiming to be front-of-queue only splits the queue). Kept for its root-cause
+record, not as work.** The owner-reported mosaic
 "multicolour grid" regression is FIXED (v0.225.0); its root cause was confirmed by repro
-and measured.** `analyze_proxy` measured sky noise as the MAD of the sky's *levels*, which
+and measured. `analyze_proxy` measured sky noise as the MAD of the sky's *levels*, which
 counts a mosaic's per-panel level/colour offsets (and any residual gradient) as grain — so a
 deep, clean mosaic read as one of the noisiest images the app had seen (`sky_sigma` 0.0078 as
 a single field → 0.0299 as a mosaic), fired `detail.chroma_denoise` at its full ceiling and lost
@@ -178,24 +193,31 @@ finished Auto picture's brightness tilt +64% → +11% of sky). The numeric-`null
 stack-defaults poisoning, the 2000-frame truncation, and all five listed click-path
 bugs are fixed too.
 
-**So what's front-of-queue now?** There is no known, blind-fixable ⭐ bug left. Every
-entry still open in `docs/IMPROVEMENTS.md` → "Bugs" is **gated** on something an agent
-cannot supply from the repo — real elongated-target data (the streak auto-reject
-thresholds), confirmation of S30/S50 folder naming (the bare mosaic-output skip), or a
-legacy library shape the owner doesn't have (the wholesale-drop ingest). **Read the
-gate before starting one; do not blind-flip a threshold or a default on the
-on-by-default hot path.** With the bug list in that state, work the **Current focus**
-list immediately below — a bug *you* verify yourself still outranks all of it. And
-**grep before you build**: the Ideas list has repeatedly carried items that were
+**So what's front-of-queue now? (re-checked 2026-09-03 — the 2026-07 answer below it
+had gone stale twice over.)** Read the **Bugs** section of `docs/IMPROVEMENTS.md`
+yourself and believe *it*, not this paragraph: the whole A1–A10 external-audit batch
+has since been filed there and shipped, so any list of "the open ones" written here
+rots within days. What has stayed true across three refreshes is the *shape* of what
+is left: the entries still open are **gated** on something an agent cannot supply from
+the repo — real elongated-target data, a legacy library shape the owner doesn't have,
+an external binary — or are deliberate stand-downs with the measurement already
+recorded. **Read the gate, or the stand-down, before starting one; do not blind-flip a
+threshold or a default on the on-by-default hot path, and do not re-litigate a
+stand-down that carries numbers.** With the bug list in that state, work the **Current
+focus** list immediately below — a bug *you* verify yourself still outranks all of it.
+And **grep before you build**: the Ideas list has repeatedly carried items that were
 already shipped, and several "new" features turn out to be copy tweaks on machinery
 that already exists.
 
 
-**Current focus (2026-07 — set by the owner).** The editor (priority 1) is now
-**well-hardened**: its traced bug backlog is drained and repeated adversarial
-re-audits come back clean. That rule still stands — if a *real* editor regression
-appears, fixing it comes first — but the editor no longer needs feature-piling,
-and the highest *marginal* value has moved to:
+**Current focus (2026-07, set by the owner; the editor claim corrected 2026-09-03).**
+The editor's *traced* bug backlog is drained and adversarial re-audits mostly come
+back clean — but **do not read that as "well-hardened"**: the 2026-09-02 external
+audit found two real editor defects (A1 and A2) that had survived exactly such
+re-audits, which is why priority 1 is re-opened at the top of this section. What
+follows is about *marginal* value, not about the editor being finished: it no
+longer needs feature-piling, and if a *real* editor regression appears, fixing it
+still comes first. With that said, the highest marginal value is in:
   1. **QA and harden the stacking engine itself.** Deeply audit and fix the
      `seestack/stack/` path (`align.py`, `stacker.py`, `accumulator.py`,
      `mosaic.py`, `drizzle_path.py`, rejection) and `seestack/calibrate/`. A bug
@@ -256,7 +278,7 @@ the priorities above — not a long tail of niche additions.
 
 A run is an **outer loop over tasks**. Keep completing tasks until you run low on
 time, run out of good candidates, or the only work left needs owner sign-off.
-A healthy run lands **~3–6 tasks** (more if small, fewer if one is large — a
+A healthy run lands **~2–4 tasks** (more if small, fewer if one is large — a
 single big feature can legitimately be the whole run). **Never trade the quality
 bar (§5) for task count.**
 
@@ -747,9 +769,10 @@ Start of run:
 [ ] git fetch; read IMPROVEMENTS.md + recent log + open PRs
 [ ] env ready; baseline test suite green (if red, fixing it is task #1)
 
-Per task (repeat ~3–6×, or fewer if large):
+Per task (repeat ~2–4×, or fewer if large):
 [ ] git fetch origin main FIRST — another agent may have shipped this task while
-    you worked on the last one (this has now happened seven times; §11)
+    you worked on the last one (the merge commits show at least ten such
+    collisions, twelve duplicated items; §11)
 [ ] picked/invented ONE task (§3 decision rule or §4 ideation); marked In progress
 [ ] implemented across engine/webapp/frontend as needed
 [ ] upgrade-safe: config loads, DB migrates, layout/defaults/API unchanged (§9)
