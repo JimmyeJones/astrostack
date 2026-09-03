@@ -51,7 +51,8 @@ export function OneFrameVsStackCard({
   const stackSrc = api.stackArtifactUrl(safe, runId, "preview");
   const caption = oneFrameCaption(
     info.data.sub_exposure_s, info.data.n_frames, info.data.matched_by);
-  const noiseBadge = noiseReductionBadge(noise.data?.ratio, info.data.n_frames);
+  const noiseBadge = noiseReductionBadge(
+    noise.data?.ratio, info.data.n_frames, noise.data?.is_mosaic);
   // "…and is that any good?" — the √N yardstick beside the measured number, so
   // a beginner can tell a healthy stack from an underperforming one instead of
   // reading a factor with nothing to compare it to.

@@ -38,7 +38,11 @@ export function StackNoiseBadge({
     enabled: !!safe && Number.isFinite(runId),
     retry: false,
   });
-  const badge = noiseReductionBadge(noise.data?.ratio, nFrames);
+  // The sub count is dropped on a mosaic: the ratio comes from a central crop
+  // that only ever saw one panel's subs, so `nFrames` would credit the whole
+  // target's frames with a panel's result (see `noiseReductionBadge`).
+  const badge = noiseReductionBadge(
+    noise.data?.ratio, nFrames, noise.data?.is_mosaic);
   if (!badge) return null;
   return (
     <Group gap={6} wrap="nowrap" data-testid="stack-noise-badge">

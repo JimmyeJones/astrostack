@@ -51,13 +51,30 @@ export function oneFrameCaption(
  * subs help, √N). Returns null for a missing/non-finite ratio, or one too small
  * to be a compelling, trustworthy story (< 1.5×) — the card then just shows the
  * visual reveal without a number. Formats a big reduction as a whole number
- * ("about 15×") and a small one to one decimal ("about 2.4×"). */
+ * ("about 15×") and a small one to one decimal ("about 2.4×").
+ *
+ * **`isMosaic` drops the sub count**, because the ratio is measured over a
+ * central crop and no pixel there ever saw more than its own panel's subs — so
+ * "your 400 subs cut the noise about 10×" credits a whole target's frames with
+ * one panel's result. That is the same wrong denominator the yardstick sentence
+ * below fixed (`expected_basis: "mosaic_centre"`) and `rejection_blind` fixed
+ * before it; this is its mildest instance, and the only one that *flatters*
+ * rather than accuses, which is why it outlived two sweeps. The fix is the
+ * already-tested countless phrasing rather than a panel-depth caveat: this is
+ * the card's one celebratory line, the ×-figure itself is right, and naming the
+ * panel depth here would both repeat and undercut the sentence directly beneath.
+ * A `null` flag (a run stacked before schema 8) keeps the count — unlike the
+ * yardstick, which withholds a *judgement* on an unknown canvas, this only
+ * withholds a compliment's subject, and dropping it on every legacy single-field
+ * run costs more than the rare legacy mosaic's overstatement does. */
 export function noiseReductionBadge(
   ratio: number | null | undefined,
   nFrames: number | null | undefined,
+  isMosaic?: boolean | null,
 ): string | null {
   if (ratio == null || !Number.isFinite(ratio) || ratio < 1.5) return null;
-  const hasCount = nFrames != null && Number.isFinite(nFrames) && nFrames > 0;
+  const hasCount =
+    !isMosaic && nFrames != null && Number.isFinite(nFrames) && nFrames > 0;
   const subs = hasCount ? `your ${nFrames} subs` : "your subs";
   return `Stacking ${subs} cut the background noise about ${factorLabel(ratio)}×.`;
 }
