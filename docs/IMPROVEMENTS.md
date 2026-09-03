@@ -43,6 +43,18 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## In progress
 
+> **Builder 2026-09-03, branch `claude/sweet-babbage-axt93w` — claim, by site, pushed before the first line of
+> code (the mitigation collision NINE's note asked the next Builder for).** The top open item under
+> "⭐ Editor — make it excellent": **the second slice of the full-size loupe — an additive-field channel for
+> the three `background.*` ops**, which the v0.328.2 fitted-parameter channel explicitly could not carry
+> because they fit a *spatial model*, not a scalar. Sites I am editing: `seestack/edit/registry.py`
+> (`EditContext`: a source-window origin, `field_deltas` / `frozen_deltas`, and the capture/replay helpers
+> beside `fit`; `OpSpec.additive_field`), `seestack/edit/pipeline.py` (capture `after − before` for an
+> additive op, and replay a frozen one *instead of* re-running it), `seestack/edit/ops/background.py` (the
+> three registrations declare themselves additive — no `seestack/bg/` module is touched: those are on the
+> stack hot path), and `tests/test_edit_field_replay.py`. Guard: with no frozen deltas every render is
+> byte-for-byte what it is today.
+
 > **⚠️ PROCESS NOTE + Builder 2026-09-02, branch `claude/zen-mccarthy-olkjpm` — collision TEN, two of three
 > tasks duplicated by one other Builder inside the same hour, and the first where the *stand-down decision was
 > settled by measurement instead of argument*. Run finished; claims released.**
