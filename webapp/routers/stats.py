@@ -20,7 +20,7 @@ from webapp import deps, video
 from webapp.capture_nights import capture_night_count, capture_night_range
 from webapp.goals import read_goal_s
 from webapp.registry_cache import cached_for_registry, registry_signature
-from webapp.site_location import resolve_site_lon
+from webapp.site_location import resolve_night_key, resolve_site_lon
 
 router = APIRouter(tags=["stats"])
 
@@ -156,13 +156,18 @@ class TargetProgressOut(BaseModel):
     recent_pace_s: float | None = None
 
 
-def _collect_progress(lib, targets) -> list[TargetProgressOut]:
+def _collect_progress(lib, targets, night_of=None) -> list[TargetProgressOut]:  # noqa: ANN001
     """For every target that has collected some light, gather the inputs the
     readiness overview needs: total integration, the offline catalog object type,
     any user-set goal, and the target's recent per-night pace. Opens each project
     once for the cheap goal-meta read plus a three-column scan of its dated frames
     (the object type is resolved offline from the library entry). A broken project
-    is skipped, never 500s the dashboard."""
+    is skipped, never 500s the dashboard.
+
+    ``night_of`` buckets the pace by **observing night** rather than by capture
+    session, so a night shot in two goes counts once with its whole integration —
+    the same rows the Target page's client-side estimate divides by. Without it
+    the two screens quote different "about N more clear nights" for one target."""
     from seestack.io.project import Project
     from seestack.nightplan import load_catalog
     from seestack.objectinfo import identify_object
@@ -182,7 +187,7 @@ def _collect_progress(lib, targets) -> list[TargetProgressOut]:
         try:
             proj = Project.open(lib.target_dir(t))
             goal_s = read_goal_s(proj)
-            pace_s = recent_night_pace_s(proj)
+            pace_s = recent_night_pace_s(proj, night_of=night_of)
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
             pass
         finally:
@@ -206,12 +211,14 @@ def get_library_progress(request: Request) -> list[TargetProgressOut]:
     an empty list until some light has been collected. Read-only aggregation over
     the registry + a cheap per-target goal read, cached on the app between scans.
     """
+    settings = deps.get_settings(request)
     lib = deps.open_library(request)
     try:
         targets = lib.list_targets()
+        night_key = resolve_night_key(request, lib, settings.site_lon)
         rows = cached_for_registry(
             request.app, "library_progress", registry_signature(targets),
-            lambda: _collect_progress(lib, targets),
+            lambda: _collect_progress(lib, targets, night_key),
             ttl_s=_PROGRESS_CACHE_TTL_S,
         )
     finally:

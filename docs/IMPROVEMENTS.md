@@ -11954,35 +11954,79 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **⭐ NEW, TRACED (Builder 2026-09-03, the half v0.329.1 could not reach) — the "about N more clear nights"
-  estimate still counts *sessions*, so a night shot in two goes halves what it thinks a clear night is worth.**
-  *(Pillar: autonomy + trust — PRIORITY 2/3; size S–M; confidence: **traced in code**, mechanism identical to
-  the one v0.329.1 just fixed one surface up; the fixture that exhibits it is the one that entry added.)*
-  v0.329.1 made a **Nights-card row** mean one observing night. `recent_night_pace_s`
-  (`seestack/session_recap.py`) — *"the median kept integration per clear night"*, and the number behind the
-  goal card's **"about 2 more clear nights"** — still calls `_split_sessions` and takes the last
-  `PACE_LOOKBACK_NIGHTS` (5) of them. So an evening run, bed, then a pre-dawn run contributes **two** entries
-  to the median, each carrying roughly half the night's integration. The median is therefore biased *low*, and
-  the error runs in the direction that matters: the app tells a beginner they need **more** clear nights than
-  they do, on a plan whose whole point is knowing when to stop. Its own docstring already claims the two
-  agree — *"Nights are the same 6 h-gap capture sessions `nights_breakdown` shows, so the number agrees with
-  the Nights card"* — and after v0.329.1 that sentence is simply false.
-  **Why it wasn't done with v0.329.1, and what it actually needs.** Three things, none of them hard, all of
-  them wider than the endpoint that fix touched:
-  1. The pace path reads `iter_frame_capture_rows` — `(datetime, exposure_s, accept)` **triples**, not
-     `FrameRow`s — so `nights_breakdown`'s `night_of(timestamp_utc)` signature does not fit it. It wants a key
-     taken from the `datetime` it already has.
-  2. `PACE_LOOKBACK_NIGHTS` and `MIN_PRODUCTIVE_NIGHT_S` are **mirrored by hand** into the frontend's
-     `clearNights.ts`, which derives the same pace client-side from the night list the Target page already
-     fetched. The module comment says in terms that both must land on the same figure for the same target, so
-     a server-side merge without the client-side one leaves two screens quoting different ETAs — worse than
-     the bug.
-  3. The lookback window changes meaning: five sessions and five nights are not the same five, and on a
-     habitual split-night observer the old window reached back half as far.
-  **The check that settles it before writing anything:** `MIN_PRODUCTIVE_NIGHT_S` (120 s) is a floor on a
-  *session*; halving a night's integration can push a genuinely short-but-real night's halves under it, in
-  which case the night vanishes from the pace entirely rather than merely counting light. Measure which of the
-  two errors is larger on a fixture before choosing whether the fix is grouping or a re-floored session.
+- **✅ SHIPPED (Builder, v0.329.4, branch `claude/sweet-babbage-fwtqxh`) — ~~the "about N more clear nights"
+  estimate still counts *sessions*, so a night shot in two goes halves what it thinks a clear night is
+  worth.~~** Measured before it was written, exactly as the entry's last paragraph asked, and both errors
+  turned out to be real and to compound:
+  - **The halving, at the endpoint.** On a fixture of three nights each shot in two 600 s goes,
+    `/api/library-progress` reported `recent_pace_s` **600 s** where the nights produced **1200 s** — so the
+    Dashboard's ETA to a goal was exactly **twice** the honest number. Pinned in
+    `tests/webapp/test_library_progress.py` (`…_pace_counts_a_split_night_once`), which fails on pre-fix code
+    with `assert 600.0 == 1200.0`.
+  - **The `MIN_PRODUCTIVE_NIGHT_S` question the entry said to settle first, answered: the floor error is the
+    *larger* one.** A real 200 s night shot in two 100 s goes has *both* halves under the 120 s floor, so it
+    doesn't merely count half — it **vanishes**, and three such nights leave fewer than the two the function
+    needs, so the pace comes back `None` and the app says nothing at all. Merged, the same frames give a 200 s
+    pace. So the fix is grouping, not a re-floored session: the floor is correct, it was being applied to the
+    wrong thing.
+  - **The lookback reach, also real.** Five *sessions* are two and a half nights for a habitual split-night
+    observer, so `PACE_LOOKBACK_NIGHTS`'s documented "long enough that one short night doesn't dominate" was
+    quietly not true for them. Pinned on a six-night fixture: 2400 s as nights, 300 s as sessions.
+
+  **What shipped.** `recent_night_pace_s` takes an optional `night_of` (the same `NightKeyFn`
+  `nights_breakdown` already took) and merges sessions by observing night before windowing;
+  `_merge_sessions_by_night` is now generic in what rides along with the timestamp — a `stamp_of` accessor —
+  so the Nights card's `(datetime, FrameRow)` pairs and the pace's lean `(datetime, exposure_s, accept,
+  stamp)` rows share **one** merge implementation and cannot drift about which two halves are one night.
+  Point 2 of the entry (the hand-mirrored frontend) needed **no frontend change**, and checking that was the
+  cheap part: `clearNights.ts` derives its pace from the rows of `/api/targets/{safe}/nights`, which v0.329.1
+  had *already* made observing nights — so the client was right and the server was the one out of step. The
+  agreement is now pinned end-to-end rather than assumed
+  (`…_pace_agrees_with_the_targets_nights_card` replicates the client-side window + floor against the server's
+  figure).
+
+  **The third copy of the bucketing is gone too.** `targets.py` hand-rolled the `night_date_of` →
+  ISO-date closure; `stats.py` and `plan.py` would each have needed their own. They now share
+  `webapp.site_location.resolve_night_key`, beside the `resolve_site_lon` it wraps — so the Nights card, the
+  Dashboard roll-up and the planner's already-targeted rows cannot bucket a night three slightly different
+  ways. (Filed under A-MINOR as "three hand-mirrored predicates"'s sibling class; this is one of them.)
+
+  **Upgrade-safe (§9):** `night_of` defaults to `None` = the previous session behaviour, so nothing that
+  hasn't been given a longitude changes; no config, schema, on-disk or response-shape change (`recent_pace_s`
+  keeps its name and type — only its value gets more honest). **Tests:** +6 in `tests/test_session_recap.py`,
+  +2 in `tests/webapp/test_library_progress.py`; the two webapp ones fail before and pass after.
+
+  Original spec, for the record:
+
+  - **⭐ NEW, TRACED (Builder 2026-09-03, the half v0.329.1 could not reach) — the "about N more clear nights"
+    estimate still counts *sessions*, so a night shot in two goes halves what it thinks a clear night is worth.**
+    *(Pillar: autonomy + trust — PRIORITY 2/3; size S–M; confidence: **traced in code**, mechanism identical to
+    the one v0.329.1 just fixed one surface up; the fixture that exhibits it is the one that entry added.)*
+    v0.329.1 made a **Nights-card row** mean one observing night. `recent_night_pace_s`
+    (`seestack/session_recap.py`) — *"the median kept integration per clear night"*, and the number behind the
+    goal card's **"about 2 more clear nights"** — still calls `_split_sessions` and takes the last
+    `PACE_LOOKBACK_NIGHTS` (5) of them. So an evening run, bed, then a pre-dawn run contributes **two** entries
+    to the median, each carrying roughly half the night's integration. The median is therefore biased *low*, and
+    the error runs in the direction that matters: the app tells a beginner they need **more** clear nights than
+    they do, on a plan whose whole point is knowing when to stop. Its own docstring already claims the two
+    agree — *"Nights are the same 6 h-gap capture sessions `nights_breakdown` shows, so the number agrees with
+    the Nights card"* — and after v0.329.1 that sentence is simply false.
+    **Why it wasn't done with v0.329.1, and what it actually needs.** Three things, none of them hard, all of
+    them wider than the endpoint that fix touched:
+    1. The pace path reads `iter_frame_capture_rows` — `(datetime, exposure_s, accept)` **triples**, not
+       `FrameRow`s — so `nights_breakdown`'s `night_of(timestamp_utc)` signature does not fit it. It wants a key
+       taken from the `datetime` it already has.
+    2. `PACE_LOOKBACK_NIGHTS` and `MIN_PRODUCTIVE_NIGHT_S` are **mirrored by hand** into the frontend's
+       `clearNights.ts`, which derives the same pace client-side from the night list the Target page already
+       fetched. The module comment says in terms that both must land on the same figure for the same target, so
+       a server-side merge without the client-side one leaves two screens quoting different ETAs — worse than
+       the bug.
+    3. The lookback window changes meaning: five sessions and five nights are not the same five, and on a
+       habitual split-night observer the old window reached back half as far.
+    **The check that settles it before writing anything:** `MIN_PRODUCTIVE_NIGHT_S` (120 s) is a floor on a
+    *session*; halving a night's integration can push a genuinely short-but-real night's halves under it, in
+    which case the night vanishes from the pace entirely rather than merely counting light. Measure which of the
+    two errors is larger on a fixture before choosing whether the fix is grouping or a re-floored session.
 
 - **NEW IDEA (Builder 2026-09-03, the obvious sibling of the v0.329.2 skip report) — a `*_video/` folder
   dropped in `incoming/` is skipped just as silently, and the app *does* have a home for it.**
