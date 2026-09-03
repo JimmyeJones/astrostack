@@ -12482,6 +12482,48 @@ to **Shipped**.)_
   > standing IA priority — **not** one more always-on banner), which is why it was not bundled into a copy
   > fix. **Size is now S–M rather than M:** the surface exists, and it is the streaked badge.
 
+  > **✅ SHIPPED — the depth-aware half of (a), i.e. the whole of this entry (Builder, v0.335.0, branch
+  > `claude/sweet-babbage-2mtrwu`).** `GET /api/targets/{safe}/rejection-outlook` resolves the options the
+  > *unattended* chain will actually stack this target with and asks the engine's own `rejection_reach`,
+  > sized by `estimate_stack`'s `panel_depth` rather than the target's frame count. A `RejectionOutlookNote`
+  > in the Target page's existing `NoticeBoard` (a `warning`, **not** a new always-on banner) then says so in
+  > plain language, with a link to the form where the setting lives.
+  >
+  > **The entry's "do not overrule their saved choice" is honoured literally: nothing writes anything.** The
+  > endpoint is read-only, the note is advisory, and no default is flipped — option (b) (a new opt-in setting)
+  > stays unbuilt because it turned out not to be needed: *saying* the thing is the whole fix, since the owner
+  > can already change it on a form they own.
+  >
+  > **One definition, not a second copy — which is the part worth carrying forward.** The chain's merge and
+  > its two "the user chose nothing" injections moved into a new pure `webapp/walkaway.py`
+  > (`parse_saved_stack_defaults`, `rejection_choice_expressed`, `apply_unattended_rejection`), and
+  > `pipeline._stack_target` now *calls* them. So the sentence on the page and the options the job runs
+  > cannot describe different stacks; a test asserts the endpoint's resolved method against the chain's own
+  > merge rather than against a restatement of the rule. The `drizzle_reject` injection moved with it (from
+  > after the `quality_weighted` block to beside its sibling) — checked to be behaviour-identical, since
+  > `quality_weighted`'s guard reads `min_max_reject`/`drizzle` and never `drizzle_reject`.
+  >
+  > **Gated three ways, because this is the page the owner already calls busy.** It speaks only when subs on
+  > this target *actually* carry a trail (`streak_detected`, the same evidence the badge fires on — and the
+  > query is not even issued otherwise), only when the method is the **user's own** saved choice (when the
+  > chain picked it, it picked one that works, and saying so would be noise), and only when it genuinely
+  > cannot reach. A drizzled run is silent too: its two-pass rejection is settled by the memory budget at run
+  > time, which a pure pre-run answer cannot know.
+  >
+  > **Upgrade-safe (§9):** one new read-only endpoint, one new pure module, one new client method, one notice
+  > inside an existing board. No config key, no schema, no on-disk change, no default flipped, no existing
+  > response shape touched. A never-solved target answers `reaches: null` (a 200 with no verdict, not a 422 a
+  > page would render as an error); an older backend or a failed fetch renders nothing.
+  >
+  > **Tests (+9 Python, +17 vitest).** `tests/webapp/test_rejection_outlook.py` — the 6-sub saved-κ-σ case
+  > that names 11, the same target deep enough to reach, the no-saved-choice auto pick, **a four-panel mosaic
+  > 5 deep whose 20 frames would have read "reaches" and whose pixels do not**, the single-field `panel_depth`
+  > of `null`, the nothing-solved silence, a malformed meta row degrading like the job does, agreement with
+  > the chain's own merge, and that asking the question writes nothing and starts no job.
+  > `rejectionOutlookNote.test.ts` (+9) pins the copy and all five silences; `RejectionOutlookNote.test.tsx`
+  > (+4) the render, the link, and that no request is made with no trail; `Target.test.tsx` (+2) that the note
+  > reaches the real page's notes area and stays away without one.
+
 - **NEW IDEA (Builder 2026-09-02, spotted while unifying two of the four copies in v0.323.1) — route the
   remaining two copies of the combine dispatcher's frame-count gates through `combine_method`.** *(Pillar:
   maintainability in service of correctness — size S; **the hot path, so measure nothing changes**.)* The gates

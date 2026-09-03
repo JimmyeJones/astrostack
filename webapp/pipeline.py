@@ -28,6 +28,7 @@ from webapp.schemas import (
     coerce_stack_options,
     strip_non_form_keys,
 )
+from webapp.walkaway import apply_unattended_rejection, parse_saved_stack_defaults
 
 if TYPE_CHECKING:
     from seestack.io.project import StackRunRow
@@ -2735,34 +2736,34 @@ def _stack_target(
     saved_master_ids: dict[str, Any] = {}
     try:
         if options is None:
-            raw = proj.get_meta(STACK_DEFAULTS_META_KEY)
-            if raw:
-                with contextlib.suppress(json.JSONDecodeError):
-                    saved = json.loads(raw)
-                    # A valid-JSON *non-dict* (a legacy/hand-edited/foreign-version
-                    # meta row — the writer only ever stores a dict) survives
-                    # json.loads but would make opts_dict.update() raise TypeError,
-                    # crashing the whole walk-away auto-stack for this target. Gate
-                    # the update on it actually being a dict so a malformed row
-                    # falls back to the plain defaults rather than failing the job.
-                    if isinstance(saved, dict):
-                        opts_dict.update(saved)
-                        saved_master_ids = {
-                            k: saved[k] for k, _, _ in _SAVED_MASTER_BINDINGS
-                            if saved.get(k) is not None
-                        }
+            # ``parse_saved_stack_defaults`` is the shared reader for this row
+            # (webapp/walkaway.py): a malformed or non-dict blob degrades to "no
+            # saved defaults" rather than failing the walk-away job, and the
+            # read-only surfaces that have to *say* what this chain will do use
+            # the same reader so they cannot answer for a different blob.
+            saved = parse_saved_stack_defaults(proj.get_meta(STACK_DEFAULTS_META_KEY))
+            opts_dict.update(saved)
+            saved_master_ids = {
+                k: saved[k] for k, _, _ in _SAVED_MASTER_BINDINGS
+                if saved.get(k) is not None
+            }
         else:
             opts_dict.update(options)
         if output_name is not None:
             opts_dict["output_name"] = output_name
-        if auto and not any(
-            k in opts_dict for k in ("auto_reject", "sigma_clip", "min_max_reject")
-        ):
-            # Walk-away stack, no user rejection choice → let the engine auto-pick
-            # min/max (small stacks) vs κ-σ (large) so a lone trail is removed even
-            # below the ~11-frame κ-σ threshold. Only when nothing explicit was set,
-            # so a saved per-target default / the manual form is never overridden.
-            opts_dict["auto_reject"] = True
+        if auto:
+            # Walk-away stack: fill in the rejection choices this user never made
+            # — ``auto_reject`` when no method was picked at all, and
+            # ``drizzle_reject`` on a drizzled run (``auto_reject`` is a no-op
+            # under drizzle, which has its own two-pass rejection and which
+            # nothing ever turned on, so a drizzled walk-away stack used to
+            # combine completely unfiltered). Both are gated on the merged
+            # options expressing no preference, so a saved per-target default and
+            # the manual Stack form are honoured verbatim. The definition lives in
+            # ``webapp/walkaway.py`` because the Target page has to be able to say
+            # what this chain will do *before* the night, and a second copy of the
+            # rule is how the two would come to disagree.
+            apply_unattended_rejection(opts_dict)
         if (auto and "quality_weighted" not in opts_dict
                 and not (opts_dict.get("min_max_reject") and not opts_dict.get("drizzle"))):
             # Same walk-away reasoning: with no user choice, weight each sub by the
@@ -2784,24 +2785,6 @@ def _stack_target(
             # counting once there are more subs.) Drizzle is exempt — it honours
             # per-frame weights and runs its own rejection.
             opts_dict["quality_weighted"] = True
-        if (auto and opts_dict.get("drizzle")
-                and "drizzle_reject" not in opts_dict):
-            # …and the third leg of the same "the user chose nothing" chain, for
-            # the one path the other two can't reach. ``auto_reject`` (and every
-            # method it resolves to) is a **no-op under drizzle** — the drizzle
-            # accumulation is one-shot, so it has its own two-pass rejection
-            # instead — and nothing ever turned that on. A drizzled walk-away
-            # stack therefore combined completely unfiltered: satellites, plane
-            # trails and cosmic rays that slipped past frame-level QC went
-            # straight into the picture. Same guard as above (only when the merged
-            # options express no preference, so a saved per-target default and the
-            # manual Stack form are honoured verbatim), and only when drizzle is
-            # actually on, so a non-drizzle run's recorded options are unchanged.
-            # The engine still gates it on having enough frames for the statistics
-            # to mean anything (``and n >= 4``). It costs a second pass over the
-            # frames — the same trade the non-drizzle walk-away path already makes
-            # by auto-picking a rejecting combine.
-            opts_dict["drizzle_reject"] = True
         # The posture, written **last** so nothing can spoof it: a stale saved
         # per-target default, a crafted POST body or a reused prior-run option
         # blob may all carry ``unattended``, and only this function knows whether
