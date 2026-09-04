@@ -467,6 +467,58 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🔴 OWNER-REPORTED WITH SCREENSHOT (2026-09-04) — a stacked SOLAR still is covered edge-to-edge in a fine
+  regular "mesh"/crosshatch at pixel pitch. The video pipeline never debayers, and its own docstring says so.**
+  *(Severity: **wrong picture** — the whole disk is textured with an artefact, on the owner-requested Moon & Sun
+  feature. Confidence: **HIGH on the mechanism, traced end-to-end in code**; the one unverified link is the
+  owner's actual source pixel format — a one-line check that settles it is below. Owner's words: "the sun
+  stacking looks weird - the pixels are like a mesh or something".)*
+
+  **The chain, all verified in-repo except the last step:**
+  1. **The video path has NO Bayer/CFA handling at all.** Grepping `seestack/video/*` for
+     `bayer|debayer|cfa` returns **nothing but a comment**. Contrast the deep-sky path, which is explicit:
+     `load_seestar_raw(path, debayer=False)` → `bilinear_debayer(raw, pattern=pattern)`
+     (`seestack/stack/stacker.py:~3492`).
+  2. **The design assumed video arrives already debayered, and says so in writing.**
+     `seestack/video/__init__.py` line 6: *"there are no stars to plate-solve and **no Bayer FITS to
+     calibrate**"* — the CFA case was never considered, so no code exists for it.
+  3. **The decoder forces `-pix_fmt rgb24` and never asks what the source is**
+     (`seestack/video/ffmpeg.py:204`). If the stream is **mono/grey carrying the raw CFA mosaic** — which is
+     the normal way solar/planetary capture is recorded, precisely so lucky imaging gets unprocessed frames —
+     ffmpeg replicates that single channel into R=G=B and **the mosaic survives verbatim as a luminance
+     checkerboard.** On the solar continuum the R/G/B photosites have different transmission, so adjacent
+     pixels alternate bright/dark: **exactly the observed mesh.**
+  4. **`probe_video` never collects `pix_fmt`** — its `-show_entries` list is
+     `stream=width,height,nb_frames,avg_frame_rate,duration` (`ffmpeg.py:~14`). So the pipeline is structurally
+     incapable of noticing the difference.
+  5. **Lucky imaging makes it worse, not better.** The disk is static and alignment shifts are near zero, so a
+     *sensor-fixed* pattern **adds coherently across every kept frame instead of averaging down** — which is
+     why the artefact is a crisp, clean grid rather than noise. Stacking sharpens it.
+  6. **The display stretch then makes it glaring.** `normalize_for_display` (`seestack/video/lucky.py:449`)
+     anchors lo/hi at the 1st/99.9th percentile of the whole frame — sky→0, disk-peak→1 — so a near-uniform
+     disk whose only structure *is* the mesh renders that mesh at high contrast. *(This step only reveals it;
+     it is not the cause. Do not "fix" it here.)*
+  **Ruled out while tracing:** nothing in the decode rescales or filters (the only `-vf` is frame `select` for
+  stride, `ffmpeg.py:~202`), so the decoder does not invent the pattern; the sharpness grader only produces a
+  scalar and never touches pixels.
+
+  **Owner check that settles which branch this is — one line:**
+  `ffprobe -v error -show_entries stream=pix_fmt,codec_name -of default=nw=1 "<the Solar_video file>"`
+  - `gray` / `gray16le` / any `bayer_*` → **confirmed**: the mosaic is being stacked undebayered. Fix as below.
+  - `yuv420p` or another true colour format → the mesh is something else and this entry needs re-tracing
+    before anyone changes code (say so rather than shipping the fix anyway).
+
+  **Fix direction (do NOT build until the check above confirms the branch):** add `pix_fmt` to
+  `probe_video`'s `-show_entries` (one word), and when the source is mono/CFA, debayer each decoded frame with
+  the **existing, proven `bilinear_debayer`** from `seestack/io/fits_loader.py` using the Seestar's known
+  pattern — reuse it, do not write a second debayer. Leave a genuinely-colour source untouched, and guard hard
+  against debayering twice. **Regression test:** synthesise a video whose frames carry a known CFA mosaic,
+  stack it, and assert the result has **no periodic 2-px structure** (e.g. the 2-px-lag autocorrelation, or the
+  Nyquist bin of its FFT, is at noise level) — a test that would fail today. **Worth noting for whoever takes
+  this:** point 5 is a general property of this pipeline — any fixed-pattern sensor artefact will accumulate
+  rather than average on a static target — so it is worth saying in the module docstring even after the CFA
+  case is handled, but do **not** speculatively build flat/dark handling for video off the back of it.
+
 > **📌 EXTERNAL AUDIT 2026-09-02 — the ten app findings below (A1–A10) come from an independent read-only audit
 > commissioned by the owner, baselined at `4c2dac4` (v0.322.7) and re-verified at `87987cd5` (v0.325.2, 24
 > commits later). All ten still reproduced after re-verification. Full suite green at baseline (3,837 passed /
