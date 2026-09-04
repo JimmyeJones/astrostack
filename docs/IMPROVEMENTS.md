@@ -25799,7 +25799,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   declared after it. It is declared first, with a comment saying why, and
   `test_year_poster_downloads_as_a_square_jpeg` fails if that ever slips.
 
-  **Tests (+22: 13 Python engine, +11 webapp, +9 vitest).** `tests/test_year_recap.py` — the caption's
+  **Tests (+32: 13 Python engine, +10 webapp, +9 vitest).** `tests/test_year_recap.py` — the caption's
   wording, its drop-the-zero rule, its silence on an empty year, its shared voice with `recap_caption`, the
   two standout-night lines and their silence, the no-em-dash rule (Pillow's built-in font has no U+2014
   glyph and would draw tofu onto a picture the user is about to post), `years_by_target`, all three
