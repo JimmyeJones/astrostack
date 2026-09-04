@@ -12365,6 +12365,40 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-09-04, the choice v0.342.0 made deliberately and should be re-measured) — the
+  early-stop judgement compares *sessions*, so a split night quietly makes the app less likely to speak.**
+  *(Pillar: autonomy + trust — PRIORITY 2; size S, **measure before changing anything**.)* `early_stop`
+  is fed `session_end_stamps(frames)` on both surfaces that report it — the Dashboard's "Last night" card
+  and, since v0.342.0, the Nights card's newest row. That was the right call *for agreement*: the Nights
+  rows are observing nights (an evening run and a pre-dawn run merge into one), so computing the two
+  surfaces from different stamps would let them quote different medians for the same night. But the
+  quantity itself is arguably wrong for an owner who shoots a night **in two goes**: that night contributes
+  *two* stop times to the habit, one of which (the evening half's ~21:00) is not when the night ended at
+  all. It drags the median earlier, so a genuinely early stop looks less early — the **conservative**
+  direction, which is why it was shipped rather than blocked, but a measurable blind spot on long nights.
+  **Shape:** feed both surfaces the *merged* per-night end stamps instead (`nights_breakdown` already has
+  `_merge_sessions_by_night`, and `/api/last-night` already resolves the observer's night key), keeping the
+  single-input rule that stops them drifting. **Measure first:** on a fixture of split nights, how much does
+  the median move, and does any real shape cross `EARLY_STOP_MIN_MINUTES` in either direction? A change here
+  makes the app speak *more* often, and the whole design bias of this note is that a wrong "you lost half a
+  night" costs far more than a missed one — so it needs the numbers, not the argument.
+
+- **NEW IDEA (Builder 2026-09-04, the obvious next slice after the v0.342.1 dispatcher routing) — the other
+  seven copies of `min_max_reject and not drizzle and n >= 3` are the same predicate, and one of them drives
+  a sentence the user reads.** *(Pillar: maintainability in service of correctness — size S; **the memory
+  path, so keep the estimate's shape**.)* v0.342.1 routed the two copies its entry named (the dispatcher's
+  `if/elif` chain and `_records_rejection_map`). Grepping the module afterwards finds the same predicate
+  spelled out at seven more sites in `seestack/stack/stacker.py` — `_mmr_charged`, three `reject_arrays=`
+  arguments in the estimate/guard path, two in the pre-submit `estimate_stack`, and `weights_applied` — and
+  every one of them is exactly `combine_method(eff, n) == "min-max-reject"`, because `combine_method`
+  answers `"drizzle"` first. **`weights_applied` is the one that matters beyond tidiness:** it decides
+  whether the run reports that quality weighting was honoured, i.e. a claim a user reads, computed from a
+  hand-written copy of a gate that has already drifted once. **Care:** several of these sit inside the OOM
+  guard's arithmetic, and the entry that preceded this one was explicit that folding must not change the
+  memory estimate's *shape* — so route the predicate, leave the `_estimate_peak_bytes` call sites' argument
+  lists alone, and re-run the six-case before/after hash script (see the drizzle-determinism entry under
+  "Image quality" for why the drizzle case must be hashed at `max_workers=1`).
+
 - **✅ SHIPPED (Builder, v0.342.0, branch `claude/sweet-babbage-0z0bbr`) — ~~a target whose *own* last night
   stopped early, on its own page, however long ago that was.~~** Built as the entry's own **"grep first"**
   paragraph recommended, and that recommendation is what removed the need for the age cap it was worried
