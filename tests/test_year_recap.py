@@ -324,6 +324,50 @@ def test_poster_lines_name_the_two_standout_nights():
     assert year_poster_title(r) == "My 2026 under the stars"
 
 
+def test_the_poster_says_one_date_once_when_one_night_was_both():
+    """A short season's longest night is often its steadiest one too.
+
+    Printed as two dated lines the poster spent two of its few lines saying one
+    date twice — on the picture the owner is about to post. The footnote drops
+    the repeated date and names the second accolade instead, keeping both
+    figures. The page makes the same call (`frontend/src/yourYear.ts`
+    `yearNightCards`), so the two cannot disagree about whether that was one
+    night or two.
+    """
+    nights = [
+        night("2026-01-02", exposure_s=7200.0, fwhm=2.1, n_measured=40),
+        night("2026-02-03", exposure_s=1800.0, fwhm=3.4, n_measured=20),
+    ]
+    r = build_year_recap(nights, year=2026)
+    assert r.longest_night is not None and r.sharpest_night is not None
+    assert r.longest_night.date == r.sharpest_night.date == "2026-01-02"
+    assert year_longest_night_line(r) == "Longest night: 2 Jan 2026 · 2.0 h"
+    assert year_sharpest_night_line(r) == "Also your sharpest night: 2.1 px stars"
+    # The date appears once across the two lines, not twice.
+    assert (year_longest_night_line(r) + year_sharpest_night_line(r)).count(
+        "2 Jan 2026") == 1
+
+
+def test_the_sharpest_line_keeps_its_date_when_no_longest_night_is_printed():
+    """"Also" needs something to refer to.
+
+    A one-night year has no "longest" to crown (LONGEST_MIN_NIGHTS), so the line
+    above is empty — and the sharpest night must still say *when* it was.
+    """
+    import dataclasses
+
+    # A year whose standouts both resolve, with the "longest" then withheld the
+    # way `longest_night` withholds it on a year too short to crown one.
+    full = build_year_recap([
+        night("2026-01-02", exposure_s=7200.0, fwhm=2.1, n_measured=40),
+        night("2026-02-03", exposure_s=1800.0, fwhm=3.4, n_measured=20),
+    ], year=2026)
+    r = dataclasses.replace(full, longest_night=None)
+    assert r.longest_night is None and r.sharpest_night is not None
+    assert year_longest_night_line(r) == ""
+    assert year_sharpest_night_line(r) == "Sharpest night: 2 Jan 2026 · 2.1 px stars"
+
+
 def test_poster_lines_stay_silent_when_the_year_has_no_standout():
     # One night: no "longest" to crown (LONGEST_MIN_NIGHTS), nothing measured.
     r = build_year_recap([night("2026-01-02")], year=2026)

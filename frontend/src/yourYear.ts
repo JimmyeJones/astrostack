@@ -98,3 +98,53 @@ export function sharpestNightLines(
     detail: `Your steadiest sky of the year${whatYouShot(night)}${measured}.`,
   };
 }
+
+export interface YearNightCard {
+  /** Which standout(s) this card carries — also its React key. */
+  key: "longest" | "sharpest" | "both";
+  title: string;
+  lines: YearNightLines;
+}
+
+/**
+ * The standout-night cards to render, in order — none, one or two.
+ *
+ * The year ranks its nights twice, by length and by steadiness, and on a short
+ * season those two questions have one answer: the night you got the most out of
+ * is often the night the sky was best. Rendered as two cards it read as the page
+ * repeating itself — the same date, the same target, twice, side by side. So
+ * when both standouts are the *same night* they become one card that says so,
+ * carrying both figures and both facts. Nothing is dropped; the reader gains the
+ * thing two cards could never say — that one night was both.
+ *
+ * The poster makes the same call in its own copy
+ * (`seestack.yearrecap.year_sharpest_night_line`), so the page and the picture
+ * you post from it cannot disagree about whether that was one night or two.
+ */
+export function yearNightCards(
+  longestNight: NightActivity | null | undefined,
+  sharpestNight: NightActivity | null | undefined,
+  formatIntegration: (s: number) => string,
+): YearNightCard[] {
+  const longest = longestNightLines(longestNight, formatIntegration);
+  const sharpest = sharpestNightLines(sharpestNight);
+  if (longest && sharpest && longestNight && sharpestNight
+      && longestNight.date === sharpestNight.date) {
+    return [{
+      key: "both",
+      title: "Longest — and sharpest — night",
+      lines: {
+        date: longest.date,
+        value: `${longest.value} · ${sharpest.value}`,
+        // The longest night's own sentence, then the second accolade as its
+        // own clause — the sharpest line's "steadiest sky of the year" wording,
+        // without repeating where you were pointing or how many subs it was.
+        detail: `${longest.detail} It was your steadiest sky of the year too.`,
+      },
+    }];
+  }
+  const out: YearNightCard[] = [];
+  if (longest) out.push({ key: "longest", title: "Longest night", lines: longest });
+  if (sharpest) out.push({ key: "sharpest", title: "Sharpest night", lines: sharpest });
+  return out;
+}
