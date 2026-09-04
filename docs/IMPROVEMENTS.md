@@ -25831,6 +25831,36 @@ problems. Dogfood it every big-picture run and fix root causes.
     **Grep first:** `seestack/recap.py`, `_recap_hero` and `ShareYourSkyCard` already do 90 % of this for the
     all-time poster; this is a second *facts* source into the same renderer, not new machinery.
 
+- **NEW IDEA (Builder 2026-09-04, spotted while shipping the year poster v0.344.0) — both recap posters use a
+  target's *newest stack preview* as their backdrop, ignoring the cover the owner actually pinned.**
+  *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: S. Additive, and the machinery already exists.)*
+  `_recap_hero` (the all-time poster) and `_year_hero` (the new year one) both read
+  `TargetEntry.last_stack_preview`. But "Set as cover" (v0.145.0) exists precisely so the owner can say *this*
+  is the picture of M 31 — and the deep-sky wall already honours it (v0.277.1), as does the pictures `.zip`.
+  So the poster a beginner is about to post can show a picture they deliberately demoted. **Shape:** resolve
+  the pinned cover first and fall through to the newest preview, reusing whatever helper the wall already
+  uses rather than re-reading the pin — one definition of "this target's picture", three surfaces.
+  **Grep first:** find the wall's cover resolution before writing any; if it is already a shared helper this
+  is a two-line change in each of the two hero pickers plus a test each. **Care:** the fallback must stay
+  silent-and-graceful — an unreadable *cover* has to fall through to the newest preview and then to the plain
+  background, exactly as an unreadable preview does today, or a stale pin costs the poster its backdrop.
+
+- **⚪ MEASURED, RECORDED SO NOBODY RE-INVESTIGATES (Builder 2026-09-04, hit while writing the year-hero
+  tests) — the night-fold cache can serve a stale year/heatmap for up to 120 s after a frame's *timestamp*
+  changes without moving its target's `last_activity_utc`.** *(No code change wanted — bounded, pre-existing,
+  and the cheap alternatives are worse.)* `_cached_night_acc`'s signature is
+  `(lon, [(safe_name, last_activity_utc)])` over the registry. Re-dating an *existing* frame (a header
+  re-read, a hand edit, a re-ingest that lands an older stamp) can leave the registry row untouched, so the
+  signature matches and the fold is reused until `_ACTIVITY_CACHE_TTL_S` (120 s) expires — the Dashboard
+  heatmap, the year recap and the recap poster all then quote the pre-edit nights. **Why it is not worth
+  fixing:** the only signature that would catch it is one over the frames themselves, which is the library
+  walk the cache exists to avoid, and every *ordinary* path that changes a frame's night (ingest, a scan)
+  moves `last_activity_utc` with it. 120 s is a bounded, self-healing wrong answer on a surface nobody is
+  watching second-by-second. **What this costs a test author, which is the actual reason to record it:** a
+  test that mutates a timestamp *between* two requests to any night-shaped endpoint will silently read the
+  first request's fold. Arrange the whole fixture before the first request instead — that is why
+  `test_year_hero_says_so_when_its_picture_may_carry_another_years_light` builds both years up front.
+
 - **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-t59xya`) — ~~put the planned week in the user's
   calendar.~~** Built as filed, as composition: `GET /api/plan/week/calendar.ics` and an **Add this week to
   your calendar** anchor on the Plan-my-week card. One event per night that has a pick, titled with what to
