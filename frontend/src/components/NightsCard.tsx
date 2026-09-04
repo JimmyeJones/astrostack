@@ -195,7 +195,7 @@ function NightRow({
  *
  * The §1 owner shoots one target across many nights (the Seestar writes a new
  * folder per night), and today there's no per-target view of *all* the nights
- * behind a picture — only the single-night "Last session" card. This lists each
+ * behind a picture — only the single-night "Last night" card. This lists each
  * night's kept-vs-total subs, integration, median FWHM, and a one-word verdict
  * (sharp / soft / hazy) so a soft or clouded-out night is easy to spot.
  *
@@ -205,7 +205,7 @@ function NightRow({
  * and re-stack a cleaner picture. Undo re-accepts exactly the subs it touched.
  *
  * Renders only when the target spans more than one night — a single night is
- * already covered by the "Last session" card, so this would just duplicate it.
+ * already covered by the "Last night" card, so this would just duplicate it.
  */
 export function NightsCard({ safe }: { safe: string }) {
   const qc = useQueryClient();

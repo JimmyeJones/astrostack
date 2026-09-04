@@ -2,7 +2,7 @@
  * "Your year under the stars" — one calendar year of imaging, on its own page.
  *
  * The app already had both ends of the time axis and nothing in between: a
- * *night* ("Last session"), and the *whole hobby* ("Your sky, so far"). This is
+ * *night* ("Last night"), and the *whole hobby* ("Your sky, so far"). This is
  * the middle — the season a beginner actually wants to look back on in January
  * and show someone.
  *

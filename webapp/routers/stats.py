@@ -135,7 +135,7 @@ class LastNightResponse(BaseModel):
     end_utc: str | None = None
     # The *observing night* this session belongs to, as ISO ``YYYY-MM-DD`` — the
     # noon-to-noon local bucket the imaging calendar, the per-target Nights card
-    # and the "Last session" recap all use. Additive and optional: ``None`` when
+    # and the "Last night" recap all use. Additive and optional: ``None`` when
     # the start time can't be parsed, and an older frontend keeps labelling from
     # the raw UTC stamps.
     night_date: str | None = None

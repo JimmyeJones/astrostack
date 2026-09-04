@@ -14,6 +14,13 @@ frames on their **capture** time (``timestamp_utc``): a night's subs are minutes
 apart, and the gap to the previous night is hours, so the trailing run of frames
 separated from the rest by more than ``gap_hours`` is "the last session". This
 groups a night that spans UTC midnight together and is robust to timezone.
+
+A session and an **observing night** are not the same thing, and they disagree
+in exactly one direction: an evening run, bed, then a pre-dawn run are two
+sessions inside one night. Every surface that *calls* itself a night therefore
+passes a ``night_of`` key and gets the sessions merged first — the card, the
+Nights rows and the pace estimate all through :func:`_merge_sessions_by_night`,
+so they cannot disagree about which two halves are one night.
 """
 
 from __future__ import annotations
@@ -295,12 +302,28 @@ def _fwhm_quality_drift(
 
 
 def session_recap(
-    project: Project, *, gap_hours: float = DEFAULT_SESSION_GAP_HOURS
+    project: Project,
+    *,
+    gap_hours: float = DEFAULT_SESSION_GAP_HOURS,
+    night_of: NightKeyFn | None = None,
 ) -> SessionRecap | None:
-    """Summarise the target's most recent capture session, or ``None`` when
+    """Summarise the target's most recent **observing night**, or ``None`` when
     there's nothing datable to report (no frames carry a capture timestamp).
 
     Read-only aggregation over the ``frames`` table — safe to call any time.
+
+    ``night_of`` is what makes the answer night-shaped: without it the recap is
+    the trailing 6 h-gap *session*, which on a night shot in two goes is only
+    the second half — and the card is **dated with the observing night**, so it
+    then contradicts the Nights row directly beneath it about the same date
+    (measured: 13 subs vs 26 on a split night). With it, the sessions belonging
+    to one night are merged first, through the same
+    :func:`_merge_sessions_by_night` the Nights card and the pace estimate use,
+    so the three cannot disagree about which two halves are one night.
+
+    It stays optional because only the webapp knows the observer's longitude;
+    a caller that can't supply one gets today's session-shaped answer rather
+    than a guess, exactly as :func:`nights_breakdown` degrades.
     """
     dated: list[tuple[datetime, FrameRow]] = []
     total_kept_exposure_s = 0.0
@@ -316,6 +339,9 @@ def session_recap(
 
     dated.sort(key=lambda pair: pair[0])
     sessions = _split_sessions(dated, gap_hours)
+    if night_of is not None:
+        sessions = _merge_sessions_by_night(
+            sessions, night_of, lambda row: row[1].timestamp_utc)
     session_pairs = sessions[-1] if sessions else []
     if not session_pairs:
         return None
