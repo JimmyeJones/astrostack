@@ -12666,13 +12666,9 @@ to **Shipped**.)_
 
   Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
 
-  - **✅ SHIPPED (v0.342.0, "A target's own page keeps the night that stopped early") — ~~a target whose *own*
-    last night stopped early, on its own page, however long ago that was.~~** *(Verified by a Builder
-    2026-09-04 that had picked this entry as open work: `NightSummaryOut.ended_early` (`webapp/schemas.py`,
-    additive and set on the newest row only) carries the same `session_recap.early_stop` measurement, and
-    `earlyStopTooltip` (`components/NightsCard.tsx`) renders it — which is the entry's own "grep first"
-    answer, a marker on the night row rather than a standing sentence, so it never nags. The entry had simply
-    not been struck. Original spec follows.)* v0.341.0 puts
+  - **NEW IDEA (Builder 2026-09-04, the surface v0.341.0's morning early-stop line deliberately did not reach) —
+    a target whose *own* last night stopped early, on its own page, however long ago that was.**
+    *(Pillar: autonomy + trust — PRIORITY 2; size XS–S; **check the overlap before building**.)* v0.341.0 puts
     "M 42 stopped getting subs at 23:40 — about 3 h earlier than its last 4 nights" on the Dashboard's
     **Last night** card, which by construction speaks only for the **library's most recent** capture night. A
     target the owner shot on Tuesday and has not returned to has exactly the same fact recorded and nowhere to
@@ -17789,6 +17785,30 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
+- **✅ SHIPPED (Builder, v0.345.3, branch `claude/sweet-babbage-i0r8cl`) — ~~the Export panel ends with a
+  four-sentence paragraph explaining the buttons four rows above it, and its first sentence says what the
+  Export line already said.~~** Found by *looking at* the editor (`scripts/agent-dogfood.sh`, desktop shot),
+  not by reading it: the panel's foot rendered as five consecutive grey paragraphs, and the last one was a
+  second explanation of its own controls.
+
+  **What it said, checked clause by clause before anything moved.** *"'Export' writes a new stack run
+  (FITS/TIFF/PNG); the original is never changed"* — already stated, in more detail, in the line directly
+  under the Export button. *"'Download full-res PNG' renders your edits at native resolution…"* and
+  *"'Share image' saves a smaller, post-ready JPEG plus a caption you can copy"* — the **only** place either
+  button was described. So one third of the paragraph was duplication and two thirds were homeless.
+
+  **Each sentence now sits under its own button**, which is the idiom the panel already used for Export, and
+  the panel ends with the print advice about *the picture* rather than a recap of its own buttons.
+  **Nothing was removed** (the owner's standing constraint): the one fact only the paragraph carried — that
+  an export also writes a preview PNG, which `write_stack_outputs` does — moved into the Export line, so the
+  three files are still named.
+
+  **Upgrade-safe (§9):** frontend copy and layout only; no config, schema, on-disk, API or default change.
+
+  **Test (+1 in `Editor.test.tsx`, fails before):** both descriptions present beside their buttons, the
+  export line still naming TIFF + FITS + preview PNG, and the duplicate summary (`/writes a new stack run/`)
+  absent.
+
 - **✅ SHIPPED (Builder, v0.329.6, branch `claude/sweet-babbage-fwtqxh`) — ~~let the server say where the
   window is **on the preview**, so the marker stops being a guess.~~** Filed by this run an hour earlier as
   the half v0.329.5 deliberately did not build, and taken here rather than left, because the sentence
@@ -17819,14 +17839,9 @@ problems. Dogfood it every big-picture run and fix root causes.
 
   Original spec, for the record:
 
-  - **✅ SHIPPED (v0.329.6, "The marker points where the window is, not where the click was") — ~~let the
-    server say where the window is **on the preview**, so the marker stops being a guess.~~** *(Verified by a
-    Builder 2026-09-04 that had picked this entry as open work: `_window_on_preview`
-    (`webapp/routers/editor.py`) emits `preview_x/y/width/height` on `X-Loupe-Window` — added beside the
-    existing keys, never renaming them — and `loupeMarkerFromWindow` (`components/editor/loupe.ts`) draws from
-    them, with `loupeMarkerRect` kept as the first-paint / older-backend fallback exactly as the Care note
-    asked. Both halves of the spec are on `main`; the entry had simply not been struck. Original spec
-    follows.)* v0.329.5 gave `X-Loupe-Window` a reader, but only for the *sentence*: its
+  - **NEW IDEA (Builder 2026-09-03, the half v0.329.5 deliberately did NOT build) — let the server say where the
+    window is **on the preview**, so the marker stops being a guess.** *(Pillar: a better editor — PRIORITY 1;
+    size XS server + XS frontend.)* v0.329.5 gave `X-Loupe-Window` a reader, but only for the *sentence*: its
     `{x, y, width, height}` are full-canvas pixels, and the navigator marker is drawn against what the **preview**
     covers. With a crop in the recipe those are different coordinate systems, and `loupe.ts` has always said so —
     *"they can differ by up to half a window at the very edge"*. The frontend cannot close that without
@@ -20497,6 +20512,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **⚪ DOGFOOD BASELINE (Builder 2026-09-04, `scripts/agent-dogfood.sh` at v0.345.2 — the third measurement in
+  a row that says DO NOT open a speculative IA slice).** Full run (boot → sample → stack → Playwright probe at
+  1440 px and 420 px): **nothing overflowing, no console errors**, and the tallest page is still the Target
+  page at **3,014 px on a phone** — the *same* number the v0.338.1 probe recorded, against 14,584 px on the
+  worst page before the 08-13→16 slices. The rest, tallest first: `/life-list` 3,008 px (phone), the editor
+  2,829 px (phone), the Target page 2,010 px (desktop), the editor 1,805 px (desktop), the Dashboard 1,785 px
+  (phone), `/stack` 1,748 px (phone), `/life-list` 1,453 px (desktop). **So the standing IA banner in
+  AGENTS.md §1 keeps its verdict**: three measurements across ~90 versions agree that nothing is stacked
+  badly and the worst page has not moved. Re-measure before any future slice; do not open one on a reading of
+  a route file.
+  **What the pass *did* find is the entry directly above under "Editor"** — the export panel's trailing
+  paragraph, which is invisible to a code read (each of its sentences is defensible on its own; only the
+  rendered page shows five grey paragraphs in a row) and is exactly the kind of thing the running-app probe
+  exists to catch. Shipped as v0.345.3.
 
 - **NEW IDEA (Builder 2026-09-03, measured while sweeping the display-space statistics for A1's blindness) —
   Levels' "From your image" button silently leaves the black point at 0, and nothing says why.** *(Pillar:
@@ -23920,8 +23950,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   pinned by construction (render at what it asks for → the crop fills the preset exactly), by limiting edge,
   and at the cap.
 
-- **NEW IDEA (Builder 2026-08-30, the two halves deliberately left out of the v0.310.0 wallpaper fix) — the
-  other two exports that are still made out of the 1024 px preview.** *(Pillar: image quality — PRIORITY 4;
+- **✅ BOTH HALVES SHIPPED — ~~the other two exports that are still made out of the 1024 px preview.~~**
+  *(Verified by a Builder 2026-09-04 that had picked this entry as open work; it had simply not been struck.
+  `_native_picture_source` (`webapp/routers/stack.py`) now re-renders both from the run's own master —
+  **(a)** the keepsake / scale JPEG at `SHARE_JPEG_MAX_LONG_EDGE` (2560 px), with the entry's own blocker
+  answered rather than dodged: the marks, caption and matte are sized as a *fraction* of the picture, so the
+  furniture scales with it; **(b)** the wallpaper at `wallpaper_source_long_edge(...)`, i.e. gated on the
+  preset's own target size exactly as the cost note asked. Original spec follows.)*
+  *(Pillar: image quality — PRIORITY 4;
   size S each; the second one has a cost gate, read it.)*
   **(a) The keepsake / "with scale & compass" JPEG** (`download_stack_run`, `kind="jpeg"`) is the one the
   Target page's own comment calls "the one that matters on Instagram **or a printed 6×4**" — at 1024 px that

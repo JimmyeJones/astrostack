@@ -189,6 +189,31 @@ describe("EditorView", () => {
     expect(screen.queryByDisplayValue("Auto-stretched")).not.toBeInTheDocument();
   });
 
+  it("says what each download does under its own button, not in a trailing "
+    + "paragraph that repeats the first one", async () => {
+    // The panel used to end with a four-sentence grey block restating the three
+    // buttons above it — four buttons away from what it described, and its first
+    // clause ("Export writes a new stack run… the original is never changed")
+    // said what the Export line directly under that button already said. Each
+    // sentence now sits with its button; the one fact only the paragraph carried
+    // (an export also writes a preview PNG) moved into the Export line.
+    mockEditorQueries();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    expect(await screen.findByText("Download full-res PNG")).toBeInTheDocument();
+    expect(screen.getByText(/Renders your edits at native resolution/)).toBeInTheDocument();
+    expect(screen.getByText(/smaller, post-ready JPEG/)).toBeInTheDocument();
+    // Nothing was lost: the export still says it writes all three files.
+    expect(screen.getByText(/a 16-bit TIFF, a FITS and a preview\s+PNG/))
+      .toBeInTheDocument();
+    // …and the duplicate summary is gone.
+    expect(screen.queryByText(/writes a new stack run/)).not.toBeInTheDocument();
+  });
+
   it("offers a print size the picture can actually fill, and hides the offer when it can't", async () => {
     // "Print it" is a promise: only sizes this picture has the detail to fill
     // sharply are listed, biggest first, so the default is the best real print.
