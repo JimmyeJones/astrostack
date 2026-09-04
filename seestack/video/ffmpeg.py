@@ -73,6 +73,11 @@ class VideoInfo:
     n_frames_exact: bool
     fps: float
     duration_s: float
+    #: The stream's own pixel format as ffprobe reports it (``""`` when it
+    #: doesn't say). Load-bearing: a **single-channel** stream is carrying the
+    #: sensor's raw colour-filter mosaic, which has to be debayered rather than
+    #: stacked as luminance — see :func:`source_is_cfa_mosaic`.
+    pix_fmt: str = ""
 
     @property
     def megapixels(self) -> float:
@@ -106,7 +111,8 @@ def probe_video(path: str | Path) -> VideoInfo:
     cmd = [
         exe, "-v", "error",
         "-select_streams", "v:0",
-        "-show_entries", "stream=width,height,nb_frames,avg_frame_rate,duration",
+        "-show_entries",
+        "stream=width,height,nb_frames,avg_frame_rate,duration,pix_fmt",
         "-show_entries", "format=duration",
         "-of", "json",
         str(path),
@@ -162,7 +168,44 @@ def probe_video(path: str | Path) -> VideoInfo:
         n_frames_exact=exact,
         fps=fps,
         duration_s=duration,
+        pix_fmt=str(st.get("pix_fmt") or ""),
     )
+
+
+#: Pixel formats that mean "one byte (or word) per pixel, straight off the
+#: sensor" — i.e. the frame is the **raw colour-filter mosaic**, not a picture.
+#:
+#: ``pal8`` is the one the Seestar actually writes (measured on the owner's
+#: ``…-Solar-RAW.avi``: ``rawvideo``, ``pal8``, and 1.00026 bytes per pixel over
+#: the whole file). The byte at each pixel is a palette *index* that is the raw
+#: sensor value, and the palette is the identity grey ramp — which is exactly how
+#: the mosaic used to reach the stack as a luminance checkerboard.
+#:
+#: ``bayer_*`` formats are deliberately **absent**: ffmpeg debayers those itself
+#: on the way to ``rgb24``, so treating one as a mosaic would debayer it twice.
+_MOSAIC_PIX_FMT_PREFIXES = ("gray", "mono")
+_MOSAIC_PIX_FMTS = frozenset({"pal8"})
+
+
+def source_is_cfa_mosaic(pix_fmt: str | None) -> bool:
+    """Is a stream in this pixel format carrying an undebayered sensor mosaic?
+
+    True for the single-channel families (``pal8``, ``gray*``, ``mono*``), which
+    is how solar/planetary capture is normally recorded — precisely so lucky
+    imaging gets unprocessed frames. False for every colour format, and
+    **deliberately false for ffmpeg's own ``bayer_*`` formats**, which the
+    decoder already demosaics on the way to ``rgb24``.
+    """
+    fmt = (pix_fmt or "").strip().lower()
+    if not fmt or fmt.startswith("bayer"):
+        return False
+    return fmt in _MOSAIC_PIX_FMTS or fmt.startswith(_MOSAIC_PIX_FMT_PREFIXES)
+
+
+#: The Seestar's colour-filter layout. Stated once here rather than guessed:
+#: ``seestack/io/fits_loader.py`` already documents it for the deep-sky path
+#: ("The Seestar uses 'RGGB'") and :func:`bilinear_debayer` defaults to it.
+CFA_PATTERN = "RGGB"
 
 
 def iter_frames(
@@ -171,6 +214,7 @@ def iter_frames(
     stride: int = 1,
     width: int | None = None,
     height: int | None = None,
+    pix_fmt: str | None = None,
 ) -> Iterator[np.ndarray]:
     """Stream a capture's frames as ``(H, W, 3)`` uint8 RGB arrays.
 
@@ -186,16 +230,45 @@ def iter_frames(
     two-pass lucky stack grade in pass 1 and re-decode exactly those frames in
     pass 2.
 
-    ``width``/``height`` may be passed to skip a redundant probe; they must
-    match the stream or the byte framing is wrong (so pass them only from a
-    :func:`probe_video` result for the same file).
+    ``width``/``height``/``pix_fmt`` may be passed to skip a redundant probe;
+    the dimensions must match the stream or the byte framing is wrong (so pass
+    them only from a :func:`probe_video` result for the same file).
+
+    **A single-channel source is debayered here**, once, so every consumer
+    downstream sees the same ``(H, W, 3)`` picture and nothing can demosaic
+    twice. Solar and planetary video is normally recorded as the raw sensor
+    mosaic (see :func:`source_is_cfa_mosaic`); left alone, that mosaic reaches
+    the stack as a luminance checkerboard and — because the disk is static and
+    the pattern is sensor-fixed — *adds coherently* across every kept frame
+    instead of averaging down, which is the fine "mesh" the owner reported over
+    a stacked Sun.
+
+    **Why the decode still asks for ``rgb24``, which looks like the bug and is
+    not.** Measured on a `pal8` fixture with the identity grey palette the
+    Seestar writes: ``rgb24`` returns ``R == G == B ==`` the raw sensor byte,
+    *exactly*, so one channel of it **is** the mosaic. The obvious-looking
+    ``-pix_fmt gray`` is the one that loses data — ffmpeg routes it through an
+    RGB→luma step and it came back off by up to 1 DN on the same fixture. So
+    the honest raw plane is already on the wire; the bug was only that nobody
+    demosaiced it. Keeping the decode command untouched also keeps the byte
+    framing, the truncated-tail handling and the memory bound exactly as they
+    were.
+
+    The ``R == G == B`` equality is *verified on the first frame* rather than
+    assumed, because a ``pal8`` stream whose palette is not a grey ramp would
+    decode to real colour — in which case the frame is passed through
+    untouched, since demosaicing it would be nonsense.
     """
     exe = ffmpeg_path()
     if exe is None:
         raise VideoToolsMissing("ffmpeg is not installed")
-    if width is None or height is None:
+    if width is None or height is None or pix_fmt is None:
         info = probe_video(path)
         width, height = info.width, info.height
+        if pix_fmt is None:
+            pix_fmt = info.pix_fmt
+    mosaic_source = source_is_cfa_mosaic(pix_fmt)
+    demosaic: bool | None = None  # decided on the first frame, then latched
 
     stride = max(1, int(stride))
     cmd = [exe, "-v", "error", "-nostdin", "-i", str(path)]
@@ -222,10 +295,49 @@ def iter_frames(
                 break
             # Copy off the pipe buffer: ``frombuffer`` views immutable bytes, so
             # the array would be read-only and blow up on any in-place caller.
-            yield np.frombuffer(buf, dtype=np.uint8).reshape(height, width, 3).copy()
+            frame = np.frombuffer(buf, dtype=np.uint8).reshape(height, width, 3).copy()
+            if mosaic_source:
+                if demosaic is None:
+                    demosaic = _channels_agree(frame)
+                    if not demosaic:
+                        log.info(
+                            "%s reports %s but decodes to real colour — leaving it "
+                            "alone rather than demosaicing a picture",
+                            Path(path).name, pix_fmt,
+                        )
+                if demosaic:
+                    frame = _demosaic_frame(frame)
+            yield frame
     finally:
         if proc.poll() is None:
             proc.kill()
         if proc.stdout is not None:
             proc.stdout.close()
         proc.wait()
+
+
+def _channels_agree(frame: np.ndarray) -> bool:
+    """Is every pixel of this decoded frame grey (``R == G == B``)?
+
+    The evidence that the three channels carry one sensor plane replicated,
+    rather than real colour — see :func:`iter_frames`.
+    """
+    return bool(
+        np.array_equal(frame[..., 0], frame[..., 1])
+        and np.array_equal(frame[..., 1], frame[..., 2])
+    )
+
+
+def _demosaic_frame(frame: np.ndarray) -> np.ndarray:
+    """Turn a replicated-mosaic ``rgb24`` frame into a real colour frame.
+
+    Reuses the engine's own :func:`~seestack.io.fits_loader.bilinear_debayer` —
+    the same one the deep-sky path has always used — rather than growing a
+    second demosaic here. It preserves dtype, so the ``uint8`` contract this
+    generator promises is unchanged, and the frame is **not** transposed or
+    flipped on the way in: CFA phase depends on true row/column parity, so a
+    flip would silently swap colours while looking "fixed".
+    """
+    from seestack.io.fits_loader import bilinear_debayer
+
+    return bilinear_debayer(frame[..., 0], pattern=CFA_PATTERN)
