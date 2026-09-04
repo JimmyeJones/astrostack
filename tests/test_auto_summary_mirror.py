@@ -155,7 +155,7 @@ def test_cause_clause_reads_as_the_editor_writes_it() -> None:
         "sky": 0.125, "median_fwhm": 4.7, "noise_fraction": 0.8,
         "trim_fraction": 0.125,
     }) == (
-        "a ~0.13 sky, 4.7 px stars, a noisy background, "
+        "a ~0.13 sky before stretching, 4.7 px stars, a noisy background, "
         "13% of ragged mosaic edge to trim"
     )
 
@@ -170,10 +170,31 @@ def test_a_linear_stacks_dark_sky_is_not_reported_as_no_sky() -> None:
     the same picture twice and getting nothing the first time.
     """
     assert _auto_cause_clause({"sky": 0.001, "median_fwhm": 2.07}) == (
-        "a ~0.001 sky, 2.07 px stars")
+        "a ~0.001 sky before stretching, 2.07 px stars")
     # Three decimals is exactly what `analyze_auto_inputs` carries, so a sky it
     # rounded to zero still reads "0" rather than inventing precision.
-    assert _auto_cause_clause({"sky": 0.0}) == "a ~0 sky"
+    assert _auto_cause_clause({"sky": 0.0}) == "a ~0 sky before stretching"
     # …and nothing about the ordinary range moves.
     assert _auto_num(0.24) == "0.24"
     assert _auto_num(2.07) == "2.07"
+
+
+def test_the_measured_sky_says_which_sky_it_is() -> None:
+    """The editor panel writes "sky" twice, one line apart, about two different
+    quantities: this clause's *measured* level of the **linear** stack (~0.001 on
+    the bundled sample) and, below it, the STF stretch's display-space target
+    background ("stretched sky level 0.24"). Both are right; unqualified and two
+    orders of magnitude apart they read as the app contradicting itself, so each
+    clause names which sky it means. The editor's mirror
+    (``autoValueSentence`` / ``autoCauseSentence``) says the same thing on its
+    side; this pins the half an unattended job stamps."""
+    clause = _auto_cause_clause({"sky": 0.001, "median_fwhm": 2.07})
+    assert clause == "a ~0.001 sky before stretching, 2.07 px stars"
+    # Wherever the clause writes "sky", it says which one in the same breath —
+    # so a re-wording cannot quietly drop the qualifier and restore the clash.
+    for word in clause.split(", "):
+        if "sky" in word:
+            assert "stretch" in word, (
+                f"{word!r} names a sky without saying which one; the value line "
+                "one row below reports the stretch's target background."
+            )
