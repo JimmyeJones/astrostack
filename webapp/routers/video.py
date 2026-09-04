@@ -137,6 +137,12 @@ class VideoResultOut(BaseModel):
     #: sharpened it before the soft render was kept beside it — the strength is
     #: still reported, it just can't be moved without re-stacking.
     sharpen_editable: bool = False
+    #: True when this picture was stacked before AstroStack could read the
+    #: camera's colour filter, from a capture that needs it — so it is grey and
+    #: carries the sensor mosaic as a fine mesh, and a re-stack would fix it.
+    #: Additive with a neutral default: a still made by this build, and every
+    #: ordinary colour capture, reads ``false``.
+    colour_stale: bool = False
 
 
 class VideoCaptureOut(BaseModel):
@@ -312,6 +318,11 @@ def _build_result_out(settings, capture_id: str, meta) -> VideoResultOut:  # noq
     # not the same as "nothing to trim" — measure it once, from the picture, so
     # pictures the owner already has get the same offer a new one does.
     meta = video.ensure_framing_measured(settings, capture_id, meta)
+    # A still made before the video path could demosaic a raw capture is carrying
+    # the sensor mosaic as a mesh. Nothing on disk fixes itself and there is no
+    # auto-stack for video, so the page has to say so — checked once per capture
+    # and remembered (see ``colour_is_stale``).
+    colour_stale, meta = video.colour_is_stale(settings, capture_id, meta)
     return VideoResultOut(
         created_utc=meta.created_utc,
         source_name=meta.source_name,
@@ -335,6 +346,7 @@ def _build_result_out(settings, capture_id: str, meta) -> VideoResultOut:  # noq
         crop_restorable=video.crop_is_restorable(settings, capture_id, meta),
         sharpen_amount=meta.sharpen_amount,
         sharpen_editable=video.can_resharpen(meta),
+        colour_stale=colour_stale,
     )
 
 

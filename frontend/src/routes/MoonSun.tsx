@@ -5,7 +5,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import {
   IconAlertTriangle, IconArrowBackUp, IconChartBar, IconCrop, IconDownload,
-  IconMoon, IconSparkles, IconSun, IconVideo, IconWand,
+  IconMoon, IconRefresh, IconSparkles, IconSun, IconVideo, IconWand,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -241,6 +241,36 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
           {result.warnings.map((w) => (
             <Text key={w} size="xs" c="dimmed">{w}</Text>
           ))}
+          {/* This picture is genuinely wrong — it was stacked before AstroStack
+              could read the camera's colour filter, so it is grey and covered in
+              a fine mesh. Nothing on disk fixes itself and there is no automatic
+              stack for video, so the only way the owner ever gets the good
+              version is if the page says so and offers the button. */}
+          {result.colour_stale ? (
+            <Alert
+              color="violet"
+              variant="light"
+              icon={<IconRefresh size={18} />}
+              p="xs"
+              mt={4}
+            >
+              <Text size="xs">
+                This picture was made before AstroStack could read your camera's
+                colour filter, so it came out grey with a fine mesh over it.
+                Stacking it again gives you real colour and a clean picture.
+              </Text>
+              <Button
+                size="compact-xs"
+                variant="light"
+                mt={6}
+                leftSection={<IconRefresh size={12} />}
+                onClick={() => stack.mutate({})}
+                loading={stack.isPending}
+              >
+                Stack it again
+              </Button>
+            </Alert>
+          ) : null}
           {/* Most people won't think to ask for a crop before they've seen how
               much sky their Seestar left around the Moon — so the offer waits
               until the picture itself can make the case. */}

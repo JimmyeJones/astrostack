@@ -369,6 +369,36 @@ describe("cropping the empty sky", () => {
     expect(cropNote({ crop_applied: false }, "solar")).toBeNull();
   });
 
+  it("offers a re-stack for a picture made before the demosaic, and starts one",
+    async () => {
+      // The leftover of the mesh bug: v0.347.0 fixed the stacking, but the Sun
+      // already on disk keeps the mesh and nothing re-derives itself. Fails
+      // before: the page said nothing and the owner kept the wrong picture.
+      vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+        captures: [capture({ result: result({ colour_stale: true }) })],
+      }));
+      const stack = vi.spyOn(client.api, "stackVideoCapture")
+        .mockResolvedValue({ job_id: "j9" });
+      renderView();
+      await waitFor(() => expect(
+        screen.getByText(/came out grey with a fine mesh over it/),
+      ).toBeInTheDocument());
+      fireEvent.click(screen.getByRole("button", { name: /^Stack it again$/i }));
+      await waitFor(() => expect(stack).toHaveBeenCalled());
+      expect(stack.mock.calls[0][0]).toBe("Lunar_video");
+    });
+
+  it("says nothing about colour for a picture that is already right", async () => {
+    // The nagging guard: an ordinary still must never be told to re-stack.
+    vi.spyOn(client.api, "listVideoCaptures")
+      .mockResolvedValue(list({ captures: [capture({ result: result() })] }));
+    renderView();
+    await waitFor(() => expect(screen.getByText("Stacked")).toBeInTheDocument());
+    expect(screen.queryByText(/fine mesh over it/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Stack it again$/i }))
+      .not.toBeInTheDocument();
+  });
+
   it("crops a finished still in place — no second stack of the capture", async () => {
     vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
       captures: [capture({
