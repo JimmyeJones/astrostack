@@ -2264,6 +2264,11 @@ export interface VideoResult {
   // True when the still was cropped in place and its full frame is still saved
   // beside it, so the crop can be undone in one click.
   crop_restorable?: boolean;
+  // True when the picture was stacked before AstroStack could read the camera's
+  // colour filter, from a capture that needs it — so it is grey and carries the
+  // sensor mosaic as a fine mesh, and re-stacking would fix it. Optional: an
+  // older backend sends nothing and nothing is claimed.
+  colour_stale?: boolean;
 }
 
 export interface VideoCapture {
