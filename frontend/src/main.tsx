@@ -31,6 +31,7 @@ import { TonightView } from "./routes/Tonight";
 import { LifeListView } from "./routes/LifeList";
 import { LiveView } from "./routes/Live";
 import { SkySoFarView } from "./routes/SkySoFar";
+import { YourYearView } from "./routes/YourYear";
 import { MoonSunView } from "./routes/MoonSun";
 
 // Lazy-load the 3D sky viewer so three.js stays out of the main bundle.
@@ -71,6 +72,9 @@ const router = createBrowserRouter([
       { path: "tonight", element: <TonightView /> },
       { path: "live", element: <LiveView /> },
       { path: "sky-so-far", element: <SkySoFarView /> },
+      // One calendar year of "Your sky, so far", nested under it so the year
+      // is bookmarkable and the nav gains no extra entry.
+      { path: "sky-so-far/:year", element: <YourYearView /> },
       { path: "life-list", element: <LifeListView /> },
       { path: "moon-sun", element: <MoonSunView /> },
       { path: "targets/:safe", element: <TargetView /> },

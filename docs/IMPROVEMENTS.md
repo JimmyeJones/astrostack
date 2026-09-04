@@ -25530,44 +25530,117 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ NEW BEGINNER FEATURE (Scout 2026-09-04) — "Your year under the stars": a year-bounded, shareable
-  recap of a season of imaging.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: M. Clears the
-  beginner bar: sane default (the current year, auto-computed from data the app already stores), plain
-  language, nothing pro/niche.)*
+- **✅ SLICES (a)+(c) SHIPPED (Builder, v0.343.0, branch `claude/sweet-babbage-l67sz2`) — ~~"Your year under
+  the stars": a year-bounded recap of a season of imaging.~~** Built as filed, as composition over the night
+  fold the Dashboard heatmap already pays for. Slice (b) — the best-of-year thumbnail and the share/caption
+  reuse — is deliberately still open and filed below.
 
-  **The gap, checked before filing.** The app already has the two ends of the time axis but not the middle:
-  a *per-night* recap (`seestack/session_recap.py` → the "Last session" card and the by-breakfast poster) and
-  an *all-time* cumulative view (`Your sky, so far` → `/api/stats/*`, the life list, "Draw your skyline").
-  There is **no season-bounded story**: grepped `webapp/`, `frontend/src/` and the backlog for
-  `wrapped|year in review|annual|yearly|this year` — the only hits are the per-night recap and cache-window
-  plumbing, none of them a year view. A beginner who shot 30 nights across a winter has no single screen that
-  says "here's what *this year* looked like", and that is exactly the kind of milestone a non-expert wants to
-  look back on and post.
+  **What shipped.** `seestack/yearrecap.py` (pure, offline, no `webapp` imports) folds
+  `activity_calendar.NightActivity` rows into one calendar year and answers the six questions the entry
+  named: nights out, light collected, targets imaged, **first lights** (targets whose *first ever* night
+  falls in that year — measured against the whole history, not the year's slice, or every target would be
+  "new" in the year you happen to be looking at), the **longest** night and the **sharpest** night.
+  `GET /api/recap/year/{year}` serves it; `/sky-so-far/{year}` renders it as a nested route under
+  "Your sky, so far", with a `YourYearCard` link in that page's existing flow — **no new nav entry and no new
+  always-on banner**, per the standing IA rule.
 
-  **What it is (one read-only page + one endpoint).** `GET /api/recap/year/{year}` folds the library's
-  existing per-target night/hour accounting (the same `capture_hours_json` / `stack_runs` reads the Dashboard
-  and "Your sky, so far" already walk, filtered to nights whose local date falls in `year`) into a small,
-  honest summary: **nights out**, **total integration hours**, **distinct targets**, **new targets first shot
-  this year** ("first light" moments), the **clearest night** (best median transparency / lowest sky), the
-  **longest single session**, and the **best picture of the year** (reuse `best_picture` ranking, scoped to
-  the year). A `/recap/{year}` route renders it as a single scrollable card with plain-language sentences
-  ("You were out under the stars on **31 nights** and collected **52 hours** of light on **9 targets**"), the
-  best-of-year thumbnail, and a one-click **Copy caption** / **Download share image (JPEG)** reusing the
-  existing share-card machinery (`seestack/sharecard.py`) so it lands social-ready with no typing.
+  **One fold, one set of numbers — and one library walk fewer, not one more.** The expensive half of the
+  heatmap is opening every project and reading its frames; the windowing on top is arithmetic. So the router
+  now caches the **accumulator** (`_cached_night_acc`) rather than each finished calendar, and
+  `_cached_activity_calendar` finalizes over it. The year page, the Dashboard heatmap and the recap poster
+  therefore read the *same* nights — pinned by a test that the year's totals equal the heatmap's cells for the
+  same night — and asking for a different `months` window no longer re-walks the library either.
+  `activity_calendar.nights_from(acc, start=…, end=…)` is the one public conversion both slices go through, so
+  neither can invent a second definition of what a night's numbers are.
 
-  **Why it clears the bar and serves §1.** It adds no expert surface — it is pure recall of what the beginner
-  already did, framed to enjoy and share (priority 3). Everything it needs is already stored, so it is
-  additive and offline. Sane default: opens on the most recent year with any data. Empty state: a year with
-  no nights says so kindly and offers the years that do have data.
+  **Honest rather than complete, everywhere.** "Your longest night" needs ≥2 nights to be worth naming (on a
+  one-night year the longest night is *the* night wearing a rosette) — the same reasoning, and deliberately the
+  same threshold, as `sharpest_night`'s existing `SHARPEST_MIN_NIGHTS`; the sharpest night reuses
+  `activity_calendar.sharpest_night` outright rather than inventing a second definition of "the good night".
+  A clause the data can't support is **dropped, not zeroed** ("0 targets" reads as a bug, not a beginning),
+  and a year with nothing in it returns `has_anything=false` plus the years that *do* have data, so the page
+  offers them instead of a wall of zeros. The card and the page open on the **most recent year with nights**,
+  not the calendar year — clicking in on 3 January should land on the season you just finished.
 
-  **Slicing for one Builder run.** Slice (a): the endpoint + the six headline stats + a bare card (no share).
-  Slice (b): the best-of-year thumbnail + the share/caption reuse. Slice (c): "first light this year" target
-  chips linking to each target. Ship (a) first; it stands alone.
+  **Upgrade-safe (§9):** one new engine module, one new public engine helper, one new read-only endpoint, one
+  new nested route, one new card. No config key, no schema, no on-disk change, no default flipped, no existing
+  response field or endpoint touched. The card self-hides against a backend that doesn't have the endpoint, so
+  an older/newer pairing degrades to today's page.
 
-  **Upgrade-safe by construction:** one new read-only router + one new route, both additive; no schema, no
-  config key, no on-disk change, no default flipped. Reads only columns that already exist. A test builds a
-  two-year synthetic library and pins that a year filter counts only that year's nights and that an empty year
-  degrades to the kind empty state.
+  **Tests: +26 Python engine, +8 API, +29 vitest.** `tests/test_year_recap.py` pins the year boundary
+  (New Year's Eve and New Year's Day land in different years), first light against the whole history, both
+  standouts' silence rules and tie-breaks, the dropped-clause wording and all three empty-state messages.
+  `tests/webapp/test_year_recap.py` pins the endpoint against real project data: the year filter, the
+  first-light `safe` links, accepted-frames-only (a clouded-out night must not inflate the year), the 422 on a
+  bad year, and the heatmap-agreement invariant. Frontend: `yourYear.test.ts` (11) for the pure helpers,
+  `YourYear.test.tsx` (10) for the page and `YourYearCard.test.tsx` (5) for the entry card.
+
+  **Slice (b) is still open**, deliberately: the best-of-year thumbnail + `sharecard.py` reuse for a
+  downloadable year poster and copy-paste caption. It is a clean follow-on — the endpoint already returns
+  everything a caption needs — and it wants its own run because the poster render is where the effort is.
+
+  *(Original entry follows.)*
+
+  Original spec, for the record — **slices (a) and (c) are done**; it is indented so a triage pass can see
+  that by shape:
+  - **⭐ NEW BEGINNER FEATURE (Scout 2026-09-04) — "Your year under the stars": a year-bounded, shareable
+    recap of a season of imaging.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: M. Clears the
+    beginner bar: sane default (the current year, auto-computed from data the app already stores), plain
+    language, nothing pro/niche.)*
+
+    **The gap, checked before filing.** The app already has the two ends of the time axis but not the middle:
+    a *per-night* recap (`seestack/session_recap.py` → the "Last session" card and the by-breakfast poster) and
+    an *all-time* cumulative view (`Your sky, so far` → `/api/stats/*`, the life list, "Draw your skyline").
+    There is **no season-bounded story**: grepped `webapp/`, `frontend/src/` and the backlog for
+    `wrapped|year in review|annual|yearly|this year` — the only hits are the per-night recap and cache-window
+    plumbing, none of them a year view. A beginner who shot 30 nights across a winter has no single screen that
+    says "here's what *this year* looked like", and that is exactly the kind of milestone a non-expert wants to
+    look back on and post.
+
+    **What it is (one read-only page + one endpoint).** `GET /api/recap/year/{year}` folds the library's
+    existing per-target night/hour accounting (the same `capture_hours_json` / `stack_runs` reads the Dashboard
+    and "Your sky, so far" already walk, filtered to nights whose local date falls in `year`) into a small,
+    honest summary: **nights out**, **total integration hours**, **distinct targets**, **new targets first shot
+    this year** ("first light" moments), the **clearest night** (best median transparency / lowest sky), the
+    **longest single session**, and the **best picture of the year** (reuse `best_picture` ranking, scoped to
+    the year). A `/recap/{year}` route renders it as a single scrollable card with plain-language sentences
+    ("You were out under the stars on **31 nights** and collected **52 hours** of light on **9 targets**"), the
+    best-of-year thumbnail, and a one-click **Copy caption** / **Download share image (JPEG)** reusing the
+    existing share-card machinery (`seestack/sharecard.py`) so it lands social-ready with no typing.
+
+    **Why it clears the bar and serves §1.** It adds no expert surface — it is pure recall of what the beginner
+    already did, framed to enjoy and share (priority 3). Everything it needs is already stored, so it is
+    additive and offline. Sane default: opens on the most recent year with any data. Empty state: a year with
+    no nights says so kindly and offers the years that do have data.
+
+    **Slicing for one Builder run.** Slice (a): the endpoint + the six headline stats + a bare card (no share).
+    Slice (b): the best-of-year thumbnail + the share/caption reuse. Slice (c): "first light this year" target
+    chips linking to each target. Ship (a) first; it stands alone.
+
+    **Upgrade-safe by construction:** one new read-only router + one new route, both additive; no schema, no
+    config key, no on-disk change, no default flipped. Reads only columns that already exist. A test builds a
+    two-year synthetic library and pins that a year filter counts only that year's nights and that an empty year
+    degrades to the kind empty state.
+
+- **NEW IDEA — SLICE (b) OF "Your year under the stars" (Builder 2026-09-04, the half v0.343.0 deliberately
+  left out) — make the year *shareable*: a best-of-year picture and a one-click poster + caption.** *(Pillar:
+  friendliness / enjoy + share — PRIORITY 3. Size: S–M. The endpoint already returns everything a caption
+  needs, so this is render work, not data work.)*
+
+  Slices (a) and (c) shipped: `/sky-so-far/{year}` tells the story, and the first-light chips link out. What
+  is missing is the part a beginner actually posts. Two pieces, in order:
+  1. **The best picture of the year.** Rank the year's targets the way `_recap_hero` already picks a poster
+     backdrop (the summary's heroes, first one with a readable preview), *scoped to targets with a night in
+     that year*, and show it at the top of the year page. **Caution:** a hero's preview is its *newest* stack,
+     which may have been made after the year ended — say "your picture of M 31, shot in 2026" rather than
+     implying the pixels are from that year, or scope to runs whose newest frame falls in the year.
+  2. **`GET /api/recap/year/{year}.jpg` + a copy-paste caption**, reusing `seestack/recap.py`'s
+     `draw_recap_poster` / `seestack/sharecard.py` rather than a second poster renderer — the whole reason
+     `RecapFacts` carries `window_months` is so a poster can say "this year" honestly. A `year_caption()`
+     beside `year_headline()` in `seestack/yearrecap.py` is the natural shape.
+
+  **Grep first:** `seestack/recap.py`, `_recap_hero` and `ShareYourSkyCard` already do 90 % of this for the
+  all-time poster; this is a second *facts* source into the same renderer, not new machinery.
 
 - **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-t59xya`) — ~~put the planned week in the user's
   calendar.~~** Built as filed, as composition: `GET /api/plan/week/calendar.ics` and an **Add this week to

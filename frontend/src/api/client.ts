@@ -885,6 +885,34 @@ export interface LibraryRecap {
   also_shot?: string;
 }
 
+/** A target seen for the first time in a given year. `safe` is null when the
+ * registry no longer has it, in which case the chip isn't a link. */
+export interface YearFirstLight {
+  name: string;
+  safe: string | null;
+}
+
+/** "Your year under the stars" — one calendar year of imaging. `has_anything`
+ * is false for a year with no imaged nights; `empty_message` then names the
+ * years that do have data, so the page can offer them instead of zeros. */
+export interface YearRecap {
+  year: number;
+  has_anything: boolean;
+  headline: string;
+  empty_message: string;
+  stats: { value: string; label: string }[];
+  first_light_line: string;
+  n_nights: number;
+  total_exposure_s: number;
+  n_frames: number;
+  n_targets: number;
+  target_names: string[];
+  first_lights: YearFirstLight[];
+  longest_night: NightActivity | null;
+  sharpest_night: NightActivity | null;
+  years_with_data: number[];
+}
+
 export interface DashboardStats {
   n_targets: number;
   n_frames: number;
@@ -2951,6 +2979,10 @@ export const api = {
   // from the same figures over the user's own best picture. A href/download,
   // not a fetch: the browser saves the image.
   recapPosterUrl: () => `/api/recap.jpg`,
+  // "Your year under the stars" — the same nights the heatmap folds, clipped to
+  // one calendar year. A year with nothing in it is a normal 200 whose
+  // `years_with_data` says where the nights actually are.
+  getYearRecap: (year: number) => req<YearRecap>(`/api/recap/year/${year}`),
   galleryMontageUrl: (limit?: number) =>
     `/api/gallery/montage.jpg${limit ? `?limit=${limit}` : ""}`,
   // Download URL for "all my pictures" — every target's current picture (its
