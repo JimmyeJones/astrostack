@@ -12823,18 +12823,55 @@ to **Shipped**.)_
   > (+4) the render, the link, and that no request is made with no trail; `Target.test.tsx` (+2) that the note
   > reaches the real page's notes area and stays away without one.
 
-- **NEW IDEA (Builder 2026-09-02, spotted while unifying two of the four copies in v0.323.1) — route the
-  remaining two copies of the combine dispatcher's frame-count gates through `combine_method`.** *(Pillar:
-  maintainability in service of correctness — size S; **the hot path, so measure nothing changes**.)* The gates
-  `min_max_reject and n >= 3` / `sigma_clip and n >= 4` were written out **four** times in
-  `seestack/stack/stacker.py`. v0.323.1 gave them one public definition (`combine_method`) and routed the
-  `STACKER` header card through it; the *dispatcher itself* (`run_stack`'s `if/elif` chain) and
-  `_records_rejection_map`'s mirror of the same conditions still carry their own. They agree today — that was
-  checked — but the whole reason v0.323.1 existed is that a *fifth* surface (the Stack form) had drifted from
-  them, and the next gate change has two places left to forget. **Care:** the dispatcher's branches also decide
-  which accumulator is constructed, so this is a rewrite of live control flow rather than a label — take it
-  only with a before/after that a representative stack produces bit-identical output, and leave
-  `_records_rejection_map` alone if folding it needs the memory estimate to change shape.
+- **✅ SHIPPED (Builder, v0.342.1, branch `claude/sweet-babbage-0z0bbr`) — ~~route the remaining two copies of
+  the combine dispatcher's frame-count gates through `combine_method`.~~** Built as filed, with the
+  before/after the entry demanded actually run rather than argued.
+
+  **Both named copies are gone.** `run_stack`'s dispatcher now computes `combine = combine_method(eff, n)`
+  once and branches on it (`if combine == "drizzle"` / `elif combine == "min-max-reject"` / `elif combine ==
+  "sigma-clip"` / `else`), and `_records_rejection_map` asks the same function instead of re-deriving the
+  same three conditions a second time. The branch bodies are untouched — this is a rewrite of the
+  *predicate*, not of the control flow inside it — and `eff.drizzle` is never anything but `options.drizzle`
+  (nothing between `_resolve_auto_reject` and the dispatcher touches it), so the expressions are identical
+  term for term.
+
+  **Measured bit-identical on a real stack, not asserted.** The same six-case script was run against a
+  `git worktree` of `origin/main` and against this tree, hashing the master's pixels: *mean at 3 subs*,
+  *κ-σ at 16*, *min/max at 3*, *min/max taking precedence over κ-σ at 16*, and *κ-σ with a rejection
+  map* all came back with the **identical SHA-256**, the identical `STACKER`/`REJMODE`/`REJFRAC` cards and
+  the identical coverage. The drizzle case did not — and that turned out to be a **property of the drizzle
+  path itself, not of this change**: it does not reproduce bit-for-bit run to run on `origin/main` either.
+  Filed as its own measured observation under "Image quality" rather than swept into this commit.
+
+  **The test is the half that keeps it true.** `tests/test_combine_dispatch.py` runs *real* stacks on both
+  sides of every gate the dispatcher has — 3 vs 4 subs on the default κ-σ, 2 vs 3 on min/max, and min/max
+  winning over κ-σ at 16 — and asserts the **`REJMODE`** card matches `combine_method`'s answer.
+  `REJMODE` is written by each branch body from its own `RejectionStats`, so a branch taken against the
+  shared definition shows up; asserting on `STACKER` could not, since `combine_method` fills that in itself.
+  Verified to bite: re-inlining a wrong gate (`combine == "min-max-reject" and n >= 4`) fails the 3-sub case.
+  A sixth test pins `_records_rejection_map` against the combine it will run across the whole grid, plus the
+  drizzle exception (its map rides on `drizzle_reject`, not on the combine name) and the
+  `record_rejection_map=False` short-circuit.
+
+  **Upgrade-safe (§9):** no pixel moves, no option, default, schema, on-disk path or response shape changes;
+  three comments that described the duplication were corrected rather than left to mislead the next reader.
+
+  *(Original entry follows.)*
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-02, spotted while unifying two of the four copies in v0.323.1) — route the
+    remaining two copies of the combine dispatcher's frame-count gates through `combine_method`.** *(Pillar:
+    maintainability in service of correctness — size S; **the hot path, so measure nothing changes**.)* The gates
+    `min_max_reject and n >= 3` / `sigma_clip and n >= 4` were written out **four** times in
+    `seestack/stack/stacker.py`. v0.323.1 gave them one public definition (`combine_method`) and routed the
+    `STACKER` header card through it; the *dispatcher itself* (`run_stack`'s `if/elif` chain) and
+    `_records_rejection_map`'s mirror of the same conditions still carry their own. They agree today — that was
+    checked — but the whole reason v0.323.1 existed is that a *fifth* surface (the Stack form) had drifted from
+    them, and the next gate change has two places left to forget. **Care:** the dispatcher's branches also decide
+    which accumulator is constructed, so this is a rewrite of live control flow rather than a label — take it
+    only with a before/after that a representative stack produces bit-identical output, and leave
+    `_records_rejection_map` alone if folding it needs the memory estimate to change shape.
 
 - **NEW IDEA (Builder 2026-09-02, the third consumer of the same fact, left alone by v0.323.1 deliberately) —
   the Stack form's `rejectionOn` still asks "did a pass dispatch?", not "can it remove anything?"**
@@ -22962,6 +22999,45 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **⚪ MEASURED, RECORDED SO NOBODY RE-TREADS IT — the **drizzle** path is not bit-reproducible under
+  multithreading; every other combine is. Not a picture bug at the size measured; do NOT "fix" it by
+  serialising the accumulation.** *(Builder 2026-09-04, found while proving the combine-dispatcher routing
+  changed no pixels — it was the one case of six whose hash moved, and it moves on `origin/main` too.
+  Pillar: trust / image quality — PRIORITY 4. Confidence: **measured**, four runs, both trees.)*
+
+  **What was measured.** Sixteen synthetic Seestar subs (one carrying a planted satellite trail), stacked
+  twice with identical options — `drizzle`, `drizzle_reject`, `drizzle_scale=1.5`, `max_workers=2` — produce
+  masters that differ. Repeated four times against the same first run:
+
+  | pair | max abs diff | pixels > 1 ADU | pixels differing at all |
+  |---|---|---|---|
+  | run0 vs run1 | 7.24 | 12 | 563,725 / 1,036,800 |
+  | run0 vs run2 | **117.66** | 12 | 491,361 / 1,036,800 |
+  | run0 vs run3 | 7.24 | 12 | 392,844 / 1,036,800 |
+
+  No NaN ever swapped sides (`nan_mismatch = 0`), so coverage is stable — it is the *values* that move.
+
+  **The size, in context, which is why this is filed rather than fixed.** The half-a-million differing
+  pixels are float-order noise: sub-0.01 ADU on an image whose median is 5.7. Only **12 pixels of a million**
+  move by more than 1 ADU, and the 117 is a **star core** — 8,817.96 against 8,753.12, i.e. **0.7 % of the
+  value**, on a pixel where a κ-σ clip decision flipped on a steep gradient. Nothing structural, nothing
+  visible, and nothing that changes what the picture shows.
+
+  **The cause, and the reason serialising is the wrong cure.** Isolated by probe:
+  `max_workers=1` is **bit-identical** (`ndiff = 0`); `max_workers=2` diverges **with and without**
+  `drizzle_reject` (max 0.0117 and 0.0098 on the runs that did not catch a clip flip). So it is
+  non-associative float addition into a shared canvas under two workers — not the rejection pass, which
+  only *amplifies* it at a handful of pixels. The κ-σ and min/max paths are deterministic at
+  `max_workers=2` (`ndiff = 0`), because their consumers accumulate in submission order. Forcing the same
+  on drizzle means giving up the parallelism on the path that needs it most (the owner's mosaics are the
+  largest canvases this app builds), to buy a reproducibility nobody has asked for.
+
+  **What it *does* mean, and the only thing worth acting on.** A re-stack of the same subs is not
+  guaranteed to be byte-identical, so **no test or tool may assert a drizzled master's bytes** — compare
+  with a tolerance, or compare a non-drizzle case. The six-case before/after script that found this is the
+  method to reuse for any future hot-path refactor; run it with `max_workers=1` if a drizzle case must be
+  hashed.
 
 - **NEW IDEA (Builder 2026-09-04, the *behavioural* consequence of the v0.340.0 measurement — read the caution
   before touching this) — an unattended drizzle run could skip a rejection pass that provably clips nothing,
