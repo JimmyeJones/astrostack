@@ -29,7 +29,7 @@ import { integrationTrend } from "../components/target/integrationTrend";
 import { NoiseReadout, NoiseDelta, CleanestBadge, cleanestRunId, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import {
-  AnnotatedImage, croppedAnnotationView, storedPreviewScaleBar,
+  AnnotatedImage, croppedAnnotationView, storedPreviewScaleBar, turnedPreviewView,
 } from "../components/AnnotatedImage";
 import { describeFieldObjects } from "../components/fieldObjectList";
 import { StackHealthCard } from "../components/StackHealthCard";
@@ -1055,18 +1055,31 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const imageIsNorthUp = showingStored
     ? savedNorthUp || storedNorthUp
     : applyNorthUp;
-  const view = croppedAnnotationView(
+  // …and the one case that *can't* be composed: a stored preview whose geometry
+  // isn't a crop of the canvas at all. Nothing measured on the FITS grid can be
+  // placed on it honestly, so hide the pins/bar like a North-up save does.
+  const geometryUnplaceable = showingStored && !!run.preview_geometry_unknown;
+  // A turn a past save baked into the stored bytes *is* answerable — by the
+  // server, on the preview's own grid — so the pins come back on it. Only while
+  // those very bytes are what's on screen and nothing is turning them further:
+  // the live Adjust render is a different picture, and `?north_up=true` takes
+  // another turn on top, neither of which the server's answer describes.
+  const turnedView = showingStored && !storedNorthUp && !geometryUnplaceable
+    ? turnedPreviewView(annotations.data) : null;
+  const view = turnedView ?? croppedAnnotationView(
     showingStored ? run.preview_crop : null,
     objects, scaleBar,
     annotations.data?.width ?? run.canvas_w,
     annotations.data?.height ?? run.canvas_h,
     annotations.data?.preview_scale_bar ?? null,
   );
-  // …and the one case that *can't* be composed: a stored preview whose geometry
-  // isn't a crop of the canvas at all. Nothing measured on the FITS grid can be
-  // placed on it honestly, so hide the pins/bar like a North-up save does.
-  const geometryUnplaceable = showingStored && !!run.preview_geometry_unknown;
+  // The scale bar and the compass still step aside on any turned picture: the
+  // bar's own length would survive the turn, but the sentence it carries ("the
+  // whole frame is about 5.4 full Moons wide") describes a *field*, and a turned
+  // frame has grown black wedges around the same sky. The pins have no such
+  // problem — a name points at a thing, not at the edges.
   const cantPlaceMarks = imageIsNorthUp || geometryUnplaceable;
+  const cantPlaceObjects = cantPlaceMarks && !turnedView;
   // The rejection tint is measured against the stored bytes, so it lands only
   // while those bytes are what's on screen — but it no longer has to step aside
   // for an on-the-fly North-up turn: the overlay endpoint takes the same turn
@@ -1085,7 +1098,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             src={imgSrc} alt={run.output_basename}
             imgWidth={view.width}
             imgHeight={view.height}
-            objects={view.objects} show={identify && !cantPlaceMarks} height={180}
+            objects={view.objects} show={identify && !cantPlaceObjects} height={180}
             scaleBar={view.scaleBar} showScale={scale && !cantPlaceMarks}
             // The rose rides the same toggle as the bar — they are one idea
             // ("how big, and which way up?") and the *baked* share picture has
@@ -1110,7 +1123,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         )}
       </Card.Section>
 
-      {cantPlaceMarks && (identify || scale) ? (
+      {(identify && cantPlaceObjects) || (scale && cantPlaceMarks) ? (
         // Object pins and the scale bar are computed on the un-rotated, un-cropped
         // FITS grid, so they'd land in the wrong place on a render that turned or
         // reshaped it. Hide them (rather than mis-plot) and say why — which differs
@@ -1121,6 +1134,10 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             ? "This picture was reshaped when it was processed, so object pins, the scale bar and the compass can’t be placed on it — they’re measured on the original image. Open Adjust and save it again to use them."
             : applyNorthUp
             ? "Turn off “Rotate so North is up” to place object pins, the scale bar and the compass — they’re measured on the un-rotated image."
+            : turnedView
+            // The pins followed the turn, so only the two marks are missing —
+            // and this line only renders when the scale toggle asked for them.
+            ? "This picture was saved rotated so North is up. The object pins follow the turn, but the scale bar and the compass describe the un-rotated frame, so they can’t be placed on it. Open Adjust and save it un-rotated to use them."
             : "This picture was saved rotated so North is up, so object pins, the scale bar and the compass can’t be placed on it — they’re measured on the un-rotated image. Open Adjust and save it un-rotated to use them."}
         </Text>
       ) : null}
@@ -1133,7 +1150,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         </Text>
       ) : null}
 
-      {identify && !cantPlaceMarks && !annotations.isLoading && annotations.isSuccess ? (
+      {identify && !cantPlaceObjects && !annotations.isLoading && annotations.isSuccess ? (
         view.objects.length ? (
           // Plain-language "what else is in this picture?" list — the friendly
           // read of the same objects the overlay labels on the image, so a

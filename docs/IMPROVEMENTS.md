@@ -20920,6 +20920,82 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **✅ SHIPPED (Builder, v0.350.0, branch `claude/sweet-babbage-8dyvfi`) — ~~using the app's own
+  "Adjust → North up → Save" silently cost you "What's in it?", for good~~. The pins now follow the turn on
+  screen too, so the app stops telling you it can't label a picture it just made.**
+  *(Pillar: friendliness / trust — PRIORITY 3. Found while shipping the North-up half of the labelled share,
+  v0.349.0, which fixed the same stand-down on the shared *file*.)*
+
+  **The dead end.** `preview_north_up_deg` is only ever set by History's "Adjust → North up → Save" — the
+  app's own, discoverable way to orient a picture like every reference photo of the object. From then on both
+  surfaces that draw object pins (`LatestPictureCard` and History) hid them and said *"This picture was saved
+  rotated so North is up, so object labels can't be placed on it — they're measured on the un-rotated
+  image."* Honest, and a dead end the app created for itself: the only way back was to save it un-rotated,
+  i.e. to undo the feature.
+
+  **Why it stayed unfixed, and what changed.** The browser genuinely cannot reconstruct the turn — a
+  rotate-with-expand's canvas is a ceil/floor bounding box and a near-square angle snaps to a lossless
+  `rot90` — so re-deriving it in TypeScript would have been a second copy of the renderer's geometry, free to
+  drift from both the picture and the names baked into a share. v0.349.0 made the server able to answer
+  (`follow_north_up_turns`), so it answers: `GET …/annotations` gained **`preview_objects`** with
+  **`preview_width`/`preview_height`** — the same objects on the stored preview's own grid, its crop applied
+  and *then* the baked turn, in the order the pixels took them. One geometry, three consumers (the on-screen
+  pin, the baked label, the picture itself), so they cannot disagree.
+
+  **What deliberately does NOT come back, and why.** The **scale bar and the compass** still stand down on a
+  turned picture. The bar's *length* would survive a rotate (the pixel scale doesn't change), but the
+  sentence it carries — *"the whole frame is about 5.4 full Moons wide"* — is a claim about the **field**, and
+  a turned frame has grown black wedges around the same sky. A pin has no such problem: it points at a thing,
+  not at the edges. So History's note now names only the half that is missing, and only when the Scale toggle
+  actually asked for it. `storedPreviewScaleBar` already said nothing there for this exact reason; a test
+  pins the two agreeing.
+
+  **Upgrade-safe (§9):** three additive response fields, `null` for every run nothing turned — so an
+  uncropped, un-turned payload is byte-for-byte what it was, and the crop-only case stays where it was (the
+  client composes that one exactly). An older backend, and any preview the server refuses to reconcile
+  (`preview_geometry_unknown`), both arrive as "no answer" and step aside exactly as before. No config key,
+  no schema, no on-disk path, no default flipped, no field renamed or removed.
+
+  **Tests (+13).** `tests/webapp/test_stack_annotations.py` (+5): nothing extra on a run nothing turned; a
+  saved-North-up preview's pins measured **against the renderer as ground truth** (plant the un-turned pixel,
+  put it through `rotate_image_north_up`, the served coordinate has to be where the marker landed);
+  crop-then-turn composed in that order on an exact 90° grid (600×640 → 640×600); an unreconcilable geometry
+  still refusing; and a turned run with no WCS answering nothing rather than erroring.
+  `AnnotatedImage.test.tsx` (+4) on the pure `turnedPreviewView` — null for every "server didn't answer"
+  shape, the server's answer taken when it did, no bar (agreeing with `storedPreviewScaleBar`), and a
+  degenerate grid refused. `LatestPictureCard.test.tsx` (+2) and `History.test.tsx` (+2): the names coming
+  back on a turned picture, the read-out following the *placed* list rather than the canvas-grid one, the
+  labelled-save offer now honest there (the share bakes through the same turn), and the note naming only the
+  marks when Scale is on. The two tests that pinned the old refusal were **kept**, re-aimed at the case that
+  still refuses (an older backend / no server answer) rather than deleted.
+
+- **NEW IDEA (Builder 2026-09-04, the half v0.350.0 deliberately did not build) — decide what the scale bar's
+  Moon sentence is a claim *about*, and then the bar and compass can survive a North-up turn too.**
+  *(Pillar: friendliness / trust — PRIORITY 3; size S once the question is answered, and the question is the
+  whole task.)* v0.350.0 brought the object pins back on a picture a past "Adjust → North up → Save" turned,
+  and left the scale bar and compass standing down. That was not laziness and it is not a gap to close
+  blindly — the two marks split cleanly on one unanswered question:
+  * **The compass is easy and could ship on its own (XS).** A rose is a pair of angles, and rotating a
+    direction is exact and already done server-side (`seestack.skymarks.rotated`, which
+    `_sky_marks_for_run` uses for the baked share). Add `preview_directions` beside `preview_objects` and it
+    follows the turn. The only reason it did not ship in v0.350.0 is that it rides History's *Scale* toggle
+    together with the bar, so shipping it alone gives you a compass and no bar under one control — which may
+    read as a bug rather than as a decision.
+  * **The bar is the real question.** Its drawn *length* survives a rotate exactly (a rotate doesn't change
+    the pixel scale — rescale `fraction` by `unrotated_w / turned_w` and it is right). What does not survive
+    is the sentence it carries: `frame_arcmin` / `moon_comparison` say *"the whole frame is about N full
+    Moons wide"*, and a rotate-with-expand's frame is wider than the field by the black wedges it just added.
+    So there are two defensible answers and they need choosing, not averaging: **(a)** the sentence is about
+    the *picture's frame*, so on a turned picture it must be re-measured (and would then honestly include
+    wedge), or **(b)** the sentence is about the *field* — what the telescope actually saw — in which case
+    the un-rotated number is already right and only the drawn length needs rescaling. **(b) is probably the
+    honest one for a beginner** ("how big a piece of sky is this?" is a question about sky, not about canvas)
+    — but it makes the drawn bar and the sentence measure two different rectangles, which is exactly the
+    inconsistency `preview_scale_bar` was introduced to remove for the crop case. **Decide that before
+    writing any code**, and record the decision here; then both marks are a small additive field each.
+    Grep `storedPreviewScaleBar` and `_scale_bar_from_wcs` first — the crop case already made this choice
+    once, and whatever it chose is the precedent to follow or to knowingly break.
+
 - **⚪ DOGFOOD BASELINE (Builder 2026-09-04, `scripts/agent-dogfood.sh` at v0.345.7 — the fourth measurement,
   and the fourth that says DO NOT open a speculative IA slice).** Full run (boot → sample → stack → Playwright
   probe at 1440 px and 420 px): **nothing overflowing, no console errors**. Tallest pages, phone first:
@@ -21037,6 +21113,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   session-recap standouts. **Care:** the fix is a *merge that keeps both figures*, never a drop — and a pair
   that usually differs should stay two cards, because merging a coincidence would be as confusing as
   repeating one.
+
+- **⚪ DID THE GREP, AND THE ANSWER IS "ALREADY ANSWERED" — DECLINED ONCE so it isn't re-litigated (Builder
+  2026-09-04).** The entry below asks for a caption under the Target picture explaining the canvas's black
+  margins, and tells whoever picks it up to grep first and decline it as copy churn if the app already says
+  it where the beginner is looking. It does. `seestack/stackhealth.py` (~line 467, `kind="coverage"`) already
+  emits, into the "How's my stack?" panel on the *same page*: *"About N% of this picture has far fewer frames
+  than the best-covered part, so it's noisier and uneven there. Trim border gives a clean, even rectangle."*
+  — with `action="trim_border"`, i.e. it also names the one-click fix, which a bare caption would not. It is
+  measured (`coverage_thin_frac`) rather than guessed, and it self-hides below `_COVERAGE_THIN_SHARE` so an
+  evenly-covered stack is never told about a border it hasn't got. **The one honest gap, recorded rather than
+  built:** the wording is about *noise* ("noisier and uneven"), not about *black* — a beginner staring at a
+  flat black band may not connect the two. If anyone ever wants to close that, it is **four words inside the
+  existing sentence**, not a new caption or card: say the thin edge *looks dark*. Do not add a second surface
+  for it.
 
 - **NEW IDEA (Builder 2026-09-04, seen on the Target page in the same dogfood pass — GREP FIRST, this may be
   answered already) — the picture card shows the canvas's black margins with nothing saying what they are.**
@@ -28811,9 +28901,65 @@ problems. Dogfood it every big-picture run and fix root causes.
   North-up-saved run returns the plain picture unchanged (never a mis-plot); a cropped run's labels land inside
   the trim.
 
-- **🟡 SLICE (a) SHIPPED v0.316.0 — slice (b) still open. NEW IDEA (Builder 2026-08-30, the two halves
+- **✅ BOTH SLICES SHIPPED (slice (a): v0.316.0; slice (b): Builder, v0.349.0, branch
+  `claude/sweet-babbage-8dyvfi`). NEW IDEA (Builder 2026-08-30, the two halves
   deliberately left out of the labelled share v0.315.0) — the names reach the *download*, not yet the
   **share sheet**; and a North-up picture still refuses them.**
+
+  **✅ (b) SHIPPED v0.349.0 — the names now survive the turn, and both of the entry's "check first" items
+  were checked rather than assumed.** The pins are carried through the *renderer's own* geometry
+  (`seestack.render.orient.north_up_pixel_transform`) instead of being abandoned, so North-up framing and
+  object names stopped being mutually exclusive on a shared file.
+
+  **The convention question the entry asked about is answered by not having one.** `north_up_pixel_transform`
+  maps a *rotated* pixel back to the original (`p_in = M·p_out + t`); a label needs the other direction, and
+  `M` is a rotation in both of its branches, so its transpose is its inverse — no angle sign is re-derived
+  anywhere, which is the whole reason that helper exists. That inverse is now a public
+  `seestack.render.orient.follow_north_up_turns(points, w, h, turns)`, beside the transform it inverts rather
+  than inside the label module, because "where did this thing in the picture go?" is the question every future
+  overlay will ask. `place_labels` gained a `north_up_turns=()` keyword and `_object_labels_for_run` takes the
+  **sequence** of turns rather than one summed angle.
+
+  **Why a sequence, with the number that settles it.** A picture a past "Adjust → North up → Save" turned and
+  then shared with `?north_up=true` takes **two** rotations of a *growing* canvas: the first rotate-with-expand
+  adds black wedges, and the second bounds a frame that now includes them. At 41×27, 33° then 41° puts a point
+  at **(22.7, 44.3) on a 69×69** canvas while one 74° turn puts it at **(7.7, 33.3) on a 39×47** one. The trap
+  worth writing down is that a *square* first turn expands nothing, so 90°+33° and 123° agree **exactly** — the
+  summed shortcut looks right until the first turn isn't square, which is why both tests here were rewritten
+  onto two non-square angles after the first pair passed for that reason.
+
+  **Measured, not argued, against the renderer as ground truth** — plant one bright pixel, put the image
+  through `rotate_image_north_up`, take the centroid of what comes out: **exact (0.000 px)** on every snapped
+  90° turn, and **≤ 0.19 px** at 7°/31.5°/44°/123°, where `PIL.Image.rotate(expand=True)`'s ceil/floor
+  bounding box is the only residual. The geometry is computed on the crop rectangle's own grid while the
+  rotation really happens on the downscaled preview; that scale gap was measured too, at the sizes the owner
+  has (1920×1080 canvas → 1024 px preview): **≤ 0.81 px**, against a marker dot of ~5 px radius.
+
+  **The second "check first" — a chip pushed into the expanded canvas's new corners — is a non-issue, and
+  here is why rather than a constant nudged until it looked right.** The dot is always on real picture
+  content (it *is* a catalog object in the solved field) and `draw_object_labels` only ever places a chip
+  within one text-height of its dot, so the worst case is a name whose tail overlaps a black wedge —
+  high-contrast on the wedge, still attached to its dot. Nothing can be drawn in a wedge *pointing at
+  nothing*, because a label with no dot is never drawn at all.
+
+  **Upgrade-safe (§9):** `north_up_turns` defaults to `()` and an empty/zero turn list is byte-identical to
+  today's placement (pinned), so every existing caller and every un-turned share is unchanged; no config key,
+  no schema, no on-disk path, no API response shape, no default flipped. The one behaviour that changes is the
+  one that was a stand-down: a turned share carried no names, and now carries them.
+
+  **Tests (+15).** `tests/test_orient.py` (+4, on the new public helper): it lands where the renderer put the
+  pixel across six angles; the two-turn/summed divergence above; the no-turn identity; and a degenerate grid.
+  `tests/test_object_labels.py` (+7): the no-turn identity; lossless placement across
+  ±90°/180° and sub-pixel placement across four off-square angles, both against the rotate-a-marker ground
+  truth; two turns following the pixels *and* differing from their sum; a turn re-placing the names without
+  reshuffling which ones a crowded field keeps; and a turn composing with a crop. `tests/webapp/
+  test_share_object_labels.py` (+4, the fixture gained a `field_rotation_deg` so a North-up test measures a
+  real turn rather than a no-op): the anchors following a 31.5° turn on the real Orion field; the endpoint
+  serving a North-up share that actually carries names; a preview a past *save* turned still carrying them
+  with no `north_up` asked for at all; and the existing "a turned picture is shared unlabelled" test replaced
+  by the behaviour that supersedes it.
+
+  *(Original entry follows.)*
   *(Pillar: understand + share — PRIORITY 3.)* Two independent slices, in value order.
 
   **✅ (a) SHIPPED v0.316.0** (Builder 2026-08-30, branch `claude/compassionate-galileo-p5irbc`), **decided
@@ -28856,7 +29002,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   scale bar and reaches the same answer: most likely the **keepsake** share — the one meant for other people —
   gains them, rather than adding a fourth share item to a menu the owner already calls busy. Decide the two
   together; shipping them separately will produce two different answers to one question.
-  **(b) Label a North-up share (S–M).** v0.314.0 refuses on a turned picture because the pins are on the
+  **~~(b) Label a North-up share (S–M).~~ — SHIPPED v0.349.0, see above.** v0.314.0 refuses on a turned picture because the pins are on the
   un-rotated FITS grid — an honest stand-down, but it means the two most-wanted marks on a shared file
   (North-up framing and object names) are mutually exclusive. It is buildable: the turn is a known angle with
   `expand=True`, and the app **already** maps points through exactly that transform —
