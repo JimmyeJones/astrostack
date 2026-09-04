@@ -21787,14 +21787,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   explanation and is the natural home for "and here is how to do it from a keyboard" — that removes nothing from
   anybody and costs no height. The second is almost certainly the right answer.
 
-- **NEW IDEA (Builder 2026-08-19, same dogfood pass) — the Tonight page explains itself with a FITS keyword.**
-  *(Friendliness — PRIORITY 3; size S; copy only.)* The "Set your observing location" alert reads *"It reads your
-  location automatically from a plate-solved Seestar frame (SITELAT/SITELONG) — so once you've solved some subs
-  it'll just work."* Everything about that sentence is right for a beginner except the parenthesis, which is a pair
-  of FITS header keywords and means nothing to the person the sentence is written for. Dropping the four words
-  costs no information a beginner can use (nobody is going to go and read their headers), and the sentence is
-  already doing the reassuring work. **Care:** check the same parenthesis isn't load-bearing somewhere it *is* the
-  answer — e.g. a Settings hint aimed at someone debugging why their location didn't come through.
+- **✅ SHIPPED (Builder, v0.345.1, branch `claude/sweet-babbage-xf90y3`) — ~~the Tonight page explains itself
+  with a FITS keyword.~~** The parenthesis is gone; the sentence now reads *"It reads your location
+  automatically from a plate-solved Seestar frame — so once you've solved some subs it'll just work."*
+
+  **The entry's care note was the actual work, and it came back clean.** Swept every user-visible string in
+  `frontend/src` for raw FITS keywords (`SITELAT`, `SITELONG`, `DATE-OBS`, `FOCALLEN`, `XPIXSZ`, `CROTA2`,
+  `BAYERPAT`, `EXPTIME`, `CCD-TEMP`, `OBJCTRA`/`OBJCTDEC`, `IMAGETYP`, `NAXIS*`): **this alert was the only
+  one.** The two remaining hits are a *code comment* in `Tonight.tsx` and one in `Target.tsx`, which is where
+  a keyword belongs. In particular the Settings hints the entry worried about — `site_lat` / `site_lon` —
+  already say *"Leave blank to read it automatically from a plate-solved Seestar frame"* with no keyword in
+  them, so nothing anywhere was leaning on the parenthesis as the answer.
+
+  Frontend copy only: no API, schema, config, on-disk or default change. **Test (+1, in the existing
+  location-prompt case):** the reassurance survives and the keywords are absent, so a future edit can't put
+  the jargon back without reddening the suite.
+
+  *(Original entry follows.)*
+
+  - **NEW IDEA (Builder 2026-08-19, same dogfood pass) — the Tonight page explains itself with a FITS
+    keyword.** *(Friendliness — PRIORITY 3; size S; copy only.)* The "Set your observing location" alert reads
+    *"It reads your location automatically from a plate-solved Seestar frame (SITELAT/SITELONG) — so once
+    you've solved some subs it'll just work."* Everything about that sentence is right for a beginner except
+    the parenthesis, which is a pair of FITS header keywords and means nothing to the person the sentence is
+    written for. Dropping the four words costs no information a beginner can use (nobody is going to go and
+    read their headers), and the sentence is already doing the reassuring work. **Care:** check the same
+    parenthesis isn't load-bearing somewhere it *is* the answer — e.g. a Settings hint aimed at someone
+    debugging why their location didn't come through.
 
 - ~~**NEXT SLICE OF THE STANDING IA ITEM — FOUND BY DOGFOODING (Builder 2026-08-17, counted in a real running build
   at 1440 px) — one History run card renders **15 buttons in four rows** plus a delete icon, for a single
