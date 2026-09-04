@@ -28773,9 +28773,65 @@ problems. Dogfood it every big-picture run and fix root causes.
   North-up-saved run returns the plain picture unchanged (never a mis-plot); a cropped run's labels land inside
   the trim.
 
-- **🟡 SLICE (a) SHIPPED v0.316.0 — slice (b) still open. NEW IDEA (Builder 2026-08-30, the two halves
+- **✅ BOTH SLICES SHIPPED (slice (a): v0.316.0; slice (b): Builder, v0.348.0, branch
+  `claude/sweet-babbage-8dyvfi`). NEW IDEA (Builder 2026-08-30, the two halves
   deliberately left out of the labelled share v0.315.0) — the names reach the *download*, not yet the
   **share sheet**; and a North-up picture still refuses them.**
+
+  **✅ (b) SHIPPED v0.348.0 — the names now survive the turn, and both of the entry's "check first" items
+  were checked rather than assumed.** The pins are carried through the *renderer's own* geometry
+  (`seestack.render.orient.north_up_pixel_transform`) instead of being abandoned, so North-up framing and
+  object names stopped being mutually exclusive on a shared file.
+
+  **The convention question the entry asked about is answered by not having one.** `north_up_pixel_transform`
+  maps a *rotated* pixel back to the original (`p_in = M·p_out + t`); a label needs the other direction, and
+  `M` is a rotation in both of its branches, so its transpose is its inverse — no angle sign is re-derived
+  anywhere, which is the whole reason that helper exists. That inverse is now a public
+  `seestack.render.orient.follow_north_up_turns(points, w, h, turns)`, beside the transform it inverts rather
+  than inside the label module, because "where did this thing in the picture go?" is the question every future
+  overlay will ask. `place_labels` gained a `north_up_turns=()` keyword and `_object_labels_for_run` takes the
+  **sequence** of turns rather than one summed angle.
+
+  **Why a sequence, with the number that settles it.** A picture a past "Adjust → North up → Save" turned and
+  then shared with `?north_up=true` takes **two** rotations of a *growing* canvas: the first rotate-with-expand
+  adds black wedges, and the second bounds a frame that now includes them. At 41×27, 33° then 41° puts a point
+  at **(22.7, 44.3) on a 69×69** canvas while one 74° turn puts it at **(7.7, 33.3) on a 39×47** one. The trap
+  worth writing down is that a *square* first turn expands nothing, so 90°+33° and 123° agree **exactly** — the
+  summed shortcut looks right until the first turn isn't square, which is why both tests here were rewritten
+  onto two non-square angles after the first pair passed for that reason.
+
+  **Measured, not argued, against the renderer as ground truth** — plant one bright pixel, put the image
+  through `rotate_image_north_up`, take the centroid of what comes out: **exact (0.000 px)** on every snapped
+  90° turn, and **≤ 0.19 px** at 7°/31.5°/44°/123°, where `PIL.Image.rotate(expand=True)`'s ceil/floor
+  bounding box is the only residual. The geometry is computed on the crop rectangle's own grid while the
+  rotation really happens on the downscaled preview; that scale gap was measured too, at the sizes the owner
+  has (1920×1080 canvas → 1024 px preview): **≤ 0.81 px**, against a marker dot of ~5 px radius.
+
+  **The second "check first" — a chip pushed into the expanded canvas's new corners — is a non-issue, and
+  here is why rather than a constant nudged until it looked right.** The dot is always on real picture
+  content (it *is* a catalog object in the solved field) and `draw_object_labels` only ever places a chip
+  within one text-height of its dot, so the worst case is a name whose tail overlaps a black wedge —
+  high-contrast on the wedge, still attached to its dot. Nothing can be drawn in a wedge *pointing at
+  nothing*, because a label with no dot is never drawn at all.
+
+  **Upgrade-safe (§9):** `north_up_turns` defaults to `()` and an empty/zero turn list is byte-identical to
+  today's placement (pinned), so every existing caller and every un-turned share is unchanged; no config key,
+  no schema, no on-disk path, no API response shape, no default flipped. The one behaviour that changes is the
+  one that was a stand-down: a turned share carried no names, and now carries them.
+
+  **Tests (+15).** `tests/test_orient.py` (+4, on the new public helper): it lands where the renderer put the
+  pixel across six angles; the two-turn/summed divergence above; the no-turn identity; and a degenerate grid.
+  `tests/test_object_labels.py` (+7): the no-turn identity; lossless placement across
+  ±90°/180° and sub-pixel placement across four off-square angles, both against the rotate-a-marker ground
+  truth; two turns following the pixels *and* differing from their sum; a turn re-placing the names without
+  reshuffling which ones a crowded field keeps; and a turn composing with a crop. `tests/webapp/
+  test_share_object_labels.py` (+4, the fixture gained a `field_rotation_deg` so a North-up test measures a
+  real turn rather than a no-op): the anchors following a 31.5° turn on the real Orion field; the endpoint
+  serving a North-up share that actually carries names; a preview a past *save* turned still carrying them
+  with no `north_up` asked for at all; and the existing "a turned picture is shared unlabelled" test replaced
+  by the behaviour that supersedes it.
+
+  *(Original entry follows.)*
   *(Pillar: understand + share — PRIORITY 3.)* Two independent slices, in value order.
 
   **✅ (a) SHIPPED v0.316.0** (Builder 2026-08-30, branch `claude/compassionate-galileo-p5irbc`), **decided
@@ -28818,7 +28874,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   scale bar and reaches the same answer: most likely the **keepsake** share — the one meant for other people —
   gains them, rather than adding a fourth share item to a menu the owner already calls busy. Decide the two
   together; shipping them separately will produce two different answers to one question.
-  **(b) Label a North-up share (S–M).** v0.314.0 refuses on a turned picture because the pins are on the
+  **~~(b) Label a North-up share (S–M).~~ — SHIPPED v0.348.0, see above.** v0.314.0 refuses on a turned picture because the pins are on the
   un-rotated FITS grid — an honest stand-down, but it means the two most-wanted marks on a shared file
   (North-up framing and object names) are mutually exclusive. It is buildable: the turn is a known angle with
   `expand=True`, and the app **already** maps points through exactly that transform —

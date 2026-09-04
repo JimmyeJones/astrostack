@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -1259,7 +1260,8 @@ def _sky_marks_for_run(fits_path: str | None, preview_width: int,
     )
 
 
-def _object_labels_for_run(fits_path: str | None, north_up_deg: float,
+def _object_labels_for_run(fits_path: str | None,
+                           north_up_turns: Sequence[float] = (),
                            crop: PreviewCrop | str | None = None):  # noqa: ANN202
     """The catalog object names to bake onto a run's shared picture.
 
@@ -1268,31 +1270,34 @@ def _object_labels_for_run(fits_path: str | None, north_up_deg: float,
     objects_in_field`) — so the file a beginner posts says exactly what the card
     they shared it from said.
 
-    Two geometries have to be honoured, and unlike the browser overlay there is
-    no toggle to fall back to, so both **refuse rather than guess**:
+    Two geometries sit between those pins and the picture that is actually sent,
+    and both are *followed* rather than guessed at:
 
-    * **Rotation.** The pins are measured on the un-rotated FITS grid. A picture
-      that has been turned — by ``?north_up=true`` or by a past "Adjust → North
-      up → Save" that baked the turn into the stored bytes — no longer matches
-      that grid, and a rotate-with-expand moves every pixel *and* grows the
-      canvas. So a turned picture is shared unlabelled rather than mis-plotted.
-    * **Crop.** A stored preview can be a border trim of the canvas
-      (the one-click auto-edit does this on a mosaic). That one *is* reconcilable
-      — re-base each pin onto the visible rectangle, which is what
-      :func:`~seestack.objectlabels.place_labels` takes ``crop_box`` for — and an
-      object outside the trim simply drops out. A crop whose geometry can't be
-      reconciled at all (:data:`~seestack.previewcrop.UNKNOWN`) refuses, like the
-      scale bar.
+    * **Crop.** A stored preview can be a border trim of the canvas (the
+      one-click auto-edit does this on a mosaic), so each pin is re-based onto
+      the visible rectangle — what :func:`~seestack.objectlabels.place_labels`
+      takes ``crop_box`` for — and an object outside the trim simply drops out.
+      A crop whose geometry can't be reconciled at all
+      (:data:`~seestack.previewcrop.UNKNOWN`) still **refuses**, like the scale
+      bar: there is no toggle to fall back to here, and a mis-plotted name is
+      worse than none.
+    * **Rotation.** ``north_up_turns`` are the North-up rotations applied to
+      those cropped pixels, in order — a past "Adjust → North up → Save" baked
+      into the stored bytes, then whatever a ``?north_up=true`` share still
+      turns them. The turn moves every pixel *and* grows the canvas, so the
+      anchors are carried through the identical transform the renderer used
+      (:func:`~seestack.render.orient.north_up_pixel_transform`) instead of the
+      whole picture being shared bare. Passed as the sequence the pixels really
+      took rather than as one summed angle: two rotations of a growing canvas do
+      not compose into a single rotation of the first one.
 
     Always returns an :class:`~seestack.objectlabels.ObjectLabels` — an empty
-    (falsey) one for every refusal and for a run with no FITS, no WCS, or no
+    (falsey) one for a refusal and for a run with no FITS, no WCS, or no
     catalog object in frame — so the caller never special-cases them and the
     plain share stays byte-for-byte what it was."""
     from seestack.objectlabels import ObjectLabels, place_labels
 
     if not fits_path or not Path(fits_path).exists():
-        return ObjectLabels()
-    if north_up_deg:
         return ObjectLabels()
     if crop == CROP_UNKNOWN:
         return ObjectLabels()
@@ -1308,7 +1313,7 @@ def _object_labels_for_run(fits_path: str | None, north_up_deg: float,
     box = crop_pixel_box(crop if isinstance(crop, PreviewCrop) else None,
                          width, height)
     return place_labels(objects_in_field(wcs, width, height), width, height,
-                        crop_box=box)
+                        crop_box=box, north_up_turns=tuple(north_up_turns))
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/framing")
@@ -3460,6 +3465,13 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # saved North-up arrives already turned, and its rose was wrong even
         # without `north_up` asked for.
         applied_north_up = baked_north_up
+        # The turns the *pixels* took, in order — what anything plotted by pixel
+        # position has to follow. Deliberately a sequence rather than the single
+        # `applied_north_up` total above: that one is right for the rose (a
+        # direction only cares about the summed angle) and wrong for a pin,
+        # because rotating a canvas twice grows it differently from rotating it
+        # once by the sum.
+        north_up_turns: list[float] = [baked_north_up] if baked_north_up else []
         # north_up rotates the shared picture so celestial North points up (like
         # reference photos of the object), using the run's own WCS — a no-op (the
         # bytes are returned untouched) when the run has no WCS, when the
@@ -3471,9 +3483,15 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
                 from seestack.render.thumbnail import (
                     applied_north_up_deg,
                     orient_preview_north_up,
+                    preview_north_up_remainder_deg,
                     stack_north_up_deg,
                 )
                 try:
+                    # The same answer the picture is about to get, from the one
+                    # place that owns the "no WCS / sub-threshold" rules — asked
+                    # for here so the pins can take the identical second turn.
+                    extra_north_up = preview_north_up_remainder_deg(
+                        fits_path, already_deg=baked_north_up)
                     preview = orient_preview_north_up(
                         preview, fits_path, already_deg=baked_north_up)
                     # After that call the bytes sit at the run's *total* North-up
@@ -3482,6 +3500,8 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
                     # which case they keep exactly what the save left.
                     if stack_north_up_deg(fits_path) is not None:
                         applied_north_up = applied_north_up_deg(fits_path)
+                    if extra_north_up:
+                        north_up_turns.append(extra_north_up)
                 except Exception:  # noqa: BLE001 — a broken FITS just shares the un-oriented preview
                     pass
         # nameplate bakes the same tasteful acquisition footer the editor share
@@ -3513,13 +3533,13 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
                                        parse_preview_crop(run.preview_crop_json))
         # label_objects bakes the named catalog objects in the field onto the
         # shared picture — the same pins and names the Target page draws on
-        # screen, which otherwise vanish the moment the file leaves the app. It
-        # refuses (draws nothing) on a picture whose geometry no longer matches
-        # the grid the pins were measured on; see _object_labels_for_run.
+        # screen, which otherwise vanish the moment the file leaves the app. The
+        # pins follow the picture's own crop and North-up turns rather than being
+        # abandoned when it moves; see _object_labels_for_run.
         labels = None
         if label_objects:
             labels = _object_labels_for_run(
-                run.fits_path, applied_north_up,
+                run.fits_path, north_up_turns,
                 parse_preview_crop(run.preview_crop_json))
         data = png_bytes_to_jpeg(
             preview,

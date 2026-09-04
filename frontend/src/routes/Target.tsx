@@ -1418,8 +1418,11 @@ export function TargetView() {
                     wasn't there; the plain share above stays naked for anyone
                     who wants the bare picture. Every one of them is a clean
                     no-op server-side on a run that can't supply it (no solve, a
-                    rotated or reshaped preview, an empty field), so this never
-                    becomes a share that fails — it just carries less. */}
+                    reshaped preview, an empty field), so this never becomes a
+                    share that fails — it just carries less. A picture a past
+                    "North up → Save" turned is no longer one of those cases: the
+                    pins follow the turn, so a rotated keepsake still says what's
+                    in it. */}
                 <SharePictureButton
                   asMenuItem
                   label={<>

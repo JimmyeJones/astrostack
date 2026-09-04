@@ -163,6 +163,87 @@ def test_pixel_transform_rejects_a_degenerate_size():
     assert north_up_pixel_transform(10, -1, 90.0) is None
 
 
+# ---- following an object through the turn ----------------------------------
+#
+# The inverse direction of the transform above: the mapping is written
+# rotated → original because that is what re-deriving a WCS needs, while
+# anything pinned *to a thing in the picture* — a baked object label, an
+# on-screen pin — has to go the other way.
+
+@pytest.mark.parametrize("angle", [90.0, -90.0, 180.0, 31.5, 123.0, -7.0])
+def test_follow_north_up_turns_lands_where_the_picture_put_the_pixel(angle):
+    """Ground truth is the renderer: plant a bright pixel, rotate the image with
+    :func:`rotate_image_north_up`, and the followed point must be where the
+    marker ended up."""
+    from seestack.render.orient import follow_north_up_turns
+
+    w, h = 41, 27
+    pts = [(7.0, 5.0), (20.0, 13.0), (33.0, 22.0)]
+    moved, new_w, new_h = follow_north_up_turns(pts, w, h, (angle,))
+    for (x, y), (mx, my) in zip(pts, moved, strict=True):
+        img = np.zeros((h, w, 3), dtype=np.float32)
+        img[int(y), int(x)] = 1.0
+        out = rotate_image_north_up(img, angle)
+        assert out.shape[:2] == (new_h, new_w)
+        plane = out[..., 0]
+        hit = plane > plane.max() * 0.3
+        ys, xs = np.nonzero(hit)
+        wts = plane[hit]
+        assert abs(mx - (xs * wts).sum() / wts.sum()) < 0.5
+        assert abs(my - (ys * wts).sum() / wts.sum()) < 0.5
+
+
+def test_follow_north_up_turns_applies_them_in_order_not_summed():
+    """Two turns of a *growing* canvas are not one turn by their sum — the first
+    rotate-with-expand adds black wedges, and the second bounds a frame that now
+    includes them. Pinned because a picture really can take two (a baked
+    "North up → Save", then a North-up render).
+
+    Measured at 41×27: 33° then 41° puts the point at (22.7, 44.3) on a 69×69
+    canvas, while one 74° turn puts it at (7.7, 33.3) on a 39×47 one. (A *square*
+    first turn is the exception — it expands nothing, so 90°+33° and 123° really
+    do agree. That is why the summed shortcut looks right until it isn't.)
+    """
+    from seestack.render.orient import follow_north_up_turns
+
+    w, h = 41, 27
+    pts = [(7.0, 5.0)]
+    stepwise, sw, sh = follow_north_up_turns(pts, w, h, (33.0, 41.0))
+    summed, uw, uh = follow_north_up_turns(pts, w, h, (74.0,))
+    assert (sw, sh) != (uw, uh)
+    assert abs(stepwise[0][0] - summed[0][0]) + abs(stepwise[0][1] - summed[0][1]) > 1.0
+
+    # And stepwise is the one the pixels take.
+    img = np.zeros((h, w, 3), dtype=np.float32)
+    img[5, 7] = 1.0
+    out = rotate_image_north_up(rotate_image_north_up(img, 33.0), 41.0)
+    assert out.shape[:2] == (sh, sw)
+    plane = out[..., 0]
+    hit = plane > plane.max() * 0.3
+    ys, xs = np.nonzero(hit)
+    wts = plane[hit]
+    assert abs(stepwise[0][0] - (xs * wts).sum() / wts.sum()) < 0.8
+    assert abs(stepwise[0][1] - (ys * wts).sum() / wts.sum()) < 0.8
+
+
+def test_follow_north_up_turns_with_nothing_to_do_is_the_identity():
+    """No turns — and a zero/sub-threshold turn — must return the points and the
+    grid untouched, so every caller that doesn't turn its picture is unaffected."""
+    from seestack.render.orient import follow_north_up_turns
+
+    pts = [(1.5, 2.5), (30.0, 4.0)]
+    assert follow_north_up_turns(pts, 41, 27, ()) == (pts, 41, 27)
+    assert follow_north_up_turns(pts, 41, 27, (0.0,)) == (pts, 41, 27)
+    assert follow_north_up_turns([], 41, 27, (90.0,)) == ([], 27, 41)
+
+
+def test_follow_north_up_turns_rejects_a_degenerate_grid():
+    from seestack.render.orient import follow_north_up_turns
+
+    assert follow_north_up_turns([(1.0, 1.0)], 0, 10, (90.0,)) is None
+    assert follow_north_up_turns([(1.0, 1.0)], 10, -1, ()) is None
+
+
 @pytest.mark.parametrize("angle", [90.0, 180.0, 270.0, 30.0, -37.0])
 def test_rotate_mask_follows_the_picture_it_belongs_to(angle):
     """A coverage mask rotated by :func:`rotate_mask_north_up` lands on exactly
