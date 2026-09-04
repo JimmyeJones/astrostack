@@ -309,9 +309,31 @@ otherwise end the run.
 7. **Push** and keep going to the next task.
 
 **End of run (once):**
-8. Add any new ideas you found to `docs/IMPROVEMENTS.md`, then **merge your green
-   work into the default branch yourself** and clean up (§8). This project is
-   zero-touch: no human reviews or merges, so shipping = merging. Then stop.
+8. Add any new ideas you found to `docs/IMPROVEMENTS.md` (Scout only — §4), then
+   **merge your green work into the default branch yourself** and clean up (§8).
+   This project is zero-touch: no human reviews or merges, so shipping = merging.
+   Then stop.
+
+**The three-file rule — where writing goes (added 2026-09-04; R2).**
+`docs/IMPROVEMENTS.md` is the **working list only**, and a run must leave it *no
+longer than it found it* unless it is filing a verified bug. It grows ~100 lines
+per merged PR and is already far past what any agent can read in a run, so a stale
+entry survives by default and gets re-picked — several runs have been spent
+rebuilding something that shipped weeks earlier.
+
+- **`docs/IMPROVEMENTS.md`** — open bugs, live claims, open ideas. "Bugs (fix these
+  first)" contains **open bugs and nothing else**.
+- **`docs/SHIPPED.md`** — when an item ships or is closed, **cut the whole entry**
+  and append it there (newest first, headed by version + date); leave a one-line
+  `✅ v0.xxx.y <what>` under "Shipped" in the backlog. Grep this file before filing
+  an idea.
+- **`docs/PROCESS-NOTES.md`** — process notes, collision diaries and QA sweep
+  records (**including clean ones**), one dated block each. **Never** into a
+  priority section: the top entry of "Bugs (fix these first)" has more than once
+  been a clean-sweep record, which is what every triaging agent reads first.
+
+Delete an "In progress" claim when you release it — that section is a claim board,
+not a diary.
 
 **Batching guidance:** group closely-related small changes onto one branch as
 separate commits and one PR; put unrelated changes on their own branches/PRs so
@@ -372,10 +394,21 @@ except to fix an outright bug in what already exists.
 
 ## 4. How to come up with new features and ideas
 
-Don't just drain the backlog — **replenish it**. Every run, spend some effort
-generating genuinely new, valuable ideas and record them (with a why, a rough
-size, and which pillar they serve). Aim to add at least a couple of well-reasoned
-ideas per run. Here's how to find good ones.
+**Only the Scout adds ideas, and only after checking the idea is not already filed
+or shipped** (grep `docs/IMPROVEMENTS.md` for the idea's key nouns before writing
+a line — this list has repeatedly carried items that had already shipped). A
+**Builder** files only two things: a bug it verified itself, and a lead it could
+not finish. It does not spend a run inventing features.
+
+*(Corrected 2026-09-04 — R3. This section used to tell **every** run to "aim to add
+at least a couple of well-reasoned ideas", which contradicted the Builder role text
+above it and made idea supply the thing the backlog had most of: **26 new idea
+entries were added on 08-27 alone**, and 49 of the 162 filed were still open against
+193 open priority items. Supply was never the constraint; a Builder's hour is. The
+§12 checklist line that mandated the same thing is gone with it.)*
+
+When the Scout does add one, record it with a why, a rough size, and which pillar
+it serves. Here's how to find good ones.
 
 ### Ideas must serve the §1 priorities — in this order
 An idea is only worth logging if it clearly helps the target user via one of:
@@ -579,10 +612,15 @@ them or merge into them.
    (the harness may create a working branch for you automatically — that's fine;
    just make sure it's based on the current `origin/main`). Use a fresh branch per
    topic; related small tasks may share one.
-2. Commit each task as its own well-described commit. End every commit message with
-   the repo's trailer convention (a `Co-Authored-By:` line; never put any model
-   identifier in commits, code, or logs). Push after each task
-   (`git push -u origin <branch>`); retry transient network errors with backoff.
+2. Commit each task as its own well-described commit. **The subject must name the
+   item's key nouns *and at least one code identifier*** — a function, module or
+   setting — so the next agent's "grep the log before you build" (§11) actually
+   finds it. A headline alone is not a subject. *(Added 2026-09-04: only **4 of 250**
+   commit subjects contained a code identifier, which is why that grep keeps missing
+   work that had already shipped.)* End every commit message with the repo's trailer
+   convention (a `Co-Authored-By:` line; never put any model identifier in commits,
+   code, or logs). Push after each task (`git push -u origin <branch>`); retry
+   transient network errors with backoff.
 3. **Before merging, make it green on top of the latest `main`:**
    `git fetch origin` → merge `origin/main` into your branch → re-run the full
    test suite (§5) and, if the frontend changed, the frontend build. Resolve any
@@ -781,7 +819,8 @@ Per task (repeat ~2–4×, or fewer if large):
 [ ] committed (independently green) and pushed
 
 End of run:
-[ ] added ≥1–2 new ideas to IMPROVEMENTS.md (§4)
+[ ] Scout only: any new idea grep-checked against the backlog first (§4); a
+    Builder files only verified bugs and unfinished leads
 [ ] synced branch with latest default; full suite still re-run and green (§11)
 [ ] version set by bumping the LATEST main; IMPROVEMENTS.md conflicts kept as a
     union (never drop another agent's entry) (§11)
