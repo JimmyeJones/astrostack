@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+import numpy as np
+
 from seestack.io.project import readable_frame_path
 from seestack.qc.metrics import FrameMetrics, compute_frame_metrics
 
@@ -60,13 +62,31 @@ def build_qc_arglist(project, *, only_new: bool = False) -> list[tuple[int, str,
     (``qc_error_final:…`` by ``apply_qc_result_to_db``) and skipped thereafter, so
     a genuinely-corrupt file isn't re-QC'd on every scan forever; a manual full
     re-QC (``only_new=False``) still retries even terminal frames.
+
+    One more frame is re-offered under ``only_new``: a sub still sitting on an
+    ``auto:streak`` rejection with **no recorded streak position** — i.e. one
+    QC'd before those existed. That position is the only evidence
+    :func:`stationary_streak_frames` can rescue it with, so without this an
+    upgraded install keeps discarding the very subs the new guard exists for,
+    forever. Strictly bounded and self-terminating: only frames that are
+    *currently rejected as streaks* qualify (never a clean or accepted one), and
+    one pass gives each of them a position, a clean re-QC that un-rejects it, or
+    a ``qc_error`` — all three leave the set.
     """
     out: list[tuple[int, str, str | None, bool]] = []
     for f in project.iter_frames():
         if f.id is None:
             continue
-        if only_new and (f.star_count is not None
-                         or (f.reject_reason or "").startswith("qc_error_final")):
+        needs_streak_position = (
+            (f.reject_reason or "") == "auto:streak"
+            and f.streak_cx is None
+            # A user override is never reconciled, so a position would buy it
+            # nothing — and it is the one state a re-QC cannot clear, which
+            # would make this re-offer the same frame on every scan.
+            and not f.user_override)
+        if only_new and not needs_streak_position and (
+                f.star_count is not None
+                or (f.reject_reason or "").startswith("qc_error_final")):
             continue
         path = readable_frame_path(f)
         if not path:
@@ -100,6 +120,11 @@ def apply_qc_result_to_db(project, result: QCResult, *, auto_reject: bool = True
         "transparency_score": m.transparency_score,
         "streak_detected": m.streak_detected,
         "streak_count": m.streak_count,
+        # Written on every QC pass, including the clean one that stores None —
+        # otherwise a frame that used to flag a streak would keep a stale
+        # position and could be clustered with frames it has nothing to do with.
+        "streak_cx": m.streak_cx,
+        "streak_cy": m.streak_cy,
     }
     if auto_reject and m.streak_detected:
         # Don't overwrite a user-driven decision.
@@ -161,12 +186,116 @@ STREAK_RECONCILE_SMALL_MIN_FRAMES = 3
 STREAK_MASS_REJECT_FRACTION_SMALL = 0.8
 
 
-def reconcile_streak_rejections(project) -> list[int]:
-    """Re-accept auto:streak frames when they cover a majority of the target.
+# ---------------------------------------------------------------------------
+# The *stationary object* reconciliation — the half the fraction tiers can't do.
+#
+# The tiers above answer "was a majority of this target flagged?", which is the
+# only question a shape-only detector's own output can support. It leaves a real
+# gap: a marginal Hough decision flags a *variable subset* of the subs, so an
+# edge-on galaxy is flagged on (say) 40 % of a session — under the >50 % tier,
+# over the small tier's floor — and those good subs stay discarded. A target
+# whose accepted-but-unsolved subs dilute the denominator hides the same way.
+#
+# Position separates the two causes where shape cannot. The scope tracks the
+# target, so a bright extended object forms its component in the *same place in
+# the frame* on every sub, all night. A satellite, plane or meteor lands
+# somewhere different every time — and even a Starlink train, whose members do
+# follow one track, is over in minutes. So: a cluster of flagged components at
+# one spot, seen across a span no transient could survive, is a stationary
+# object, whatever fraction of the target it covers.
+#
+# Contract, unchanged from the tiers: this only ever **un**-rejects, only frames
+# whose own recorded position is in the cluster (a genuine trail among them stays
+# rejected on its own evidence), never a user override, never a non-streak
+# reason. A frame with no recorded position — every frame QC'd before the columns
+# existed — is not evidence and is left exactly as the tiers left it.
 
-    Returns the ids re-accepted (empty when the guard doesn't fire), so the
-    caller can log/summarise. Pure DB reconciliation — safe to call after any
-    QC pass; a no-op when auto:streak rejection wasn't mass.
+#: How far from the cluster's median position a flagged component may sit and
+#: still count as the same object, in normalised frame widths/heights. Generous
+#: enough for dithering and for the field rotation an alt-az Seestar accumulates
+#: over a night; small enough that independent trails clustering by chance is
+#: implausible (~3 % of the frame area per trail, so four of them agreeing is a
+#: one-in-a-million coincidence — and they would still have to span the hours
+#: below).
+STATIONARY_CLUSTER_RADIUS = 0.10
+
+#: How many flagged frames must agree on the position. Four is where chance
+#: agreement stops being worth worrying about, and no smaller number can
+#: distinguish a cluster from a coincidence.
+STATIONARY_MIN_FRAMES = 4
+
+#: How long the clustered frames must span. A satellite pass is seconds; a
+#: Starlink train is minutes; an aircraft is one frame. Nothing transient puts a
+#: bright elongated feature in the *same* part of the frame an hour apart, and a
+#: session long enough to be worth rescuing clears this easily.
+STATIONARY_MIN_SPAN_S = 3600.0
+
+
+def stationary_streak_frames(
+    marks: list[tuple[int, float | None, float | None, str | None]],
+) -> list[int]:
+    """Which of these flagged frames show one *stationary* object.
+
+    ``marks`` is ``(frame_id, cx, cy, timestamp_utc)`` for the frames under
+    consideration. Returns the ids whose flagged component clusters around the
+    set's median position **and** whose cluster spans
+    :data:`STATIONARY_MIN_SPAN_S`; ``[]`` when there is no such cluster, which is
+    the answer for real trails, for too small a sample, and for anything
+    undated.
+
+    The centre is the **median** position rather than the mean so a minority of
+    genuine trails among the object's frames can't drag the cluster onto empty
+    sky — they simply fall outside the radius and keep their rejection.
+
+    Pure and side-effect free, so the rule can be tested without a database.
+    """
+    from seestack.activity_calendar import parse_utc
+
+    usable: list[tuple[int, float, float, object]] = []
+    for fid, cx, cy, stamp in marks:
+        if fid is None or cx is None or cy is None:
+            continue
+        if not (np.isfinite(cx) and np.isfinite(cy)):
+            continue
+        when = parse_utc(str(stamp)) if stamp else None
+        if when is None:
+            continue  # undated: the span test can't be answered, so no verdict
+        usable.append((fid, float(cx), float(cy), when))
+    if len(usable) < STATIONARY_MIN_FRAMES:
+        return []
+
+    mid_x = float(np.median([m[1] for m in usable]))
+    mid_y = float(np.median([m[2] for m in usable]))
+    cluster = [
+        m for m in usable
+        if ((m[1] - mid_x) ** 2 + (m[2] - mid_y) ** 2) ** 0.5
+        <= STATIONARY_CLUSTER_RADIUS
+    ]
+    if len(cluster) < STATIONARY_MIN_FRAMES:
+        return []
+    times = sorted(m[3] for m in cluster)
+    if (times[-1] - times[0]).total_seconds() < STATIONARY_MIN_SPAN_S:
+        return []
+    return [m[0] for m in cluster]
+
+
+def reconcile_streak_rejections(project) -> list[int]:
+    """Re-accept auto:streak frames the detector can't have meant.
+
+    Two independent guards, tried in order and both un-reject-only:
+
+    1. **Fraction** — a streak flagged on a majority of the target can't be a
+       transient trail (:data:`STREAK_MASS_REJECT_FRACTION` and its small-target
+       tier). Unchanged.
+    2. **Position** — failing that, flagged components that sit at one spot in
+       the frame across hours are a stationary object however small a share of
+       the target they are (:func:`stationary_streak_frames`). This is what
+       rescues the marginal-detection case the fraction tiers structurally
+       cannot see, and it needs the positions QC now records, so it simply never
+       fires on frames checked before those existed.
+
+    Returns the ids re-accepted (empty when neither guard fires), so the caller
+    can log/summarise. Pure DB reconciliation — safe to call after any QC pass.
     """
     frames = list(project.iter_frames())
     # The population the streak auto-reject could plausibly act on: exclude hard
@@ -190,7 +319,7 @@ def reconcile_streak_rejections(project) -> list[int]:
     else:
         fires = False
     if not fires:
-        return []
+        return _reconcile_stationary(project, streaked)
     restored: list[int] = []
     for f in streaked:
         if f.id is None:
@@ -204,5 +333,37 @@ def reconcile_streak_rejections(project) -> list[int]:
         "streak reconcile: re-accepted %d of %d frames auto-rejected as streaks "
         "(a majority — a stationary extended object, not transient trails)",
         len(restored), len(eligible),
+    )
+    return restored
+
+
+def _reconcile_stationary(project, streaked: list) -> list[int]:
+    """Guard 2 of :func:`reconcile_streak_rejections` — see its docstring.
+
+    ``streaked`` is the already-filtered ``auto:streak`` population (no user
+    overrides, no QC errors), so this only has to decide *which* of them sit at
+    one place in the frame across a transient-implausible span.
+    """
+    marks = [
+        (f.id, f.streak_cx, f.streak_cy, f.timestamp_utc)
+        for f in streaked if f.id is not None
+    ]
+    keep = set(stationary_streak_frames(marks))
+    if not keep:
+        return []
+    restored: list[int] = []
+    for f in streaked:
+        if f.id not in keep:
+            continue
+        # Same as the fraction guard: clear only the streak reason, leave
+        # ``streak_detected`` set so the UI still counts them and the user can
+        # bulk-reject if they disagree.
+        project.update_frame(f.id, accept=True, reject_reason=None)
+        restored.append(f.id)
+    log.info(
+        "streak reconcile: re-accepted %d of %d frames auto-rejected as streaks "
+        "(their flagged feature stays in one place for hours — a tracked "
+        "extended object, not a transient trail)",
+        len(restored), len(streaked),
     )
     return restored
