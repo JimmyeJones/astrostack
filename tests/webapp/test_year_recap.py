@@ -296,6 +296,68 @@ def test_year_poster_survives_an_unreadable_preview(client, solved_library):
         assert img.size[0] == img.size[1]
 
 
+def test_year_poster_backdrop_is_the_cover_you_pinned(client, solved_library):
+    """The year poster is the other surface that read ``last_stack_preview``
+    directly, so it too could show a picture the owner deliberately demoted."""
+    import io
+    import json
+    from datetime import date
+
+    from PIL import Image
+
+    from seestack.io.library import Library
+    from seestack.io.project import StackRunRow
+
+    def register(basename, rgb, timestamp):
+        lib = Library.open_or_create(solved_library / "library")
+        try:
+            preview = lib.target_dir(lib.find_target("M_42")) / f"{basename}.png"
+            preview.parent.mkdir(parents=True, exist_ok=True)
+            buf = io.BytesIO()
+            Image.new("RGB", (64, 32), rgb).save(buf, format="PNG")
+            preview.write_bytes(buf.getvalue())
+            proj = lib.open_target("M_42")
+            try:
+                run_id = proj.add_stack_run(StackRunRow(
+                    id=None, timestamp_utc=timestamp,
+                    output_basename=basename, fits_path=None, tiff_path=None,
+                    preview_path=str(preview), n_frames_used=3,
+                    canvas_h=320, canvas_w=480, coverage_min=1, coverage_max=3,
+                    options_json=json.dumps({}),
+                ))
+            finally:
+                proj.close()
+            lib.refresh_target_stats("M_42")
+            return run_id
+        finally:
+            lib.close()
+
+    def corner():
+        r = client.get("/api/recap/year/2024.jpg")
+        assert r.status_code == 200
+        with Image.open(io.BytesIO(r.content)) as img:
+            return img.convert("RGB").getpixel((2, img.size[1] - 2))
+
+    lib = _library(solved_library)
+    try:
+        _set_night(lib, "M_42", date(2024, 11, 3), 22, 60.0)
+    finally:
+        lib.close()
+    favourite = register("favourite", (255, 255, 255), "2026-05-01T00:00:00Z")
+    register("newer", (0, 0, 0), "2026-05-09T00:00:00Z")
+
+    unpinned = corner()
+    assert max(unpinned) < 60, unpinned
+
+    lib = _library(solved_library)
+    try:
+        lib.set_target_cover("M_42", favourite)
+    finally:
+        lib.close()
+    pinned = corner()
+    assert all(60 < c < 210 for c in pinned), pinned
+
+
 def test_year_poster_404s_for_a_year_with_no_nights(client, built_library):
     """A poster about a year of nothing is a wall of nothing — the page's empty
     state already says where the nights actually are."""
