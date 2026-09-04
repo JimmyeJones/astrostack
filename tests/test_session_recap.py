@@ -415,6 +415,81 @@ def test_library_recap_counts_a_target_revisited_later_the_same_night():
     assert recap.start_utc == dusk.isoformat()  # the night starts at A's dusk sub
 
 
+def test_library_recap_keeps_an_unbridged_split_night_whole():
+    """The same shape as the bridged test above with the bridge taken away — one
+    target, one observing night, shot in two goes with bed in between.
+
+    The 6 h gap walk cannot see that as one night: it holds the pre-dawn half
+    alone, and the card headed "Last night" reports half the subs and half the
+    integration. Handing it the observer's night key widens the cluster back
+    over the night it belongs to.
+    """
+    evening = datetime(2026, 7, 1, 21, 0, 0)      # 21:00 → 23:00
+    predawn = datetime(2026, 7, 2, 5, 30, 0)      # 05:30 → 07:30, a 6.5 h gap
+    frames = [_frame(evening + timedelta(minutes=10 * i)) for i in range(13)]
+    frames += [_frame(predawn + timedelta(minutes=10 * i)) for i in range(13)]
+
+    bare = library_session_recap([("M 42", "M_42", frames)])
+    assert bare is not None
+    assert bare.n_frames == 13                    # the pre-dawn half only
+    assert bare.session_exposure_s == 130.0
+
+    whole = library_session_recap([("M 42", "M_42", frames)],
+                                  night_of=_noon_night_key)
+    assert whole is not None
+    assert whole.n_frames == 26                   # the night the owner shot
+    assert whole.session_exposure_s == 260.0
+    assert whole.start_utc == evening.isoformat()
+    assert whole.targets[0].n_frames == 26
+
+
+def test_library_recap_night_key_never_reaches_into_an_earlier_night():
+    """The widening is bounded by the night key, so the properties the gap walk
+    provided still hold: a target last shot a week ago stays out, and a target's
+    own earlier night is not swept in."""
+    old = datetime(2026, 7, 1, 22, 0, 0)
+    evening = datetime(2026, 7, 8, 21, 0, 0)
+    predawn = datetime(2026, 7, 9, 5, 30, 0)
+    m42 = [_frame(old + timedelta(minutes=10 * i)) for i in range(5)]
+    m42 += [_frame(evening + timedelta(minutes=10 * i)) for i in range(13)]
+    m42 += [_frame(predawn + timedelta(minutes=10 * i)) for i in range(13)]
+    ngc = [_frame(old + timedelta(minutes=10 * i)) for i in range(4)]
+
+    recap = library_session_recap(
+        [("M 42", "M_42", m42), ("NGC 7000", "NGC_7000", ngc)],
+        night_of=_noon_night_key)
+    assert recap is not None
+    assert recap.n_targets == 1                   # the week-old target drops out
+    assert {c.safe for c in recap.targets} == {"M_42"}
+    assert recap.n_frames == 26                   # both halves of the 8th, none of the 1st
+    assert recap.start_utc == evening.isoformat()
+
+
+def test_library_recap_night_key_is_inert_without_a_split():
+    """An observer who never splits a night gets the gap walk's own answer, so
+    turning the key on cannot change what a normal library's card says."""
+    night = datetime(2026, 7, 8, 21, 0, 0)
+    a = [_frame(night + timedelta(minutes=10 * i)) for i in range(6)]
+    b = [_frame(night + timedelta(hours=2, minutes=10 * i)) for i in range(4)]
+    pair = [("A", "A", a), ("B", "B", b)]
+    bare = library_session_recap(pair)
+    keyed = library_session_recap(pair, night_of=_noon_night_key)
+    assert bare == keyed
+
+
+def test_library_recap_unplaceable_stamps_never_widen_the_night():
+    """A night key that cannot place a stamp returns ``None``, and ``None`` is
+    never treated as a match — the walk stops there rather than guessing."""
+    evening = datetime(2026, 7, 1, 21, 0, 0)
+    predawn = datetime(2026, 7, 2, 5, 30, 0)
+    frames = [_frame(evening + timedelta(minutes=10 * i)) for i in range(13)]
+    frames += [_frame(predawn + timedelta(minutes=10 * i)) for i in range(13)]
+    recap = library_session_recap([("M 42", "M_42", frames)],
+                                  night_of=lambda _stamp: None)
+    assert recap is not None
+    assert recap.n_frames == 13                   # unchanged from the bare walk
+
+
 def test_recent_session_window_keeps_a_bridged_early_batch():
     """The memory-bound window keeps a >6 h-earlier batch of the same night (so it
     can be bridged), while dropping a genuinely prior night far outside the window."""

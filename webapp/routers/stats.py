@@ -576,10 +576,16 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
     return recent, n_stack_runs, n_targets_with_stacks
 
 
-def _collect_last_night(lib, targets):
+def _collect_last_night(lib, targets, night_of=None):
     """Open each project, trim it to its most recent session, and combine every
     target's latest night into one recap. Expensive (opens every project) — the
     caller caches it. A broken project is skipped, never 500s the dashboard.
+
+    ``night_of`` is the observer's capture-stamp → observing-night key, passed
+    down so the combined recap covers the whole night rather than the trailing
+    six-hour cluster (see :func:`~seestack.session_recap.library_session_recap`).
+    Because the answer now depends on the observer's longitude, the caller's
+    cache signature carries it too.
 
     Returns ``(recap, end_stamps)``: the combined night, plus — per target safe
     name — that target's per-session capture stop times, the raw material for
@@ -634,7 +640,7 @@ def _collect_last_night(lib, targets):
         finally:
             if proj is not None:
                 proj.close()
-    return library_session_recap(rows), early
+    return library_session_recap(rows, night_of=night_of), early
 
 
 @router.get("/api/last-night", response_model=LastNightResponse | None)
@@ -663,19 +669,22 @@ def get_last_night(request: Request) -> LastNightResponse | None:
     lib = deps.open_library(request)
     try:
         targets = lib.list_targets()
-        sig = tuple(sorted(
+        lon = resolve_site_lon(request, lib, settings.site_lon)
+        night_key = resolve_night_key(request, lib, settings.site_lon)
+        # The longitude is part of the signature because it decides where one
+        # observing night ends — so moving the site in Settings re-cuts the night
+        # immediately instead of serving a stale one until the TTL runs out.
+        sig = (lon, tuple(sorted(
             (t.safe_name, t.last_activity_utc or "") for t in targets
-        ))
+        )))
         cache = getattr(request.app.state, "last_night_cache", None)
         now = time.monotonic()
         if cache and cache["sig"] == sig and (now - cache["at"]) < _LAST_NIGHT_CACHE_TTL_S:
             recap, stamps_by_target = cache["data"]
         else:
-            recap, stamps_by_target = _collect_last_night(lib, targets)
+            recap, stamps_by_target = _collect_last_night(lib, targets, night_key)
             request.app.state.last_night_cache = {
                 "sig": sig, "at": now, "data": (recap, stamps_by_target)}
-        lon = resolve_site_lon(request, lib, settings.site_lon)
-        night_key = resolve_night_key(request, lib, settings.site_lon)
     finally:
         lib.close()
 

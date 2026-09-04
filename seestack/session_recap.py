@@ -1057,6 +1057,7 @@ def library_session_recap(
     targets: list[tuple[str, str, list[FrameRow]]],
     *,
     gap_hours: float = DEFAULT_SESSION_GAP_HOURS,
+    night_of: NightKeyFn | None = None,
 ) -> LibrarySessionRecap | None:
     """Combine every target's most-recent capture session into one recap of the
     library's latest night. ``targets`` is ``(name, safe, frames)`` per target.
@@ -1067,6 +1068,21 @@ def library_session_recap(
     night". So two targets shot the same night combine into one recap, while a
     target *not* shot that night (its last session was earlier) drops out. Returns
     ``None`` when no frame across the library carries a capture timestamp.
+
+    Pass ``night_of`` — a capture stamp → observing-night key, as
+    :func:`nights_breakdown` takes — to make the card's "night" an **observing
+    night** rather than the trailing gap cluster. Those differ on the one shape
+    the gap rule cannot see: a night the owner shot in two goes, bed in between,
+    with nothing else running through the gap to bridge it. The trailing cluster
+    is then the pre-dawn half alone, and a card headed "Last night" reports half
+    the subs and half the integration the night actually produced (measured on a
+    26-sub split night: 13 subs, 130 s). With the key, the cluster is widened
+    back over frames belonging to the same observing night.
+
+    Widening only, and only within one night: nothing outside the newest night's
+    key is ever pulled in, so a target whose own last session was earlier still
+    drops out, and an unplaceable stamp (``None``) never joins. Omit the key and
+    the walk is exactly the gap cluster it always was.
 
     Pure, offline, read-only — it just aggregates the frame rows it's handed.
     """
@@ -1099,6 +1115,18 @@ def library_session_recap(
             start_idx = i - 1
         else:
             break
+    # …then widen back over the rest of the *observing night* the newest capture
+    # belongs to, when the caller told us what a night is. A >6 h break inside
+    # one night (bed, then a pre-dawn run) leaves the gap walk holding only the
+    # second half unless another target happened to shoot through the gap; this
+    # closes that hole without letting an older night in, because the walk stops
+    # the moment the key stops matching.
+    if night_of is not None:
+        newest_key = night_of(merged[-1][3].timestamp_utc)
+        if newest_key is not None:
+            while start_idx > 0 and night_of(
+                    merged[start_idx - 1][3].timestamp_utc) == newest_key:
+                start_idx -= 1
     night = merged[start_idx:]
 
     # Group the night's frames by target, preserving each target's first-capture

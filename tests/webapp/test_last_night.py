@@ -200,6 +200,41 @@ def _night_run(lib, safe, start, *, hours, every_min=10):
         proj.close()
 
 
+def test_last_night_counts_both_halves_of_a_night_shot_in_two_goes(
+    client, built_library, monkeypatch
+):
+    """The card is headed "Last night", so it must count the night.
+
+    One target, one observing night, shot 21:00 → 23:00 and again 05:30 → 07:30
+    with nothing else running through the gap to bridge it. The six-hour session
+    walk holds only the pre-dawn half, so the card used to report 13 of the 26
+    subs and half the integration — on the Dashboard's headline card, about the
+    owner's own night.
+    """
+    import webapp.site_location as site_location
+
+    from seestack.io.library import Library
+
+    monkeypatch.setattr(site_location, "detect_site_from_library", lambda lib, **k: None)
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _night_run(lib, "M_42",
+                   dt.datetime(2026, 7, 1, 21, 0, tzinfo=dt.timezone.utc), hours=2)
+        _night_run(lib, "M_42",
+                   dt.datetime(2026, 7, 2, 5, 30, tzinfo=dt.timezone.utc), hours=2)
+    finally:
+        lib.close()
+
+    body = client.get("/api/last-night").json()
+    assert body is not None
+    assert body["n_frames"] == 26
+    assert body["session_exposure_s"] == 260.0
+    assert body["targets"][0]["n_frames"] == 26
+    assert body["start_utc"].startswith("2026-07-01T21:00")
+    # …and it is still one night, named once.
+    assert body["night_date"] == "2026-07-01"
+
+
 def test_last_night_says_when_a_target_stopped_earlier_than_it_usually_does(
     client, built_library,
 ):
