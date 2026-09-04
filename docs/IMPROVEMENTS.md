@@ -2415,6 +2415,29 @@ _(nothing else claimed — claim an item here with your branch name)_
     `wcs.pixel_to_world` (or `all_pix2world` at the image centre) rather than `CRVAL`. One file + a repro test.
     Filed, not rushed.)*
 
+- **⚪ SCOUT QA RE-AUDIT (2026-09-04, stacking engine core + full-app dogfood) — swept and CLEAN; no new
+  verified bug. Recorded so the next Scout rotates away from this ground rather than re-treads it.** Led the
+  rotation with `seestack/stack/*` + `seestack/calibrate/*` as AGENTS.md §1 asks, re-read adversarially end to
+  end for NaN/coverage semantics, rejection/weighting math, memory bounds and error paths — and it holds,
+  confirming the 2026-09-01 note one entry below: `accumulator.py` (all three accumulators; the any-channel
+  frame count, the MinMaxReject k-set insertion + count-band degrade, Welford's NaN-for-`n<2` variance),
+  `weighting.py` + `photometric.py` (per-panel `pointing_groups` split, geometric-mean floor, the `1/s²`
+  photometric-into-combine fold), `calibrate/{apply,masters}.py` (no-data-pedestal→0, flat floor, the
+  `bias + (dark−bias)·ratio` exposure-scaling with its two no-data masks, `_bias_applies` never
+  double-subtracting), `drizzle_path.py` (the frame-count `neff` gate vs pixfrac-deflated weight, float64
+  variance + resolution floor, per-channel reject tally + scatter map), `mosaic.py` (wrap-safe circular-mean
+  outlier rejection, px/MP caps), `pointings.py` (union-find single-linkage + ≥2-substantial gate), `align.py`
+  (windowed inset/valid mask, the order-1 NaN-propagation ring on both sub-pixel shift paths), and the κ-σ
+  pass-2 keep-mask (`_kappa_sigma_keep_mask` — both σ-unknown and mean-unknown widen to keep-all). Combine
+  dispatch (`auto_reject_method` / `combine_method` / `auto_reject_depth`) traced clean. **Dogfood pass**
+  (`scripts/agent-dogfood.sh`, real app + bundled sample stacked): probe reports **nothing overflowing, no
+  console errors**; tallest page 3014 px (phone Target) — bit-for-bit the AGENTS.md §1 baseline, so no IA
+  regression. One non-bug surfaced and filed as **log hygiene** under "Infra / maintainability": ~20 benign
+  `astropy.stats` NaN warnings per stack (verified result-preserving). Baseline suite green this run
+  (**4423 passed, 2 skipped**). **Next Scout: rotate onto the webapp routers not swept recently — `stack.py`/`editor.py`,
+  `upload.py`/`scanner.py` ingest, `video.py` — per the 2026-09-02 note directly below; the engine core is
+  drained.**
+
 - **⚪ SCOUT QA RE-AUDIT (2026-09-02, webapp routers / ingest / plate-solve / render — swept, mostly CLEAN;
   three verified findings filed above, the rest clean.** This run rotated off the (drained, re-confirmed-clean)
   stacking engine core onto the areas the 2026-09-01 note flagged as higher-marginal. Traced adversarially and
@@ -25507,6 +25530,45 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ NEW BEGINNER FEATURE (Scout 2026-09-04) — "Your year under the stars": a year-bounded, shareable
+  recap of a season of imaging.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: M. Clears the
+  beginner bar: sane default (the current year, auto-computed from data the app already stores), plain
+  language, nothing pro/niche.)*
+
+  **The gap, checked before filing.** The app already has the two ends of the time axis but not the middle:
+  a *per-night* recap (`seestack/session_recap.py` → the "Last session" card and the by-breakfast poster) and
+  an *all-time* cumulative view (`Your sky, so far` → `/api/stats/*`, the life list, "Draw your skyline").
+  There is **no season-bounded story**: grepped `webapp/`, `frontend/src/` and the backlog for
+  `wrapped|year in review|annual|yearly|this year` — the only hits are the per-night recap and cache-window
+  plumbing, none of them a year view. A beginner who shot 30 nights across a winter has no single screen that
+  says "here's what *this year* looked like", and that is exactly the kind of milestone a non-expert wants to
+  look back on and post.
+
+  **What it is (one read-only page + one endpoint).** `GET /api/recap/year/{year}` folds the library's
+  existing per-target night/hour accounting (the same `capture_hours_json` / `stack_runs` reads the Dashboard
+  and "Your sky, so far" already walk, filtered to nights whose local date falls in `year`) into a small,
+  honest summary: **nights out**, **total integration hours**, **distinct targets**, **new targets first shot
+  this year** ("first light" moments), the **clearest night** (best median transparency / lowest sky), the
+  **longest single session**, and the **best picture of the year** (reuse `best_picture` ranking, scoped to
+  the year). A `/recap/{year}` route renders it as a single scrollable card with plain-language sentences
+  ("You were out under the stars on **31 nights** and collected **52 hours** of light on **9 targets**"), the
+  best-of-year thumbnail, and a one-click **Copy caption** / **Download share image (JPEG)** reusing the
+  existing share-card machinery (`seestack/sharecard.py`) so it lands social-ready with no typing.
+
+  **Why it clears the bar and serves §1.** It adds no expert surface — it is pure recall of what the beginner
+  already did, framed to enjoy and share (priority 3). Everything it needs is already stored, so it is
+  additive and offline. Sane default: opens on the most recent year with any data. Empty state: a year with
+  no nights says so kindly and offers the years that do have data.
+
+  **Slicing for one Builder run.** Slice (a): the endpoint + the six headline stats + a bare card (no share).
+  Slice (b): the best-of-year thumbnail + the share/caption reuse. Slice (c): "first light this year" target
+  chips linking to each target. Ship (a) first; it stands alone.
+
+  **Upgrade-safe by construction:** one new read-only router + one new route, both additive; no schema, no
+  config key, no on-disk change, no default flipped. Reads only columns that already exist. A test builds a
+  two-year synthetic library and pins that a year filter counts only that year's nights and that an empty year
+  degrades to the kind empty state.
+
 - **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-t59xya`) — ~~put the planned week in the user's
   calendar.~~** Built as filed, as composition: `GET /api/plan/week/calendar.ics` and an **Add this week to
   your calendar** anchor on the Plan-my-week card. One event per night that has a pick, titled with what to
@@ -33841,6 +33903,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **⚪ LOG HYGIENE (Scout 2026-09-04, found by dogfooding a real stack) — the `astropy.stats`
+  "Input data contains invalid values (NaNs or infs)…" warning is emitted dozens of times per stack, burying
+  any *real* warning in the Logs a beginner reads.** *(Pillar: friendliness / trust — PRIORITY 3. Size: S.
+  Confidence: reproduced in the dogfood run; verified NOT a wrong-result — see below. Not filed as a bug: the
+  result is bit-for-bit correct.)*
+
+  **What happens.** A live stack of the bundled sample logged the astropy `AstropyUserWarning` **~20 times**
+  (`/tmp` server log, timestamps clustered at each stack/edit phase). Every no-coverage NaN region (mosaic
+  edges, uncovered sky, masked pixels — pervasive in this engine, where *NaN = no coverage* by design) reaches
+  `astropy.stats.sigma_clipped_stats` unmasked, so astropy clips the NaN itself and warns each time. Call
+  sites that pass NaN-bearing arrays without a `mask=`: `seestack/qc/metrics.py:88`,
+  `seestack/post/color_cal.py:194`, `seestack/bg/coverage_leveling.py:131` and `:203` (`_sky_mode` — on the
+  owner's mosaic sky-leveling path). `coverage_leveling.py:324` already passes `mask=~finite` and is the
+  template to copy.
+
+  **Verified it is only noise, not a wrong result.** `sigma_clipped_stats(data_with_nan)` returns *identical*
+  `(mean, median, std)` to `sigma_clipped_stats(data, mask=~isfinite(data))` and to pre-filtering to finite
+  values (checked directly: all three agree to full float32 precision on a 200×200 array with a NaN quadrant).
+  So the maths is correct today; the cost is purely a wall of benign warnings that makes a *genuine* NaN/inf
+  problem invisible on the Logs page.
+
+  **Fix (S, Builder).** Pass an explicit `mask=~np.isfinite(x)` at each of the four unmasked call sites (makes
+  intent explicit and silences the warning), or — if a site legitimately expects finite input — assert/pre-
+  filter there. Regression test: call each helper on a NaN-bearing array inside
+  `warnings.catch_warnings(); simplefilter("error")` and assert no `AstropyUserWarning`, plus assert the
+  returned stats equal the masked-input stats (pins that the silence didn't change the number). Behaviour-
+  preserving on all-finite inputs (the common single-field case), so upgrade-safe.
 
 - **⚠️ PROCESS NOTE (Builder 2026-09-03, found by tripping over it — a run's "baseline is green" can be a
   statement about nothing).** `AGENTS.md` §7 tells every run to confirm the suite green before changing
