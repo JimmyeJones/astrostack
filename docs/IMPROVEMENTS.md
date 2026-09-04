@@ -13208,6 +13208,19 @@ to **Shipped**.)_
   that sets two form keys must land them in **one** state update, or the panel re-queries through an
   intermediate state and flickers between two verdicts.
 
+  **⚪ SWEPT AND CLOSED — every named starting point already has its button (Builder 2026-09-04, read in the
+  code, not assumed). Do not re-pick this.** All four candidates the entry names were checked in
+  `frontend/src/routes/Stack.tsx` as it stands: `drizzleTooFewHint` has *"Turn off Drizzle"*, `drizzleClipHint`
+  has *"Turn on drizzle outlier rejection"*, `backgroundModeNudge` has *"Use <mode> background flatten"*, and
+  the calibration-suggestion copy has **"apply recommended"** (`applyRecommended`, which sets every
+  recommended master *and* `scale_dark_to_light` in one go, precisely because applying half of a
+  scaling-dependent pairing would mis-subtract the pedestal). The neighbours are done too — the min/max
+  weighting hint, the transparency hint, the quality-weighting and photometric nudges, the drizzle nudge and
+  the two memory fixes all carry theirs. **The identifying test still stands for anything newly written**
+  (does the copy name a concrete value some reachable control would accept?), and so does the entry's care
+  note — a button earns its place by being *conditional on something rare*; an advisory that fires on most
+  stacks stays a sentence. But there is no backlog of un-actioned sentences left on the Stack form to sweep.
+
 - **✅ SHIPPED (Builder, v0.322.3, branch `claude/wizardly-feynman-yryq05`) — ~~Compare tells you one stack is
   "the cleaner stack" even when the two are *different objects*.~~** Built as the entry's **second** option, the
   one it called better: the figure stays, the *claim* goes. `noiseComparison` now returns `sameTarget`
@@ -20588,6 +20601,18 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **⚪ DOGFOOD BASELINE (Builder 2026-09-04, `scripts/agent-dogfood.sh` at v0.345.7 — the fourth measurement,
+  and the fourth that says DO NOT open a speculative IA slice).** Full run (boot → sample → stack → Playwright
+  probe at 1440 px and 420 px): **nothing overflowing, no console errors**. Tallest pages, phone first:
+  the Target page **3,014 px** (unchanged across four measurements and ~100 versions), `/life-list` 3,008 px,
+  the editor 2,815 px, then desktop Target 2,010 px, desktop editor 1,841 px, Dashboard 1,785 px (phone),
+  `/stack` 1,748 px (phone), `/life-list` 1,453 px (desktop). **What this pass found is the entry below** —
+  the two standout cards on "Your sky, so far" naming one target twice — which no code read had caught in the
+  ~30 versions since the page was last edited, because each card is right on its own and only the rendered
+  row shows the same picture beside itself. That is now three consecutive dogfood passes where the *finding*
+  was a duplication or a contradiction between two lines that are individually correct: worth treating as the
+  probe's speciality when choosing what to look at in the screenshots.
+
 - **⚪ DOGFOOD BASELINE (Builder 2026-09-04, `scripts/agent-dogfood.sh` at v0.345.2 — the third measurement in
   a row that says DO NOT open a speculative IA slice).** Full run (boot → sample → stack → Playwright probe at
   1440 px and 420 px): **nothing overflowing, no console errors**, and the tallest page is still the Target
@@ -20602,6 +20627,52 @@ problems. Dogfood it every big-picture run and fix root causes.
   paragraph, which is invisible to a code read (each of its sentences is defensible on its own; only the
   rendered page shows five grey paragraphs in a row) and is exactly the kind of thing the running-app probe
   exists to catch. Shipped as v0.345.3.
+
+- **✅ SHIPPED (Builder, v0.345.8, branch `claude/sweet-babbage-enljxc`) — ~~"Your sky, so far" and the year
+  page each award two superlatives, and on this owner's data they usually land on the same thing — so the
+  page renders one picture, one name and two near-identical figures twice, side by side.~~** *(Pillar:
+  friendliness / trust — PRIORITY 3. Found by **looking at a running app** (`scripts/agent-dogfood.sh`), like
+  v0.345.3 and v0.345.6 before it: the duplication is invisible to a code read — each card is correct on its
+  own — and unmissable on the rendered page.)*
+
+  **Why it is the usual case, not an edge case.** "Your biggest project" ranks by `total_exposure_s`;
+  "Most-imaged target" ranks by `n_frames_accepted`. On a Seestar the subs are a fixed length, so total
+  exposure is very nearly the sub count times a constant and **the two questions have one answer most of the
+  time** — always so on a one-target library, which is exactly the beginner this page is written for. The
+  year page's "Longest night" / "Sharpest night" pair is the same shape: a short season's longest night is
+  often its steadiest one, and the two cards then print one date twice as if they were two nights.
+
+  **Fixed by merging, never by dropping** (the standing "nothing may be removed" constraint). When both
+  accolades name the same thing there is now **one** card carrying both titles and both figures — *"Your
+  biggest project — and most-imaged · 2.0 h of integration · 240 subs kept"*, and *"Longest — and sharpest —
+  night · 14 Feb 2026 · 2.0 h · 2.4 px stars"*. The reader loses no fact and gains the one two separate cards
+  could never state: that this is the same target / the same night. When they genuinely differ, both cards
+  render exactly as before.
+
+  **The poster follows the page.** `year_sharpest_night_line` drops the repeated date on a same-night year
+  (*"Also your sharpest night: 2.1 px stars"*), so the picture the owner posts does not spend two of its few
+  lines on one date. It keeps its date whenever the longest-night line is *not* printed — a year too short to
+  crown a longest night leaves "also" nothing to refer to. This is the rule `seestack/recap.py` already
+  applied to the all-time poster's own copy (its "also shot" line keeps the top target out "so the two lines
+  sit together without repeating a name"), now applied on the screens as well.
+
+  **The deciding is pure and shared.** `frontend/src/standouts.ts` (`libraryStandouts`) and
+  `frontend/src/yourYear.ts` (`yearNightCards`) return the card list; the routes only render it — so the two
+  pages and the poster cannot drift about whether that was one standout or two.
+
+  **Upgrade-safe (§9):** presentation only. Both API fields are still served and still populated
+  (`longest_target` / `most_imaged_target`, `longest_night` / `sharpest_night`); no config key, schema,
+  on-disk path, response shape or default changed. One engine string changes on a year whose two standouts
+  are one night.
+
+  **Tests (+14; the 3 that touch pre-existing files fail before).** `standouts.test.ts` (+5, new): the merge,
+  the two-card case, each single standout, silence, and the "1 sub kept" singular the old inline copy got
+  wrong. `yourYear.test.ts` (+4): the same four shapes for nights, plus the case that must **not** merge — a
+  same-date night with no measured star size, where the sharpest line is silent and there is no second
+  accolade to fold in. `SkySoFar.test.tsx` (+1) and `YourYear.test.tsx` (+1) pin it end to end on the
+  rendered page, asserting the separate titles are *gone* rather than merely that the merged one is present.
+  `tests/test_year_recap.py` (+2): the poster's folded footnote (with the date asserted to appear exactly
+  once across the pair) and the un-folded one when no longest night is printed.
 
 - **NEW IDEA (Builder 2026-09-04, the generalisation of the v0.345.3 export-panel fix) — sweep the app for
   the other trailing "what these buttons do" paragraphs, and check each against the per-control copy above

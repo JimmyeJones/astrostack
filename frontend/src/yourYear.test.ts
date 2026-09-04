@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { NightActivity, YearRecap } from "./api/client";
 import {
   defaultRecapYear, longestNightLines, recapYearOptions, sharpestNightLines,
+  yearNightCards,
 } from "./yourYear";
 import { formatIntegration } from "./format";
 
@@ -97,5 +98,61 @@ describe("sharpestNightLines", () => {
     expect(sharpestNightLines(null)).toBeNull();
     expect(sharpestNightLines(night({ median_fwhm_px: null }))).toBeNull();
     expect(sharpestNightLines(night({ median_fwhm_px: 0 }))).toBeNull();
+  });
+});
+
+describe("yearNightCards", () => {
+  it("keeps two cards when the longest and sharpest nights are different", () => {
+    const cards = yearNightCards(
+      night({ date: "2026-02-14", exposure_s: 7200, n_frames: 120 }),
+      night({ date: "2026-03-03", median_fwhm_px: 2.44, n_measured: 40 }),
+      formatIntegration,
+    );
+    expect(cards.map((c) => c.key)).toEqual(["longest", "sharpest"]);
+    expect(cards[0].title).toBe("Longest night");
+    expect(cards[1].title).toBe("Sharpest night");
+    expect(cards[1].lines.date).toBe("3 Mar 2026");
+  });
+
+  it("merges into one card when one night was both", () => {
+    // A short season's longest night is often its steadiest one too, and the
+    // page used to print the same date, the same target and the same night
+    // twice, side by side, as if they were two different nights.
+    const both = night({
+      date: "2026-02-14", exposure_s: 7200, n_frames: 120,
+      median_fwhm_px: 2.44, n_measured: 120,
+    });
+    const cards = yearNightCards(both, { ...both }, formatIntegration);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].key).toBe("both");
+    expect(cards[0].title).toBe("Longest — and sharpest — night");
+    expect(cards[0].lines.date).toBe("14 Feb 2026");
+    // Both figures survive the merge, and the second accolade is stated rather
+    // than left for the reader to notice from a repeated date.
+    expect(cards[0].lines.value).toBe("2.0 h · 2.4 px stars");
+    expect(cards[0].lines.detail).toBe(
+      "Your longest night of the year on M 31 — 120 subs kept."
+      + " It was your steadiest sky of the year too.");
+  });
+
+  it("renders whichever single standout the year has", () => {
+    expect(yearNightCards(
+      night({ exposure_s: 7200 }), null, formatIntegration,
+    ).map((c) => c.key)).toEqual(["longest"]);
+    expect(yearNightCards(
+      null, night({ median_fwhm_px: 2.1 }), formatIntegration,
+    ).map((c) => c.key)).toEqual(["sharpest"]);
+    expect(yearNightCards(null, null, formatIntegration)).toEqual([]);
+  });
+
+  it("does not merge a same-date night the server measured nothing on", () => {
+    // The sharpest line is silent without a star size, so there is no second
+    // accolade to fold in — the longest night keeps its own card.
+    const cards = yearNightCards(
+      night({ date: "2026-02-14", exposure_s: 7200 }),
+      night({ date: "2026-02-14", median_fwhm_px: null }),
+      formatIntegration,
+    );
+    expect(cards.map((c) => c.key)).toEqual(["longest"]);
   });
 });

@@ -313,12 +313,25 @@ def year_sharpest_night_line(recap: YearRecap) -> str:
 
     Star size in pixels — the unit the Frames table, the Nights card and the
     year page all quote — so a beginner meets one number rather than three.
+
+    **The date is dropped when it is the line above's date.** A short season's
+    longest night is often its steadiest one too, and a poster that prints
+    ``"Longest night: 15 Nov 2024 · 1 h"`` over ``"Sharpest night: 15 Nov 2024 ·
+    2.1 px stars"`` spends two of its few lines saying one date twice — on the
+    picture the owner is about to post. Saying *"Also your sharpest night"*
+    keeps both facts and both figures while making the connection the two dated
+    lines left the reader to notice. Only when the longest-night line is
+    actually printed, since otherwise there is nothing for "also" to refer to.
     """
     night = recap.sharpest_night
     when = _night_date(night)
     fwhm = night.median_fwhm_px if night is not None else None
     if not when or fwhm is None or not (fwhm > 0):
         return ""
+    longest = recap.longest_night
+    if (longest is not None and night is not None and longest.date == night.date
+            and year_longest_night_line(recap)):
+        return f"Also your sharpest night: {fwhm:.1f} px stars"
     return f"Sharpest night: {when} · {fwhm:.1f} px stars"
 
 
