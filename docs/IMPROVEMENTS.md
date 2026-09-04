@@ -17785,6 +17785,38 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
+- **✅ SHIPPED (Builder, v0.345.6, branch `claude/sweet-babbage-k0vyac`) — ~~the auto-edit note tells the
+  owner the app "measured a ~0 sky", one line above "sky level 0.24".~~** Found the same way v0.345.3 was —
+  by *looking at* a running editor (`scripts/agent-dogfood.sh`, desktop shot of the bundled sample) rather
+  than reading the code — and it is the same class of defect: a line that is defensible in isolation and
+  obviously wrong on the rendered page.
+
+  **The trace.** `_auto_num` / `fmt` (the mirrored pair behind the "what Auto did" note, one per language)
+  render up to **two decimals**. That is right for a stretch target or a star size, but the sky they are
+  handed is measured on the **linear** stack the editor opens, where an ordinary value sits well below 0.01 —
+  the sample's is **0.001**, so the clause rendered *"measured a ~0 sky, 2.07 px stars"*. Directly beneath it
+  the "Tuned to your data" line says *"sky level 0.24"*, which is a different quantity (the stretch's
+  display-space **target** background), so the two read as the app measuring one picture twice and finding
+  nothing the first time. Not hypothetical and not rare: any well-flattened linear stack lands there.
+
+  **The fix keeps the precision honest in both directions.** Two decimals still, but a **positive** value that
+  would render as `"0"` falls back to three — which is exactly the precision `analyze_auto_inputs` carries
+  (it does `round(sky, 3)`), so nothing finer than what was actually measured is ever invented, and a sky that
+  is genuinely zero at that precision still reads `"0"`. Applied to both implementations at once, with the
+  new rows added to the shared `autoNum.cases.json` table that drives both suites — the idiom this pair
+  already had for the half-to-even divergence fixed before it. Nothing in the ordinary range moves
+  (`0.24` → `"0.24"`, `2.07` → `"2.07"`, `1.05` → `"1.05"`), and the same fallback quietly fixes the "Tuned to
+  your data" line's own small numbers (a denoise strength of `0.004` used to print `0`).
+
+  **Upgrade-safe (§9):** two pure formatters and one test table; no option, default, config key, schema,
+  on-disk path, API shape or measurement changed — the *number* is the same, only its rendering gained a
+  digit where it had lost all of them.
+
+  **Tests (+2 suites' worth, 6 failing before on each side).** Eight new rows in `autoNum.cases.json`
+  (`0.0004`→`0`, `0.0005`→`0.001`, `0.001`, `0.0012`, `0.0015`→`0.002`, `0.004`, `0.005`→`0.01`), which both
+  `tests/test_auto_summary_mirror.py` and `autoSummary.test.ts` drive; plus a named case per side pinning the
+  sample's own clause (*"a ~0.001 sky, 2.07 px stars"*) and the genuine-zero silence next to it.
+
 - **✅ SHIPPED (Builder, v0.345.3, branch `claude/sweet-babbage-i0r8cl`) — ~~the Export panel ends with a
   four-sentence paragraph explaining the buttons four rows above it, and its first sentence says what the
   Export line already said.~~** Found by *looking at* the editor (`scripts/agent-dogfood.sh`, desktop shot),
@@ -34332,9 +34364,22 @@ problems. Dogfood it every big-picture run and fix root causes.
 
   **Which sites really fire, measured.** A NaN-cornered 240² frame through each pass, counting both
   `AstropyUserWarning`s and the records astropy pushes into the `astropy` logger (which is how they reach the
-  Logs page): `seestack/bg/per_frame.py` (the block-averaged faint-extended pass — **once per frame**, which
-  is where "dozens per stack" comes from), `seestack/bg/final_gradient.py` (**twice per canvas**, the object
-  mask and its extended pass), and `seestack/qc/metrics.py::estimate_sky`. `post/color_cal.py:194` and
+  Logs page): `seestack/bg/per_frame.py` (the block-averaged faint-extended pass — **once per frame**),
+  `seestack/bg/final_gradient.py` (**twice per canvas**, the object mask and its extended pass), and
+  `seestack/qc/metrics.py::estimate_sky`.
+
+  **⚠️ One correction to the entry's own framing, measured after the fix went in and worth carrying:
+  "per stack" is really "per stack *that has NaNs*".** A full `scripts/agent-dogfood.sh` run — boot, ingest,
+  stack, probe every page — was taken against `origin/main` (pre-fix) **and** against this branch, and the
+  server log contains **0** of these warnings in *both*. The bundled sample is a 6-frame single field whose
+  canvas has no uncovered pixel anywhere, so none of the three sites has a NaN to clip. The emitters need a
+  **NaN-bearing canvas**: a mosaic union, a reprojected edge, a masked region — i.e. the owner's actual
+  shooting style, and the shape the pre-fix suite's own warnings summary confirms: **17 test files emitted
+  99 of them** in the baseline run (76 through `sigma_clipped_stats`, 23 through the `sigma_clip` inside it),
+  led by `webapp/test_preview_crop_geometry` (20), `test_photometric_mosaic_auto` (16),
+  `test_subpixel_mosaic_reference` (10) and `test_stack_pipeline` (7) — mosaic and reprojection fixtures, to a
+  file. **So the bundled sample is the wrong instrument for this one**, and a future run should not read
+  "dogfood shows zero" as "already fixed". `post/color_cal.py:194` and
   `per_frame.py`'s two other calls **already passed `mask=`** — the entry's line numbers were stale — and
   `coverage_leveling`'s `_robust_stats` / `_sky_mode` never warn on the live path, because every caller hands
   them an already-finite selection. Those two were converted anyway (defensively, and pinned as such), so a

@@ -158,3 +158,22 @@ def test_cause_clause_reads_as_the_editor_writes_it() -> None:
         "a ~0.13 sky, 4.7 px stars, a noisy background, "
         "13% of ragged mosaic edge to trim"
     )
+
+
+def test_a_linear_stacks_dark_sky_is_not_reported_as_no_sky() -> None:
+    """The bundled sample, in a real running app, said *"measured a ~0 sky"*.
+
+    Its measured sky is 0.001 — a perfectly ordinary number for a **linear**
+    stack, which is what the editor opens — and two decimals rounded it away. The
+    same panel says "sky level 0.24" one line below (the stretch's *target*
+    background, a display-space number), so the pair read as the app measuring
+    the same picture twice and getting nothing the first time.
+    """
+    assert _auto_cause_clause({"sky": 0.001, "median_fwhm": 2.07}) == (
+        "a ~0.001 sky, 2.07 px stars")
+    # Three decimals is exactly what `analyze_auto_inputs` carries, so a sky it
+    # rounded to zero still reads "0" rather than inventing precision.
+    assert _auto_cause_clause({"sky": 0.0}) == "a ~0 sky"
+    # …and nothing about the ordinary range moves.
+    assert _auto_num(0.24) == "0.24"
+    assert _auto_num(2.07) == "2.07"
