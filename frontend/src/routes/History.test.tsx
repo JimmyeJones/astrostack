@@ -351,10 +351,12 @@ describe("HistoryView", () => {
     ).toBeInTheDocument();
   });
 
-  it("won't plot object pins on a picture a past save rotated North-up", async () => {
+  it("won't plot object pins on a turned picture the server didn't answer for", async () => {
     // The North-up toggle starts off on every page load, so a run whose *stored*
     // preview was saved rotated used to get its pins and scale bar drawn on the
-    // un-rotated FITS grid — over a picture that had since turned.
+    // un-rotated FITS grid — over a picture that had since turned. With no
+    // `preview_objects` in the payload (an older backend, or a geometry the
+    // server refused) there is still no honest place to put them.
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ has_preview: true, preview_north_up_deg: 90 }),
     ]);
@@ -376,6 +378,60 @@ describe("HistoryView", () => {
     await waitFor(() =>
       expect(screen.getByText(/saved rotated so North is up/)).toBeInTheDocument());
     expect(screen.queryByText(/In this picture —/)).not.toBeInTheDocument();
+  });
+
+  it("plots object pins on a picture a past save rotated North-up", async () => {
+    // Using the app's own "Adjust \u2192 North up \u2192 Save" used to cost the run its
+    // pins for good. The server now places them on the turned preview's own grid,
+    // so the read-out comes back — and the note doesn't appear, because nothing
+    // the user asked for is missing.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, preview_north_up_deg: 90 }),
+    ]);
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600,
+      objects: [
+        { catalog_id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+          ra_deg: 10.68, dec_deg: 41.27, x_px: 500, y_px: 300 },
+      ],
+      scale_bar: null,
+      preview_objects: [
+        { catalog_id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+          ra_deg: 10.68, dec_deg: 41.27, x_px: 300, y_px: 499 },
+      ],
+      preview_width: 600, preview_height: 1000,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Identify"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/In this picture — 1 catalog object:/)).toBeInTheDocument());
+    expect(screen.queryByText(/saved rotated so North is up/)).not.toBeInTheDocument();
+  });
+
+  it("still stands the scale bar down on a turned picture, and says which half is missing", async () => {
+    // The bar's length would survive the turn, but its sentence describes a
+    // *field* and a turned frame has grown black wedges round the same sky. So
+    // the pins come back and the two marks don't — and the note says exactly
+    // that, rather than the old "none of them can be placed".
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, preview_north_up_deg: 90 }),
+    ]);
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600, objects: [], scale_bar: null,
+      preview_objects: [], preview_width: 600, preview_height: 1000,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Scale"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/The object pins follow the turn/)).toBeInTheDocument());
   });
 
   it("still plots object pins on a picture saved un-rotated", async () => {

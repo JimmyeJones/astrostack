@@ -1380,6 +1380,18 @@ export interface StackAnnotations {
   // the larger canvas behind it. null when the run isn't cropped (use
   // `scale_bar`) or has no usable WCS; absent on an older backend, same meaning.
   preview_scale_bar?: ScaleBar | null;
+  // The same objects placed on the *stored preview's* own grid — its crop, then
+  // the North-up turn a past "Adjust → North up → Save" baked into those bytes.
+  // A crop this side can compose exactly (it's a shift); a turn it cannot (a
+  // rotate-with-expand's canvas is a ceil/floor bounding box, and a near-square
+  // angle snaps to a lossless rot90), so the server answers that one rather than
+  // a second copy of the geometry living here and drifting. null unless a save
+  // really did turn the picture; absent on an older backend, same meaning — the
+  // pins then step aside on a turned preview, exactly as they used to.
+  preview_objects?: FieldObject[] | null;
+  // The grid `preview_objects` live on. Present together with it, or not at all.
+  preview_width?: number | null;
+  preview_height?: number | null;
   // Where North/East point, or null when the run has no usable orientation.
   // Absent on an older backend, which reads as "no rose" and shows nothing.
   directions?: SkyDirections | null;

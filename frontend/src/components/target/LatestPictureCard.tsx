@@ -5,7 +5,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type FieldObject, type StackRun } from "../../api/client";
 import { formatCaptureNights, formatIntegration, pictureDateLabel } from "../../format";
-import { AnnotatedImage, croppedAnnotationView, objectLabel } from "../AnnotatedImage";
+import {
+  AnnotatedImage, croppedAnnotationView, objectLabel, turnedPreviewView,
+} from "../AnnotatedImage";
 import { ImageLightbox } from "../ImageLightbox";
 import { NorthUpViewToggle, loadNorthUpView, saveNorthUpView } from "../NorthUpViewToggle";
 import { ShowRemovedToggle } from "../ShowRemovedToggle";
@@ -159,17 +161,22 @@ export function LatestPictureCard({
     name, formatCaptureNights(run.capture_night_start, run.capture_night_end));
   // The pins are measured on the run's un-rotated, un-cropped FITS grid, and this
   // card always shows the *stored* preview bytes. A crop the one-click auto-edit
-  // baked in composes exactly (shift the pixels into the trim); a baked-in
-  // North-up rotation, or a render whose geometry isn't a crop at all, does not —
-  // so hide the pins and say why, exactly as History does, rather than mis-plot.
-  const view = croppedAnnotationView(
+  // baked in composes exactly here (shift the pixels into the trim); a baked-in
+  // North-up rotation can't be composed in the browser, so the *server* answers
+  // that one on the preview's own grid (`preview_objects`, crop already applied)
+  // and this prefers it when it's there. A render whose geometry isn't a crop at
+  // all still has no honest answer — hide the pins and say why, rather than
+  // mis-plot.
+  const turnedView = turnedPreviewView(annotations.data);
+  const view = turnedView ?? croppedAnnotationView(
     run.preview_crop,
     annotations.data?.objects ?? [],
     null,
     annotations.data?.width ?? run.canvas_w,
     annotations.data?.height ?? run.canvas_h,
   );
-  const cantPlaceMarks = !!run.preview_north_up_deg || !!run.preview_geometry_unknown;
+  const cantPlaceMarks =
+    (!!run.preview_north_up_deg && !turnedView) || !!run.preview_geometry_unknown;
   const sentence = inThisPictureSentence(view.objects);
   // Offer the turn only where it would visibly do something: the run reports a
   // real correction, and its stored bytes aren't already turned (a picture a
