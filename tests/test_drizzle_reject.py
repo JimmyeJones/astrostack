@@ -865,3 +865,41 @@ def test_a_sub_that_blipped_in_the_statistics_pass_reads_as_recovered(
         assert res.n_read_recovered == 1
     finally:
         proj.close()
+
+
+def test_drizzle_rejection_is_blind_to_a_lone_outlier_below_kappa_min_frames():
+    """The measurement behind the ``rejection_blind`` note's drizzle branch.
+
+    Two-pass drizzle rejection *dispatches* from 4 frames, and until v0.340.0
+    that dispatch gate was what ``rejection_reach`` reported as the count at
+    which it could remove something. It is the same κ·σ clip as the non-drizzle
+    pass, against statistics that still contain the outlier, so the honest bound
+    is :func:`kappa_min_frames` — and this sweep is where that stops being an
+    argument: one sub carries a bright block, the rest are clean, and the block
+    comes out **fully diluted** (the naive no-rejection average, to a part in
+    1e-3) at every depth up to 10, then vanishes at 11.
+
+    That is the owner's case, not a corner: a mosaic panel rarely holds 11 subs,
+    the panels are what a pixel sees, and the owner drizzles mosaics. The run
+    still stamps ``REJMODE = drizzle-reject`` and ``REJFRAC 0.0`` throughout,
+    which is exactly the "it ran and your data was clean" reading the note now
+    contradicts.
+    """
+    from seestack.stack.stacker import kappa_min_frames
+
+    need = kappa_min_frames(3.0)
+    assert need == 11
+    wcs = _wcs()
+    for n in (4, 6, 8, 10, need, need + 1):
+        clean = np.full((80, 100, 3), 100.0, dtype=np.float32)
+        dirty = clean.copy()
+        dirty[30:40, 40:60, :] = 5000.0
+        frames = [clean.copy() for _ in range(n - 1)] + [dirty]
+        got = _stack_with_clip(frames, wcs, reject=True)[35, 50, 1]
+        diluted = ((n - 1) * 100.0 + 5000.0) / n
+        if n < need:
+            assert got == pytest.approx(diluted, rel=1e-3), (
+                f"{n} subs: the clip removed something it cannot remove")
+        else:
+            assert got == pytest.approx(100.0, rel=1e-3), (
+                f"{n} subs: the clip should have dropped the block by now")

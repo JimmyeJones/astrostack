@@ -746,6 +746,21 @@ export interface LibrarySessionRecap {
   night_date?: string | null;
   targets: TargetNight[];
   reject_buckets: Record<string, number>;
+  /** One target whose newest night stopped notably earlier than its own recent
+   *  nights do — the morning form of the live "capture has gone quiet" note,
+   *  which self-hides before the owner wakes up. Absent on an ordinary night
+   *  and on an older backend, so every read site must tolerate `undefined`. */
+  early_stop?: EarlyStop | null;
+}
+
+export interface EarlyStop {
+  name: string;
+  safe: string;
+  /** The last sub of the night just gone, ISO 8601 UTC. */
+  stopped_utc: string;
+  /** How much earlier than this target's usual stop, in minutes. */
+  minutes_earlier: number;
+  n_nights_compared: number;
 }
 
 export interface TargetProgress {

@@ -2,7 +2,7 @@ import { Badge, Group, Paper, Stack, Text } from "@mantine/core";
 import { IconMoonStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api, type LibrarySessionRecap } from "../api/client";
+import { api, type EarlyStop, type LibrarySessionRecap } from "../api/client";
 import {
   formatIntegration, formatNightDate, formatNightDayMonth, isRecentNight,
 } from "../format";
@@ -61,6 +61,45 @@ export function lastNightLabel(
   return label === "—" ? null : label;
 }
 
+/** "About 40 minutes" / "about 3 h" / "about 2.5 h" — a rounded gap, worded so a
+ *  beginner reads it as an estimate, which it is (a median over a handful of
+ *  nights). Rounded to the quarter-hour below two hours and the half-hour above,
+ *  because the underlying number is never precise enough to earn more digits. */
+export function roughDuration(minutes: number): string {
+  if (minutes < 120) {
+    const m = Math.max(15, Math.round(minutes / 15) * 15);
+    return `${m} minutes`;
+  }
+  const h = Math.round(minutes / 30) / 2;
+  return `${h % 1 === 0 ? h.toFixed(0) : h.toFixed(1)} h`;
+}
+
+/** "M 42 stopped getting subs at 23:40 — about 3 h earlier than its last 4
+ *  nights." — the one line an owner who was asleep cannot get anywhere else.
+ *
+ *  The live "capture seems to have gone quiet" note (the Target page) covers
+ *  someone standing outside, and self-hides once the silence outlasts the 6 h
+ *  session gap — by breakfast it is gone. This is the same fact in the past
+ *  tense, judged against the target's *own* recent stop times rather than a
+ *  clock, so a night ended deliberately at the usual hour never trips it (see
+ *  `seestack.session_recap.early_stop`).
+ *
+ *  Deliberately not an alarm. It reports what happened and names the innocent
+ *  explanation in the same breath, because most early stops *are* deliberate and
+ *  a Dashboard that cries wolf over bedtime is worse than one that says nothing.
+ *  The clock is rendered in the reader's own timezone — the stamp is UTC, and
+ *  "23:40" only means anything to someone in the hour they were shooting.
+ *  Pure and offline so it is unit-testable without rendering. */
+export function describeEarlyStop(e: EarlyStop): string {
+  const clock = new Date(e.stopped_utc).toLocaleTimeString(undefined, {
+    hour: "2-digit", minute: "2-digit",
+  });
+  const nights = `its last ${e.n_nights_compared} nights`;
+  return `${e.name} stopped getting subs at ${clock} — about `
+    + `${roughDuration(e.minutes_earlier)} earlier than ${nights}. `
+    + "Worth a look if you didn't stop on purpose.";
+}
+
 /**
  * "Last night" — a small, persistent, plain-language Dashboard card answering
  * the first question a walk-away user has on return: *what did last night give
@@ -91,6 +130,14 @@ export function LastNightCard() {
             <Badge variant="light" color="violet" size="sm">{keptPct}% kept</Badge>
           </Group>
           <Text size="sm" c="dimmed">{describeLibraryNight(r)}</Text>
+          {r.early_stop && (
+            <Text size="sm" c="dimmed" data-testid="last-night-early-stop">
+              <Link to={`/targets/${r.early_stop.safe}`}
+                style={{ color: "inherit" }}>
+                {describeEarlyStop(r.early_stop)}
+              </Link>
+            </Text>
+          )}
           {r.targets.length > 1 && (
             <Group gap="xs">
               {r.targets.map((t) => (

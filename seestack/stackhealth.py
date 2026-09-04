@@ -455,8 +455,23 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # paths turn it on for you, so this only fires for a run whose options said
     # otherwise — a saved default from before that existed, or an explicit choice.
     # Keyed off the *recorded* rejection mode, the authoritative account of what
-    # actually ran: an auto-picked small stack records "min-max-reject" and a
-    # drizzle run "drizzle-reject", so neither can trip this.
+    # actually ran: an auto-picked small stack records "min-max-reject", whose
+    # drop is an order statistic rather than a κ·σ clip, so it cannot trip this.
+    #
+    # A **drizzled** run ("drizzle-reject") *can*, and used to be excluded here
+    # for no better reason than that it is a different code path. Its two-pass
+    # clip is the same κ·σ test against statistics that still include the
+    # outlier, with the same ``options.sigma_kappa``, so it is blind to a lone
+    # trail below the same ``kappa_min_frames`` — measured on a real drizzle
+    # stack in ``tests/test_drizzle_reject.py``: one sub's bright block comes out
+    # fully diluted at every depth up to 10 and is removed from 11, at κ=3. That
+    # is exactly the owner's case (mosaic panels are thin, and the owner
+    # drizzles): the run stamps ``REJMODE = drizzle-reject`` with ``REJFRAC
+    # 0.0``, the clean-up note below reads that as "your data was clean", and
+    # the trail is in the picture with nothing saying so. Its *cure* differs, so
+    # it gets its own last sentence — ``auto_reject`` is a no-op while drizzle is
+    # on (``_resolve_auto_reject`` returns early), and pointing a beginner at a
+    # switch that changes nothing is worse than saying nothing.
     #
     # On a **mosaic** the frame count is the wrong number: a pixel only ever sees
     # its own panel's subs, so a 2x2 mosaic three subs deep presents 12 frames to
@@ -472,7 +487,8 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     n_combined = run.n_frames_used
     peak_depth = (min(n_combined, run.coverage_max)
                   if run.coverage_max and run.coverage_max > 0 else n_combined)
-    if (run.rejection_mode or "").strip() == "sigma-clip" and n_combined >= 1:
+    blind_mode = (run.rejection_mode or "").strip()
+    if blind_mode in ("sigma-clip", "drizzle-reject") and n_combined >= 1:
         from seestack.stack.stacker import kappa_min_frames
 
         need = kappa_min_frames(_run_sigma_kappa(run.options_json))
@@ -487,16 +503,28 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
                     f"With no more than {peak_depth} sub"
                     f"{'s' if peak_depth != 1 else ''} overlapping at any one "
                     "spot in this picture")
+            # Same measurement, two cures. Sigma clipping has a one-switch fix;
+            # a drizzled run does not, because Auto outlier removal cannot
+            # override drizzle — so name the two things that would actually
+            # work, in the order a beginner should try them.
+            if blind_mode == "drizzle-reject":
+                what = "drizzle's own outlier removal"
+                cure = ("More subs on that part of the sky is the real fix; "
+                        "re-stacking with drizzle off and \"Auto outlier "
+                        "removal\" switched on would use the min/max method "
+                        "instead, which works from 3 subs up.")
+            else:
+                what = "sigma-clip outlier removal"
+                cure = ("Re-stack with \"Auto outlier removal\" switched on and "
+                        "AstroStack will use the min/max method instead, which "
+                        "works from 3 subs up.")
             scored.append((25, HealthNote(
                 kind="rejection_blind",
                 severity="info",
                 message=(f"{deep}, "
-                         "sigma-clip outlier removal couldn't drop anything — it "
+                         f"{what} couldn't drop anything — it "
                          f"needs about {need} frames before a passing satellite or "
-                         "cosmic-ray hit stands out enough to clip. Re-stack with "
-                         "\"Auto outlier removal\" switched on and AstroStack will "
-                         "use the min/max method instead, which works from 3 subs "
-                         "up."),
+                         f"cosmic-ray hit stands out enough to clip. {cure}"),
                 action="restack",
             )))
 
