@@ -278,7 +278,8 @@ def grade_video(
     best_frame: np.ndarray | None = None
     expected = max(1, vinfo.n_frames // stride) if vinfo.n_frames else 0
     for i, frame in enumerate(
-        iter_frames(src, stride=stride, width=vinfo.width, height=vinfo.height)
+        iter_frames(src, stride=stride, width=vinfo.width, height=vinfo.height,
+                    pix_fmt=vinfo.pix_fmt)
     ):
         if should_cancel is not None and should_cancel():
             raise VideoStackCancelled("cancelled while grading frames")
@@ -383,7 +384,8 @@ def stack_video(
     max_shift = max(2.0, _MAX_SHIFT_FRACTION * min(vinfo.height, vinfo.width))
     done = 0
     for i, frame in enumerate(
-        iter_frames(src, stride=stride, width=vinfo.width, height=vinfo.height)
+        iter_frames(src, stride=stride, width=vinfo.width, height=vinfo.height,
+                    pix_fmt=vinfo.pix_fmt)
     ):
         if i not in keep_idx:
             continue

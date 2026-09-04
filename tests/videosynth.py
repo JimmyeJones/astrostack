@@ -88,6 +88,101 @@ def write_video(path: Path, frames: Iterable[np.ndarray], *, fps: int = 10) -> P
     return path
 
 
+#: Relative transmission of the four RGGB photosites on a solar continuum —
+#: the physical reason an undebayered mosaic reads as a fine bright/dark
+#: checkerboard rather than as a flat disk. Exaggerated a little so a test can
+#: measure the pattern without needing thousands of frames.
+_CFA_TRANSMISSION = {"R": 1.00, "G": 0.80, "B": 0.55}
+
+
+def solar_mosaic_frame(
+    w: int, h: int, *, cx: float, cy: float, radius: float,
+    sharpness: float = 1.0, seed: int = 0, noise: float = 2.0,
+) -> np.ndarray:
+    """One synthetic **raw sensor mosaic** frame as (h, w) uint8.
+
+    A near-uniform solar disk sampled through an RGGB colour filter array: the
+    scene itself is smooth, so *every* 2-px structure in the result comes from
+    the filter. Single channel, exactly as a raw capture is recorded.
+    """
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    r = np.hypot(xx - cx, yy - cy)
+    disk = np.clip((radius - r) / 2.0 + 0.5, 0.0, 1.0)
+    dx, dy = xx - cx, yy - cy
+    detail = (np.sin(dx * 0.35) * np.cos(dy * 0.31)).astype(np.float32)
+    scene = 200.0 * disk + 25.0 * sharpness * detail * disk + 8.0
+
+    gain = np.empty((h, w), dtype=np.float32)
+    gain[0::2, 0::2] = _CFA_TRANSMISSION["R"]
+    gain[0::2, 1::2] = _CFA_TRANSMISSION["G"]
+    gain[1::2, 0::2] = _CFA_TRANSMISSION["G"]
+    gain[1::2, 1::2] = _CFA_TRANSMISSION["B"]
+
+    rng = np.random.default_rng(seed)
+    img = scene * gain + rng.normal(0.0, noise, size=scene.shape).astype(np.float32)
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+
+def write_pal8_video(path: Path, planes: Iterable[np.ndarray], *, fps: int = 10) -> Path:
+    """Encode single-channel ``planes`` as a **pal8 rawvideo AVI**.
+
+    This is the shape the Seestar actually writes (measured on the owner's
+    ``…-Solar-RAW.avi``: ``rawvideo`` / ``pal8`` / one byte per pixel), with the
+    identity grey-ramp palette that makes each byte the raw sensor value.
+    ffmpeg's rawvideo pal8 layout is ``w*h`` index bytes followed by a 1024-byte
+    palette per frame, so the palette is written explicitly rather than left to
+    a quantiser — a quantised palette would not be the file under test.
+    """
+    exe = ffmpeg_path()
+    if exe is None:  # pragma: no cover — guarded by the tests' skip marker
+        raise RuntimeError("ffmpeg not installed")
+    planes = list(planes)
+    if not planes:
+        raise ValueError("no frames")
+    h, w = planes[0].shape[:2]
+    ramp = np.arange(256, dtype=np.uint8)
+    palette = np.stack([ramp, ramp, ramp, np.full(256, 255, np.uint8)], axis=1)
+    payload = b"".join(
+        np.ascontiguousarray(p, dtype=np.uint8).tobytes() + palette.tobytes()
+        for p in planes
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        exe, "-v", "error", "-y", "-nostdin",
+        "-f", "rawvideo", "-pix_fmt", "pal8",
+        "-s", f"{w}x{h}", "-r", str(fps), "-i", "-",
+        "-c:v", "rawvideo", "-pix_fmt", "pal8",
+        str(path),
+    ]
+    proc = subprocess.run(cmd, input=payload, capture_output=True, check=False)
+    if proc.returncode != 0 or not path.exists():
+        raise RuntimeError(
+            "ffmpeg encode failed: " + proc.stderr.decode("utf-8", "replace")[-400:]
+        )
+    return path
+
+
+def solar_raw_video(
+    path: Path, *, n_frames: int = 12, w: int = 96, h: int = 72,
+    sharp_indices: Iterable[int] = (), fps: int = 10,
+) -> Path:
+    """A short **undebayered** solar capture, in the owner's real file shape.
+
+    The disk does not move — a solar/planetary capture is a static target, which
+    is exactly why a sensor-fixed pattern accumulates through the stack instead
+    of averaging away.
+    """
+    sharp = set(sharp_indices)
+    planes = [
+        solar_mosaic_frame(
+            w, h, cx=w / 2, cy=h / 2, radius=min(w, h) * 0.35,
+            sharpness=1.0 if i in sharp else 0.2, seed=i,
+        )
+        for i in range(n_frames)
+    ]
+    return write_pal8_video(path, planes, fps=fps)
+
+
 def lunar_video(
     path: Path, *, n_frames: int = 12, w: int = 96, h: int = 72,
     sharp_indices: Iterable[int] = (), drift_px: float = 0.0, fps: int = 10,
