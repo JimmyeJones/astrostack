@@ -181,3 +181,231 @@ def test_year_recap_and_activity_calendar_agree_about_a_night(client, built_libr
     assert cal_nights[f"{now_year}-01-20"]["exposure_s"] == year["total_exposure_s"]
     assert cal_nights[f"{now_year}-01-20"]["n_frames"] == year["n_frames"]
     assert year["longest_night"] is None  # one night in the year — nothing to rank
+
+
+# --- slice (b): the shareable year — poster, caption, and the honest hero ----
+#
+# The year page told the story but had nothing a beginner could post. These pin
+# the API half: the `.jpg` route actually resolving (it shares a path prefix
+# with the JSON one, so a route-ordering slip would 422 it), the caption and
+# hero riding along on the JSON, and the one thing that could quietly lie — a
+# hero picture whose target was also imaged in another year.
+
+def _register_preview(root, safe: str, image_bytes: bytes | None = None):
+    """Register a stack run whose preview is a real readable PNG on disk, so the
+    year poster has a hero backdrop to composite (mirrors the helper in
+    ``tests/webapp/test_recap.py``)."""
+    import io
+    import json
+
+    from PIL import Image
+
+    from seestack.io.library import Library
+    from seestack.io.project import StackRunRow
+
+    lib = Library.open_or_create(root / "library")
+    try:
+        entry = lib.find_target(safe)
+        preview_path = lib.target_dir(entry) / "master_preview.png"
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        if image_bytes is None:
+            buf = io.BytesIO()
+            Image.new("RGB", (64, 32), (255, 255, 255)).save(buf, format="PNG")
+            image_bytes = buf.getvalue()
+        preview_path.write_bytes(image_bytes)
+        proj = lib.open_target(safe)
+        try:
+            proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-02T00:00:00Z",
+                output_basename="master", fits_path=None, tiff_path=None,
+                preview_path=str(preview_path), n_frames_used=3,
+                canvas_h=320, canvas_w=480, coverage_min=1, coverage_max=3,
+                options_json=json.dumps({}),
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+    return preview_path
+
+
+def test_year_poster_downloads_as_a_square_jpeg(client, built_library):
+    """The `.jpg` route resolves — it shares its prefix with `/{year}`, whose
+    int path param would 422 on "2024.jpg" if the ordering ever slipped."""
+    import io
+    from datetime import date
+
+    from PIL import Image
+
+    lib = _library(built_library)
+    try:
+        _set_night(lib, "M_42", date(2024, 11, 3), 22, 60.0)
+    finally:
+        lib.close()
+
+    r = client.get("/api/recap/year/2024.jpg")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+    assert "my-2024-under-the-stars.jpg" in r.headers["content-disposition"]
+    with Image.open(io.BytesIO(r.content)) as img:
+        assert img.size[0] == img.size[1]
+
+
+def test_year_poster_uses_that_years_own_best_picture(client, solved_library):
+    """The backdrop is the year's hero, not the plain deep-space background."""
+    import io
+    from datetime import date
+
+    from PIL import Image
+
+    lib = _library(solved_library)
+    try:
+        _set_night(lib, "M_42", date(2024, 11, 3), 22, 60.0)
+    finally:
+        lib.close()
+    _register_preview(solved_library, "M_42")
+
+    r = client.get("/api/recap/year/2024.jpg")
+    assert r.status_code == 200
+    with Image.open(io.BytesIO(r.content)) as img:
+        corner = img.convert("RGB").getpixel((2, img.size[1] - 2))
+    # A white hero, veiled: lighter than the plain background, dark enough that
+    # the poster text stays readable over it.
+    assert all(60 < c < 210 for c in corner), corner
+
+
+def test_year_poster_survives_an_unreadable_preview(client, solved_library):
+    """A deleted or corrupt preview falls back to the plain backdrop, never a
+    500 — previews are regenerated artifacts, not user data."""
+    import io
+    from datetime import date
+
+    from PIL import Image
+
+    lib = _library(solved_library)
+    try:
+        _set_night(lib, "M_42", date(2024, 11, 3), 22, 60.0)
+    finally:
+        lib.close()
+    _register_preview(solved_library, "M_42", image_bytes=b"not really a png")
+
+    r = client.get("/api/recap/year/2024.jpg")
+    assert r.status_code == 200
+    with Image.open(io.BytesIO(r.content)) as img:
+        assert img.size[0] == img.size[1]
+
+
+def test_year_poster_404s_for_a_year_with_no_nights(client, built_library):
+    """A poster about a year of nothing is a wall of nothing — the page's empty
+    state already says where the nights actually are."""
+    from datetime import date
+
+    lib = _library(built_library)
+    try:
+        _set_night(lib, "M_42", date(2024, 11, 3), 22, 60.0)
+    finally:
+        lib.close()
+
+    assert client.get("/api/recap/year/2019.jpg").status_code == 404
+
+
+def test_year_poster_rejects_a_year_out_of_range(client, built_library):
+    assert client.get("/api/recap/year/1200.jpg").status_code == 422
+
+
+def test_year_recap_carries_a_caption_to_post_beside_the_poster(client,
+                                                                built_library):
+    from datetime import date
+
+    lib = _library(built_library)
+    try:
+        _set_night(lib, "M_42", date(2024, 11, 3), 22, 60.0)     # 3 × 60 s
+        _set_night(lib, "NGC_7000", date(2025, 2, 14), 21, 30.0)  # a different year
+    finally:
+        lib.close()
+
+    data = client.get("/api/recap/year/2024").json()
+    assert data["caption"] == (
+        "2024 under the stars · 1 night out · 3 min of light · 1 target · "
+        "first light: M_42")
+
+
+def test_an_empty_year_offers_no_caption(client, built_library):
+    from datetime import date
+
+    lib = _library(built_library)
+    try:
+        _set_night(lib, "M_42", date(2024, 11, 3), 22, 60.0)
+    finally:
+        lib.close()
+
+    assert client.get("/api/recap/year/2019").json()["caption"] == ""
+
+
+def test_year_hero_is_a_target_shot_that_year_and_links_to_it(client,
+                                                              solved_library):
+    from datetime import date
+
+    lib = _library(solved_library)
+    try:
+        _set_night(lib, "M_42", date(2024, 11, 3), 22, 60.0)
+        _set_night(lib, "NGC_7000", date(2025, 2, 14), 21, 30.0)
+    finally:
+        lib.close()
+    # Both targets have a picture; only M 42 has a night in 2024.
+    _register_preview(solved_library, "M_42")
+    _register_preview(solved_library, "NGC_7000")
+
+    hero = client.get("/api/recap/year/2024").json()["hero"]
+    assert hero is not None
+    assert hero["name"] == "M_42"
+    assert hero["thumbnail_url"] == "/api/targets/M_42/thumbnail"
+    # Shot in 2024 and no other year — nothing to caveat.
+    assert hero["note"] == ""
+
+
+def test_year_hero_says_so_when_its_picture_may_carry_another_years_light(
+        client, solved_library):
+    """The hero's preview is its *newest* stack. A target imaged across two
+    years must not be presented as if the pixels were all this year's."""
+    from datetime import date
+
+    lib = _library(solved_library)
+    try:
+        _set_night(lib, "M_42", date(2024, 11, 3), 22, 60.0)
+        _set_night(lib, "NGC_7000", date(2025, 2, 14), 21, 30.0)
+        # …and M 42 was shot again the following June, so its newest stack can
+        # no longer be honestly captioned as "your 2024".
+        proj = lib.open_target("M_42")
+        try:
+            first = list(proj.iter_frames())[0]
+            proj.update_frame(first.id, timestamp_utc="2025-06-01T22:00:00Z")
+        finally:
+            proj.close()
+        lib.refresh_target_stats("M_42")
+    finally:
+        lib.close()
+    _register_preview(solved_library, "M_42")
+
+    data = client.get("/api/recap/year/2024").json()
+    assert data["years_with_data"] == [2024, 2025]
+    hero = data["hero"]
+    assert hero["name"] == "M_42"
+    assert "other years" in hero["note"]
+
+
+def test_year_with_no_picture_yet_reports_no_hero(client, built_library):
+    """A library that has captured but never stacked: the year still has its
+    story, and the share card simply offers the poster without a backdrop."""
+    from datetime import date
+
+    lib = _library(built_library)
+    try:
+        _set_night(lib, "M_42", date(2024, 11, 3), 22, 60.0)
+    finally:
+        lib.close()
+
+    data = client.get("/api/recap/year/2024").json()
+    assert data["has_anything"] is True
+    assert data["hero"] is None

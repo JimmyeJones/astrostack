@@ -24,7 +24,12 @@ deterministic: no clock, no network, no ``webapp`` imports, nothing written.
 
 Honest rather than complete: a figure the data can't support is left out
 (``None``/empty) instead of guessed, and a year with no nights simply says so.
-The caller decides what to render; this module only decides what is *true*.
+
+The year is also *shareable*: :func:`year_caption` writes the copy-paste blurb
+and :func:`draw_year_poster` renders the square picture to post beside it — the
+latter by feeding this module's facts into :func:`seestack.recap.draw_poster`,
+the same renderer the all-time "your sky, so far" poster uses, so the two can
+never drift apart in look.
 """
 
 from __future__ import annotations
@@ -250,6 +255,139 @@ def year_stats(recap: YearRecap) -> list[tuple[str, str]]:
     return out
 
 
+def year_caption(recap: YearRecap) -> str:
+    """The copy-paste blurb to post beside the year poster, e.g.
+
+    ``"2026 under the stars · 31 nights out · 52.4 h of light · 9 targets ·
+    first light: M 31, M 42 and 3 more"``
+
+    Built from whatever is known, in the order a person would say it, with each
+    part omitted when its figure is missing — the same voice (and the same
+    middle-dot separator) as :func:`seestack.recap.recap_caption`, so a beginner
+    who posts both in one week doesn't meet two different products. Returns
+    ``""`` for a year with nothing in it.
+    """
+    if not recap.has_anything or recap.n_nights <= 0:
+        return ""
+    parts = [f"{recap.year} under the stars",
+             _plural(recap.n_nights, "night", "nights") + " out"]
+    dur = format_duration(recap.total_exposure_s)
+    if dur:
+        parts.append(f"{dur} of light")
+    if recap.n_targets > 0:
+        parts.append(_plural(recap.n_targets, "target", "targets"))
+    # …and what you met for the first time. Lower case here (mid-sentence) where
+    # the poster's own line is capitalised — exactly how `recap_caption` folds in
+    # its "also shot" line.
+    firsts = year_first_light_line(recap)
+    if firsts:
+        parts.append(firsts[0].lower() + firsts[1:])
+    return " · ".join(parts)
+
+
+def _night_date(night: NightActivity | None) -> str:
+    """A night's date as a person writes it (``"12 Jan 2026"``), or ``""``."""
+    from seestack.nameplate import format_acq_date
+
+    return format_acq_date(night.date) if night is not None else ""
+
+
+def year_longest_night_line(recap: YearRecap) -> str:
+    """The poster's "longest night" line, or ``""`` when the year has none.
+
+    Uses a **middle dot** rather than an em dash for the same reason
+    :func:`seestack.recap.recap_top_project_line` does: Pillow's built-in font
+    has no U+2014 glyph, and a tofu box on a poster is the one character the
+    user is about to post publicly.
+    """
+    night = recap.longest_night
+    when, dur = _night_date(night), format_duration(
+        night.exposure_s if night is not None else None)
+    if not when or not dur:
+        return ""
+    return f"Longest night: {when} · {dur}"
+
+
+def year_sharpest_night_line(recap: YearRecap) -> str:
+    """The poster's "sharpest night" footnote, or ``""``.
+
+    Star size in pixels — the unit the Frames table, the Nights card and the
+    year page all quote — so a beginner meets one number rather than three.
+    """
+    night = recap.sharpest_night
+    when = _night_date(night)
+    fwhm = night.median_fwhm_px if night is not None else None
+    if not when or fwhm is None or not (fwhm > 0):
+        return ""
+    return f"Sharpest night: {when} · {fwhm:.1f} px stars"
+
+
+def year_poster_title(recap: YearRecap) -> str:
+    """The poster's headline, e.g. ``"My 2026 under the stars"``."""
+    return f"My {recap.year} under the stars"
+
+
+def draw_year_poster(recap: YearRecap, hero=None, *, size: int | None = None):  # noqa: ANN001
+    """Render the year as one square, social-ready ``PIL.Image``.
+
+    Deliberately a *second facts source into the same renderer* rather than a
+    second poster: :func:`seestack.recap.draw_poster` owns the layout, so the
+    year poster and the all-time one can never drift apart in look.
+
+    ``hero`` is the user's own picture for the backdrop — the caller decides
+    which, since only it knows the library; without one the poster falls back to
+    the plain deep-space background.
+    """
+    from seestack.recap import POSTER_SIZE, draw_poster
+
+    return draw_poster(
+        title=year_poster_title(recap),
+        stats=year_stats(recap),
+        lines=(
+            year_longest_night_line(recap),
+            year_first_light_line(recap),
+            year_sharpest_night_line(recap),
+        ),
+        hero=hero,
+        size=POSTER_SIZE if size is None else size,
+    )
+
+
+def years_by_target(nights: list[NightActivity]) -> dict[str, tuple[int, ...]]:
+    """Each target's imaged calendar years, ascending, over every night given.
+
+    This is what lets a year page caption its best picture *honestly*: a target's
+    newest stack is the pixels the thumbnail shows, and those pixels only belong
+    to one year if the target was never imaged in another.
+    """
+    out: dict[str, set[int]] = {}
+    for n in nights:
+        year = _year_of(n)
+        if year is None:
+            continue
+        for name in n.targets:
+            if name:
+                out.setdefault(name, set()).add(year)
+    return {name: tuple(sorted(years)) for name, years in out.items()}
+
+
+def year_hero_note(year: int, target_years: tuple[int, ...] | None) -> str:
+    """The honest caveat under a year's best picture, or ``""`` when none is
+    needed.
+
+    A hero's preview is its **newest** stack, which may have been made from
+    nights either side of the year — so unless the target was imaged in this
+    year and no other, the page has to say so rather than implying the pixels
+    are the year's. An unknown span is treated as "might span", because a
+    silent overclaim is the failure mode worth avoiding.
+    """
+    years = tuple(target_years or ())
+    if years == (int(year),):
+        return ""
+    return ("Your newest picture of it — it may include light from other "
+            "years too.")
+
+
 # Kept as a module-level name so a caller can present the same empty state the
 # tests pin, rather than each surface inventing its own wording.
 def year_empty_message(recap: YearRecap) -> str:
@@ -276,11 +414,18 @@ __all__ = [
     "LONGEST_MIN_NIGHTS",
     "YearRecap",
     "build_year_recap",
+    "draw_year_poster",
     "first_night_by_target",
     "longest_night",
+    "year_caption",
     "year_empty_message",
     "year_first_light_line",
     "year_headline",
+    "year_hero_note",
+    "year_longest_night_line",
+    "year_poster_title",
+    "year_sharpest_night_line",
     "year_stats",
+    "years_by_target",
     "years_with_data",
 ]
