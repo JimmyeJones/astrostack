@@ -1157,8 +1157,41 @@ def test_best_tonight_never_says_you_have_zero_minutes():
     says so in words."""
     fresh = np_plan.rank_targets_now(None, JAN_EVENING,
                                      [_lib("new", "New", 10.7, 41.3, hours=0.0)])
-    assert "haven't captured any of New yet" in fresh.picks[0].reason
+    assert "haven't captured anything here yet" in fresh.picks[0].reason
     assert "0 min" not in fresh.picks[0].reason
+
+
+def test_a_depth_only_pick_does_not_repeat_the_name_it_is_rendered_under():
+    """Both cards that show these picks — the Dashboard's "Worth more time" and
+    the Tonight page's list — print the target's name and then this sentence
+    directly beneath it, so a reason that names the target again reads as the
+    same long catalogue name twice, one line apart:
+
+        Sample: Orion Nebula (M42)
+        You've got 1 min on Sample: Orion Nebula (M42) — another hour would …
+
+    The *placed* path already avoids this from the other end (`_pick_reason`
+    passes "it", because its own opening clause has just said the name), so this
+    is the same rule on the no-location path. Every shape of the sentence is
+    checked, since each builds its own phrase.
+    """
+    long_name = "Sample: Orion Nebula (M42)"
+    for hours in (0.0, 0.001, 1 / 60.0, 1.5, 500.0):
+        pick = np_plan.rank_targets_now(None, JAN_EVENING, [
+            _lib("sample", long_name, 83.8, -5.4, hours=hours),
+        ]).picks[0]
+        assert pick.name == long_name, "the card still gets the name to render"
+        assert long_name not in pick.reason, (
+            f"the reason repeats the name it is rendered under: {pick.reason!r}")
+        # …and it still says what you have and what another hour buys.
+        assert pick.reason.startswith("You"), pick.reason
+        assert pick.reason.endswith("."), pick.reason
+
+    # The placed path names the target exactly once — its own opening clause.
+    placed = np_plan.rank_targets_now(LONDON, JAN_EVENING, [
+        _lib("sample", long_name, 10.7, 41.3, hours=1.5),
+    ]).picks[0]
+    assert placed.reason.count(long_name) == 1
 
 
 def test_the_planner_says_how_much_light_you_have_in_the_apps_own_words():
