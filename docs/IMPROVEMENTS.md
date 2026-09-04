@@ -12365,7 +12365,53 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-09-04, the choice v0.342.0 made deliberately and should be re-measured) — the
+- **✅ SHIPPED (Builder, v0.342.3, branch `claude/sweet-babbage-77bqc1`) — ~~the early-stop judgement compares
+  *sessions*, so a split night quietly makes the app less likely to speak.~~ Measured first, exactly as the
+  entry demanded — and the measurement says the entry's own premise was the *smaller* half of the story, and
+  its "conservative direction" reassurance was wrong.** Both surfaces now merge session end stamps into
+  observing nights (`merge_end_stamps_by_night`, built on the one `_merge_sessions_by_night` the Nights card
+  already used) before `early_stop` sees them, so they still agree by construction.
+
+  **What the measurement found**, on split-night fixtures across the shapes the entry named, plus two it
+  did not:
+  - **The entry's own case barely moves.** On an evenly split night (evening + pre-dawn) three of the five
+    session stamps in the lookback window *are* night ends, so the median already lands on one: **180 min
+    early either way; 300 min early either way.** The "drags the median earlier" mechanism is real and
+    almost always cancels.
+  - **The floor is defeated, and that is not conservative — it invents a habit.** Two real nights, each shot
+    in two goes, are **four** session stamps, which clears `EARLY_STOP_MIN_PRIOR_NIGHTS` — the constant whose
+    entire job is to keep the note off a target's first couple of nights, "where every stop time is equally
+    usual and any claim about it would be invented". Measured on the endpoint: the card announced a
+    **315-minute early stop over "3 nights"** for a target the owner had shot **twice**. This is exactly the
+    shape v0.329.4 found in the pace estimate ("the floor error is the *larger* one"), one surface along.
+  - **And the median really does dilute when a night is shot in more than two goes.** On a habitual
+    three-goes night (evening / small hours / dawn) only one stamp in three is a true night end, so the
+    yardstick lands mid-night: a night that ended **9½ h** early was reported as **2½ h** early.
+  - **The count is a sentence the owner reads.** `LastNightCard.earlyStopClause` renders *"…earlier than its
+    last N nights"* straight off `n_nights_compared`, which was a count of *sessions*: "its last 5 nights"
+    over three real ones, on every split-night library.
+  - **An observer who never splits a night is bit-identical** — same verdict, same minutes, same count. The
+    merge is a no-op on a list with one stamp per night.
+
+  **What shipped.** `merge_end_stamps_by_night(end_stamps, night_of)` in `seestack/session_recap.py`, wired
+  into both consumers: `nights_breakdown` merges its stamps whenever it was given a `night_of` (it already
+  merged the *rows*), and `/api/last-night` now caches the raw per-target stamps and forms the verdict at the
+  endpoint, where the observer's longitude lives. That second move is a small improvement in its own right:
+  the verdict now follows a Settings longitude change immediately instead of waiting out the recap cache's
+  TTL, the same property `night_date` already had and for the same reason.
+
+  **Tests (+2 engine, +2 endpoint, 1 rewritten).** The two endpoint regressions both **fail on pre-fix
+  code** (`assert {…'minutes_earlier': 315.0…} is None`, and `assert 5 == 3`): two split nights say nothing,
+  and three of them are judged against when those nights *ended*. The engine pair pins the same two shapes
+  directly, including the three-goes 150 min → 570 min correction. The v0.342.0 test that pinned the old
+  behaviour was **rewritten, not deleted**: its real invariant — the Target page and the Dashboard must not
+  quote different medians for one night — is unchanged and still asserted, now against the merged stamps
+  both surfaces feed, with the count corrected from 5 sessions to 4 nights.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change; the only cached value that
+  changed shape is an in-memory `app.state` dict rebuilt on every process start.
+
+  *(Original spec.)* **NEW IDEA (Builder 2026-09-04, the choice v0.342.0 made deliberately and should be re-measured) — the
   early-stop judgement compares *sessions*, so a split night quietly makes the app less likely to speak.**
   *(Pillar: autonomy + trust — PRIORITY 2; size S, **measure before changing anything**.)* `early_stop`
   is fed `session_end_stamps(frames)` on both surfaces that report it — the Dashboard's "Last night" card
