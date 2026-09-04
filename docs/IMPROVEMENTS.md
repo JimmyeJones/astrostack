@@ -17785,6 +17785,20 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
+- **NEW IDEA (Builder 2026-09-04, the half v0.345.6 deliberately did NOT build — it is wording, and wording
+  wants a deliberate pass) — the auto-edit panel says "sky" twice, one line apart, meaning two different
+  things.** *(Pillar: approachable / trust — PRIORITY 3; size XS, but **copy, so read the whole panel before
+  moving a word**.)* v0.345.6 fixed the *number* ("a ~0 sky" → "a ~0.001 sky"); it did not touch the fact that
+  the cause clause's **"a ~0.001 sky"** is a measurement of the *linear* stack, while the "Tuned to your data"
+  line's **"sky level 0.24"** is the stretch's *target* background in display space. Both are correct, both
+  say "sky", and they sit one line apart differing by two orders of magnitude — a beginner reading them
+  together has no way to know they are different quantities rather than a contradiction. **Shape:** name them
+  apart in the two clauses (e.g. *"your sky measured ~0.001"* against *"stretched to a sky brightness of
+  0.24"*), which needs the same both-sides change as the number did — `autoSummary.ts` and
+  `seestack/edit/presets.py`, plus the phrase table. **Do NOT** solve it by hiding one of them: each is the
+  only place its own fact appears (the standing "nothing may be removed" constraint), and the pair is *why*
+  the note earns trust — it says what was measured and what was done about it.
+
 - **✅ SHIPPED (Builder, v0.345.6, branch `claude/sweet-babbage-k0vyac`) — ~~the auto-edit note tells the
   owner the app "measured a ~0 sky", one line above "sky level 0.24".~~** Found the same way v0.345.3 was —
   by *looking at* a running editor (`scripts/agent-dogfood.sh`, desktop shot of the bundled sample) rather
@@ -34337,6 +34351,27 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **NEW IDEA (Builder 2026-09-04, measured while shipping v0.345.4 — the dogfood app cannot see the owner's
+  shooting style) — give `scripts/agent-dogfood.sh` a `--mosaic` sample, because the bundled one is a single
+  field and every mosaic-only code path is structurally invisible to it.** *(Pillar: maintainability in
+  service of finding real bugs — size S/M. Confidence: **measured this run**, both directions.)*
+  The sample target is 6 subs of one field, so its canvas has **no uncovered pixel anywhere**. That makes the
+  probe blind, by construction, to everything gated on `NaN = no coverage`: coverage-leveling, the union
+  canvas, per-panel photometric normalisation, seam residual, the panel-depth rejection surfaces, and the
+  whole class of "what does this say on a mosaic?" copy. **The measurement that showed it:** a full dogfood
+  run against `origin/main` and against the fixed branch both logged **0** astropy NaN warnings — the exact
+  defect being fixed, invisible on the sample — while the *test suite* on the same code emitted **99** of them
+  across 17 files, every one a mosaic or reprojection fixture. A run that trusts the dogfood as its instrument
+  would have concluded there was nothing to fix.
+  **Shape:** the script already synthesises and ingests the sample; a second, opt-in target built from
+  `tests/synth.py` with 4 panels on a 2×2 dither (the `<T>_mosaic_sub/` shape §1 names as the owner's main
+  style) would exercise the union canvas and every mosaic surface, for one flag and one extra stack. Keep it
+  **opt-in** (`--mosaic`), not the default: the single-field sample is what makes the standard run fast, and
+  the page-height baselines the §1 banner depends on are measured against *it* — a different target would move
+  those numbers and invalidate three runs' worth of comparisons. **Care:** the synthetic panels must carry
+  real per-panel level offsets and overlap, or the mosaic surfaces will read "nothing to level" and the probe
+  is no better than today's.
 
 - **NEW IDEA (Builder 2026-09-04, after losing three separate slots to it in one run) — when an entry ships,
   strike the "the half X deliberately did NOT build" follow-ons the same commit closed, not just the entry
