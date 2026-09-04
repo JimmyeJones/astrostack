@@ -12365,21 +12365,69 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-09-04, the surface v0.341.0's morning early-stop line deliberately did not reach) —
-  a target whose *own* last night stopped early, on its own page, however long ago that was.**
-  *(Pillar: autonomy + trust — PRIORITY 2; size XS–S; **check the overlap before building**.)* v0.341.0 puts
-  "M 42 stopped getting subs at 23:40 — about 3 h earlier than its last 4 nights" on the Dashboard's
-  **Last night** card, which by construction speaks only for the **library's most recent** capture night. A
-  target the owner shot on Tuesday and has not returned to has exactly the same fact recorded and nowhere to
-  say it: by Thursday the Dashboard is recapping something else, and the Target page's live quiet note self-
-  hid on Tuesday morning. `early_stop` is already a pure helper over one target's session end stamps, so the
-  Target page could answer it for that target's own newest night at the cost of one call. **Care, and why it
-  is filed rather than built:** the Dashboard line is *timely* — it is about last night, so it decays on its
-  own. A Target-page version is permanent until the next night is shot, which turns a report into a standing
-  reproach about a night the owner may well have ended on purpose; it wants an age cap (say a week) and a
-  place inside the existing `NoticeBoard` rather than a new block. **Grep first:** the Nights breakdown card
-  already shows each night's span, so the honest version may be a *marker on the night row* rather than a
-  sentence — which would also be the version that never nags.
+- **✅ SHIPPED (Builder, v0.342.0, branch `claude/sweet-babbage-0z0bbr`) — ~~a target whose *own* last night
+  stopped early, on its own page, however long ago that was.~~** Built as the entry's own **"grep first"**
+  paragraph recommended, and that recommendation is what removed the need for the age cap it was worried
+  about: it is a **marker on the night row**, not a sentence in the `NoticeBoard`.
+
+  **Why the row, and why that answers the "standing reproach" care note.** A banner is undated — it says
+  *now* whatever night it is about, so it needs an age cap to stop nagging about a night the owner ended on
+  purpose. A marker on the Nights table's newest row is dated *by the row it sits on*, and the next night
+  pushes it down the table, so it decays exactly as the Dashboard line does without a cap having to be
+  invented. It also costs no vertical space on the page the owner calls "extremely busy": it is an `xs`
+  orange `ended early` badge beside the date, next to the existing `sharpest` one, with the sentence in a
+  tooltip and an `aria-label` — the same shape the verdict badge's explanation already takes.
+
+  **One measurement, two surfaces, and the stamps they are computed from are the same ones — deliberately.**
+  `nights_breakdown` rows are **observing nights** (`night_of` merges an evening run and a pre-dawn run into
+  one row), while the Dashboard's card judges **sessions**. Left alone, a night shot in two goes would
+  contribute one stop time to one surface and two to the other, and the two screens would quote different
+  medians for the same night with no way for the reader to tell which was right. So the end stamps are taken
+  **before** the merge — making them bit-for-bit `session_end_stamps(frames)`, the Dashboard's own input —
+  and an endpoint test asserts the two APIs report the identical `stopped_utc` / `minutes_earlier` /
+  `n_nights_compared`. The wording is shared the same way: `describeEarlyStop` now composes the Dashboard
+  sentence from a name-free `earlyStopClause`, and the row's tooltip is that clause plus the same *"Worth a
+  look if you didn't stop on purpose."*
+
+  **Only the newest row is marked.** An older night that ended early is history the owner has already lived
+  through; the newest one is the fact the Dashboard tells them for a day and then forgets. `early_stop`
+  judges only the newest of the stamps it is handed, so this is its natural reach rather than a rule bolted
+  on top.
+
+  **Upgrade-safe (§9):** one dataclass field with a `None` default (`NightSummary.ended_early`), one additive
+  optional response field (`NightSummaryOut.ended_early`, a new `NightEarlyStopOut` model), one optional
+  frontend type field. No config key, no schema, no on-disk change, no default flipped, no existing response
+  field touched, and no extra query or frame pass — the stamps were already in hand inside the function that
+  builds the rows. An older frontend ignores the field; a new frontend against an older backend sees
+  `undefined` and renders exactly what it does today.
+
+  **Tests (+3 Python engine, +3 endpoint, +5 vitest; all fail before).** `tests/test_session_recap.py`: the
+  newest row marked with the right numbers and *no* older row marked; five identical nights saying nothing
+  at all; and the split-night contract — a merged four-night fixture whose judgement equals
+  `early_stop(session_end_stamps(flat))` exactly, at five prior sessions rather than four merged nights.
+  `tests/webapp/test_target_nights.py`: the marker end to end on the four-nights-then-a-short-one fixture,
+  the silence when every night ended at the usual hour, and the agreement with `/api/last-night` field by
+  field. Frontend: the tooltip's wording and its shared-clause identity with the Dashboard sentence, its
+  silence on `null` and on an older backend, exactly one marker rendered across two rows with the
+  explanation reachable by `aria-label`, and no marker when the server sent none.
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-04, the surface v0.341.0's morning early-stop line deliberately did not reach) —
+    a target whose *own* last night stopped early, on its own page, however long ago that was.**
+    *(Pillar: autonomy + trust — PRIORITY 2; size XS–S; **check the overlap before building**.)* v0.341.0 puts
+    "M 42 stopped getting subs at 23:40 — about 3 h earlier than its last 4 nights" on the Dashboard's
+    **Last night** card, which by construction speaks only for the **library's most recent** capture night. A
+    target the owner shot on Tuesday and has not returned to has exactly the same fact recorded and nowhere to
+    say it: by Thursday the Dashboard is recapping something else, and the Target page's live quiet note self-
+    hid on Tuesday morning. `early_stop` is already a pure helper over one target's session end stamps, so the
+    Target page could answer it for that target's own newest night at the cost of one call. **Care, and why it
+    is filed rather than built:** the Dashboard line is *timely* — it is about last night, so it decays on its
+    own. A Target-page version is permanent until the next night is shot, which turns a report into a standing
+    reproach about a night the owner may well have ended on purpose; it wants an age cap (say a week) and a
+    place inside the existing `NoticeBoard` rather than a new block. **Grep first:** the Nights breakdown card
+    already shows each night's span, so the honest version may be a *marker on the night row* rather than a
+    sentence — which would also be the version that never nags.
 
 - **✅ SHIPPED (Builder, v0.336.0, branch `claude/sweet-babbage-76t8i3`) — ~~answer the reach question at the
   moment the default is *saved*, not only when a trail turns up later.~~** Built exactly as the entry shapes

@@ -691,6 +691,12 @@ class NightSummary:
     typical_fwhm_px: float | None
     is_best: bool                   # the target's sharpest night (only when ≥2 judgeable)
     reject_buckets: dict[str, int] = field(default_factory=dict)  # plain bucket → count
+    # Set only on the **newest** row, and only when that night stopped notably
+    # earlier than this target's own recent nights (see :func:`early_stop`).
+    # ``None`` everywhere else — an older night ending early is history the owner
+    # has already lived through, whereas the newest one is the fact the Dashboard
+    # recap tells them for a day and then forgets.
+    ended_early: "EarlyStop | None" = None
 
 
 def _typical_other_fwhm(medians: list[float], skip: int) -> float | None:
@@ -800,6 +806,15 @@ def nights_breakdown(
     session-by-session exactly as before; the last-session recap and the pace
     estimate genuinely want sessions, so the default does not change under them.
 
+    The **newest** row also carries ``ended_early`` when that night stopped
+    notably earlier than the target's own recent nights (:func:`early_stop`).
+    The Dashboard's "Last night" card says the same thing, but only ever about
+    the library's most recent capture night: a target shot on Tuesday and not
+    returned to has the fact recorded and nowhere to say it by Thursday. On a
+    row it is an annotation on the night it describes rather than a standing
+    banner, so it cannot become a reproach about a night the owner may well have
+    ended on purpose.
+
     Returns ``[]`` when nothing is datable (no frame carries a capture time).
     """
     dated: list[tuple[datetime, FrameRow]] = [
@@ -810,9 +825,20 @@ def nights_breakdown(
         return []
     dated.sort(key=lambda pair: pair[0])
     sessions = _split_sessions(dated, gap_hours)
+    # Taken **before** the observing-night merge, so this is exactly
+    # ``session_end_stamps(frames)`` — the same input the Dashboard's "Last
+    # night" card feeds ``early_stop``. The two surfaces report the same fact
+    # about the same night, so they must not be allowed to compute it from
+    # different stamps: a night shot in two goes would otherwise contribute one
+    # stop time here and two there, and the medians would drift apart with no
+    # way for the reader to tell which is right.
+    end_stamps = [s[-1][1].timestamp_utc for s in sessions]
     if night_of is not None:
         sessions = _merge_sessions_by_night(
             sessions, night_of, lambda row: row[1].timestamp_utc)
+    # Judged once, for the newest row only (the newest session always lands in
+    # the newest merged night, so the row is the same either way).
+    stopped_early = early_stop(end_stamps)
 
     # Per-night medians, once, for the two things that need to compare nights.
     # They want *different* statistics and used to share one: the "best" nod
@@ -870,6 +896,7 @@ def nights_breakdown(
             typical_fwhm_px=typical_fwhm,
             is_best=is_best,
             reject_buckets=buckets,
+            ended_early=(stopped_early if s_idx == len(sessions) - 1 else None),
         ))
 
     out.reverse()  # newest night first

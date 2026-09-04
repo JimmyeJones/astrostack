@@ -35,6 +35,7 @@ from webapp.schemas import (
     MergeSuggestionOut,
     MergeSuggestionTarget,
     MosaicPlanOut,
+    NightEarlyStopOut,
     NightSummaryOut,
     ObjectInfoOut,
     RestackGainOut,
@@ -836,6 +837,15 @@ def target_nights(safe: str, request: Request) -> list[NightSummaryOut]:
             typical_fwhm_px=n.typical_fwhm_px,
             is_best=n.is_best,
             reject_buckets=n.reject_buckets,
+            ended_early=(
+                NightEarlyStopOut(
+                    stopped_utc=n.ended_early.stopped_utc,
+                    minutes_earlier=n.ended_early.minutes_earlier,
+                    n_nights_compared=n.ended_early.n_nights_compared,
+                )
+                if n.ended_early is not None
+                else None
+            ),
         )
         for n in nights
     ]

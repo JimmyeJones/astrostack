@@ -8,6 +8,7 @@ reject buckets).
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from seestack.io.library import Library
@@ -335,3 +336,79 @@ def test_a_far_east_observers_night_splits_where_his_noon_falls(
     nights = client.get("/api/targets/M_42/nights").json()
     assert len(nights) == 2
     assert [n["night_date"] for n in nights] == ["2026-07-09", "2026-07-08"]
+
+
+# --- "this night stopped early", on the target's own page -------------------
+
+
+def _night_run(lib, safe, start, *, hours, every_min=10):
+    """A night's worth of subs from ``start``, ending ``hours`` later."""
+    from seestack.io.project import FrameRow
+
+    n = int(hours * 60 / every_min) + 1
+    proj = lib.open_target(safe)
+    try:
+        for i in range(n):
+            proj.add_frame(FrameRow(
+                source_path=f"/x/{safe}-{start:%Y%m%d%H%M}-{i}.fit",
+                timestamp_utc=(start + timedelta(minutes=every_min * i)).isoformat(),
+                exposure_s=10.0, accept=True,
+            ))
+    finally:
+        proj.close()
+
+
+def _five_nights(data_root: Path, *, last_hours: float) -> None:
+    """Four nights that ran 21:00 → 02:00, then one of ``last_hours``."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        for d in range(4):
+            _night_run(lib, "M_42",
+                       datetime(2026, 7, 1 + d, 21, 0, tzinfo=timezone.utc), hours=5)
+        _night_run(lib, "M_42",
+                   datetime(2026, 7, 5, 21, 0, tzinfo=timezone.utc), hours=last_hours)
+    finally:
+        lib.close()
+
+
+def test_nights_newest_row_says_when_the_night_stopped_early(
+    client, solved_library, data_root,
+):
+    """The Dashboard's "Last night" card speaks only for the library's most
+    recent capture night, so by Thursday a Tuesday target's early stop has
+    nowhere to be said. Its own newest night row keeps it."""
+    _five_nights(data_root, last_hours=1)
+    nights = client.get("/api/targets/M_42/nights").json()
+    early = nights[0]["ended_early"]
+    assert early is not None
+    assert early["minutes_earlier"] == 240.0
+    assert early["n_nights_compared"] == 4
+    assert early["stopped_utc"].startswith("2026-07-05T22:00")
+    # Only the newest row is annotated — an older night ending early is history.
+    assert all(n["ended_early"] is None for n in nights[1:])
+
+
+def test_nights_say_nothing_when_the_night_ended_at_the_usual_hour(
+    client, solved_library, data_root,
+):
+    """Silence is the default: five nights that all ran to 02:00 report nothing,
+    because a wrong "you lost half a night" costs far more than a missed one."""
+    _five_nights(data_root, last_hours=5)
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert all(n["ended_early"] is None for n in nights)
+
+
+def test_nights_early_stop_agrees_with_the_dashboard_last_night_card(
+    client, solved_library, data_root,
+):
+    """Two surfaces, one measurement. The Nights row groups by *observing night*
+    and the Dashboard by *session*, so the judgement is deliberately taken from
+    the session stamps on both — otherwise a night shot in two goes would be
+    reported two different ways by two screens the owner reads minutes apart."""
+    _five_nights(data_root, last_hours=1)
+    row = client.get("/api/targets/M_42/nights").json()[0]["ended_early"]
+    card = client.get("/api/last-night").json()["early_stop"]
+    assert row is not None and card is not None
+    assert card["safe"] == "M_42"
+    for key in ("stopped_utc", "minutes_earlier", "n_nights_compared"):
+        assert row[key] == card[key]
