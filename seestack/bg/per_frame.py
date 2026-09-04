@@ -436,7 +436,7 @@ def _extended_structure_mask(resid: np.ndarray, finite: np.ndarray,
     boolean mask; blocks are nearest-neighbour expanded back, which is enough
     precision for something that then gets dilated anyway.
     """
-    from astropy.stats import sigma_clipped_stats
+    from seestack.core.skystats import sigma_clipped_stats_finite
 
     block = max(2, int(round(_EXT_BLOCK / proxy_scale)))
     h, w = resid.shape[:2]
@@ -452,7 +452,7 @@ def _extended_structure_mask(resid: np.ndarray, finite: np.ndarray,
     n = weight.reshape(shape).sum(axis=(1, 3))
     coarse = np.where(n > 0, vals.reshape(shape).sum(axis=(1, 3)) / np.maximum(n, 1.0),
                       np.nan)
-    _, c_med, c_std = sigma_clipped_stats(coarse, sigma=3.0, maxiters=5)
+    _, c_med, c_std = sigma_clipped_stats_finite(coarse, sigma=3.0, maxiters=5)
     if not (np.isfinite(c_med) and np.isfinite(c_std) and c_std > 0):
         return out
     threshold = c_med + max(sigma_above * float(c_std), _EXT_NOISE_FLOOR * std)

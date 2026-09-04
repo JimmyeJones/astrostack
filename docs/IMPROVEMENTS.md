@@ -17785,6 +17785,52 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
+- **NEW IDEA (Builder 2026-09-04, the half v0.345.6 deliberately did NOT build — it is wording, and wording
+  wants a deliberate pass) — the auto-edit panel says "sky" twice, one line apart, meaning two different
+  things.** *(Pillar: approachable / trust — PRIORITY 3; size XS, but **copy, so read the whole panel before
+  moving a word**.)* v0.345.6 fixed the *number* ("a ~0 sky" → "a ~0.001 sky"); it did not touch the fact that
+  the cause clause's **"a ~0.001 sky"** is a measurement of the *linear* stack, while the "Tuned to your data"
+  line's **"sky level 0.24"** is the stretch's *target* background in display space. Both are correct, both
+  say "sky", and they sit one line apart differing by two orders of magnitude — a beginner reading them
+  together has no way to know they are different quantities rather than a contradiction. **Shape:** name them
+  apart in the two clauses (e.g. *"your sky measured ~0.001"* against *"stretched to a sky brightness of
+  0.24"*), which needs the same both-sides change as the number did — `autoSummary.ts` and
+  `seestack/edit/presets.py`, plus the phrase table. **Do NOT** solve it by hiding one of them: each is the
+  only place its own fact appears (the standing "nothing may be removed" constraint), and the pair is *why*
+  the note earns trust — it says what was measured and what was done about it.
+
+- **✅ SHIPPED (Builder, v0.345.6, branch `claude/sweet-babbage-k0vyac`) — ~~the auto-edit note tells the
+  owner the app "measured a ~0 sky", one line above "sky level 0.24".~~** Found the same way v0.345.3 was —
+  by *looking at* a running editor (`scripts/agent-dogfood.sh`, desktop shot of the bundled sample) rather
+  than reading the code — and it is the same class of defect: a line that is defensible in isolation and
+  obviously wrong on the rendered page.
+
+  **The trace.** `_auto_num` / `fmt` (the mirrored pair behind the "what Auto did" note, one per language)
+  render up to **two decimals**. That is right for a stretch target or a star size, but the sky they are
+  handed is measured on the **linear** stack the editor opens, where an ordinary value sits well below 0.01 —
+  the sample's is **0.001**, so the clause rendered *"measured a ~0 sky, 2.07 px stars"*. Directly beneath it
+  the "Tuned to your data" line says *"sky level 0.24"*, which is a different quantity (the stretch's
+  display-space **target** background), so the two read as the app measuring one picture twice and finding
+  nothing the first time. Not hypothetical and not rare: any well-flattened linear stack lands there.
+
+  **The fix keeps the precision honest in both directions.** Two decimals still, but a **positive** value that
+  would render as `"0"` falls back to three — which is exactly the precision `analyze_auto_inputs` carries
+  (it does `round(sky, 3)`), so nothing finer than what was actually measured is ever invented, and a sky that
+  is genuinely zero at that precision still reads `"0"`. Applied to both implementations at once, with the
+  new rows added to the shared `autoNum.cases.json` table that drives both suites — the idiom this pair
+  already had for the half-to-even divergence fixed before it. Nothing in the ordinary range moves
+  (`0.24` → `"0.24"`, `2.07` → `"2.07"`, `1.05` → `"1.05"`), and the same fallback quietly fixes the "Tuned to
+  your data" line's own small numbers (a denoise strength of `0.004` used to print `0`).
+
+  **Upgrade-safe (§9):** two pure formatters and one test table; no option, default, config key, schema,
+  on-disk path, API shape or measurement changed — the *number* is the same, only its rendering gained a
+  digit where it had lost all of them.
+
+  **Tests (+2 suites' worth, 6 failing before on each side).** Eight new rows in `autoNum.cases.json`
+  (`0.0004`→`0`, `0.0005`→`0.001`, `0.001`, `0.0012`, `0.0015`→`0.002`, `0.004`, `0.005`→`0.01`), which both
+  `tests/test_auto_summary_mirror.py` and `autoSummary.test.ts` drive; plus a named case per side pinning the
+  sample's own clause (*"a ~0.001 sky, 2.07 px stars"*) and the genuine-zero silence next to it.
+
 - **✅ SHIPPED (Builder, v0.345.3, branch `claude/sweet-babbage-i0r8cl`) — ~~the Export panel ends with a
   four-sentence paragraph explaining the buttons four rows above it, and its first sentence says what the
   Export line already said.~~** Found by *looking at* the editor (`scripts/agent-dogfood.sh`, desktop shot),
@@ -20863,9 +20909,25 @@ problems. Dogfood it every big-picture run and fix root causes.
     `friendlyJobError`-style strip for a 422 whose detail is already a sentence would improve every settings
     error at once, not just this one.
 
-- **NEW IDEA (Builder 2026-09-02, left rather than churned while standing down the A5 collision) — the
-  Target page's Edit button is still labelled "Edit latest stack" while it now edits the *cover*.**
-  *(Pillar: approachable — PRIORITY 3; size XS.)* Since v0.327.3 the row's Edit button, the Save/share menu and
+- **✅ SHIPPED (Builder, v0.345.5, branch `claude/sweet-babbage-k0vyac`) — ~~the Target page's Edit button is
+  still labelled "Edit latest stack" while it now edits the *cover*.~~** Built the way the entry asked — as a
+  deliberate pass, not a drive-by rename — and the pass found the **second** control with the same defect,
+  three rows along: the Save/share menu's `aria-label` read *"Save or share the latest picture"* while it too
+  has followed `pictureRun` since v0.327.3. Both are now named after the run they actually open: **"Edit your
+  picture"** and **"Save or share your picture"**, which is the wording the card directly below them already
+  uses for the same run ("Your picture (cover)"). `LatestPictureCard`'s own **"Edit this picture"** link is
+  untouched, so the two edit affordances stay distinct — the collision the entry warned about, avoided rather
+  than argued away — and a comment at the site says why neither name may say "the latest".
+  **Sighted users never saw either string** (the buttons read "Edit" and "Save / share"), so this is
+  screen-reader-only honesty: on a target whose owner pinned an older favourite, both names described a run
+  the control does not open. Frontend copy only — no config, schema, on-disk, API or default change.
+  **Tests (+1, `Target.test.tsx`, verified to fail before):** on the pinned-cover fixture (cover 3 pinned,
+  run 4 newer) the Edit link is named "Edit your picture" *and* still points at run 3, the menu button is
+  named "Save or share your picture", **no** control on the page is named anything matching `/latest/i`, and
+  the card's "Edit this picture" link is still there and still distinct. Five existing assertions that quoted
+  the old labels were updated, not weakened.
+
+  *(Original entry follows.)* *(Pillar: approachable — PRIORITY 3; size XS.)* Since v0.327.3 the row's Edit button, the Save/share menu and
   the hero card all follow the **pinned cover**, but the button's `aria-label` in `frontend/src/routes/Target.tsx`
   still says `"Edit latest stack"` — a screen-reader user is told it does something it does not. Worth one
   deliberate pass rather than a drive-by rename, because the obvious replacement ("Edit this picture") is
@@ -34290,6 +34352,27 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Infra / maintainability
 
+- **NEW IDEA (Builder 2026-09-04, measured while shipping v0.345.4 — the dogfood app cannot see the owner's
+  shooting style) — give `scripts/agent-dogfood.sh` a `--mosaic` sample, because the bundled one is a single
+  field and every mosaic-only code path is structurally invisible to it.** *(Pillar: maintainability in
+  service of finding real bugs — size S/M. Confidence: **measured this run**, both directions.)*
+  The sample target is 6 subs of one field, so its canvas has **no uncovered pixel anywhere**. That makes the
+  probe blind, by construction, to everything gated on `NaN = no coverage`: coverage-leveling, the union
+  canvas, per-panel photometric normalisation, seam residual, the panel-depth rejection surfaces, and the
+  whole class of "what does this say on a mosaic?" copy. **The measurement that showed it:** a full dogfood
+  run against `origin/main` and against the fixed branch both logged **0** astropy NaN warnings — the exact
+  defect being fixed, invisible on the sample — while the *test suite* on the same code emitted **99** of them
+  across 17 files, every one a mosaic or reprojection fixture. A run that trusts the dogfood as its instrument
+  would have concluded there was nothing to fix.
+  **Shape:** the script already synthesises and ingests the sample; a second, opt-in target built from
+  `tests/synth.py` with 4 panels on a 2×2 dither (the `<T>_mosaic_sub/` shape §1 names as the owner's main
+  style) would exercise the union canvas and every mosaic surface, for one flag and one extra stack. Keep it
+  **opt-in** (`--mosaic`), not the default: the single-field sample is what makes the standard run fast, and
+  the page-height baselines the §1 banner depends on are measured against *it* — a different target would move
+  those numbers and invalidate three runs' worth of comparisons. **Care:** the synthetic panels must carry
+  real per-panel level offsets and overlap, or the mosaic surfaces will read "nothing to level" and the probe
+  is no better than today's.
+
 - **NEW IDEA (Builder 2026-09-04, after losing three separate slots to it in one run) — when an entry ships,
   strike the "the half X deliberately did NOT build" follow-ons the same commit closed, not just the entry
   itself.** *(Pillar: maintainability in service of not wasting runs — size XS per sweep, and it is a **Scout**
@@ -34308,9 +34391,89 @@ problems. Dogfood it every big-picture run and fix root causes.
   relationship is editorial, and the existing "keep a shipped item's spec *indented*" convention already
   makes the answer visible by shape once someone applies it.
 
-- **⚪ LOG HYGIENE (Scout 2026-09-04, found by dogfooding a real stack) — the `astropy.stats`
-  "Input data contains invalid values (NaNs or infs)…" warning is emitted dozens of times per stack, burying
-  any *real* warning in the Logs a beginner reads.** *(Pillar: friendliness / trust — PRIORITY 3. Size: S.
+- **✅ SHIPPED (Builder, v0.345.4, branch `claude/sweet-babbage-k0vyac`) — ~~the `astropy.stats` "Input data
+  contains invalid values (NaNs or infs)…" warning is emitted dozens of times per stack, burying any *real*
+  warning in the Logs a beginner reads.~~** Built as filed, with the sites re-derived by **probing a running
+  pass** rather than trusting the filed line numbers — three of the four the entry names had moved or were
+  already masked, and two it did not name were the actual emitters.
+
+  **Which sites really fire, measured.** A NaN-cornered 240² frame through each pass, counting both
+  `AstropyUserWarning`s and the records astropy pushes into the `astropy` logger (which is how they reach the
+  Logs page): `seestack/bg/per_frame.py` (the block-averaged faint-extended pass — **once per frame**),
+  `seestack/bg/final_gradient.py` (**twice per canvas**, the object mask and its extended pass), and
+  `seestack/qc/metrics.py::estimate_sky`.
+
+  **⚠️ One correction to the entry's own framing, measured after the fix went in and worth carrying:
+  "per stack" is really "per stack *that has NaNs*".** A full `scripts/agent-dogfood.sh` run — boot, ingest,
+  stack, probe every page — was taken against `origin/main` (pre-fix) **and** against this branch, and the
+  server log contains **0** of these warnings in *both*. The bundled sample is a 6-frame single field whose
+  canvas has no uncovered pixel anywhere, so none of the three sites has a NaN to clip. The emitters need a
+  **NaN-bearing canvas**: a mosaic union, a reprojected edge, a masked region — i.e. the owner's actual
+  shooting style, and the shape the pre-fix suite's own warnings summary confirms: **17 test files emitted
+  99 of them** in the baseline run (76 through `sigma_clipped_stats`, 23 through a second astropy entry point
+  — see the open half below), led by `webapp/test_preview_crop_geometry` (20), `test_photometric_mosaic_auto`
+  (16), `test_subpixel_mosaic_reference` (10) and `test_stack_pipeline` (7) — mosaic and reprojection
+  fixtures, to a file. **So the bundled sample is the wrong instrument for this one**, and a future run should
+  not read "dogfood shows zero" as "already fixed".
+
+  **What this shipped, exactly, counted the same way: all 76 of the `sigma_clipped_stats` warnings are gone**
+  (post-fix suite: **0** at `astropy/stats/sigma_clipping.py:395`, down from 76 across 12 files). **~30
+  remain from a different site**, filed as the open half directly below rather than swept into this claim. `post/color_cal.py:194` and
+  `per_frame.py`'s two other calls **already passed `mask=`** — the entry's line numbers were stale — and
+  `coverage_leveling`'s `_robust_stats` / `_sky_mode` never warn on the live path, because every caller hands
+  them an already-finite selection. Those two were converted anyway (defensively, and pinned as such), so a
+  future caller that does pass an uncovered sample can't reopen the noise.
+
+  **One shared helper, not six copies of `mask=~np.isfinite(x)`.** `seestack/core/skystats.py`
+  (`sigma_clipped_stats_finite`) is a drop-in for the unmasked call. It matters for the case a bare `mask=`
+  gets wrong: an array with **no** finite pixel comes back as `np.ma.masked`, and `float(np.ma.masked)` emits
+  a warning of its own — trading one noisy warning for another — so that case short-circuits to NaN **of the
+  input's own dtype**, exactly what the unmasked call used to return. Keeping the dtype is not cosmetic: every
+  consumer builds a detection threshold (`med + k*std`) out of these, and a float32→float64 promotion would
+  round the threshold differently and could move a pixel in or out of an object mask.
+
+  **The pixels do not move.** The masked call returns bit-identical `(mean, median, std)` to letting astropy
+  clip — pinned over NaNs, ±inf, 1-D samples, int arrays and the all-finite fast path — so this is silence,
+  not a new number. Upgrade-safe (§9): one new engine-free module, no option, default, config key, schema,
+  on-disk path or API shape touched; an all-finite single-field stack takes the same code path it always did.
+
+  **Tests (+12, `tests/test_skystats.py`; 4 fail before).** The helper's equivalence to the legacy call and
+  its dtype/all-NaN/int/1-D edges, plus a call-site test per pass — QC sky estimate, final-gradient removal,
+  per-frame flatten, and the coverage-leveling helpers — each asserting **no `AstropyUserWarning`** on
+  NaN-bearing input, with the raw astropy call kept beside them as the control so a future astropy that stops
+  warning cannot quietly turn the test green.
+
+  ---
+
+  **🟡 THE OPEN HALF, WITH THE HOUR OF TRACING ALREADY SPENT ON IT (Builder 2026-09-04, same run) — ~30 of
+  these warnings survive, from a *different* astropy entry point inside `Background2D`, and the obvious fix
+  measurably does not work.** *(Same pillar and size. Read all four bullets before touching it.)*
+  - **Where.** `astropy/stats/sigma_clipping.py:**315**` — the **axis-based** clip (`_sigmaclip_withaxis`),
+    not the `:395` one this entry fixed — reached from `photutils/background/background_2d.py`
+    `_sigmaclip_boxes` ← `_compute_box_statistics` ← `_calculate_stats` ← `Background2D.__init__` ←
+    `seestack/bg/per_frame.py::_fit_bg2d_ladder` ← `_subtract_background_cpu`. That chain is a **captured
+    traceback**, not a reading. Post-fix suite: 30 across `test_stack_pipeline` (11), `webapp/test_pipeline`
+    (11), `test_photometric_mosaic`, `test_photometric_stack`, `test_progress_reel`,
+    `webapp/test_reprocess_all` (2 each).
+  - **The obvious fix does not fix it — measured, so nobody re-spends the hour.** Mirroring
+    `final_gradient._fit_background_2d` (zero-fill the non-finite pixels, OR them into the mask, hand
+    `Background2D` a finite array) leaves the count at **27 on those six files, before and after**, while
+    being bit-for-bit identical on the pixels (checked on two NaN-bearing fixtures). So the NaN is reaching
+    photutils' box statistics by another route — most likely the **low-resolution mesh photutils builds
+    itself**, where a fully-masked box becomes NaN and is then clipped again. The change was reverted rather
+    than shipped: a silent no-op on the on-by-default hot path is worse than the warning it doesn't remove.
+  - **So the next step is photutils' own knobs, measured** (`fill_value`, the mesh-interpolation options, or
+    masking at the mesh level), **not another zero-fill in our caller.**
+  - **How to trace it, because the obvious way silently fails.** pytest's warnings plugin installs its own
+    `showwarning`, so an in-process hook records **nothing** unless you disable it: run
+    `pytest <file> -q -p no:warnings` with a `warnings.showwarning` hook that walks `sys._getframe()` back to
+    the frame you care about. `-W error::astropy.utils.exceptions.AstropyUserWarning` also does **not** work
+    here (it comes back green while the summary still counts the warnings). The reliable counter is pytest's
+    own warnings summary — which is where both the 99 and the 30 in this entry come from.
+
+  *(Original entry follows.)*
+
+  *(Pillar: friendliness / trust — PRIORITY 3. Size: S.
   Confidence: reproduced in the dogfood run; verified NOT a wrong-result — see below. Not filed as a bug: the
   result is bit-for-bit correct.)*
 

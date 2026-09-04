@@ -132,19 +132,21 @@ def _build_object_mask(rgb: np.ndarray, options: FinalGradientOptions) -> np.nda
     outer nebulosity a per-pixel threshold misses — the thing that would
     otherwise get quietly absorbed into the "sky" model.
     """
-    from astropy.stats import sigma_clipped_stats
     from scipy.ndimage import binary_dilation, gaussian_filter, label
 
+    from seestack.core.skystats import sigma_clipped_stats_finite
+
     luma = 0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]
-    # Normalise every non-finite pixel (NaN *or* inf) to NaN; sigma_clipped_stats
-    # auto-clips NaN, so the stats below are computed over the finite sky only.
+    # Normalise every non-finite pixel (NaN *or* inf) to NaN; the stats helper
+    # measures the finite sky only, and says so with an explicit mask rather
+    # than letting astropy warn about it on every call.
     finite = np.isfinite(luma)
     if not finite.any():
         return np.zeros(luma.shape, dtype=bool)
     luma_filled = np.where(finite, luma, np.nan)
     trend = fit_sky_poly(luma_filled)
     resid = luma_filled if trend is None else luma_filled - trend
-    _, med, std = sigma_clipped_stats(resid, sigma=3.0, maxiters=5)
+    _, med, std = sigma_clipped_stats_finite(resid, sigma=3.0, maxiters=5)
     if not np.isfinite(med) or not np.isfinite(std) or std <= 0:
         return ~finite  # mask only NaN pixels if stats failed
     obj_mask = np.where(finite, resid, -np.inf) > (med + options.detect_sigma * std)
@@ -169,7 +171,7 @@ def _build_object_mask(rgb: np.ndarray, options: FinalGradientOptions) -> np.nda
                           smooth_px, mode="nearest")
     den = gaussian_filter(weight, smooth_px, mode="nearest")
     smoothed = np.where(den > 1e-3, num / np.maximum(den, 1e-6), 0.0)
-    _, ext_med, ext_std = sigma_clipped_stats(
+    _, ext_med, ext_std = sigma_clipped_stats_finite(
         np.where(finite, smoothed, np.nan), sigma=3.0, maxiters=5)
     if np.isfinite(ext_med) and np.isfinite(ext_std) and ext_std > 0:
         threshold = ext_med + max(options.detect_sigma * ext_std,
