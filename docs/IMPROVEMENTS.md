@@ -20674,6 +20674,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   `tests/test_year_recap.py` (+2): the poster's folded footnote (with the date asserted to appear exactly
   once across the pair) and the un-folded one when no longest night is printed.
 
+- **✅ SHIPPED (Builder, v0.345.9, branch `claude/sweet-babbage-enljxc`) — ~~the "Worth more time" pick
+  repeats the target's own name, one line under the heading that *is* that name.~~** *(Pillar: friendliness —
+  PRIORITY 3. The third find of the same dogfood pass, and the same family as v0.345.8: one fact said twice
+  on one card.)*
+
+  **What it looked like**, on the Tonight page and the Dashboard card alike, for the sample target:
+
+  > **Sample: Orion Nebula (M42)**
+  > You've got 1 min on Sample: Orion Nebula (M42) — another hour would cut its noise about 87%.
+
+  **The fix was already in the file, on the other path.** `_pick_reason` (the *placed* pick, when the app
+  knows where you are) passes `"it"` into `_have_phrase` precisely because its own opening clause has just
+  said the name — *"M 31 is 45° up right now … So far you've got 45 min on it"*. Only the **depth-only**
+  path (`_depth_only_picks`, taken when there is no observing location or no darkness tonight) passed
+  `t.name`, and that sentence is the whole reason, rendered directly under the name. It now passes `None`,
+  and `_have_phrase` grows a subject-free form for each of its three shapes: *"you've got 1 min so far"*,
+  *"you've barely started"*, *"you haven't captured anything here yet"*.
+
+  **Who sees it:** the no-location path is the *first-run* path — a beginner meets it before any frame is
+  plate-solved, which is exactly when the planner card is doing the most work — and a high-latitude summer
+  night lands there too.
+
+  **Upgrade-safe (§9):** one engine string; no option, default, config key, schema, on-disk path or response
+  shape changed. `TonightPick.name` still carries the name, so any consumer that wants it has it.
+
+  **Tests (+1, 2 failing before).** `tests/test_nightplan.py` gains a check across **all five** shapes of the
+  sentence (nothing captured, under a minute, a minute, deep, absurdly deep) that a long catalogue name never
+  appears in a depth-only `reason` while `name` still carries it — and that the placed path still names the
+  target exactly once. The existing zero-minutes test moved to the new wording. The two frontend mocks that
+  hand-wrote a server payload were updated so the fixtures still model what the server actually sends.
+
 - **NEW IDEA (Builder 2026-09-04, the generalisation of the v0.345.8 merge) — sweep the app for the other
   pairs of superlatives that can resolve to the same thing.** *(Pillar: friendliness / trust — PRIORITY 3;
   size XS per site once found; confidence: two instances fixed, the rest unchecked.)* v0.345.8 merged two
