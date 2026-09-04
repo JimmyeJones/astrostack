@@ -22,6 +22,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { YearShareCard } from "../components/YearShareCard";
 import { formatIntegration } from "../format";
 import {
   defaultRecapYear, longestNightLines, recapYearOptions, sharpestNightLines,
@@ -135,6 +136,9 @@ export function YourYearView() {
               <StatCard key={s.label} value={s.value} label={s.label} />
             ))}
           </SimpleGrid>
+
+          <YearShareCard year={data.year} caption={data.caption}
+            hero={data.hero} />
 
           {(longest || sharpest) ? (
             <SimpleGrid cols={{ base: 1, sm: 2 }}>

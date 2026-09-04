@@ -12,12 +12,19 @@ from seestack.activity_calendar import NightActivity
 from seestack.yearrecap import (
     LONGEST_MIN_NIGHTS,
     build_year_recap,
+    draw_year_poster,
     first_night_by_target,
     longest_night,
+    year_caption,
     year_empty_message,
     year_first_light_line,
     year_headline,
+    year_hero_note,
+    year_longest_night_line,
+    year_poster_title,
+    year_sharpest_night_line,
     year_stats,
+    years_by_target,
     years_with_data,
 )
 
@@ -262,3 +269,136 @@ def test_empty_library_says_so_kindly_without_naming_a_year():
 
 def test_a_year_with_data_has_no_empty_message():
     assert year_empty_message(build_year_recap([night("2026-01-01")], year=2026)) == ""
+
+
+# --- the shareable year: caption, poster lines, and the honest hero note -----
+#
+# Slice (b) of "Your year under the stars": the year page told the story but had
+# nothing a beginner could actually post. These pin the copy-paste blurb, the
+# three poster lines, and the one thing that could quietly lie — a hero picture
+# whose pixels are not all from the year the poster names.
+
+def test_year_caption_says_it_the_way_a_person_would():
+    nights = [
+        night("2026-01-02", exposure_s=7200.0, n_frames=120),
+        night("2026-02-03", exposure_s=3600.0, n_frames=60, targets=("M 42",)),
+    ]
+    r = build_year_recap(nights, year=2026)
+    assert year_caption(r) == (
+        "2026 under the stars · 2 nights out · 3.0 h of light · 2 targets · "
+        "first light: M 31 and M 42")
+
+
+def test_year_caption_drops_what_it_does_not_know_rather_than_printing_zero():
+    # A year of nights that recorded no exposure at all: the hours clause has to
+    # go, and the sentence must still read as a sentence.
+    nights = [night("2026-01-02", exposure_s=0.0, n_frames=0, targets=())]
+    r = build_year_recap(nights, year=2026)
+    caption = year_caption(r)
+    assert caption == "2026 under the stars · 1 night out"
+    assert "0" not in caption.replace("2026", "")
+
+
+def test_year_caption_is_empty_for_a_year_with_nothing_in_it():
+    assert year_caption(build_year_recap([night("2025-01-01")], year=2026)) == ""
+
+
+def test_year_caption_and_the_all_time_caption_share_a_separator_and_voice():
+    # Two posters a week apart must not read as two different products.
+    from seestack.recap import RecapFacts, recap_caption
+
+    r = build_year_recap([night("2026-01-02"), night("2026-01-03")], year=2026)
+    theirs = recap_caption(RecapFacts(n_nights=2, total_integration_s=7200.0))
+    assert " · " in year_caption(r) and " · " in theirs
+    assert "h of light" in year_caption(r) and "h of light" in theirs
+
+
+def test_poster_lines_name_the_two_standout_nights():
+    nights = [
+        night("2026-01-02", exposure_s=7200.0, fwhm=3.4, n_measured=40),
+        night("2026-02-03", exposure_s=1800.0, fwhm=2.1, n_measured=20),
+    ]
+    r = build_year_recap(nights, year=2026)
+    assert year_longest_night_line(r) == "Longest night: 2 Jan 2026 · 2.0 h"
+    assert year_sharpest_night_line(r) == "Sharpest night: 3 Feb 2026 · 2.1 px stars"
+    assert year_poster_title(r) == "My 2026 under the stars"
+
+
+def test_poster_lines_stay_silent_when_the_year_has_no_standout():
+    # One night: no "longest" to crown (LONGEST_MIN_NIGHTS), nothing measured.
+    r = build_year_recap([night("2026-01-02")], year=2026)
+    assert r.longest_night is None and r.sharpest_night is None
+    assert year_longest_night_line(r) == ""
+    assert year_sharpest_night_line(r) == ""
+
+
+def test_poster_lines_avoid_the_em_dash_pillow_cannot_draw():
+    nights = [
+        night("2026-01-02", exposure_s=7200.0, fwhm=3.4, n_measured=40),
+        night("2026-02-03", exposure_s=1800.0, fwhm=2.1, n_measured=20),
+    ]
+    r = build_year_recap(nights, year=2026)
+    for line in (year_poster_title(r), year_longest_night_line(r),
+                 year_sharpest_night_line(r), year_first_light_line(r)):
+        assert "—" not in line and "–" not in line
+
+
+def test_years_by_target_lists_each_targets_years_ascending():
+    nights = [
+        night("2025-12-30", targets=("M 31", "M 42")),
+        night("2026-01-02", targets=("M 31",)),
+        night("2026-03-04", targets=("M 31", "NGC 7000")),
+    ]
+    spans = years_by_target(nights)
+    assert spans["M 31"] == (2025, 2026)
+    assert spans["M 42"] == (2025,)
+    assert spans["NGC 7000"] == (2026,)
+
+
+def test_hero_note_is_silent_when_the_year_owns_the_target_outright():
+    assert year_hero_note(2026, (2026,)) == ""
+
+
+def test_hero_note_warns_when_the_picture_may_carry_another_years_light():
+    note = year_hero_note(2026, (2025, 2026))
+    assert "other" in note and "years" in note
+
+
+def test_hero_note_warns_rather_than_guessing_when_the_span_is_unknown():
+    # A silent overclaim is the failure mode worth avoiding, so no span at all
+    # gets the caveat rather than the confident line.
+    assert year_hero_note(2026, None) != ""
+    assert year_hero_note(2026, ()) != ""
+
+
+def test_year_poster_renders_a_square_image_with_and_without_a_hero():
+    from PIL import Image
+
+    from seestack.recap import POSTER_SIZE
+
+    nights = [
+        night("2026-01-02", exposure_s=7200.0, fwhm=3.4, n_measured=40),
+        night("2026-02-03", exposure_s=1800.0, fwhm=2.1, n_measured=20,
+              targets=("M 42",)),
+    ]
+    r = build_year_recap(nights, year=2026)
+    plain = draw_year_poster(r)
+    assert plain.size == (POSTER_SIZE, POSTER_SIZE) and plain.mode == "RGB"
+    hero = Image.new("RGB", (400, 300), (200, 40, 40))
+    over = draw_year_poster(r, hero=hero)
+    assert over.size == (POSTER_SIZE, POSTER_SIZE)
+    # The hero actually reached the backdrop: a red picture behind the veil is
+    # not the plain deep-space background.
+    assert plain.tobytes() != over.tobytes()
+
+
+def test_year_poster_uses_the_same_renderer_as_the_all_time_poster():
+    # A second facts source into one renderer, not a second poster: the year and
+    # the all-time poster must stay the same size and shape for ever.
+    from seestack.recap import POSTER_SIZE, RecapFacts, draw_recap_poster
+
+    r = build_year_recap([night("2026-01-02"), night("2026-02-03")], year=2026)
+    mine = draw_year_poster(r, size=240)
+    theirs = draw_recap_poster(RecapFacts(n_nights=2), size=240)
+    assert mine.size == theirs.size == (240, 240)
+    assert draw_year_poster(r).size == (POSTER_SIZE, POSTER_SIZE)

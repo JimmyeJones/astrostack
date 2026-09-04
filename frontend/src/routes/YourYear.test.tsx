@@ -152,4 +152,32 @@ describe("YourYearView", () => {
     await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(spy).toHaveBeenCalledWith(new Date().getFullYear());
   });
+
+  it("offers the year as something to post, over its own best picture", async () => {
+    vi.spyOn(client.api, "getYearRecap").mockResolvedValue(recap({
+      year: 2026,
+      caption: "2026 under the stars · 12 nights out",
+      hero: {
+        name: "M 31", safe: "M_31",
+        thumbnail_url: "/api/targets/M_31/thumbnail", note: "",
+      },
+    }));
+    renderPage("2026");
+    const card = await screen.findByTestId("year-share");
+    expect(within(card).getByRole("link", { name: /Download poster/ }))
+      .toHaveAttribute("href", "/api/recap/year/2026.jpg");
+    expect(within(card).getByAltText("Your picture of M 31")).toBeInTheDocument();
+  });
+
+  it("offers nothing to share on a year with no nights in it", async () => {
+    vi.spyOn(client.api, "getYearRecap").mockResolvedValue(recap({
+      has_anything: false, headline: "", stats: [], n_nights: 0,
+      empty_message: "Nothing from 2026 — but 2025 has your nights in it.",
+      years_with_data: [2025], caption: "",
+    }));
+    renderPage("2026");
+    await waitFor(() =>
+      expect(screen.getByTestId("year-empty")).toBeInTheDocument());
+    expect(screen.queryByTestId("year-share")).not.toBeInTheDocument();
+  });
 });

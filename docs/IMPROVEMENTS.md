@@ -25688,25 +25688,84 @@ problems. Dogfood it every big-picture run and fix root causes.
     two-year synthetic library and pins that a year filter counts only that year's nights and that an empty year
     degrades to the kind empty state.
 
-- **NEW IDEA — SLICE (b) OF "Your year under the stars" (Builder 2026-09-04, the half v0.343.0 deliberately
-  left out) — make the year *shareable*: a best-of-year picture and a one-click poster + caption.** *(Pillar:
-  friendliness / enjoy + share — PRIORITY 3. Size: S–M. The endpoint already returns everything a caption
-  needs, so this is render work, not data work.)*
+- **✅ SHIPPED (Builder, v0.344.0, branch `claude/sweet-babbage-xf90y3`) — ~~SLICE (b) OF "Your year under
+  the stars": make the year *shareable* — a best-of-year picture and a one-click poster + caption.~~** Built
+  as filed, both pieces, and as **composition rather than a second poster renderer**.
 
-  Slices (a) and (c) shipped: `/sky-so-far/{year}` tells the story, and the first-light chips link out. What
-  is missing is the part a beginner actually posts. Two pieces, in order:
-  1. **The best picture of the year.** Rank the year's targets the way `_recap_hero` already picks a poster
-     backdrop (the summary's heroes, first one with a readable preview), *scoped to targets with a night in
-     that year*, and show it at the top of the year page. **Caution:** a hero's preview is its *newest* stack,
-     which may have been made after the year ended — say "your picture of M 31, shot in 2026" rather than
-     implying the pixels are from that year, or scope to runs whose newest frame falls in the year.
-  2. **`GET /api/recap/year/{year}.jpg` + a copy-paste caption**, reusing `seestack/recap.py`'s
-     `draw_recap_poster` / `seestack/sharecard.py` rather than a second poster renderer — the whole reason
-     `RecapFacts` carries `window_months` is so a poster can say "this year" honestly. A `year_caption()`
-     beside `year_headline()` in `seestack/yearrecap.py` is the natural shape.
+  **The renderer is now shared, not copied.** `seestack/recap.py` grew `draw_poster(title, stats, lines,
+  hero, size)` — the layout the all-time poster always had, with its three bottom-anchored line slots pulled
+  out as data (`POSTER_LINE_SLOTS`). `draw_recap_poster` is now a four-line call into it feeding the same
+  three lines it always did, so the existing poster is unchanged; `seestack/yearrecap.py`'s
+  `draw_year_poster` is the *second facts source into the same renderer*, feeding the year's longest night,
+  first-light line and sharpest night into those slots under the title *"My 2026 under the stars"*. The two
+  posters cannot drift apart in look, which is the whole reason the entry said to reuse it.
 
-  **Grep first:** `seestack/recap.py`, `_recap_hero` and `ShareYourSkyCard` already do 90 % of this for the
-  all-time poster; this is a second *facts* source into the same renderer, not new machinery.
+  **The caption sits beside `year_headline`, exactly where the entry said.** `year_caption()` writes
+  *"2026 under the stars · 31 nights out · 52.4 h of light · 9 targets · first light: M 31, M 42 and 3
+  more"* — the same middle-dot separator, the same drop-the-clause-when-it's-missing rule and the same
+  lower-cased trailing names as `recap_caption`, with a test pinning that the two share a voice. It rides
+  along on the existing `/api/recap/year/{year}` JSON (additive field), and
+  `GET /api/recap/year/{year}.jpg` downloads the poster as `my-2026-under-the-stars.jpg`.
+
+  **The entry's caution about the hero is what most of the care went into.** A hero's preview is its
+  *newest* stack, which may have been made after the year ended — so the page says **"Your picture of
+  M 31"**, never "your 2026 picture", and the backend computes whether that target was imaged in any *other*
+  year (`years_by_target`) and hands the page the caveat when it was: *"Your newest picture of it — it may
+  include light from other years too."* A target the year owns outright instead reads *"Everything you shot
+  of it was in 2026."* An **unknown** span gets the caveat, not the confident line — a silent overclaim is
+  the failure mode worth avoiding. The hero itself is ranked exactly the way `_recap_hero` ranks the
+  all-time backdrop (the summary's heroes, first with a readable preview) but **scoped to targets with a
+  night in that year**, so a year page never leads with a picture the year had nothing to do with.
+
+  **One card, not three (the standing IA rule).** `YearShareCard` puts the picture, the caption and the two
+  buttons in a single block under the stat grid rather than appending three always-on banners to a page the
+  owner already calls busy. It degrades all the way down: no caption (older backend) still offers the
+  poster; no picture yet still offers the poster over the plain deep-space background; an unreadable or
+  deleted preview falls back to that background rather than 500-ing the download; and a year with no nights
+  offers nothing at all (the `.jpg` 404s, and the page shows its existing empty state).
+
+  **Upgrade-safe (§9):** one new read-only endpoint, two additive optional response fields
+  (`YearRecapOut.caption`, `.hero`), one new client URL helper, one new component. No config key, no
+  schema, no on-disk change, no default flipped, no existing response field or poster output touched. An
+  older frontend against a new backend ignores both fields; a new frontend against an older backend sees
+  them absent and offers the poster alone.
+
+  **Route ordering is load-bearing and pinned.** `{year}` matches any path segment, so
+  `/api/recap/year/2026.jpg` would hit the JSON route and 422 on the int parse if the `.jpg` route were
+  declared after it. It is declared first, with a comment saying why, and
+  `test_year_poster_downloads_as_a_square_jpeg` fails if that ever slips.
+
+  **Tests (+22: 13 Python engine, +11 webapp, +9 vitest).** `tests/test_year_recap.py` — the caption's
+  wording, its drop-the-zero rule, its silence on an empty year, its shared voice with `recap_caption`, the
+  two standout-night lines and their silence, the no-em-dash rule (Pillow's built-in font has no U+2014
+  glyph and would draw tofu onto a picture the user is about to post), `years_by_target`, all three
+  `year_hero_note` cases, and that the poster renders square with and without a hero and through the same
+  renderer as the all-time one. `tests/webapp/test_year_recap.py` — the `.jpg` route resolving, its
+  filename, the year's own picture reaching the backdrop, the unreadable-preview fallback, the empty-year
+  404, the out-of-range 422, the caption on the JSON, the hero and its link, the two-year caveat, and the
+  no-picture-yet `hero: null`. `YearShareCard.test.tsx` (+7) and `YourYear.test.tsx` (+2).
+
+  *(Original entry follows.)*
+
+  - **NEW IDEA — SLICE (b) OF "Your year under the stars" (Builder 2026-09-04, the half v0.343.0
+    deliberately left out) — make the year *shareable*: a best-of-year picture and a one-click poster +
+    caption.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: S–M. The endpoint already returns
+    everything a caption needs, so this is render work, not data work.)*
+
+    Slices (a) and (c) shipped: `/sky-so-far/{year}` tells the story, and the first-light chips link out. What
+    is missing is the part a beginner actually posts. Two pieces, in order:
+    1. **The best picture of the year.** Rank the year's targets the way `_recap_hero` already picks a poster
+       backdrop (the summary's heroes, first one with a readable preview), *scoped to targets with a night in
+       that year*, and show it at the top of the year page. **Caution:** a hero's preview is its *newest* stack,
+       which may have been made after the year ended — say "your picture of M 31, shot in 2026" rather than
+       implying the pixels are from that year, or scope to runs whose newest frame falls in the year.
+    2. **`GET /api/recap/year/{year}.jpg` + a copy-paste caption**, reusing `seestack/recap.py`'s
+       `draw_recap_poster` / `seestack/sharecard.py` rather than a second poster renderer — the whole reason
+       `RecapFacts` carries `window_months` is so a poster can say "this year" honestly. A `year_caption()`
+       beside `year_headline()` in `seestack/yearrecap.py` is the natural shape.
+
+    **Grep first:** `seestack/recap.py`, `_recap_hero` and `ShareYourSkyCard` already do 90 % of this for the
+    all-time poster; this is a second *facts* source into the same renderer, not new machinery.
 
 - **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-t59xya`) — ~~put the planned week in the user's
   calendar.~~** Built as filed, as composition: `GET /api/plan/week/calendar.ics` and an **Add this week to

@@ -1174,6 +1174,19 @@ class YearFirstLightOut(BaseModel):
     safe: str | None = None
 
 
+class YearHeroOut(BaseModel):
+    """The year's best picture — the target to show at the top of the page.
+
+    ``note`` is the honest caveat when that target was also imaged in another
+    year (its preview is the *newest* stack, so the pixels may not all be this
+    year's); it is ``""`` when the target belongs to this year alone."""
+
+    name: str
+    safe: str
+    thumbnail_url: str | None = None
+    note: str = ""
+
+
 class YearRecapOut(BaseModel):
     """One calendar year of imaging.
 
@@ -1187,6 +1200,10 @@ class YearRecapOut(BaseModel):
     empty_message: str
     stats: list[RecapStatOut] = []
     first_light_line: str = ""
+    # The copy-paste blurb to post beside the year poster, or "" for an empty
+    # year. Additive: an older frontend simply ignores it.
+    caption: str = ""
+    hero: YearHeroOut | None = None
     n_nights: int = 0
     total_exposure_s: float = 0.0
     n_frames: int = 0
@@ -1211,6 +1228,117 @@ def _safe_by_target_name(request: Request) -> dict[str, str]:
         lib.close()
 
 
+def _valid_year(year: int) -> int:
+    """A calendar year, or a 422.
+
+    A bad path segment is a client mistake, not an empty year, and shouldn't
+    look like one."""
+    from fastapi import HTTPException
+
+    if not (1900 <= year <= 2999):
+        raise HTTPException(status_code=422, detail="year out of range")
+    return year
+
+
+def _year_recap_and_nights(request: Request, year: int):  # noqa: ANN202
+    """``(YearRecap, every night)`` for one calendar year.
+
+    Both halves come out of the *same* cached night fold, so the poster, the
+    caption and the page can never disagree about a year — and the year costs
+    nothing the Dashboard heatmap hasn't already paid for.
+    """
+    from seestack.activity_calendar import nights_from
+    from seestack.yearrecap import build_year_recap
+
+    acc, _today = _cached_night_acc(request)
+    nights = nights_from(acc)
+    return build_year_recap(nights, year=year), nights
+
+
+def _year_hero(request: Request, recap, nights):  # noqa: ANN001, ANN202
+    """The year's best picture as ``(SummaryTarget, note)``, or ``(None, "")``.
+
+    Ranked exactly the way the all-time poster's backdrop is — the summary's
+    heroes, in integration order — but **scoped to targets with a night in this
+    year**, so a year page never leads with a picture the year had nothing to do
+    with. The note is the honest caveat for a target imaged across more than one
+    year (see :func:`seestack.yearrecap.year_hero_note`).
+    """
+    from seestack.yearrecap import year_hero_note, years_by_target
+
+    if not recap.has_anything:
+        return None, ""
+    imaged = set(recap.target_names)
+    summary = _cached_library_summary(request)
+    spans = years_by_target(nights)
+    for hero in summary.heroes:
+        if hero.name in imaged and hero.has_preview:
+            return hero, year_hero_note(recap.year, spans.get(hero.name))
+    return None, ""
+
+
+# Declared **before** the JSON route below on purpose: ``{year}`` matches any
+# path segment, so ``/api/recap/year/2026.jpg`` would otherwise hit that route
+# and 422 on the int parse. `tests/webapp/test_year_recap.py` pins it.
+@router.get("/api/recap/year/{year}.jpg")
+def get_year_poster(request: Request, year: int) -> Response:
+    """Download the year as one square, social-ready JPEG.
+
+    Rendered on demand from the same figures ``/api/recap/year/{year}`` reports,
+    over the year's own best picture. Nothing is written to the library — this
+    is a display-time render, exactly like the all-time recap poster."""
+    import io
+
+    from fastapi import HTTPException
+
+    from seestack.stack.output import save_display_jpeg
+    from seestack.yearrecap import draw_year_poster
+
+    year = _valid_year(year)
+    recap, nights = _year_recap_and_nights(request, year)
+    if not recap.has_anything:
+        # A poster about a year with no nights is a wall of nothing; the page's
+        # empty state already says where the nights actually are.
+        raise HTTPException(status_code=404, detail="no nights in that year")
+    hero, _note = _year_hero(request, recap, nights)
+    poster = draw_year_poster(recap, hero=_hero_image(request, hero))
+    buf = io.BytesIO()
+    save_display_jpeg(poster, buf, quality=92)
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/jpeg",
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="my-{year}-under-the-stars.jpg"',
+        },
+    )
+
+
+def _hero_image(request: Request, hero):  # noqa: ANN001, ANN202
+    """One summary hero's stack preview as a PIL image, or ``None``.
+
+    Best-effort in the same way :func:`_recap_hero` is: an unreadable or deleted
+    preview gives the poster its plain deep-space background rather than a 500.
+    """
+    if hero is None:
+        return None
+    from PIL import Image
+
+    lib = deps.open_library(request)
+    try:
+        entry = next(
+            (t for t in lib.list_targets() if t.safe_name == hero.safe), None)
+        path = getattr(entry, "last_stack_preview", None) if entry else None
+        if not path:
+            return None
+        with Image.open(path) as img:
+            return img.convert("RGB")
+    except Exception:  # noqa: BLE001 — a bad preview must not sink the poster
+        return None
+    finally:
+        lib.close()
+
+
 @router.get("/api/recap/year/{year}", response_model=YearRecapOut)
 def get_year_recap(request: Request, year: int) -> YearRecapOut:
     """"Your year under the stars" — one calendar year's nights, hours, targets,
@@ -1221,24 +1349,17 @@ def get_year_recap(request: Request, year: int) -> YearRecapOut:
     header, else UTC), so a year boundary falls where the owner's own nights do.
     A year with nothing in it returns ``has_anything=false`` and the years that
     do have data, so the caller can offer them."""
-    from fastapi import HTTPException
-
-    from seestack.activity_calendar import nights_from
     from seestack.yearrecap import (
-        build_year_recap,
+        year_caption,
         year_empty_message,
         year_first_light_line,
         year_headline,
         year_stats,
     )
 
-    # A calendar year, not a free-form int — a bad path segment is a client
-    # mistake, not an empty year, and shouldn't look like one.
-    if not (1900 <= year <= 2999):
-        raise HTTPException(status_code=422, detail="year out of range")
-
-    acc, _today = _cached_night_acc(request)
-    recap = build_year_recap(nights_from(acc), year=year)
+    year = _valid_year(year)
+    recap, nights = _year_recap_and_nights(request, year)
+    hero, hero_note = _year_hero(request, recap, nights)
     safe_by_name = _safe_by_target_name(request) if recap.first_light_names else {}
     return YearRecapOut(
         year=recap.year,
@@ -1247,6 +1368,14 @@ def get_year_recap(request: Request, year: int) -> YearRecapOut:
         empty_message=year_empty_message(recap),
         stats=[RecapStatOut(value=v, label=lbl) for v, lbl in year_stats(recap)],
         first_light_line=year_first_light_line(recap),
+        caption=year_caption(recap),
+        hero=(
+            YearHeroOut(
+                name=hero.name, safe=hero.safe,
+                thumbnail_url=f"/api/targets/{hero.safe}/thumbnail",
+                note=hero_note,
+            ) if hero is not None else None
+        ),
         n_nights=recap.n_nights,
         total_exposure_s=recap.total_exposure_s,
         n_frames=recap.n_frames,
