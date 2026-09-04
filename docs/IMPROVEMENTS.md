@@ -12365,21 +12365,103 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-09-04, the surface v0.341.0's morning early-stop line deliberately did not reach) —
-  a target whose *own* last night stopped early, on its own page, however long ago that was.**
-  *(Pillar: autonomy + trust — PRIORITY 2; size XS–S; **check the overlap before building**.)* v0.341.0 puts
-  "M 42 stopped getting subs at 23:40 — about 3 h earlier than its last 4 nights" on the Dashboard's
-  **Last night** card, which by construction speaks only for the **library's most recent** capture night. A
-  target the owner shot on Tuesday and has not returned to has exactly the same fact recorded and nowhere to
-  say it: by Thursday the Dashboard is recapping something else, and the Target page's live quiet note self-
-  hid on Tuesday morning. `early_stop` is already a pure helper over one target's session end stamps, so the
-  Target page could answer it for that target's own newest night at the cost of one call. **Care, and why it
-  is filed rather than built:** the Dashboard line is *timely* — it is about last night, so it decays on its
-  own. A Target-page version is permanent until the next night is shot, which turns a report into a standing
-  reproach about a night the owner may well have ended on purpose; it wants an age cap (say a week) and a
-  place inside the existing `NoticeBoard` rather than a new block. **Grep first:** the Nights breakdown card
-  already shows each night's span, so the honest version may be a *marker on the night row* rather than a
-  sentence — which would also be the version that never nags.
+- **NEW IDEA (Builder 2026-09-04, the choice v0.342.0 made deliberately and should be re-measured) — the
+  early-stop judgement compares *sessions*, so a split night quietly makes the app less likely to speak.**
+  *(Pillar: autonomy + trust — PRIORITY 2; size S, **measure before changing anything**.)* `early_stop`
+  is fed `session_end_stamps(frames)` on both surfaces that report it — the Dashboard's "Last night" card
+  and, since v0.342.0, the Nights card's newest row. That was the right call *for agreement*: the Nights
+  rows are observing nights (an evening run and a pre-dawn run merge into one), so computing the two
+  surfaces from different stamps would let them quote different medians for the same night. But the
+  quantity itself is arguably wrong for an owner who shoots a night **in two goes**: that night contributes
+  *two* stop times to the habit, one of which (the evening half's ~21:00) is not when the night ended at
+  all. It drags the median earlier, so a genuinely early stop looks less early — the **conservative**
+  direction, which is why it was shipped rather than blocked, but a measurable blind spot on long nights.
+  **Shape:** feed both surfaces the *merged* per-night end stamps instead (`nights_breakdown` already has
+  `_merge_sessions_by_night`, and `/api/last-night` already resolves the observer's night key), keeping the
+  single-input rule that stops them drifting. **Measure first:** on a fixture of split nights, how much does
+  the median move, and does any real shape cross `EARLY_STOP_MIN_MINUTES` in either direction? A change here
+  makes the app speak *more* often, and the whole design bias of this note is that a wrong "you lost half a
+  night" costs far more than a missed one — so it needs the numbers, not the argument.
+
+- **NEW IDEA (Builder 2026-09-04, the obvious next slice after the v0.342.1 dispatcher routing) — the other
+  seven copies of `min_max_reject and not drizzle and n >= 3` are the same predicate, and one of them drives
+  a sentence the user reads.** *(Pillar: maintainability in service of correctness — size S; **the memory
+  path, so keep the estimate's shape**.)* v0.342.1 routed the two copies its entry named (the dispatcher's
+  `if/elif` chain and `_records_rejection_map`). Grepping the module afterwards finds the same predicate
+  spelled out at seven more sites in `seestack/stack/stacker.py` — `_mmr_charged`, three `reject_arrays=`
+  arguments in the estimate/guard path, two in the pre-submit `estimate_stack`, and `weights_applied` — and
+  every one of them is exactly `combine_method(eff, n) == "min-max-reject"`, because `combine_method`
+  answers `"drizzle"` first. **`weights_applied` is the one that matters beyond tidiness:** it decides
+  whether the run reports that quality weighting was honoured, i.e. a claim a user reads, computed from a
+  hand-written copy of a gate that has already drifted once. **Care:** several of these sit inside the OOM
+  guard's arithmetic, and the entry that preceded this one was explicit that folding must not change the
+  memory estimate's *shape* — so route the predicate, leave the `_estimate_peak_bytes` call sites' argument
+  lists alone, and re-run the six-case before/after hash script (see the drizzle-determinism entry under
+  "Image quality" for why the drizzle case must be hashed at `max_workers=1`).
+
+- **✅ SHIPPED (Builder, v0.342.0, branch `claude/sweet-babbage-0z0bbr`) — ~~a target whose *own* last night
+  stopped early, on its own page, however long ago that was.~~** Built as the entry's own **"grep first"**
+  paragraph recommended, and that recommendation is what removed the need for the age cap it was worried
+  about: it is a **marker on the night row**, not a sentence in the `NoticeBoard`.
+
+  **Why the row, and why that answers the "standing reproach" care note.** A banner is undated — it says
+  *now* whatever night it is about, so it needs an age cap to stop nagging about a night the owner ended on
+  purpose. A marker on the Nights table's newest row is dated *by the row it sits on*, and the next night
+  pushes it down the table, so it decays exactly as the Dashboard line does without a cap having to be
+  invented. It also costs no vertical space on the page the owner calls "extremely busy": it is an `xs`
+  orange `ended early` badge beside the date, next to the existing `sharpest` one, with the sentence in a
+  tooltip and an `aria-label` — the same shape the verdict badge's explanation already takes.
+
+  **One measurement, two surfaces, and the stamps they are computed from are the same ones — deliberately.**
+  `nights_breakdown` rows are **observing nights** (`night_of` merges an evening run and a pre-dawn run into
+  one row), while the Dashboard's card judges **sessions**. Left alone, a night shot in two goes would
+  contribute one stop time to one surface and two to the other, and the two screens would quote different
+  medians for the same night with no way for the reader to tell which was right. So the end stamps are taken
+  **before** the merge — making them bit-for-bit `session_end_stamps(frames)`, the Dashboard's own input —
+  and an endpoint test asserts the two APIs report the identical `stopped_utc` / `minutes_earlier` /
+  `n_nights_compared`. The wording is shared the same way: `describeEarlyStop` now composes the Dashboard
+  sentence from a name-free `earlyStopClause`, and the row's tooltip is that clause plus the same *"Worth a
+  look if you didn't stop on purpose."*
+
+  **Only the newest row is marked.** An older night that ended early is history the owner has already lived
+  through; the newest one is the fact the Dashboard tells them for a day and then forgets. `early_stop`
+  judges only the newest of the stamps it is handed, so this is its natural reach rather than a rule bolted
+  on top.
+
+  **Upgrade-safe (§9):** one dataclass field with a `None` default (`NightSummary.ended_early`), one additive
+  optional response field (`NightSummaryOut.ended_early`, a new `NightEarlyStopOut` model), one optional
+  frontend type field. No config key, no schema, no on-disk change, no default flipped, no existing response
+  field touched, and no extra query or frame pass — the stamps were already in hand inside the function that
+  builds the rows. An older frontend ignores the field; a new frontend against an older backend sees
+  `undefined` and renders exactly what it does today.
+
+  **Tests (+3 Python engine, +3 endpoint, +5 vitest; all fail before).** `tests/test_session_recap.py`: the
+  newest row marked with the right numbers and *no* older row marked; five identical nights saying nothing
+  at all; and the split-night contract — a merged four-night fixture whose judgement equals
+  `early_stop(session_end_stamps(flat))` exactly, at five prior sessions rather than four merged nights.
+  `tests/webapp/test_target_nights.py`: the marker end to end on the four-nights-then-a-short-one fixture,
+  the silence when every night ended at the usual hour, and the agreement with `/api/last-night` field by
+  field. Frontend: the tooltip's wording and its shared-clause identity with the Dashboard sentence, its
+  silence on `null` and on an older backend, exactly one marker rendered across two rows with the
+  explanation reachable by `aria-label`, and no marker when the server sent none.
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-04, the surface v0.341.0's morning early-stop line deliberately did not reach) —
+    a target whose *own* last night stopped early, on its own page, however long ago that was.**
+    *(Pillar: autonomy + trust — PRIORITY 2; size XS–S; **check the overlap before building**.)* v0.341.0 puts
+    "M 42 stopped getting subs at 23:40 — about 3 h earlier than its last 4 nights" on the Dashboard's
+    **Last night** card, which by construction speaks only for the **library's most recent** capture night. A
+    target the owner shot on Tuesday and has not returned to has exactly the same fact recorded and nowhere to
+    say it: by Thursday the Dashboard is recapping something else, and the Target page's live quiet note self-
+    hid on Tuesday morning. `early_stop` is already a pure helper over one target's session end stamps, so the
+    Target page could answer it for that target's own newest night at the cost of one call. **Care, and why it
+    is filed rather than built:** the Dashboard line is *timely* — it is about last night, so it decays on its
+    own. A Target-page version is permanent until the next night is shot, which turns a report into a standing
+    reproach about a night the owner may well have ended on purpose; it wants an age cap (say a week) and a
+    place inside the existing `NoticeBoard` rather than a new block. **Grep first:** the Nights breakdown card
+    already shows each night's span, so the honest version may be a *marker on the night row* rather than a
+    sentence — which would also be the version that never nags.
 
 - **✅ SHIPPED (Builder, v0.336.0, branch `claude/sweet-babbage-76t8i3`) — ~~answer the reach question at the
   moment the default is *saved*, not only when a trail turns up later.~~** Built exactly as the entry shapes
@@ -12775,18 +12857,55 @@ to **Shipped**.)_
   > (+4) the render, the link, and that no request is made with no trail; `Target.test.tsx` (+2) that the note
   > reaches the real page's notes area and stays away without one.
 
-- **NEW IDEA (Builder 2026-09-02, spotted while unifying two of the four copies in v0.323.1) — route the
-  remaining two copies of the combine dispatcher's frame-count gates through `combine_method`.** *(Pillar:
-  maintainability in service of correctness — size S; **the hot path, so measure nothing changes**.)* The gates
-  `min_max_reject and n >= 3` / `sigma_clip and n >= 4` were written out **four** times in
-  `seestack/stack/stacker.py`. v0.323.1 gave them one public definition (`combine_method`) and routed the
-  `STACKER` header card through it; the *dispatcher itself* (`run_stack`'s `if/elif` chain) and
-  `_records_rejection_map`'s mirror of the same conditions still carry their own. They agree today — that was
-  checked — but the whole reason v0.323.1 existed is that a *fifth* surface (the Stack form) had drifted from
-  them, and the next gate change has two places left to forget. **Care:** the dispatcher's branches also decide
-  which accumulator is constructed, so this is a rewrite of live control flow rather than a label — take it
-  only with a before/after that a representative stack produces bit-identical output, and leave
-  `_records_rejection_map` alone if folding it needs the memory estimate to change shape.
+- **✅ SHIPPED (Builder, v0.342.1, branch `claude/sweet-babbage-0z0bbr`) — ~~route the remaining two copies of
+  the combine dispatcher's frame-count gates through `combine_method`.~~** Built as filed, with the
+  before/after the entry demanded actually run rather than argued.
+
+  **Both named copies are gone.** `run_stack`'s dispatcher now computes `combine = combine_method(eff, n)`
+  once and branches on it (`if combine == "drizzle"` / `elif combine == "min-max-reject"` / `elif combine ==
+  "sigma-clip"` / `else`), and `_records_rejection_map` asks the same function instead of re-deriving the
+  same three conditions a second time. The branch bodies are untouched — this is a rewrite of the
+  *predicate*, not of the control flow inside it — and `eff.drizzle` is never anything but `options.drizzle`
+  (nothing between `_resolve_auto_reject` and the dispatcher touches it), so the expressions are identical
+  term for term.
+
+  **Measured bit-identical on a real stack, not asserted.** The same six-case script was run against a
+  `git worktree` of `origin/main` and against this tree, hashing the master's pixels: *mean at 3 subs*,
+  *κ-σ at 16*, *min/max at 3*, *min/max taking precedence over κ-σ at 16*, and *κ-σ with a rejection
+  map* all came back with the **identical SHA-256**, the identical `STACKER`/`REJMODE`/`REJFRAC` cards and
+  the identical coverage. The drizzle case did not — and that turned out to be a **property of the drizzle
+  path itself, not of this change**: it does not reproduce bit-for-bit run to run on `origin/main` either.
+  Filed as its own measured observation under "Image quality" rather than swept into this commit.
+
+  **The test is the half that keeps it true.** `tests/test_combine_dispatch.py` runs *real* stacks on both
+  sides of every gate the dispatcher has — 3 vs 4 subs on the default κ-σ, 2 vs 3 on min/max, and min/max
+  winning over κ-σ at 16 — and asserts the **`REJMODE`** card matches `combine_method`'s answer.
+  `REJMODE` is written by each branch body from its own `RejectionStats`, so a branch taken against the
+  shared definition shows up; asserting on `STACKER` could not, since `combine_method` fills that in itself.
+  Verified to bite: re-inlining a wrong gate (`combine == "min-max-reject" and n >= 4`) fails the 3-sub case.
+  A sixth test pins `_records_rejection_map` against the combine it will run across the whole grid, plus the
+  drizzle exception (its map rides on `drizzle_reject`, not on the combine name) and the
+  `record_rejection_map=False` short-circuit.
+
+  **Upgrade-safe (§9):** no pixel moves, no option, default, schema, on-disk path or response shape changes;
+  three comments that described the duplication were corrected rather than left to mislead the next reader.
+
+  *(Original entry follows.)*
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-02, spotted while unifying two of the four copies in v0.323.1) — route the
+    remaining two copies of the combine dispatcher's frame-count gates through `combine_method`.** *(Pillar:
+    maintainability in service of correctness — size S; **the hot path, so measure nothing changes**.)* The gates
+    `min_max_reject and n >= 3` / `sigma_clip and n >= 4` were written out **four** times in
+    `seestack/stack/stacker.py`. v0.323.1 gave them one public definition (`combine_method`) and routed the
+    `STACKER` header card through it; the *dispatcher itself* (`run_stack`'s `if/elif` chain) and
+    `_records_rejection_map`'s mirror of the same conditions still carry their own. They agree today — that was
+    checked — but the whole reason v0.323.1 existed is that a *fifth* surface (the Stack form) had drifted from
+    them, and the next gate change has two places left to forget. **Care:** the dispatcher's branches also decide
+    which accumulator is constructed, so this is a rewrite of live control flow rather than a label — take it
+    only with a before/after that a representative stack produces bit-identical output, and leave
+    `_records_rejection_map` alone if folding it needs the memory estimate to change shape.
 
 - **NEW IDEA (Builder 2026-09-02, the third consumer of the same fact, left alone by v0.323.1 deliberately) —
   the Stack form's `rejectionOn` still asks "did a pass dispatch?", not "can it remove anything?"**
@@ -22914,6 +23033,45 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **⚪ MEASURED, RECORDED SO NOBODY RE-TREADS IT — the **drizzle** path is not bit-reproducible under
+  multithreading; every other combine is. Not a picture bug at the size measured; do NOT "fix" it by
+  serialising the accumulation.** *(Builder 2026-09-04, found while proving the combine-dispatcher routing
+  changed no pixels — it was the one case of six whose hash moved, and it moves on `origin/main` too.
+  Pillar: trust / image quality — PRIORITY 4. Confidence: **measured**, four runs, both trees.)*
+
+  **What was measured.** Sixteen synthetic Seestar subs (one carrying a planted satellite trail), stacked
+  twice with identical options — `drizzle`, `drizzle_reject`, `drizzle_scale=1.5`, `max_workers=2` — produce
+  masters that differ. Repeated four times against the same first run:
+
+  | pair | max abs diff | pixels > 1 ADU | pixels differing at all |
+  |---|---|---|---|
+  | run0 vs run1 | 7.24 | 12 | 563,725 / 1,036,800 |
+  | run0 vs run2 | **117.66** | 12 | 491,361 / 1,036,800 |
+  | run0 vs run3 | 7.24 | 12 | 392,844 / 1,036,800 |
+
+  No NaN ever swapped sides (`nan_mismatch = 0`), so coverage is stable — it is the *values* that move.
+
+  **The size, in context, which is why this is filed rather than fixed.** The half-a-million differing
+  pixels are float-order noise: sub-0.01 ADU on an image whose median is 5.7. Only **12 pixels of a million**
+  move by more than 1 ADU, and the 117 is a **star core** — 8,817.96 against 8,753.12, i.e. **0.7 % of the
+  value**, on a pixel where a κ-σ clip decision flipped on a steep gradient. Nothing structural, nothing
+  visible, and nothing that changes what the picture shows.
+
+  **The cause, and the reason serialising is the wrong cure.** Isolated by probe:
+  `max_workers=1` is **bit-identical** (`ndiff = 0`); `max_workers=2` diverges **with and without**
+  `drizzle_reject` (max 0.0117 and 0.0098 on the runs that did not catch a clip flip). So it is
+  non-associative float addition into a shared canvas under two workers — not the rejection pass, which
+  only *amplifies* it at a handful of pixels. The κ-σ and min/max paths are deterministic at
+  `max_workers=2` (`ndiff = 0`), because their consumers accumulate in submission order. Forcing the same
+  on drizzle means giving up the parallelism on the path that needs it most (the owner's mosaics are the
+  largest canvases this app builds), to buy a reproducibility nobody has asked for.
+
+  **What it *does* mean, and the only thing worth acting on.** A re-stack of the same subs is not
+  guaranteed to be byte-identical, so **no test or tool may assert a drizzled master's bytes** — compare
+  with a tolerance, or compare a non-drizzle case. The six-case before/after script that found this is the
+  method to reuse for any future hot-path refactor; run it with `max_workers=1` if a drizzle case must be
+  hashed.
 
 - **NEW IDEA (Builder 2026-09-04, the *behavioural* consequence of the v0.340.0 measurement — read the caution
   before touching this) — an unattended drizzle run could skip a rejection pass that provably clips nothing,

@@ -352,6 +352,19 @@ class RestackGainOut(BaseModel):
     missing_night_count: bool
 
 
+class NightEarlyStopOut(BaseModel):
+    """A night that stopped notably earlier than this target's recent nights do.
+
+    The same measurement the Dashboard's "Last night" card reports
+    (``seestack.session_recap.early_stop``), minus the target's name and safe
+    name: on a target's own page the reader already knows which target this is.
+    """
+
+    stopped_utc: str            # the last sub of that night
+    minutes_earlier: float      # how much earlier than this target's usual stop
+    n_nights_compared: int      # how many earlier nights the median was over
+
+
 class NightSummaryOut(BaseModel):
     """One capture night in the per-target "Nights" breakdown."""
 
@@ -378,6 +391,11 @@ class NightSummaryOut(BaseModel):
     typical_fwhm_px: float | None = None
     is_best: bool = False
     reject_buckets: dict[str, int] = {}
+    # Set on the newest row only, when that night stopped notably earlier than
+    # this target's own recent nights. Additive and optional (``None`` on every
+    # other row, and an older frontend simply ignores it) — it is the Dashboard
+    # "Last night" fact in the one place it survives past breakfast.
+    ended_early: NightEarlyStopOut | None = None
 
 
 class FocusTrendPointOut(BaseModel):

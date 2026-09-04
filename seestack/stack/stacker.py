@@ -137,14 +137,17 @@ def _records_rejection_map(options: "StackOptions", n: int) -> bool:
     Pass the *effective* options (post ``_resolve_auto_reject`` /
     ``_afford_drizzle_reject``), so the memory guard, the in-flight cap and the
     pre-submit estimate all charge the plane exactly when the run allocates it.
+
+    The branch is asked of :func:`combine_method` rather than re-derived here,
+    so a change to the dispatcher's gates cannot leave this mirror behind — the
+    two used to carry the same three conditions written out twice.
     """
     if not options.record_rejection_map:
         return False
-    if options.drizzle:
+    combine = combine_method(options, n)
+    if combine == "drizzle":
         return bool(options.drizzle_reject) and n >= 4
-    if options.min_max_reject and n >= 3:
-        return False
-    return bool(options.sigma_clip) and n >= 4
+    return combine == "sigma-clip"
 
 
 def _estimate_peak_bytes(dst_shape: tuple[int, int], *, drizzle: bool,
@@ -811,10 +814,11 @@ def combine_method(options: "StackOptions", n: int) -> str:
     candidate frames: ``"drizzle"``, ``"min-max-reject"``, ``"sigma-clip"`` or
     ``"mean"``.
 
-    The gates are the dispatcher's own (``min_max_reject and n >= 3``,
-    ``sigma_clip and n >= 4``): below those counts it silently falls through to a
-    plain mean with **no rejection pass at all**, so a 3-frame stack with
-    sigma-clip ticked combines as ``"mean"``.
+    These gates (``min_max_reject and n >= 3``, ``sigma_clip and n >= 4``) are
+    not a description of the dispatcher — ``run_stack`` branches on this
+    function's answer, and so does :func:`_records_rejection_map`. Below those
+    counts a run silently falls through to a plain mean with **no rejection pass
+    at all**, so a 3-frame stack with sigma-clip ticked combines as ``"mean"``.
 
     Pass the *effective* options (post :func:`_resolve_auto_reject`) — the label
     describes what runs, not what was asked for. Public because the header
@@ -837,11 +841,9 @@ MIN_MAX_MIN_FRAMES = 3
 #: Smallest stack the two-pass **drizzle** rejection dispatches on, i.e. the
 #: floor :func:`_afford_drizzle_reject` and :func:`_records_rejection_map` both
 #: gate their ``n >= 4`` on. Named here so :func:`rejection_reach` can say
-#: "the pass does not even run" without writing the literal a fifth time; the
-#: gates themselves are deliberately left where they are (rewriting live
-#: dispatcher control flow is its own backlog item). *Dispatching* is not the
-#: same as *reaching* — see :func:`rejection_reach`, where the honest bound is
-#: :func:`kappa_min_frames`.
+#: "the pass does not even run" without writing the literal a fifth time.
+#: *Dispatching* is not the same as *reaching* — see :func:`rejection_reach`,
+#: where the honest bound is :func:`kappa_min_frames`.
 DRIZZLE_REJECT_MIN_FRAMES = 4
 
 
@@ -1710,14 +1712,14 @@ def _build_output_header_meta(
     camera = _stack_camera_name(frames)
     if camera:
         meta["INSTRUME"] = (camera, "camera the subs were taken with")
-    # Label the method the dispatcher actually ran, applying the *same* frame-count
-    # gates it uses (`min_max_reject and n >= 3`, `sigma_clip and n >= 4`): below
-    # those counts the dispatcher silently falls through to plain mean (no rejection
-    # pass runs — REJMODE is correctly absent), so a 3-frame default stack or a
-    # 2-frame min-max stack must record STACKER="mean", not the rejection method.
-    # `len(frames)` here is the candidate count `n` the dispatcher gated on.
-    # `combine_method` *is* those gates — shared with the Stack form's pre-run
-    # warning so the card and the warning can never name different methods.
+    # Label the method the dispatcher actually ran — the *same call* it now
+    # branches on, not a re-application of its gates. Below the frame-count
+    # floors the dispatcher falls through to plain mean (no rejection pass runs
+    # — REJMODE is correctly absent), so a 3-frame default stack or a 2-frame
+    # min-max stack records STACKER="mean", not the rejection method.
+    # `len(frames)` here is the candidate count `n` the dispatcher gated on, and
+    # `combine_method` is shared with the Stack form's pre-run warning too, so
+    # the run, the card and the warning cannot name different methods.
     method = combine_method(options, len(frames))
     meta["STACKER"] = (method, "stacking method")
     meta["COLORTYP"] = ("mono" if options.mono else "OSC", "sensor/stack colour mode")
@@ -2578,8 +2580,20 @@ def run_stack(
         pass_logs.append(_PassFrameLog())
         return pass_logs[-1]
 
+    # Which combine runs, asked **once**. The three branches below used to
+    # re-write their own gates (``min_max_reject and n >= 3`` etc.), which is
+    # how a fifth surface — the Stack form — came to disagree with them
+    # (v0.323.1). :func:`combine_method` is the definition the ``STACKER``
+    # header card and the form already read, so routing the dispatcher through
+    # it makes "what the app says it did" and "what it did" the same expression
+    # rather than two that happen to agree. The predicate is identical
+    # term-for-term to what each ``elif`` carried, and ``eff.drizzle`` is never
+    # anything but ``options.drizzle`` (nothing between here and
+    # ``_resolve_auto_reject`` touches it), so no run changes branch.
+    combine = combine_method(eff, n)
+
     # ---- 3a. Drizzle path (alternate accumulator) --------------------------
-    if options.drizzle:
+    if combine == "drizzle":
         from seestack.io.wcs_io import wcs_from_text, wcs_to_text
         from seestack.stack.drizzle_path import DrizzleParams, DrizzleStacker
 
@@ -2689,7 +2703,7 @@ def run_stack(
     # Takes precedence over κ-σ on the standard path when enabled. Rejects a
     # lone per-pixel extreme (satellite/plane trail, hot/cold sample) that κ-σ
     # can't in a small stack. Needs ≥3 frames to spare two samples.
-    elif eff.min_max_reject and n >= 3:
+    elif combine == "min-max-reject":
         mmr = MinMaxRejectAccumulator(canvas_3, reject_count=eff.min_max_reject_count)
 
         def consume_min_max(aligned: np.ndarray, y0: int, x0: int, weight: float) -> None:
@@ -2727,7 +2741,7 @@ def run_stack(
     # ---- 3b. Standard path: pass 1 streaming mean + std --------------------
     # If sigma-clipping is off we go directly to the weighted sum and we're
     # done after one pass.
-    elif eff.sigma_clip and n >= 4:
+    elif combine == "sigma-clip":
         wel = WelfordAccumulator(canvas_3)
         p1_log = _new_pass_log()
         p2_log = _new_pass_log()

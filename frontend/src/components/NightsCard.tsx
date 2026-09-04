@@ -16,6 +16,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type NightSummary } from "../api/client";
 import { formatIntegration, formatNightDate } from "../format";
+import { earlyStopClause } from "./LastNightCard";
 
 // `formatNightDate` moved to `format.ts` (so the night-recency helpers there can
 // share its month table) and is re-exported here for its long-standing callers.
@@ -69,6 +70,27 @@ export function verdictTooltip(n: NightSummary): string | null {
   return null;
 }
 
+/** "Stopped getting subs at 23:40 — about 3 h earlier than its last 4 nights.
+ *  Worth a look if you didn't stop on purpose." — the tooltip behind an
+ *  `ended early` marker, or null when the server said nothing.
+ *
+ *  The Dashboard's "Last night" card carries the same measurement, but it can
+ *  only ever speak for the library's *most recent* capture night: a target shot
+ *  on Tuesday and not returned to has this fact recorded and nowhere to say it
+ *  by Thursday. Here it is an annotation on the row for that night — which is
+ *  why it never becomes a reproach, and why it needs no age cap: it is dated by
+ *  the row it sits on, and the next night pushes it down the table.
+ *
+ *  Wording comes from `earlyStopClause`, the same helper the Dashboard sentence
+ *  is built from, so the two surfaces cannot describe one night two ways. */
+export function earlyStopTooltip(n: Pick<NightSummary, "ended_early">): string | null {
+  const e = n.ended_early;
+  if (!e) return null;
+  const clause = earlyStopClause(e);
+  return `${clause.charAt(0).toUpperCase()}${clause.slice(1)}. `
+    + "Worth a look if you didn't stop on purpose.";
+}
+
 /** Colour + label for a night's one-word verdict badge, or null (no badge) when
  *  there's too little measured to judge ("" verdict). Pure/testable. */
 export function verdictBadge(verdict: string): { color: string; label: string } | null {
@@ -95,6 +117,7 @@ function NightRow({
 }) {
   const badge = verdictBadge(n.verdict);
   const tip = verdictTooltip(n);
+  const earlyTip = earlyStopTooltip(n);
   const subs = n.n_set_aside > 0 ? `${n.n_kept}/${n.n_frames}` : String(n.n_frames);
   // Only offer "Set aside" when the night still has kept subs to drop and its
   // bounds are known (a night with no datable frames can't be targeted).
@@ -106,6 +129,18 @@ function NightRow({
           <Text size="sm">{nightDateLabel(n)}</Text>
           {n.is_best ? (
             <Badge size="xs" variant="light" color="violet">sharpest</Badge>
+          ) : null}
+          {earlyTip ? (
+            // A marker on the night it describes, not another banner: the
+            // Target page is the "extremely busy" one, so the explanation lives
+            // in the tooltip (and in `aria-label`, so it is reachable without a
+            // pointer) exactly as the verdict badge's does.
+            <Tooltip label={earlyTip} multiline w={260}>
+              <Badge size="xs" variant="light" color="orange"
+                aria-label={`ended early: ${earlyTip}`}>
+                ended early
+              </Badge>
+            </Tooltip>
           ) : null}
         </Group>
       </Table.Td>
