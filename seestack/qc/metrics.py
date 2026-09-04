@@ -83,9 +83,9 @@ def green_channel(mosaic: np.ndarray, pattern: str = "RGGB") -> np.ndarray:
 
 def estimate_sky(image: np.ndarray) -> tuple[float, float]:
     """Return ``(median, std)`` of the sky background using sigma-clipping."""
-    from astropy.stats import sigma_clipped_stats
+    from seestack.core.skystats import sigma_clipped_stats_finite
 
-    _, median, std = sigma_clipped_stats(image, sigma=3.0, maxiters=5)
+    _, median, std = sigma_clipped_stats_finite(image, sigma=3.0, maxiters=5)
     return float(median), float(std)
 
 

@@ -34308,9 +34308,44 @@ problems. Dogfood it every big-picture run and fix root causes.
   relationship is editorial, and the existing "keep a shipped item's spec *indented*" convention already
   makes the answer visible by shape once someone applies it.
 
-- **⚪ LOG HYGIENE (Scout 2026-09-04, found by dogfooding a real stack) — the `astropy.stats`
-  "Input data contains invalid values (NaNs or infs)…" warning is emitted dozens of times per stack, burying
-  any *real* warning in the Logs a beginner reads.** *(Pillar: friendliness / trust — PRIORITY 3. Size: S.
+- **✅ SHIPPED (Builder, v0.345.4, branch `claude/sweet-babbage-k0vyac`) — ~~the `astropy.stats` "Input data
+  contains invalid values (NaNs or infs)…" warning is emitted dozens of times per stack, burying any *real*
+  warning in the Logs a beginner reads.~~** Built as filed, with the sites re-derived by **probing a running
+  pass** rather than trusting the filed line numbers — three of the four the entry names had moved or were
+  already masked, and two it did not name were the actual emitters.
+
+  **Which sites really fire, measured.** A NaN-cornered 240² frame through each pass, counting both
+  `AstropyUserWarning`s and the records astropy pushes into the `astropy` logger (which is how they reach the
+  Logs page): `seestack/bg/per_frame.py` (the block-averaged faint-extended pass — **once per frame**, which
+  is where "dozens per stack" comes from), `seestack/bg/final_gradient.py` (**twice per canvas**, the object
+  mask and its extended pass), and `seestack/qc/metrics.py::estimate_sky`. `post/color_cal.py:194` and
+  `per_frame.py`'s two other calls **already passed `mask=`** — the entry's line numbers were stale — and
+  `coverage_leveling`'s `_robust_stats` / `_sky_mode` never warn on the live path, because every caller hands
+  them an already-finite selection. Those two were converted anyway (defensively, and pinned as such), so a
+  future caller that does pass an uncovered sample can't reopen the noise.
+
+  **One shared helper, not six copies of `mask=~np.isfinite(x)`.** `seestack/core/skystats.py`
+  (`sigma_clipped_stats_finite`) is a drop-in for the unmasked call. It matters for the case a bare `mask=`
+  gets wrong: an array with **no** finite pixel comes back as `np.ma.masked`, and `float(np.ma.masked)` emits
+  a warning of its own — trading one noisy warning for another — so that case short-circuits to NaN **of the
+  input's own dtype**, exactly what the unmasked call used to return. Keeping the dtype is not cosmetic: every
+  consumer builds a detection threshold (`med + k*std`) out of these, and a float32→float64 promotion would
+  round the threshold differently and could move a pixel in or out of an object mask.
+
+  **The pixels do not move.** The masked call returns bit-identical `(mean, median, std)` to letting astropy
+  clip — pinned over NaNs, ±inf, 1-D samples, int arrays and the all-finite fast path — so this is silence,
+  not a new number. Upgrade-safe (§9): one new engine-free module, no option, default, config key, schema,
+  on-disk path or API shape touched; an all-finite single-field stack takes the same code path it always did.
+
+  **Tests (+12, `tests/test_skystats.py`; 4 fail before).** The helper's equivalence to the legacy call and
+  its dtype/all-NaN/int/1-D edges, plus a call-site test per pass — QC sky estimate, final-gradient removal,
+  per-frame flatten, and the coverage-leveling helpers — each asserting **no `AstropyUserWarning`** on
+  NaN-bearing input, with the raw astropy call kept beside them as the control so a future astropy that stops
+  warning cannot quietly turn the test green.
+
+  *(Original entry follows.)*
+
+  *(Pillar: friendliness / trust — PRIORITY 3. Size: S.
   Confidence: reproduced in the dogfood run; verified NOT a wrong-result — see below. Not filed as a bug: the
   result is bit-for-bit correct.)*
 
