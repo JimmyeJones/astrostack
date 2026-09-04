@@ -30,7 +30,7 @@ from typing import Any, Iterable, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -114,6 +114,10 @@ CREATE TABLE IF NOT EXISTS frames (
     -- streak detection
     streak_detected     INTEGER NOT NULL DEFAULT 0,  -- 0/1
     streak_count        INTEGER NOT NULL DEFAULT 0,
+    -- where the dominant flagged component sat, normalised 0..1 across the
+    -- frame; NULL on every frame QC'd before these existed
+    streak_cx           REAL,
+    streak_cy           REAL,
     -- mosaic grouping (assigned by align stage)
     mosaic_panel_id     INTEGER,
     -- accept / reject
@@ -190,6 +194,8 @@ class FrameRow:
     transparency_score: float | None = None
     streak_detected: bool = False
     streak_count: int = 0
+    streak_cx: float | None = None
+    streak_cy: float | None = None
     mosaic_panel_id: int | None = None
     accept: bool = True
     reject_reason: str | None = None
@@ -248,7 +254,7 @@ _INSERT_COLS = [
     "ra_hint_deg", "dec_hint_deg",
     "wcs_json", "ra_center_deg", "dec_center_deg", "pixscale_arcsec", "rotation_deg",
     "fwhm_px", "star_count", "sky_adu_median", "eccentricity_median", "transparency_score",
-    "streak_detected", "streak_count",
+    "streak_detected", "streak_count", "streak_cx", "streak_cy",
     "mosaic_panel_id",
     "accept", "reject_reason", "user_override",
 ]
@@ -694,6 +700,20 @@ class Project:
                     "ALTER TABLE stack_runs ADD COLUMN coverage_thin_frac REAL")
             except sqlite3.OperationalError:
                 pass  # already present
+        if from_version < 21:
+            # Where in the frame the streak detector's dominant flagged
+            # component sat, normalised 0..1. Shape alone can't separate a
+            # satellite trail from an edge-on galaxy; *position across a
+            # session* can, and nothing recorded it. Additive; frames QC'd
+            # before these existed stay NULL, which reads as "no evidence" and
+            # leaves the existing majority guard as the only reconciliation —
+            # i.e. exactly today's behaviour.
+            for col in ("streak_cx", "streak_cy"):
+                try:
+                    self._conn.execute(
+                        f"ALTER TABLE frames ADD COLUMN {col} REAL")
+                except sqlite3.OperationalError:
+                    pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -803,6 +823,7 @@ class Project:
             "fwhm_px": None, "star_count": None, "sky_adu_median": None,
             "eccentricity_median": None, "transparency_score": None,
             "streak_detected": False, "streak_count": 0,
+            "streak_cx": None, "streak_cy": None,
         }
         if not existing.user_override:
             fields["accept"] = True
@@ -1642,6 +1663,8 @@ def _row_to_frame(row: sqlite3.Row) -> FrameRow:
         transparency_score=row["transparency_score"],
         streak_detected=bool(row["streak_detected"]),
         streak_count=row["streak_count"],
+        streak_cx=row["streak_cx"],
+        streak_cy=row["streak_cy"],
         mosaic_panel_id=row["mosaic_panel_id"],
         accept=bool(row["accept"]),
         reject_reason=row["reject_reason"],

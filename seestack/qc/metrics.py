@@ -49,6 +49,12 @@ class FrameMetrics:
     transparency_score: float | None = None
     streak_detected: bool = False
     streak_count: int = 0
+    #: Where the dominant flagged component sat, in normalised frame
+    #: coordinates (0..1) — ``None`` when nothing was flagged. Shape alone
+    #: can't tell a satellite trail from an edge-on galaxy; position across a
+    #: session can (``seestack.qc.runner.stationary_streak_frames``).
+    streak_cx: float | None = None
+    streak_cy: float | None = None
 
 
 def green_channel(mosaic: np.ndarray, pattern: str = "RGGB") -> np.ndarray:
@@ -266,9 +272,11 @@ def compute_frame_metrics(
 
     streak_flag = False
     streak_n = 0
+    streak_shape = None
     if detect_streaks:
-        from seestack.qc.streaks import detect_streaks as _ds
-        streak_flag, streak_n = _ds(g, sky_median=sky_med, sky_std=sky_std)
+        from seestack.qc.streaks import detect_streaks_with_shape as _ds
+        streak_flag, streak_n, streak_shape = _ds(
+            g, sky_median=sky_med, sky_std=sky_std)
 
     return FrameMetrics(
         star_count=n_stars,
@@ -278,4 +286,6 @@ def compute_frame_metrics(
         transparency_score=transparency,
         streak_detected=streak_flag,
         streak_count=streak_n,
+        streak_cx=streak_shape.cx if streak_shape is not None else None,
+        streak_cy=streak_shape.cy if streak_shape is not None else None,
     )
