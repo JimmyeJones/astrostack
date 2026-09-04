@@ -24,9 +24,7 @@ import { api } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { YearShareCard } from "../components/YearShareCard";
 import { formatIntegration } from "../format";
-import {
-  defaultRecapYear, longestNightLines, recapYearOptions, sharpestNightLines,
-} from "../yourYear";
+import { defaultRecapYear, recapYearOptions, yearNightCards } from "../yourYear";
 
 function StatCard({ value, label }: { value: string; label: string }) {
   return (
@@ -83,8 +81,8 @@ export function YourYearView() {
 
   const years = recapYearOptions(data);
   const suggested = defaultRecapYear(data.years_with_data, thisYear);
-  const longest = longestNightLines(data.longest_night, formatIntegration);
-  const sharpest = sharpestNightLines(data.sharpest_night);
+  const nightCards = yearNightCards(
+    data.longest_night, data.sharpest_night, formatIntegration);
 
   return (
     <Stack gap="md">
@@ -140,18 +138,19 @@ export function YourYearView() {
           <YearShareCard year={data.year} caption={data.caption}
             hero={data.hero} />
 
-          {(longest || sharpest) ? (
+          {/* One card when the year's longest night was also its sharpest —
+              which a short season usually makes true, and a one-standout year
+              always does. `yearNightCards` keeps both figures on it. */}
+          {nightCards.length > 0 ? (
             <SimpleGrid cols={{ base: 1, sm: 2 }}>
-              {longest ? (
+              {nightCards.map((c) => (
                 <NightCard
-                  icon={<IconClock size={22} color="var(--mantine-color-violet-4)" />}
-                  title="Longest night" lines={longest} />
-              ) : null}
-              {sharpest ? (
-                <NightCard
-                  icon={<IconMoonStars size={22} color="var(--mantine-color-teal-4)" />}
-                  title="Sharpest night" lines={sharpest} />
-              ) : null}
+                  key={c.key}
+                  icon={c.key === "sharpest"
+                    ? <IconMoonStars size={22} color="var(--mantine-color-teal-4)" />
+                    : <IconClock size={22} color="var(--mantine-color-violet-4)" />}
+                  title={c.title} lines={c.lines} />
+              ))}
             </SimpleGrid>
           ) : null}
 

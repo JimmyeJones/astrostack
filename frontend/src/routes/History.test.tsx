@@ -173,7 +173,7 @@ describe("HistoryView", () => {
     vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
       run_id: 1, integration_s: 2520, n_frames: 840, weighting: null,
       auto_edit:
-        "Auto-edited: flattened the background, then applied a natural stretch · measured a ~0.1 sky, 4.7 px stars.",
+        "Auto-edited: flattened the background, then applied a natural stretch · measured a ~0.1 sky before stretching, 4.7 px stars.",
       cards: [{ key: "STACKER", value: "sigma-clip", comment: "stacking method" }],
     });
 

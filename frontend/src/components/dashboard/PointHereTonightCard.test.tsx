@@ -136,12 +136,14 @@ describe("PointHereTonightCard", () => {
       picks: [
         pick({
           altitude_now_deg: null,
-          reason: "You've got 45 min on M 31 — another hour would cut its noise "
+          // The depth-only path names no target: the card prints the name
+          // directly above this line (see `_have_phrase`).
+          reason: "You've got 45 min so far — another hour would cut its noise "
             + "about 35%.",
         }),
         pick({
           safe: "NGC_7000", name: "NGC 7000", altitude_now_deg: null, score: 30,
-          reason: "You've got 2 h on NGC 7000 — another hour would cut its noise "
+          reason: "You've got 2 h so far — another hour would cut its noise "
             + "about 22%.",
         }),
       ],

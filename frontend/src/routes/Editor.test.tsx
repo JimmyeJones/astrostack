@@ -1061,7 +1061,7 @@ describe("EditorView", () => {
     expect(await screen.findByText("What Auto-process did")).toBeInTheDocument();
     expect(screen.getByText("Applied a natural stretch.")).toBeInTheDocument();
     // ...and names the data-driven value it chose (the STF sky level).
-    expect(screen.getByText("Tuned to your data: sky level 0.2.")).toBeInTheDocument();
+    expect(screen.getByText("Tuned to your data: stretched sky level 0.2.")).toBeInTheDocument();
 
     // Editing the pipeline (removing the op) drops the note so it can't
     // misdescribe the current recipe.
@@ -1180,7 +1180,7 @@ describe("EditorView", () => {
     });
     vi.spyOn(client.api, "autoNote").mockResolvedValue({
       note: "Auto-edited: flattened the background, then applied a natural stretch"
-        + " · measured a ~0.1 sky, 4.7 px stars.",
+        + " · measured a ~0.1 sky before stretching, 4.7 px stars.",
     });
     vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
     vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
@@ -1198,7 +1198,7 @@ describe("EditorView", () => {
       .toBeInTheDocument();
     // ...and the same data-driven values line the interactive Auto note shows, so
     // the Process-target lander gets an equally-complete explanation.
-    expect(screen.getByText("Tuned to your data: sky level 0.2.")).toBeInTheDocument();
+    expect(screen.getByText("Tuned to your data: stretched sky level 0.2.")).toBeInTheDocument();
 
     // Hand-editing the pipeline drops the note so it can't misdescribe the recipe.
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));

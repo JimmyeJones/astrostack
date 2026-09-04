@@ -13208,6 +13208,19 @@ to **Shipped**.)_
   that sets two form keys must land them in **one** state update, or the panel re-queries through an
   intermediate state and flickers between two verdicts.
 
+  **⚪ SWEPT AND CLOSED — every named starting point already has its button (Builder 2026-09-04, read in the
+  code, not assumed). Do not re-pick this.** All four candidates the entry names were checked in
+  `frontend/src/routes/Stack.tsx` as it stands: `drizzleTooFewHint` has *"Turn off Drizzle"*, `drizzleClipHint`
+  has *"Turn on drizzle outlier rejection"*, `backgroundModeNudge` has *"Use <mode> background flatten"*, and
+  the calibration-suggestion copy has **"apply recommended"** (`applyRecommended`, which sets every
+  recommended master *and* `scale_dark_to_light` in one go, precisely because applying half of a
+  scaling-dependent pairing would mis-subtract the pedestal). The neighbours are done too — the min/max
+  weighting hint, the transparency hint, the quality-weighting and photometric nudges, the drizzle nudge and
+  the two memory fixes all carry theirs. **The identifying test still stands for anything newly written**
+  (does the copy name a concrete value some reachable control would accept?), and so does the entry's care
+  note — a button earns its place by being *conditional on something rare*; an advisory that fires on most
+  stacks stays a sentence. But there is no backlog of un-actioned sentences left on the Stack form to sweep.
+
 - **✅ SHIPPED (Builder, v0.322.3, branch `claude/wizardly-feynman-yryq05`) — ~~Compare tells you one stack is
   "the cleaner stack" even when the two are *different objects*.~~** Built as the entry's **second** option, the
   one it called better: the figure stays, the *claim* goes. `noiseComparison` now returns `sameTarget`
@@ -17785,19 +17798,48 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
-- **NEW IDEA (Builder 2026-09-04, the half v0.345.6 deliberately did NOT build — it is wording, and wording
-  wants a deliberate pass) — the auto-edit panel says "sky" twice, one line apart, meaning two different
-  things.** *(Pillar: approachable / trust — PRIORITY 3; size XS, but **copy, so read the whole panel before
-  moving a word**.)* v0.345.6 fixed the *number* ("a ~0 sky" → "a ~0.001 sky"); it did not touch the fact that
-  the cause clause's **"a ~0.001 sky"** is a measurement of the *linear* stack, while the "Tuned to your data"
-  line's **"sky level 0.24"** is the stretch's *target* background in display space. Both are correct, both
-  say "sky", and they sit one line apart differing by two orders of magnitude — a beginner reading them
-  together has no way to know they are different quantities rather than a contradiction. **Shape:** name them
-  apart in the two clauses (e.g. *"your sky measured ~0.001"* against *"stretched to a sky brightness of
-  0.24"*), which needs the same both-sides change as the number did — `autoSummary.ts` and
-  `seestack/edit/presets.py`, plus the phrase table. **Do NOT** solve it by hiding one of them: each is the
-  only place its own fact appears (the standing "nothing may be removed" constraint), and the pair is *why*
-  the note earns trust — it says what was measured and what was done about it.
+- **✅ SHIPPED (Builder, v0.345.7, branch `claude/sweet-babbage-enljxc`) — ~~the auto-edit panel says "sky"
+  twice, one line apart, meaning two different things.~~** Built as the entry asked: **named apart, with
+  nothing hidden**, on both sides of the mirror at once.
+
+  **The two clauses now say which sky they mean.** The measured cue reads *"a ~0.001 sky **before
+  stretching**"* (`autoCauseSentence`, `_auto_cause_clause`) and the value line reads *"**stretched** sky
+  level 0.24"* (`autoValuePhrases`), so the panel's two sky numbers read as a measurement and a decision
+  rather than as one picture measured twice with a two-orders-of-magnitude disagreement. The words *"sky
+  level"* were kept on the value side deliberately — that is what the control itself is called (`target_bg`,
+  labelled *"STF sky level"*), and a note that names the knob it moved is findable; the qualifier goes in
+  front rather than replacing it.
+
+  **Neither fact was removed** (the standing "nothing may be removed" constraint): both numbers still appear,
+  in the same two lines, in the same order.
+
+  **Upgrade-safe (§9):** two pure string builders; no option, default, config key, schema, on-disk path, API
+  shape or measurement changed.
+
+  **Tests (+2 suites, 3 Python and 9 vitest failing before).** `tests/test_auto_summary_mirror.py` gains
+  `test_the_measured_sky_says_which_sky_it_is`, which pins the sample's own clause *and* the general rule —
+  every comma-separated part naming a sky must also say which one — so a future re-wording cannot quietly
+  drop the qualifier and restore the clash. `autoSummary.test.ts` gains the same pair (the two lines side by
+  side for the sample's numbers, and a scan asserting every occurrence of "sky" in either line sits next to
+  the word that disambiguates it). Existing expectations in `autoSummary.test.ts`, `Editor.test.tsx`,
+  `History.test.tsx`, `test_edit_engine.py` and the mirror test were **updated, not weakened** — each still
+  asserts the whole sentence.
+
+  *(Original entry follows.)*
+
+  - **NEW IDEA (Builder 2026-09-04, the half v0.345.6 deliberately did NOT build — it is wording, and wording
+    wants a deliberate pass) — the auto-edit panel says "sky" twice, one line apart, meaning two different
+    things.** *(Pillar: approachable / trust — PRIORITY 3; size XS, but **copy, so read the whole panel before
+    moving a word**.)* v0.345.6 fixed the *number* ("a ~0 sky" → "a ~0.001 sky"); it did not touch the fact that
+    the cause clause's **"a ~0.001 sky"** is a measurement of the *linear* stack, while the "Tuned to your data"
+    line's **"sky level 0.24"** is the stretch's *target* background in display space. Both are correct, both
+    say "sky", and they sit one line apart differing by two orders of magnitude — a beginner reading them
+    together has no way to know they are different quantities rather than a contradiction. **Shape:** name them
+    apart in the two clauses (e.g. *"your sky measured ~0.001"* against *"stretched to a sky brightness of
+    0.24"*), which needs the same both-sides change as the number did — `autoSummary.ts` and
+    `seestack/edit/presets.py`, plus the phrase table. **Do NOT** solve it by hiding one of them: each is the
+    only place its own fact appears (the standing "nothing may be removed" constraint), and the pair is *why*
+    the note earns trust — it says what was measured and what was done about it.
 
 - **✅ SHIPPED (Builder, v0.345.6, branch `claude/sweet-babbage-k0vyac`) — ~~the auto-edit note tells the
   owner the app "measured a ~0 sky", one line above "sky level 0.24".~~** Found the same way v0.345.3 was —
@@ -20559,6 +20601,18 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **⚪ DOGFOOD BASELINE (Builder 2026-09-04, `scripts/agent-dogfood.sh` at v0.345.7 — the fourth measurement,
+  and the fourth that says DO NOT open a speculative IA slice).** Full run (boot → sample → stack → Playwright
+  probe at 1440 px and 420 px): **nothing overflowing, no console errors**. Tallest pages, phone first:
+  the Target page **3,014 px** (unchanged across four measurements and ~100 versions), `/life-list` 3,008 px,
+  the editor 2,815 px, then desktop Target 2,010 px, desktop editor 1,841 px, Dashboard 1,785 px (phone),
+  `/stack` 1,748 px (phone), `/life-list` 1,453 px (desktop). **What this pass found is the entry below** —
+  the two standout cards on "Your sky, so far" naming one target twice — which no code read had caught in the
+  ~30 versions since the page was last edited, because each card is right on its own and only the rendered
+  row shows the same picture beside itself. That is now three consecutive dogfood passes where the *finding*
+  was a duplication or a contradiction between two lines that are individually correct: worth treating as the
+  probe's speciality when choosing what to look at in the screenshots.
+
 - **⚪ DOGFOOD BASELINE (Builder 2026-09-04, `scripts/agent-dogfood.sh` at v0.345.2 — the third measurement in
   a row that says DO NOT open a speculative IA slice).** Full run (boot → sample → stack → Playwright probe at
   1440 px and 420 px): **nothing overflowing, no console errors**, and the tallest page is still the Target
@@ -20573,6 +20627,112 @@ problems. Dogfood it every big-picture run and fix root causes.
   paragraph, which is invisible to a code read (each of its sentences is defensible on its own; only the
   rendered page shows five grey paragraphs in a row) and is exactly the kind of thing the running-app probe
   exists to catch. Shipped as v0.345.3.
+
+- **✅ SHIPPED (Builder, v0.345.8, branch `claude/sweet-babbage-enljxc`) — ~~"Your sky, so far" and the year
+  page each award two superlatives, and on this owner's data they usually land on the same thing — so the
+  page renders one picture, one name and two near-identical figures twice, side by side.~~** *(Pillar:
+  friendliness / trust — PRIORITY 3. Found by **looking at a running app** (`scripts/agent-dogfood.sh`), like
+  v0.345.3 and v0.345.6 before it: the duplication is invisible to a code read — each card is correct on its
+  own — and unmissable on the rendered page.)*
+
+  **Why it is the usual case, not an edge case.** "Your biggest project" ranks by `total_exposure_s`;
+  "Most-imaged target" ranks by `n_frames_accepted`. On a Seestar the subs are a fixed length, so total
+  exposure is very nearly the sub count times a constant and **the two questions have one answer most of the
+  time** — always so on a one-target library, which is exactly the beginner this page is written for. The
+  year page's "Longest night" / "Sharpest night" pair is the same shape: a short season's longest night is
+  often its steadiest one, and the two cards then print one date twice as if they were two nights.
+
+  **Fixed by merging, never by dropping** (the standing "nothing may be removed" constraint). When both
+  accolades name the same thing there is now **one** card carrying both titles and both figures — *"Your
+  biggest project — and most-imaged · 2.0 h of integration · 240 subs kept"*, and *"Longest — and sharpest —
+  night · 14 Feb 2026 · 2.0 h · 2.4 px stars"*. The reader loses no fact and gains the one two separate cards
+  could never state: that this is the same target / the same night. When they genuinely differ, both cards
+  render exactly as before.
+
+  **The poster follows the page.** `year_sharpest_night_line` drops the repeated date on a same-night year
+  (*"Also your sharpest night: 2.1 px stars"*), so the picture the owner posts does not spend two of its few
+  lines on one date. It keeps its date whenever the longest-night line is *not* printed — a year too short to
+  crown a longest night leaves "also" nothing to refer to. This is the rule `seestack/recap.py` already
+  applied to the all-time poster's own copy (its "also shot" line keeps the top target out "so the two lines
+  sit together without repeating a name"), now applied on the screens as well.
+
+  **The deciding is pure and shared.** `frontend/src/standouts.ts` (`libraryStandouts`) and
+  `frontend/src/yourYear.ts` (`yearNightCards`) return the card list; the routes only render it — so the two
+  pages and the poster cannot drift about whether that was one standout or two.
+
+  **Upgrade-safe (§9):** presentation only. Both API fields are still served and still populated
+  (`longest_target` / `most_imaged_target`, `longest_night` / `sharpest_night`); no config key, schema,
+  on-disk path, response shape or default changed. One engine string changes on a year whose two standouts
+  are one night.
+
+  **Tests (+14; the 3 that touch pre-existing files fail before).** `standouts.test.ts` (+5, new): the merge,
+  the two-card case, each single standout, silence, and the "1 sub kept" singular the old inline copy got
+  wrong. `yourYear.test.ts` (+4): the same four shapes for nights, plus the case that must **not** merge — a
+  same-date night with no measured star size, where the sharpest line is silent and there is no second
+  accolade to fold in. `SkySoFar.test.tsx` (+1) and `YourYear.test.tsx` (+1) pin it end to end on the
+  rendered page, asserting the separate titles are *gone* rather than merely that the merged one is present.
+  `tests/test_year_recap.py` (+2): the poster's folded footnote (with the date asserted to appear exactly
+  once across the pair) and the un-folded one when no longest night is printed.
+
+- **✅ SHIPPED (Builder, v0.345.9, branch `claude/sweet-babbage-enljxc`) — ~~the "Worth more time" pick
+  repeats the target's own name, one line under the heading that *is* that name.~~** *(Pillar: friendliness —
+  PRIORITY 3. The third find of the same dogfood pass, and the same family as v0.345.8: one fact said twice
+  on one card.)*
+
+  **What it looked like**, on the Tonight page and the Dashboard card alike, for the sample target:
+
+  > **Sample: Orion Nebula (M42)**
+  > You've got 1 min on Sample: Orion Nebula (M42) — another hour would cut its noise about 87%.
+
+  **The fix was already in the file, on the other path.** `_pick_reason` (the *placed* pick, when the app
+  knows where you are) passes `"it"` into `_have_phrase` precisely because its own opening clause has just
+  said the name — *"M 31 is 45° up right now … So far you've got 45 min on it"*. Only the **depth-only**
+  path (`_depth_only_picks`, taken when there is no observing location or no darkness tonight) passed
+  `t.name`, and that sentence is the whole reason, rendered directly under the name. It now passes `None`,
+  and `_have_phrase` grows a subject-free form for each of its three shapes: *"you've got 1 min so far"*,
+  *"you've barely started"*, *"you haven't captured anything here yet"*.
+
+  **Who sees it:** the no-location path is the *first-run* path — a beginner meets it before any frame is
+  plate-solved, which is exactly when the planner card is doing the most work — and a high-latitude summer
+  night lands there too.
+
+  **Upgrade-safe (§9):** one engine string; no option, default, config key, schema, on-disk path or response
+  shape changed. `TonightPick.name` still carries the name, so any consumer that wants it has it.
+
+  **Tests (+1, 2 failing before).** `tests/test_nightplan.py` gains a check across **all five** shapes of the
+  sentence (nothing captured, under a minute, a minute, deep, absurdly deep) that a long catalogue name never
+  appears in a depth-only `reason` while `name` still carries it — and that the placed path still names the
+  target exactly once. The existing zero-minutes test moved to the new wording. The two frontend mocks that
+  hand-wrote a server payload were updated so the fixtures still model what the server actually sends.
+
+- **NEW IDEA (Builder 2026-09-04, the generalisation of the v0.345.8 merge) — sweep the app for the other
+  pairs of superlatives that can resolve to the same thing.** *(Pillar: friendliness / trust — PRIORITY 3;
+  size XS per site once found; confidence: two instances fixed, the rest unchecked.)* v0.345.8 merged two
+  such pairs — "biggest project" vs "most-imaged target", and "longest night" vs "sharpest night" — after a
+  dogfood pass showed each printing one answer twice, side by side. **The identifying test:** two adjacent
+  surfaces that each *rank* the same population by a different key, where the keys are correlated on this
+  owner's data (fixed-length Seestar subs make exposure ≈ count; a short season's best night tends to be
+  best at everything). **Unchecked candidates:** the Dashboard's "Your best night" card against the year
+  page's sharpest night (different pages, so much weaker — probably leave it); `/best`'s ranking against the
+  Library tile's "latest picture"; the Target page's "sharpest sub" against its "reference sub"; and the
+  session-recap standouts. **Care:** the fix is a *merge that keeps both figures*, never a drop — and a pair
+  that usually differs should stay two cards, because merging a coincidence would be as confusing as
+  repeating one.
+
+- **NEW IDEA (Builder 2026-09-04, seen on the Target page in the same dogfood pass — GREP FIRST, this may be
+  answered already) — the picture card shows the canvas's black margins with nothing saying what they are.**
+  *(Pillar: friendliness — PRIORITY 3; size XS if it is only a caption; confidence: **observed on the sample,
+  not traced** — the sample is one field, so a real mosaic may read differently.)* "Your picture" on the
+  Target page rendered the stack with a wide black band down each side: the union canvas is wider than the
+  sky every frame covered, which is correct and is exactly what `auto_crop_border` trims when Auto runs in
+  the editor. A beginner meeting it on the *unedited* stack has no way to know whether their picture is
+  broken, and the caption underneath talks about frames and exposure rather than about the black. **Shape:**
+  one conditional line under the picture when the run's coverage says a meaningful border is uncovered —
+  *"the dark edges are where fewer frames overlapped; Auto trims them when you edit"* — reusing
+  `_trim_rect_for_run` / the existing trim fraction rather than measuring anything new. **Grep first:** the
+  editor already surfaces "% of ragged mosaic edge to trim" in its Auto note and the Target page already
+  carries a coverage-thin verdict in "How's my stack?" — if either already answers this where the beginner is
+  looking, this is copy churn and should be declined.
 
 - **NEW IDEA (Builder 2026-09-04, the generalisation of the v0.345.3 export-panel fix) — sweep the app for
   the other trailing "what these buttons do" paragraphs, and check each against the per-control copy above
@@ -20590,6 +20750,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   clause by clause, move each sentence under the control it describes (the idiom several panels already use),
   and re-home any fact the paragraph carried that the per-control copy did not, rather than deleting the
   block wholesale. A paragraph whose every clause is genuinely new information is *not* a hit — leave it.
+
+  **⚪ ALL FOUR NAMED STARTING POINTS ARE CLEAN — checked in the code, recorded so nobody re-walks them
+  (Builder 2026-09-04).** The **Stack form's foot** ends in the sizing line and its conditional advisories,
+  each of which sits with the control it is about and carries a number nothing else states. The
+  **Save/share menu** (`Target.tsx` / `History.tsx`) has no trailing block at all — every item carries its
+  own one-line `MENU_HINT` under its own label, which is the idiom the export-panel fix moved *towards*. The
+  **Calibration page's** picker explainer is one sentence about the *source-folder input* beside it ("point
+  at a server-side folder of raw dark/flat FITS…"), not a recap of the buttons. The **Storage page's** two
+  closing paragraphs both carry facts stated nowhere else — what a cache is and that pruning is permanent,
+  and the standing guarantee that nothing on the page touches `incoming/` (§10), which is the one paragraph
+  on that screen that must never be trimmed for tidiness. **So the confirmed instance count stands at one
+  (v0.345.3), and the remaining candidates are unenumerated rather than known.** If the sweep is ever
+  reopened, look at panels *added since* v0.345.3 rather than re-reading these four.
 
 - **NEW IDEA (Builder 2026-09-03, measured while sweeping the display-space statistics for A1's blindness) —
   Levels' "From your image" button silently leaves the black point at 0, and nothing says why.** *(Pillar:

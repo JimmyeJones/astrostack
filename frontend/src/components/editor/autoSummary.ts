@@ -54,7 +54,8 @@ export function autoSummaryPhrases(
  *
  * The fallback exists because a *linear* stack's sky sits well below 0.01: the
  * bundled sample's measured 0.001 sky rendered as "measured a ~0 sky", i.e. the
- * app saying it measured nothing, directly above "sky level 0.24". Three
+ * app saying it measured nothing, directly above "stretched sky level 0.24".
+ * Three
  * decimals is the precision `analyze_auto_inputs` actually carries, so nothing
  * finer than what was measured is ever invented.
  *
@@ -80,7 +81,14 @@ export function autoValuePhrases(ops: OpInstance[]): string[] {
     if (!op.enabled) continue;
     const p = (op.params ?? {}) as Record<string, unknown>;
     if (op.id === "tone.stretch" && p.mode === "stf" && typeof p.target_bg === "number") {
-      out.push(`sky level ${fmt(p.target_bg)}`);
+      // "stretched" distinguishes this from the *measured* sky named one line
+      // above ("a ~0.001 sky before stretching"): this is the display-space
+      // background the stretch aimed for, that one is the linear stack's own
+      // level. Both are correct and they differ by two orders of magnitude, so
+      // unqualified they read as the panel contradicting itself. The words
+      // "sky level" stay, because that is what the control itself is called
+      // ("STF sky level"), and the note should name the knob it moved.
+      out.push(`stretched sky level ${fmt(p.target_bg)}`);
     } else if (op.id === "detail.denoise" && typeof p.strength === "number") {
       out.push(`denoise strength ${fmt(p.strength)}`);
     } else if (op.id === "tone.saturation" && typeof p.amount === "number") {
@@ -100,7 +108,8 @@ export function autoValuePhrases(ops: OpInstance[]): string[] {
 
 /** A single line naming the values Auto chose from the data, or null when none
  * of the value-bearing ops are present, e.g.
- * "Tuned to your data: sky level 0.2, saturation 1.1×, sharpen radius 1.4 px." */
+ * "Tuned to your data: stretched sky level 0.2, saturation 1.1×, sharpen
+ * radius 1.4 px." */
 export function autoValueSentence(ops: OpInstance[]): string | null {
   const phrases = autoValuePhrases(ops);
   if (phrases.length === 0) return null;
@@ -134,13 +143,17 @@ export function autoSummarySentence(
  * measured and returns null when none were (e.g. an unmeasurable proxy with no
  * FWHM), so the note simply omits the line rather than showing an empty one.
  *
- * e.g. "Measured from your image: a ~0.10 sky, 4.7 px stars, some background noise,
- * 12% of ragged mosaic edge to trim."
+ * e.g. "Measured from your image: a ~0.10 sky before stretching, 4.7 px stars,
+ * some background noise, 12% of ragged mosaic edge to trim."
  */
 export function autoCauseSentence(a: AutoAnalysis | null | undefined): string | null {
   if (!a) return null;
   const parts: string[] = [];
-  if (typeof a.sky === "number") parts.push(`a ~${fmt(a.sky)} sky`);
+  // "before stretching" names *which* sky: this is the linear stack's own level,
+  // where an ordinary value sits near 0.001, while `autoValueSentence` one line
+  // below reports the stretch's display-space target ("stretched sky level
+  // 0.24"). Mirrored by `_auto_cause_clause`.
+  if (typeof a.sky === "number") parts.push(`a ~${fmt(a.sky)} sky before stretching`);
   if (typeof a.median_fwhm === "number") parts.push(`${fmt(a.median_fwhm)} px stars`);
   // A qualitative noise read (the numeric σ is opaque to a beginner); only when
   // it actually influenced the recipe (the denoise/sharpen crossfade is engaged).

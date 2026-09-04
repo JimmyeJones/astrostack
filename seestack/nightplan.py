@@ -1941,7 +1941,10 @@ def _depth_only_picks(targets: list[LibraryTarget], limit: int) -> list[TonightP
             frames_accepted=int(t.frames_accepted or 0),
             noise_gain=round(gain, 3),
             score=round(100.0 * depth, 1),
-            reason=_depth_sentence(hours, t.name, gain),
+            # No subject: this sentence is the whole reason, rendered on both
+            # cards directly beneath the target's own name, so naming it here
+            # printed a long catalogue name twice one line apart.
+            reason=_depth_sentence(hours, None, gain),
         ))
     picks.sort(key=lambda p: (-p.score, -p.hours_captured))
     return picks[:max(0, int(limit))]
@@ -1967,13 +1970,27 @@ def _pick_reason(name: str, altitude_deg: float, minutes_left: float,
             f"So far {depth}{moon}")
 
 
-def _have_phrase(hours: float, subject: str, *, capitalise: bool = True) -> str:
+def _have_phrase(hours: float, subject: str | None, *,
+                 capitalise: bool = True) -> str:
     """"You've got 45 min on M 31" — or, under a minute, words instead of a "0 min"
-    that reads as a bug rather than a fact."""
+    that reads as a bug rather than a fact.
+
+    ``subject`` is ``None`` where the sentence is rendered directly under the
+    target's own name (the depth-only picks on the Dashboard's "Worth more time"
+    card and the Tonight page's list), so naming it again would print a long
+    catalogue name twice, one line apart: *"Sample: Orion Nebula (M42)"* over
+    *"You've got 1 min on Sample: Orion Nebula (M42) — …"*. The placed path
+    already avoids this the other way round — :func:`_pick_reason` passes
+    ``"it"`` because its own opening clause has just said the name.
+    """
     if hours <= 0.0:
-        text = f"you haven't captured any of {subject} yet"
+        text = ("you haven't captured anything here yet" if subject is None
+                else f"you haven't captured any of {subject} yet")
     elif hours * 60.0 < 1.0:
-        text = f"you've barely started on {subject}"
+        text = ("you've barely started" if subject is None
+                else f"you've barely started on {subject}")
+    elif subject is None:
+        text = f"you've got {format_duration(hours * 3600.0)} so far"
     else:
         # The app's one integration-time vocabulary (`sharecard.format_duration`,
         # which is what `formatIntegration` says in the browser), not the window
@@ -1986,7 +2003,7 @@ def _have_phrase(hours: float, subject: str, *, capitalise: bool = True) -> str:
     return text[0].upper() + text[1:] if capitalise else text
 
 
-def _depth_sentence(hours: float, subject: str, gain: float, *,
+def _depth_sentence(hours: float, subject: str | None, gain: float, *,
                     capitalise: bool = True) -> str:
     """"You've got 45 min on M 31 — another hour would cut its noise about 33%."
 

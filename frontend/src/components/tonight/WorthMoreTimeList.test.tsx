@@ -15,7 +15,9 @@ function pick(overrides: Partial<TonightPick> = {}): TonightPick {
     altitude_now_deg: null,
     minutes_usable_left: 0, hours_captured: 0.75, frames_accepted: 90,
     noise_gain: 0.345, score: 34.5,
-    reason: "You've got 45 min on M 31 — another hour would cut its noise about 35%.",
+    // The depth-only path names no target — the row prints the name right
+    // above this line, so the server leaves it out (`_have_phrase`).
+    reason: "You've got 45 min so far — another hour would cut its noise about 35%.",
     ...overrides,
   };
 }

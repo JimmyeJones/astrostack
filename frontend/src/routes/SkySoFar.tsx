@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type SummaryTarget } from "../api/client";
 import { formatIntegration, formatMonthYear } from "../format";
+import { libraryStandouts } from "../standouts";
 import { QueryError } from "../components/QueryError";
 import { MyDeepSkyWallCard } from "../components/MyDeepSkyWallCard";
 import { ShareYourSkyCard } from "../components/ShareYourSkyCard";
@@ -76,6 +77,8 @@ export function SkySoFarView() {
   }
 
   const hasAnything = data.n_targets_imaged > 0;
+  const standouts = libraryStandouts(
+    data.longest_target, data.most_imaged_target, formatIntegration);
 
   return (
     <Stack gap="md">
@@ -136,22 +139,23 @@ export function SkySoFarView() {
               wall. Self-hides until two targets have a finished picture. */}
           <MyDeepSkyWallCard />
 
-          {(data.longest_target || data.most_imaged_target) ? (
+          {/* One card, not two, when both superlatives name the same target —
+              which on a Seestar is the usual case (fixed-length subs make
+              "most integration" and "most subs" nearly the same question), and
+              the only case on a one-target library. `libraryStandouts` keeps
+              both titles and both figures on the merged card. */}
+          {standouts.length > 0 ? (
             <SimpleGrid cols={{ base: 1, sm: 2 }}>
-              {data.longest_target ? (
+              {standouts.map((s) => (
                 <StandoutCard
-                  icon={<IconTrophy size={20} color="var(--mantine-color-yellow-5)" />}
-                  title="Your biggest project"
-                  target={data.longest_target}
-                  detail={`${formatIntegration(data.longest_target.total_exposure_s)} of integration`} />
-              ) : null}
-              {data.most_imaged_target ? (
-                <StandoutCard
-                  icon={<IconStack2 size={20} color="var(--mantine-color-teal-4)" />}
-                  title="Most-imaged target"
-                  target={data.most_imaged_target}
-                  detail={`${data.most_imaged_target.n_frames_accepted.toLocaleString()} subs kept`} />
-              ) : null}
+                  key={s.key}
+                  icon={s.key === "most_imaged"
+                    ? <IconStack2 size={20} color="var(--mantine-color-teal-4)" />
+                    : <IconTrophy size={20} color="var(--mantine-color-yellow-5)" />}
+                  title={s.title}
+                  target={s.target}
+                  detail={s.detail} />
+              ))}
             </SimpleGrid>
           ) : null}
 
