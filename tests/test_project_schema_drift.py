@@ -229,3 +229,45 @@ def test_a_schema_20_project_gains_the_streak_positions_without_losing_rows(tmp_
         assert f.streak_cx is None and f.streak_cy is None
     finally:
         proj.close()
+
+
+def test_a_schema_21_project_gains_the_restoration_stamp_without_losing_rows(tmp_path):
+    """The v21 → v22 step. ``frames.restored_utc`` must arrive as NULL on every
+    existing row — which reads as "this sub was never put back", so the Target
+    page's restored-subs nudge stays silent on a pre-upgrade install rather than
+    inventing a restoration out of a legacy row — with nothing else disturbed."""
+    project_dir = tmp_path / "v21"
+    project_dir.mkdir(parents=True)
+    conn = sqlite3.connect(project_dir / "project.sqlite")
+    try:
+        conn.executescript(SCHEMA_SQL)
+        conn.execute("ALTER TABLE frames DROP COLUMN restored_utc")
+        conn.execute(
+            "INSERT INTO frames(source_path, exposure_s, star_count, "
+            "streak_detected, streak_cx, accept, reject_reason) VALUES(?,?,?,?,?,?,?)",
+            ("sub_001.fit", 10.0, 90, 1, 0.5, 1, None),
+        )
+        conn.execute("PRAGMA user_version = 21")
+        conn.commit()
+    finally:
+        conn.close()
+
+    proj = Project.open(project_dir)
+    try:
+        frames = list(proj.iter_frames())
+        assert len(frames) == 1
+        f = frames[0]
+        assert f.source_path == "sub_001.fit"
+        assert f.exposure_s == 10.0
+        assert f.star_count == 90
+        assert f.streak_detected is True
+        assert f.streak_cx == 0.5
+        assert f.accept is True
+        assert f.restored_utc is None
+        # And the read side agrees: nothing to say about a legacy row.
+        assert proj.restored_frame_stamps() == []
+
+        from seestack.io.project import SCHEMA_VERSION
+        assert proj._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    finally:
+        proj.close()

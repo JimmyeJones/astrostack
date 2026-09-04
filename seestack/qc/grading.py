@@ -72,7 +72,7 @@ import math
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from seestack.io.project import FrameRow
+from seestack.io.project import FrameRow, restoration_stamp
 from seestack.stack.pointings import pointing_groups
 
 log = logging.getLogger(__name__)
@@ -598,12 +598,16 @@ def apply_grade_reaccepts(project, report: GradeReport) -> list[int]:
     list) is a no-op.
     """
     changed: list[int] = []
+    stamp = restoration_stamp()
     for fid in report.re_accept:
         f = project.get_frame(fid)
         if f is None or f.accept or f.user_override:
             continue
         if not (f.reject_reason or "").startswith("auto:grade"):
             continue
-        project.update_frame(fid, accept=True, reject_reason=None)
+        # Stamp when the sub came back, so a picture stacked before this moment
+        # can be recognised as having been made without it.
+        project.update_frame(fid, accept=True, reject_reason=None,
+                             restored_utc=stamp)
         changed.append(fid)
     return changed
