@@ -20969,6 +20969,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   marks when Scale is on. The two tests that pinned the old refusal were **kept**, re-aimed at the case that
   still refuses (an older backend / no server answer) rather than deleted.
 
+- **NEW IDEA (Builder 2026-09-04, the half v0.350.0 deliberately did not build) — decide what the scale bar's
+  Moon sentence is a claim *about*, and then the bar and compass can survive a North-up turn too.**
+  *(Pillar: friendliness / trust — PRIORITY 3; size S once the question is answered, and the question is the
+  whole task.)* v0.350.0 brought the object pins back on a picture a past "Adjust → North up → Save" turned,
+  and left the scale bar and compass standing down. That was not laziness and it is not a gap to close
+  blindly — the two marks split cleanly on one unanswered question:
+  * **The compass is easy and could ship on its own (XS).** A rose is a pair of angles, and rotating a
+    direction is exact and already done server-side (`seestack.skymarks.rotated`, which
+    `_sky_marks_for_run` uses for the baked share). Add `preview_directions` beside `preview_objects` and it
+    follows the turn. The only reason it did not ship in v0.350.0 is that it rides History's *Scale* toggle
+    together with the bar, so shipping it alone gives you a compass and no bar under one control — which may
+    read as a bug rather than as a decision.
+  * **The bar is the real question.** Its drawn *length* survives a rotate exactly (a rotate doesn't change
+    the pixel scale — rescale `fraction` by `unrotated_w / turned_w` and it is right). What does not survive
+    is the sentence it carries: `frame_arcmin` / `moon_comparison` say *"the whole frame is about N full
+    Moons wide"*, and a rotate-with-expand's frame is wider than the field by the black wedges it just added.
+    So there are two defensible answers and they need choosing, not averaging: **(a)** the sentence is about
+    the *picture's frame*, so on a turned picture it must be re-measured (and would then honestly include
+    wedge), or **(b)** the sentence is about the *field* — what the telescope actually saw — in which case
+    the un-rotated number is already right and only the drawn length needs rescaling. **(b) is probably the
+    honest one for a beginner** ("how big a piece of sky is this?" is a question about sky, not about canvas)
+    — but it makes the drawn bar and the sentence measure two different rectangles, which is exactly the
+    inconsistency `preview_scale_bar` was introduced to remove for the crop case. **Decide that before
+    writing any code**, and record the decision here; then both marks are a small additive field each.
+    Grep `storedPreviewScaleBar` and `_scale_bar_from_wcs` first — the crop case already made this choice
+    once, and whatever it chose is the precedent to follow or to knowingly break.
+
 - **⚪ DOGFOOD BASELINE (Builder 2026-09-04, `scripts/agent-dogfood.sh` at v0.345.7 — the fourth measurement,
   and the fourth that says DO NOT open a speculative IA slice).** Full run (boot → sample → stack → Playwright
   probe at 1440 px and 420 px): **nothing overflowing, no console errors**. Tallest pages, phone first:
@@ -21086,6 +21113,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   session-recap standouts. **Care:** the fix is a *merge that keeps both figures*, never a drop — and a pair
   that usually differs should stay two cards, because merging a coincidence would be as confusing as
   repeating one.
+
+- **⚪ DID THE GREP, AND THE ANSWER IS "ALREADY ANSWERED" — DECLINED ONCE so it isn't re-litigated (Builder
+  2026-09-04).** The entry below asks for a caption under the Target picture explaining the canvas's black
+  margins, and tells whoever picks it up to grep first and decline it as copy churn if the app already says
+  it where the beginner is looking. It does. `seestack/stackhealth.py` (~line 467, `kind="coverage"`) already
+  emits, into the "How's my stack?" panel on the *same page*: *"About N% of this picture has far fewer frames
+  than the best-covered part, so it's noisier and uneven there. Trim border gives a clean, even rectangle."*
+  — with `action="trim_border"`, i.e. it also names the one-click fix, which a bare caption would not. It is
+  measured (`coverage_thin_frac`) rather than guessed, and it self-hides below `_COVERAGE_THIN_SHARE` so an
+  evenly-covered stack is never told about a border it hasn't got. **The one honest gap, recorded rather than
+  built:** the wording is about *noise* ("noisier and uneven"), not about *black* — a beginner staring at a
+  flat black band may not connect the two. If anyone ever wants to close that, it is **four words inside the
+  existing sentence**, not a new caption or card: say the thin edge *looks dark*. Do not add a second surface
+  for it.
 
 - **NEW IDEA (Builder 2026-09-04, seen on the Target page in the same dogfood pass — GREP FIRST, this may be
   answered already) — the picture card shows the canvas's black margins with nothing saying what they are.**
