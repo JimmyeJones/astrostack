@@ -132,6 +132,97 @@ def test_recap_poster_survives_an_unreadable_preview(client, solved_library):
         assert img.size[0] == img.size[1]
 
 
+# ---------------------------------------------------------------------------
+# The user's own pick: a pinned cover backdrops the poster they are about to
+# post, exactly as it already fronts the deep-sky wall and the Library tile.
+# ---------------------------------------------------------------------------
+
+def _register_flat_run(root, safe, *, basename, rgb, timestamp):
+    """Register a stack run whose preview is one flat colour, returning its id.
+
+    A flat backdrop is what makes "which picture did the poster use?" readable
+    off a single corner pixel."""
+    from PIL import Image
+
+    lib = Library.open_or_create(root / "library")
+    try:
+        preview = lib.target_dir(lib.find_target(safe)) / f"{basename}.png"
+        preview.parent.mkdir(parents=True, exist_ok=True)
+        buf = io.BytesIO()
+        Image.new("RGB", (64, 32), rgb).save(buf, format="PNG")
+        preview.write_bytes(buf.getvalue())
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc=timestamp,
+                output_basename=basename, fits_path=None, tiff_path=None,
+                preview_path=str(preview), n_frames_used=3,
+                canvas_h=320, canvas_w=480, coverage_min=1, coverage_max=3,
+                options_json=json.dumps({}),
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        return run_id
+    finally:
+        lib.close()
+
+
+def _poster_corner(client, url="/api/recap.jpg"):
+    from PIL import Image
+
+    r = client.get(url)
+    assert r.status_code == 200
+    with Image.open(io.BytesIO(r.content)) as img:
+        return img.convert("RGB").getpixel((2, img.size[1] - 2))
+
+
+def _set_cover(root, safe, run_id):
+    """Pin (or clear) a target's cover run, exactly as ``PUT /targets/{safe}/cover``
+    does."""
+    lib = Library.open_or_create(root / "library")
+    try:
+        lib.set_target_cover(safe, run_id)
+    finally:
+        lib.close()
+
+
+def test_recap_poster_backdrop_is_the_cover_you_pinned(client, solved_library):
+    """"Set as cover" means *this* is the picture of that target. The poster used
+    to read ``last_stack_preview`` directly, so it showed whatever stacked last —
+    a picture the owner may have deliberately demoted."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    favourite = _register_flat_run(
+        solved_library, safe, basename="favourite", rgb=(255, 255, 255),
+        timestamp="2026-05-01T00:00:00Z")
+    _register_flat_run(
+        solved_library, safe, basename="newer", rgb=(0, 0, 0),
+        timestamp="2026-05-09T00:00:00Z")
+
+    # Nothing pinned: the newest (black) stack backdrops it, as it always has.
+    unpinned = _poster_corner(client)
+    assert max(unpinned) < 60, unpinned
+
+    _set_cover(solved_library, safe, favourite)
+    pinned = _poster_corner(client)
+    # The white favourite, veiled the same way the newest one was.
+    assert all(60 < c < 210 for c in pinned), pinned
+
+
+def test_recap_poster_falls_through_a_stale_pin_to_the_newest_picture(
+        client, solved_library):
+    """A cover whose run was pruned (or whose preview file has gone) must degrade
+    to the newest picture, never cost the poster its backdrop."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_flat_run(
+        solved_library, safe, basename="newest", rgb=(255, 255, 255),
+        timestamp="2026-05-09T00:00:00Z")
+    _set_cover(solved_library, safe, 9999)  # a run id that never existed
+
+    corner = _poster_corner(client)
+    assert all(60 < c < 210 for c in corner), corner
+
+
 def test_recap_names_the_other_targets_you_shot(client, solved_library):
     """The recap says *what* you pointed at, not only how much — and never
     repeats the biggest project, which has its own line."""
