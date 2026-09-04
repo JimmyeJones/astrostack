@@ -20674,6 +20674,35 @@ problems. Dogfood it every big-picture run and fix root causes.
   `tests/test_year_recap.py` (+2): the poster's folded footnote (with the date asserted to appear exactly
   once across the pair) and the un-folded one when no longest night is printed.
 
+- **NEW IDEA (Builder 2026-09-04, the generalisation of the v0.345.8 merge) — sweep the app for the other
+  pairs of superlatives that can resolve to the same thing.** *(Pillar: friendliness / trust — PRIORITY 3;
+  size XS per site once found; confidence: two instances fixed, the rest unchecked.)* v0.345.8 merged two
+  such pairs — "biggest project" vs "most-imaged target", and "longest night" vs "sharpest night" — after a
+  dogfood pass showed each printing one answer twice, side by side. **The identifying test:** two adjacent
+  surfaces that each *rank* the same population by a different key, where the keys are correlated on this
+  owner's data (fixed-length Seestar subs make exposure ≈ count; a short season's best night tends to be
+  best at everything). **Unchecked candidates:** the Dashboard's "Your best night" card against the year
+  page's sharpest night (different pages, so much weaker — probably leave it); `/best`'s ranking against the
+  Library tile's "latest picture"; the Target page's "sharpest sub" against its "reference sub"; and the
+  session-recap standouts. **Care:** the fix is a *merge that keeps both figures*, never a drop — and a pair
+  that usually differs should stay two cards, because merging a coincidence would be as confusing as
+  repeating one.
+
+- **NEW IDEA (Builder 2026-09-04, seen on the Target page in the same dogfood pass — GREP FIRST, this may be
+  answered already) — the picture card shows the canvas's black margins with nothing saying what they are.**
+  *(Pillar: friendliness — PRIORITY 3; size XS if it is only a caption; confidence: **observed on the sample,
+  not traced** — the sample is one field, so a real mosaic may read differently.)* "Your picture" on the
+  Target page rendered the stack with a wide black band down each side: the union canvas is wider than the
+  sky every frame covered, which is correct and is exactly what `auto_crop_border` trims when Auto runs in
+  the editor. A beginner meeting it on the *unedited* stack has no way to know whether their picture is
+  broken, and the caption underneath talks about frames and exposure rather than about the black. **Shape:**
+  one conditional line under the picture when the run's coverage says a meaningful border is uncovered —
+  *"the dark edges are where fewer frames overlapped; Auto trims them when you edit"* — reusing
+  `_trim_rect_for_run` / the existing trim fraction rather than measuring anything new. **Grep first:** the
+  editor already surfaces "% of ragged mosaic edge to trim" in its Auto note and the Target page already
+  carries a coverage-thin verdict in "How's my stack?" — if either already answers this where the beginner is
+  looking, this is copy churn and should be declined.
+
 - **NEW IDEA (Builder 2026-09-04, the generalisation of the v0.345.3 export-panel fix) — sweep the app for
   the other trailing "what these buttons do" paragraphs, and check each against the per-control copy above
   it.** *(Pillar: friendliness — PRIORITY 3; size XS per site once found. Confidence: one confirmed instance,
@@ -20690,6 +20719,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   clause by clause, move each sentence under the control it describes (the idiom several panels already use),
   and re-home any fact the paragraph carried that the per-control copy did not, rather than deleting the
   block wholesale. A paragraph whose every clause is genuinely new information is *not* a hit — leave it.
+
+  **⚪ ALL FOUR NAMED STARTING POINTS ARE CLEAN — checked in the code, recorded so nobody re-walks them
+  (Builder 2026-09-04).** The **Stack form's foot** ends in the sizing line and its conditional advisories,
+  each of which sits with the control it is about and carries a number nothing else states. The
+  **Save/share menu** (`Target.tsx` / `History.tsx`) has no trailing block at all — every item carries its
+  own one-line `MENU_HINT` under its own label, which is the idiom the export-panel fix moved *towards*. The
+  **Calibration page's** picker explainer is one sentence about the *source-folder input* beside it ("point
+  at a server-side folder of raw dark/flat FITS…"), not a recap of the buttons. The **Storage page's** two
+  closing paragraphs both carry facts stated nowhere else — what a cache is and that pruning is permanent,
+  and the standing guarantee that nothing on the page touches `incoming/` (§10), which is the one paragraph
+  on that screen that must never be trimmed for tidiness. **So the confirmed instance count stands at one
+  (v0.345.3), and the remaining candidates are unenumerated rather than known.** If the sweep is ever
+  reopened, look at panels *added since* v0.345.3 rather than re-reading these four.
 
 - **NEW IDEA (Builder 2026-09-03, measured while sweeping the display-space statistics for A1's blindness) —
   Levels' "From your image" button silently leaves the black point at 0, and nothing says why.** *(Pillar:
