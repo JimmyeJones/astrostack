@@ -12365,6 +12365,22 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-09-04, the surface v0.341.0's morning early-stop line deliberately did not reach) —
+  a target whose *own* last night stopped early, on its own page, however long ago that was.**
+  *(Pillar: autonomy + trust — PRIORITY 2; size XS–S; **check the overlap before building**.)* v0.341.0 puts
+  "M 42 stopped getting subs at 23:40 — about 3 h earlier than its last 4 nights" on the Dashboard's
+  **Last night** card, which by construction speaks only for the **library's most recent** capture night. A
+  target the owner shot on Tuesday and has not returned to has exactly the same fact recorded and nowhere to
+  say it: by Thursday the Dashboard is recapping something else, and the Target page's live quiet note self-
+  hid on Tuesday morning. `early_stop` is already a pure helper over one target's session end stamps, so the
+  Target page could answer it for that target's own newest night at the cost of one call. **Care, and why it
+  is filed rather than built:** the Dashboard line is *timely* — it is about last night, so it decays on its
+  own. A Target-page version is permanent until the next night is shot, which turns a report into a standing
+  reproach about a night the owner may well have ended on purpose; it wants an age cap (say a week) and a
+  place inside the existing `NoticeBoard` rather than a new block. **Grep first:** the Nights breakdown card
+  already shows each night's span, so the honest version may be a *marker on the night row* rather than a
+  sentence — which would also be the version that never nags.
+
 - **✅ SHIPPED (Builder, v0.336.0, branch `claude/sweet-babbage-76t8i3`) — ~~answer the reach question at the
   moment the default is *saved*, not only when a trail turns up later.~~** Built exactly as the entry shapes
   it, and at the entry's size: the *Save as defaults* confirmation now carries one clause when what was just
@@ -12893,8 +12909,57 @@ to **Shipped**.)_
   panels even out" is a like-for-like verdict about each mosaic on its own, so it survives a cross-target
   comparison in a way "which is cleaner" does not.
 
-- **NEW IDEA (Builder 2026-09-01, the surface the v0.322.0 quiet-capture note deliberately did not add) — one
-  library-wide "a target went quiet last night" line, for the morning.** *(Pillar: autonomy — PRIORITY 2;
+- **✅ SHIPPED (Builder, v0.341.0, branch `claude/sweet-babbage-5iozyk`) — ~~one library-wide "a target went
+  quiet last night" line, for the morning.~~** Built to the entry's own reasoning, including the part that
+  said what *not* to do: it is not a wider window on the live note, and it is not a new banner.
+
+  **The yardstick, which is the whole design.** The entry offered two — the planner's observing-night length,
+  or "simply this target's own usual stop time" — and the second is the one that ships, because it needs no
+  site location, no astronomy, and no guess about intent. `early_stop` (`seestack/session_recap.py`) takes the
+  target's per-session end stamps and asks whether the newest night stopped notably earlier than the **median**
+  of its recent nights. A median, not a mean: one dusk-to-dawn marathon must not make every ordinary night
+  after it look like a failure, and a test drives exactly that case (a mean would fire; the median is silent).
+  Recent nights only — up to 5, within 30 days — because a clock time is the yardstick and darkness moves with
+  the season.
+
+  **The one piece of real arithmetic is the midnight wrap.** Stop times sit either side of local midnight, so
+  a target that usually ends at 00:20 and stopped at 23:40 is forty minutes early, not twenty-three hours
+  late. `_minutes_earlier_than` resolves the difference to the nearer half of the 24 h circle; a test pins that
+  exact pair *staying silent*, which is where a naive time-of-day subtraction would have shouted.
+
+  **Care, as the entry demanded — "a false 'you lost half a night' in the morning is worse than silence."**
+  Four gates, each with a test for the silence: fewer than three earlier nights (a target's first nights have
+  no habit to have broken), none of them recent enough, a shortfall under 90 minutes (well past both the
+  seasonal drift and ordinary bedtime scatter), and — at the endpoint — a target that was not actually shot on
+  the night being recapped. The wording is a report, not an alarm: *"M 42 stopped getting subs at 23:40 —
+  about 3 h earlier than its last 4 nights. Worth a look if you didn't stop on purpose."* It names the
+  innocent explanation in the same breath, and a test pins that it never says "lost" or "failed".
+
+  **Placement follows the standing IA rule** (put a feature inside the existing grouping, not one more
+  always-on banner): it is one line inside the Dashboard's existing **Last night** card, linked to the target,
+  rendered only when the server sends one. **One** line, not a list — a night where three targets stopped
+  early is one event (the scope stopped), not three, so the largest shortfall leads.
+
+  **Cost: effectively nothing.** `_collect_last_night` already materialises every target's frames to trim
+  them; the end stamps are one more pass over rows already in memory (measured at 0.22 µs per stamp parse —
+  ~7 ms across the owner's largest target), and only the stamps are kept. The endpoint's existing 60 s cache
+  now carries both halves.
+
+  **Upgrade-safe (§9):** one additive, optional response field (`early_stop`, `null` on every ordinary night);
+  no config, schema, on-disk or default change; an older frontend never renders the line, and the new frontend
+  tolerates an older backend that omits the field (pinned).
+
+  **Tests (+8 Python, +4 vitest).** `tests/test_session_recap.py`: the end-stamp extraction, the fire case
+  (four nights ending 02:00, one stopping at 22:30 → 210 minutes), and one test per silence — the usual night,
+  the midnight wrap, too few nights, an out-of-season night, just under the threshold (and just over), and the
+  median-vs-mean marathon. `tests/webapp/test_last_night.py`: the endpoint's fire case, its silence on five
+  identical nights, and that a target not shot that night cannot speak on that night's card.
+  `LastNightCard.test.tsx`: the rounding, the sentence (including what it must *not* say), the rendered line
+  and its link, and nothing at all when the field is absent.
+
+  Original spec, for the record:
+
+  *(Pillar: autonomy — PRIORITY 2;
   size S; **read the "why not simply widen the window" note below before building**.)* v0.322.0 tells a
   *target's own page* when its subs stopped mid-session, and self-hides once the silence outlasts the 6 h
   session gap — past that the night is over and a live "capture may have stopped" warning would be nonsense.
@@ -22849,6 +22914,28 @@ problems. Dogfood it every big-picture run and fix root causes.
   astap-missing one, not just best-effort.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
+
+- **NEW IDEA (Builder 2026-09-04, the *behavioural* consequence of the v0.340.0 measurement — read the caution
+  before touching this) — an unattended drizzle run could skip a rejection pass that provably clips nothing,
+  and get 1.75× of its canvas memory back.** *(Pillar: autonomy + image quality — PRIORITY 2/4; size S to
+  write, **L to be sure of**; the on-by-default hot path, so measure or leave it.)* v0.340.0 measured that the
+  two-pass drizzle clip removes **nothing at all** below `kappa_min_frames` samples on a pixel — the block in
+  the sweep came out at the naive average to a part in 1e-3 at every depth up to 10. `_afford_drizzle_reject`
+  nonetheless takes the pass whenever `n >= 4` on the *target's* frame count, and the pass costs
+  `_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT` (7) full-canvas RGB planes against the single pass's 4 — the 1.75×
+  jump that `_guard_stack_memory` refuses on, and the exact reason the unattended path already forgives it
+  when the budget is short. **So on a thin drizzled mosaic the app is paying its largest memory premium for a
+  pass whose output is bit-identical to not running it** — and the owner's union mosaic canvas is the largest
+  canvas this app builds. Declining it there would make some runs fit that today are stepped down to a smaller
+  `drizzle_scale`, i.e. *better* pixels from a smaller footprint.
+  **Why this is filed, not built.** "Bit-identical" is a claim about the sweep's fixture, not a theorem: the
+  clip's own Bessel correction and the per-pixel `neff` gate mean the honest bound is per-*pixel*, and a
+  mosaic has a deep centre and thin edges — a canvas whose peak coverage clears 11 must keep the pass even if
+  its thinnest panel does not. So the gate would have to be the **coverage plane**, which is not known until
+  the canvas is built, where `_afford_drizzle_reject` is priced. And the failure mode is silent: get it wrong
+  and a satellite that *would* have been clipped is baked into the owner's picture with no note anywhere. Do
+  it only with a before/after showing bit-identical output on a real mosaic at several depths, and with the
+  skip stamped in the provenance the way `DRZREJSK` already stamps the memory case.
 
 - **✅ SHIPPED (Builder, v0.340.0, branch `claude/sweet-babbage-5iozyk`) — ~~a drizzled mosaic can report that
   outlier rejection ran when no pixel could be clipped.~~** Built as filed — "no change to any pixel, this is

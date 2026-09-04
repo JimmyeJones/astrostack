@@ -1122,3 +1122,127 @@ def library_session_recap(
         targets=contributions,
         reject_buckets=buckets,
     )
+
+
+# --- "It stopped earlier than you usually stop" -------------------------------
+#
+# The morning half of the live "capture seems to have gone quiet" note. That note
+# (:mod:`seestack.livesession`) is right for someone standing outside — and it
+# self-hides once the silence outlasts the session gap, because past that point
+# the night is simply over and a live "capture may have stopped" warning would be
+# nonsense. Which means the owner who was **asleep** never sees it: by breakfast
+# it is gone, and the Dashboard, where they actually start, said nothing.
+#
+# So this is the same question asked in the past tense, and it needs a different
+# yardstick. "Mid-run" is unknowable in the morning; what *is* knowable is how
+# this target's nights usually end. A Seestar that stalled at 23:40 on a target
+# the owner normally shoots until 03:00 shows up plainly against that; a night
+# the owner ended deliberately at their usual time does not, however short it
+# was. Judging it against the owner's own habit is what keeps this off the many
+# nights that end early on purpose.
+
+#: How many earlier nights must be datable before there is a "usual" to compare
+#: against. Three is the smallest number a median means anything over, and it
+#: keeps the note off a target's first couple of nights — where every stop time
+#: is equally "usual" and any claim about it would be invented.
+EARLY_STOP_MIN_PRIOR_NIGHTS = 3
+
+#: How many earlier nights the median is taken over. Recent ones only, because
+#: the yardstick is a clock time and darkness itself moves with the season: over
+#: a month it shifts by roughly an hour at mid-latitudes, which
+#: :data:`EARLY_STOP_MIN_MINUTES` deliberately clears.
+EARLY_STOP_MAX_PRIOR_NIGHTS = 5
+
+#: How far back a night may sit and still count toward the "usual" stop.
+EARLY_STOP_LOOKBACK_DAYS = 30.0
+
+#: How much earlier than usual is worth mentioning. Well past both the seasonal
+#: drift above and the ordinary night-to-night scatter of when someone goes to
+#: bed, because the cost of a wrong "you lost half a night" in the morning is
+#: much higher than the cost of missing a marginal one.
+EARLY_STOP_MIN_MINUTES = 90.0
+
+
+@dataclass(frozen=True)
+class EarlyStop:
+    """A night that stopped notably earlier than this target's recent nights do.
+
+    ``minutes_earlier`` is measured against the **median** of the compared
+    nights' stop times, on a 24 h circle, so a target that usually ends at 00:20
+    and stopped at 23:40 is 40 minutes early rather than 23 hours late.
+    """
+
+    stopped_utc: str          # the last sub of the night just gone
+    minutes_earlier: float    # how much earlier than usual it stopped
+    n_nights_compared: int    # how many earlier nights the median was taken over
+
+
+def session_end_stamps(
+    frames: list[FrameRow], *, gap_hours: float = DEFAULT_SESSION_GAP_HOURS
+) -> list[str]:
+    """The capture stamp of the **last** sub of each session, oldest first.
+
+    The same ``gap_hours`` split every night-shaped screen makes, reduced to one
+    stamp per session — all :func:`early_stop` needs, and small enough that a
+    caller can hold it for every target in the library at once where holding
+    their frame lists would not be.
+    """
+    dated = [(dt, f) for f in frames if (dt := _parse(f.timestamp_utc)) is not None]
+    if not dated:
+        return []
+    dated.sort(key=lambda pair: pair[0])
+    return [session[-1][1].timestamp_utc for session in
+            _split_sessions(dated, gap_hours)]
+
+
+def _minutes_earlier_than(newest: datetime, prior: datetime) -> float:
+    """How many minutes earlier in the day ``newest`` falls than ``prior``, on a
+    24 h circle — positive when ``newest`` is the earlier of the two.
+
+    Times of day cannot be subtracted directly: capture stops either side of
+    midnight (23:40 and 00:20) are 40 minutes apart, not 23 hours, and a target
+    drifts across midnight over a season. Resolving the difference to the nearer
+    half of the circle is the only reading that stays true through that drift.
+    """
+    a = newest.hour * 60.0 + newest.minute + newest.second / 60.0
+    b = prior.hour * 60.0 + prior.minute + prior.second / 60.0
+    return ((b - a) + 720.0) % 1440.0 - 720.0
+
+
+def early_stop(
+    end_stamps: list[str],
+    *,
+    min_prior_nights: int = EARLY_STOP_MIN_PRIOR_NIGHTS,
+    max_prior_nights: int = EARLY_STOP_MAX_PRIOR_NIGHTS,
+    lookback_days: float = EARLY_STOP_LOOKBACK_DAYS,
+    min_minutes: float = EARLY_STOP_MIN_MINUTES,
+) -> EarlyStop | None:
+    """Did the newest of these capture sessions stop notably earlier than the
+    ones before it? ``end_stamps`` is :func:`session_end_stamps` output.
+
+    ``None`` — say nothing — whenever the answer would be a guess rather than a
+    measurement: fewer than ``min_prior_nights`` earlier nights to form a habit
+    from, none of them recent enough to still describe the same season, or a
+    shortfall inside ``min_minutes``. Silence is the default on purpose; a wrong
+    "you lost half a night" told to someone over breakfast costs far more than a
+    missed one.
+
+    Pure and offline — it reads nothing but the stamps it is handed.
+    """
+    dated = [(dt, s) for s in end_stamps if (dt := _parse(s)) is not None]
+    if len(dated) < min_prior_nights + 1:
+        return None
+    dated.sort(key=lambda pair: pair[0])
+    newest, newest_stamp = dated[-1]
+    cutoff = newest - timedelta(days=lookback_days)
+    prior = [dt for dt, _s in dated[:-1] if dt >= cutoff][-max_prior_nights:]
+    if len(prior) < min_prior_nights:
+        return None
+    earlier_by = median(_minutes_earlier_than(newest, dt) for dt in prior)
+    if earlier_by < min_minutes:
+        return None
+    return EarlyStop(
+        stopped_utc=newest_stamp,
+        minutes_earlier=float(earlier_by),
+        n_nights_compared=len(prior),
+    )
