@@ -225,6 +225,23 @@ describe("autoCauseSentence", () => {
       "Measured from your image: a ~0.08 sky.",
     );
   });
+
+  it("does not report a linear stack's dark sky as no sky at all", () => {
+    // Seen in the running app on the bundled sample: "measured a ~0 sky, 2.07 px
+    // stars" — its sky really is 0.001, an ordinary number for the *linear*
+    // stack the editor opens, and two decimals rounded it away. The panel says
+    // "sky level 0.24" (the stretch's display-space target) one line below, so
+    // the two read as one picture measured twice with nothing found the first
+    // time.
+    expect(autoCauseSentence(analysis({ sky: 0.001, median_fwhm: 2.07 }))).toBe(
+      "Measured from your image: a ~0.001 sky, 2.07 px stars.",
+    );
+    // A genuine zero still reads "0" — the fallback adds no precision that
+    // `analyze_auto_inputs` (which rounds sky to 3 dp) did not measure.
+    expect(autoCauseSentence(analysis({ sky: 0, median_fwhm: null }))).toBe(
+      "Measured from your image: a ~0 sky.",
+    );
+  });
 });
 
 describe("presetSuggestionSentence", () => {

@@ -695,8 +695,20 @@ def _auto_num(n: float) -> str:
     JavaScript's ``Math.round`` rounds it *up*, so a measured 0.125 sky read
     "a ~0.12 sky" here and "a ~0.13 sky" in the editor — the same defect
     :func:`seestack.stackhealth._factor_label` was fixed for in v0.332.1, in a
-    function whose docstring already claimed to mirror this one."""
-    r = math.floor(float(n) * 100 + 0.5) / 100
+    function whose docstring already claimed to mirror this one.
+
+    **A positive value never renders as "0".** Two decimals is the right
+    precision for a stretch target or a star size, but a *linear* stack's sky
+    sits well below 0.01, so the bundled sample's measured 0.001 sky read
+    "measured a ~0 sky" in the running app — which says the app measured
+    nothing, one line above "sky level 0.24". When two decimals round a positive
+    number away, it falls back to three, which is exactly the precision
+    ``analyze_auto_inputs`` carries (it rounds ``sky`` to 3 dp), so nothing below
+    what was actually measured is ever invented."""
+    value = float(n)
+    r = math.floor(value * 100 + 0.5) / 100
+    if r == 0 and value > 0:
+        r = math.floor(value * 1000 + 0.5) / 1000
     return str(int(r)) if r == int(r) else str(r)
 
 

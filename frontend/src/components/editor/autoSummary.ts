@@ -49,14 +49,23 @@ export function autoSummaryPhrases(
 }
 
 /** Compact number for a value note: up to 2 decimals, no trailing-zero padding
- * (0.2 → "0.2", 1.05 → "1.05", 1.5 → "1.5").
+ * (0.2 → "0.2", 1.05 → "1.05", 1.5 → "1.5") — falling back to 3 decimals when
+ * 2 would round a positive number down to "0" (0.001 → "0.001").
+ *
+ * The fallback exists because a *linear* stack's sky sits well below 0.01: the
+ * bundled sample's measured 0.001 sky rendered as "measured a ~0 sky", i.e. the
+ * app saying it measured nothing, directly above "sky level 0.24". Three
+ * decimals is the precision `analyze_auto_inputs` actually carries, so nothing
+ * finer than what was measured is ever invented.
  *
  * Mirrored by `seestack/edit/presets.py::_auto_num`, which writes the same
  * numbers into the same clause when an unattended job stamps the note — pinned
  * from both sides against `autoNum.cases.json`. Exported for that guard.
  */
 export function fmt(n: number): string {
-  return String(Math.round(n * 100) / 100);
+  let r = Math.round(n * 100) / 100;
+  if (r === 0 && n > 0) r = Math.round(n * 1000) / 1000;
+  return String(r);
 }
 
 /** The *data-driven values* Auto picked from your image, read straight from the
