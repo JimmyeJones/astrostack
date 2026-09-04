@@ -25,8 +25,10 @@ pytest.importorskip("astropy")
 from seestack.io.project import FrameRow, Project  # noqa: E402
 from seestack.stack.stacker import (  # noqa: E402
     StackOptions,
+    _min_max_reject_runs,
     _records_rejection_map,
     combine_method,
+    estimate_stack,
     run_stack,
 )
 
@@ -44,7 +46,11 @@ _REJMODE_OF = {
 }
 
 
-def _build_project(tmp_path, n_frames: int) -> Project:
+def _build_project(tmp_path, n_frames: int, *, with_quality: bool = False) -> Project:
+    """A small solved project. ``with_quality`` stamps *varying* QC metrics, so
+    quality weighting has something to bite on (frames missing every metric all
+    weigh 1.0, and the WGT* provenance is then absent for a reason that has
+    nothing to do with which combine ran)."""
     from tests.synth import make_synth_wcs_text as _wcs_text
     from tests.synth import write_seestar_fits
 
@@ -61,6 +67,8 @@ def _build_project(tmp_path, n_frames: int) -> Project:
             width_px=480, height_px=320, bayer_pattern="RGGB",
             wcs_json=_wcs_text(),
             ra_center_deg=83.6, dec_center_deg=-5.4,
+            fwhm_px=(3.0 + 0.5 * i) if with_quality else None,
+            star_count=(120 - 8 * i) if with_quality else None,
         ))
     return proj
 
@@ -115,3 +123,86 @@ def test_records_rejection_map_agrees_with_the_combine_it_will_run(tmp_path):
     # And asking for no map at all is still the first word on the subject.
     assert _records_rejection_map(
         StackOptions(record_rejection_map=False), 50) is False
+
+
+# --- The *other* mirror of the same gate: "did the min/max path run?" ----------
+# ``min_max_reject and not drizzle and n >= 3`` was written out at seven further
+# sites — the memory estimate and OOM guard's ``reject_arrays``, and
+# ``weights_applied``, which decides whether the finished stack *claims* its
+# quality weighting was honoured. They now ask ``combine_method`` too; these are
+# the tests that the answer still describes what the run does.
+
+
+@pytest.mark.parametrize("n", [0, 1, 2, 3, 4, 12])
+@pytest.mark.parametrize("opts", [
+    {},
+    {"min_max_reject": True},
+    {"sigma_clip": False, "min_max_reject": True},
+    {"sigma_clip": True, "min_max_reject": True},
+    {"drizzle": True, "min_max_reject": True},
+    {"drizzle": True, "min_max_reject": True, "sigma_clip": True},
+    {"min_max_reject": False, "sigma_clip": False},
+])
+def test_min_max_reject_runs_is_the_dispatchers_own_answer(n, opts):
+    o = StackOptions(**opts)
+    assert _min_max_reject_runs(o, n) is (combine_method(o, n) == "min-max-reject")
+
+
+def _stack_weight_cards(tmp_path, n_frames: int, **overrides) -> dict:
+    """The WGT* provenance cards off a finished, quality-weighted master."""
+    from astropy.io import fits
+
+    proj = _build_project(tmp_path, n_frames, with_quality=True)
+    try:
+        result = run_stack(proj, StackOptions(
+            **{**_BASE_OPTS, "quality_weighted": True, **overrides}))
+    finally:
+        proj.close()
+    with fits.open(result.fits_path) as hdul:
+        header = dict(hdul[0].header)
+    return {k: header[k] for k in ("WGTMODE", "WGTSKIP") if k in header}
+
+
+@pytest.mark.parametrize(("n", "opts"), [
+    (2, {"sigma_clip": False, "min_max_reject": True}),  # below the gate → mean
+    (3, {"sigma_clip": False, "min_max_reject": True}),  # …and min/max at 3
+    (4, {}),                                             # κ-σ honours weights
+    (4, {"sigma_clip": True, "min_max_reject": True}),   # min/max wins over κ-σ
+    (4, {"drizzle": True, "drizzle_scale": 1.0,          # drizzle wins over both
+         "min_max_reject": True}),
+])
+def test_the_weighting_claim_matches_the_combine_that_ran(tmp_path, n, opts):
+    """A stack must not claim weighting was honoured on the one path that ignores it.
+
+    The min/max order-statistic combine picks by rank, so its per-frame weights
+    never touch a pixel — ``WGTSKIP`` says so, and ``WGTMODE`` must be absent.
+    Every other combine applies them. This is the same question ``REJMODE``
+    answers above, asked of the sentence the History Info card shows a user.
+    """
+    cards = _stack_weight_cards(tmp_path, n, **opts)
+    ran_min_max = combine_method(StackOptions(**opts), n) == "min-max-reject"
+    assert ("WGTSKIP" in cards) is ran_min_max, cards
+    assert ("WGTMODE" in cards) is not ran_min_max, cards
+
+
+@pytest.mark.parametrize(("n", "opts"), [
+    (2, {"sigma_clip": False, "min_max_reject": True}),
+    (3, {"sigma_clip": False, "min_max_reject": True}),
+    (4, {}),
+    (4, {"sigma_clip": True, "min_max_reject": True}),
+])
+def test_the_estimate_charges_reject_planes_only_when_min_max_runs(tmp_path, n, opts):
+    """The pre-run memory estimate charges the accumulator's extra canvas planes
+    exactly when the run would allocate them — i.e. when the min/max combine is
+    the one that dispatches. Measured as a *difference* against k=1, so it reads
+    the charged planes rather than the whole peak.
+    """
+    proj = _build_project(tmp_path, n)
+    try:
+        base = estimate_stack(proj, StackOptions(**{**opts, "min_max_reject_count": 1}))
+        deep = estimate_stack(proj, StackOptions(**{**opts, "min_max_reject_count": 4}))
+    finally:
+        proj.close()
+    ran_min_max = combine_method(StackOptions(**opts), n) == "min-max-reject"
+    assert (deep.peak_bytes > base.peak_bytes) is ran_min_max, (
+        n, opts, base.peak_bytes, deep.peak_bytes)

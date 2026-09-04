@@ -12365,7 +12365,130 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **NEW IDEA (Builder 2026-09-04, the choice v0.342.0 made deliberately and should be re-measured) — the
+- **⭐ VERIFIED, MEASURED, DELIBERATELY NOT BUILT (Builder 2026-09-04, the fourth and last site of the
+  "a six-hour gap is not a night" class) — the "Last session" card and the Nights row *directly beneath it*
+  report different numbers for the same dated night, on the same screen.** *(Pillar: trust — PRIORITY 3;
+  size S to write, but it turns on a **product choice** an agent should not make alone. Confidence:
+  reproduced.)* `routes/Target.tsx:1781-1782` renders `<SessionRecapCard>` immediately above `<NightsCard>`.
+  The recap is `session_recap`, which is honestly *session*-shaped (the trailing 6 h-gap cluster) — but it is
+  **dated with the observing night** (`night_date`, v0.229.2), and the Nights row below it is night-shaped
+  since v0.342.0. On a night shot in two goes they therefore disagree, measured on a 26-sub split night
+  (21:00–23:00, 05:30–07:30):
+
+  | card | reads |
+  |---|---|
+  | "Last session — 1 Jul 2026" | 13 subs kept, 130 s |
+  | Nights row, 1 Jul 2026 | 26 subs kept, 260 s |
+
+  **Why it is filed rather than fixed, and this is the whole of the difficulty:** the two honest repairs are
+  a *product* decision, not a code one. (a) Make the recap night-shaped and retitle the card **"Last
+  night"** — it then agrees with the row, and with the Dashboard card of the same name (v0.342.4), at the
+  cost of the one screen that could tell you what your *most recent sitting* produced. (b) Keep it
+  session-shaped and stop dating it with a night — the contradiction goes away because the card no longer
+  claims to be about that date, at the cost of the v0.229.2 improvement that let a beginner tell whether
+  "27 subs kept" was last night or three weeks ago. **Do not split the difference** by dating it with a
+  session-specific label nobody else uses; a third vocabulary for time on this page is worse than either.
+  A future run (or the owner) should pick; (a) is the better guess, because every other night-shaped surface
+  has converged that way and "your most recent sitting" is not a question the app is otherwise asked.
+
+- **⚪ SWEEP COMPLETE — the "a six-hour gap is not a night" class has four sites and all four are now
+  answered; here is the list so nobody re-walks it (Builder 2026-09-04).** The generative test is cheap
+  enough to keep applying to *new* code, but a repository-wide re-sweep is spent. **A candidate is any
+  statistic computed over `_split_sessions` / `session_end_stamps` output that is then *called a night*, or
+  *counted* as one.** Every site, and its answer:
+  - `recent_night_pace_s` — **fixed v0.329.4** (a split night halved the pace; a short one vanished under
+    `MIN_PRODUCTIVE_NIGHT_S`).
+  - `nights_breakdown`'s rows — **fixed v0.342.0** (two rows carrying one date, with a "Set this night
+    aside" button that acted on half of it).
+  - `early_stop`, on both surfaces — **fixed v0.342.3** (the prior-*night* floor counted sessions, so two
+    split nights invented a habit; and the median was diluted by mid-night stops).
+  - `library_session_recap` — **fixed v0.342.4** (the Dashboard's "Last night" card reported half a night).
+  - `session_recap` — **the entry above**: not a defect in the statistic, which is honestly session-shaped;
+    a defect in showing it next to a night-shaped one under a shared date.
+  Everything else that splits sessions either *is* asking a session question (`last_session_frames`,
+  `recent_session_window_frames` — a memory bound) or already takes a `night_of`.
+
+- **✅ SHIPPED (Builder, v0.342.4, branch `claude/sweet-babbage-77bqc1`) — the Dashboard card headed "Last
+  night" was reporting HALF a night, and nobody had swept for the third instance of the class.** Found by
+  finishing the v0.342.3 fix properly: after wiring the session-vs-night distinction through `early_stop`, I
+  grepped every remaining `_split_sessions` / `session_end_stamps` call site and probed the one that had
+  never been asked the question. *(Pillar: trust + friendliness — PRIORITY 3; **measured, not read**.)*
+
+  **The measurement.** One target, one observing night, shot 21:00 → 23:00 and again 05:30 → 07:30 — the
+  owner's own habit, with nothing else running through the gap to bridge it. `library_session_recap` cuts
+  "last night" as the trailing 6 h-gap cluster of the merged timeline, so it held the pre-dawn half alone:
+  **`n_frames=13` of 26, `session_exposure_s=130.0` of 260.0**, on the Dashboard's headline card, under a
+  heading that says "Last night" and beside a `night_date` naming the whole night correctly. The bridged
+  case was already fixed (v0.213-era, and tested); the **unbridged** one — a single target, or a night where
+  every target took its break at the same time — was the hole the bridge test could not see.
+
+  **Why the gap walk cannot fix itself, and what shipped instead.** Six hours is the right rule for "is this
+  the same run of captures"; it is not, and cannot be, a rule about *nights*. So `library_session_recap`
+  takes the same optional `night_of` key `nights_breakdown` already took, and after the gap walk widens the
+  cluster back over frames sharing the newest capture's observing night. **Widening only, bounded by the
+  key:** a target whose last session was a week ago still drops out, a target's own earlier night is never
+  swept in, and an unplaceable stamp (`None`) never matches — so the properties the gap walk provided are
+  unchanged, pinned by their own tests. Without a key the walk is byte-for-byte what it was.
+
+  `/api/last-night` passes the observer's key down, which means the recap now depends on longitude — so the
+  cache signature carries `lon`, exactly as `/api/stats` already does two hundred lines below it and for the
+  same stated reason: a location the owner has just set must not keep serving nights cut for the old one.
+
+  **Tests (+4 engine, +1 endpoint; the endpoint one fails on pre-fix code with `assert 13 == 26`):** the
+  split night is kept whole (26 subs, 260 s, starting at the evening sub); the key never reaches into an
+  earlier night (a week-old target still drops out); the key is **inert** on a library with no split night
+  (`bare == keyed`, so a normal install cannot change); and a key that places nothing widens nothing.
+
+  **Upgrade-safe (§9):** additive keyword with a default that preserves today's behaviour; no config, schema,
+  on-disk, API-shape or default change; the cache is in-memory and rebuilt on every process start.
+
+- **✅ SHIPPED (Builder, v0.342.3, branch `claude/sweet-babbage-77bqc1`) — ~~the early-stop judgement compares
+  *sessions*, so a split night quietly makes the app less likely to speak.~~ Measured first, exactly as the
+  entry demanded — and the measurement says the entry's own premise was the *smaller* half of the story, and
+  its "conservative direction" reassurance was wrong.** Both surfaces now merge session end stamps into
+  observing nights (`merge_end_stamps_by_night`, built on the one `_merge_sessions_by_night` the Nights card
+  already used) before `early_stop` sees them, so they still agree by construction.
+
+  **What the measurement found**, on split-night fixtures across the shapes the entry named, plus two it
+  did not:
+  - **The entry's own case barely moves.** On an evenly split night (evening + pre-dawn) three of the five
+    session stamps in the lookback window *are* night ends, so the median already lands on one: **180 min
+    early either way; 300 min early either way.** The "drags the median earlier" mechanism is real and
+    almost always cancels.
+  - **The floor is defeated, and that is not conservative — it invents a habit.** Two real nights, each shot
+    in two goes, are **four** session stamps, which clears `EARLY_STOP_MIN_PRIOR_NIGHTS` — the constant whose
+    entire job is to keep the note off a target's first couple of nights, "where every stop time is equally
+    usual and any claim about it would be invented". Measured on the endpoint: the card announced a
+    **315-minute early stop over "3 nights"** for a target the owner had shot **twice**. This is exactly the
+    shape v0.329.4 found in the pace estimate ("the floor error is the *larger* one"), one surface along.
+  - **And the median really does dilute when a night is shot in more than two goes.** On a habitual
+    three-goes night (evening / small hours / dawn) only one stamp in three is a true night end, so the
+    yardstick lands mid-night: a night that ended **9½ h** early was reported as **2½ h** early.
+  - **The count is a sentence the owner reads.** `LastNightCard.earlyStopClause` renders *"…earlier than its
+    last N nights"* straight off `n_nights_compared`, which was a count of *sessions*: "its last 5 nights"
+    over three real ones, on every split-night library.
+  - **An observer who never splits a night is bit-identical** — same verdict, same minutes, same count. The
+    merge is a no-op on a list with one stamp per night.
+
+  **What shipped.** `merge_end_stamps_by_night(end_stamps, night_of)` in `seestack/session_recap.py`, wired
+  into both consumers: `nights_breakdown` merges its stamps whenever it was given a `night_of` (it already
+  merged the *rows*), and `/api/last-night` now caches the raw per-target stamps and forms the verdict at the
+  endpoint, where the observer's longitude lives. That second move is a small improvement in its own right:
+  the verdict now follows a Settings longitude change immediately instead of waiting out the recap cache's
+  TTL, the same property `night_date` already had and for the same reason.
+
+  **Tests (+2 engine, +2 endpoint, 1 rewritten).** The two endpoint regressions both **fail on pre-fix
+  code** (`assert {…'minutes_earlier': 315.0…} is None`, and `assert 5 == 3`): two split nights say nothing,
+  and three of them are judged against when those nights *ended*. The engine pair pins the same two shapes
+  directly, including the three-goes 150 min → 570 min correction. The v0.342.0 test that pinned the old
+  behaviour was **rewritten, not deleted**: its real invariant — the Target page and the Dashboard must not
+  quote different medians for one night — is unchanged and still asserted, now against the merged stamps
+  both surfaces feed, with the count corrected from 5 sessions to 4 nights.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change; the only cached value that
+  changed shape is an in-memory `app.state` dict rebuilt on every process start.
+
+  *(Original spec.)* **NEW IDEA (Builder 2026-09-04, the choice v0.342.0 made deliberately and should be re-measured) — the
   early-stop judgement compares *sessions*, so a split night quietly makes the app less likely to speak.**
   *(Pillar: autonomy + trust — PRIORITY 2; size S, **measure before changing anything**.)* `early_stop`
   is fed `session_end_stamps(frames)` on both surfaces that report it — the Dashboard's "Last night" card
@@ -12383,7 +12506,35 @@ to **Shipped**.)_
   makes the app speak *more* often, and the whole design bias of this note is that a wrong "you lost half a
   night" costs far more than a missed one — so it needs the numbers, not the argument.
 
-- **NEW IDEA (Builder 2026-09-04, the obvious next slice after the v0.342.1 dispatcher routing) — the other
+- **✅ SHIPPED (Builder, v0.342.2, branch `claude/sweet-babbage-77bqc1`) — ~~the other seven copies of
+  `min_max_reject and not drizzle and n >= 3` are the same predicate, and one of them drives a sentence the
+  user reads.~~** Built as filed, and with the entry's own caution honoured to the letter: the predicate is
+  now `_min_max_reject_runs(options, n)` — one line, `combine_method(options, n) == "min-max-reject"` — and
+  **every `_estimate_peak_bytes` / `_guard_stack_memory` / `_best_memory_fix` call site keeps its argument
+  list exactly as it was**; only the condition inside each `if … else 0` moved. So the memory estimate's
+  shape is untouched, and `weights_applied` now asks the same function the dispatcher branched on a few
+  hundred lines above it.
+
+  **Proved byte-identical, not argued.** Ran the six-case before/after hash script this entry asked for
+  (`origin/main` in one `git worktree`, the branch in another, same fixture, same seeds): `mean-n3`,
+  `sigma-clip-n6`, `minmax-k1-n6`, `minmax-k3-n8`, `minmax-weighted-n6` and `drizzle-n6` (the drizzle case at
+  `max_workers=1`, per the drizzle-determinism entry) — **all six sha256s identical, NaN counts identical**.
+  A useful by-product: `minmax-weighted-n6` hashes the *same as* `minmax-k1-n6`, which is the pixel-level
+  demonstration of the very fact `weights_applied` reports — the order-statistic path ignores the weights.
+
+  **Tests (+21 in `tests/test_combine_dispatch.py`, 7 fail on a deliberately re-inlined predicate).** The
+  grid unit test that `_min_max_reject_runs` is the dispatcher's own answer across six option shapes × six
+  frame counts (both sides of the `n >= 3` gate, min/max-over-κ-σ precedence, and drizzle-over-both); the
+  behavioural one that **the weighting claim matches the combine that ran** — a real quality-weighted stack
+  must carry `WGTSKIP` and never `WGTMODE` exactly when min/max dispatched, which is the sentence the History
+  Info card shows a user; and that the pre-run estimate charges the accumulator's extra canvas planes (k=4 vs
+  k=1) only when min/max is the combine that runs. `_build_project` grew a `with_quality` flag so the
+  weighting has metrics to bite on — frames missing every metric all weigh 1.0, and the WGT* cards would then
+  be absent for a reason unrelated to the combine.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, default or API change; pure internal routing.
+
+  *(Original spec.)* **NEW IDEA (Builder 2026-09-04, the obvious next slice after the v0.342.1 dispatcher routing) — the other
   seven copies of `min_max_reject and not drizzle and n >= 3` are the same predicate, and one of them drives
   a sentence the user reads.** *(Pillar: maintainability in service of correctness — size S; **the memory
   path, so keep the estimate's shape**.)* v0.342.1 routed the two copies its entry named (the dispatcher's
