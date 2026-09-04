@@ -1088,6 +1088,37 @@ class Project:
         for row in self._conn.execute(sql):
             yield _row_to_frame(row)
 
+    def solved_frame_geometry(self) -> tuple[float, int, int] | None:
+        """``(pixscale_arcsec, width_px, height_px)`` of a solved frame, or ``None``.
+
+        The three numbers that say what field of view this target's telescope
+        actually has — the plate solve already measured the scale, and the frame
+        carries its own dimensions — so "will it fit in one frame?" and "how many
+        mosaic panels?" can be answered from the owner's own optics instead of an
+        assumed camera model (AGENTS.md §1 "Owner facts";
+        :func:`seestack.framing.frame_field_from_solve` turns this into a field).
+
+        Deliberately **one row, three columns**, like :meth:`source_paths`: the
+        question is asked from request handlers on a target with thousands of
+        subs, and building a ``FrameRow`` per frame to read three numbers off one
+        of them is the shape of cost this app has had to remove before. Takes the
+        newest such frame (highest id) so a scope that changed mid-library
+        answers with what it is now. ``None`` when nothing is solved yet.
+        """
+        assert self._conn is not None
+        row = self._conn.execute(
+            "SELECT pixscale_arcsec, width_px, height_px FROM frames "
+            "WHERE pixscale_arcsec IS NOT NULL AND pixscale_arcsec > 0 "
+            "AND width_px IS NOT NULL AND height_px IS NOT NULL "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            return float(row[0]), int(row[1]), int(row[2])
+        except (TypeError, ValueError):
+            return None
+
     def source_paths(self) -> list[str]:
         """Every registered frame's ``source_path``, in id order.
 

@@ -689,3 +689,35 @@ def test_stack_run_options_chunks_past_sqlites_parameter_limit(proj):
         n_frames_used=1, canvas_h=4, canvas_w=4, coverage_min=1, coverage_max=1,
         options_json="{}")) for i in range(1200)]
     assert len(proj.stack_run_options(ids)) == 1200
+
+
+def test_solved_frame_geometry_reports_the_newest_solved_frame(tmp_path):
+    """The three numbers the framing advice needs to know which telescope it is
+    advising, read as one row rather than by building a FrameRow per sub."""
+    from seestack.io.project import FrameRow, Project
+
+    proj = Project.create(tmp_path / "t", "T")
+    try:
+        # Nothing solved yet → no answer, and the caller keeps its default.
+        assert proj.solved_frame_geometry() is None
+
+        proj.add_frame(FrameRow(source_path="a.fit", width_px=1920, height_px=1080))
+        assert proj.solved_frame_geometry() is None  # shape but no plate scale
+
+        fid = proj.add_frame(FrameRow(source_path="b.fit", width_px=1920,
+                                      height_px=1080, pixscale_arcsec=3.987))
+        assert proj.solved_frame_geometry() == (3.987, 1920, 1080)
+
+        # The newest solved frame wins, so a scope swapped mid-library answers
+        # with what it is now rather than what it was.
+        proj.add_frame(FrameRow(source_path="c.fit", width_px=1920,
+                                height_px=1080, pixscale_arcsec=2.392))
+        assert proj.solved_frame_geometry() == (2.392, 1920, 1080)
+
+        # A non-positive scale is not an answer (a failed solve writing zero).
+        proj.add_frame(FrameRow(source_path="d.fit", width_px=1920,
+                                height_px=1080, pixscale_arcsec=0.0))
+        assert proj.solved_frame_geometry() == (2.392, 1920, 1080)
+        assert fid is not None
+    finally:
+        proj.close()

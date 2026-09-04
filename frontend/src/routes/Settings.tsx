@@ -51,7 +51,7 @@ export const HINTS: Record<string, string> = {
   auto_grade_frames: "After QC, automatically reject frames that are clear statistical outliers versus the rest of the target (trailed, cloud-hit or hazy subs), each with a plain-language reason. The same grading is available manually via Auto-grade on a target's page. Frames you graded yourself are never touched.",
   auto_grade_sensitivity: "How strict auto-grading is. Balanced suits most data; Conservative only drops gross outliers; Aggressive cuts deeper into marginal frames.",
   astap_path: "Path to the ASTAP executable. Blank = auto-detect (bundled binary → $SEESTACK_ASTAP_PATH → PATH).",
-  astap_fov_deg: "Approximate field-of-view height in degrees, used as a solving hint (~1.3° suits the Seestar).",
+  astap_fov_deg: "Approximate field of view in degrees, used as a solving hint only when a frame's own header doesn't say — normally it does, and the app reads the real field from each frame (a Seestar S30 sees about 2.1°, an S50 about 1.3°). Leave it alone unless solving keeps failing.",
   astap_timeout_s: "Give up on each solve attempt after this many seconds. The solver tries up to 3 strategies per frame, so a frame that never solves can take up to about 3× this before it's set aside (and retried on the next scan).",
   cpu_workers: "CPU workers for QC / solve / stack. Blank = all cores.",
   max_stack_memory_gb: "Working-memory cap for a single stack. Blank = auto (~70% of RAM). Raise it on a big box to allow larger drizzle/mosaic canvases; lower it to leave more headroom. The ASTROSTACK_MAX_STACK_GB env var, if set, overrides this.",

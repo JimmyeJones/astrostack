@@ -360,13 +360,19 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
     "What am I looking at?" card. Matches by the target's name first, then by its
     plate-solved centre if one is known."""
     from seestack.objectinfo import identify_object
+    from webapp.frame_field import install_frame_field
 
     lib = deps.open_library(request)
     try:
         entry = lib.find_target(safe)
         if entry is None:
             raise HTTPException(status_code=404, detail=f"No target '{safe}'")
-        info = identify_object(entry.name, entry.ra_deg, entry.dec_deg)
+        # "Will it fit in one frame?" and "how many mosaic panels?" are answers
+        # about the owner's *own* telescope; without this they were answered for
+        # an S50 on an S30's frames (see webapp/frame_field.py). None → the
+        # module default, i.e. unchanged behaviour on a library with no solve yet.
+        info = identify_object(entry.name, entry.ra_deg, entry.dec_deg,
+                               field=install_frame_field(request.app.state, lib))
     finally:
         lib.close()
     if info is None:
