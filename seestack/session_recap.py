@@ -825,17 +825,19 @@ def nights_breakdown(
         return []
     dated.sort(key=lambda pair: pair[0])
     sessions = _split_sessions(dated, gap_hours)
-    # Taken **before** the observing-night merge, so this is exactly
-    # ``session_end_stamps(frames)`` — the same input the Dashboard's "Last
-    # night" card feeds ``early_stop``. The two surfaces report the same fact
-    # about the same night, so they must not be allowed to compute it from
+    # Exactly ``session_end_stamps(frames)`` — the same input the Dashboard's
+    # "Last night" card feeds ``early_stop``. The two surfaces report the same
+    # fact about the same night, so they must not be allowed to compute it from
     # different stamps: a night shot in two goes would otherwise contribute one
-    # stop time here and two there, and the medians would drift apart with no
-    # way for the reader to tell which is right.
+    # stop time here and two there, and the medians would drift apart with no way
+    # for the reader to tell which is right. Both are therefore merged by
+    # observing night below, with the same key — the Dashboard does its merge at
+    # the endpoint, where the observer's longitude lives.
     end_stamps = [s[-1][1].timestamp_utc for s in sessions]
     if night_of is not None:
         sessions = _merge_sessions_by_night(
             sessions, night_of, lambda row: row[1].timestamp_utc)
+        end_stamps = merge_end_stamps_by_night(end_stamps, night_of)
     # Judged once, for the newest row only (the newest session always lands in
     # the newest merged night, so the row is the same either way).
     stopped_early = early_stop(end_stamps)
@@ -1220,6 +1222,43 @@ def session_end_stamps(
     dated.sort(key=lambda pair: pair[0])
     return [session[-1][1].timestamp_utc for session in
             _split_sessions(dated, gap_hours)]
+
+
+def merge_end_stamps_by_night(
+    end_stamps: list[str], night_of: NightKeyFn
+) -> list[str]:
+    """Reduce :func:`session_end_stamps` to one stamp per **observing night** —
+    the time the night itself ended, not the time each half of it did.
+
+    A night shot in two goes contributes two session stamps, and only the later
+    one is when capture actually stopped; the earlier one is bedtime. Handing
+    both to :func:`early_stop` breaks its two guarantees at once, measured on
+    split-night fixtures:
+
+    * it **counts sessions as nights**, so two split nights already satisfy
+      :data:`EARLY_STOP_MIN_PRIOR_NIGHTS` — the constant that exists to keep the
+      note off a target's first couple of nights — and the note speaks about a
+      habit that does not exist yet. It also *says* the wrong number: the card
+      reads "earlier than its last 5 nights" over three real ones.
+    * it **dilutes the median with mid-night stops**, so on a night habitually
+      shot in three goes only one stamp in three is a true night end and a
+      genuinely 3½ h-early night reads as no shortfall at all.
+
+    ``night_of`` is the same capture-stamp → observing-night key
+    :func:`nights_breakdown` takes, supplied by the caller because only the
+    webapp knows the observer's longitude. An unplaceable stamp (``None``) never
+    merges with anything, including another unplaceable one — the same rule
+    :func:`_merge_sessions_by_night`, which does the grouping, already applies.
+
+    A caller with no night key should pass the stamps straight through: an
+    observer who never splits a night gets an identical list either way, so this
+    only ever costs the pass over it.
+    """
+    if not end_stamps:
+        return []
+    groups = _merge_sessions_by_night(
+        [[s] for s in end_stamps], night_of, lambda s: s)
+    return [g[-1] for g in groups]
 
 
 def _minutes_earlier_than(newest: datetime, prior: datetime) -> float:
