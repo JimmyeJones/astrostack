@@ -20505,54 +20505,120 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Tests (+27; 7 fail before).** 26 shared cases through the Python side plus the anti-vacuity guard, and the
   same 26 through the TypeScript side.
 
-- **NEW IDEA (Builder 2026-09-03, the generalisation of the entry above, written straight after committing a
-  fresh instance of the problem) — sweep for the *other* hand-mirrored sentences about one stack, and decide
-  each one's home.** *(Pillar: trust + maintainability — size S to survey, then XS–S each; **survey first,
-  do not start unifying**.)* `factorLabel`/`_factor_label` was found because v0.330.0 needed the same
-  *number* twice. The wider pattern is the same **sentence** written twice: v0.332.0 has just added another —
-  the "About 100 subs cover the middle of this mosaic, which should cut the background noise about 10×…"
-  wording now exists in `seestack/stackhealth.py` **and** in `frontend/src/components/oneFrameVsStack.ts`,
-  word for word, because the health note and the reveal card say the same thing about the same run on two
-  screens. Known or suspected siblings to check in one pass: that mosaic/low-noise pair; `_format_reject_pct`
-  against the History Info-panel's rejection wording; `seam_verdict`'s copy against the History chip's; and
-  the calibration summary, which was *already* unified (`components/calibrationSummary.ts`) and is the
-  precedent for what "done" looks like.
-  **The decision each one needs is not "share it" but "which side owns it".** The project has already picked
-  the right answer twice and they were different answers: the *judgement* moved server-side (v0.330.0's
-  `expected_verdict`, so the card renders a sentence for a decision made once), while the *thresholds* stayed
-  in Python with a mirror test over the constants. A sentence a user can read on two screens minutes apart
-  wants the first shape; a formatter wants the second. **Cautions:** do not move copy server-side merely to
-  de-duplicate it — a string that has to be rendered before it is known (an empty state, a client-side
-  fallback for an older backend) belongs in the frontend, and the "self-hides against an older backend" rule
-  applies to any sentence that moves. And file the survey's findings **before** building any of them; the
-  value here is knowing how many there are.
+- **✅ SURVEY DONE, AND EVERY DIVERGENCE IT FOUND IS FIXED AND PINNED (Builder, v0.343.1, branch
+  `claude/sweet-babbage-l67sz2`) — ~~sweep for the *other* hand-mirrored sentences about one stack, and decide
+  each one's home.~~** The entry asked for the survey first and said the value was in *knowing how many there
+  are*. There are **four** live mirrors beyond `factorLabel`, **three of them had already drifted**, and two of
+  the three were drifting in the *number*, not the wording.
 
-  **⚪ FIRST DATA POINT, MEASURED NOT ASSUMED (Builder 2026-09-03, while sizing this) — the mosaic/low-noise
-  pair is *already* out of sync, so "word for word" above is no longer true, and that is the argument for
-  doing the survey.** Read side by side, `seestack/stackhealth.py:578` says *"which should cut the
-  **background** noise about N×"* while `frontend/src/components/oneFrameVsStack.ts:164` says *"which should
-  cut the noise about N×"* — the health note kept the qualifier, the reveal card dropped it. Same run, same
-  number, two screens, two sentences. **Nothing is wrong in either**, which is exactly why nobody caught it:
-  this class does not fail loudly, it drifts. The numbers still agree (both go through the shared
-  `factorLabel` table v0.332.1 pinned), so the divergence today is pure wording — but the wording is what a
-  beginner reads, and one of the two is measurably about the *sky background* while the other is about
-  "noise" in general. **This is one finding, not the survey** — the other three siblings the entry names are
-  still unwalked. It is filed here so the survey starts from "at least one has already drifted" rather than
-  from the entry's original "word for word", and so whoever does walk them knows the failure mode is a
-  qualifier quietly going missing, not a number disagreeing.
+  **How the survey was done, so the next one is cheap.** Every quoted prose fragment ≥28 characters was pulled
+  out of `seestack/` + `webapp/` and out of `frontend/src/` (excluding tests) and intersected: 43 exact matches,
+  of which most are one side's comment *quoting* the other (`client.ts` naming a server string). Four were real
+  duplicated rendering. That grep is worth re-running after any run that adds a user-facing sentence; it takes
+  seconds and it is what found all of these.
 
-    *(Original entry follows.)* *(Pillar:
-  maintainability in service of trust — size XS.)* "Stacking cut the background noise about 15×" is written
-  by `factorLabel` (`frontend/src/components/oneFrameVsStack.ts`) and, since v0.330.0, by `_factor_label`
-  (`seestack/stackhealth.py`) for the health note about the same run. The rule is fiddly on purpose —
-  whole numbers at/above 10, one decimal below, trailing `.0` dropped — so the same stack can end up
-  described as "10×" on one screen and "10.0×" on the other after one careless edit, on two surfaces a user
-  reads minutes apart. The repo already has the right idiom for exactly this
-  (`tests/test_pace_constants_mirror.py`, for a pair of hand-synced pace constants): a test that drives both
-  implementations over the same values and asserts identical output. **Note this is a *formatter*, not a
-  constant**, so the mirror test has to run the TypeScript — either by reading and re-deriving the rule from
-  the source the way the pace test does, or (cleaner) by pinning both against one shared table of
-  value → string cases, so a change to either side has to touch the table.
+  **The findings, and what happened to each.**
+  1. **`_format_reject_pct` ↔ `formatRejectPct` — DRIFTED, and the drift was visible in the live band.** The
+     sentence around the number is word-identical on the two screens (*"Cleaned ~N% of pixels — passing
+     satellites, planes and cosmic-ray hits were rejected"*: the "How's my stack?" note and the one-click
+     Process-target result on the Jobs page). The formatter was not. Below 1% the frontend printed **two**
+     decimals where the engine printed one — *"0.50%"* against *"0.5%"* — and at the bottom of the cue's own
+     honest band (0.05%–8%) it printed *"0.07%"* where the engine printed *"<0.1%"*. **12 of the 22 shared
+     cases fail on the pre-fix frontend.** The frontend moved to the engine's rule: two decimals is false
+     precision on a figure the sentence already prefixes with "~", and `<0.1%` is the honest way to say
+     "a trace". The engine's own ≥10% branch moved from `round()` to `floor(pct + 0.5)` at the same time —
+     unreachable from the cue's band, so nothing shipped changes, but a hand-mirrored formatter should not
+     carry a rounding mode its mirror doesn't.
+  2. **`_auto_num` ↔ `fmt` — DRIFTED, the same half-to-even defect `_factor_label` was fixed for in
+     v0.332.1**, in a function whose docstring *already claimed* to mirror the other. A measured 0.125 sky read
+     *"a ~0.12 sky"* on the History Info panel (stamped by an unattended job) and *"a ~0.13 sky"* in the editor
+     for the identical recipe. The Python side moved to `floor(x + 0.5)`, which is what `Math.round` is. The
+     cause clause carries a **second** independent instance — `round(trim * 100)` for the ragged-edge
+     percentage — which had the same divergence and took the same fix. **3 of the 16 shared cases fail before.**
+  3. **`_AUTO_OP_PHRASES` ↔ `OP_PHRASES` — identical, and nothing was holding them that way.** Thirteen
+     phrases naming what Auto did, written twice so an unattended job can stamp the same note the editor shows.
+     Now pinned as a **whole mapping** (a phrase table drifts by gaining or losing a key as much as by
+     re-wording one, and neither shows up in a per-key loop), plus a test that builds a **real Auto recipe** and
+     asserts every op it emits has a phrase — otherwise an op added to Auto with no phrase on *either* side
+     would print a raw id at a user and a table-only guard would still pass.
+  4. **The noise-shortfall lead — DRIFTED, exactly as the first data point below recorded.** The card said
+     *"cut the noise"* where the health note said *"cut the **background** noise"*. The measured quantity is the
+     sky background's own grain, so the card moved to the qualifier. Extracted to `noise_low_lead` /
+     `noiseLowLead` on the two sides so there is one place the wording lives, and pinned — including an
+     anti-vacuity assertion that the word *"background"* is still in every case, since two sides that both
+     dropped it would otherwise agree.
+
+  **Two the survey deliberately did NOT touch, recorded so nobody re-treads them.** The **seam** copy
+  (`stackhealth` vs `PanelSeamsBadge`) is *not* a drift: the judgement is already shared server-side via
+  `seam_verdict`, and the two texts are deliberately scoped differently (a health note that names the measured
+  step and points at the editor, vs a chip tooltip). The **calibration summary**
+  (`components/calibrationSummary.ts`) was already unified and is the precedent for what "done" looks like.
+
+  **The entry's "which side owns it" question, answered by the shapes above.** Nothing moved server-side to
+  de-duplicate it: every one of these is a *formatter or a phrase table*, which is the case the entry itself
+  said stays mirrored with a guard. What moved is the *rule*, always towards the side that was already right —
+  the engine's percentage rule, the conventional `Math.round`, the true qualifier. Four new shared tables
+  (`rejectPct`, `autoNum`, `autoOpPhrases`, `noiseLowLead`), each with an anti-vacuity guard, in the idiom
+  `factorLabel.cases.json` established.
+
+  **Upgrade-safe (§9):** four wording/rounding rules on notes that are already conditional. No config, schema,
+  on-disk, API, response-shape or default change. Two existing frontend assertions were **rewritten, not
+  deleted** — each pinned the divergent behaviour, and each now pins the honest one.
+
+  **Tests: +79 Python (across three new mirror files), +36 vitest.** 15 of them fail before the fix.
+
+  *(Original entry follows.)*
+
+  Original spec and its first data point, for the record — **this is done**; indented so a triage pass can see
+  that by shape:
+  - **NEW IDEA (Builder 2026-09-03, the generalisation of the entry above, written straight after committing a
+    fresh instance of the problem) — sweep for the *other* hand-mirrored sentences about one stack, and decide
+    each one's home.** *(Pillar: trust + maintainability — size S to survey, then XS–S each; **survey first,
+    do not start unifying**.)* `factorLabel`/`_factor_label` was found because v0.330.0 needed the same
+    *number* twice. The wider pattern is the same **sentence** written twice: v0.332.0 has just added another —
+    the "About 100 subs cover the middle of this mosaic, which should cut the background noise about 10×…"
+    wording now exists in `seestack/stackhealth.py` **and** in `frontend/src/components/oneFrameVsStack.ts`,
+    word for word, because the health note and the reveal card say the same thing about the same run on two
+    screens. Known or suspected siblings to check in one pass: that mosaic/low-noise pair; `_format_reject_pct`
+    against the History Info-panel's rejection wording; `seam_verdict`'s copy against the History chip's; and
+    the calibration summary, which was *already* unified (`components/calibrationSummary.ts`) and is the
+    precedent for what "done" looks like.
+    **The decision each one needs is not "share it" but "which side owns it".** The project has already picked
+    the right answer twice and they were different answers: the *judgement* moved server-side (v0.330.0's
+    `expected_verdict`, so the card renders a sentence for a decision made once), while the *thresholds* stayed
+    in Python with a mirror test over the constants. A sentence a user can read on two screens minutes apart
+    wants the first shape; a formatter wants the second. **Cautions:** do not move copy server-side merely to
+    de-duplicate it — a string that has to be rendered before it is known (an empty state, a client-side
+    fallback for an older backend) belongs in the frontend, and the "self-hides against an older backend" rule
+    applies to any sentence that moves. And file the survey's findings **before** building any of them; the
+    value here is knowing how many there are.
+
+    **⚪ FIRST DATA POINT, MEASURED NOT ASSUMED (Builder 2026-09-03, while sizing this) — the mosaic/low-noise
+    pair is *already* out of sync, so "word for word" above is no longer true, and that is the argument for
+    doing the survey.** Read side by side, `seestack/stackhealth.py:578` says *"which should cut the
+    **background** noise about N×"* while `frontend/src/components/oneFrameVsStack.ts:164` says *"which should
+    cut the noise about N×"* — the health note kept the qualifier, the reveal card dropped it. Same run, same
+    number, two screens, two sentences. **Nothing is wrong in either**, which is exactly why nobody caught it:
+    this class does not fail loudly, it drifts. The numbers still agree (both go through the shared
+    `factorLabel` table v0.332.1 pinned), so the divergence today is pure wording — but the wording is what a
+    beginner reads, and one of the two is measurably about the *sky background* while the other is about
+    "noise" in general. **This is one finding, not the survey** — the other three siblings the entry names are
+    still unwalked. It is filed here so the survey starts from "at least one has already drifted" rather than
+    from the entry's original "word for word", and so whoever does walk them knows the failure mode is a
+    qualifier quietly going missing, not a number disagreeing.
+
+      *(Original entry follows.)* *(Pillar:
+    maintainability in service of trust — size XS.)* "Stacking cut the background noise about 15×" is written
+    by `factorLabel` (`frontend/src/components/oneFrameVsStack.ts`) and, since v0.330.0, by `_factor_label`
+    (`seestack/stackhealth.py`) for the health note about the same run. The rule is fiddly on purpose —
+    whole numbers at/above 10, one decimal below, trailing `.0` dropped — so the same stack can end up
+    described as "10×" on one screen and "10.0×" on the other after one careless edit, on two surfaces a user
+    reads minutes apart. The repo already has the right idiom for exactly this
+    (`tests/test_pace_constants_mirror.py`, for a pair of hand-synced pace constants): a test that drives both
+    implementations over the same values and asserts identical output. **Note this is a *formatter*, not a
+    constant**, so the mirror test has to run the TypeScript — either by reading and re-deriving the rule from
+    the source the way the pace test does, or (cleaner) by pinning both against one shared table of
+    value → string cases, so a change to either side has to touch the table.
 
 - **✅ SHIPPED — BOTH, AS ONE CHANGE (Builder, v0.328.3, branch `claude/sweet-babbage-2xguh9`) — ~~a capture
   window is spelled three different ways~~ and ~~the Editor's copyable caption is the only one of the four with
@@ -25530,44 +25596,117 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ NEW BEGINNER FEATURE (Scout 2026-09-04) — "Your year under the stars": a year-bounded, shareable
-  recap of a season of imaging.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: M. Clears the
-  beginner bar: sane default (the current year, auto-computed from data the app already stores), plain
-  language, nothing pro/niche.)*
+- **✅ SLICES (a)+(c) SHIPPED (Builder, v0.343.0, branch `claude/sweet-babbage-l67sz2`) — ~~"Your year under
+  the stars": a year-bounded recap of a season of imaging.~~** Built as filed, as composition over the night
+  fold the Dashboard heatmap already pays for. Slice (b) — the best-of-year thumbnail and the share/caption
+  reuse — is deliberately still open and filed below.
 
-  **The gap, checked before filing.** The app already has the two ends of the time axis but not the middle:
-  a *per-night* recap (`seestack/session_recap.py` → the "Last session" card and the by-breakfast poster) and
-  an *all-time* cumulative view (`Your sky, so far` → `/api/stats/*`, the life list, "Draw your skyline").
-  There is **no season-bounded story**: grepped `webapp/`, `frontend/src/` and the backlog for
-  `wrapped|year in review|annual|yearly|this year` — the only hits are the per-night recap and cache-window
-  plumbing, none of them a year view. A beginner who shot 30 nights across a winter has no single screen that
-  says "here's what *this year* looked like", and that is exactly the kind of milestone a non-expert wants to
-  look back on and post.
+  **What shipped.** `seestack/yearrecap.py` (pure, offline, no `webapp` imports) folds
+  `activity_calendar.NightActivity` rows into one calendar year and answers the six questions the entry
+  named: nights out, light collected, targets imaged, **first lights** (targets whose *first ever* night
+  falls in that year — measured against the whole history, not the year's slice, or every target would be
+  "new" in the year you happen to be looking at), the **longest** night and the **sharpest** night.
+  `GET /api/recap/year/{year}` serves it; `/sky-so-far/{year}` renders it as a nested route under
+  "Your sky, so far", with a `YourYearCard` link in that page's existing flow — **no new nav entry and no new
+  always-on banner**, per the standing IA rule.
 
-  **What it is (one read-only page + one endpoint).** `GET /api/recap/year/{year}` folds the library's
-  existing per-target night/hour accounting (the same `capture_hours_json` / `stack_runs` reads the Dashboard
-  and "Your sky, so far" already walk, filtered to nights whose local date falls in `year`) into a small,
-  honest summary: **nights out**, **total integration hours**, **distinct targets**, **new targets first shot
-  this year** ("first light" moments), the **clearest night** (best median transparency / lowest sky), the
-  **longest single session**, and the **best picture of the year** (reuse `best_picture` ranking, scoped to
-  the year). A `/recap/{year}` route renders it as a single scrollable card with plain-language sentences
-  ("You were out under the stars on **31 nights** and collected **52 hours** of light on **9 targets**"), the
-  best-of-year thumbnail, and a one-click **Copy caption** / **Download share image (JPEG)** reusing the
-  existing share-card machinery (`seestack/sharecard.py`) so it lands social-ready with no typing.
+  **One fold, one set of numbers — and one library walk fewer, not one more.** The expensive half of the
+  heatmap is opening every project and reading its frames; the windowing on top is arithmetic. So the router
+  now caches the **accumulator** (`_cached_night_acc`) rather than each finished calendar, and
+  `_cached_activity_calendar` finalizes over it. The year page, the Dashboard heatmap and the recap poster
+  therefore read the *same* nights — pinned by a test that the year's totals equal the heatmap's cells for the
+  same night — and asking for a different `months` window no longer re-walks the library either.
+  `activity_calendar.nights_from(acc, start=…, end=…)` is the one public conversion both slices go through, so
+  neither can invent a second definition of what a night's numbers are.
 
-  **Why it clears the bar and serves §1.** It adds no expert surface — it is pure recall of what the beginner
-  already did, framed to enjoy and share (priority 3). Everything it needs is already stored, so it is
-  additive and offline. Sane default: opens on the most recent year with any data. Empty state: a year with
-  no nights says so kindly and offers the years that do have data.
+  **Honest rather than complete, everywhere.** "Your longest night" needs ≥2 nights to be worth naming (on a
+  one-night year the longest night is *the* night wearing a rosette) — the same reasoning, and deliberately the
+  same threshold, as `sharpest_night`'s existing `SHARPEST_MIN_NIGHTS`; the sharpest night reuses
+  `activity_calendar.sharpest_night` outright rather than inventing a second definition of "the good night".
+  A clause the data can't support is **dropped, not zeroed** ("0 targets" reads as a bug, not a beginning),
+  and a year with nothing in it returns `has_anything=false` plus the years that *do* have data, so the page
+  offers them instead of a wall of zeros. The card and the page open on the **most recent year with nights**,
+  not the calendar year — clicking in on 3 January should land on the season you just finished.
 
-  **Slicing for one Builder run.** Slice (a): the endpoint + the six headline stats + a bare card (no share).
-  Slice (b): the best-of-year thumbnail + the share/caption reuse. Slice (c): "first light this year" target
-  chips linking to each target. Ship (a) first; it stands alone.
+  **Upgrade-safe (§9):** one new engine module, one new public engine helper, one new read-only endpoint, one
+  new nested route, one new card. No config key, no schema, no on-disk change, no default flipped, no existing
+  response field or endpoint touched. The card self-hides against a backend that doesn't have the endpoint, so
+  an older/newer pairing degrades to today's page.
 
-  **Upgrade-safe by construction:** one new read-only router + one new route, both additive; no schema, no
-  config key, no on-disk change, no default flipped. Reads only columns that already exist. A test builds a
-  two-year synthetic library and pins that a year filter counts only that year's nights and that an empty year
-  degrades to the kind empty state.
+  **Tests: +26 Python engine, +8 API, +29 vitest.** `tests/test_year_recap.py` pins the year boundary
+  (New Year's Eve and New Year's Day land in different years), first light against the whole history, both
+  standouts' silence rules and tie-breaks, the dropped-clause wording and all three empty-state messages.
+  `tests/webapp/test_year_recap.py` pins the endpoint against real project data: the year filter, the
+  first-light `safe` links, accepted-frames-only (a clouded-out night must not inflate the year), the 422 on a
+  bad year, and the heatmap-agreement invariant. Frontend: `yourYear.test.ts` (11) for the pure helpers,
+  `YourYear.test.tsx` (10) for the page and `YourYearCard.test.tsx` (5) for the entry card.
+
+  **Slice (b) is still open**, deliberately: the best-of-year thumbnail + `sharecard.py` reuse for a
+  downloadable year poster and copy-paste caption. It is a clean follow-on — the endpoint already returns
+  everything a caption needs — and it wants its own run because the poster render is where the effort is.
+
+  *(Original entry follows.)*
+
+  Original spec, for the record — **slices (a) and (c) are done**; it is indented so a triage pass can see
+  that by shape:
+  - **⭐ NEW BEGINNER FEATURE (Scout 2026-09-04) — "Your year under the stars": a year-bounded, shareable
+    recap of a season of imaging.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: M. Clears the
+    beginner bar: sane default (the current year, auto-computed from data the app already stores), plain
+    language, nothing pro/niche.)*
+
+    **The gap, checked before filing.** The app already has the two ends of the time axis but not the middle:
+    a *per-night* recap (`seestack/session_recap.py` → the "Last session" card and the by-breakfast poster) and
+    an *all-time* cumulative view (`Your sky, so far` → `/api/stats/*`, the life list, "Draw your skyline").
+    There is **no season-bounded story**: grepped `webapp/`, `frontend/src/` and the backlog for
+    `wrapped|year in review|annual|yearly|this year` — the only hits are the per-night recap and cache-window
+    plumbing, none of them a year view. A beginner who shot 30 nights across a winter has no single screen that
+    says "here's what *this year* looked like", and that is exactly the kind of milestone a non-expert wants to
+    look back on and post.
+
+    **What it is (one read-only page + one endpoint).** `GET /api/recap/year/{year}` folds the library's
+    existing per-target night/hour accounting (the same `capture_hours_json` / `stack_runs` reads the Dashboard
+    and "Your sky, so far" already walk, filtered to nights whose local date falls in `year`) into a small,
+    honest summary: **nights out**, **total integration hours**, **distinct targets**, **new targets first shot
+    this year** ("first light" moments), the **clearest night** (best median transparency / lowest sky), the
+    **longest single session**, and the **best picture of the year** (reuse `best_picture` ranking, scoped to
+    the year). A `/recap/{year}` route renders it as a single scrollable card with plain-language sentences
+    ("You were out under the stars on **31 nights** and collected **52 hours** of light on **9 targets**"), the
+    best-of-year thumbnail, and a one-click **Copy caption** / **Download share image (JPEG)** reusing the
+    existing share-card machinery (`seestack/sharecard.py`) so it lands social-ready with no typing.
+
+    **Why it clears the bar and serves §1.** It adds no expert surface — it is pure recall of what the beginner
+    already did, framed to enjoy and share (priority 3). Everything it needs is already stored, so it is
+    additive and offline. Sane default: opens on the most recent year with any data. Empty state: a year with
+    no nights says so kindly and offers the years that do have data.
+
+    **Slicing for one Builder run.** Slice (a): the endpoint + the six headline stats + a bare card (no share).
+    Slice (b): the best-of-year thumbnail + the share/caption reuse. Slice (c): "first light this year" target
+    chips linking to each target. Ship (a) first; it stands alone.
+
+    **Upgrade-safe by construction:** one new read-only router + one new route, both additive; no schema, no
+    config key, no on-disk change, no default flipped. Reads only columns that already exist. A test builds a
+    two-year synthetic library and pins that a year filter counts only that year's nights and that an empty year
+    degrades to the kind empty state.
+
+- **NEW IDEA — SLICE (b) OF "Your year under the stars" (Builder 2026-09-04, the half v0.343.0 deliberately
+  left out) — make the year *shareable*: a best-of-year picture and a one-click poster + caption.** *(Pillar:
+  friendliness / enjoy + share — PRIORITY 3. Size: S–M. The endpoint already returns everything a caption
+  needs, so this is render work, not data work.)*
+
+  Slices (a) and (c) shipped: `/sky-so-far/{year}` tells the story, and the first-light chips link out. What
+  is missing is the part a beginner actually posts. Two pieces, in order:
+  1. **The best picture of the year.** Rank the year's targets the way `_recap_hero` already picks a poster
+     backdrop (the summary's heroes, first one with a readable preview), *scoped to targets with a night in
+     that year*, and show it at the top of the year page. **Caution:** a hero's preview is its *newest* stack,
+     which may have been made after the year ended — say "your picture of M 31, shot in 2026" rather than
+     implying the pixels are from that year, or scope to runs whose newest frame falls in the year.
+  2. **`GET /api/recap/year/{year}.jpg` + a copy-paste caption**, reusing `seestack/recap.py`'s
+     `draw_recap_poster` / `seestack/sharecard.py` rather than a second poster renderer — the whole reason
+     `RecapFacts` carries `window_months` is so a poster can say "this year" honestly. A `year_caption()`
+     beside `year_headline()` in `seestack/yearrecap.py` is the natural shape.
+
+  **Grep first:** `seestack/recap.py`, `_recap_hero` and `ShareYourSkyCard` already do 90 % of this for the
+  all-time poster; this is a second *facts* source into the same renderer, not new machinery.
 
 - **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-t59xya`) — ~~put the planned week in the user's
   calendar.~~** Built as filed, as composition: `GET /api/plan/week/calendar.ics` and an **Add this week to

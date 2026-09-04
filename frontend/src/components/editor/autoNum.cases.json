@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "The one table that pins the compact numbers in the 'what Auto did' note,",
+    "driven by BOTH implementations: `fmt` (frontend/src/components/editor/",
+    "autoSummary.ts, the note the editor shows when a user clicks Auto) and",
+    "`_auto_num` (seestack/edit/presets.py, the note an *unattended* job stamps on",
+    "the History Info panel for the same recipe). Both write the same clause —",
+    "'a ~0.12 sky, 4.7 px stars' — about the same picture, so a divergence reads as",
+    "the app measuring the image twice and getting two answers. Change the rule and",
+    "you must change this table, on both sides at once:",
+    "frontend/src/components/editor/autoSummary.test.ts and",
+    "tests/test_auto_summary_mirror.py.",
+    "",
+    "Cases are [input, expected]. The .xx5 rows are why the table exists: Python's",
+    "round() is half-to-even and JavaScript's Math.round() is half-up, so a",
+    "measured 0.125 sky read 'a ~0.12 sky' server-side and 'a ~0.13 sky' in the",
+    "editor. The Python side moved to floor(x + 0.5), which is what Math.round is —",
+    "the same fix _factor_label took in v0.332.1."
+  ],
+  "cases": [
+    [0, "0"],
+    [0.1, "0.1"],
+    [0.101, "0.1"],
+    [0.105, "0.11"],
+    [0.115, "0.12"],
+    [0.125, "0.13"],
+    [0.135, "0.14"],
+    [0.2, "0.2"],
+    [1, "1"],
+    [1.05, "1.05"],
+    [1.5, "1.5"],
+    [2.345, "2.35"],
+    [4.7, "4.7"],
+    [10, "10"],
+    [12.005, "12.01"],
+    [100, "100"]
+  ]
+}

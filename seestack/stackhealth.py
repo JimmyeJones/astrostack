@@ -286,16 +286,57 @@ def _factor_label(value: float) -> str:
     return str(int(rounded)) if float(rounded).is_integer() else f"{rounded:.1f}"
 
 
+def noise_low_lead(n_subs: int, noise_ratio: float, is_mosaic: bool) -> str:
+    """The "you should have got about N×, you got M×" lead of the shortfall note.
+
+    The *same* sentence is written by ``noiseLowLead`` in
+    ``frontend/src/components/oneFrameVsStack.ts`` for the History page's "See
+    the difference" reveal, about the same run — a user reads both about one
+    picture, minutes apart. So it is pinned from both sides against
+    ``frontend/src/components/noiseLowLead.cases.json``
+    (``tests/test_noise_low_lead_mirror.py``).
+
+    It had already drifted, quietly: the card said *"cut the noise"* where this
+    side said *"cut the **background** noise"*. Nothing was wrong in either,
+    which is exactly why nobody caught it — but the measured quantity is the sky
+    background's grain, so the qualifier is the true word and the card moved to
+    it. Public (not underscored) because the guard drives it directly.
+    """
+    expected = _factor_label(math.sqrt(n_subs))
+    measured = _factor_label(float(noise_ratio))
+    if is_mosaic:
+        return (f"About {n_subs} subs cover the middle of this mosaic, which "
+                f"should cut the background noise about {expected}× (√{n_subs}), "
+                f"and it came in nearer {measured}×.")
+    return (f"{n_subs} subs should cut the background noise about "
+            f"{expected}× (√{n_subs}), and this stack came in nearer "
+            f"{measured}×.")
+
+
 def _format_reject_pct(frac: float) -> str:
-    """A plain, honest percentage for a rejection fraction (mirrors the History
-    Info-panel wording): ``<0.1%`` for a sliver, one decimal below 10%, whole
-    percent above."""
+    """A plain, honest percentage for a rejection fraction: ``<0.1%`` for a
+    sliver, one decimal below 10%, whole percent above.
+
+    The *same sentence* — "Cleaned ~N% of pixels — passing satellites, planes and
+    cosmic-ray hits were rejected" — is also written by ``formatRejectPct`` in
+    ``frontend/src/components/target/rejectionNote.ts`` for the one-click
+    "Process target" result, about the same run. So the rule is pinned from both
+    sides against ``frontend/src/components/rejectPct.cases.json``
+    (``tests/test_reject_pct_mirror.py``), the idiom
+    :func:`_factor_label` already uses.
+
+    **``floor(pct + 0.5)``, not ``round()``**, for the same reason
+    :func:`_factor_label` moved: Python rounds a half to *even* and JavaScript's
+    ``Math.round``/``toFixed`` round it *up*. Nothing shipped changes — the
+    cheerful note's band tops out below 8% so the whole-percent branch is
+    unreachable from it — but a formatter that is mirrored by hand should not
+    carry a rounding mode the mirror doesn't."""
     pct = frac * 100
     if pct < 0.1:
         return "<0.1%"
     if pct < 10:
-        return f"{pct:.1f}%"
-    return f"{round(pct)}%"
+        return f"{math.floor(pct * 10 + 0.5) / 10:.1f}%"
+    return f"{math.floor(pct + 0.5)}%"
 
 
 @dataclass(frozen=True)
@@ -601,15 +642,7 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
                          noise_crop_depth) == "low":
         n_subs = noise_yardstick_frames(run.n_frames_used, run.is_mosaic,
                                         noise_crop_depth)
-        expected = _factor_label(math.sqrt(n_subs))
-        measured = _factor_label(float(noise_ratio))
-        lead = (f"About {n_subs} subs cover the middle of this mosaic, which "
-                f"should cut the background noise about {expected}× (√{n_subs}), "
-                f"and it came in nearer {measured}×."
-                if run.is_mosaic else
-                f"{n_subs} subs should cut the background noise about "
-                f"{expected}× (√{n_subs}), and this stack came in nearer "
-                f"{measured}×.")
+        lead = noise_low_lead(n_subs, float(noise_ratio), run.is_mosaic)
         scored.append((38, HealthNote(
             kind="noise_low",
             severity="info",

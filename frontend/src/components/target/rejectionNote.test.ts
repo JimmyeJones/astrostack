@@ -6,6 +6,19 @@ import {
   REJECTION_NOTE_MIN_FRACTION,
   REJECTION_NOTE_MAX_FRACTION,
 } from "./rejectionNote";
+import rejectPctCases from "../rejectPct.cases.json";
+
+describe("formatRejectPct", () => {
+  // The *same* table `tests/test_reject_pct_mirror.py` drives
+  // `seestack.stackhealth._format_reject_pct` against, so this note and the
+  // "How's my stack?" note can't quote one stack two percentages. Change the
+  // rule and you have to change the table, which fails both sides at once.
+  it.each(rejectPctCases.cases as [number, string][])(
+    "spells %p as %p, the same as the health note does",
+    (fraction, want) => {
+      expect(formatRejectPct(fraction)).toBe(want);
+    });
+});
 
 describe("rejectionNote", () => {
   it("names a κ-σ clean-up as a percentage inside the honest band", () => {
@@ -60,8 +73,14 @@ describe("rejectionNote", () => {
 
 describe("formatRejectPct", () => {
   it("keeps a significant digit for small fractions and rounds larger ones", () => {
+    // Rewritten, not deleted: this case used to pin "0.10%", which is what this
+    // side printed while the "How's my stack?" note printed "0.5%"-style single
+    // decimals about the same run. Two decimals is false precision on a figure
+    // the sentence already prefixes with "~", so this side took the engine's
+    // rule — the sliver floor included.
     expect(formatRejectPct(0.012)).toBe("1.2%");
-    expect(formatRejectPct(0.001)).toBe("0.10%");
+    expect(formatRejectPct(0.001)).toBe("0.1%");
+    expect(formatRejectPct(0.0007)).toBe("<0.1%");
     expect(formatRejectPct(0.153)).toBe("15%");
   });
 });

@@ -214,6 +214,40 @@ def _best_streak(nights: list[date]) -> int:
     return best
 
 
+def nights_from(
+    acc: dict[date, _NightAgg],
+    *,
+    start: date | None = None,
+    end: date | None = None,
+) -> list[NightActivity]:
+    """The folded accumulator as date-ascending :class:`NightActivity` rows,
+    optionally clipped to ``start``…``end`` (both inclusive).
+
+    Public because the accumulator itself is private plumbing: a caller that
+    wants a *different* slice of the same fold — the year recap wants whole
+    calendar years, the heatmap wants a trailing window — should get the rows
+    through one conversion rather than reaching into ``_NightAgg`` and inventing
+    a second definition of what a night's numbers are. With no bounds it returns
+    every night that was folded."""
+    ordered = [
+        d for d in sorted(acc)
+        if (start is None or d >= start) and (end is None or d <= end)
+    ]
+    return [
+        NightActivity(
+            date=d.isoformat(),
+            exposure_s=round(acc[d].exposure_s, 3),
+            n_frames=acc[d].n_frames,
+            targets=sorted(acc[d].targets),
+            median_fwhm_px=(
+                None if (m := _median(acc[d].fwhms)) is None else round(m, 3)
+            ),
+            n_measured=len(acc[d].fwhms),
+        )
+        for d in ordered
+    ]
+
+
 def finalize_calendar(
     acc: dict[date, _NightAgg], *, today: date, months: int,
 ) -> ActivityCalendar:
@@ -230,19 +264,7 @@ def finalize_calendar(
     in_window = {d: a for d, a in acc.items() if start <= d <= today}
     ordered = sorted(in_window)
 
-    nights = [
-        NightActivity(
-            date=d.isoformat(),
-            exposure_s=round(in_window[d].exposure_s, 3),
-            n_frames=in_window[d].n_frames,
-            targets=sorted(in_window[d].targets),
-            median_fwhm_px=(
-                None if (m := _median(in_window[d].fwhms)) is None else round(m, 3)
-            ),
-            n_measured=len(in_window[d].fwhms),
-        )
-        for d in ordered
-    ]
+    nights = nights_from(acc, start=start, end=today)
     total = round(sum(a.exposure_s for a in in_window.values()), 3)
     this_month = sum(
         1 for d in ordered if d.year == today.year and d.month == today.month
