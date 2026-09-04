@@ -17785,19 +17785,48 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
-- **NEW IDEA (Builder 2026-09-04, the half v0.345.6 deliberately did NOT build — it is wording, and wording
-  wants a deliberate pass) — the auto-edit panel says "sky" twice, one line apart, meaning two different
-  things.** *(Pillar: approachable / trust — PRIORITY 3; size XS, but **copy, so read the whole panel before
-  moving a word**.)* v0.345.6 fixed the *number* ("a ~0 sky" → "a ~0.001 sky"); it did not touch the fact that
-  the cause clause's **"a ~0.001 sky"** is a measurement of the *linear* stack, while the "Tuned to your data"
-  line's **"sky level 0.24"** is the stretch's *target* background in display space. Both are correct, both
-  say "sky", and they sit one line apart differing by two orders of magnitude — a beginner reading them
-  together has no way to know they are different quantities rather than a contradiction. **Shape:** name them
-  apart in the two clauses (e.g. *"your sky measured ~0.001"* against *"stretched to a sky brightness of
-  0.24"*), which needs the same both-sides change as the number did — `autoSummary.ts` and
-  `seestack/edit/presets.py`, plus the phrase table. **Do NOT** solve it by hiding one of them: each is the
-  only place its own fact appears (the standing "nothing may be removed" constraint), and the pair is *why*
-  the note earns trust — it says what was measured and what was done about it.
+- **✅ SHIPPED (Builder, v0.345.7, branch `claude/sweet-babbage-enljxc`) — ~~the auto-edit panel says "sky"
+  twice, one line apart, meaning two different things.~~** Built as the entry asked: **named apart, with
+  nothing hidden**, on both sides of the mirror at once.
+
+  **The two clauses now say which sky they mean.** The measured cue reads *"a ~0.001 sky **before
+  stretching**"* (`autoCauseSentence`, `_auto_cause_clause`) and the value line reads *"**stretched** sky
+  level 0.24"* (`autoValuePhrases`), so the panel's two sky numbers read as a measurement and a decision
+  rather than as one picture measured twice with a two-orders-of-magnitude disagreement. The words *"sky
+  level"* were kept on the value side deliberately — that is what the control itself is called (`target_bg`,
+  labelled *"STF sky level"*), and a note that names the knob it moved is findable; the qualifier goes in
+  front rather than replacing it.
+
+  **Neither fact was removed** (the standing "nothing may be removed" constraint): both numbers still appear,
+  in the same two lines, in the same order.
+
+  **Upgrade-safe (§9):** two pure string builders; no option, default, config key, schema, on-disk path, API
+  shape or measurement changed.
+
+  **Tests (+2 suites, 3 Python and 9 vitest failing before).** `tests/test_auto_summary_mirror.py` gains
+  `test_the_measured_sky_says_which_sky_it_is`, which pins the sample's own clause *and* the general rule —
+  every comma-separated part naming a sky must also say which one — so a future re-wording cannot quietly
+  drop the qualifier and restore the clash. `autoSummary.test.ts` gains the same pair (the two lines side by
+  side for the sample's numbers, and a scan asserting every occurrence of "sky" in either line sits next to
+  the word that disambiguates it). Existing expectations in `autoSummary.test.ts`, `Editor.test.tsx`,
+  `History.test.tsx`, `test_edit_engine.py` and the mirror test were **updated, not weakened** — each still
+  asserts the whole sentence.
+
+  *(Original entry follows.)*
+
+  - **NEW IDEA (Builder 2026-09-04, the half v0.345.6 deliberately did NOT build — it is wording, and wording
+    wants a deliberate pass) — the auto-edit panel says "sky" twice, one line apart, meaning two different
+    things.** *(Pillar: approachable / trust — PRIORITY 3; size XS, but **copy, so read the whole panel before
+    moving a word**.)* v0.345.6 fixed the *number* ("a ~0 sky" → "a ~0.001 sky"); it did not touch the fact that
+    the cause clause's **"a ~0.001 sky"** is a measurement of the *linear* stack, while the "Tuned to your data"
+    line's **"sky level 0.24"** is the stretch's *target* background in display space. Both are correct, both
+    say "sky", and they sit one line apart differing by two orders of magnitude — a beginner reading them
+    together has no way to know they are different quantities rather than a contradiction. **Shape:** name them
+    apart in the two clauses (e.g. *"your sky measured ~0.001"* against *"stretched to a sky brightness of
+    0.24"*), which needs the same both-sides change as the number did — `autoSummary.ts` and
+    `seestack/edit/presets.py`, plus the phrase table. **Do NOT** solve it by hiding one of them: each is the
+    only place its own fact appears (the standing "nothing may be removed" constraint), and the pair is *why*
+    the note earns trust — it says what was measured and what was done about it.
 
 - **✅ SHIPPED (Builder, v0.345.6, branch `claude/sweet-babbage-k0vyac`) — ~~the auto-edit note tells the
   owner the app "measured a ~0 sky", one line above "sky level 0.24".~~** Found the same way v0.345.3 was —
