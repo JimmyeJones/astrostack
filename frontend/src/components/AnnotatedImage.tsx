@@ -321,6 +321,33 @@ export function storedPreviewScaleBar(
   return annotations.scale_bar ?? null;
 }
 
+/**
+ * How wide the picture box should be allowed to get, given the height it is
+ * capped at — i.e. the width the image will actually render at once it is
+ * contain-fit.
+ *
+ * Without this the box is the full card width at a fixed height, so a landscape
+ * Seestar stack in a wide column is padded with black to either side: measured
+ * on the running app, the Target page's hero card gave a 480×320 preview a
+ * 648×260 box, so **40 % of the card was black bars**. On a black astro picture
+ * that does not read as padding — it reads as part of the photograph, or as a
+ * picture that has been cropped. Capping the width at the rendered width makes
+ * the box *be* the picture.
+ *
+ * It only ever shrinks the box, so the "height-capped so the picture and the
+ * frames table fit on one screen" contract its callers rely on is untouched, and
+ * a container narrower than this cap is unaffected (the image is width-limited
+ * there, which is the phone case). `null` — unknown image dimensions — means
+ * "don't cap", exactly the behaviour before this existed. Pure, so the geometry
+ * is unit-testable without a DOM.
+ */
+export function containBoxMaxWidth(
+  imgWidth: number, imgHeight: number, height: number,
+): number | null {
+  if (!(imgWidth > 0) || !(imgHeight > 0) || !(height > 0)) return null;
+  return Math.round((height * imgWidth) / imgHeight);
+}
+
 /** A friendly one-word label for an object: its name if it has one, else its id. */
 export function objectLabel(o: FieldObject): string {
   return o.name && o.name.trim() ? o.name : o.catalog_id;
@@ -468,6 +495,11 @@ export function AnnotatedImage({
       ref={ref}
       style={{
         position: "relative", width: "100%", height, background: "#000",
+        // Never wider than the picture itself will render — see
+        // `containBoxMaxWidth`. Centred, so a picture narrower than its column
+        // sits under the card's own heading rather than off to one side.
+        maxWidth: containBoxMaxWidth(imgWidth, imgHeight, height) ?? undefined,
+        marginInline: "auto",
         cursor: onClick ? "zoom-in" : undefined, overflow: "hidden",
       }}
       onClick={onClick}

@@ -21044,6 +21044,22 @@ problems. Dogfood it every big-picture run and fix root causes.
     Grep `storedPreviewScaleBar` and `_scale_bar_from_wcs` first — the crop case already made this choice
     once, and whatever it chose is the precedent to follow or to knowingly break.
 
+- **⚪ DOGFOOD BASELINE (Builder 2026-09-04, `scripts/agent-dogfood.sh` at v0.351.0 — the FIFTH measurement,
+  and the fifth that says DO NOT open a speculative IA slice).** Full run (boot → sample → stack → Playwright
+  probe at 1440 px and 420 px): **nothing overflowing, no console errors**. Tallest pages are **identical to
+  the v0.345.7 measurement, to the pixel** — phone Target 3,014 px, `/life-list` 3,008 px, the editor
+  2,815 px, then desktop Target 2,010 px, desktop editor 1,841 px, Dashboard 1,785 px (phone), `/stack`
+  1,748 px (phone), `/life-list` 1,453 px (desktop). Five measurements across ~130 versions and the worst page
+  has moved 21 px: the IA work is done, and the standing rule (put a new feature *inside* the existing
+  grouping) is what is left of that priority.
+  **What this pass found is the picture card's 40 % black letterbox** (shipped as v0.351.1, below) — and the
+  way it found it is the part worth keeping. The screenshot had already been looked at twice by earlier runs,
+  which both read the black as *uncovered canvas* and filed/declined a caption for it. Asking the **app**
+  instead of the screenshot — `GET .../preview` (480×320, three dark columns) and `GET .../stack-health`
+  ("even coverage") — showed it was the card's own box. So the probe's speciality is not only "two correct
+  lines that contradict each other" (three passes running): it is anything where the *composite* on screen is
+  read as data. **Confirm what a pixel is with an endpoint before writing copy that explains it.**
+
 - **⚪ DOGFOOD BASELINE (Builder 2026-09-04, `scripts/agent-dogfood.sh` at v0.345.7 — the fourth measurement,
   and the fourth that says DO NOT open a speculative IA slice).** Full run (boot → sample → stack → Playwright
   probe at 1440 px and 420 px): **nothing overflowing, no console errors**. Tallest pages, phone first:
@@ -21162,6 +21178,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   that usually differs should stay two cards, because merging a coincidence would be as confusing as
   repeating one.
 
+- **✅ SHIPPED (Builder, v0.351.1, branch `claude/sweet-babbage-bezz8m`) — ~~the black around the picture on
+  the Target page is the *card's own letterbox*, not the canvas — and it was 40 % of the card~~.** Found by
+  running the app (`scripts/agent-dogfood.sh`), then **measured rather than assumed**, which is what changed
+  the answer: the two entries below both read the same screenshot as *uncovered canvas* and argued about
+  whether the coverage note already explains it. It isn't uncovered canvas. Probed on the running app, the
+  sample's stored preview is **480×320 with three near-black columns in it**, and `stack-health` on the same
+  run says *"This looks like a solid stack — round stars, even coverage."* — correctly, because
+  `coverage_thin_frac` is about *thinly* covered pixels and there are none. The black was
+  `AnnotatedImage`'s box: `width: 100%` at a fixed `height`, so a 480×320 preview in the Target page's
+  648 px column got a 648×260 box and rendered 390 px wide — **258 px of black bar**, 40 % of the card.
+
+  **Why that is worth a fix and a caption never was.** On a black astro picture, black padding does not read
+  as padding; it reads as part of the photograph, or as a picture that has been cropped. A caption saying
+  "the dark edges are where fewer frames overlapped" would have been **actively wrong** here — the dark edges
+  were the card. Removing them is also the honest version of the owner's standing "extremely busy" priority:
+  40 % of the hero card on the app's busiest page was showing nothing.
+
+  **One pure helper, and it only ever shrinks the box.** `containBoxMaxWidth(imgWidth, imgHeight, height)`
+  returns the width the picture will actually render at once contain-fit; the box takes it as a `maxWidth` and
+  centres itself. A container *narrower* than the cap is untouched (the image is width-limited there — the
+  phone case, where the waste was already about 2 %), the fixed height stays exactly as it was, so the
+  "height-capped so the picture and the frames table fit on one screen" contract behind that number is
+  unchanged, and unknown dimensions (`null`) keep the full-width box the component always had. Both consumers
+  benefit — the Target hero card (260 px) and the History card (180 px) — and the marker/scale-bar/compass
+  geometry needed no change at all: every one of them already re-derives the contain-fit from the *measured*
+  box, so a smaller box simply has smaller letterbox offsets.
+
+  **Verified in the running app, not only in jsdom:** re-probed after the change, the hero picture sits at its
+  own size with the card's background around it, the History card likewise, the phone view is unchanged, and
+  the probe still reports no overflow and no console errors at identical page heights.
+
+  **Tests (+5, the render one fails before — `maxWidth` was `""`):** the four `containBoxMaxWidth` cases
+  (the measured 480×320-into-260 case, a portrait picture, a square-ish mosaic, and every "size not known
+  yet" shape returning `null` so the box can never collapse to zero and hide the picture), plus a render
+  assertion that the box carries both the cap and its height.
+
 - **⚪ DID THE GREP, AND THE ANSWER IS "ALREADY ANSWERED" — DECLINED ONCE so it isn't re-litigated (Builder
   2026-09-04).** The entry below asks for a caption under the Target picture explaining the canvas's black
   margins, and tells whoever picks it up to grep first and decline it as copy churn if the app already says
@@ -21176,20 +21228,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   existing sentence**, not a new caption or card: say the thin edge *looks dark*. Do not add a second surface
   for it.
 
-- **NEW IDEA (Builder 2026-09-04, seen on the Target page in the same dogfood pass — GREP FIRST, this may be
-  answered already) — the picture card shows the canvas's black margins with nothing saying what they are.**
-  *(Pillar: friendliness — PRIORITY 3; size XS if it is only a caption; confidence: **observed on the sample,
-  not traced** — the sample is one field, so a real mosaic may read differently.)* "Your picture" on the
-  Target page rendered the stack with a wide black band down each side: the union canvas is wider than the
-  sky every frame covered, which is correct and is exactly what `auto_crop_border` trims when Auto runs in
-  the editor. A beginner meeting it on the *unedited* stack has no way to know whether their picture is
-  broken, and the caption underneath talks about frames and exposure rather than about the black. **Shape:**
-  one conditional line under the picture when the run's coverage says a meaningful border is uncovered —
-  *"the dark edges are where fewer frames overlapped; Auto trims them when you edit"* — reusing
-  `_trim_rect_for_run` / the existing trim fraction rather than measuring anything new. **Grep first:** the
-  editor already surfaces "% of ragged mosaic edge to trim" in its Auto note and the Target page already
-  carries a coverage-thin verdict in "How's my stack?" — if either already answers this where the beginner is
-  looking, this is copy churn and should be declined.
+- **⚪ CLOSED — THE PREMISE WAS WRONG, AND MEASURING IT IS WHAT SHOWED THAT (Builder 2026-09-04). The black
+  was the *card*, not the canvas; see the shipped entry above (v0.351.1).** Probed on the running app rather
+  than read off the screenshot again: the sample's stored preview is 480×320 with **three** near-black
+  columns, and `stack-health` on that run answers *"even coverage"*, correctly. The wide bands were
+  `AnnotatedImage`'s full-width fixed-height box letterboxing a 1.5:1 picture into a 2.5:1 slot. **So the
+  caption this entry asks for would have been actively wrong** — it would have told the owner the dark edges
+  were thin coverage when they were empty card. Both this entry and the declination above it argued about
+  *which surface* should explain the black without either checking that there was any black in the picture.
+  **The lesson worth keeping: a screenshot shows you the composite. Before writing copy that explains a
+  pixel, ask the app what that pixel is.** Original entry follows, struck.
+
+  - ~~**NEW IDEA (Builder 2026-09-04, seen on the Target page in the same dogfood pass — GREP FIRST, this may be
+    answered already) — the picture card shows the canvas's black margins with nothing saying what they are.**~~
+    *(Pillar: friendliness — PRIORITY 3; size XS if it is only a caption; confidence: **observed on the sample,
+    not traced** — the sample is one field, so a real mosaic may read differently.)* "Your picture" on the
+    Target page rendered the stack with a wide black band down each side: the union canvas is wider than the
+    sky every frame covered, which is correct and is exactly what `auto_crop_border` trims when Auto runs in
+    the editor. A beginner meeting it on the *unedited* stack has no way to know whether their picture is
+    broken, and the caption underneath talks about frames and exposure rather than about the black. **Shape:**
+    one conditional line under the picture when the run's coverage says a meaningful border is uncovered —
+    *"the dark edges are where fewer frames overlapped; Auto trims them when you edit"* — reusing
+    `_trim_rect_for_run` / the existing trim fraction rather than measuring anything new. **Grep first:** the
+    editor already surfaces "% of ragged mosaic edge to trim" in its Auto note and the Target page already
+    carries a coverage-thin verdict in "How's my stack?" — if either already answers this where the beginner is
+    looking, this is copy churn and should be declined.
 
 - **NEW IDEA (Builder 2026-09-04, the generalisation of the v0.345.3 export-panel fix) — sweep the app for
   the other trailing "what these buttons do" paragraphs, and check each against the per-control copy above
