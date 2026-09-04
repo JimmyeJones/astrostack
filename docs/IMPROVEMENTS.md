@@ -77,6 +77,27 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 LEAD, NOT YET A VERIFIED BUG (Builder 2026-09-04, the thread that led to the v0.352.0 field-of-view fix
+  and was not itself closed by it) — the "only N% of it is in this picture" verdict and the "About a C×R
+  mosaic" plan are two claims about one object that can still contradict each other, because they measure
+  against different things.** *(Pillar: trust + friendliness — PRIORITY 3; size S to check, unknown to fix.
+  Confidence: **observed on a running app, arithmetic not yet traced** — which is why this is a lead.)*
+  On the bundled sample's Target page, the framing banner read *"Orion Nebula is bigger than your frame — only
+  about **15%** of it is in this picture"* while the object card below it planned *"about a **2×2** mosaic
+  (4 panels)"*. Those cannot both be right: 15 % of the object's area implies needing ~1/0.15 ≈ 6.7 frames,
+  i.e. a 3×3, not a 2×2.
+  **Why they differ, as far as it is traced.** `framing.framing_result_verdict`'s `coverage` is an **area**
+  fraction of the object's box against **this run's canvas and plate scale**; `mosaic_plan` counts **panels**
+  along each edge against a **single frame**, and the two are only the same thing when the canvas *is* one
+  frame. On the sample they nearly are, so the gap looks real; on a mosaic stack the canvas is deliberately
+  bigger than a frame and the pair is *expected* to differ, which is the hard part — the fix is probably
+  wording ("of this picture" vs "of one frame"), not arithmetic.
+  **What v0.352.0 did and did not do:** it made the *panel count* right (it was an S50's). It did **not**
+  reconcile the two sentences, because the coverage half was already measuring against the run's own optics
+  and was never wrong — so this needs its own look. **Start by re-running `scripts/agent-dogfood.sh` on
+  v0.352.0** and reading the same page: the numbers have moved, and the contradiction may have moved with
+  them.
+
 - **✅ SHIPPED (Builder, v0.352.0, branch `claude/sweet-babbage-73i7y6`) — ~~every "will it fit in one frame?"
   verdict and every mosaic panel count is computed for an **S50**, and the owner has an **S30**.~~ Found by
   dogfooding the running app; verified against the owner's own target list; fixed by *deriving* the field, not
