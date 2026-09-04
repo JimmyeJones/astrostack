@@ -803,3 +803,91 @@ def test_asking_to_crop_a_frame_filling_disk_says_why_it_didnt(client, data_root
     assert (result["width"], result["height"]) == (64, 48)
     assert any("Nothing worth cropping" in w for w in result["warnings"])
     assert any("Sun" in w for w in result["warnings"])
+
+
+# --- a still made before the video path could demosaic a raw capture ---------
+#
+# v0.347.0 fixed the stacking, but the picture already on disk keeps the mesh:
+# nothing re-derives itself and there is no auto-stack for video. So the page
+# has to say so. These pin who gets told and — more importantly — who doesn't.
+
+def _drop_raw_capture(data_root: Path, folder: str = "Solar_video") -> Path:
+    from videosynth import solar_raw_video
+
+    d = data_root / "incoming" / folder
+    d.mkdir(parents=True, exist_ok=True)
+    return solar_raw_video(d / "clip.avi", n_frames=10, w=64, h=48,
+                           sharp_indices=(1, 4, 7))
+
+
+def _stale_meta(data_root: Path, capture_id: str) -> None:
+    """Rewrite a finished still's metadata the way a pre-v0.347.0 build wrote
+    it: with no ``colour_current`` claim at all."""
+    import json
+
+    from webapp.config import Settings
+    from webapp.video import META_NAME, result_dir
+
+    path = result_dir(Settings(data_root=str(data_root)), capture_id) / META_NAME
+    raw = json.loads(path.read_text())
+    raw.pop("colour_current", None)
+    path.write_text(json.dumps(raw))
+
+
+def test_a_still_stacked_before_the_demosaic_offers_a_re_stack(client, data_root):
+    """The bug's leftover: a Sun stacked by an older build from a raw capture."""
+    _drop_raw_capture(data_root)
+    job_id = client.post("/api/videos/Solar_video/stack",
+                         json={"keep_percent": 30}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    _stale_meta(data_root, "Solar_video")
+
+    listed = client.get("/api/videos").json()["captures"][0]
+    assert listed["result"]["colour_stale"] is True
+
+
+def test_a_still_this_build_made_is_never_called_stale(client, data_root):
+    """The same raw capture, stacked by this build — the picture is right, so
+    the page must say nothing."""
+    _drop_raw_capture(data_root)
+    job_id = client.post("/api/videos/Solar_video/stack",
+                         json={"keep_percent": 30}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    listed = client.get("/api/videos").json()["captures"][0]
+    assert listed["result"]["colour_stale"] is False
+
+
+def test_an_old_still_from_a_colour_capture_is_left_alone(client, data_root):
+    """The case that must never be nagged: an ordinary colour Moon video. Its
+    old still is as good as this build can make it, whatever its metadata says
+    — and the check is *recorded*, so the source is probed exactly once."""
+    _drop_capture(data_root)
+    job_id = client.post("/api/videos/Lunar_video/stack",
+                         json={"keep_percent": 30}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    _stale_meta(data_root, "Lunar_video")
+
+    listed = client.get("/api/videos").json()["captures"][0]
+    assert listed["result"]["colour_stale"] is False
+
+    from webapp.config import Settings
+    from webapp.video import read_meta
+
+    meta = read_meta(Settings(data_root=str(data_root)), "Lunar_video")
+    assert meta is not None
+    assert meta.colour_current is True  # written back, so it is asked once
+
+
+def test_a_still_whose_video_is_gone_is_never_called_stale(client, data_root):
+    """No source to check means no verdict: telling someone to re-stack a
+    capture they no longer have is worse than saying nothing."""
+    clip = _drop_raw_capture(data_root)
+    job_id = client.post("/api/videos/Solar_video/stack",
+                         json={"keep_percent": 30}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    _stale_meta(data_root, "Solar_video")
+    clip.unlink()
+
+    listed = client.get("/api/videos").json()["captures"][0]
+    assert listed["result"]["colour_stale"] is False

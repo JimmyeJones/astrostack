@@ -64,7 +64,11 @@ from typing import Any
 from seestack.stack.output import write_full_res_png
 from seestack.video.detail import SHARPEN_MAX, sharpen_still
 from seestack.video.discover import VideoCapture, find_video_capture
-from seestack.video.ffmpeg import ffmpeg_available, probe_video
+from seestack.video.ffmpeg import (
+    ffmpeg_available,
+    probe_video,
+    source_is_cfa_mosaic,
+)
 from seestack.video.framing import crop_to_disk, measure_framing
 from seestack.video.lucky import (
     LuckyOptions,
@@ -170,6 +174,12 @@ class VideoStackMeta:
     #: by an older version has none; the box is re-measured from the original in
     #: that case, which is deterministic on the same picture.
     crop_box: list[int] = field(default_factory=list)
+    #: True when this picture's colour is what the current build would produce —
+    #: either its source was demosaiced on the way in, or it was already a colour
+    #: capture and needed none. False on every ``meta.json`` written before the
+    #: video path could read a colour-filter mosaic, which is exactly the set of
+    #: stills that may be carrying the mesh. See :func:`colour_is_stale`.
+    colour_current: bool = False
 
 
 def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
@@ -685,6 +695,49 @@ def ensure_framing_measured(
     return updated
 
 
+def colour_is_stale(
+    settings: Settings, capture_id: str, meta: VideoStackMeta,
+) -> tuple[bool, VideoStackMeta]:
+    """Was this still made before the stack could read a colour-filter mosaic?
+
+    Returns ``(stale, meta)`` — the metadata comes back because a capture that
+    turns out **not** to be a raw source is marked ``colour_current`` on the
+    spot, so the question is asked of it exactly once, ever.
+
+    A still stacked before v0.347.0 from a raw solar/planetary capture carries
+    the sensor mosaic as a fine mesh over the whole picture. Re-stacking fixes
+    it, but nothing on disk changes by itself and there is no auto-stack path
+    for video — so the owner would keep the wrong picture unless the app says
+    so. The judgement is exact rather than a look at the pixels: the source's
+    own pixel format says whether it is raw
+    (:func:`~seestack.video.ffmpeg.source_is_cfa_mosaic`), and the metadata says
+    whether the stack that made this picture handled it.
+
+    Best-effort in every direction that could nag wrongly: a capture whose file
+    has gone, an unreadable source, ffmpeg missing, or any probe failure all
+    answer **not stale**, because being told to re-stack a picture that is fine
+    is worse than being told nothing about one that isn't.
+    """
+    if meta.colour_current:
+        return False, meta
+    try:
+        _capture, source = _resolve_source(settings, capture_id, meta.source_name)
+        info = probe_video(source)
+    except Exception:  # noqa: BLE001 — an advisory must never fail the page
+        log.debug("could not check the colour source for %s", capture_id, exc_info=True)
+        return False, meta
+    if source_is_cfa_mosaic(info.pix_fmt):
+        return True, meta
+    # Nothing to remake: this capture was always colour, so the picture is as
+    # good as this build can make it. Record that so the probe happens once.
+    updated = replace(meta, colour_current=True)
+    try:
+        _write_meta(result_dir(settings, capture_id), updated)
+    except OSError:
+        log.debug("could not record the colour check for %s", capture_id, exc_info=True)
+    return False, updated
+
+
 def crop_saved_still(settings: Settings, capture_id: str) -> VideoStackMeta:
     """Trim a finished still to its disk, without decoding the video again.
 
@@ -1146,6 +1199,11 @@ def _video_stack_body(
         # Zero: the copy kept beside a sharpened still is the *soft* render,
         # so the strength stays changeable from here on.
         sharpen_baked=0.0,
+        # This build demosaics a raw source on the way in, so whatever the
+        # capture was, this picture's colour is current. Recorded here (rather
+        # than only for a raw source) so ``colour_is_stale`` never has to probe
+        # a capture this build already stacked.
+        colour_current=True,
     )
     _write_meta(out_dir, meta)
     return {
