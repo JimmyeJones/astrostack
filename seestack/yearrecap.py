@@ -1,7 +1,7 @@
 """Your year under the stars — a calendar-year recap of a season of imaging.
 
 The app already has both ends of the time axis and nothing in the middle. A
-*night* has :mod:`seestack.session_recap` ("Last session", the by-breakfast
+*night* has :mod:`seestack.session_recap` ("Last night", the by-breakfast
 poster); the *whole hobby* has "Your sky, so far" and
 :mod:`seestack.recap`'s share poster. Neither answers the question a beginner
 actually asks in January: **"what did last year look like?"** — the milestone
