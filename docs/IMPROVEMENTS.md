@@ -12666,9 +12666,13 @@ to **Shipped**.)_
 
   Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
 
-  - **NEW IDEA (Builder 2026-09-04, the surface v0.341.0's morning early-stop line deliberately did not reach) —
-    a target whose *own* last night stopped early, on its own page, however long ago that was.**
-    *(Pillar: autonomy + trust — PRIORITY 2; size XS–S; **check the overlap before building**.)* v0.341.0 puts
+  - **✅ SHIPPED (v0.342.0, "A target's own page keeps the night that stopped early") — ~~a target whose *own*
+    last night stopped early, on its own page, however long ago that was.~~** *(Verified by a Builder
+    2026-09-04 that had picked this entry as open work: `NightSummaryOut.ended_early` (`webapp/schemas.py`,
+    additive and set on the newest row only) carries the same `session_recap.early_stop` measurement, and
+    `earlyStopTooltip` (`components/NightsCard.tsx`) renders it — which is the entry's own "grep first"
+    answer, a marker on the night row rather than a standing sentence, so it never nags. The entry had simply
+    not been struck. Original spec follows.)* v0.341.0 puts
     "M 42 stopped getting subs at 23:40 — about 3 h earlier than its last 4 nights" on the Dashboard's
     **Last night** card, which by construction speaks only for the **library's most recent** capture night. A
     target the owner shot on Tuesday and has not returned to has exactly the same fact recorded and nowhere to
@@ -17815,9 +17819,14 @@ problems. Dogfood it every big-picture run and fix root causes.
 
   Original spec, for the record:
 
-  - **NEW IDEA (Builder 2026-09-03, the half v0.329.5 deliberately did NOT build) — let the server say where the
-    window is **on the preview**, so the marker stops being a guess.** *(Pillar: a better editor — PRIORITY 1;
-    size XS server + XS frontend.)* v0.329.5 gave `X-Loupe-Window` a reader, but only for the *sentence*: its
+  - **✅ SHIPPED (v0.329.6, "The marker points where the window is, not where the click was") — ~~let the
+    server say where the window is **on the preview**, so the marker stops being a guess.~~** *(Verified by a
+    Builder 2026-09-04 that had picked this entry as open work: `_window_on_preview`
+    (`webapp/routers/editor.py`) emits `preview_x/y/width/height` on `X-Loupe-Window` — added beside the
+    existing keys, never renaming them — and `loupeMarkerFromWindow` (`components/editor/loupe.ts`) draws from
+    them, with `loupeMarkerRect` kept as the first-paint / older-backend fallback exactly as the Care note
+    asked. Both halves of the spec are on `main`; the entry had simply not been struck. Original spec
+    follows.)* v0.329.5 gave `X-Loupe-Window` a reader, but only for the *sentence*: its
     `{x, y, width, height}` are full-canvas pixels, and the navigator marker is drawn against what the **preview**
     covers. With a crop in the recipe those are different coordinate systems, and `loupe.ts` has always said so —
     *"they can differ by up to half a window at the very edge"*. The frontend cannot close that without
@@ -25831,8 +25840,40 @@ problems. Dogfood it every big-picture run and fix root causes.
     **Grep first:** `seestack/recap.py`, `_recap_hero` and `ShareYourSkyCard` already do 90 % of this for the
     all-time poster; this is a second *facts* source into the same renderer, not new machinery.
 
-- **NEW IDEA (Builder 2026-09-04, spotted while shipping the year poster v0.344.0) — both recap posters use a
-  target's *newest stack preview* as their backdrop, ignoring the cover the owner actually pinned.**
+- **✅ SHIPPED (Builder, v0.345.2, branch `claude/sweet-babbage-i0r8cl`) — ~~both recap posters use a target's
+  *newest stack preview* as their backdrop, ignoring the cover the owner actually pinned.~~** Built exactly as
+  the entry's "Grep first" predicted: the shared helper already existed, so this is the two hero pickers
+  calling it instead of reading the stamp.
+
+  **One definition, now on both posters.** `_recap_hero` (all-time) and `_hero_image` (the year poster's
+  loader) resolve through `targets.current_picture_path` — the same helper the deep-sky wall, the Library
+  tile, `/api/gallery/best` and `/api/imaging-log` already use — so "this target's picture" has one answer on
+  every surface that shows one. Its precedence is the pin, then the stamped newest preview, then the newest
+  run that still has a preview on disk.
+
+  **The Care note is what the second test pins.** A cover whose run was pruned, or whose preview file has
+  gone, must not cost the poster its backdrop: `current_picture_path` already degrades to the newest picture
+  and then to nothing, so a stale pin falls through exactly as an unreadable preview always did.
+
+  **⚪ AND THE REST OF THE CLASS IS CLEAN — swept while here, so nobody re-walks it.** Every remaining
+  `last_stack_preview` reader in `webapp/` is a *presence* test or a cache signature, not a choice of picture:
+  `targets.TargetOut.has_preview`, `lifelist`'s per-target flag, `registry_cache.registry_signature`, and the
+  two stats cache keys. `gallery._montage_tiles` already resolves through the same helper. So after this
+  change no Python surface picks a target's picture by reading the stamp directly.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk path, API shape or default change — two internal helpers
+  resolve the same fact through the app's existing precedence. A library with nothing pinned renders exactly
+  the poster it rendered before.
+
+  **Tests (+3; the two that pin the fix fail before it, `2 failed, 28 passed`).**
+  `tests/webapp/test_recap.py` — the all-time poster's backdrop is the pinned white cover, measured off a
+  corner pixel against the black newest stack that used to win (the unpinned half of the same test pins that
+  the newest stack still backdrops it when nothing is pinned). `tests/webapp/test_year_recap.py` — the same
+  before/after on `/api/recap/year/{year}.jpg`. The third is a *guard*, green either way by construction: a
+  pin pointing at a run id that never existed still gets the newest picture, which is the Care note's
+  requirement and the thing a future "resolve the pin harder" change would break.
+
+  *(Original spec follows.)*
   *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: S. Additive, and the machinery already exists.)*
   `_recap_hero` (the all-time poster) and `_year_hero` (the new year one) both read
   `TargetEntry.last_stack_preview`. But "Set as cover" (v0.145.0) exists precisely so the owner can say *this*

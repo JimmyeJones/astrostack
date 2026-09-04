@@ -1108,19 +1108,24 @@ def _recap_hero(request: Request, summary):
     """The user's own best picture for the poster backdrop, or ``None``.
 
     The heroes are already ranked by integration, so the first one that still has
-    a readable preview on disk is "your biggest finished project". Best-effort:
-    an unreadable or deleted preview simply falls through to the next, and an
-    all-empty list gives the poster its plain deep-space background rather than
-    an error."""
+    a readable picture on disk is "your biggest finished project". Which picture
+    that is comes from ``targets.current_picture_path`` — the one definition of
+    "this target's picture", so a cover the owner pinned in History backdrops the
+    poster they are about to post, exactly as it already fronts the deep-sky wall
+    and the Library tile. Best-effort: an unreadable or deleted picture simply
+    falls through to the next hero, and an all-empty list gives the poster its
+    plain deep-space background rather than an error."""
     from PIL import Image
+
+    from webapp.routers.targets import current_picture_path
 
     lib = deps.open_library(request)
     try:
         by_safe = {t.safe_name: t for t in lib.list_targets()}
         for hero in summary.heroes:
             entry = by_safe.get(hero.safe)
-            path = getattr(entry, "last_stack_preview", None) if entry else None
-            if not path:
+            path = current_picture_path(lib, entry) if entry else None
+            if path is None:
                 continue
             try:
                 with Image.open(path) as img:
@@ -1315,21 +1320,26 @@ def get_year_poster(request: Request, year: int) -> Response:
 
 
 def _hero_image(request: Request, hero):  # noqa: ANN001, ANN202
-    """One summary hero's stack preview as a PIL image, or ``None``.
+    """One summary hero's own picture as a PIL image, or ``None``.
 
-    Best-effort in the same way :func:`_recap_hero` is: an unreadable or deleted
-    preview gives the poster its plain deep-space background rather than a 500.
+    Resolved through ``targets.current_picture_path`` for the same reason
+    :func:`_recap_hero` is — a pinned cover is the picture that target *is*, on
+    the year poster as much as on the wall. Best-effort in the same way: an
+    unreadable or deleted picture gives the poster its plain deep-space
+    background rather than a 500.
     """
     if hero is None:
         return None
     from PIL import Image
 
+    from webapp.routers.targets import current_picture_path
+
     lib = deps.open_library(request)
     try:
         entry = next(
             (t for t in lib.list_targets() if t.safe_name == hero.safe), None)
-        path = getattr(entry, "last_stack_preview", None) if entry else None
-        if not path:
+        path = current_picture_path(lib, entry) if entry else None
+        if path is None:
             return None
         with Image.open(path) as img:
             return img.convert("RGB")
