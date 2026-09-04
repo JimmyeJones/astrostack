@@ -123,12 +123,12 @@ def _robust_stats(values: np.ndarray) -> tuple[float, float]:
     Strided (not randomly sampled) so the answer is deterministic for a given
     input — two runs of the same stack must produce the same picture.
     """
-    from astropy.stats import sigma_clipped_stats
+    from seestack.core.skystats import sigma_clipped_stats_finite
 
     flat = np.asarray(values).ravel()
     if flat.size > _STATS_SAMPLE_CAP:
         flat = flat[::int(np.ceil(flat.size / _STATS_SAMPLE_CAP))]
-    _, med, std = sigma_clipped_stats(flat, sigma=3.0, maxiters=5)
+    _, med, std = sigma_clipped_stats_finite(flat, sigma=3.0, maxiters=5)
     return float(med), float(std)
 
 
@@ -198,9 +198,10 @@ def _sky_mode(sky_pixels: np.ndarray) -> float | None:
     when the sample has no usable statistics at all, so the caller can skip the
     level rather than shift it by a nonsense offset.
     """
-    from astropy.stats import sigma_clipped_stats
+    from seestack.core.skystats import sigma_clipped_stats_finite
 
-    sc_mean, sc_med, sc_std = sigma_clipped_stats(sky_pixels, sigma=3.0, maxiters=5)
+    sc_mean, sc_med, sc_std = sigma_clipped_stats_finite(
+        sky_pixels, sigma=3.0, maxiters=5)
     if not (np.isfinite(sc_mean) and np.isfinite(sc_med)):
         return None
     mode_est = 2.5 * sc_med - 1.5 * sc_mean
