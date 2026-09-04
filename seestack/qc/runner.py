@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from seestack.io.project import readable_frame_path
+from seestack.io.project import readable_frame_path, restoration_stamp
 from seestack.qc.metrics import FrameMetrics, compute_frame_metrics
 
 log = logging.getLogger(__name__)
@@ -321,13 +321,17 @@ def reconcile_streak_rejections(project) -> list[int]:
     if not fires:
         return _reconcile_stationary(project, streaked)
     restored: list[int] = []
+    stamp = restoration_stamp()
     for f in streaked:
         if f.id is None:
             continue
         # Only the streak reason kept these out; clear it and re-accept. The
         # ``streak_detected`` flag stays set, so the UI still shows "N streaked"
-        # and the user can bulk-reject them if they really are trails.
-        project.update_frame(f.id, accept=True, reject_reason=None)
+        # and the user can bulk-reject them if they really are trails. The stamp
+        # records *when* the sub came back, so the Target page can tell that a
+        # picture stacked earlier was made without it.
+        project.update_frame(f.id, accept=True, reject_reason=None,
+                             restored_utc=stamp)
         restored.append(f.id)
     log.info(
         "streak reconcile: re-accepted %d of %d frames auto-rejected as streaks "
@@ -352,13 +356,15 @@ def _reconcile_stationary(project, streaked: list) -> list[int]:
     if not keep:
         return []
     restored: list[int] = []
+    stamp = restoration_stamp()
     for f in streaked:
         if f.id not in keep:
             continue
         # Same as the fraction guard: clear only the streak reason, leave
         # ``streak_detected`` set so the UI still counts them and the user can
-        # bulk-reject if they disagree.
-        project.update_frame(f.id, accept=True, reject_reason=None)
+        # bulk-reject if they disagree, and stamp when the sub came back.
+        project.update_frame(f.id, accept=True, reject_reason=None,
+                             restored_utc=stamp)
         restored.append(f.id)
     log.info(
         "streak reconcile: re-accepted %d of %d frames auto-rejected as streaks "

@@ -627,6 +627,20 @@ export interface RestackGain {
   missing_night_count: boolean;
 }
 
+/** Subs the app set aside on its own and later put back — *after* this target's
+ *  newest picture was stacked, so the picture was made without them. The
+ *  counterpart of "N new subs since your last stack" for the case that one can't
+ *  see: a restored sub was *shot* before the stack ran. `null` when nothing came
+ *  back since, which is every healthy install. */
+export interface RestoredSubs {
+  run_id: number;
+  timestamp_utc: string;
+  /** How many subs the picture on screen combined. */
+  n_frames_used: number;
+  /** How many came back after it was made, and are ready to stack now. */
+  n_restored: number;
+}
+
 export interface HealthNote {
   kind: string;
   severity: "good" | "info";
@@ -2453,6 +2467,10 @@ export const api = {
   // back, named as a gain. `null` (the common case) means say nothing.
   restackGain: (safe: string) =>
     req<RestackGain | null>(`/api/targets/${safe}/restack-gain`),
+  // "Some of your subs came back after this picture was made" — automation put
+  // set-aside subs back after the newest stack ran. `null` means say nothing.
+  restoredSubs: (safe: string) =>
+    req<RestoredSubs | null>(`/api/targets/${safe}/restored-subs`),
   stackHealth: (safe: string, runId?: number) =>
     req<StackHealth | null>(
       `/api/targets/${safe}/stack-health` +

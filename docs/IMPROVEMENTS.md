@@ -12677,27 +12677,75 @@ to **Shipped**.)_
     still is untouched by all of this and must never be nudged. Grep `webapp/video.py` (`read_meta`'s
     known-fields filter already makes additive fields safe) and `MoonSun.tsx` before building.
 
-- **NEW IDEA (Builder 2026-09-04, the half v0.346.0 deliberately did not build) — a target whose subs were
-  wrongly held out and have since been *restored* keeps the thin picture it was stacked from, and nothing says
-  so.** *(Pillar: autonomy + trust — PRIORITY 2/3; size S–M; confidence: **traced**, the mechanism is v0.346.0's
-  own.)* The streak position guard re-accepts subs an earlier scan had discarded — up to a third of a session
-  on an edge-on galaxy — but the target's **published stack was made without them** and the owner's live
-  settings have `auto_stack` **off**, so nothing will notice. They are left with a picture that is quietly
-  worse than their data, and no reason on screen to re-stack.
-  **The precedent to copy, not to re-derive:** `pipeline._auto_stack_degraded_recheck` already answers exactly
-  this shape for the walk-away readability case — "the best stack this target has is thinner than what is
-  readable now, so redo it once". The honest quantity here is the same comparison, from a different cause:
-  `stack_runs.n_frames_used` on the newest run against the target's accepted+solved count *now*.
-  **Two shapes, and the second is the one that fits the owner's settings.** (a) An unattended re-stack, which
-  is a behaviour change on a target the owner did not ask to be stacked — needs to stay behind `auto_stack`,
-  which is off, so it would help nobody today. (b) A **nudge on the Target page**: *"12 subs were set aside as
-  satellite trails and have since been restored — your picture was made without them. Re-stack?"* with the
-  existing one-click re-stack. That is the shippable one. **Grep first:** `restackgain.py` already computes
-  "how much would re-stacking gain?", and the Target page already carries a re-stack action — this is very
-  likely a new *condition* on machinery that exists, not a new card, and it must go inside the existing
-  grouping rather than adding one more always-on banner (§1's standing IA rule). **Care:** the condition must
-  fire only on a real restoration, not on every target whose newest run predates its newest subs — otherwise it
-  is on screen permanently for anyone still shooting, which is everyone.
+- **✅ SHIPPED (Builder, v0.351.0, branch `claude/sweet-babbage-bezz8m`) — ~~a target whose subs were wrongly
+  held out and have since been *restored* keeps the thin picture it was stacked from, and nothing says so~~.**
+  Built to shape (b), the nudge, exactly as the entry asked — and the entry's one hard requirement ("fire only
+  on a real restoration, not on every target whose newest run predates its newest subs") is what decided the
+  whole design.
+
+  **The condition is a recorded fact, not a count comparison — and that was the crux.** The obvious rule,
+  "more subs are ready now than the newest run combined", was sized and rejected: a run legitimately combines
+  fewer frames than it is offered whenever one fails to align or its file was unreadable at the time, so that
+  rule reads *permanently true* on an ordinary target and would have put an un-dismissable "re-stack me" banner
+  on the page the owner opens every session. Instead `frames.restored_utc` (schema 22, additive, NULL on every
+  older row) records **the moment automation put a sub back**, so the question becomes "was the picture stacked
+  before that?" — two timestamps, both about the app's own actions, and exactly right.
+
+  **All three reconsiderations stamp it, so the answer can't drift by cause.** The streak-position guard and
+  the fraction guard (`qc/runner.py`), the auto-grade re-accept (`qc/grading.py`), and the missing-file
+  restoration (`Project.restore_missing_frames`) all write it through one `restoration_stamp()` helper, whose
+  reason for existing is that the value is compared against a stack run's `timestamp_utc` and the two must not
+  become a format argument between call sites. A **user's** accept is never stamped — their decision is not the
+  app noticing something.
+
+  **What it will and won't promise.** `Project.restored_frame_stamps()` lists only subs that are accepted **and
+  plate-solved now**, because those are the two things a re-stack needs from a frame: a restored-but-unsolved
+  sub would not go into the picture, and it self-heals into the count the moment the solve lands. A sub the
+  user has since rejected by hand drops out too.
+
+  **It sits inside the existing grouping** (§1's standing IA rule), as one advisory `NoticeBoard` entry — and
+  it *replaces* rather than joins the older "this picture can't say which night it's from" note, which presses
+  the same button: two restack offers on one page is the banner-piling the owner complained about, and
+  "your picture is thinner than your data" is the more pressing of the two. Both stand down while the "N new
+  subs" note is up, for the same reason. **Never auto-re-stacks** (§9): it is hours of NAS CPU on a target the
+  owner did not ask to be stacked.
+
+  **Upgrade-safe (§9):** one additive nullable column, one new endpoint, one new response model, one new
+  client method; no config, on-disk path, existing shape or default touched. An older frontend against a new
+  backend never calls it; a new frontend against an older backend gets a 404, catches it, and says nothing.
+
+  **Tests (+27).** `tests/test_restorednudge.py` (+11, the pure rule: after/before/at-the-boundary, only the
+  newest run counting, unparseable and naive stamps, and the four silence cases);
+  `tests/test_restored_stamp.py` (+8, through a real project DB — each of the three restoration paths stamping,
+  and the three shapes that must *not* stamp: an ordinary accepted sub, a real trail that stays rejected, a
+  file that is still missing); `tests/webapp/test_target_restored_subs.py` (+8, the endpoint on the real
+  library fixture, including the restack landing and the note going away); `test_project_schema_drift.py` (+1,
+  the v21 → v22 upgrade with every row and value intact and the stamp arriving NULL);
+  `RestoredSubsNote.test.tsx` (+5) and `Target.test.tsx` (+3, the wiring and both stand-downs).
+
+  *(Original entry follows.)*
+
+  - **NEW IDEA (Builder 2026-09-04, the half v0.346.0 deliberately did not build) — a target whose subs were
+    wrongly held out and have since been *restored* keeps the thin picture it was stacked from, and nothing says
+    so.** *(Pillar: autonomy + trust — PRIORITY 2/3; size S–M; confidence: **traced**, the mechanism is v0.346.0's
+    own.)* The streak position guard re-accepts subs an earlier scan had discarded — up to a third of a session
+    on an edge-on galaxy — but the target's **published stack was made without them** and the owner's live
+    settings have `auto_stack` **off**, so nothing will notice. They are left with a picture that is quietly
+    worse than their data, and no reason on screen to re-stack.
+    **The precedent to copy, not to re-derive:** `pipeline._auto_stack_degraded_recheck` already answers exactly
+    this shape for the walk-away readability case — "the best stack this target has is thinner than what is
+    readable now, so redo it once". The honest quantity here is the same comparison, from a different cause:
+    `stack_runs.n_frames_used` on the newest run against the target's accepted+solved count *now*.
+    **Two shapes, and the second is the one that fits the owner's settings.** (a) An unattended re-stack, which
+    is a behaviour change on a target the owner did not ask to be stacked — needs to stay behind `auto_stack`,
+    which is off, so it would help nobody today. (b) A **nudge on the Target page**: *"12 subs were set aside as
+    satellite trails and have since been restored — your picture was made without them. Re-stack?"* with the
+    existing one-click re-stack. That is the shippable one. **Grep first:** `restackgain.py` already computes
+    "how much would re-stacking gain?", and the Target page already carries a re-stack action — this is very
+    likely a new *condition* on machinery that exists, not a new card, and it must go inside the existing
+    grouping rather than adding one more always-on banner (§1's standing IA rule). **Care:** the condition must
+    fire only on a real restoration, not on every target whose newest run predates its newest subs — otherwise it
+    is on screen permanently for anyone still shooting, which is everyone.
 
 - **⚪ CHECKED, NOT A GAP — recorded so the next run doesn't "fix" it (Builder 2026-09-04, while shipping
   v0.346.0).** The stationary-streak guard needs its clustered frames to span an hour, which a beginner's
