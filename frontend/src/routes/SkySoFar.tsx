@@ -12,6 +12,7 @@ import { QueryError } from "../components/QueryError";
 import { MyDeepSkyWallCard } from "../components/MyDeepSkyWallCard";
 import { ShareYourSkyCard } from "../components/ShareYourSkyCard";
 import { BestNightCard } from "../components/BestNightCard";
+import { YourYearCard } from "../components/YourYearCard";
 
 function StatCard({ icon, label, value, sub }: {
   icon: React.ReactNode; label: string; value: string; sub?: string;
@@ -116,6 +117,11 @@ export function SkySoFarView() {
               label="First light"
               value={formatMonthYear(data.first_light_utc)} />
           </SimpleGrid>
+
+          {/* One calendar year of it, on its own page — the middle of the time
+              axis between "last night" and "everything". A link inside the
+              existing flow, not another nav entry. */}
+          <YourYearCard />
 
           {/* The one night that was better than the others — the first thing on
               this page that ranks a night rather than adding it up. Self-hides
