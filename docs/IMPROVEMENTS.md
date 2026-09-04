@@ -12365,6 +12365,49 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **⭐ VERIFIED, MEASURED, DELIBERATELY NOT BUILT (Builder 2026-09-04, the fourth and last site of the
+  "a six-hour gap is not a night" class) — the "Last session" card and the Nights row *directly beneath it*
+  report different numbers for the same dated night, on the same screen.** *(Pillar: trust — PRIORITY 3;
+  size S to write, but it turns on a **product choice** an agent should not make alone. Confidence:
+  reproduced.)* `routes/Target.tsx:1781-1782` renders `<SessionRecapCard>` immediately above `<NightsCard>`.
+  The recap is `session_recap`, which is honestly *session*-shaped (the trailing 6 h-gap cluster) — but it is
+  **dated with the observing night** (`night_date`, v0.229.2), and the Nights row below it is night-shaped
+  since v0.342.0. On a night shot in two goes they therefore disagree, measured on a 26-sub split night
+  (21:00–23:00, 05:30–07:30):
+
+  | card | reads |
+  |---|---|
+  | "Last session — 1 Jul 2026" | 13 subs kept, 130 s |
+  | Nights row, 1 Jul 2026 | 26 subs kept, 260 s |
+
+  **Why it is filed rather than fixed, and this is the whole of the difficulty:** the two honest repairs are
+  a *product* decision, not a code one. (a) Make the recap night-shaped and retitle the card **"Last
+  night"** — it then agrees with the row, and with the Dashboard card of the same name (v0.342.4), at the
+  cost of the one screen that could tell you what your *most recent sitting* produced. (b) Keep it
+  session-shaped and stop dating it with a night — the contradiction goes away because the card no longer
+  claims to be about that date, at the cost of the v0.229.2 improvement that let a beginner tell whether
+  "27 subs kept" was last night or three weeks ago. **Do not split the difference** by dating it with a
+  session-specific label nobody else uses; a third vocabulary for time on this page is worse than either.
+  A future run (or the owner) should pick; (a) is the better guess, because every other night-shaped surface
+  has converged that way and "your most recent sitting" is not a question the app is otherwise asked.
+
+- **⚪ SWEEP COMPLETE — the "a six-hour gap is not a night" class has four sites and all four are now
+  answered; here is the list so nobody re-walks it (Builder 2026-09-04).** The generative test is cheap
+  enough to keep applying to *new* code, but a repository-wide re-sweep is spent. **A candidate is any
+  statistic computed over `_split_sessions` / `session_end_stamps` output that is then *called a night*, or
+  *counted* as one.** Every site, and its answer:
+  - `recent_night_pace_s` — **fixed v0.329.4** (a split night halved the pace; a short one vanished under
+    `MIN_PRODUCTIVE_NIGHT_S`).
+  - `nights_breakdown`'s rows — **fixed v0.342.0** (two rows carrying one date, with a "Set this night
+    aside" button that acted on half of it).
+  - `early_stop`, on both surfaces — **fixed v0.342.3** (the prior-*night* floor counted sessions, so two
+    split nights invented a habit; and the median was diluted by mid-night stops).
+  - `library_session_recap` — **fixed v0.342.4** (the Dashboard's "Last night" card reported half a night).
+  - `session_recap` — **the entry above**: not a defect in the statistic, which is honestly session-shaped;
+    a defect in showing it next to a night-shaped one under a shared date.
+  Everything else that splits sessions either *is* asking a session question (`last_session_frames`,
+  `recent_session_window_frames` — a memory bound) or already takes a `night_of`.
+
 - **✅ SHIPPED (Builder, v0.342.4, branch `claude/sweet-babbage-77bqc1`) — the Dashboard card headed "Last
   night" was reporting HALF a night, and nobody had swept for the third instance of the class.** Found by
   finishing the v0.342.3 fix properly: after wiring the session-vs-night distinction through `early_stop`, I
