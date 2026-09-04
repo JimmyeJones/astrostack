@@ -12619,25 +12619,63 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **⭐ NEW IDEA (Builder 2026-09-04, the half v0.347.0 could not reach) — the Sun still that *is* covered in
-  the mesh is still sitting on the owner's box, and nothing tells them to re-stack it.** *(Pillar: autonomy +
-  trust — PRIORITY 2/3; size S; confidence: **certain**, it is the direct consequence of the fix.)*
-  v0.347.0 makes every *new* video stack demosaic its source. It cannot touch the picture already on disk:
-  `result_dir(...)/meta.json` + the rendered still are written once at stack time and only ever replaced by
-  an explicit re-stack, and there is no auto-stack path for video at all. So the owner upgrades, the bug is
-  fixed, and the Sun on their Moon & Sun page is *still meshed* — with the app silent about why, and no
-  reason on screen to press the button that would fix it.
-  **Why this needs a stamp rather than a guess.** `VideoStackMeta` carries no version or provenance field, so
-  nothing distinguishes a still made before the fix from one made after. **Shape:** one additive, defaulted
-  field — `demosaiced: bool = False`, or a plain `engine_version: str = ""` if a general stamp is judged more
-  useful — written by the stack job; a still whose source `source_is_cfa_mosaic` says is raw *and* whose meta
-  does not claim the demosaic is stale. Then one line on the capture's card: *"this picture was made before
-  AstroStack could read your camera's colour filter — re-stack it for real colour and no mesh"*, next to the
-  re-stack button that already exists. **Do not auto-re-stack**: it is a multi-minute job on a static file
-  the owner did not ask for, and the perf note under "Performance" says what that now costs.
-  **Care:** `False` must mean "unknown, and the source is raw", not "definitely stale" — a colour capture's
-  still is untouched by all of this and must never be nudged. Grep `webapp/video.py` (`read_meta`'s
-  known-fields filter already makes additive fields safe) and `MoonSun.tsx` before building.
+- **✅ SHIPPED (Builder, v0.348.0, branch `claude/sweet-babbage-slg59h`) — ~~the Sun still that *is* covered
+  in the mesh is still sitting on the owner's box, and nothing tells them to re-stack it~~.** Built in the
+  same run that filed it, because the fix it completes is an owner-reported wrong picture and the owner
+  would otherwise still be looking at it.
+
+  **One field, not three, because the check can mark itself done.** `VideoStackMeta.colour_current`
+  (additive, `False` on every older `meta.json`) means *"this picture's colour is what the current build
+  produces"* — written `True` by every stack this build makes, whatever the source was. `colour_is_stale`
+  then answers the question exactly rather than by looking at pixels: not `colour_current`, **and** the
+  capture's own `pix_fmt` says raw. The elegant part is the else-branch — a capture that turns out to be
+  ordinary colour is **marked `colour_current` on the spot and written back**, so its source is probed once
+  and never again. Only a genuinely stale raw still keeps costing a probe, which is exactly the one we want
+  to keep nudging about, and there is at most a handful.
+
+  **Every failure answers "not stale".** A capture whose file is gone, an unreadable source, ffmpeg missing,
+  any probe failure: all read as fine. Being told to re-stack a picture that is right is worse than being
+  told nothing about one that is wrong, and that asymmetry is the whole design.
+
+  **The nudge sits inside the existing grouping** (§1's standing IA rule): one `Alert` in the same stack as
+  the crop and sharpen offers, in plain language — *"This picture was made before AstroStack could read your
+  camera's colour filter, so it came out grey with a fine mesh over it"* — with a **Stack it again** button
+  wired to the re-stack that already exists. **Not auto-re-stacked**, as the entry demanded: it is a
+  multi-minute job on a static file nobody asked for, and the perf note under "Performance" prices it.
+
+  **Upgrade-safe (§9):** one additive meta field with a neutral default (`read_meta`'s known-fields filter
+  already tolerates both directions), one additive response field, one optional client field; no config,
+  schema, on-disk path or existing shape touched. An older frontend against a new backend ignores
+  `colour_stale`; a new frontend against an older backend sees nothing and says nothing.
+
+  **Tests (+7; the two that matter fail before).** `tests/webapp/test_video_api.py` (+4), each driving a real
+  stack of a real capture and then rewriting the meta the way a pre-v0.347.0 build wrote it: the raw still
+  offering the re-stack, this build's own still never called stale, **an old colour still left alone *and*
+  its check written back** (so the probe happens once), and a still whose video has been deleted staying
+  quiet. `MoonSun.test.tsx` (+2): the alert appearing and its button actually starting a stack, and the
+  silence on an ordinary picture. `MoonSun.tsx`'s existing 45 tests still pass unchanged.
+
+  *(Original entry follows.)*
+
+  - **⭐ NEW IDEA (Builder 2026-09-04, the half v0.347.0 could not reach) — the Sun still that *is* covered in
+    the mesh is still sitting on the owner's box, and nothing tells them to re-stack it.** *(Pillar: autonomy +
+    trust — PRIORITY 2/3; size S; confidence: **certain**, it is the direct consequence of the fix.)*
+    v0.347.0 makes every *new* video stack demosaic its source. It cannot touch the picture already on disk:
+    `result_dir(...)/meta.json` + the rendered still are written once at stack time and only ever replaced by
+    an explicit re-stack, and there is no auto-stack path for video at all. So the owner upgrades, the bug is
+    fixed, and the Sun on their Moon & Sun page is *still meshed* — with the app silent about why, and no
+    reason on screen to press the button that would fix it.
+    **Why this needs a stamp rather than a guess.** `VideoStackMeta` carries no version or provenance field, so
+    nothing distinguishes a still made before the fix from one made after. **Shape:** one additive, defaulted
+    field — `demosaiced: bool = False`, or a plain `engine_version: str = ""` if a general stamp is judged more
+    useful — written by the stack job; a still whose source `source_is_cfa_mosaic` says is raw *and* whose meta
+    does not claim the demosaic is stale. Then one line on the capture's card: *"this picture was made before
+    AstroStack could read your camera's colour filter — re-stack it for real colour and no mesh"*, next to the
+    re-stack button that already exists. **Do not auto-re-stack**: it is a multi-minute job on a static file
+    the owner did not ask for, and the perf note under "Performance" says what that now costs.
+    **Care:** `False` must mean "unknown, and the source is raw", not "definitely stale" — a colour capture's
+    still is untouched by all of this and must never be nudged. Grep `webapp/video.py` (`read_meta`'s
+    known-fields filter already makes additive fields safe) and `MoonSun.tsx` before building.
 
 - **NEW IDEA (Builder 2026-09-04, the half v0.346.0 deliberately did not build) — a target whose subs were
   wrongly held out and have since been *restored* keeps the thin picture it was stacked from, and nothing says
