@@ -4,11 +4,13 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   NightsCard,
+  earlyStopTooltip,
   formatNightDate,
   nightDateLabel,
   verdictBadge,
   verdictTooltip,
 } from "./NightsCard";
+import { describeEarlyStop } from "./LastNightCard";
 import type { NightSummary } from "../api/client";
 import * as client from "../api/client";
 
@@ -246,5 +248,65 @@ describe("NightsCard", () => {
     expect(screen.getAllByRole("button", { name: "Set aside" })).toHaveLength(1);
     // The fully-set-aside night shows the dimmed marker instead of a button.
     expect(screen.getByText("set aside", { selector: "p" })).toBeInTheDocument();
+  });
+});
+
+describe("earlyStopTooltip", () => {
+  const early = {
+    stopped_utc: "2026-07-05T22:00:00+00:00",
+    minutes_earlier: 240,
+    n_nights_compared: 4,
+  };
+
+  it("says when the night stopped and how much earlier than usual", () => {
+    const tip = earlyStopTooltip(night({ ended_early: early }));
+    expect(tip).toMatch(/^Stopped getting subs at /);
+    expect(tip).toContain("about 4 h earlier than its last 4 nights");
+    // Never an accusation: most early stops are deliberate.
+    expect(tip).toContain("Worth a look if you didn't stop on purpose.");
+  });
+
+  it("uses the same words as the Dashboard's Last night sentence", () => {
+    // One measurement, two surfaces — they must not be able to phrase it
+    // differently, so both compose the clause from one helper.
+    const tip = earlyStopTooltip(night({ ended_early: early }))!;
+    expect(describeEarlyStop({ name: "M 42", safe: "M_42", ...early }))
+      .toContain(tip.charAt(0).toLowerCase() + tip.slice(1, tip.indexOf(".")));
+  });
+
+  it("says nothing for a night that ended as usual, or an older backend", () => {
+    expect(earlyStopTooltip(night({ ended_early: null }))).toBeNull();
+    expect(earlyStopTooltip(night())).toBeNull();
+  });
+});
+
+describe("NightsCard early-stop marker", () => {
+  it("marks the night that stopped early, and no other", async () => {
+    vi.spyOn(client.api, "targetNights").mockResolvedValue([
+      night({
+        start_utc: "2026-07-05T21:00:00+00:00",
+        ended_early: {
+          stopped_utc: "2026-07-05T22:00:00+00:00",
+          minutes_earlier: 240,
+          n_nights_compared: 4,
+        },
+      }),
+      night({ start_utc: "2026-07-04T21:00:00+00:00" }),
+    ]);
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Nights")).toBeInTheDocument());
+    const marks = screen.getAllByText("ended early");
+    expect(marks).toHaveLength(1);
+    // The explanation is reachable without a pointer, exactly as the verdict
+    // badge's is — the Target page is too busy for another column.
+    expect(screen.getByLabelText(/ended early: .*about 4 h earlier/))
+      .toBeInTheDocument();
+  });
+
+  it("shows no marker when the server sent none", async () => {
+    vi.spyOn(client.api, "targetNights").mockResolvedValue([night(), night()]);
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Nights")).toBeInTheDocument());
+    expect(screen.queryByText("ended early")).not.toBeInTheDocument();
   });
 });

@@ -91,13 +91,26 @@ export function roughDuration(minutes: number): string {
  *  "23:40" only means anything to someone in the hour they were shooting.
  *  Pure and offline so it is unit-testable without rendering. */
 export function describeEarlyStop(e: EarlyStop): string {
+  return `${e.name} ${earlyStopClause(e)}. `
+    + "Worth a look if you didn't stop on purpose.";
+}
+
+/** The name-free half of the sentence above — "stopped getting subs at 23:40 —
+ *  about 3 h earlier than its last 4 nights".
+ *
+ *  Split out so the Target page's Nights card can annotate the row for that
+ *  night with the *same* words, without repeating a target name the reader is
+ *  already looking at. Two surfaces reporting one measurement must not be able
+ *  to phrase it differently, so there is one clause and both read it. */
+export function earlyStopClause(
+  e: Pick<EarlyStop, "stopped_utc" | "minutes_earlier" | "n_nights_compared">,
+): string {
   const clock = new Date(e.stopped_utc).toLocaleTimeString(undefined, {
     hour: "2-digit", minute: "2-digit",
   });
-  const nights = `its last ${e.n_nights_compared} nights`;
-  return `${e.name} stopped getting subs at ${clock} — about `
-    + `${roughDuration(e.minutes_earlier)} earlier than ${nights}. `
-    + "Worth a look if you didn't stop on purpose.";
+  return `stopped getting subs at ${clock} — about `
+    + `${roughDuration(e.minutes_earlier)} earlier than `
+    + `its last ${e.n_nights_compared} nights`;
 }
 
 /**

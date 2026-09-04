@@ -1596,3 +1596,97 @@ def test_early_stop_takes_a_median_so_one_odd_night_cannot_set_the_habit():
         _night_frames(base + timedelta(days=4), start_h=21, end_h=24.0),
     ]
     assert early_stop(_ends(nights)) is None
+
+
+# --- the same fact, on the target's own page --------------------------------
+#
+# The Dashboard's "Last night" card can only ever speak for the library's most
+# recent capture night. A target shot on Tuesday and not returned to has this
+# fact recorded and nowhere to say it by Thursday, so the newest row of its own
+# Nights breakdown carries it.
+
+
+def _add_all(proj, nights):
+    for night in nights:
+        for f in night:
+            proj.add_frame(f)
+
+
+def test_nights_breakdown_marks_the_newest_night_that_stopped_early(tmp_path):
+    """Four nights ending at 02:00, then one that stops at 22:30 → the newest
+    row says so, and no older row does."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        base = datetime(2026, 8, 1)
+        nights = [_night_frames(base + timedelta(days=d), start_h=21, end_h=26)
+                  for d in range(4)]
+        nights.append(_night_frames(base + timedelta(days=4),
+                                    start_h=21, end_h=22.5))
+        _add_all(proj, nights)
+        rows = nights_breakdown(proj)  # newest first
+        assert len(rows) == 5
+        assert rows[0].ended_early is not None
+        assert rows[0].ended_early.minutes_earlier == 210.0
+        assert rows[0].ended_early.n_nights_compared == 4
+        assert rows[0].ended_early.stopped_utc.startswith("2026-08-05T22:30")
+        # The marker is dated by the row it sits on; history is not annotated.
+        assert all(r.ended_early is None for r in rows[1:])
+    finally:
+        proj.close()
+
+
+def test_nights_breakdown_says_nothing_about_a_night_that_ended_as_usual(tmp_path):
+    """Silence is the default — an owner who goes to bed at the same time every
+    night must never be told they lost half of one."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        base = datetime(2026, 8, 1)
+        _add_all(proj, [_night_frames(base + timedelta(days=d),
+                                      start_h=21, end_h=26)
+                        for d in range(5)])
+        rows = nights_breakdown(proj)
+        assert len(rows) == 5
+        assert all(r.ended_early is None for r in rows)
+    finally:
+        proj.close()
+
+
+def test_nights_breakdown_early_stop_reads_the_same_stamps_as_the_dashboard(tmp_path):
+    """A night shot in two goes is ONE row here (``night_of`` merges it) but TWO
+    sessions on the Dashboard. The early-stop judgement must still be computed
+    from the session stamps, or the two surfaces would quote different medians
+    for the same night with no way for the reader to tell which is right."""
+    from seestack.session_recap import early_stop, session_end_stamps
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        base = datetime(2026, 8, 1)
+        nights = []
+        for d in range(4):
+            # An evening run, bed, then a pre-dawn run: 21:00 → 04:00 is more
+            # than the 6 h session gap, so two sessions inside one night.
+            day = base + timedelta(days=d)
+            nights.append(_night_frames(day, start_h=19, end_h=21))
+            nights.append(_night_frames(day, start_h=28, end_h=29))
+        nights.append(_night_frames(base + timedelta(days=4),
+                                    start_h=19, end_h=21.5))
+        _add_all(proj, nights)
+        flat = [f for night in nights for f in night]
+
+        def _night_of(stamp):
+            # Noon-to-noon buckets, as the webapp's observing-night key does.
+            if not stamp:
+                return None
+            dt = datetime.fromisoformat(stamp) - timedelta(hours=12)
+            return dt.date().isoformat()
+
+        rows = nights_breakdown(proj, night_of=_night_of)
+        assert len(rows) == 5  # the four split nights merged back into one each
+        assert rows[0].ended_early == early_stop(session_end_stamps(flat))
+        assert rows[0].ended_early is not None
+        # Five prior *sessions* — `EARLY_STOP_MAX_PRIOR_NIGHTS`, taken from the
+        # unmerged list — not the four merged nights the rows are built from.
+        assert rows[0].ended_early.n_nights_compared == 5
+        assert rows[0].ended_early.minutes_earlier == 450.0
+    finally:
+        proj.close()
