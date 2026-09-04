@@ -227,7 +227,10 @@ describe("LatestPictureCard — object labels", () => {
     expect(screen.queryByTestId("identify-toggle")).not.toBeInTheDocument();
   });
 
-  it("refuses to place labels on a picture a past save rotated North-up", async () => {
+  it("refuses to place labels on a turned picture the server didn't answer for", async () => {
+    // The fallback, and what an older backend always looks like: no
+    // `preview_objects` in the payload, so there is no honest way to place a pin
+    // on bytes a past save turned. Say so rather than mis-plot.
     const spy = vi.spyOn(client.api, "stackAnnotations")
       .mockResolvedValue(annotations());
     renderCard(mkRun({ preview_north_up_deg: 12.5 }));
@@ -235,6 +238,38 @@ describe("LatestPictureCard — object labels", () => {
     await waitFor(() => expect(screen.getByTestId("identify-readout"))
       .toHaveTextContent(/saved rotated so North is up/));
     expect(spy).toHaveBeenCalled();  // still asked; just not drawn on this render
+  });
+
+  it("names what's in a picture a past save rotated North-up", async () => {
+    // The point of the slice: using the app's own "Adjust \u2192 North up \u2192 Save"
+    // used to cost you "What's in it?" entirely, with the app explaining that it
+    // couldn't place labels on a picture it had just made. The server now answers
+    // on the turned preview's own grid, so the names come back.
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations({
+      objects: [obj({ x_px: 960, y_px: 540 })],
+      preview_objects: [obj({ x_px: 700, y_px: 900 })],
+      preview_width: 1600, preview_height: 1700,
+    }));
+    renderCard(mkRun({ preview_north_up_deg: 12.5 }));
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    const readout = await screen.findByTestId("identify-readout");
+    await waitFor(() => expect(readout).toHaveTextContent("In this picture: Orion Nebula"));
+    expect(readout).not.toHaveTextContent(/saved rotated so North is up/);
+  });
+
+  it("lists the objects the server placed, not the un-turned ones", async () => {
+    // A turned picture can drop an object the crop cut away, so the read-out has
+    // to follow the placed list rather than the canvas-grid one it came from.
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations({
+      objects: [obj(), obj({ catalog_id: "NGC 1977", name: "Running Man Nebula" })],
+      preview_objects: [obj({ x_px: 700, y_px: 900 })],
+      preview_width: 1600, preview_height: 1700,
+    }));
+    renderCard(mkRun({ preview_north_up_deg: 12.5 }));
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    const readout = await screen.findByTestId("identify-readout");
+    await waitFor(() => expect(readout).toHaveTextContent("Orion Nebula"));
+    expect(readout).not.toHaveTextContent("Running Man");
   });
 
   it("refuses to place labels on a processed picture whose geometry can't be reconciled", async () => {
@@ -275,15 +310,29 @@ describe("LatestPictureCard — object labels", () => {
       "href", "/api/targets/M_42/stack-runs/7/jpeg?label_objects=true");
   });
 
-  it("doesn't offer the labelled save where the server would refuse it", async () => {
-    // A picture a past save rotated North-up can't carry the pins at all — the
-    // server hands back the plain file — so offering the save would be a link
-    // that quietly does nothing.
+  it("doesn't offer the labelled save where the pins can't be placed at all", async () => {
+    // A turned picture the server didn't answer for carries no pins here, and the
+    // save would be a link that quietly does nothing. (A turned picture it *did*
+    // answer for is the test below: the baked share follows the same turn.)
     vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations());
     renderCard(mkRun({ preview_north_up_deg: 12.5 }));
     fireEvent.click(screen.getByTestId("identify-toggle"));
     await screen.findByTestId("identify-readout");
     expect(screen.queryByTestId("save-labelled")).not.toBeInTheDocument();
+  });
+
+  it("offers the labelled save on a turned picture the server placed pins on", async () => {
+    // The share bakes its names through the same turn (v0.349.0), so the offer is
+    // honest here — the file really does come back with the names on it.
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations({
+      preview_objects: [obj({ x_px: 700, y_px: 900 })],
+      preview_width: 1600, preview_height: 1700,
+    }));
+    renderCard(mkRun({ preview_north_up_deg: 12.5 }));
+    fireEvent.click(screen.getByTestId("identify-toggle"));
+    const link = await screen.findByTestId("save-labelled");
+    expect(link).toHaveAttribute(
+      "href", "/api/targets/M_42/stack-runs/7/jpeg?label_objects=true");
   });
 
   it("doesn't offer the labelled save when nothing landed in the frame", async () => {

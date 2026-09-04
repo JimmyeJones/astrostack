@@ -20920,6 +20920,55 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Friendliness (PRIORITY 3)
 
+- **✅ SHIPPED (Builder, v0.350.0, branch `claude/sweet-babbage-8dyvfi`) — ~~using the app's own
+  "Adjust → North up → Save" silently cost you "What's in it?", for good~~. The pins now follow the turn on
+  screen too, so the app stops telling you it can't label a picture it just made.**
+  *(Pillar: friendliness / trust — PRIORITY 3. Found while shipping the North-up half of the labelled share,
+  v0.349.0, which fixed the same stand-down on the shared *file*.)*
+
+  **The dead end.** `preview_north_up_deg` is only ever set by History's "Adjust → North up → Save" — the
+  app's own, discoverable way to orient a picture like every reference photo of the object. From then on both
+  surfaces that draw object pins (`LatestPictureCard` and History) hid them and said *"This picture was saved
+  rotated so North is up, so object labels can't be placed on it — they're measured on the un-rotated
+  image."* Honest, and a dead end the app created for itself: the only way back was to save it un-rotated,
+  i.e. to undo the feature.
+
+  **Why it stayed unfixed, and what changed.** The browser genuinely cannot reconstruct the turn — a
+  rotate-with-expand's canvas is a ceil/floor bounding box and a near-square angle snaps to a lossless
+  `rot90` — so re-deriving it in TypeScript would have been a second copy of the renderer's geometry, free to
+  drift from both the picture and the names baked into a share. v0.349.0 made the server able to answer
+  (`follow_north_up_turns`), so it answers: `GET …/annotations` gained **`preview_objects`** with
+  **`preview_width`/`preview_height`** — the same objects on the stored preview's own grid, its crop applied
+  and *then* the baked turn, in the order the pixels took them. One geometry, three consumers (the on-screen
+  pin, the baked label, the picture itself), so they cannot disagree.
+
+  **What deliberately does NOT come back, and why.** The **scale bar and the compass** still stand down on a
+  turned picture. The bar's *length* would survive a rotate (the pixel scale doesn't change), but the
+  sentence it carries — *"the whole frame is about 5.4 full Moons wide"* — is a claim about the **field**, and
+  a turned frame has grown black wedges around the same sky. A pin has no such problem: it points at a thing,
+  not at the edges. So History's note now names only the half that is missing, and only when the Scale toggle
+  actually asked for it. `storedPreviewScaleBar` already said nothing there for this exact reason; a test
+  pins the two agreeing.
+
+  **Upgrade-safe (§9):** three additive response fields, `null` for every run nothing turned — so an
+  uncropped, un-turned payload is byte-for-byte what it was, and the crop-only case stays where it was (the
+  client composes that one exactly). An older backend, and any preview the server refuses to reconcile
+  (`preview_geometry_unknown`), both arrive as "no answer" and step aside exactly as before. No config key,
+  no schema, no on-disk path, no default flipped, no field renamed or removed.
+
+  **Tests (+13).** `tests/webapp/test_stack_annotations.py` (+5): nothing extra on a run nothing turned; a
+  saved-North-up preview's pins measured **against the renderer as ground truth** (plant the un-turned pixel,
+  put it through `rotate_image_north_up`, the served coordinate has to be where the marker landed);
+  crop-then-turn composed in that order on an exact 90° grid (600×640 → 640×600); an unreconcilable geometry
+  still refusing; and a turned run with no WCS answering nothing rather than erroring.
+  `AnnotatedImage.test.tsx` (+4) on the pure `turnedPreviewView` — null for every "server didn't answer"
+  shape, the server's answer taken when it did, no bar (agreeing with `storedPreviewScaleBar`), and a
+  degenerate grid refused. `LatestPictureCard.test.tsx` (+2) and `History.test.tsx` (+2): the names coming
+  back on a turned picture, the read-out following the *placed* list rather than the canvas-grid one, the
+  labelled-save offer now honest there (the share bakes through the same turn), and the note naming only the
+  marks when Scale is on. The two tests that pinned the old refusal were **kept**, re-aimed at the case that
+  still refuses (an older backend / no server answer) rather than deleted.
+
 - **⚪ DOGFOOD BASELINE (Builder 2026-09-04, `scripts/agent-dogfood.sh` at v0.345.7 — the fourth measurement,
   and the fourth that says DO NOT open a speculative IA slice).** Full run (boot → sample → stack → Playwright
   probe at 1440 px and 420 px): **nothing overflowing, no console errors**. Tallest pages, phone first:
