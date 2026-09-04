@@ -67,8 +67,23 @@ describe("savedRejectionClause", () => {
     expect(savedRejectionClause(undefined)).toBeNull();
   });
 
-  it("is silent on a drizzled run, whose rejection is settled at run time", () => {
-    expect(savedRejectionClause(outlook({ method: "drizzle" }))).toBeNull();
+  it("has its own clause for a drizzled default that can't reach either", () => {
+    // Replaces "is silent on a drizzled run": drizzle's two-pass rejection is
+    // the same κ·σ clip, so a saved drizzled mosaic at panel depth 10 is just as
+    // blind — and the owner's saved defaults are drizzled mosaics.
+    const text = savedRejectionClause(
+      outlook({ method: "drizzle", n_frames: 40, panel_depth: 10 }));
+    expect(text).toContain("will now drizzle");
+    expect(text).toMatch(/only about 10 subs land on any one spot/);
+    expect(text).toContain("it needs about 11");
+    // …and it must not offer the one fix that cannot work here.
+    expect(text).toContain("can't help while drizzle is on");
+    expect(text).not.toMatch(/Turn on Auto outlier removal and save again/);
+  });
+
+  it("is silent on a drizzled default that does reach", () => {
+    expect(savedRejectionClause(
+      outlook({ method: "drizzle", reaches: true }))).toBeNull();
   });
 
   it("is silent when there is no depth to talk about", () => {

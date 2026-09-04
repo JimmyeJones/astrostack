@@ -76,6 +76,22 @@ describe("RejectionOutlookNote", () => {
     expect(screen.queryByTestId("rejection-outlook-note")).toBeNull();
   });
 
+  it("withholds the hands-off switch on a drizzled target, which it can't fix", async () => {
+    // The note itself still shows — drizzle's own rejection is just as blind at
+    // this depth — but `auto_reject_on_unattended` is overridden while drizzle
+    // is on, so the button would be a fix that changes nothing.
+    vi.spyOn(client.api, "rejectionOutlook")
+      .mockResolvedValue(outlook({ method: "drizzle", n_frames: 40, panel_depth: 10 }));
+    renderNote(2);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("rejection-outlook-note")).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /Change how this target stacks/ }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole(
+      "link", { name: /Let AstroStack choose on every hands-off stack/ })).toBeNull();
+  });
+
   it("renders nothing when the saved rejection does reach", async () => {
     vi.spyOn(client.api, "rejectionOutlook")
       .mockResolvedValue(outlook({ reaches: true }));

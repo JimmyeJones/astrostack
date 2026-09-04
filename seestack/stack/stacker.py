@@ -834,6 +834,16 @@ def combine_method(options: "StackOptions", n: int) -> str:
 #: has to spare a sample at each end and still have one left to average.
 MIN_MAX_MIN_FRAMES = 3
 
+#: Smallest stack the two-pass **drizzle** rejection dispatches on, i.e. the
+#: floor :func:`_afford_drizzle_reject` and :func:`_records_rejection_map` both
+#: gate their ``n >= 4`` on. Named here so :func:`rejection_reach` can say
+#: "the pass does not even run" without writing the literal a fifth time; the
+#: gates themselves are deliberately left where they are (rewriting live
+#: dispatcher control flow is its own backlog item). *Dispatching* is not the
+#: same as *reaching* — see :func:`rejection_reach`, where the honest bound is
+#: :func:`kappa_min_frames`.
+DRIZZLE_REJECT_MIN_FRAMES = 4
+
 
 # The smallest population that counts as a real mosaic panel when auto-reject
 # sizes its method. Set to ``MIN_MAX_MIN_FRAMES`` on purpose: a group thinner
@@ -945,9 +955,11 @@ class RejectionReach:
     #: Candidate frames the dispatcher will gate on.
     n_frames: int
     #: Smallest ``n`` at which ``method`` could drop a lone extreme — ``None``
-    #: for ``"mean"`` (no rejection pass runs at any count) and for ``"drizzle"``
-    #: (its two-pass rejection is also gated on the memory budget, which this
-    #: pure helper does not know).
+    #: for ``"mean"`` (no rejection pass runs at any count) and for a drizzled
+    #: run that never asked for its two-pass rejection. A drizzled run that *did*
+    #: ask reports :func:`kappa_min_frames`, the same bound as κ-σ (the pass is
+    #: the same κ·σ clip); whether it also fits the memory budget is
+    #: ``_afford_drizzle_reject``'s question, which this pure helper cannot know.
     lone_outlier_min_frames: int | None
     #: Whether a lone satellite/plane/cosmic-ray hit in one sub can be removed.
     reaches: bool
@@ -963,6 +975,13 @@ def rejection_reach(options: "StackOptions", n: int,
     the default κ=3), so at every count between the two it runs, records
     ``REJMODE = sigma-clip``, and clips nothing. Min/max removes an extreme from
     3 frames up, which is why ``auto_reject`` picks it down there.
+
+    A **drizzled** run has exactly the same gap, and the owner drizzles mosaics:
+    its two-pass rejection dispatches from :data:`DRIZZLE_REJECT_MIN_FRAMES` but
+    clips with the same κ against statistics that still contain the outlier, so
+    it too reaches nothing until :func:`kappa_min_frames` samples land on the
+    pixel. Sized by ``depth``, that is a *panel's* depth on a mosaic — a four-
+    panel mosaic 40 subs deep in total is a 10-deep problem, and 10 is under 11.
 
     ``depth`` is the mosaic's per-pixel sample depth (:func:`auto_reject_depth`);
     pass it so the Stack form's pre-run warning answers for the pixels a mosaic
@@ -981,12 +1000,25 @@ def rejection_reach(options: "StackOptions", n: int,
         need = kappa_min_frames(eff.sigma_kappa)
         return RejectionReach(method, n, need, reach_n >= need)
     if method == "drizzle":
-        # Two-pass drizzle rejection needs ≥4 frames *and* the memory to hold the
-        # extra planes (:func:`_afford_drizzle_reject`); report the frame-count
-        # half only, and say nothing when it was never asked for.
+        # Two-pass drizzle rejection needs ≥4 frames to *dispatch* and the memory
+        # to hold the extra planes (:func:`_afford_drizzle_reject`) — but neither
+        # is the reach question, and reporting the dispatch gate as the answer is
+        # what this branch used to do. The pass is the same κ·σ clip against
+        # statistics that still include the outlier
+        # (``DrizzleStacker.clip_reference(options.sigma_kappa)``), so it is blind
+        # to a lone trail below the same :func:`kappa_min_frames`; its own
+        # ``_MIN_REJECT_NEFF`` floor of 3 sits below that and never binds first.
+        # Measured on a real drizzle stack (``tests/test_drizzle_reject.py``): a
+        # bright block in one sub comes out fully diluted at every depth up to 10
+        # and is removed from 11, at the default κ=3. So a drizzled mosaic whose
+        # panels are thin stamps ``REJMODE = drizzle-reject`` and ``REJFRAC 0.0``
+        # while the trail stays in the picture — the same untruth κ-σ told before
+        # this helper existed, one method along.
         if not eff.drizzle_reject:
             return RejectionReach(method, n, None, False)
-        return RejectionReach(method, n, 4, n >= 4)
+        need = kappa_min_frames(eff.sigma_kappa)
+        return RejectionReach(method, n, need,
+                              n >= DRIZZLE_REJECT_MIN_FRAMES and reach_n >= need)
     return RejectionReach(method, n, None, False)
 
 
