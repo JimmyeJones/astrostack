@@ -12388,31 +12388,74 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **⭐ VERIFIED, MEASURED, DELIBERATELY NOT BUILT (Builder 2026-09-04, the fourth and last site of the
-  "a six-hour gap is not a night" class) — the "Last session" card and the Nights row *directly beneath it*
-  report different numbers for the same dated night, on the same screen.** *(Pillar: trust — PRIORITY 3;
-  size S to write, but it turns on a **product choice** an agent should not make alone. Confidence:
-  reproduced.)* `routes/Target.tsx:1781-1782` renders `<SessionRecapCard>` immediately above `<NightsCard>`.
-  The recap is `session_recap`, which is honestly *session*-shaped (the trailing 6 h-gap cluster) — but it is
-  **dated with the observing night** (`night_date`, v0.229.2), and the Nights row below it is night-shaped
-  since v0.342.0. On a night shot in two goes they therefore disagree, measured on a 26-sub split night
-  (21:00–23:00, 05:30–07:30):
+- **✅ SHIPPED (Builder, v0.345.0, branch `claude/sweet-babbage-xf90y3`) — ~~the "Last session" card and the
+  Nights row *directly beneath it* report different numbers for the same dated night, on the same screen.~~**
+  Built as **option (a)**, the one the entry itself named as the better guess: the card is now night-shaped
+  and titled **"Last night"**.
 
-  | card | reads |
-  |---|---|
-  | "Last session — 1 Jul 2026" | 13 subs kept, 130 s |
-  | Nights row, 1 Jul 2026 | 26 subs kept, 260 s |
+  **Why (a) and not (b), decided rather than deferred.** The entry left the choice open because it is a
+  product call. (a) wins on the entry's own reasoning and one more: the card was *already dated with an
+  observing night* (v0.229.2) and *already sits under* night-shaped rows, so it was the only surface on the
+  page still measuring in sessions — every other night-shaped surface had converged, and "what did my most
+  recent *sitting* produce" is a question the app is not otherwise asked. (b) would have bought agreement by
+  removing the date, undoing v0.229.2's whole point. The entry's "do not split the difference" warning is
+  honoured: no third vocabulary for time was invented.
 
-  **Why it is filed rather than fixed, and this is the whole of the difficulty:** the two honest repairs are
-  a *product* decision, not a code one. (a) Make the recap night-shaped and retitle the card **"Last
-  night"** — it then agrees with the row, and with the Dashboard card of the same name (v0.342.4), at the
-  cost of the one screen that could tell you what your *most recent sitting* produced. (b) Keep it
-  session-shaped and stop dating it with a night — the contradiction goes away because the card no longer
-  claims to be about that date, at the cost of the v0.229.2 improvement that let a beginner tell whether
-  "27 subs kept" was last night or three weeks ago. **Do not split the difference** by dating it with a
-  session-specific label nobody else uses; a third vocabulary for time on this page is worse than either.
-  A future run (or the owner) should pick; (a) is the better guess, because every other night-shaped surface
-  has converged that way and "your most recent sitting" is not a question the app is otherwise asked.
+  **One merge implementation, not a second one.** `session_recap` gained an optional `night_of` and merges
+  through the very same `_merge_sessions_by_night` the Nights card and the pace estimate already use, so the
+  three surfaces cannot drift about which two halves are one night. It stays **optional** and unkeyed callers
+  get today's session-shaped answer — only the webapp knows the observer's longitude, and the endpoint passes
+  the shared `resolve_night_key`, exactly as `/nights` does.
+
+  **The drift nudge got more correct for free.** `_fwhm_quality_drift` compares the newest group against the
+  prior ones; merged by night, a split prior night is *one* baseline entry rather than two, so its two halves
+  can no longer be each other's "prior night". Pinned by a test on the baseline's sub count (10, the whole
+  night, not 4).
+
+  **Copy follows the fact.** "Last session — 8 Jul 2026" → **"Last night — 8 Jul 2026"**; "Your session on
+  8 Jul added…" → "Your night on 8 Jul added…"; the drift line's "last session's stars" → "last night's
+  stars" (and "that night's" once it is no longer the night just gone).
+
+  **Upgrade-safe (§9):** one optional engine keyword defaulting to today's behaviour, no response-shape
+  change (the endpoint's fields are identical — only the frames it counts changed, which is the fix), no
+  config key, no schema, no on-disk change, no default flipped. An older frontend against the new backend
+  simply shows the corrected numbers under its old heading.
+
+  **Tests (+10; 8 fail before).** `tests/test_session_recap.py` (+6) — a split night covering both halves,
+  the unkeyed call still session-shaped, the recap agreeing field-for-field with `nights_breakdown`'s newest
+  row, two nights running staying two, two *undatable* halves never merging with each other, and the drift
+  baseline counting the whole prior night. `tests/webapp/test_target_session_recap.py` (+4) — the endpoint's
+  night-shaped count and span, the card and the Nights row beneath it counting the same subs under the same
+  date, the merge following a **western** longitude rather than UTC's boundary, and two nights running still
+  being two.
+
+  *(Original entry follows.)*
+
+  - **⭐ VERIFIED, MEASURED (Builder 2026-09-04, the fourth and last site of the
+    "a six-hour gap is not a night" class) — the "Last session" card and the Nights row *directly beneath it*
+    report different numbers for the same dated night, on the same screen.** *(Pillar: trust — PRIORITY 3;
+    size S to write, but it turns on a **product choice** an agent should not make alone. Confidence:
+    reproduced.)* `routes/Target.tsx:1781-1782` renders `<SessionRecapCard>` immediately above `<NightsCard>`.
+    The recap is `session_recap`, which is honestly *session*-shaped (the trailing 6 h-gap cluster) — but it is
+    **dated with the observing night** (`night_date`, v0.229.2), and the Nights row below it is night-shaped
+    since v0.342.0. On a night shot in two goes they therefore disagree, measured on a 26-sub split night
+    (21:00–23:00, 05:30–07:30):
+
+    | card | reads |
+    |---|---|
+    | "Last session — 1 Jul 2026" | 13 subs kept, 130 s |
+    | Nights row, 1 Jul 2026 | 26 subs kept, 260 s |
+
+    **Why it is filed rather than fixed, and this is the whole of the difficulty:** the two honest repairs are
+    a *product* decision, not a code one. (a) Make the recap night-shaped and retitle the card **"Last
+    night"** — it then agrees with the row, and with the Dashboard card of the same name (v0.342.4), at the
+    cost of the one screen that could tell you what your *most recent sitting* produced. (b) Keep it
+    session-shaped and stop dating it with a night — the contradiction goes away because the card no longer
+    claims to be about that date, at the cost of the v0.229.2 improvement that let a beginner tell whether
+    "27 subs kept" was last night or three weeks ago. **Do not split the difference** by dating it with a
+    session-specific label nobody else uses; a third vocabulary for time on this page is worse than either.
+    A future run (or the owner) should pick; (a) is the better guess, because every other night-shaped surface
+    has converged that way and "your most recent sitting" is not a question the app is otherwise asked.
 
 - **⚪ SWEEP COMPLETE — the "a six-hour gap is not a night" class has four sites and all four are now
   answered; here is the list so nobody re-walks it (Builder 2026-09-04).** The generative test is cheap
@@ -12426,8 +12469,10 @@ to **Shipped**.)_
   - `early_stop`, on both surfaces — **fixed v0.342.3** (the prior-*night* floor counted sessions, so two
     split nights invented a habit; and the median was diluted by mid-night stops).
   - `library_session_recap` — **fixed v0.342.4** (the Dashboard's "Last night" card reported half a night).
-  - `session_recap` — **the entry above**: not a defect in the statistic, which is honestly session-shaped;
-    a defect in showing it next to a night-shaped one under a shared date.
+  - `session_recap` — **fixed v0.345.0** (the entry above). Not a defect in the statistic, which was honestly
+    session-shaped; a defect in showing it next to a night-shaped one under a shared date. Resolved by making
+    the *card* night-shaped and renaming it "Last night" — the statistic keeps its session answer for any
+    caller that passes no `night_of`. **So the class is now closed on all five sites.**
   Everything else that splits sessions either *is* asking a session question (`last_session_frames`,
   `recent_session_window_frames` — a memory bound) or already takes a `night_of`.
 
@@ -21742,14 +21787,33 @@ problems. Dogfood it every big-picture run and fix root causes.
   explanation and is the natural home for "and here is how to do it from a keyboard" — that removes nothing from
   anybody and costs no height. The second is almost certainly the right answer.
 
-- **NEW IDEA (Builder 2026-08-19, same dogfood pass) — the Tonight page explains itself with a FITS keyword.**
-  *(Friendliness — PRIORITY 3; size S; copy only.)* The "Set your observing location" alert reads *"It reads your
-  location automatically from a plate-solved Seestar frame (SITELAT/SITELONG) — so once you've solved some subs
-  it'll just work."* Everything about that sentence is right for a beginner except the parenthesis, which is a pair
-  of FITS header keywords and means nothing to the person the sentence is written for. Dropping the four words
-  costs no information a beginner can use (nobody is going to go and read their headers), and the sentence is
-  already doing the reassuring work. **Care:** check the same parenthesis isn't load-bearing somewhere it *is* the
-  answer — e.g. a Settings hint aimed at someone debugging why their location didn't come through.
+- **✅ SHIPPED (Builder, v0.345.1, branch `claude/sweet-babbage-xf90y3`) — ~~the Tonight page explains itself
+  with a FITS keyword.~~** The parenthesis is gone; the sentence now reads *"It reads your location
+  automatically from a plate-solved Seestar frame — so once you've solved some subs it'll just work."*
+
+  **The entry's care note was the actual work, and it came back clean.** Swept every user-visible string in
+  `frontend/src` for raw FITS keywords (`SITELAT`, `SITELONG`, `DATE-OBS`, `FOCALLEN`, `XPIXSZ`, `CROTA2`,
+  `BAYERPAT`, `EXPTIME`, `CCD-TEMP`, `OBJCTRA`/`OBJCTDEC`, `IMAGETYP`, `NAXIS*`): **this alert was the only
+  one.** The two remaining hits are a *code comment* in `Tonight.tsx` and one in `Target.tsx`, which is where
+  a keyword belongs. In particular the Settings hints the entry worried about — `site_lat` / `site_lon` —
+  already say *"Leave blank to read it automatically from a plate-solved Seestar frame"* with no keyword in
+  them, so nothing anywhere was leaning on the parenthesis as the answer.
+
+  Frontend copy only: no API, schema, config, on-disk or default change. **Test (+1, in the existing
+  location-prompt case):** the reassurance survives and the keywords are absent, so a future edit can't put
+  the jargon back without reddening the suite.
+
+  *(Original entry follows.)*
+
+  - **NEW IDEA (Builder 2026-08-19, same dogfood pass) — the Tonight page explains itself with a FITS
+    keyword.** *(Friendliness — PRIORITY 3; size S; copy only.)* The "Set your observing location" alert reads
+    *"It reads your location automatically from a plate-solved Seestar frame (SITELAT/SITELONG) — so once
+    you've solved some subs it'll just work."* Everything about that sentence is right for a beginner except
+    the parenthesis, which is a pair of FITS header keywords and means nothing to the person the sentence is
+    written for. Dropping the four words costs no information a beginner can use (nobody is going to go and
+    read their headers), and the sentence is already doing the reassuring work. **Care:** check the same
+    parenthesis isn't load-bearing somewhere it *is* the answer — e.g. a Settings hint aimed at someone
+    debugging why their location didn't come through.
 
 - ~~**NEXT SLICE OF THE STANDING IA ITEM — FOUND BY DOGFOODING (Builder 2026-08-17, counted in a real running build
   at 1440 px) — one History run card renders **15 buttons in four rows** plus a delete icon, for a single
@@ -25688,25 +25752,114 @@ problems. Dogfood it every big-picture run and fix root causes.
     two-year synthetic library and pins that a year filter counts only that year's nights and that an empty year
     degrades to the kind empty state.
 
-- **NEW IDEA — SLICE (b) OF "Your year under the stars" (Builder 2026-09-04, the half v0.343.0 deliberately
-  left out) — make the year *shareable*: a best-of-year picture and a one-click poster + caption.** *(Pillar:
-  friendliness / enjoy + share — PRIORITY 3. Size: S–M. The endpoint already returns everything a caption
-  needs, so this is render work, not data work.)*
+- **✅ SHIPPED (Builder, v0.344.0, branch `claude/sweet-babbage-xf90y3`) — ~~SLICE (b) OF "Your year under
+  the stars": make the year *shareable* — a best-of-year picture and a one-click poster + caption.~~** Built
+  as filed, both pieces, and as **composition rather than a second poster renderer**.
 
-  Slices (a) and (c) shipped: `/sky-so-far/{year}` tells the story, and the first-light chips link out. What
-  is missing is the part a beginner actually posts. Two pieces, in order:
-  1. **The best picture of the year.** Rank the year's targets the way `_recap_hero` already picks a poster
-     backdrop (the summary's heroes, first one with a readable preview), *scoped to targets with a night in
-     that year*, and show it at the top of the year page. **Caution:** a hero's preview is its *newest* stack,
-     which may have been made after the year ended — say "your picture of M 31, shot in 2026" rather than
-     implying the pixels are from that year, or scope to runs whose newest frame falls in the year.
-  2. **`GET /api/recap/year/{year}.jpg` + a copy-paste caption**, reusing `seestack/recap.py`'s
-     `draw_recap_poster` / `seestack/sharecard.py` rather than a second poster renderer — the whole reason
-     `RecapFacts` carries `window_months` is so a poster can say "this year" honestly. A `year_caption()`
-     beside `year_headline()` in `seestack/yearrecap.py` is the natural shape.
+  **The renderer is now shared, not copied.** `seestack/recap.py` grew `draw_poster(title, stats, lines,
+  hero, size)` — the layout the all-time poster always had, with its three bottom-anchored line slots pulled
+  out as data (`POSTER_LINE_SLOTS`). `draw_recap_poster` is now a four-line call into it feeding the same
+  three lines it always did, so the existing poster is unchanged; `seestack/yearrecap.py`'s
+  `draw_year_poster` is the *second facts source into the same renderer*, feeding the year's longest night,
+  first-light line and sharpest night into those slots under the title *"My 2026 under the stars"*. The two
+  posters cannot drift apart in look, which is the whole reason the entry said to reuse it.
 
-  **Grep first:** `seestack/recap.py`, `_recap_hero` and `ShareYourSkyCard` already do 90 % of this for the
-  all-time poster; this is a second *facts* source into the same renderer, not new machinery.
+  **The caption sits beside `year_headline`, exactly where the entry said.** `year_caption()` writes
+  *"2026 under the stars · 31 nights out · 52.4 h of light · 9 targets · first light: M 31, M 42 and 3
+  more"* — the same middle-dot separator, the same drop-the-clause-when-it's-missing rule and the same
+  lower-cased trailing names as `recap_caption`, with a test pinning that the two share a voice. It rides
+  along on the existing `/api/recap/year/{year}` JSON (additive field), and
+  `GET /api/recap/year/{year}.jpg` downloads the poster as `my-2026-under-the-stars.jpg`.
+
+  **The entry's caution about the hero is what most of the care went into.** A hero's preview is its
+  *newest* stack, which may have been made after the year ended — so the page says **"Your picture of
+  M 31"**, never "your 2026 picture", and the backend computes whether that target was imaged in any *other*
+  year (`years_by_target`) and hands the page the caveat when it was: *"Your newest picture of it — it may
+  include light from other years too."* A target the year owns outright instead reads *"Everything you shot
+  of it was in 2026."* An **unknown** span gets the caveat, not the confident line — a silent overclaim is
+  the failure mode worth avoiding. The hero itself is ranked exactly the way `_recap_hero` ranks the
+  all-time backdrop (the summary's heroes, first with a readable preview) but **scoped to targets with a
+  night in that year**, so a year page never leads with a picture the year had nothing to do with.
+
+  **One card, not three (the standing IA rule).** `YearShareCard` puts the picture, the caption and the two
+  buttons in a single block under the stat grid rather than appending three always-on banners to a page the
+  owner already calls busy. It degrades all the way down: no caption (older backend) still offers the
+  poster; no picture yet still offers the poster over the plain deep-space background; an unreadable or
+  deleted preview falls back to that background rather than 500-ing the download; and a year with no nights
+  offers nothing at all (the `.jpg` 404s, and the page shows its existing empty state).
+
+  **Upgrade-safe (§9):** one new read-only endpoint, two additive optional response fields
+  (`YearRecapOut.caption`, `.hero`), one new client URL helper, one new component. No config key, no
+  schema, no on-disk change, no default flipped, no existing response field or poster output touched. An
+  older frontend against a new backend ignores both fields; a new frontend against an older backend sees
+  them absent and offers the poster alone.
+
+  **Route ordering is load-bearing and pinned.** `{year}` matches any path segment, so
+  `/api/recap/year/2026.jpg` would hit the JSON route and 422 on the int parse if the `.jpg` route were
+  declared after it. It is declared first, with a comment saying why, and
+  `test_year_poster_downloads_as_a_square_jpeg` fails if that ever slips.
+
+  **Tests (+32: 13 Python engine, +10 webapp, +9 vitest).** `tests/test_year_recap.py` — the caption's
+  wording, its drop-the-zero rule, its silence on an empty year, its shared voice with `recap_caption`, the
+  two standout-night lines and their silence, the no-em-dash rule (Pillow's built-in font has no U+2014
+  glyph and would draw tofu onto a picture the user is about to post), `years_by_target`, all three
+  `year_hero_note` cases, and that the poster renders square with and without a hero and through the same
+  renderer as the all-time one. `tests/webapp/test_year_recap.py` — the `.jpg` route resolving, its
+  filename, the year's own picture reaching the backdrop, the unreadable-preview fallback, the empty-year
+  404, the out-of-range 422, the caption on the JSON, the hero and its link, the two-year caveat, and the
+  no-picture-yet `hero: null`. `YearShareCard.test.tsx` (+7) and `YourYear.test.tsx` (+2).
+
+  *(Original entry follows.)*
+
+  - **NEW IDEA — SLICE (b) OF "Your year under the stars" (Builder 2026-09-04, the half v0.343.0
+    deliberately left out) — make the year *shareable*: a best-of-year picture and a one-click poster +
+    caption.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: S–M. The endpoint already returns
+    everything a caption needs, so this is render work, not data work.)*
+
+    Slices (a) and (c) shipped: `/sky-so-far/{year}` tells the story, and the first-light chips link out. What
+    is missing is the part a beginner actually posts. Two pieces, in order:
+    1. **The best picture of the year.** Rank the year's targets the way `_recap_hero` already picks a poster
+       backdrop (the summary's heroes, first one with a readable preview), *scoped to targets with a night in
+       that year*, and show it at the top of the year page. **Caution:** a hero's preview is its *newest* stack,
+       which may have been made after the year ended — say "your picture of M 31, shot in 2026" rather than
+       implying the pixels are from that year, or scope to runs whose newest frame falls in the year.
+    2. **`GET /api/recap/year/{year}.jpg` + a copy-paste caption**, reusing `seestack/recap.py`'s
+       `draw_recap_poster` / `seestack/sharecard.py` rather than a second poster renderer — the whole reason
+       `RecapFacts` carries `window_months` is so a poster can say "this year" honestly. A `year_caption()`
+       beside `year_headline()` in `seestack/yearrecap.py` is the natural shape.
+
+    **Grep first:** `seestack/recap.py`, `_recap_hero` and `ShareYourSkyCard` already do 90 % of this for the
+    all-time poster; this is a second *facts* source into the same renderer, not new machinery.
+
+- **NEW IDEA (Builder 2026-09-04, spotted while shipping the year poster v0.344.0) — both recap posters use a
+  target's *newest stack preview* as their backdrop, ignoring the cover the owner actually pinned.**
+  *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: S. Additive, and the machinery already exists.)*
+  `_recap_hero` (the all-time poster) and `_year_hero` (the new year one) both read
+  `TargetEntry.last_stack_preview`. But "Set as cover" (v0.145.0) exists precisely so the owner can say *this*
+  is the picture of M 31 — and the deep-sky wall already honours it (v0.277.1), as does the pictures `.zip`.
+  So the poster a beginner is about to post can show a picture they deliberately demoted. **Shape:** resolve
+  the pinned cover first and fall through to the newest preview, reusing whatever helper the wall already
+  uses rather than re-reading the pin — one definition of "this target's picture", three surfaces.
+  **Grep first:** find the wall's cover resolution before writing any; if it is already a shared helper this
+  is a two-line change in each of the two hero pickers plus a test each. **Care:** the fallback must stay
+  silent-and-graceful — an unreadable *cover* has to fall through to the newest preview and then to the plain
+  background, exactly as an unreadable preview does today, or a stale pin costs the poster its backdrop.
+
+- **⚪ MEASURED, RECORDED SO NOBODY RE-INVESTIGATES (Builder 2026-09-04, hit while writing the year-hero
+  tests) — the night-fold cache can serve a stale year/heatmap for up to 120 s after a frame's *timestamp*
+  changes without moving its target's `last_activity_utc`.** *(No code change wanted — bounded, pre-existing,
+  and the cheap alternatives are worse.)* `_cached_night_acc`'s signature is
+  `(lon, [(safe_name, last_activity_utc)])` over the registry. Re-dating an *existing* frame (a header
+  re-read, a hand edit, a re-ingest that lands an older stamp) can leave the registry row untouched, so the
+  signature matches and the fold is reused until `_ACTIVITY_CACHE_TTL_S` (120 s) expires — the Dashboard
+  heatmap, the year recap and the recap poster all then quote the pre-edit nights. **Why it is not worth
+  fixing:** the only signature that would catch it is one over the frames themselves, which is the library
+  walk the cache exists to avoid, and every *ordinary* path that changes a frame's night (ingest, a scan)
+  moves `last_activity_utc` with it. 120 s is a bounded, self-healing wrong answer on a surface nobody is
+  watching second-by-second. **What this costs a test author, which is the actual reason to record it:** a
+  test that mutates a timestamp *between* two requests to any night-shaped endpoint will silently read the
+  first request's fold. Arrange the whole fixture before the first request instead — that is why
+  `test_year_hero_says_so_when_its_picture_may_carry_another_years_light` builds both years up front.
 
 - **✅ SHIPPED (Builder, v0.326.0, branch `claude/zen-mccarthy-t59xya`) — ~~put the planned week in the user's
   calendar.~~** Built as filed, as composition: `GET /api/plan/week/calendar.ics` and an **Add this week to

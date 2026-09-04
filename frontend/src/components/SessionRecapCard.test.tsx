@@ -46,14 +46,14 @@ describe("describeRejects", () => {
   });
 });
 
-// The morning after the fixture's 8 Jul night — so "Last session" is honest and
+// The morning after the fixture's 8 Jul night — so "Last night" is honest and
 // the existing phrasing assertions stay deterministic whatever day the suite runs.
 const MORNING_AFTER = new Date("2026-07-09T09:00:00Z");
 
 describe("describeSession", () => {
   it("phrases the kept-vs-set-aside recap with a reason breakdown", () => {
     expect(describeSession(recap(), MORNING_AFTER)).toBe(
-      "Last session added 10 subs (2 min). 8 kept; 2 set aside (2 trailed). " +
+      "Last night added 10 subs (2 min). 8 kept; 2 set aside (2 trailed). " +
         "Total on this target: 2 min.",
     );
   });
@@ -62,7 +62,7 @@ describe("describeSession", () => {
     const r = recap({ n_frames: 3, n_kept: 3, n_set_aside: 0, reject_buckets: {},
       session_exposure_s: 30, kept_exposure_s: 30, total_kept_exposure_s: 30 });
     expect(describeSession(r, MORNING_AFTER)).toBe(
-      "Last session added 3 subs (30 s). All 3 were kept. Total on this target: 30 s.",
+      "Last night added 3 subs (30 s). All 3 were kept. Total on this target: 30 s.",
     );
   });
 
@@ -71,23 +71,23 @@ describe("describeSession", () => {
     expect(describeSession(r, MORNING_AFTER)).toContain("added 1 sub (");
   });
 
-  it("dates itself instead of saying 'Last session' weeks later", () => {
+  it("dates itself instead of saying 'Last night' weeks later", () => {
     // The card always shows the most recent session, so after a cloudy fortnight
-    // "Last session added…" reads as though the app lost track of the date.
+    // "Last night added…" reads as though the app lost track of the date.
     expect(describeSession(recap(), new Date("2026-07-23T09:00:00Z"))).toBe(
-      "Your session on 8 Jul added 10 subs (2 min). 8 kept; 2 set aside (2 trailed). " +
+      "Your night on 8 Jul added 10 subs (2 min). 8 kept; 2 set aside (2 trailed). " +
         "Total on this target: 2 min.",
     );
   });
 
   it("adds the year once the session is no longer this year", () => {
     expect(describeSession(recap(), new Date("2027-01-05T09:00:00Z")))
-      .toContain("Your session on 8 Jul 2026 added");
+      .toContain("Your night on 8 Jul 2026 added");
   });
 
   it("keeps the warm wording when the night can't be dated at all", () => {
     const r = recap({ night_date: null, start_utc: null });
-    expect(describeSession(r, MORNING_AFTER)).toContain("Last session added");
+    expect(describeSession(r, MORNING_AFTER)).toContain("Last night added");
   });
 });
 
@@ -99,7 +99,7 @@ describe("describeQualityDrift", () => {
         n_latest: 8, n_baseline: 8,
       }),
     ).toBe(
-      "Heads up: last session's stars are softer than this target's usual " +
+      "Heads up: last night's stars are softer than this target's usual " +
         "(5.2 px vs 3.4 px FWHM) — worth checking focus.",
     );
   });
@@ -125,7 +125,7 @@ describe("describeQualityDrift", () => {
         kind: "fwhm", latest_fwhm_px: 5.2, baseline_fwhm_px: 3.4,
         n_latest: 8, n_baseline: 8,
       }, false),
-    ).toContain("Heads up: that session's stars are softer");
+    ).toContain("Heads up: that night's stars are softer");
   });
 });
 
@@ -135,18 +135,18 @@ describe("sessionRecapTitle", () => {
     // of UTC, and the server's night_date says so — the title must follow it
     // rather than re-deriving a date from the raw UTC stamp.
     expect(sessionRecapTitle({ night_date: "2026-07-08", start_utc: "2026-07-09T03:00:00+00:00" }))
-      .toBe("Last session — 8 Jul 2026");
+      .toBe("Last night — 8 Jul 2026");
   });
 
   it("falls back to the UTC start when an older backend sends no night_date", () => {
     expect(sessionRecapTitle({ start_utc: "2026-07-08T22:00:00+00:00" }))
-      .toBe("Last session — 8 Jul 2026");
+      .toBe("Last night — 8 Jul 2026");
     expect(sessionRecapTitle({ night_date: null, start_utc: "2026-07-08T22:00:00+00:00" }))
-      .toBe("Last session — 8 Jul 2026");
+      .toBe("Last night — 8 Jul 2026");
   });
 
   it("stays a bare heading when the night can't be dated at all", () => {
-    expect(sessionRecapTitle({ night_date: null, start_utc: null })).toBe("Last session");
+    expect(sessionRecapTitle({ night_date: null, start_utc: null })).toBe("Last night");
   });
 });
 
@@ -155,7 +155,7 @@ describe("SessionRecapCard", () => {
     vi.spyOn(client.api, "sessionRecap").mockResolvedValue(recap());
     renderCard();
     await waitFor(() =>
-      expect(screen.getByText("Last session — 8 Jul 2026")).toBeInTheDocument());
+      expect(screen.getByText("Last night — 8 Jul 2026")).toBeInTheDocument());
     expect(screen.getByText("80% kept")).toBeInTheDocument();
     expect(screen.getByText(/2 set aside \(2 trailed\)/)).toBeInTheDocument();
   });
@@ -177,7 +177,7 @@ describe("SessionRecapCard", () => {
     vi.spyOn(client.api, "sessionRecap").mockResolvedValue(recap());
     renderCard();
     await waitFor(() =>
-      expect(screen.getByText("Last session — 8 Jul 2026")).toBeInTheDocument());
+      expect(screen.getByText("Last night — 8 Jul 2026")).toBeInTheDocument());
     expect(screen.queryByText(/worth checking focus/)).toBeNull();
   });
 
@@ -196,7 +196,7 @@ describe("SessionRecapCard", () => {
     vi.spyOn(client.api, "sessionRecap").mockResolvedValue(recap());
     renderCard();
     await waitFor(() =>
-      expect(screen.getByText("Last session \u2014 8 Jul 2026")).toBeInTheDocument());
+      expect(screen.getByText("Last night \u2014 8 Jul 2026")).toBeInTheDocument());
     expect(screen.queryByText(/Moon/)).toBeNull();
   });
 

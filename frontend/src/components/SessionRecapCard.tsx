@@ -25,20 +25,25 @@ export function describeRejects(buckets: Record<string, number>): string {
   return entries.map(([label, n]) => `${n} ${label}`).join(", ");
 }
 
-/** The recap paragraph a beginner reads on return: what last session added, how
+/** The recap paragraph a beginner reads on return: what last night added, how
  *  much was kept vs. set aside (and why), and where the target stands now.
  *  Pure and offline so it's unit-testable without rendering.
  *
- *  "Last session" is only warm wording while it *was* the last session — this
- *  card keeps showing the most recent one however long ago that was, so beyond
- *  the night just gone it dates itself instead ("Your session on 8 Jul added…").
+ *  It says **night**, not session, because the card is dated with an observing
+ *  night and sits directly above the Nights rows, which are night-shaped: on a
+ *  night shot in two goes the two used to report different subs under the same
+ *  date. The server merges the halves now, so the wording follows the fact.
+ *
+ *  "Last night" is only warm wording while it *was* last night — this card keeps
+ *  showing the most recent one however long ago that was, so beyond the night
+ *  just gone it dates itself instead ("Your night on 8 Jul added…").
  *  `now` is injectable so the wording is deterministic under test. */
 export function describeSession(r: SessionRecap, now: Date = new Date()): string {
   const subs = r.n_frames === 1 ? "sub" : "subs";
   const night = r.night_date ?? r.start_utc;
   const day = formatNightDayMonth(night, now);
   const lead =
-    isRecentNight(night, now) || !day ? "Last session" : `Your session on ${day}`;
+    isRecentNight(night, now) || !day ? "Last night" : `Your night on ${day}`;
   let out = `${lead} added ${r.n_frames} ${subs} (${formatIntegration(r.session_exposure_s)}).`;
   if (r.n_set_aside === 0) {
     out += ` All ${r.n_kept} were kept.`;
@@ -62,38 +67,38 @@ export function describeSession(r: SessionRecap, now: Date = new Date()): string
  *  a "softer than your usual best" sentence over a median baseline would be
  *  quoting a number that isn't anyone's best.
  *
- *  `recent` mirrors the recap sentence above it: once the session it describes
- *  is no longer the night just gone, "last session's stars" becomes "that
- *  session's stars" so the two lines never disagree about when this happened. */
+ *  `recent` mirrors the recap sentence above it: once the night it describes is
+ *  no longer the night just gone, "last night's stars" becomes "that night's
+ *  stars" so the two lines never disagree about when this happened. */
 export function describeQualityDrift(
   d: SessionQualityDrift,
   recent: boolean = true,
 ): string {
   const latest = d.latest_fwhm_px.toFixed(1);
   const usual = d.baseline_fwhm_px.toFixed(1);
-  const whose = recent ? "last session's" : "that session's";
+  const whose = recent ? "last night's" : "that night's";
   return (
     `Heads up: ${whose} stars are softer than this target's usual ` +
     `(${latest} px vs ${usual} px FWHM) — worth checking focus.`
   );
 }
 
-/** The card's heading, naming the *observing night* the session belongs to —
- *  "Last session — 8 Jul 2026" — so a beginner can tell whether "27 subs kept"
+/** The card's heading, naming the *observing night* it summarises —
+ *  "Last night — 8 Jul 2026" — so a beginner can tell whether "27 subs kept"
  *  was last night or three weeks ago, and can line the recap up with the Nights
- *  rows below it (which label the same way). Falls back to the bare "Last
- *  session" when the night can't be dated (an older backend sending no
- *  `night_date` and no start time, or frames with no capture time) rather than
- *  showing an em-dash placeholder. Pure and unit-testable. */
+ *  rows below it (which label the same way, and now count the same subs).
+ *  Falls back to the bare "Last night" when the night can't be dated (an older
+ *  backend sending no `night_date` and no start time, or frames with no capture
+ *  time) rather than showing an em-dash placeholder. Pure and unit-testable. */
 export function sessionRecapTitle(
   r: Pick<SessionRecap, "night_date" | "start_utc">,
 ): string {
   const label = nightDateLabel(r);
-  return label === "—" ? "Last session" : `Last session — ${label}`;
+  return label === "—" ? "Last night" : `Last night — ${label}`;
 }
 
 /**
- * "Last session" recap — a small, persistent, plain-language card answering the
+ * "Last night" recap — a small, persistent, plain-language card answering the
  * first question a walk-away user has on return: *what did last night give me?*
  * Built entirely from data already on disk (the frames table), so it renders
  * only when there's something datable to report and needs no config. Safe to

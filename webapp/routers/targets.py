@@ -662,7 +662,7 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
     session — how many subs it added, how many were kept vs. set aside (and why,
     in plain buckets), and the target's total integration now. Returns ``null``
     when there's nothing datable to report (no frame carries a capture time).
-    Read-only aggregation over the frames table; renders the "Last session" card.
+    Read-only aggregation over the frames table; renders the "Last night" card.
 
     The recap also carries the **observing-night** date its session belongs to
     (same noon-to-noon local bucketing as the Nights card and the Dashboard's
@@ -682,7 +682,12 @@ def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
     settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
-        recap = session_recap(proj)
+        # Night-shaped, with the observer's own longitude — the card is dated
+        # with an observing night and sits directly above the Nights rows, so a
+        # session-shaped answer would have it report half of a split night's
+        # subs under the same date the row below reports all of them.
+        recap = session_recap(proj, night_of=resolve_night_key(
+            request, lib, settings.site_lon))
         lon = resolve_site_lon(request, lib, settings.site_lon)
         entry = lib.find_target(safe)
         observer = _recap_observer(request, lib, settings)

@@ -892,6 +892,16 @@ export interface YearFirstLight {
   safe: string | null;
 }
 
+/** The year's best picture — the target the page leads with. `note` is the
+ * honest caveat when that target was also imaged in another year (the preview
+ * is its newest stack), and "" when the year owns it outright. */
+export interface YearHero {
+  name: string;
+  safe: string;
+  thumbnail_url: string | null;
+  note: string;
+}
+
 /** "Your year under the stars" — one calendar year of imaging. `has_anything`
  * is false for a year with no imaged nights; `empty_message` then names the
  * years that do have data, so the page can offer them instead of zeros. */
@@ -902,6 +912,12 @@ export interface YearRecap {
   empty_message: string;
   stats: { value: string; label: string }[];
   first_light_line: string;
+  /** The copy-paste blurb to post beside the year poster. Optional: an older
+   * backend omits it, and the share card then offers the poster alone. */
+  caption?: string;
+  /** Optional: absent on an older backend, and null for a year whose targets
+   * have no readable picture yet. */
+  hero?: YearHero | null;
   n_nights: number;
   total_exposure_s: number;
   n_frames: number;
@@ -2983,6 +2999,10 @@ export const api = {
   // one calendar year. A year with nothing in it is a normal 200 whose
   // `years_with_data` says where the nights actually are.
   getYearRecap: (year: number) => req<YearRecap>(`/api/recap/year/${year}`),
+  // Download URL for one year's poster — the same square JPEG the all-time
+  // recap renders, over that year's own best picture. A href/download, not a
+  // fetch: the browser saves the image.
+  yearPosterUrl: (year: number) => `/api/recap/year/${year}.jpg`,
   galleryMontageUrl: (limit?: number) =>
     `/api/gallery/montage.jpg${limit ? `?limit=${limit}` : ""}`,
   // Download URL for "all my pictures" — every target's current picture (its

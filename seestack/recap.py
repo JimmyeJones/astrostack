@@ -239,19 +239,30 @@ def _cover_crop(img, size: int):  # noqa: ANN001 — PIL Image
     return resized.crop((left, top, left + size, top + size))
 
 
-def draw_recap_poster(facts: RecapFacts, hero=None, *, size: int = POSTER_SIZE):  # noqa: ANN001
-    """Render the recap as one square RGB ``PIL.Image``.
+#: The poster's three bottom-anchored line slots, biggest first, as
+#: ``(font_fraction, gap_fraction, fill)``. Kept as data rather than three
+#: hand-written blocks so a second facts source (the year recap) renders into
+#: exactly the same layout instead of growing a second poster renderer.
+POSTER_LINE_SLOTS = (
+    (0.036, 0.058, (232, 234, 244)),
+    (0.029, 0.046, (178, 184, 204)),
+    (0.030, 0.048, (158, 164, 184)),
+)
+
+
+def draw_poster(*, title: str, stats, lines=(), hero=None,  # noqa: ANN001
+                size: int = POSTER_SIZE):
+    """Render one square RGB ``PIL.Image`` poster — the shared renderer.
+
+    ``stats`` are ``(value, label)`` pairs (at most four are drawn) and ``lines``
+    are the bottom-anchored strings, biggest first, matching
+    :data:`POSTER_LINE_SLOTS`; an empty string is skipped and its space
+    reclaimed, so the poster is never sparse in an obviously-broken way.
 
     ``hero`` is the user's own finished picture (any PIL image) used as the
     backdrop, darkened so the text stays readable; without one the poster falls
     back to a plain deep-space background, so a library with no stack yet still
     renders rather than failing.
-
-    Layout, top to bottom: a title, up to four big stat blocks in a 2×2 grid,
-    the "biggest project" line, the smaller "also shot" line naming the rest of
-    your targets, and the "since <date>" footnote. Anything with no data is
-    skipped and the rest closes up, so the poster is never sparse in an
-    obviously-broken way.
     """
     from PIL import Image, ImageDraw
 
@@ -266,20 +277,19 @@ def draw_recap_poster(facts: RecapFacts, hero=None, *, size: int = POSTER_SIZE):
     margin = round(size * 0.075)
     inner = size - 2 * margin
 
-    title = "My sky, so far"
     font = _fit_font(draw, title, round(size * 0.072), inner)
     draw.text((margin, margin), title, font=font, fill=(255, 255, 255))
 
     # The stat grid sits in the middle of the square and the provenance lines
     # anchor to the bottom, so the poster stays balanced whether it carries one
     # stat or four (a top-down flow left a big empty foot on a thin library).
-    stats = recap_stats(facts)[:4]
-    if stats:
+    shown = list(stats)[:4]
+    if shown:
         col_w = inner // 2
         row_h = round(size * 0.165)
-        n_rows = (len(stats) + 1) // 2
+        n_rows = (len(shown) + 1) // 2
         top = round(size * 0.5) - (n_rows * row_h) // 2
-        for i, (value, label) in enumerate(stats):
+        for i, (value, label) in enumerate(shown):
             cx = margin + (i % 2) * col_w
             cy = top + (i // 2) * row_h
             vfont = _fit_font(draw, value, round(size * 0.085), col_w - margin // 2)
@@ -288,28 +298,39 @@ def draw_recap_poster(facts: RecapFacts, hero=None, *, size: int = POSTER_SIZE):
             draw.text((cx, cy + round(size * 0.092)), label, font=lfont,
                       fill=(196, 200, 216))
 
-    # Bottom-anchored, laid out upwards: footer, then "since", then the biggest
-    # project — each line skipped (and its space reclaimed) when it has no data.
+    # Bottom-anchored, laid out upwards: footer first, then the line slots in
+    # reverse (smallest nearest the footer), each skipped when it has no data.
     y = size - margin - round(size * 0.030)
     footer = "Made with AstroStack"
     draw.text((margin, y), footer, font=_load_font(round(size * 0.026)),
               fill=(132, 138, 160))
 
-    since = recap_since_line(facts)
-    if since:
-        y -= round(size * 0.048)
-        sfont = _fit_font(draw, since, round(size * 0.030), inner)
-        draw.text((margin, y), since, font=sfont, fill=(158, 164, 184))
-
-    others = recap_other_targets_line(facts)
-    if others:
-        y -= round(size * 0.046)
-        ofont = _fit_font(draw, others, round(size * 0.029), inner)
-        draw.text((margin, y), others, font=ofont, fill=(178, 184, 204))
-
-    line = recap_top_project_line(facts)
-    if line:
-        y -= round(size * 0.058)
-        lfont = _fit_font(draw, line, round(size * 0.036), inner)
-        draw.text((margin, y), line, font=lfont, fill=(232, 234, 244))
+    slotted = list(lines)[:len(POSTER_LINE_SLOTS)]
+    paired = list(zip(slotted, POSTER_LINE_SLOTS[:len(slotted)], strict=True))
+    for text, (frac, gap, fill) in reversed(paired):
+        if not text:
+            continue
+        y -= round(size * gap)
+        draw.text((margin, y), text, font=_fit_font(
+            draw, text, round(size * frac), inner), fill=fill)
     return canvas
+
+
+def draw_recap_poster(facts: RecapFacts, hero=None, *, size: int = POSTER_SIZE):  # noqa: ANN001
+    """Render the whole-library recap as one square RGB ``PIL.Image``.
+
+    Layout, top to bottom: a title, up to four big stat blocks in a 2×2 grid,
+    the "biggest project" line, the smaller "also shot" line naming the rest of
+    your targets, and the "since <date>" footnote.
+    """
+    return draw_poster(
+        title="My sky, so far",
+        stats=recap_stats(facts),
+        lines=(
+            recap_top_project_line(facts),
+            recap_other_targets_line(facts),
+            recap_since_line(facts),
+        ),
+        hero=hero,
+        size=size,
+    )
