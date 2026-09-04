@@ -123,6 +123,25 @@ def _min_max_reject_arrays(reject_count: int) -> int:
     return 2 + 2 * max(1, int(reject_count))
 
 
+def _min_max_reject_runs(options: "StackOptions", n: int) -> bool:
+    """Is the per-pixel **order-statistic** min/max reject the combine that will
+    actually run — the one path that allocates the extra canvas planes and that
+    ignores per-frame quality weights?
+
+    Asked of :func:`combine_method` rather than re-derived, for the same reason
+    the dispatcher and :func:`_records_rejection_map` are: the predicate
+    ``min_max_reject and not drizzle and n >= 3`` used to be written out at nine
+    separate sites in this module, and one of them (``weights_applied``) decides
+    whether the finished stack *claims* its quality weighting was honoured. A
+    gate that drives a sentence the user reads must not be a hand-written copy
+    of a gate that has already drifted once (v0.323.1).
+
+    Pass the *effective* options (post :func:`_resolve_auto_reject`), exactly as
+    the dispatcher does — the question is what runs, not what was asked for.
+    """
+    return combine_method(options, n) == "min-max-reject"
+
+
 def _records_rejection_map(options: "StackOptions", n: int) -> bool:
     """Will this run actually allocate a per-pixel rejection map?
 
@@ -1215,8 +1234,7 @@ def estimate_stack(project: Project, options: StackOptions,
         dst_shape, drizzle=options.drizzle, drizzle_scale=options.drizzle_scale,
         drizzle_reject=options.drizzle_reject,
         reject_arrays=(_min_max_reject_arrays(options.min_max_reject_count)
-                       if options.min_max_reject and not options.drizzle and n >= 3
-                       else 0),
+                       if _min_max_reject_runs(options, n) else 0),
         rejection_map=_records_rejection_map(options, n),
     )
     budget = int(_stack_memory_budget_bytes(memory_budget_gb))
@@ -1231,8 +1249,7 @@ def estimate_stack(project: Project, options: StackOptions,
             drizzle_scale=options.drizzle_scale,
             drizzle_reject=options.drizzle_reject,
             reject_arrays=(_min_max_reject_arrays(options.min_max_reject_count)
-                           if options.min_max_reject and not options.drizzle
-                           and n >= 3 else 0),
+                           if _min_max_reject_runs(options, n) else 0),
             rejection_map=_records_rejection_map(options, n),
             min_max_reject_count=options.min_max_reject_count, budget=budget)
         if would_exceed else None
@@ -1254,8 +1271,7 @@ def estimate_stack(project: Project, options: StackOptions,
         ref_peak, _ = _estimate_peak_bytes(
             ref_shape, drizzle=False, drizzle_scale=1.0,
             reject_arrays=(_min_max_reject_arrays(options.min_max_reject_count)
-                           if options.min_max_reject and n >= 3
-                           else 0),
+                           if _min_max_reject_runs(options, n) else 0),
             rejection_map=_records_rejection_map(options, n))
         suggest_ref_canvas = int(ref_peak) <= budget
     return StackEstimate(
@@ -2463,7 +2479,7 @@ def run_stack(
     # a refusal here for the same reason it does above — cropping a mosaic's field
     # is a different order of change — and an attended run is untouched.
     min_max_reject_count_requested: int | None = None
-    _mmr_charged = eff.min_max_reject and not options.drizzle and n >= 3
+    _mmr_charged = _min_max_reject_runs(eff, n)
     if eff.unattended and _mmr_charged and eff.min_max_reject_count > 1:
         _arrays = _min_max_reject_arrays(eff.min_max_reject_count)
         _need, _ = _estimate_peak_bytes(
@@ -2506,12 +2522,10 @@ def run_stack(
                         drizzle_scale=eff.drizzle_scale,
                         drizzle_reject=eff.drizzle_reject,
                         reject_arrays=(_min_max_reject_arrays(eff.min_max_reject_count)
-                                       if eff.min_max_reject and not options.drizzle and n >= 3
-                                       else 0),
+                                       if _min_max_reject_runs(eff, n) else 0),
                         ref_shape=ref_shape, is_mosaic=is_mosaic_canvas,
                         min_max_reject_count=(eff.min_max_reject_count
-                                              if eff.min_max_reject and not options.drizzle and n >= 3
-                                              else 1),
+                                              if _min_max_reject_runs(eff, n) else 1),
                         rejection_map=_records_rejection_map(eff, n),
                         memory_budget_gb=memory_budget_gb)
     # Bound the in-flight aligned/prepared frame buffers (each ~one native
@@ -2527,8 +2541,7 @@ def run_stack(
         drizzle=options.drizzle, drizzle_scale=eff.drizzle_scale,
         drizzle_reject=eff.drizzle_reject,
         reject_arrays=(_min_max_reject_arrays(eff.min_max_reject_count)
-                       if eff.min_max_reject and not options.drizzle and n >= 3
-                       else 0),
+                       if _min_max_reject_runs(eff, n) else 0),
         rejection_map=_records_rejection_map(eff, n),
         memory_budget_gb=memory_budget_gb)
     errors: list[str] = []
@@ -3001,11 +3014,13 @@ def run_stack(
     seam_residual = _compute_seam_residual(
         result_image, coverage, frame_cov, is_mosaic=bool(is_mosaic_canvas))
     # The min/max order-statistic path combines by rank and ignores per-frame
-    # weights, so weighting provenance must not be stamped when it ran (it's the
-    # active path only for a non-drizzle ≥3-frame min-max-reject stack). Every
+    # weights, so weighting provenance must not be stamped when it ran. Every
     # other path (drizzle, κ-σ pass 2, plain weighted sum, and the min/max
-    # fall-back-to-mean when n < 3) does apply the weights.
-    weights_applied = not (eff.min_max_reject and not options.drizzle and n >= 3)
+    # fall-back-to-mean when n < 3) does apply the weights. Asked of the same
+    # ``combine_method`` the dispatcher branched on a few hundred lines up, so
+    # the WGTMODE/WGTSKIP claim a user reads cannot describe a different combine
+    # from the one that ran — this used to be a hand-written copy of the gate.
+    weights_applied = not _min_max_reject_runs(eff, n)
     n_roughly = len(roughly_ids)
     # How far refine reached: subs no patch covered. (``n_refine_patches`` was
     # counted as the patches were built, above: one on a single field, plus one

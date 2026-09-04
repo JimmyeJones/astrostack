@@ -12383,7 +12383,35 @@ to **Shipped**.)_
   makes the app speak *more* often, and the whole design bias of this note is that a wrong "you lost half a
   night" costs far more than a missed one — so it needs the numbers, not the argument.
 
-- **NEW IDEA (Builder 2026-09-04, the obvious next slice after the v0.342.1 dispatcher routing) — the other
+- **✅ SHIPPED (Builder, v0.342.2, branch `claude/sweet-babbage-77bqc1`) — ~~the other seven copies of
+  `min_max_reject and not drizzle and n >= 3` are the same predicate, and one of them drives a sentence the
+  user reads.~~** Built as filed, and with the entry's own caution honoured to the letter: the predicate is
+  now `_min_max_reject_runs(options, n)` — one line, `combine_method(options, n) == "min-max-reject"` — and
+  **every `_estimate_peak_bytes` / `_guard_stack_memory` / `_best_memory_fix` call site keeps its argument
+  list exactly as it was**; only the condition inside each `if … else 0` moved. So the memory estimate's
+  shape is untouched, and `weights_applied` now asks the same function the dispatcher branched on a few
+  hundred lines above it.
+
+  **Proved byte-identical, not argued.** Ran the six-case before/after hash script this entry asked for
+  (`origin/main` in one `git worktree`, the branch in another, same fixture, same seeds): `mean-n3`,
+  `sigma-clip-n6`, `minmax-k1-n6`, `minmax-k3-n8`, `minmax-weighted-n6` and `drizzle-n6` (the drizzle case at
+  `max_workers=1`, per the drizzle-determinism entry) — **all six sha256s identical, NaN counts identical**.
+  A useful by-product: `minmax-weighted-n6` hashes the *same as* `minmax-k1-n6`, which is the pixel-level
+  demonstration of the very fact `weights_applied` reports — the order-statistic path ignores the weights.
+
+  **Tests (+21 in `tests/test_combine_dispatch.py`, 7 fail on a deliberately re-inlined predicate).** The
+  grid unit test that `_min_max_reject_runs` is the dispatcher's own answer across six option shapes × six
+  frame counts (both sides of the `n >= 3` gate, min/max-over-κ-σ precedence, and drizzle-over-both); the
+  behavioural one that **the weighting claim matches the combine that ran** — a real quality-weighted stack
+  must carry `WGTSKIP` and never `WGTMODE` exactly when min/max dispatched, which is the sentence the History
+  Info card shows a user; and that the pre-run estimate charges the accumulator's extra canvas planes (k=4 vs
+  k=1) only when min/max is the combine that runs. `_build_project` grew a `with_quality` flag so the
+  weighting has metrics to bite on — frames missing every metric all weigh 1.0, and the WGT* cards would then
+  be absent for a reason unrelated to the combine.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, default or API change; pure internal routing.
+
+  *(Original spec.)* **NEW IDEA (Builder 2026-09-04, the obvious next slice after the v0.342.1 dispatcher routing) — the other
   seven copies of `min_max_reject and not drizzle and n >= 3` are the same predicate, and one of them drives
   a sentence the user reads.** *(Pillar: maintainability in service of correctness — size S; **the memory
   path, so keep the estimate's shape**.)* v0.342.1 routed the two copies its entry named (the dispatcher's
