@@ -52,7 +52,8 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   resolved entries still sitting in "Bugs" and the inline "✅ SHIPPED" ones under
   "Ideas", and for the moment between shipping and moving. Strike the headline,
   write the SHIPPED paragraph, and keep the original spec **as an indented
-  continuation** (two spaces), never as a fresh top-level `- **…**` bullet. A top-level copy is indistinguishable from open work: every
+  continuation** (two spaces), never as a fresh top-level `- **…**` bullet. A
+  top-level copy is indistinguishable from open work: every
   way an agent triages this file — reading a section, or grepping `^- \*\*` for
   unclaimed items — surfaces it as a live idea, and runs have been spent
   re-picking features that shipped months earlier. Indented, the "is this open?"
@@ -75,6 +76,98 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 *No live claims.*
 
 ## Bugs (fix these first)
+
+- **✅ SHIPPED (Builder, v0.352.0, branch `claude/sweet-babbage-73i7y6`) — ~~every "will it fit in one frame?"
+  verdict and every mosaic panel count is computed for an **S50**, and the owner has an **S30**.~~ Found by
+  dogfooding the running app; verified against the owner's own target list; fixed by *deriving* the field, not
+  by flipping the constant.**
+
+  **The defect.** `seestack/framing.py` hard-codes `SEESTAR_FOV_LONG_ARCMIN = 77.0` /
+  `SEESTAR_FOV_SHORT_ARCMIN = 44.0`, and its comment called that "the Seestar's" field. It is the **S50's**
+  (250 mm over a 1920×1080 2.9 µm sensor → 1.28° × 0.72°). The owner's S30 is 150 mm: **~128' × 72'**, 1.66×
+  on each edge and 2.75× the area. Shipped in **v0.130.0 on 2026-07-16** — **eight days before** the owner
+  confirmed the S30 on 2026-07-24 — and never revisited. This is the *arithmetic* twin of **A4**, which fixed
+  the same wrong fact where it was a printed *caption* (`_SEESTAR_CAMERA = "ZWO Seestar S50"`, v0.326.5) and
+  left the field of view alone. `seestack/io/fits_loader.fov_deg_from_header` has known the right answer the
+  whole time — its own docstring says "S30 ≈ 2.1°, S50 ≈ 1.27°" — but nothing connected it to the advice.
+
+  **Measured on the owner's real targets** (the folder listing confirmed in this file), major-axis size →
+  verdict and panel count, before and after:
+
+  | target | size | shipped (S50 field) | owner's S30 field |
+  |---|---|---|---|
+  | M 31 | 178' | mosaic, **3×5 = 15 panels** | mosaic, **2×3 = 6 panels** |
+  | M 44 | 95' | mosaic, 2×3 = 6 panels | tight, 1×2 = 2 panels |
+  | NGC 7000 | 120' | mosaic, 2×3 = 6 panels | tight, 1×2 = 2 panels |
+  | IC 1318 | 100' | mosaic, 2×3 = 6 panels | tight, 1×2 = 2 panels |
+  | M 42 | 85' | **mosaic, 2×2 = 4 panels** | **tight, no mosaic needed** |
+  | NGC 6960 | 70' | tight, 1×2 = 2 panels | **fits in one frame** |
+  | IC 5070 | 60' | tight, 1×2 = 2 panels | **fits in one frame** |
+  | M 3 | 18' | fits | fits |
+
+  So the owner was told to spend **15 panels on M 31 where 6 do it** — two and a half times the clear nights,
+  on the app's flagship planning advice — and to shoot mosaics of the Veil and IC 5070, which fit whole in one
+  of their frames. Every surface that renders `framing`/`mosaic` said it: the Target page's object card, the
+  editor's and History's copies of it, and the Tonight planner's "Needs mosaic" badge on every row.
+
+  **The fix is derivation, per AGENTS.md §1** ("where the model matters, derive it from the frame's own
+  `FOCALLEN`/`XPIXSZ` rather than assuming either"), and the data was already in the project DB — the plate
+  solve writes `pixscale_arcsec` on every solved frame and the frame carries its own dimensions, so the field
+  is `pixscale × long_edge / 60`, **measured** rather than nominal, with no header read.
+  * `seestack/framing.py`: new `FrameField` + pure `frame_field_from_solve(pixscale, w, h)`, sanity-clamped to
+    the same 0.05°–20° band `fov_deg_from_header` uses; `framing_hint`/`mosaic_plan` take an optional
+    `field=` that wins over the `fov_*` fallbacks. The constants stay (`bg_advice` imports one) but now say in
+    writing that they are the **S50's** and are a fallback — **do not flip them to the S30's, that is the same
+    bug with a different wrong answer for the next owner.**
+  * `seestack/io/project.py`: `Project.solved_frame_geometry()` — one row, three columns, deliberately not a
+    `FrameRow` per sub, because it is asked from request handlers on a 5,477-sub target.
+  * `webapp/frame_field.py`: `install_frame_field`, cached on `app.state` (a telescope does not change
+    mid-session), re-probing at most every 5 min while the answer is still `None`, so an install that solves
+    its first frames starts giving honest advice without a restart.
+  * Threaded through `objectinfo.identify_object` and `nightplan.plan_tonight` /
+    `well_placed_tonight` / `suggest_targets`, and wired at `GET /api/targets/{safe}/identify`,
+    `GET /api/plan/tonight` and `GET /api/plan/suggest`.
+  * **The third consumer of the same constant, found by grepping for it rather than assumed:**
+    `bg_advice.background_mode_hint` appends *"It's also bigger than a single Seestar frame, so it fills each
+    sub"* above `SEESTAR_FOV_LONG_ARCMIN`, on the **same card** as the framing line. Left alone it would have
+    said a 90' nebula fills a 128' frame while the line above it said the nebula fits — so it reads the field
+    too, and a test pins the two sentences agreeing about M 8 in the same breath. `framing_payload`'s
+    *post-hoc* "did it land well?" verdict was checked and needed nothing: it already measures against the
+    run's own canvas and plate scale, which is why it was the one surface telling the truth.
+  * **One string of user-visible copy carried the same wrong model** and is fixed with it: Settings'
+    `astap_fov_deg` help said *"~1.3° suits the Seestar"*, which is the S50's. It now says the app reads the
+    real field off each frame's header and that this is only the fallback, naming **both** models' fields
+    (S30 ~2.1°, S50 ~1.3°). Low impact — `fov_deg_from_header` has answered this per-frame since v0.184 — but
+    it is the same false claim, in the one place a beginner would act on it.
+
+  **Why nine weeks:** three sweeps list "mosaic" as covered, and this is not visible from the code — the
+  constant is *correct arithmetic for a telescope*, just not this one, and no test could see it because the
+  webapp fixture solves its frames without ever writing a plate scale. It surfaced from a **running app**
+  (`scripts/agent-dogfood.sh`): the sample's Target page said "only about 15% of it is in this picture" while
+  the card below it planned a 2×2 mosaic — two numbers about one object that cannot both be right — and
+  pulling that thread found the field. Which is R5's point exactly.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk, default or API-*shape* change — two response fields carry
+  a more honest value for a library with solved frames. A library with **no** measured plate scale (a fresh
+  install, or one that has never solved) gets `None` and therefore **exactly today's answer**, so this can only
+  make an answer more correct, never remove one.
+
+  **Tests (+9; every one fails before, the engine ones by construction and the endpoint ones on the value).**
+  `tests/test_framing.py` +5: the two models' fields derived from their own solve (S50 lands on the constants
+  to within 1', S30 1.66× wider), the refusals (missing/zero/negative/NaN/non-numeric, and both ends of the
+  sanity band), the **owner's-targets table above asserted row by row**, `field=` beating the `fov_*`
+  arguments while its absence is byte-identical to the old answer across nine sizes, and a guard that the
+  fallback has not drifted from the constants un-migrated callers still import.
+  `tests/webapp/test_target_identify.py` +3: the card reads the field off the frames (M 42 goes
+  mosaic-of-4 → tight-with-no-mosaic), a library with no plate scale keeps the previous answer, and the
+  planner's badges and the card agree about the same object in the same breath — they were separately
+  hard-coded before. `tests/test_project.py` +1 for the accessor, including that the *newest* solved frame
+  wins and a zero scale is not an answer.
+
+  **The fixture note, because it is the reason this survived nine weeks:** the webapp fixture solves its
+  frames with a WCS but never writes `pixscale_arcsec`, so nothing in the suite could have noticed. The new
+  endpoint tests write one rather than pretending the 480×320 fixture frames are a Seestar's 16:9 sensor —
+  a fixture claiming hardware it does not have is how this shipped.
 
 - **✅ SHIPPED (Builder, v0.347.0, branch `claude/sweet-babbage-slg59h`) — ~~a stacked SOLAR still is covered
   edge-to-edge in a fine regular "mesh"~~. The pipeline demosaics a raw capture now — and the entry's own
