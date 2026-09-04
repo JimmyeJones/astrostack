@@ -20528,6 +20528,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   rendered page shows five grey paragraphs in a row) and is exactly the kind of thing the running-app probe
   exists to catch. Shipped as v0.345.3.
 
+- **NEW IDEA (Builder 2026-09-04, the generalisation of the v0.345.3 export-panel fix) — sweep the app for
+  the other trailing "what these buttons do" paragraphs, and check each against the per-control copy above
+  it.** *(Pillar: friendliness — PRIORITY 3; size XS per site once found. Confidence: one confirmed instance,
+  the rest unenumerated.)* The editor's Export panel ended with a four-sentence block recapping the three
+  buttons four rows above it, of which the first sentence duplicated the line directly under the Export
+  button. It survived every code-level read because each sentence is defensible alone — only the **rendered
+  page** shows five grey paragraphs in a row, which is why `scripts/agent-dogfood.sh` found it and audits had
+  not.
+  **The identifying test, which is cheap and does not need a browser once you know the shape:** a
+  `<Text size="xs" c="dimmed">` that is the *last* child of a panel and names two or more of the panel's own
+  controls in quotes. **Named starting points, none checked:** the Stack form's foot, the Save/share menu's
+  description block, the Calibration page's master-picker explainers, and the Storage page's cleanup copy.
+  **Care — this is the owner's "nothing may be removed" constraint, so do it the way v0.345.3 did:** go
+  clause by clause, move each sentence under the control it describes (the idiom several panels already use),
+  and re-home any fact the paragraph carried that the per-control copy did not, rather than deleting the
+  block wholesale. A paragraph whose every clause is genuinely new information is *not* a hit — leave it.
+
 - **NEW IDEA (Builder 2026-09-03, measured while sweeping the display-space statistics for A1's blindness) —
   Levels' "From your image" button silently leaves the black point at 0, and nothing says why.** *(Pillar:
   friendliness — PRIORITY 3; size XS; **copy, not arithmetic** — do NOT change the number, and read the
@@ -34272,6 +34289,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **NEW IDEA (Builder 2026-09-04, after losing three separate slots to it in one run) — when an entry ships,
+  strike the "the half X deliberately did NOT build" follow-ons the same commit closed, not just the entry
+  itself.** *(Pillar: maintainability in service of not wasting runs — size XS per sweep, and it is a **Scout**
+  job. Confidence: measured on this run.)* Three entries this run were picked as open work, greped, and turned
+  out to be fully on `main`: the loupe's **preview-space marker** (filed 09-03 as "the half v0.329.5
+  deliberately did NOT build", shipped v0.329.6 *an hour later by the same run*), the Target page's
+  **early-stop night marker** (filed 09-04, shipped v0.342.0), and **"the other two exports still made out of
+  the 1024 px preview"** (both halves shipped — `SHARE_JPEG_MAX_LONG_EDGE` and `wallpaper_source_long_edge`).
+  Two of the three were already correctly *indented* under their shipped parents and cost only a read; the
+  third was a live top-level bullet and cost a full trace. **The pattern is specific enough to act on:** an
+  entry of the form *"the half N deliberately did NOT build"* is the single likeliest thing the **next** run
+  builds, and the run that builds it strikes the parent it was working from — not the follow-on it never
+  read. **Shape:** when curating, for each newly-Shipped entry, grep the file for the sibling phrases
+  ("deliberately left out", "deliberately did NOT build", "the half", "the other two") naming the same
+  version, and strike or indent what that commit closed. **Do NOT** turn this into a code check: the
+  relationship is editorial, and the existing "keep a shipped item's spec *indented*" convention already
+  makes the answer visible by shape once someone applies it.
 
 - **⚪ LOG HYGIENE (Scout 2026-09-04, found by dogfooding a real stack) — the `astropy.stats`
   "Input data contains invalid values (NaNs or infs)…" warning is emitted dozens of times per stack, burying
