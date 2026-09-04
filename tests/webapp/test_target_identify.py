@@ -116,3 +116,89 @@ def test_identify_plans_no_mosaic_for_a_target_that_fits(client, solved_library)
     info = client.get(f"/api/targets/{safe}/identify").json()
     assert info is not None and info["framing"]["level"] == "fits"
     assert info["mosaic"] is None
+
+
+def _set_pixel_scale(data_root, arcsec_per_px: float, w: int, h: int) -> None:
+    """Give every frame in the library a solved plate scale and shape.
+
+    The `solved_library` fixture injects a WCS but no `pixscale_arcsec`, which is
+    exactly the "nothing to derive from" case the framing advice falls back on —
+    so a test that wants the derived answer has to write one.
+    """
+    from seestack.io.library import Library
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                for f in proj.iter_frames():
+                    proj.update_frame(f.id, pixscale_arcsec=arcsec_per_px,
+                                      width_px=w, height_px=h)
+            finally:
+                proj.close()
+    finally:
+        lib.close()
+
+
+def test_the_framing_verdict_is_measured_from_the_owners_own_frames(
+        client, solved_library):
+    """M 42 is a 4-panel mosaic through an S50's field and needs none through a
+    wider one — and the card must read the field off the owner's own frames.
+
+    The module shipped with the S50's 77' x 44' hard-coded eight days before the
+    owner confirmed an S30 (AGENTS.md §1 "Owner facts"), whose short edge alone
+    (~72') is wider than the S50's long one. The fixture's frames are 480x320
+    rather than a Seestar's 16:9, so this writes a plate scale that gives them
+    that ~72' short edge rather than pretending they are Seestar frames — the
+    field is what the verdict reads, and a fixture claiming a sensor it does not
+    have is how this bug got shipped in the first place.
+    """
+    _set_pixel_scale(solved_library, 71.8 * 60.0 / 320.0, 480, 320)  # 107.7' x 71.8'
+
+    info = client.get("/api/targets/M_42/identify").json()
+    assert info is not None and info["id"] == "M42"
+    # 85' clears the ~72' short edge but fits the ~108' long one — "tight", with
+    # no mosaic to plan. Through the S50 field this reads "mosaic" + 2x2/4 panels.
+    assert info["framing"]["level"] == "tight"
+    assert info["mosaic"] is None
+
+
+def test_a_library_with_no_solved_plate_scale_keeps_the_previous_answer(
+        client, solved_library):
+    """The fallback is unchanged behaviour, not a second guess: an install whose
+    frames carry no measured scale gets exactly the verdict it got before."""
+    info = client.get("/api/targets/M_42/identify").json()
+    assert info["framing"]["level"] == "mosaic"
+    assert info["mosaic"]["panels"] == 4
+
+
+def test_the_planner_badges_the_same_field_as_the_target_card(
+        client, solved_library):
+    """Two screens, one telescope. The Tonight planner's "Needs mosaic" badge and
+    the Target page's framing line are the same claim about the same object, so
+    they have to be computed against the same field — they were separately
+    hard-coded against the S50's before."""
+    _set_pixel_scale(solved_library, 71.8 * 60.0 / 320.0, 480, 320)  # 107.7' x 71.8'
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+
+    plan = client.get("/api/plan/tonight",
+                      params={"when": "2026-01-15T21:00:00Z"}).json()
+    rows = [t for t in plan.get("targets", []) if t.get("framing")]
+    assert rows, "the planner returned no framed rows to check"
+    checked = 0
+    for row in rows:
+        size = row.get("size_arcmin")
+        if size is None:
+            continue
+        # Nothing under the ~72' short edge may be badged as needing a mosaic;
+        # against the S50's 43' several of these were.
+        if size <= 71.0:
+            assert row["framing"]["level"] == "fits", row["name"]
+            assert row.get("mosaic") is None, row["name"]
+            checked += 1
+    assert checked, "no row small enough to pin the widened field"
+
+    # …and the Target card agrees about M 42 in the same breath.
+    info = client.get("/api/targets/M_42/identify").json()
+    assert info["framing"]["level"] == "tight"

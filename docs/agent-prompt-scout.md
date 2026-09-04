@@ -24,29 +24,52 @@ real bugs and sharp, well-shaped ideas is your deliverable. Each run:
    and run the app, and confirm the suite is green so you can tell a real bug from a
    pre-existing failure.
 2. **Dogfood the whole journey as the target user (§1).** Trace `drop files →
-   ingest → QC → stack → edit → export`. The editor is now well-hardened, so put
-   most of your attention on the **stack → result** path (does auto-stack /
-   auto-calibrate produce a clean, trustworthy image with minimal fuss?) and on
-   autonomy/friendliness friction. Note everything confusing, broken, ugly, slow,
-   or untrustworthy — for a beginner *and* for someone with thousands of subs.
-3. **Run a focused QA audit of ONE subsystem.** The editor is now well-hardened
-   (its bug backlog is drained and re-audits come back clean), so **lead your
-   rotation with the stacking engine** — `seestack/stack/*` (`align`, `stacker`,
-   `accumulator`, `mosaic`, `drizzle_path`, rejection) and `seestack/calibrate/*`.
-   This is correctness / data-integrity work: a bug there silently corrupts the
-   *final image*, so it's the highest-value place to hunt. Then rotate through the
-   webapp routers, watcher, ingest/QC, plate-solve, and render; re-audit the editor
-   only occasionally. Read the code adversarially — trace edge cases, NaN/coverage
-   semantics, memory bounds on the hot path, rejection/weighting math, error paths,
-   and preview↔export parity — and try to break it. For each **verified** problem,
-   file a bug into `docs/IMPROVEMENTS.md` → "Bugs (fix these first)" with: a
-   one-line symptom, the code location, **repro steps**, severity (wrong-result >
-   broken-UX > cosmetic), and a confidence (traced / reproduced). **Only file bugs
-   you've actually verified — no speculation.**
-4. **Curate the backlog + feed the feature pipeline.** Reprioritise to match §1,
+   ingest → QC → stack → edit → export`, with `scripts/agent-dogfood.sh` — a
+   *running* app, not its route files. Put most of your attention on the **stack →
+   result** path (does auto-stack / auto-calibrate produce a clean, trustworthy
+   image with minimal fuss?) and on autonomy/friendliness friction. Note everything
+   confusing, broken, ugly, slow, or untrustworthy — for a beginner *and* for
+   someone with thousands of subs. (Do **not** treat the editor as finished: two
+   audits have now found real editor defects that survived repeated "clean"
+   re-audits — see AGENTS.md §1, which re-opens priority 1.)
+3. **Run a focused QA audit of ONE subsystem, and run the code — don't only read
+   it.** *(Rotation re-aimed 2026-09-04 — R5. Since 08-26 the rotation reported
+   **14 clean subjects against 5 that found a bug**, while Builders recorded **73**
+   "found while / dogfood / incidentally" discoveries against 21 Scout-credited
+   ones. A1, A2 and A6 all live in paths the sweeps list as already covered —
+   because a sweep is *code reading*, and those are scale-dependent, per-panel or
+   external-process behaviours that reading cannot reveal.)*
+   **The single-field engine core has been swept clean fifteen times; do not
+   re-sweep it until a new bug is found there.** Rotate through, in order:
+   1. **Scale-dependent preview↔export parity** — every editor op with a
+      pixel-unit parameter, measured on a **mosaic-size canvas at proxy step 3 and
+      4**, never on a 1080p field.
+   2. **Mosaic and walk-away divergence** — every place the mosaic or auto path
+      chooses a method or threshold from a *whole-target* number that is really a
+      per-panel or per-pixel quantity.
+   3. **Filesystem side effects of external processes** (ASTAP, ffmpeg), **with a
+      stub binary that writes where the real one writes**.
+   4. **The webapp routers.**
+   **A sweep counts as done only if it ran the code on data shaped like the
+   owner's** (mosaic, many nights, thousands of subs), not only read it. For each
+   **verified** problem, file a bug into `docs/IMPROVEMENTS.md` → "Bugs (fix these
+   first)" with: a one-line symptom, the code location, **repro steps**, severity
+   (wrong-result > broken-UX > cosmetic), and a confidence (traced / reproduced).
+   **Only file bugs you've actually verified — no speculation.** Record the *sweep
+   itself* — including a clean one — as a dated block in `docs/PROCESS-NOTES.md`,
+   never as an entry in "Bugs (fix these first)": a clean-sweep record at the top of
+   the bug list is the first thing every triaging agent reads, and it is not a bug.
+4. **Curate the backlog + feed the feature pipeline.** *(Curating is the half that
+   has been skipped: `docs/IMPROVEMENTS.md` grows ~100 lines per merged PR and is now
+   large enough that no agent can read it in a run, so every stale entry survives by
+   default. **Leave the file no longer than you found it** unless you are filing a
+   verified bug: move what the last Builders left behind — resolved entries to
+   `docs/SHIPPED.md`, process notes and sweep records to `docs/PROCESS-NOTES.md`,
+   released claims out of "In progress" entirely.)* Reprioritise to match §1,
    merge duplicates, delete done/stale items, and split anything too big for one
-   Builder run into concrete slices. Then add new ideas (§4) of **two kinds every
-   run**:
+   Builder run into concrete slices. Then add new ideas (§4) — **grep the backlog
+   and `docs/SHIPPED.md` for each idea's key nouns first**, because this list has
+   repeatedly carried ideas that had already shipped — of **two kinds every run**:
    - **improvement ideas** — stacking-engine correctness, autonomy, friendliness,
      image quality (editor only if you find a real gap); and
    - **at least one genuinely NEW beginner feature** for the "Features that serve

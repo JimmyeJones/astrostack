@@ -139,6 +139,33 @@ def usual_night_pace_s(targets: list[LibraryTarget]) -> float | None:
     return paces[mid] if len(paces) % 2 else (paces[mid - 1] + paces[mid]) / 2.0
 
 
+def _frame_field(request: Request):  # noqa: ANN202 — FrameField | None
+    """The owner's own single-frame field, or ``None`` to keep the default.
+
+    Opens the library only to answer it, and only when the cached answer has
+    expired (:mod:`webapp.frame_field`), so an ordinary plan request pays
+    nothing. Advisory: any failure means "keep today's behaviour".
+    """
+    from webapp.frame_field import cached_frame_field, library_frame_field
+
+    state = request.app.state
+    cached, due = cached_frame_field(state)
+    if cached is not None or not due:
+        return cached
+    # Only now is the library worth opening: this endpoint is polled, and the
+    # answer changes about as often as the owner buys a telescope.
+    lib = deps.open_library(request)
+    try:
+        field = library_frame_field(lib)
+    except Exception:  # noqa: BLE001 — advisory; never fail a plan over it
+        return None
+    finally:
+        lib.close()
+    if field is not None:
+        state.frame_field = field
+    return field
+
+
 def _library_targets(request: Request) -> list[LibraryTarget]:
     """Library targets that have a position, for the 'already targeted' set.
 
@@ -316,6 +343,10 @@ def get_tonight(
         observer, ref, min_altitude_deg=float(min_altitude),
         library_targets=lib_targets,
         horizon=HorizonProfile.from_pairs(settings.horizon_profile),
+        # Every "Needs mosaic" badge on this table is a comparison against the
+        # owner's own single-frame field, not an assumed camera model — see
+        # webapp/frame_field.py. None keeps the module default.
+        field=_frame_field(request),
     )
     payload = asdict(plan)
     payload["location_source"] = location_source
@@ -962,6 +993,7 @@ def get_suggested_targets(
         min_altitude_deg=float(min_altitude),
         limit=_SUGGEST_LIMIT,
         horizon=HorizonProfile.from_pairs(settings.horizon_profile),
+        field=_frame_field(request),
     )
     base["suggestions"] = [asdict(s) for s in suggestions]
     return base
