@@ -467,6 +467,88 @@ _(nothing else claimed — claim an item here with your branch name)_
 
 ## Bugs (fix these first)
 
+- **🔴 OWNER-REPORTED WITH SCREENSHOT (2026-09-04) — a stacked SOLAR still is covered edge-to-edge in a fine
+  regular "mesh"/crosshatch at pixel pitch. The video pipeline never debayers, and its own docstring says so.**
+  *(Severity: **wrong picture** — the whole disk is textured with an artefact, on the owner-requested Moon & Sun
+  feature. Confidence: **HIGH on the mechanism, traced end-to-end in code**; the one unverified link is the
+  owner's actual source pixel format — a one-line check that settles it is below. Owner's words: "the sun
+  stacking looks weird - the pixels are like a mesh or something".)*
+
+  **The chain, all verified in-repo except the last step:**
+  1. **The video path has NO Bayer/CFA handling at all.** Grepping `seestack/video/*` for
+     `bayer|debayer|cfa` returns **nothing but a comment**. Contrast the deep-sky path, which is explicit:
+     `load_seestar_raw(path, debayer=False)` → `bilinear_debayer(raw, pattern=pattern)`
+     (`seestack/stack/stacker.py:~3492`).
+  2. **The design assumed video arrives already debayered, and says so in writing.**
+     `seestack/video/__init__.py` line 6: *"there are no stars to plate-solve and **no Bayer FITS to
+     calibrate**"* — the CFA case was never considered, so no code exists for it.
+  3. **The decoder forces `-pix_fmt rgb24` and never asks what the source is**
+     (`seestack/video/ffmpeg.py:204`). If the stream is **mono/grey carrying the raw CFA mosaic** — which is
+     the normal way solar/planetary capture is recorded, precisely so lucky imaging gets unprocessed frames —
+     ffmpeg replicates that single channel into R=G=B and **the mosaic survives verbatim as a luminance
+     checkerboard.** On the solar continuum the R/G/B photosites have different transmission, so adjacent
+     pixels alternate bright/dark: **exactly the observed mesh.**
+  4. **`probe_video` never collects `pix_fmt`** — its `-show_entries` list is
+     `stream=width,height,nb_frames,avg_frame_rate,duration` (`ffmpeg.py:~14`). So the pipeline is structurally
+     incapable of noticing the difference.
+  5. **Lucky imaging makes it worse, not better.** The disk is static and alignment shifts are near zero, so a
+     *sensor-fixed* pattern **adds coherently across every kept frame instead of averaging down** — which is
+     why the artefact is a crisp, clean grid rather than noise. Stacking sharpens it.
+  6. **The display stretch then makes it glaring.** `normalize_for_display` (`seestack/video/lucky.py:449`)
+     anchors lo/hi at the 1st/99.9th percentile of the whole frame — sky→0, disk-peak→1 — so a near-uniform
+     disk whose only structure *is* the mesh renders that mesh at high contrast. *(This step only reveals it;
+     it is not the cause. Do not "fix" it here.)*
+  **Ruled out while tracing:** nothing in the decode rescales or filters (the only `-vf` is frame `select` for
+  stride, `ffmpeg.py:~202`), so the decoder does not invent the pattern; the sharpness grader only produces a
+  scalar and never touches pixels.
+
+  **✅ GATE SATISFIED — CONFIRMED ON THE OWNER'S REAL FILE (2026-09-04). BUILD IT.** `ffprobe` on
+  `incoming/Solar_video/2026-06-19-175558-Solar-RAW.avi` returned:
+  ```
+  codec_name=rawvideo   width=1080   height=1920   pix_fmt=pal8
+  nb_frames=4487        duration=600.086893        size=9306684416
+  ```
+  **Two independent confirmations:**
+  1. **Bytes per pixel = 1.00026.** `9,306,684,416 / (1080 × 1920 × 4487) = 1.00026` — exactly **one byte per
+     pixel** (the 0.026 % excess is AVI container/index overhead). Single channel. There is no colour
+     information per pixel, so what is being stacked **is** the undebayered CFA mosaic. This check does not
+     depend on trusting `pix_fmt` at all.
+  2. The capture is `rawvideo`, and the file is named `…-Solar-RAW.avi`.
+
+  **⚠️ THE `pal8` WRINKLE — READ THIS BEFORE CODING, IT IS THE TRAP IN THIS FIX.** The stream is **not** `gray`
+  as predicted; ffmpeg reports **`pal8`** (8-bit *palette-indexed*). The AVI declares an 8-bit palettised
+  bitmap, and the byte at each pixel is a **palette index that happens to be the raw sensor value**.
+  - The current decoder asks for `-pix_fmt rgb24` (`seestack/video/ffmpeg.py:204`), so **every sensor byte is
+    mapped through the palette** before the pipeline ever sees it. With the usual identity greyscale ramp that
+    yields R=G=B=sensor value — which is precisely how the mosaic reaches the stack as a luminance
+    checkerboard, i.e. the owner's mesh.
+  - **The fix must recover the raw index bytes, not palette-mapped RGB.** `-pix_fmt gray` is the obvious
+    route, but it is only correct **if the palette is an identity grey ramp** — a non-monotonic or colourised
+    palette would silently corrupt every sensor value. **Verify the palette rather than assuming it**: dump it
+    once (`ffprobe -show_entries stream=pix_fmt -show_data`, or decode one frame both ways and assert
+    `gray == index`), and if it is not identity, bypass the palette and read the raw 8-bit plane directly.
+    Pin whichever assumption you rely on with a test.
+  - Note the frame is **1080×1920 (portrait)** — the sensor's native readout. Do not transpose it on the way
+    in; the CFA phase depends on the true row/column parity, so a transpose or flip before debayering
+    **changes the pattern** and will produce colour-swapped output that looks "fixed" but is wrong.
+
+  **Fix direction (the gate is satisfied — this is now buildable):** add `pix_fmt` to `probe_video`'s
+  `-show_entries` list (one word), branch on it, and for a single-channel/palettised source decode the raw
+  plane and debayer each frame with the **existing, proven `bilinear_debayer`** from
+  `seestack/io/fits_loader.py` — **reuse it, do not write a second debayer.** The pattern is already known to
+  the codebase: that module states *"The Seestar uses 'RGGB'"* (`fits_loader.py:242`) and `bilinear_debayer`
+  defaults to `RGGB`, so no guessing is needed — but **assert the result on the owner's real disk looks
+  neutral**, since a wrong CFA phase shows up as a colour cast rather than a mesh. Leave a genuinely-colour
+  source untouched, and guard hard against debayering twice.
+  **Regression test:** synthesise a video whose frames carry a known RGGB mosaic, stack it, and assert the
+  result has **no periodic 2-px structure** (the 2-px-lag autocorrelation, or the Nyquist bin of its FFT, at
+  noise level) — a test that fails today. Add a second asserting a true-colour source is passed through
+  unchanged.
+  **Worth noting for whoever takes this:** point 5 above is a general property of this pipeline — any
+  fixed-pattern sensor artefact accumulates rather than averages on a static target — so say it in the module
+  docstring even once the CFA case is handled, but do **not** speculatively build flat/dark handling for video
+  off the back of it.
+
 > **📌 EXTERNAL AUDIT 2026-09-02 — the ten app findings below (A1–A10) come from an independent read-only audit
 > commissioned by the owner, baselined at `4c2dac4` (v0.322.7) and re-verified at `87987cd5` (v0.325.2, 24
 > commits later). All ten still reproduced after re-verification. Full suite green at baseline (3,837 passed /
