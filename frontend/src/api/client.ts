@@ -684,6 +684,19 @@ export interface NightSummary {
   typical_fwhm_px?: number | null;
   is_best: boolean;
   reject_buckets: Record<string, number>;
+  // Set on the newest row only, when that night stopped notably earlier than
+  // this target's own recent nights. Optional: an older backend doesn't send it.
+  ended_early?: NightEarlyStop | null;
+}
+
+/** The Dashboard "Last night" early-stop measurement, as carried on a night row
+ *  of a target's own page (so without the name/safe the Dashboard needs). */
+export interface NightEarlyStop {
+  /** The last sub of that night, ISO 8601 UTC. */
+  stopped_utc: string;
+  /** How much earlier than this target's usual stop, in minutes. */
+  minutes_earlier: number;
+  n_nights_compared: number;
 }
 
 export interface FocusTrendPoint {
