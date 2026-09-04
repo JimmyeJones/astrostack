@@ -12365,6 +12365,22 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **NEW IDEA (Builder 2026-09-04, the surface v0.341.0's morning early-stop line deliberately did not reach) —
+  a target whose *own* last night stopped early, on its own page, however long ago that was.**
+  *(Pillar: autonomy + trust — PRIORITY 2; size XS–S; **check the overlap before building**.)* v0.341.0 puts
+  "M 42 stopped getting subs at 23:40 — about 3 h earlier than its last 4 nights" on the Dashboard's
+  **Last night** card, which by construction speaks only for the **library's most recent** capture night. A
+  target the owner shot on Tuesday and has not returned to has exactly the same fact recorded and nowhere to
+  say it: by Thursday the Dashboard is recapping something else, and the Target page's live quiet note self-
+  hid on Tuesday morning. `early_stop` is already a pure helper over one target's session end stamps, so the
+  Target page could answer it for that target's own newest night at the cost of one call. **Care, and why it
+  is filed rather than built:** the Dashboard line is *timely* — it is about last night, so it decays on its
+  own. A Target-page version is permanent until the next night is shot, which turns a report into a standing
+  reproach about a night the owner may well have ended on purpose; it wants an age cap (say a week) and a
+  place inside the existing `NoticeBoard` rather than a new block. **Grep first:** the Nights breakdown card
+  already shows each night's span, so the honest version may be a *marker on the night row* rather than a
+  sentence — which would also be the version that never nags.
+
 - **✅ SHIPPED (Builder, v0.336.0, branch `claude/sweet-babbage-76t8i3`) — ~~answer the reach question at the
   moment the default is *saved*, not only when a trail turns up later.~~** Built exactly as the entry shapes
   it, and at the entry's size: the *Save as defaults* confirmation now carries one clause when what was just
@@ -12893,8 +12909,57 @@ to **Shipped**.)_
   panels even out" is a like-for-like verdict about each mosaic on its own, so it survives a cross-target
   comparison in a way "which is cleaner" does not.
 
-- **NEW IDEA (Builder 2026-09-01, the surface the v0.322.0 quiet-capture note deliberately did not add) — one
-  library-wide "a target went quiet last night" line, for the morning.** *(Pillar: autonomy — PRIORITY 2;
+- **✅ SHIPPED (Builder, v0.341.0, branch `claude/sweet-babbage-5iozyk`) — ~~one library-wide "a target went
+  quiet last night" line, for the morning.~~** Built to the entry's own reasoning, including the part that
+  said what *not* to do: it is not a wider window on the live note, and it is not a new banner.
+
+  **The yardstick, which is the whole design.** The entry offered two — the planner's observing-night length,
+  or "simply this target's own usual stop time" — and the second is the one that ships, because it needs no
+  site location, no astronomy, and no guess about intent. `early_stop` (`seestack/session_recap.py`) takes the
+  target's per-session end stamps and asks whether the newest night stopped notably earlier than the **median**
+  of its recent nights. A median, not a mean: one dusk-to-dawn marathon must not make every ordinary night
+  after it look like a failure, and a test drives exactly that case (a mean would fire; the median is silent).
+  Recent nights only — up to 5, within 30 days — because a clock time is the yardstick and darkness moves with
+  the season.
+
+  **The one piece of real arithmetic is the midnight wrap.** Stop times sit either side of local midnight, so
+  a target that usually ends at 00:20 and stopped at 23:40 is forty minutes early, not twenty-three hours
+  late. `_minutes_earlier_than` resolves the difference to the nearer half of the 24 h circle; a test pins that
+  exact pair *staying silent*, which is where a naive time-of-day subtraction would have shouted.
+
+  **Care, as the entry demanded — "a false 'you lost half a night' in the morning is worse than silence."**
+  Four gates, each with a test for the silence: fewer than three earlier nights (a target's first nights have
+  no habit to have broken), none of them recent enough, a shortfall under 90 minutes (well past both the
+  seasonal drift and ordinary bedtime scatter), and — at the endpoint — a target that was not actually shot on
+  the night being recapped. The wording is a report, not an alarm: *"M 42 stopped getting subs at 23:40 —
+  about 3 h earlier than its last 4 nights. Worth a look if you didn't stop on purpose."* It names the
+  innocent explanation in the same breath, and a test pins that it never says "lost" or "failed".
+
+  **Placement follows the standing IA rule** (put a feature inside the existing grouping, not one more
+  always-on banner): it is one line inside the Dashboard's existing **Last night** card, linked to the target,
+  rendered only when the server sends one. **One** line, not a list — a night where three targets stopped
+  early is one event (the scope stopped), not three, so the largest shortfall leads.
+
+  **Cost: effectively nothing.** `_collect_last_night` already materialises every target's frames to trim
+  them; the end stamps are one more pass over rows already in memory (measured at 0.22 µs per stamp parse —
+  ~7 ms across the owner's largest target), and only the stamps are kept. The endpoint's existing 60 s cache
+  now carries both halves.
+
+  **Upgrade-safe (§9):** one additive, optional response field (`early_stop`, `null` on every ordinary night);
+  no config, schema, on-disk or default change; an older frontend never renders the line, and the new frontend
+  tolerates an older backend that omits the field (pinned).
+
+  **Tests (+8 Python, +4 vitest).** `tests/test_session_recap.py`: the end-stamp extraction, the fire case
+  (four nights ending 02:00, one stopping at 22:30 → 210 minutes), and one test per silence — the usual night,
+  the midnight wrap, too few nights, an out-of-season night, just under the threshold (and just over), and the
+  median-vs-mean marathon. `tests/webapp/test_last_night.py`: the endpoint's fire case, its silence on five
+  identical nights, and that a target not shot that night cannot speak on that night's card.
+  `LastNightCard.test.tsx`: the rounding, the sentence (including what it must *not* say), the rendered line
+  and its link, and nothing at all when the field is absent.
+
+  Original spec, for the record:
+
+  *(Pillar: autonomy — PRIORITY 2;
   size S; **read the "why not simply widen the window" note below before building**.)* v0.322.0 tells a
   *target's own page* when its subs stopped mid-session, and self-hides once the silence outlasts the 6 h
   session gap — past that the night is over and a live "capture may have stopped" warning would be nonsense.
@@ -22850,8 +22915,83 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Builder 2026-09-02, checked while standing down A6's duplicate — NOT a pixel bug, a reporting
-  one) — a drizzled mosaic can report that outlier rejection ran when no pixel could be clipped.**
+- **NEW IDEA (Builder 2026-09-04, the *behavioural* consequence of the v0.340.0 measurement — read the caution
+  before touching this) — an unattended drizzle run could skip a rejection pass that provably clips nothing,
+  and get 1.75× of its canvas memory back.** *(Pillar: autonomy + image quality — PRIORITY 2/4; size S to
+  write, **L to be sure of**; the on-by-default hot path, so measure or leave it.)* v0.340.0 measured that the
+  two-pass drizzle clip removes **nothing at all** below `kappa_min_frames` samples on a pixel — the block in
+  the sweep came out at the naive average to a part in 1e-3 at every depth up to 10. `_afford_drizzle_reject`
+  nonetheless takes the pass whenever `n >= 4` on the *target's* frame count, and the pass costs
+  `_PEAK_CANVAS_ARRAYS_DRIZZLE_REJECT` (7) full-canvas RGB planes against the single pass's 4 — the 1.75×
+  jump that `_guard_stack_memory` refuses on, and the exact reason the unattended path already forgives it
+  when the budget is short. **So on a thin drizzled mosaic the app is paying its largest memory premium for a
+  pass whose output is bit-identical to not running it** — and the owner's union mosaic canvas is the largest
+  canvas this app builds. Declining it there would make some runs fit that today are stepped down to a smaller
+  `drizzle_scale`, i.e. *better* pixels from a smaller footprint.
+  **Why this is filed, not built.** "Bit-identical" is a claim about the sweep's fixture, not a theorem: the
+  clip's own Bessel correction and the per-pixel `neff` gate mean the honest bound is per-*pixel*, and a
+  mosaic has a deep centre and thin edges — a canvas whose peak coverage clears 11 must keep the pass even if
+  its thinnest panel does not. So the gate would have to be the **coverage plane**, which is not known until
+  the canvas is built, where `_afford_drizzle_reject` is priced. And the failure mode is silent: get it wrong
+  and a satellite that *would* have been clipped is baked into the owner's picture with no note anywhere. Do
+  it only with a before/after showing bit-identical output on a real mosaic at several depths, and with the
+  skip stamped in the provenance the way `DRZREJSK` already stamps the memory case.
+
+- **✅ SHIPPED (Builder, v0.340.0, branch `claude/sweet-babbage-5iozyk`) — ~~a drizzled mosaic can report that
+  outlier rejection ran when no pixel could be clipped.~~** Built as filed — "no change to any pixel, this is
+  the say-what-it-did half" — and the entry's premise was checked by **measurement** before a line was written,
+  which moved the threshold it should be reported against.
+
+  **What the sweep found, and it is not `_MIN_REJECT_NEFF`.** The entry names the pass's own 3.0 effective-count
+  floor as the honest quantity. It is the right *gate*, but it is not where the pass stops working: the clip is
+  a κ·σ test against statistics that still contain the outlier, exactly like the non-drizzle pass, so it is
+  blind until `kappa_min_frames` — 11 at the default κ=3 — and the 3.0 floor sits below that and never binds
+  first. Measured on a real drizzle stack (one sub carrying a bright block, the rest clean, at depths 4 → 12):
+  the block comes out at the **naive no-rejection average to a part in 1e-3** at every depth up to 10
+  (712.50 of a possible 712.50 at 8 subs), and vanishes at 11. Pinned as a sweep in
+  `tests/test_drizzle_reject.py`, so the number the three surfaces quote is a measurement rather than a reading
+  of the docstring.
+
+  **Four surfaces were saying "protected" about that stack, and every one of them is fixed.**
+  `rejection_reach`'s drizzle branch returned the *dispatch* gate (`n >= 4`) as if it were the reach — so it
+  answered `reaches: True, lone_outlier_min_frames: 4` for a 5-, 8- or 10-sub drizzled run, and for a 40-sub
+  four-panel mosaic ten deep on a spot. It now returns `kappa_min_frames(sigma_kappa)` sized by the same
+  per-pixel `depth` the κ-σ branch uses. Downstream, all three consumers had a `method === "drizzle" →
+  return null` line whose stated reason was that the memory budget settles the pass at run time: the Target
+  page's `rejectionOutlookNote`, the Stack form's `rejectionReachNudge`, and the *Save as defaults*
+  `savedRejectionClause`. **That reason only ever pointed one way** — a pass dropped for memory removes even
+  less — so silence was never the conservative choice. Each now has its own drizzle sentence, and
+  `stackhealth`'s `rejection_blind` note fires on a `drizzle-reject` run whose deepest pixel is under the
+  bound (it was excluded for no better reason than being a different code path).
+
+  **The cure differs, and getting that wrong would have been worse than silence.** `auto_reject` is a no-op
+  while drizzle is on (`_resolve_auto_reject` returns early), so every "turn on Auto outlier removal" line
+  would have been advice that changes nothing. The drizzle wording names the two things that do work — more
+  subs on that part of the sky, or re-stacking without drizzle — and `rejectionOutlookNote` carries a new
+  `unattendedChoiceHelps` flag so the *"Let AstroStack choose on every hands-off stack"* button is withheld
+  rather than offered as a fix it cannot be.
+
+  **Upgrade-safe (§9):** no pixel moves, no option, default, schema, on-disk path or response *shape* changes
+  — one existing response field (`lone_outlier_min_frames`) reports a different number for drizzled runs,
+  which is the fix. An older frontend reading it renders nothing new.
+
+  **Tests (+7 Python, +8 vitest; 2 Python and 4 vitest fail before).** `tests/test_rejection_reach.py`: the
+  κ bound across the whole 4→11 band, the mosaic sized on panel depth not frame count, a loosened κ moving it,
+  and the reach↔note agreement contract extended to the drizzle path. `tests/test_stackhealth.py`: the note
+  firing on a thin drizzled run and on the owner's shape (40 subs, 10 on a spot), staying silent once it is
+  deep enough, and — the guard that matters — min/max still untouched, since its drop is an order statistic,
+  not a κ·σ clip. `tests/test_drizzle_reject.py`: the depth sweep above. Frontend: a drizzle branch and a
+  reaches-true silence for each of the three note builders, plus the withheld button in
+  `RejectionOutlookNote.test.tsx`. The four "is silent on a drizzled run" tests were **rewritten, not
+  deleted** — each pinned the defect, and each now pins the honest answer plus the silence that replaces it.
+
+  **Left open, deliberately:** the entry's `DRZREJ*` **FITS provenance** half. The header cards are stamped
+  where no coverage plane is in scope, so writing the depth into them means plumbing it through the meta
+  builder — a real change to a hot-path function for a card no screen reads, when all four surfaces a person
+  actually looks at are now honest. Filed as an idea below rather than bundled in.
+
+  Original spec, for the record:
+
   *(Pillar: image quality / trust — PRIORITY 4. Size: S.)* A6 fixed `auto_reject` reading a frame count where
   the honest number is a panel's depth — but `_resolve_auto_reject` returns early when `options.drizzle` is
   on, so none of it applies to a **drizzled** run, and the owner drizzles mosaics. Checked, and the pixels are
@@ -22864,6 +23004,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Shape:** feed `auto_reject_depth` (or, better, the coverage plane the pass already computes) into the
   `DRZREJ*` provenance and into `stackhealth`'s `rejection_blind` note, so a drizzled shallow mosaic gets the
   same honest line as a non-drizzled one. No change to any pixel — this is the "say what it did" half.
+
+- **NEW IDEA (Builder 2026-09-04, the half v0.340.0 deliberately left out) — let a finished picture's own FITS
+  header say that its rejection pass reached nothing.** *(Pillar: image quality / trust — PRIORITY 4; size S;
+  **only worth it if a header consumer is named first**.)* v0.340.0 made all four *screens* honest about a
+  rejection pass that ran and could not clip (`rejection_reach`, the Target-page outlook, the Stack-form
+  nudge, the save clause, and `stackhealth`'s `rejection_blind` note). The **file** still self-documents the
+  old way: `REJMODE`/`REJFRAC 0.0` with nothing distinguishing "your data was clean" from "this pass was
+  mathematically blind", which is what a user opening the master in Siril or PixInsight sees, and what the
+  app itself would read back long after the server log has rolled. **Shape:** one card beside the existing
+  `REJ*` block — the per-pixel depth the pass actually had, or a boolean "could not reach" — so the pair is
+  readable without re-deriving it. **Why it was not bundled:** the cards are stamped in a helper with no
+  coverage plane in scope, so it means plumbing the depth (or `coverage_max`) through a hot-path meta builder
+  for a card **no screen currently reads**. Name the consumer first — most likely the History Info panel,
+  which already reads the `REJ*` cards — or leave it: a header field nothing reads is exactly the kind of
+  surface this project is supposed to stop adding.
+
 - **✅ SHIPPED (Builder, v0.330.0, branch `claude/sweet-babbage-i16c1c`) — ~~the "your stack came in well
   under what its subs should give" nudge lives inside a collapsed reveal, so the one person who needs it never
   opens it.~~** Moved to "How's my stack?", which the Target page shows unprompted, exactly as the entry asked

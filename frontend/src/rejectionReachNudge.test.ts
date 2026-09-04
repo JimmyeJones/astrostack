@@ -66,10 +66,34 @@ describe("rejectionReachNudge", () => {
       reach({ method: "mean" }), { sigma_clip: false })).toBeNull();
   });
 
-  it("leaves drizzle alone — it has its own two-pass rejection and hints", () => {
+  it("warns when drizzle's own rejection is on but blind at this depth", () => {
+    // This replaces "leaves drizzle alone": drizzle's two-pass rejection is the
+    // same κ·σ clip with the same κ, so it has the same blind band — and the
+    // owner drizzles mosaics, whose panels sit inside it.
+    const nudge = rejectionReachNudge(
+      reach({ method: "drizzle", n_frames: 8 }),
+      { drizzle: true, drizzle_reject: true },
+    );
+    expect(nudge!.text).toContain("Drizzle's outlier removal is on");
+    expect(nudge!.text).toContain("8 subs");
+    expect(nudge!.text).toContain("about 11 frames up");
+    // No one-click fix: `auto_reject` is overridden while drizzle is on, so a
+    // button here would change nothing.
+    expect(nudge!.fix).toBeNull();
+  });
+
+  it("says nothing about drizzle rejection the user never asked for", () => {
+    // Drizzle on, its rejection off: the sigma-clip tick below it is inert, so
+    // "you're not getting the protection you asked for" would be untrue.
     expect(rejectionReachNudge(
       reach({ method: "drizzle", lone_outlier_min_frames: null }),
       { sigma_clip: true, drizzle: true })).toBeNull();
+  });
+
+  it("is silent once a drizzled stack is deep enough to clip", () => {
+    expect(rejectionReachNudge(
+      reach({ method: "drizzle", n_frames: 40, reaches: true }),
+      { drizzle: true, drizzle_reject: true })).toBeNull();
   });
 
   it("says nothing when the backend is older or has no frames to size", () => {

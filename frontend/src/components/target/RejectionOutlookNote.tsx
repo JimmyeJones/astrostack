@@ -29,10 +29,13 @@ import { rejectionOutlookNote } from "./rejectionOutlookNote";
  * Two ways out, and the second is the one a walk-away owner actually wants. The
  * Stack form fixes *this* target; `auto_reject_on_unattended` fixes every
  * hands-off stack at once, and a beginner will never find a Settings switch by
- * name. Offering it here needs no gate: the note only speaks when the method is
- * the user's own, and turning that setting on hands the choice back to the app —
- * so on an install that already has it, `user_chose` is false and this whole
- * note is silent.
+ * name. Offering it needs no gate on *whose* setting it is: the note only speaks
+ * when the method is the user's own, and turning that setting on hands the
+ * choice back to the app — so on an install that already has it, `user_chose` is
+ * false and this whole note is silent. It does need a gate on whether it would
+ * *do* anything: on a drizzled target the app's choice is overridden anyway, so
+ * `unattendedChoiceHelps` withholds the button rather than offering a fix that
+ * changes nothing.
  */
 export function RejectionOutlookNote(
   { safe, streaked }: { safe: string; streaked: number },
@@ -57,10 +60,12 @@ export function RejectionOutlookNote(
           to={`/targets/${encodeURIComponent(safe)}/stack`}>
           Change how this target stacks
         </Button>
-        <Button size="xs" variant="subtle" color="orange" component={Link}
-          to={settingsLink("automation")}>
-          Let AstroStack choose on every hands-off stack
-        </Button>
+        {note.unattendedChoiceHelps && (
+          <Button size="xs" variant="subtle" color="orange" component={Link}
+            to={settingsLink("automation")}>
+            Let AstroStack choose on every hands-off stack
+          </Button>
+        )}
       </Group>
     </Alert>
   );

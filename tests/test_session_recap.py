@@ -1469,3 +1469,130 @@ def test_pace_with_an_unplaceable_night_key_falls_back_to_sessions(tmp_path):
         assert recent_night_pace_s(proj, night_of=lambda ts: None) == 300.0
     finally:
         proj.close()
+
+
+# --- "it stopped earlier than it usually does" (the morning quiet-capture line) ---
+
+def _night_frames(day: datetime, *, start_h: int, end_h: float, every_min: int = 10):
+    """One night's worth of subs from ``start_h`` to ``end_h`` (UTC hours, which
+    may run past 24 into the next day), at a steady cadence."""
+    out = []
+    t = day.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=start_h)
+    end = day.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=end_h)
+    while t <= end:
+        out.append(_frame(t))
+        t += timedelta(minutes=every_min)
+    return out
+
+
+def _ends(nights):
+    """``session_end_stamps`` over a list of per-night frame lists."""
+    from seestack.session_recap import session_end_stamps
+
+    flat = [f for night in nights for f in night]
+    return session_end_stamps(flat)
+
+
+def test_session_end_stamps_gives_one_stamp_per_night_oldest_first():
+    from seestack.session_recap import session_end_stamps
+
+    base = datetime(2026, 8, 1)
+    nights = [_night_frames(base + timedelta(days=d), start_h=21, end_h=26)
+              for d in range(3)]
+    ends = session_end_stamps([f for n in nights for f in n])
+    assert len(ends) == 3
+    assert ends == [n[-1].timestamp_utc for n in nights]
+
+
+def test_early_stop_fires_when_a_night_ends_hours_before_the_usual_stop():
+    from seestack.session_recap import early_stop
+
+    base = datetime(2026, 8, 1)
+    # Four nights ending at 02:00, then one that stops at 22:30.
+    nights = [_night_frames(base + timedelta(days=d), start_h=21, end_h=26)
+              for d in range(4)]
+    nights.append(_night_frames(base + timedelta(days=4), start_h=21, end_h=22.5))
+    stop = early_stop(_ends(nights))
+    assert stop is not None
+    assert stop.n_nights_compared == 4
+    # 02:00 → 22:30 is three and a half hours early, measured across midnight.
+    assert stop.minutes_earlier == 210.0
+    assert stop.stopped_utc.startswith("2026-08-05T22:30")
+
+
+def test_early_stop_is_silent_on_a_night_that_ended_as_usual():
+    from seestack.session_recap import early_stop
+
+    base = datetime(2026, 8, 1)
+    nights = [_night_frames(base + timedelta(days=d), start_h=21, end_h=26)
+              for d in range(5)]
+    assert early_stop(_ends(nights)) is None
+
+
+def test_early_stop_measures_across_midnight_rather_than_around_the_clock():
+    """The trap this helper exists to avoid: a target that usually ends at 00:20
+    and stopped at 23:40 is forty minutes early, not twenty-three hours late — so
+    it must stay *silent*, where a naive time-of-day subtraction would shout."""
+    from seestack.session_recap import early_stop
+
+    base = datetime(2026, 8, 1)
+    nights = [_night_frames(base + timedelta(days=d), start_h=21, end_h=24.33)
+              for d in range(4)]
+    nights.append(_night_frames(base + timedelta(days=4), start_h=21, end_h=23.66))
+    assert early_stop(_ends(nights)) is None
+
+
+def test_early_stop_says_nothing_without_enough_nights_to_have_a_habit():
+    """A target's first couple of nights have no "usual" — every stop time is as
+    typical as every other, so any claim about one would be invented."""
+    from seestack.session_recap import early_stop
+
+    base = datetime(2026, 8, 1)
+    nights = [_night_frames(base + timedelta(days=d), start_h=21, end_h=26)
+              for d in range(2)]
+    nights.append(_night_frames(base + timedelta(days=2), start_h=21, end_h=22.0))
+    assert early_stop(_ends(nights)) is None
+
+
+def test_early_stop_ignores_nights_from_a_different_season():
+    """The yardstick is a clock time and darkness moves with the season, so a
+    night from three months back is not evidence about tonight's habit."""
+    from seestack.session_recap import early_stop
+
+    base = datetime(2026, 5, 1)
+    old = [_night_frames(base + timedelta(days=d), start_h=21, end_h=26)
+           for d in range(4)]
+    recent = [_night_frames(datetime(2026, 8, 1), start_h=21, end_h=22.0)]
+    assert early_stop(_ends(old + recent)) is None
+
+
+def test_early_stop_holds_its_tongue_just_under_the_threshold():
+    from seestack.session_recap import EARLY_STOP_MIN_MINUTES, early_stop
+
+    base = datetime(2026, 8, 1)
+    nights = [_night_frames(base + timedelta(days=d), start_h=21, end_h=26)
+              for d in range(4)]
+    just_under = 26 - (EARLY_STOP_MIN_MINUTES - 10) / 60.0
+    nights.append(_night_frames(base + timedelta(days=4),
+                                start_h=21, end_h=just_under))
+    assert early_stop(_ends(nights)) is None
+    just_over = 26 - (EARLY_STOP_MIN_MINUTES + 10) / 60.0
+    nights[-1] = _night_frames(base + timedelta(days=4),
+                               start_h=21, end_h=just_over)
+    assert early_stop(_ends(nights)) is not None
+
+
+def test_early_stop_takes_a_median_so_one_odd_night_cannot_set_the_habit():
+    """One marathon night must not make every ordinary night after it look like a
+    failure — which is exactly what a mean, or a max, would do."""
+    from seestack.session_recap import early_stop
+
+    base = datetime(2026, 8, 1)
+    nights = [
+        _night_frames(base, start_h=21, end_h=31),            # one dusk-to-dawn run
+        _night_frames(base + timedelta(days=1), start_h=21, end_h=24.5),
+        _night_frames(base + timedelta(days=2), start_h=21, end_h=24.5),
+        _night_frames(base + timedelta(days=3), start_h=21, end_h=24.5),
+        _night_frames(base + timedelta(days=4), start_h=21, end_h=24.0),
+    ]
+    assert early_stop(_ends(nights)) is None

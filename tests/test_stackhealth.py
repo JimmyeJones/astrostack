@@ -504,10 +504,67 @@ def test_rejection_blind_note_silent_on_a_mosaic_whose_panels_are_deep_enough():
     assert "rejection_blind" not in _kinds(notes)
 
 
-def test_rejection_blind_note_silent_on_a_drizzle_run():
+def test_rejection_blind_note_fires_on_a_drizzle_run_too_thin_to_clip():
+    """This used to be ``…_silent_on_a_drizzle_run``, which pinned the defect:
+    drizzle's two-pass rejection is the same κ·σ clip with the same κ, so a
+    5-sub drizzled run stamps ``REJMODE = drizzle-reject`` and ``REJFRAC 0.0``
+    while the trail stays in the picture. Measured, not argued — see
+    ``tests/test_drizzle_reject.py``'s depth sweep."""
     notes = stack_health(
-        _run(n_frames_used=5, rejection_mode="drizzle-reject",
-             options_json='{"drizzle": true, "drizzle_reject": true}'),
+        _run(n_frames_used=5, coverage_min=5, coverage_max=5,
+             rejection_mode="drizzle-reject", rejection_fraction=0.0,
+             options_json='{"drizzle": true, "drizzle_reject": true,'
+                          ' "sigma_kappa": 3.0}'),
+        [_frame() for _ in range(5)],
+    )
+    note = _note(notes, "rejection_blind")
+    assert note is not None
+    assert "drizzle's own outlier removal" in note.message
+    assert "11 frames" in note.message
+    # The cure differs: "Auto outlier removal" alone is a no-op while drizzle is
+    # on, so the note must not offer it as the fix on its own.
+    assert "More subs" in note.message
+    assert "drizzle off" in note.message
+    assert note.action == "restack"
+
+
+def test_rejection_blind_note_silent_on_a_deep_enough_drizzle_run():
+    """The other direction, so the new branch cannot become a standing lecture:
+    once the clip can bite, nothing fires."""
+    notes = stack_health(
+        _run(n_frames_used=40, coverage_min=30, coverage_max=40,
+             rejection_mode="drizzle-reject", rejection_fraction=0.002,
+             options_json='{"drizzle": true, "drizzle_reject": true,'
+                          ' "sigma_kappa": 3.0}'),
+        [_frame() for _ in range(40)],
+    )
+    assert "rejection_blind" not in _kinds(notes)
+
+
+def test_rejection_blind_note_fires_on_a_drizzled_mosaic_deep_by_frame_count():
+    """The owner's own shape, and the reason this branch is worth having: four
+    panels, 40 subs — comfortably past 11 — but only ten land on any one spot,
+    so no pixel on the canvas could be clipped."""
+    notes = stack_health(
+        _run(n_frames_used=40, coverage_min=8, coverage_max=10, is_mosaic=True,
+             rejection_mode="drizzle-reject", rejection_fraction=0.0,
+             options_json='{"drizzle": true, "drizzle_reject": true,'
+                          ' "sigma_kappa": 3.0}'),
+        [_frame() for _ in range(40)],
+    )
+    note = _note(notes, "rejection_blind")
+    assert note is not None
+    assert "10 subs overlapping at any one spot" in note.message
+
+
+def test_rejection_blind_note_leaves_min_max_alone():
+    """A min/max drop is an order statistic, not a κ·σ clip — it removes an
+    extreme from 3 subs up, so widening the note to drizzle must not have
+    swept it in as well."""
+    notes = stack_health(
+        _run(n_frames_used=5, coverage_min=5, coverage_max=5,
+             rejection_mode="min-max-reject",
+             options_json='{"min_max_reject": true}'),
         [_frame() for _ in range(5)],
     )
     assert "rejection_blind" not in _kinds(notes)
