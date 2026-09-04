@@ -190,3 +190,42 @@ def test_old_pre_qc_project_opens_and_round_trips(tmp_path):
         assert version == SCHEMA_VERSION
     finally:
         proj.close()
+
+
+def test_a_schema_20_project_gains_the_streak_positions_without_losing_rows(tmp_path):
+    """The v20 → v21 step, from the shape a live install actually has: a
+    current-at-the-time project with real frames, opened by a build that wants
+    the streak-position columns. They must arrive as NULL (= "no evidence", so
+    the reconciliation stays quiet on this data) with every row and every
+    existing value untouched — §9's "databases migrate, never reset"."""
+    project_dir = tmp_path / "v20"
+    project_dir.mkdir(parents=True)
+    conn = sqlite3.connect(project_dir / "project.sqlite")
+    try:
+        conn.executescript(SCHEMA_SQL)
+        for col in ("streak_cx", "streak_cy"):
+            conn.execute(f"ALTER TABLE frames DROP COLUMN {col}")
+        conn.execute(
+            "INSERT INTO frames(source_path, exposure_s, star_count, "
+            "streak_detected, accept, reject_reason) VALUES(?,?,?,?,?,?)",
+            ("sub_001.fit", 10.0, 90, 1, 0, "auto:streak"),
+        )
+        conn.execute("PRAGMA user_version = 20")
+        conn.commit()
+    finally:
+        conn.close()
+
+    proj = Project.open(project_dir)
+    try:
+        frames = list(proj.iter_frames())
+        assert len(frames) == 1
+        f = frames[0]
+        assert f.source_path == "sub_001.fit"
+        assert f.exposure_s == 10.0
+        assert f.star_count == 90
+        assert f.streak_detected is True
+        assert f.accept is False
+        assert f.reject_reason == "auto:streak"
+        assert f.streak_cx is None and f.streak_cy is None
+    finally:
+        proj.close()
