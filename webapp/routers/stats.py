@@ -107,6 +107,21 @@ class TargetNightOut(BaseModel):
     kept_exposure_s: float
 
 
+class EarlyStopOut(BaseModel):
+    """"This target stopped getting subs earlier than it usually does."
+
+    The morning form of the live "capture seems to have gone quiet" note, which
+    self-hides by breakfast — see :func:`seestack.session_recap.early_stop` for
+    the yardstick and why it is the target's own habit rather than a clock.
+    """
+
+    name: str
+    safe: str
+    stopped_utc: str
+    minutes_earlier: float
+    n_nights_compared: int
+
+
 class LastNightResponse(BaseModel):
     """The library's most recent capture night, combined across targets."""
 
@@ -126,6 +141,11 @@ class LastNightResponse(BaseModel):
     night_date: str | None = None
     targets: list[TargetNightOut] = []
     reject_buckets: dict[str, int] = {}
+    # One target whose newest night stopped notably earlier than its own recent
+    # nights do — the thing an owner who was asleep cannot otherwise find out.
+    # Additive and optional: ``None`` on every ordinary night, and an older
+    # frontend simply never renders the line.
+    early_stop: EarlyStopOut | None = None
 
 
 # The library-progress roll-up opens each project once to read its (optional)
@@ -559,24 +579,44 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
 def _collect_last_night(lib, targets):
     """Open each project, trim it to its most recent session, and combine every
     target's latest night into one recap. Expensive (opens every project) — the
-    caller caches it. A broken project is skipped, never 500s the dashboard."""
+    caller caches it. A broken project is skipped, never 500s the dashboard.
+
+    Returns ``(recap, early_stops)``: the combined night, plus — per target safe
+    name — whether that target's newest session stopped notably earlier than its
+    own recent nights do (:func:`~seestack.session_recap.early_stop`). The two
+    are collected together because they read the *same* frame list: this loop
+    already materialises every target's frames in order to trim them, so the
+    per-session end stamps cost one pass over rows that are in memory anyway,
+    where a second endpoint would re-open every project to learn the same thing.
+    Only the stamps are kept, never the frames.
+    """
     from seestack.io.project import Project
     from seestack.session_recap import (
+        early_stop,
         library_session_recap,
         recent_session_window_frames,
+        session_end_stamps,
     )
 
     rows: list[tuple[str, str, list]] = []
+    early: dict[str, object] = {}
     for t in targets:
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
+            frames = list(proj.iter_frames())
+            # Every night's stop time, before the window trim below throws the
+            # older ones away — the habit this target's newest night is judged
+            # against.
+            stop = early_stop(session_end_stamps(frames))
+            if stop is not None:
+                early[t.safe_name] = stop
             # Keep only each target's recent-night *window* inside the loop so we
             # never hold every target's full frame list at once (memory-bounded),
             # but — unlike a per-target last-session trim — without severing a
             # night that another target bridges: the precise cross-target "last
             # night" cut is made inside library_session_recap.
-            last = recent_session_window_frames(list(proj.iter_frames()))
+            last = recent_session_window_frames(frames)
             if last:
                 rows.append((t.name, t.safe_name, last))
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
@@ -584,7 +624,7 @@ def _collect_last_night(lib, targets):
         finally:
             if proj is not None:
                 proj.close()
-    return library_session_recap(rows)
+    return library_session_recap(rows), early
 
 
 @router.get("/api/last-night", response_model=LastNightResponse | None)
@@ -611,10 +651,11 @@ def get_last_night(request: Request) -> LastNightResponse | None:
         cache = getattr(request.app.state, "last_night_cache", None)
         now = time.monotonic()
         if cache and cache["sig"] == sig and (now - cache["at"]) < _LAST_NIGHT_CACHE_TTL_S:
-            recap = cache["data"]
+            recap, early = cache["data"]
         else:
-            recap = _collect_last_night(lib, targets)
-            request.app.state.last_night_cache = {"sig": sig, "at": now, "data": recap}
+            recap, early = _collect_last_night(lib, targets)
+            request.app.state.last_night_cache = {
+                "sig": sig, "at": now, "data": (recap, early)}
         lon = resolve_site_lon(request, lib, settings.site_lon)
     finally:
         lib.close()
@@ -641,6 +682,36 @@ def get_last_night(request: Request) -> LastNightResponse | None:
             for c in recap.targets
         ],
         reject_buckets=recap.reject_buckets,
+        early_stop=_pick_early_stop(recap, early),
+    )
+
+
+def _pick_early_stop(recap, early: dict) -> EarlyStopOut | None:
+    """The one target worth mentioning, of those that were actually shot on the
+    night this card is recapping.
+
+    **One** line, not a list: the card is a paragraph on a Dashboard the owner
+    has already called busy, and a night where three targets all stopped early
+    is one event (the scope stopped), not three. The largest shortfall leads
+    because it is the one most likely to be a stall rather than a target simply
+    setting. Restricted to the night's own contributors so a target last shot a
+    fortnight ago can never speak here — its "newest night" is not this one.
+    """
+    best = None
+    for c in recap.targets:
+        stop = early.get(c.safe)
+        if stop is None:
+            continue
+        if best is None or stop.minutes_earlier > best[1].minutes_earlier:
+            best = (c, stop)
+    if best is None:
+        return None
+    contribution, stop = best
+    return EarlyStopOut(
+        name=contribution.name, safe=contribution.safe,
+        stopped_utc=stop.stopped_utc,
+        minutes_earlier=stop.minutes_earlier,
+        n_nights_compared=stop.n_nights_compared,
     )
 
 

@@ -3,7 +3,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LastNightCard, describeLibraryNight, lastNightLabel } from "./LastNightCard";
+import {
+  LastNightCard, describeEarlyStop, describeLibraryNight, lastNightLabel, roughDuration,
+} from "./LastNightCard";
 import type { LibrarySessionRecap, TargetNight } from "../api/client";
 import * as client from "../api/client";
 
@@ -153,5 +155,64 @@ describe("LastNightCard", () => {
     const { container } = renderCard();
     await waitFor(() => expect(client.api.getLastNight).toHaveBeenCalled());
     expect(container.querySelector(".mantine-Paper-root")).toBeNull();
+  });
+});
+
+describe("roughDuration", () => {
+  it("rounds to a quarter-hour under two hours and a half-hour above", () => {
+    expect(roughDuration(95)).toBe("90 minutes");
+    expect(roughDuration(100)).toBe("105 minutes");
+    expect(roughDuration(180)).toBe("3 h");
+    expect(roughDuration(200)).toBe("3.5 h");
+    expect(roughDuration(240)).toBe("4 h");
+  });
+
+  it("never rounds a real gap away to nothing", () => {
+    // The server only ever sends gaps past its own 90-minute floor, but a
+    // formatter that can print "0 minutes" is one backend tweak from nonsense.
+    expect(roughDuration(1)).toBe("15 minutes");
+  });
+});
+
+describe("describeEarlyStop", () => {
+  const stop = {
+    name: "M 42", safe: "M_42",
+    stopped_utc: "2026-07-08T22:00:00+00:00",
+    minutes_earlier: 240, n_nights_compared: 4,
+  };
+
+  it("names the target, the gap and the innocent explanation", () => {
+    const text = describeEarlyStop(stop);
+    expect(text).toContain("M 42 stopped getting subs at");
+    expect(text).toContain("about 4 h earlier than its last 4 nights");
+    // Not an alarm: most early stops are deliberate, and a Dashboard that cries
+    // wolf over bedtime is worse than one that says nothing.
+    expect(text).toContain("if you didn't stop on purpose");
+    expect(text.toLowerCase()).not.toContain("lost");
+    expect(text.toLowerCase()).not.toContain("failed");
+  });
+});
+
+describe("LastNightCard early-stop line", () => {
+  it("renders the line, linked to the target, when the server sends one", async () => {
+    vi.spyOn(client.api, "getLastNight").mockResolvedValue(recap({
+      early_stop: {
+        name: "M 42", safe: "M_42",
+        stopped_utc: "2026-07-08T22:00:00+00:00",
+        minutes_earlier: 240, n_nights_compared: 4,
+      },
+    }));
+    renderCard();
+    const line = await screen.findByTestId("last-night-early-stop");
+    expect(line.textContent).toContain("M 42 stopped getting subs at");
+    expect(screen.getByRole("link", { name: /M 42 stopped getting subs/ }))
+      .toHaveAttribute("href", "/targets/M_42");
+  });
+
+  it("renders nothing extra on an ordinary night, or against an older backend", async () => {
+    vi.spyOn(client.api, "getLastNight").mockResolvedValue(recap());
+    renderCard();
+    await waitFor(() => expect(screen.getByText(/Last night/)).toBeInTheDocument());
+    expect(screen.queryByTestId("last-night-early-stop")).toBeNull();
   });
 });

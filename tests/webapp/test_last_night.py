@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime as dt
 
+from seestack.io.project import FrameRow
+
 
 def _add_night(lib, safe, start, *, n, exposure=10.0, accept=True, reject_reason=None):
     from seestack.io.project import FrameRow
@@ -181,3 +183,92 @@ def test_last_night_date_follows_a_longitude_change_without_waiting_out_the_cach
     # +150° (~UTC+10) → 15:00 local, i.e. the afternoon *of* the 9th's night.
     client.put("/api/settings", json={"site_lon": 150.0})
     assert client.get("/api/last-night").json()["night_date"] == "2026-07-09"
+
+
+def _night_run(lib, safe, start, *, hours, every_min=10):
+    """A night's worth of subs from ``start``, ending ``hours`` later."""
+    n = int(hours * 60 / every_min) + 1
+    proj = lib.open_target(safe)
+    try:
+        for i in range(n):
+            proj.add_frame(FrameRow(
+                source_path=f"/x/{safe}-{start:%Y%m%d%H%M}-{i}.fit",
+                timestamp_utc=(start + dt.timedelta(minutes=every_min * i)).isoformat(),
+                exposure_s=10.0, accept=True,
+            ))
+    finally:
+        proj.close()
+
+
+def test_last_night_says_when_a_target_stopped_earlier_than_it_usually_does(
+    client, built_library,
+):
+    """The morning half of the live "capture has gone quiet" note. The live one
+    self-hides once the silence outlasts the session gap, so an owner who was
+    asleep never sees it — this is the same fact, past tense, on the Dashboard
+    card they actually open."""
+    from seestack.io.library import Library
+
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        # Four nights that ran 21:00 → 02:00, then one that stopped at 22:00.
+        for d in range(4):
+            _night_run(lib, "M_42",
+                       dt.datetime(2026, 7, 1 + d, 21, 0, tzinfo=dt.timezone.utc),
+                       hours=5)
+        _night_run(lib, "M_42",
+                   dt.datetime(2026, 7, 5, 21, 0, tzinfo=dt.timezone.utc), hours=1)
+    finally:
+        lib.close()
+
+    early = client.get("/api/last-night").json()["early_stop"]
+    assert early is not None
+    assert early["safe"] == "M_42"
+    assert early["minutes_earlier"] == 240.0
+    assert early["n_nights_compared"] == 4
+    assert early["stopped_utc"].startswith("2026-07-05T22:00")
+
+
+def test_last_night_stays_quiet_when_the_night_ended_at_the_usual_hour(
+    client, built_library,
+):
+    """The silence that makes the line trustworthy: five identical nights say
+    nothing at all, however short they each were."""
+    from seestack.io.library import Library
+
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        for d in range(5):
+            _night_run(lib, "M_42",
+                       dt.datetime(2026, 7, 1 + d, 21, 0, tzinfo=dt.timezone.utc),
+                       hours=2)
+    finally:
+        lib.close()
+
+    assert client.get("/api/last-night").json()["early_stop"] is None
+
+
+def test_last_night_never_speaks_for_a_target_that_was_not_shot_that_night(
+    client, built_library,
+):
+    """A target whose own newest night is a fortnight old must not colour in
+    *this* night's card — its early stop, if any, is old news."""
+    from seestack.io.library import Library
+
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        for d in range(4):
+            _night_run(lib, "NGC_7000",
+                       dt.datetime(2026, 6, 1 + d, 21, 0, tzinfo=dt.timezone.utc),
+                       hours=5)
+        _night_run(lib, "NGC_7000",
+                   dt.datetime(2026, 6, 5, 21, 0, tzinfo=dt.timezone.utc), hours=1)
+        # …and a different target shot much later, which is what "last night" is.
+        _night_run(lib, "M_42",
+                   dt.datetime(2026, 7, 20, 21, 0, tzinfo=dt.timezone.utc), hours=3)
+    finally:
+        lib.close()
+
+    body = client.get("/api/last-night").json()
+    assert {t["safe"] for t in body["targets"]} == {"M_42"}
+    assert body["early_stop"] is None
