@@ -25,12 +25,13 @@ import logging
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 SCHEMA_SQL = f"""
 PRAGMA user_version = {SCHEMA_VERSION};
@@ -123,6 +124,11 @@ CREATE TABLE IF NOT EXISTS frames (
     -- accept / reject
     accept              INTEGER NOT NULL DEFAULT 1,  -- 0/1
     reject_reason       TEXT,                        -- 'auto:fwhm', 'user', etc.
+    -- when automation *un*-rejected this frame (ISO-8601 UTC); NULL for a frame
+    -- that was never set aside, is still set aside, or was put back by the user.
+    -- Only the automatic reconsiderations stamp it — see
+    -- ``Project.restored_frame_stamps``
+    restored_utc        TEXT,
     user_override       INTEGER NOT NULL DEFAULT 0   -- 0/1; 1 means user toggled
 );
 
@@ -200,6 +206,10 @@ class FrameRow:
     accept: bool = True
     reject_reason: str | None = None
     user_override: bool = False
+    # When automation put this frame *back* after having set it aside (ISO-8601
+    # UTC). NULL on every frame that was never reconsidered and on every row
+    # written before schema 22. See :meth:`Project.restored_frame_stamps`.
+    restored_utc: str | None = None
 
 
 def readable_frame_path(frame: "FrameRow") -> str | None:
@@ -256,7 +266,7 @@ _INSERT_COLS = [
     "fwhm_px", "star_count", "sky_adu_median", "eccentricity_median", "transparency_score",
     "streak_detected", "streak_count", "streak_cx", "streak_cy",
     "mosaic_panel_id",
-    "accept", "reject_reason", "user_override",
+    "accept", "reject_reason", "user_override", "restored_utc",
 ]
 
 # Reject reason stamped on the Seestar's own on-device *stacked output* when it
@@ -273,6 +283,20 @@ REJECT_REASON_SEESTAR_OUTPUT = "auto:seestar_output"
 # its file reappears — which is why this reason is stamped rather than plain
 # ``"user"``, whose choice must never be undone by the app.
 REJECT_REASON_FILE_MISSING = "auto:file_missing"
+
+
+def restoration_stamp() -> str:
+    """"Now", in the one format every ``restored_utc`` writer must use.
+
+    The stamp is compared against a stack run's ``timestamp_utc`` to answer "was
+    the published picture made before this sub came back?", and that run stamp is
+    written as ``datetime.now(timezone.utc).isoformat()``. Producing the two
+    through one shape here means the comparison can never be a string-format
+    argument between two call sites; readers parse it anyway
+    (:func:`seestack.session_recap.parse_capture_time`), so a legacy row in any
+    other ISO-8601 spelling still reads correctly.
+    """
+    return datetime.now(timezone.utc).isoformat()
 
 # The Seestar's on-device output folder holds a *single* stacked image (allow a
 # tiny margin for an occasional two-file output). A bare ``<T>/`` folder that
@@ -714,6 +738,19 @@ class Project:
                         f"ALTER TABLE frames ADD COLUMN {col} REAL")
                 except sqlite3.OperationalError:
                     pass  # already present
+        if from_version < 22:
+            # When automation put a set-aside frame *back*. The app has three
+            # reconsiderations that un-reject a sub (a streak that turned out to
+            # be a tracked object, a grade re-run, a missing file that returned)
+            # and none of them left a trace, so nothing could tell that the
+            # target's published picture was stacked *before* the sub came back.
+            # Additive; every existing frame stays NULL, which reads as "never
+            # reconsidered" — i.e. silence, exactly today's behaviour.
+            try:
+                self._conn.execute(
+                    "ALTER TABLE frames ADD COLUMN restored_utc TEXT")
+            except sqlite3.OperationalError:
+                pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -1005,10 +1042,33 @@ class Project:
         ]
         if not back:
             return []
+        stamp = restoration_stamp()
         with self.transaction():
             for fid in back:
-                self.update_frame(fid, accept=True, reject_reason=None)
+                self.update_frame(fid, accept=True, reject_reason=None,
+                                  restored_utc=stamp)
         return back
+
+    def restored_frame_stamps(self) -> list[str]:
+        """When each sub that is *ready to stack now* was put back by automation.
+
+        "Ready to stack" is accepted **and** plate-solved, because those are the
+        two things a re-stack needs from a frame: a restored sub that is still
+        unsolved would not go into the picture, so promising it would be a
+        promise the re-stack could not keep (it self-heals the moment the solve
+        lands). A frame the automation never reconsidered carries no stamp and
+        is not listed — which is every frame on a healthy install, and every
+        frame written before schema 22.
+
+        Read-only, one indexed-free scan of a small subset; the caller decides
+        what the stamps mean (see :mod:`seestack.restorednudge`).
+        """
+        assert self._conn is not None
+        rows = self._conn.execute(
+            "SELECT restored_utc FROM frames "
+            "WHERE accept = 1 AND restored_utc IS NOT NULL AND wcs_json IS NOT NULL"
+        ).fetchall()
+        return [str(r[0]) for r in rows]
 
     def count_frames_set_aside_as_missing(self) -> int:
         """How many of this target's subs are currently set aside as missing."""
@@ -1669,4 +1729,5 @@ def _row_to_frame(row: sqlite3.Row) -> FrameRow:
         accept=bool(row["accept"]),
         reject_reason=row["reject_reason"],
         user_override=bool(row["user_override"]),
+        restored_utc=row["restored_utc"],
     )

@@ -39,6 +39,7 @@ from webapp.schemas import (
     NightSummaryOut,
     ObjectInfoOut,
     RestackGainOut,
+    RestoredSubsOut,
     SessionQualityDriftOut,
     SessionRecapOut,
     SetCoverRequest,
@@ -539,6 +540,48 @@ def target_restack_gain(safe: str, request: Request) -> RestackGainOut | None:
         n_frames_ready=gain.n_frames_ready,
         missing_capture_window=gain.missing_capture_window,
         missing_night_count=gain.missing_night_count,
+    )
+
+
+@router.get("/{safe}/restored-subs", response_model=RestoredSubsOut | None)
+def target_restored_subs(safe: str, request: Request) -> RestoredSubsOut | None:
+    """**"Some of your subs came back after this picture was made."**
+
+    The app sets subs aside by itself and puts them back by itself — a streak
+    that turned out to be a tracked object, a grade re-run on a bigger
+    population, a missing file that reappeared. When a restoration lands *after*
+    the target's newest stack, the published picture is quietly thinner than the
+    owner's own data, and with ``auto_stack`` off nothing notices. The "N new
+    subs" nudge cannot see it either: that one compares each sub's *capture*
+    time against the stack, and a restored sub was shot long before the picture
+    was made.
+
+    Answered from ``frames.restored_utc`` — the moment automation put the sub
+    back — rather than by comparing counts, which would fire forever on any run
+    that legitimately combined fewer frames than were offered. Only *genuine*
+    stack runs count, and only subs that are accepted **and** solved now, so the
+    number is what a re-stack would actually fold in. ``null`` when there is
+    nothing to say, which is the common case. Read-only; it never starts a stack.
+    """
+    from seestack.restorednudge import restored_since_stack
+    from webapp.pipeline import _stack_options_from_run_json
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        runs = [r for r in proj.iter_stack_runs()  # newest first
+                if _stack_options_from_run_json(r.options_json) is not None]
+        stamps = proj.restored_frame_stamps()
+    finally:
+        proj.close()
+        lib.close()
+    back = restored_since_stack(runs, restored_stamps=stamps)
+    if back is None:
+        return None
+    return RestoredSubsOut(
+        run_id=back.run_id,
+        timestamp_utc=back.timestamp_utc,
+        n_frames_used=back.n_frames_used,
+        n_restored=back.n_restored,
     )
 
 
