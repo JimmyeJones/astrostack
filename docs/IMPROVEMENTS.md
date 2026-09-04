@@ -28811,12 +28811,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   North-up-saved run returns the plain picture unchanged (never a mis-plot); a cropped run's labels land inside
   the trim.
 
-- **✅ BOTH SLICES SHIPPED (slice (a): v0.316.0; slice (b): Builder, v0.348.0, branch
+- **✅ BOTH SLICES SHIPPED (slice (a): v0.316.0; slice (b): Builder, v0.349.0, branch
   `claude/sweet-babbage-8dyvfi`). NEW IDEA (Builder 2026-08-30, the two halves
   deliberately left out of the labelled share v0.315.0) — the names reach the *download*, not yet the
   **share sheet**; and a North-up picture still refuses them.**
 
-  **✅ (b) SHIPPED v0.348.0 — the names now survive the turn, and both of the entry's "check first" items
+  **✅ (b) SHIPPED v0.349.0 — the names now survive the turn, and both of the entry's "check first" items
   were checked rather than assumed.** The pins are carried through the *renderer's own* geometry
   (`seestack.render.orient.north_up_pixel_transform`) instead of being abandoned, so North-up framing and
   object names stopped being mutually exclusive on a shared file.
@@ -28912,7 +28912,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   scale bar and reaches the same answer: most likely the **keepsake** share — the one meant for other people —
   gains them, rather than adding a fourth share item to a menu the owner already calls busy. Decide the two
   together; shipping them separately will produce two different answers to one question.
-  **~~(b) Label a North-up share (S–M).~~ — SHIPPED v0.348.0, see above.** v0.314.0 refuses on a turned picture because the pins are on the
+  **~~(b) Label a North-up share (S–M).~~ — SHIPPED v0.349.0, see above.** v0.314.0 refuses on a turned picture because the pins are on the
   un-rotated FITS grid — an honest stand-down, but it means the two most-wanted marks on a shared file
   (North-up framing and object names) are mutually exclusive. It is buildable: the turn is a known angle with
   `expand=True`, and the app **already** maps points through exactly that transform —
