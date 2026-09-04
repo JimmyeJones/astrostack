@@ -1246,6 +1246,79 @@ describe("TargetView older-stack restack offer", () => {
   });
 });
 
+describe("TargetView restored-subs restack offer", () => {
+  // The gap this closes: a sub the app set aside and later put back was *shot*
+  // before the stack ran, so the "N new subs" nudge — which compares capture
+  // times — structurally cannot see it, and the picture stays thinner than the
+  // owner's data with nothing on screen to say so.
+  it("offers to re-stack when subs came back after the picture was made", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 1, reusable: true, timestamp_utc: "2026-03-01T00:00:00+00:00" }),
+    ]);
+    // Shot long before the stack — invisible to the new-subs comparison.
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { timestamp_utc: "2026-01-01T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "restoredSubs").mockResolvedValue({
+      run_id: 1, timestamp_utc: "2026-03-01T00:00:00+00:00",
+      n_frames_used: 200, n_restored: 12,
+    });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("restored-subs-note")).toBeInTheDocument());
+  });
+
+  it("takes the older 'which night' offer's place rather than stacking on it", async () => {
+    // Both notes press the same button, so only the more pressing one speaks —
+    // "your picture is thinner than your data" beats "it can't say its date".
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 1, reusable: true, timestamp_utc: "2026-03-01T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { timestamp_utc: "2026-01-01T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "restackGain").mockResolvedValue({
+      run_id: 1, timestamp_utc: "2026-03-01T00:00:00+00:00",
+      n_frames_used: 200, n_frames_ready: 512,
+      missing_capture_window: true, missing_night_count: false,
+    });
+    vi.spyOn(client.api, "restoredSubs").mockResolvedValue({
+      run_id: 1, timestamp_utc: "2026-03-01T00:00:00+00:00",
+      n_frames_used: 200, n_restored: 12,
+    });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("restored-subs-note")).toBeInTheDocument());
+    expect(screen.queryByTestId("restack-gain-note")).toBeNull();
+  });
+
+  it("stands down while the 'new subs' note is already offering a restack", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 1, reusable: true, timestamp_utc: "2026-01-01T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { timestamp_utc: "2026-02-05T00:00:00+00:00" }),  // a new night
+    ]);
+    vi.spyOn(client.api, "restoredSubs").mockResolvedValue({
+      run_id: 1, timestamp_utc: "2026-01-01T00:00:00+00:00",
+      n_frames_used: 200, n_restored: 12,
+    });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("1 new sub since your last stack")).toBeInTheDocument());
+    expect(screen.queryByTestId("restored-subs-note")).toBeNull();
+  });
+});
+
 describe("TargetView streaked badge", () => {
   it("shows a streaked-frame count for accepted frames carrying a trail", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());

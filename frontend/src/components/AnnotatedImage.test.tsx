@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   AnnotatedImage,
   compassLayout,
+  containBoxMaxWidth,
   croppedAnnotationView,
   objectLabel,
   deconflictMarkers,
@@ -218,11 +219,46 @@ describe("AnnotatedImage", () => {
     expect(screen.queryByTestId("object-marker")).toBeNull();
   });
 
+  it("sizes its box to the picture rather than padding it with black", () => {
+    renderImg(false);
+    // 1000x600 contain-fit into a 180px-tall box renders 300px wide; anything
+    // wider than that is black bar, which on an astro picture reads as part of
+    // the photograph.
+    const box = screen.getByAltText("M31").parentElement as HTMLElement;
+    expect(box.style.maxWidth).toBe("300px");
+    expect(box.style.height).toBe("180px");
+  });
+
   it("does not throw when asked to show markers (box measured to 0 in jsdom)", () => {
     // jsdom reports clientWidth/Height as 0, so no marker is placed — but the
     // component must render without error and still show the image.
     renderImg(true);
     expect(screen.getByAltText("M31")).toBeInTheDocument();
+  });
+});
+
+describe("containBoxMaxWidth", () => {
+  it("caps the box at the width the picture will actually render at", () => {
+    // The measured case: the Target page's hero card gave a 480x320 preview a
+    // 648x260 box, so 40% of the card was black bars either side of the picture.
+    expect(containBoxMaxWidth(480, 320, 260)).toBe(390);
+  });
+
+  it("shrinks hard for a portrait picture, where the waste is worst", () => {
+    expect(containBoxMaxWidth(320, 480, 260)).toBe(173);
+  });
+
+  it("never caps a square-ish mosaic wider than it renders", () => {
+    expect(containBoxMaxWidth(1000, 900, 180)).toBe(200);
+  });
+
+  it("says nothing when the picture's size isn't known yet", () => {
+    // An unmeasured run must keep exactly the full-width box it always had,
+    // rather than collapsing to zero and hiding the picture.
+    expect(containBoxMaxWidth(0, 320, 260)).toBeNull();
+    expect(containBoxMaxWidth(480, 0, 260)).toBeNull();
+    expect(containBoxMaxWidth(480, 320, 0)).toBeNull();
+    expect(containBoxMaxWidth(Number.NaN, 320, 260)).toBeNull();
   });
 });
 

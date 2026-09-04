@@ -25,6 +25,7 @@ import { CleanestShotNote } from "../components/CleanestShotNote";
 import { GrainierNewestNote } from "../components/GrainierNewestNote";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { RestackGainNote } from "../components/RestackGainNote";
+import { RestoredSubsNote } from "../components/RestoredSubsNote";
 import { StackFailedNote } from "../components/target/StackFailedNote";
 import { ObjectInfoCard, describeObject } from "../components/ObjectInfoCard";
 import { InsightTabs } from "../components/InsightTabs";
@@ -423,6 +424,18 @@ export function TargetView() {
     queryKey: ["reject-summary", safe],
     queryFn: () => api.rejectSummary(safe),
     enabled: !!target.data,
+  });
+  // Subs the app set aside by itself and later put *back* — after this target's
+  // newest stack ran, so the published picture was made without them. Fetched
+  // here rather than inside the note because the answer also decides which of
+  // the two "stack it again" notes speaks (see the notice board below). Null on
+  // an older backend or a failed fetch, which renders nothing.
+  const restoredSubs = useQuery({
+    queryKey: ["restored-subs", safe],
+    queryFn: () => api.restoredSubs(safe).catch(() => null),
+    enabled: !!safe,
+    staleTime: 30_000,
+    retry: false,
   });
   // Accepted-but-not-yet-solved subs the stacker can't use — the honest count
   // behind a thin/gibberish stack. Comes from the breakdown's "unsolved" bucket.
@@ -954,14 +967,29 @@ export function TargetView() {
             node: <GrainierNewestNote safe={safe} /> },
           { key: "autostack-hold", priority: NOTICE_PRIORITY.warning,
             node: <AutoStackHoldNote safe={safe} /> },
+          /* "N subs came back after this picture was made" — automation put
+              set-aside subs back *after* the newest stack ran, so the picture is
+              thinner than the owner's data and nothing else can tell them: the
+              "N new subs" note compares capture times, and a restored sub was
+              shot before the stack. Suppressed while that note is up, since it
+              already offers the same one-click restack. Self-hides otherwise. */
+          { key: "restored-subs", priority: NOTICE_PRIORITY.advisory,
+            node: newSubsSinceStack > 0
+              ? null
+              : <RestoredSubsNote safe={safe} back={restoredSubs.data} /> },
           /* "This picture can't say which night it's from" — an offer to
               re-stack a picture made before the app recorded when its subs were
               shot, named as the gain rather than as a version. Suppressed while
               the "N new subs" note is up: that one already offers a restack, for
-              a more pressing reason, and a re-stack answers both. Advisory, so
+              a more pressing reason, and a re-stack answers both. Suppressed the
+              same way by the restored-subs note above — two notes offering the
+              same button is the banner-piling §1 warns about, and that one names
+              a thinner picture, which is the more pressing reason. Advisory, so
               it can never take a warning's inline slot. */
           { key: "restack-gain", priority: NOTICE_PRIORITY.advisory,
-            node: newSubsSinceStack > 0 ? null : <RestackGainNote safe={safe} /> },
+            node: newSubsSinceStack > 0 || restoredSubs.data
+              ? null
+              : <RestackGainNote safe={safe} /> },
           /* "Capture may have stopped" — subs were arriving steadily and then
               stopped, mid-session. A warning rather than an advisory because it
               is only actionable while the night is still running; it self-hides
