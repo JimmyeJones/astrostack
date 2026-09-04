@@ -20863,9 +20863,25 @@ problems. Dogfood it every big-picture run and fix root causes.
     `friendlyJobError`-style strip for a 422 whose detail is already a sentence would improve every settings
     error at once, not just this one.
 
-- **NEW IDEA (Builder 2026-09-02, left rather than churned while standing down the A5 collision) — the
-  Target page's Edit button is still labelled "Edit latest stack" while it now edits the *cover*.**
-  *(Pillar: approachable — PRIORITY 3; size XS.)* Since v0.327.3 the row's Edit button, the Save/share menu and
+- **✅ SHIPPED (Builder, v0.345.5, branch `claude/sweet-babbage-k0vyac`) — ~~the Target page's Edit button is
+  still labelled "Edit latest stack" while it now edits the *cover*.~~** Built the way the entry asked — as a
+  deliberate pass, not a drive-by rename — and the pass found the **second** control with the same defect,
+  three rows along: the Save/share menu's `aria-label` read *"Save or share the latest picture"* while it too
+  has followed `pictureRun` since v0.327.3. Both are now named after the run they actually open: **"Edit your
+  picture"** and **"Save or share your picture"**, which is the wording the card directly below them already
+  uses for the same run ("Your picture (cover)"). `LatestPictureCard`'s own **"Edit this picture"** link is
+  untouched, so the two edit affordances stay distinct — the collision the entry warned about, avoided rather
+  than argued away — and a comment at the site says why neither name may say "the latest".
+  **Sighted users never saw either string** (the buttons read "Edit" and "Save / share"), so this is
+  screen-reader-only honesty: on a target whose owner pinned an older favourite, both names described a run
+  the control does not open. Frontend copy only — no config, schema, on-disk, API or default change.
+  **Tests (+1, `Target.test.tsx`, verified to fail before):** on the pinned-cover fixture (cover 3 pinned,
+  run 4 newer) the Edit link is named "Edit your picture" *and* still points at run 3, the menu button is
+  named "Save or share your picture", **no** control on the page is named anything matching `/latest/i`, and
+  the card's "Edit this picture" link is still there and still distinct. Five existing assertions that quoted
+  the old labels were updated, not weakened.
+
+  *(Original entry follows.)* *(Pillar: approachable — PRIORITY 3; size XS.)* Since v0.327.3 the row's Edit button, the Save/share menu and
   the hero card all follow the **pinned cover**, but the button's `aria-label` in `frontend/src/routes/Target.tsx`
   still says `"Edit latest stack"` — a screen-reader user is told it does something it does not. Worth one
   deliberate pass rather than a drive-by rename, because the obvious replacement ("Edit this picture") is

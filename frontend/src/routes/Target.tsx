@@ -1311,9 +1311,15 @@ export function TargetView() {
             leftSection={<IconHistory size={16} />} aria-label="History">
             History
           </Button>
+          {/* Both of the picture controls below follow `pictureRun` — the pinned
+              cover when there is one, the newest picture otherwise — so neither
+              accessible name may say "the latest": on a target whose owner
+              pinned an older favourite, a screen-reader user was told these open
+              a stack they do not open. "Your picture" is the name the card
+              below them already uses for the same run. */}
           {pictureRun ? (
             <Button component={Link} to={`/targets/${safe}/edit/${pictureRun.id}`} variant="default"
-              leftSection={<IconWand size={16} />} aria-label="Edit latest stack">
+              leftSection={<IconWand size={16} />} aria-label="Edit your picture">
               Edit
             </Button>
           ) : null}
@@ -1328,7 +1334,7 @@ export function TargetView() {
               <Menu.Target>
                 <Button variant="default" leftSection={<IconDownload size={16} />}
                   rightSection={<IconChevronDown size={16} />}
-                  aria-label="Save or share the latest picture">
+                  aria-label="Save or share your picture">
                   <Box visibleFrom="sm">Save / share</Box>
                   <Box hiddenFrom="sm">Save</Box>
                 </Button>

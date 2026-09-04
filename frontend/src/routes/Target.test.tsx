@@ -98,7 +98,7 @@ function phoneLabel(button: HTMLElement): string {
 // one "Save / share" menu, so the assertions below open it first.
 async function openSaveShare() {
   fireEvent.click(
-    await screen.findByRole("button", { name: "Save or share the latest picture" }),
+    await screen.findByRole("button", { name: "Save or share your picture" }),
   );
 }
 
@@ -121,8 +121,8 @@ describe("TargetView action row on a phone", () => {
       ["Process this target", "button", "Process"],
       ["Re-run QC and Solve", "button", "Re-check"],
       ["History", "link", "History"],
-      ["Edit latest stack", "link", "Edit"],
-      ["Save or share the latest picture", "button", "Save"],
+      ["Edit your picture", "link", "Edit"],
+      ["Save or share your picture", "button", "Save"],
       ["Stack", "link", "Stack"],
     ];
     for (const [aria, role, label] of named) {
@@ -375,7 +375,7 @@ describe("TargetView latest-picture download", () => {
 
     await waitFor(() =>
       expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: "Save or share the latest picture" }))
+    expect(screen.queryByRole("button", { name: "Save or share your picture" }))
       .not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Wallpaper/ }))
       .not.toBeInTheDocument();
@@ -398,7 +398,7 @@ describe("TargetView hero action row grouping", () => {
     await screen.findByRole("button", { name: "Process this target" });
     expect(screen.getByRole("button", { name: "Re-run QC and Solve" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Edit latest stack" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit your picture" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Stack" })).toBeInTheDocument();
     // …and the four picture controls are gone from the row itself — not as
     // buttons and not as links — leaving exactly one dropdown in their place.
@@ -407,7 +407,7 @@ describe("TargetView hero action row grouping", () => {
       expect(screen.queryByRole("link", { name: gone })).not.toBeInTheDocument();
     }
     expect(
-      screen.getByRole("button", { name: "Save or share the latest picture" }),
+      screen.getByRole("button", { name: "Save or share your picture" }),
     ).toBeInTheDocument();
   });
 
@@ -2177,13 +2177,34 @@ describe("TargetView honours the pinned cover", () => {
     pinned();
     renderTarget();
 
-    const edit = await screen.findByRole("link", { name: "Edit latest stack" });
+    const edit = await screen.findByRole("link", { name: "Edit your picture" });
     expect(edit).toHaveAttribute("href", "/targets/M_42/edit/3");
 
     await openSaveShare();
     const jpeg = await screen.findByText("JPEG (smaller — best for sharing)");
     expect(jpeg.closest("a")).toHaveAttribute(
       "href", client.api.stackArtifactUrl("M_42", 3, "jpeg"));
+  });
+
+  it("does not call the cover 'the latest' to a screen reader", async () => {
+    // Both controls have followed the pinned cover since v0.327.3, but their
+    // accessible names still said "latest stack" / "the latest picture" — so on
+    // exactly this target (cover 3 pinned, run 4 newer) a screen-reader user was
+    // told the button opens a run it does not open. The names now match the
+    // card's own "Your picture", and stay distinct from that card's own
+    // "Edit this picture" link so the two are still tellable apart.
+    pinned();
+    renderTarget();
+
+    expect(await screen.findByRole("link", { name: "Edit your picture" }))
+      .toHaveAttribute("href", "/targets/M_42/edit/3");
+    expect(screen.getByRole("button", { name: "Save or share your picture" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /latest/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /latest/i })).toBeNull();
+    // The card's own link keeps its wording, so both remain unambiguous.
+    expect(screen.getByRole("link", { name: "Edit this picture" }))
+      .toBeInTheDocument();
   });
 
   it("says so, so a beginner doesn't think their new stack vanished", async () => {
@@ -2205,7 +2226,7 @@ describe("TargetView honours the pinned cover", () => {
 
     renderTarget();
 
-    const edit = await screen.findByRole("link", { name: "Edit latest stack" });
+    const edit = await screen.findByRole("link", { name: "Edit your picture" });
     expect(edit).toHaveAttribute("href", "/targets/M_42/edit/9");
     expect(screen.queryByTestId("pinned-cover-note")).toBeNull();
   });
@@ -2256,7 +2277,7 @@ describe("TargetView hero when the newest run has no picture", () => {
 
     renderTarget();
 
-    expect(await screen.findByRole("link", { name: "Edit latest stack" }))
+    expect(await screen.findByRole("link", { name: "Edit your picture" }))
       .toHaveAttribute("href", "/targets/M_42/edit/7");
   });
 });
