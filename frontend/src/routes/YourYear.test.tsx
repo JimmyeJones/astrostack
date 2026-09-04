@@ -83,6 +83,25 @@ describe("YourYearView", () => {
     expect(screen.getByText("2.4 px stars")).toBeInTheDocument();
   });
 
+  it("shows one card when the longest night was also the sharpest", async () => {
+    // A short season usually makes that true, and the page used to print the
+    // same date twice as if they were two different nights.
+    const both = {
+      date: "2026-02-14", exposure_s: 7200, n_frames: 120,
+      targets: ["M 31"], median_fwhm_px: 2.4, n_measured: 120,
+    };
+    vi.spyOn(client.api, "getYearRecap").mockResolvedValue(recap({
+      longest_night: both, sharpest_night: { ...both },
+    }));
+    renderPage("2026");
+    await waitFor(() => expect(
+      screen.getByText(/Longest — and sharpest — night · 14 Feb 2026/))
+      .toBeInTheDocument());
+    // One card, carrying both figures.
+    expect(screen.getByText("2.0 h · 2.4 px stars")).toBeInTheDocument();
+    expect(screen.queryByText(/^Sharpest night/)).not.toBeInTheDocument();
+  });
+
   it("omits a standout night the server stayed silent about", async () => {
     // A one-night year has no "longest"; the page must not invent one.
     vi.spyOn(client.api, "getYearRecap").mockResolvedValue(recap({}));

@@ -96,6 +96,28 @@ describe("SkySoFarView", () => {
     expect(heroLinks.some((a) => a.getAttribute("href") === "/targets/NGC7000")).toBe(true);
   });
 
+  it("shows one standout card when both superlatives are the same target", async () => {
+    // The one-target library — and, on a Seestar, most libraries: fixed-length
+    // subs make "most integration" and "most subs kept" nearly one question, so
+    // the page used to render the same picture and name twice, side by side.
+    vi.spyOn(client.api, "getLibrarySummary").mockResolvedValue(summary({
+      n_targets_imaged: 1, n_subs_kept: 60, total_integration_s: 3600,
+      integration_hours: 1, first_light_utc: "2026-01-15T00:00:00Z",
+      longest_target: summaryTarget({ safe: "M42", name: "Orion Nebula" }),
+      most_imaged_target: summaryTarget({ safe: "M42", name: "Orion Nebula" }),
+      heroes: [summaryTarget({ safe: "M42", name: "Orion Nebula" })],
+    }));
+    renderPage();
+
+    await waitFor(() => expect(
+      screen.getByText("Your biggest project — and most-imaged")).toBeInTheDocument());
+    // …and only one card: the separate titles are gone, not both rendered.
+    expect(screen.queryByText("Your biggest project")).not.toBeInTheDocument();
+    expect(screen.queryByText("Most-imaged target")).not.toBeInTheDocument();
+    // Neither figure was lost in the merge.
+    expect(screen.getByText("1.0 h of integration · 60 subs kept")).toBeInTheDocument();
+  });
+
   it("shows a no-pictures note when there are tallies but no finished stacks", async () => {
     vi.spyOn(client.api, "getLibrarySummary").mockResolvedValue(summary({
       n_targets_imaged: 1, n_subs_kept: 40, total_integration_s: 1200,

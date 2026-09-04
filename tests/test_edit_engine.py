@@ -791,7 +791,7 @@ def test_auto_edit_summary_note():
     note = auto_edit_summary(recipe, {"sky": 0.101, "median_fwhm": 4.7})
     assert note == (
         "Auto-edited: flattened the background, balanced the colour, then "
-        "sharpened detail · measured a ~0.1 sky, 4.7 px stars."
+        "sharpened detail · measured a ~0.1 sky before stretching, 4.7 px stars."
     )
 
     # A disabled op is skipped, and with no measurable cues the note omits the

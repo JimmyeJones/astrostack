@@ -701,7 +701,8 @@ def _auto_num(n: float) -> str:
     precision for a stretch target or a star size, but a *linear* stack's sky
     sits well below 0.01, so the bundled sample's measured 0.001 sky read
     "measured a ~0 sky" in the running app — which says the app measured
-    nothing, one line above "sky level 0.24". When two decimals round a positive
+    nothing, one line above "stretched sky level 0.24". When two decimals round a
+    positive
     number away, it falls back to three, which is exactly the precision
     ``analyze_auto_inputs`` carries (it rounds ``sky`` to 3 dp), so nothing below
     what was actually measured is ever invented."""
@@ -723,7 +724,13 @@ def _auto_cause_clause(analysis: dict[str, Any] | None) -> str | None:
     parts: list[str] = []
     sky = analysis.get("sky")
     if isinstance(sky, (int, float)):
-        parts.append(f"a ~{_auto_num(sky)} sky")
+        # "before stretching" is load-bearing, not decoration: this is the sky of
+        # the **linear** stack the editor opens, and the value line one row below
+        # reports the stretch's display-space *target* background ("stretched sky
+        # level 0.24") — the same word for two quantities two orders of magnitude
+        # apart, which read as a contradiction rather than a measurement and a
+        # decision. Named apart on both sides; see the frontend's mirror.
+        parts.append(f"a ~{_auto_num(sky)} sky before stretching")
     fwhm = analysis.get("median_fwhm")
     if isinstance(fwhm, (int, float)):
         parts.append(f"{_auto_num(fwhm)} px stars")

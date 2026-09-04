@@ -142,7 +142,7 @@ describe("autoValuePhrases", () => {
       pop("tone.saturation", { amount: 1.1 }),
     ];
     expect(autoValuePhrases(ops)).toEqual([
-      "denoise strength 0.6", "sky level 0.2", "saturation 1.1×",
+      "denoise strength 0.6", "stretched sky level 0.2", "saturation 1.1×",
     ]);
   });
 
@@ -187,7 +187,7 @@ describe("autoValueSentence", () => {
       pop("detail.sharpen", { radius: 1.4 }),
     ];
     expect(autoValueSentence(ops)).toBe(
-      "Tuned to your data: sky level 0.2, saturation 1.05×, sharpen radius 1.4 px.",
+      "Tuned to your data: stretched sky level 0.2, saturation 1.05×, sharpen radius 1.4 px.",
     );
   });
 });
@@ -200,29 +200,29 @@ describe("autoCauseSentence", () => {
 
   it("lists the measured cues that drove the recipe", () => {
     expect(autoCauseSentence(analysis())).toBe(
-      "Measured from your image: a ~0.1 sky, 4.7 px stars.",
+      "Measured from your image: a ~0.1 sky before stretching, 4.7 px stars.",
     );
   });
 
   it("names background noise only when the crossfade engaged", () => {
     expect(autoCauseSentence(analysis({ noise_fraction: 0.4 }))).toBe(
-      "Measured from your image: a ~0.1 sky, 4.7 px stars, some background noise.",
+      "Measured from your image: a ~0.1 sky before stretching, 4.7 px stars, some background noise.",
     );
     expect(autoCauseSentence(analysis({ noise_fraction: 0.9 }))).toBe(
-      "Measured from your image: a ~0.1 sky, 4.7 px stars, a noisy background.",
+      "Measured from your image: a ~0.1 sky before stretching, 4.7 px stars, a noisy background.",
     );
   });
 
   it("reports the mosaic trim as a whole-percent of the frame", () => {
     expect(autoCauseSentence(analysis({ is_mosaic: true, trim_fraction: 0.12 }))).toBe(
-      "Measured from your image: a ~0.1 sky, 4.7 px stars, 12% of ragged mosaic edge to trim.",
+      "Measured from your image: a ~0.1 sky before stretching, 4.7 px stars, 12% of ragged mosaic edge to trim.",
     );
   });
 
   it("omits cues that could not be measured, and returns null when none were", () => {
     expect(autoCauseSentence(analysis({ sky: null, median_fwhm: null }))).toBeNull();
     expect(autoCauseSentence(analysis({ sky: 0.08, median_fwhm: null }))).toBe(
-      "Measured from your image: a ~0.08 sky.",
+      "Measured from your image: a ~0.08 sky before stretching.",
     );
   });
 
@@ -234,13 +234,49 @@ describe("autoCauseSentence", () => {
     // the two read as one picture measured twice with nothing found the first
     // time.
     expect(autoCauseSentence(analysis({ sky: 0.001, median_fwhm: 2.07 }))).toBe(
-      "Measured from your image: a ~0.001 sky, 2.07 px stars.",
+      "Measured from your image: a ~0.001 sky before stretching, 2.07 px stars.",
     );
     // A genuine zero still reads "0" — the fallback adds no precision that
     // `analyze_auto_inputs` (which rounds sky to 3 dp) did not measure.
     expect(autoCauseSentence(analysis({ sky: 0, median_fwhm: null }))).toBe(
-      "Measured from your image: a ~0 sky.",
+      "Measured from your image: a ~0 sky before stretching.",
     );
+  });
+});
+
+describe("the two sky numbers the panel shows one line apart", () => {
+  /** The panel says "sky" twice about one picture and means two different
+   * quantities: the *measured* level of the linear stack the editor opens
+   * (~0.001 on the bundled sample) and the display-space background the STF
+   * stretch aimed for (0.24). Both correct, two orders of magnitude apart, and
+   * unqualified they read as a contradiction rather than as a measurement and a
+   * decision — so each clause names which sky it means. */
+  it("names the measured sky and the stretch target apart", () => {
+    const cause = autoCauseSentence(analysis({ sky: 0.001, median_fwhm: 2.07 }));
+    const values = autoValueSentence([
+      pop("tone.stretch", { mode: "stf", target_bg: 0.24 }),
+    ]);
+    expect(cause).toBe(
+      "Measured from your image: a ~0.001 sky before stretching, 2.07 px stars.",
+    );
+    expect(values).toBe("Tuned to your data: stretched sky level 0.24.");
+  });
+
+  it("leaves neither number readable as a bare 'sky'", () => {
+    // The identifying test, so a future re-wording of either clause can't quietly
+    // drop the qualifier and restore the contradiction: wherever one of these
+    // lines writes the word "sky", it says which one in the same breath.
+    const lines = [
+      autoCauseSentence(analysis({ sky: 0.001, median_fwhm: 2.07 })),
+      autoValueSentence([pop("tone.stretch", { mode: "stf", target_bg: 0.24 })]),
+    ];
+    for (const line of lines) {
+      expect(line).not.toBeNull();
+      for (const m of line!.matchAll(/sky/g)) {
+        const around = line!.slice(Math.max(0, m.index! - 12), m.index! + 20);
+        expect(around).toMatch(/stretch/);
+      }
+    }
   });
 });
 
