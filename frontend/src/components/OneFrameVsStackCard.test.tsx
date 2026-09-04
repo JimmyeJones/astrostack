@@ -118,7 +118,11 @@ describe("OneFrameVsStackCard — is that number any good?", () => {
     renderCard("M_42", 7);
     fireEvent.click(await screen.findByRole("button", { name: /see the difference/i }));
     const note = await screen.findByTestId("noise-expected");
-    expect(note).toHaveTextContent(/400 subs should cut the noise about 20×/);
+    // "background noise": the card had quietly dropped the qualifier the
+    // "How's my stack?" note always carried about the same run, and the two are
+    // now driven from one shared table (`noiseLowLead.cases.json`).
+    expect(note).toHaveTextContent(
+      /400 subs should cut the background noise about 20×/);
     expect(note).toHaveTextContent(/checking focus and alignment/);
   });
 

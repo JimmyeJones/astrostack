@@ -27,12 +27,22 @@
 export const REJECTION_NOTE_MIN_FRACTION = 0.0005; // 0.05% of samples
 export const REJECTION_NOTE_MAX_FRACTION = 0.08; // 8%
 
-/** Format a rejection fraction as a friendly percentage (mirrors the engine's
- * `_format_reject_pct`: at least one significant digit, never "0.0%"). */
+/** Format a rejection fraction as a friendly percentage: `<0.1%` for a sliver,
+ * one decimal below 10%, whole percent above.
+ *
+ * This *is* the engine's `stackhealth._format_reject_pct` rule, and it now says
+ * so with a guard rather than a comment — the two write the same sentence about
+ * the same run on two screens, so the pair is pinned against
+ * `rejectPct.cases.json` from both sides. It used to only claim to mirror it: at
+ * a measured 0.5% this side printed "0.50%" where the health note printed
+ * "0.5%", and at the bottom of the cue's own band "0.07%" against "<0.1%" — two
+ * decimals of false precision on a figure already prefixed with "~".
+ */
 export function formatRejectPct(fraction: number): string {
   const pct = fraction * 100;
-  const digits = pct < 1 ? 2 : pct < 10 ? 1 : 0;
-  return `${pct.toFixed(digits)}%`;
+  if (pct < 0.1) return "<0.1%";
+  if (pct < 10) return `${(Math.floor(pct * 10 + 0.5) / 10).toFixed(1)}%`;
+  return `${Math.floor(pct + 0.5)}%`;
 }
 
 export function rejectionNote(

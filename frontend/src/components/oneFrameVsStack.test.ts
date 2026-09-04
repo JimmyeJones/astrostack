@@ -2,11 +2,25 @@ import { describe, expect, it } from "vitest";
 import {
   noiseReductionBadge,
   factorLabel,
+  noiseLowLead,
   noiseVsExpectedNote,
   oneFrameCaption,
   subExposureLabel,
 } from "./oneFrameVsStack";
 import factorLabelCases from "./factorLabel.cases.json";
+import noiseLowLeadCases from "./noiseLowLead.cases.json";
+
+describe("noiseLowLead", () => {
+  // The number in this sentence has been pinned since v0.332.1; the *words*
+  // around it were not, and had already drifted — this side said "cut the
+  // noise" where `seestack.stackhealth.noise_low_lead` said "cut the
+  // BACKGROUND noise" about the same run. Same table, both sides.
+  it.each(noiseLowLeadCases.cases as [number, number, boolean, string][])(
+    "words (%p subs, %p×, mosaic=%p) the same as the health note does",
+    (n, ratio, mosaic, want) => {
+      expect(noiseLowLead(n, ratio, mosaic)).toBe(want);
+    });
+});
 
 describe("factorLabel", () => {
   // The *same* table `tests/test_factor_label_mirror.py` drives
@@ -158,7 +172,11 @@ describe("noiseVsExpectedNote", () => {
     // a drifting gradient) produces, measured at 0.45 on real synthetic data.
     const note = noiseVsExpectedNote("low", 8, 400);
     expect(note?.concern).toBe(true);
-    expect(note?.text).toContain("400 subs should cut the noise about 20× (√400)");
+    // "background noise", not "noise": the measured quantity is the sky
+    // background's grain, and the health note has always said so. This side had
+    // quietly dropped the qualifier.
+    expect(note?.text).toContain(
+      "400 subs should cut the background noise about 20× (√400)");
     expect(note?.text).toContain("came in nearer 8×");
     // Suggests, never asserts — legitimate rejection and quality weighting both
     // lower the effective frame count.
