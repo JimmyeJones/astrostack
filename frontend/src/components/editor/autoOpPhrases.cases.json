@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "The one table naming each editor op the Auto recipe can emit, driven by BOTH",
+    "implementations: `OP_PHRASES` (frontend/src/components/editor/autoSummary.ts,",
+    "the note the editor shows when a user clicks Auto) and `_AUTO_OP_PHRASES`",
+    "(seestack/edit/presets.py, the note an *unattended* job stamps on the History",
+    "Info panel for the identical recipe). Both describe the same work on the same",
+    "picture, so a phrase re-worded on one side alone reads as the app telling two",
+    "stories about one edit.",
+    "",
+    "They were word-identical when this table was written; nothing was enforcing",
+    "that. Change a phrase — or add an op to the Auto recipe — and you must change",
+    "this table, which reddens both suites at once:",
+    "frontend/src/components/editor/autoSummary.test.ts and",
+    "tests/test_auto_summary_mirror.py. The Python test additionally builds a real",
+    "Auto recipe and asserts every op it emits has a phrase here, so an op added to",
+    "Auto can't quietly fall back to printing its raw id at a user."
+  ],
+  "cases": {
+    "background.level_coverage": "evened out the mosaic panel brightness",
+    "background.final_gradient": "flattened the background",
+    "background.subtract": "removed the background gradient",
+    "tone.color_calibrate": "balanced the colour",
+    "detail.denoise": "reduced noise",
+    "detail.chroma_denoise": "evened out the patchy sky colour",
+    "tone.stretch": "applied a natural stretch",
+    "tone.curves": "added a gentle contrast curve",
+    "tone.scnr": "removed the green cast",
+    "tone.saturation": "boosted colour saturation",
+    "detail.sharpen": "sharpened detail",
+    "detail.deconvolve": "deconvolved to recover sharpness",
+    "geometry.crop": "trimmed the ragged mosaic border"
+  }
+}

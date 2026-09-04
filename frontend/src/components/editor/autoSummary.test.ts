@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  autoCauseSentence, autoSummaryPhrases, autoSummarySentence,
-  autoValuePhrases, autoValueSentence, presetSuggestionSentence,
+  OP_PHRASES, autoCauseSentence, autoSummaryPhrases, autoSummarySentence,
+  autoValuePhrases, autoValueSentence, fmt, presetSuggestionSentence,
 } from "./autoSummary";
+import autoNumCases from "./autoNum.cases.json";
+import autoOpPhraseCases from "./autoOpPhrases.cases.json";
 import type { AutoAnalysis, EditOp, OpInstance, PresetSuggestion } from "../../api/client";
 
 /** A full AutoAnalysis payload with everything measured; override fields per test. */
@@ -255,5 +257,23 @@ describe("presetSuggestionSentence", () => {
       "Your image looks like a Nebula — its preset is another good "
       + "starting point to compare.",
     );
+  });
+});
+
+describe("the engine mirror", () => {
+  // The unattended path stamps this same note on the History Info panel
+  // (`seestack/edit/presets.py`), so both sides are driven from one table —
+  // change a number rule or a phrase and both suites redden.
+  // `tests/test_auto_summary_mirror.py` is the other half.
+  it.each(autoNumCases.cases as [number, string][])(
+    "writes %p as %p, the same as an unattended job does",
+    (value, want) => {
+      expect(fmt(value)).toBe(want);
+    });
+
+  it("names every Auto op exactly as the engine does", () => {
+    // Asserted as a whole mapping: a phrase table drifts by gaining or losing a
+    // key as much as by re-wording one, and neither shows up in a per-key loop.
+    expect(OP_PHRASES).toEqual(autoOpPhraseCases.cases);
   });
 });

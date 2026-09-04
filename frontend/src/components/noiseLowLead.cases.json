@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "The one table that pins the noise-shortfall lead sentence, driven by BOTH",
+    "implementations: `noiseLowLead` (frontend/src/components/oneFrameVsStack.ts,",
+    "the History page's 'See the difference' reveal) and",
+    "`seestack.stackhealth.noise_low_lead` (the 'How's my stack?' note about the",
+    "same run). A user reads both about one picture, minutes apart.",
+    "",
+    "It had already drifted when this table was written: the card said 'cut the",
+    "noise' where the health note said 'cut the BACKGROUND noise'. Nothing was",
+    "wrong in either, which is exactly why nobody caught it — this class doesn't",
+    "fail loudly, it drifts, and the failure mode is a qualifier quietly going",
+    "missing. The measured quantity is the sky background's grain, so the card",
+    "moved to the qualifier.",
+    "",
+    "Cases are [n_subs, ratio, is_mosaic, expected]. Change the wording and you",
+    "must change this table, on both sides at once:",
+    "frontend/src/components/oneFrameVsStack.test.ts and",
+    "tests/test_noise_low_lead_mirror.py."
+  ],
+  "cases": [
+    [100, 6.2, false, "100 subs should cut the background noise about 10× (√100), and this stack came in nearer 6.2×."],
+    [9, 2.0, false, "9 subs should cut the background noise about 3× (√9), and this stack came in nearer 2×."],
+    [50, 4.5, false, "50 subs should cut the background noise about 7.1× (√50), and this stack came in nearer 4.5×."],
+    [1, 0.9, false, "1 subs should cut the background noise about 1× (√1), and this stack came in nearer 0.9×."],
+    [100, 6.2, true, "About 100 subs cover the middle of this mosaic, which should cut the background noise about 10× (√100), and it came in nearer 6.2×."],
+    [16, 2.45, true, "About 16 subs cover the middle of this mosaic, which should cut the background noise about 4× (√16), and it came in nearer 2.5×."],
+    [400, 10.5, true, "About 400 subs cover the middle of this mosaic, which should cut the background noise about 20× (√400), and it came in nearer 11×."]
+  ]
+}

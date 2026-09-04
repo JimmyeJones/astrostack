@@ -105,6 +105,29 @@ export interface NoiseVsExpected {
   concern: boolean;
 }
 
+/** The "you should have got about N×, you got M×" lead of the shortfall note.
+ *
+ * The *same* sentence is written by `seestack.stackhealth` for the "How's my
+ * stack?" note about the same run, so it is pinned from both sides against
+ * `noiseLowLead.cases.json`. It had already drifted: this side said "cut the
+ * noise" where the health note said "cut the **background** noise" — the measured
+ * quantity is the sky background's grain, so the qualifier is the true word and
+ * this side moved to it. Nothing was *wrong* in either, which is why nobody
+ * caught it; this class doesn't fail loudly, it drifts.
+ *
+ * Exported so the mirror guard can drive it directly, and factored out of
+ * `noiseVsExpectedNote` so there is one place the wording lives.
+ */
+export function noiseLowLead(n: number, ratio: number, mosaic: boolean): string {
+  const expLabel = factorLabel(Math.sqrt(n));
+  return mosaic
+    ? `About ${n} subs cover the middle of this mosaic, which should cut the ` +
+      `background noise about ${expLabel}× (√${n}), and it came in nearer ` +
+      `${factorLabel(ratio)}×.`
+    : `${n} subs should cut the background noise about ${expLabel}× (√${n}), ` +
+      `and this stack came in nearer ${factorLabel(ratio)}×.`;
+}
+
 /** "Is ~18× any good?" — the context a beginner needs to read the badge above.
  *
  * A weighted-mean stack of `N` frames cuts background noise by about √N, so the
@@ -160,12 +183,7 @@ export function noiseVsExpectedNote(
       concern: false,
     };
   }
-  const lead = mosaic
-    ? `About ${n} subs cover the middle of this mosaic, which should cut the ` +
-      `noise about ${expLabel}× (√${n}), and it came in nearer ` +
-      `${factorLabel(ratio)}×.`
-    : `${n} subs should cut the noise about ${expLabel}× (√${n}), and this ` +
-      `stack came in nearer ${factorLabel(ratio)}×.`;
+  const lead = noiseLowLead(n, ratio, mosaic);
   return {
     text:
       `${lead} That usually means the subs didn't line up tightly, or a lot ` +

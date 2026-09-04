@@ -681,9 +681,22 @@ _AUTO_OP_PHRASES: dict[str, str] = {
 
 
 def _auto_num(n: float) -> str:
-    """Compact number for the note (mirrors the frontend's `fmt`): up to 2 decimals,
-    no trailing-zero padding (0.101 → "0.1", 4.7 → "4.7", 1.05 → "1.05")."""
-    r = round(float(n) * 100) / 100
+    """Compact number for the note: up to 2 decimals, no trailing-zero padding
+    (0.101 → "0.1", 4.7 → "4.7", 1.05 → "1.05").
+
+    The frontend's `fmt` (``components/editor/autoSummary.ts``) writes the same
+    numbers into the same clause for the same picture — the editor's "what Auto
+    did" note and the one an unattended job stamps on the History Info panel — so
+    the pair is pinned from both sides against
+    ``frontend/src/components/editor/autoNum.cases.json``
+    (``tests/test_auto_summary_mirror.py``).
+
+    **``floor(x + 0.5)``, not ``round()``**: Python rounds a half to *even* and
+    JavaScript's ``Math.round`` rounds it *up*, so a measured 0.125 sky read
+    "a ~0.12 sky" here and "a ~0.13 sky" in the editor — the same defect
+    :func:`seestack.stackhealth._factor_label` was fixed for in v0.332.1, in a
+    function whose docstring already claimed to mirror this one."""
+    r = math.floor(float(n) * 100 + 0.5) / 100
     return str(int(r)) if r == int(r) else str(r)
 
 
@@ -707,7 +720,10 @@ def _auto_cause_clause(analysis: dict[str, Any] | None) -> str | None:
         parts.append("a noisy background" if noise >= 0.75 else "some background noise")
     trim = analysis.get("trim_fraction")
     if isinstance(trim, (int, float)) and trim >= 0.005:
-        parts.append(f"{round(trim * 100)}% of ragged mosaic edge to trim")
+        # `floor(x + 0.5)` is `Math.round`, which is what the frontend clause
+        # uses — see :func:`_auto_num`. `round()` here made a 0.125 trim read
+        # "12%" beside the editor's "13%" for one picture.
+        parts.append(f"{math.floor(trim * 100 + 0.5)}% of ragged mosaic edge to trim")
     if not parts:
         return None
     if len(parts) == 1:

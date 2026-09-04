@@ -2,8 +2,15 @@ import type { AutoAnalysis, EditOp, OpInstance, PresetSuggestion } from "../../a
 
 /** Plain-language phrase for each editor op id the Auto-process recipe can emit,
  * so a user sees *what Auto did* (and in what order) instead of a bare list of op
- * names. Keyed by op id; any op not listed falls back to its registry label. */
-const OP_PHRASES: Record<string, string> = {
+ * names. Keyed by op id; any op not listed falls back to its registry label.
+ *
+ * The engine keeps the same table (`seestack/edit/presets.py::_AUTO_OP_PHRASES`)
+ * so an auto-edit applied by an *unattended* job can stamp the same note on the
+ * History Info panel. The two describe one edit to one person, so they are pinned
+ * against `autoOpPhrases.cases.json` from both sides — change a phrase here and
+ * the table, and both suites follow.
+ */
+export const OP_PHRASES: Record<string, string> = {
   "background.level_coverage": "evened out the mosaic panel brightness",
   "background.final_gradient": "flattened the background",
   "background.subtract": "removed the background gradient",
@@ -42,8 +49,13 @@ export function autoSummaryPhrases(
 }
 
 /** Compact number for a value note: up to 2 decimals, no trailing-zero padding
- * (0.2 → "0.2", 1.05 → "1.05", 1.5 → "1.5"). */
-function fmt(n: number): string {
+ * (0.2 → "0.2", 1.05 → "1.05", 1.5 → "1.5").
+ *
+ * Mirrored by `seestack/edit/presets.py::_auto_num`, which writes the same
+ * numbers into the same clause when an unattended job stamps the note — pinned
+ * from both sides against `autoNum.cases.json`. Exported for that guard.
+ */
+export function fmt(n: number): string {
   return String(Math.round(n * 100) / 100);
 }
 
