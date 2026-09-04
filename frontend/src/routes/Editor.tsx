@@ -2366,10 +2366,14 @@ export function EditorView() {
                   from `_write_tiff` before `mode` is read. Nothing is lost by stating it:
                   the mode is still sent (as "linear") and still accepted by the endpoint,
                   it simply no longer costs a beginner a decision that changes nothing. */}
+              {/* "and a preview PNG" is carried over from the trailing paragraph
+                  this line replaces, which listed FITS/TIFF/PNG. It is the one
+                  fact that paragraph said and this one did not, so it moves here
+                  rather than being dropped with the duplication. */}
               <Text size="xs" c="dimmed" mt={4}>
-                Saves the picture exactly as shown — a 16-bit TIFF and a FITS — as a new
-                image in this target's History. Your original stack keeps its own
-                untouched files.
+                Saves the picture exactly as shown — a 16-bit TIFF, a FITS and a preview
+                PNG — as a new image in this target's History. Your original stack keeps
+                its own untouched files.
               </Text>
               <Button mt="xs" fullWidth variant="light" leftSection={<IconPhotoDown size={16} />}
                 loading={downloadPng.isPending} onClick={() => downloadPng.mutate()}>
@@ -2378,6 +2382,17 @@ export function EditorView() {
               {downloadPng.isPending && pngProgress ? (
                 <Text size="xs" c="dimmed" ta="center" mt={4}>{pngProgress}</Text>
               ) : null}
+              {/* Each button says what it does *under itself*, the way "Export as
+                  new image" already did. These two sentences used to live together
+                  in a trailing paragraph at the foot of the panel, four buttons
+                  away from what they described — and its first clause repeated the
+                  Export line above word for word. Attached, they are shorter, and
+                  the panel ends with the advice about the picture rather than a
+                  second explanation of its own buttons. */}
+              <Text size="xs" c="dimmed" mt={4}>
+                Renders your edits at native resolution and downloads the PNG — this
+                can be slow on a large or mosaic picture.
+              </Text>
               <Checkbox mt="sm" size="xs" checked={nameplate}
                 onChange={(e) => setNameplate(e.currentTarget.checked)}
                 label="Add caption bar (target, exposure, date)"
@@ -2386,6 +2401,9 @@ export function EditorView() {
                 loading={downloadShare.isPending} onClick={() => downloadShare.mutate()}>
                 Download share image (JPEG)
               </Button>
+              <Text size="xs" c="dimmed" mt={4}>
+                A smaller, post-ready JPEG, plus a caption you can copy.
+              </Text>
               {canShareToApp ? (
                 <Button mt="xs" fullWidth variant="light" leftSection={<IconShare size={16} />}
                   loading={shareToApp.isPending} onClick={() => shareToApp.mutate()}>
@@ -2452,12 +2470,6 @@ export function EditorView() {
                   </CopyButton>
                 </Group>
               ) : null}
-              <Text size="xs" c="dimmed" mt={6}>
-                "Export" writes a new stack run (FITS/TIFF/PNG); the original is never
-                changed. "Download full-res PNG" renders your edits at native resolution
-                and downloads the PNG (can be slow on large/mosaic images). "Share image"
-                saves a smaller, post-ready JPEG plus a caption you can copy.
-              </Text>
             </Paper>
           </Stack>
         </Grid.Col>

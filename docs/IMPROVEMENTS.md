@@ -17785,6 +17785,30 @@ to **Shipped**.)_
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
 
+- **✅ SHIPPED (Builder, v0.345.3, branch `claude/sweet-babbage-i0r8cl`) — ~~the Export panel ends with a
+  four-sentence paragraph explaining the buttons four rows above it, and its first sentence says what the
+  Export line already said.~~** Found by *looking at* the editor (`scripts/agent-dogfood.sh`, desktop shot),
+  not by reading it: the panel's foot rendered as five consecutive grey paragraphs, and the last one was a
+  second explanation of its own controls.
+
+  **What it said, checked clause by clause before anything moved.** *"'Export' writes a new stack run
+  (FITS/TIFF/PNG); the original is never changed"* — already stated, in more detail, in the line directly
+  under the Export button. *"'Download full-res PNG' renders your edits at native resolution…"* and
+  *"'Share image' saves a smaller, post-ready JPEG plus a caption you can copy"* — the **only** place either
+  button was described. So one third of the paragraph was duplication and two thirds were homeless.
+
+  **Each sentence now sits under its own button**, which is the idiom the panel already used for Export, and
+  the panel ends with the print advice about *the picture* rather than a recap of its own buttons.
+  **Nothing was removed** (the owner's standing constraint): the one fact only the paragraph carried — that
+  an export also writes a preview PNG, which `write_stack_outputs` does — moved into the Export line, so the
+  three files are still named.
+
+  **Upgrade-safe (§9):** frontend copy and layout only; no config, schema, on-disk, API or default change.
+
+  **Test (+1 in `Editor.test.tsx`, fails before):** both descriptions present beside their buttons, the
+  export line still naming TIFF + FITS + preview PNG, and the duplicate summary (`/writes a new stack run/`)
+  absent.
+
 - **✅ SHIPPED (Builder, v0.329.6, branch `claude/sweet-babbage-fwtqxh`) — ~~let the server say where the
   window is **on the preview**, so the marker stops being a guess.~~** Filed by this run an hour earlier as
   the half v0.329.5 deliberately did not build, and taken here rather than left, because the sentence
@@ -20488,6 +20512,38 @@ problems. Dogfood it every big-picture run and fix root causes.
   zone can't shift the comparison. Pure helper `countNewSubsSinceStack` + component tests.
 
 ### Friendliness (PRIORITY 3)
+
+- **⚪ DOGFOOD BASELINE (Builder 2026-09-04, `scripts/agent-dogfood.sh` at v0.345.2 — the third measurement in
+  a row that says DO NOT open a speculative IA slice).** Full run (boot → sample → stack → Playwright probe at
+  1440 px and 420 px): **nothing overflowing, no console errors**, and the tallest page is still the Target
+  page at **3,014 px on a phone** — the *same* number the v0.338.1 probe recorded, against 14,584 px on the
+  worst page before the 08-13→16 slices. The rest, tallest first: `/life-list` 3,008 px (phone), the editor
+  2,829 px (phone), the Target page 2,010 px (desktop), the editor 1,805 px (desktop), the Dashboard 1,785 px
+  (phone), `/stack` 1,748 px (phone), `/life-list` 1,453 px (desktop). **So the standing IA banner in
+  AGENTS.md §1 keeps its verdict**: three measurements across ~90 versions agree that nothing is stacked
+  badly and the worst page has not moved. Re-measure before any future slice; do not open one on a reading of
+  a route file.
+  **What the pass *did* find is the entry directly above under "Editor"** — the export panel's trailing
+  paragraph, which is invisible to a code read (each of its sentences is defensible on its own; only the
+  rendered page shows five grey paragraphs in a row) and is exactly the kind of thing the running-app probe
+  exists to catch. Shipped as v0.345.3.
+
+- **NEW IDEA (Builder 2026-09-04, the generalisation of the v0.345.3 export-panel fix) — sweep the app for
+  the other trailing "what these buttons do" paragraphs, and check each against the per-control copy above
+  it.** *(Pillar: friendliness — PRIORITY 3; size XS per site once found. Confidence: one confirmed instance,
+  the rest unenumerated.)* The editor's Export panel ended with a four-sentence block recapping the three
+  buttons four rows above it, of which the first sentence duplicated the line directly under the Export
+  button. It survived every code-level read because each sentence is defensible alone — only the **rendered
+  page** shows five grey paragraphs in a row, which is why `scripts/agent-dogfood.sh` found it and audits had
+  not.
+  **The identifying test, which is cheap and does not need a browser once you know the shape:** a
+  `<Text size="xs" c="dimmed">` that is the *last* child of a panel and names two or more of the panel's own
+  controls in quotes. **Named starting points, none checked:** the Stack form's foot, the Save/share menu's
+  description block, the Calibration page's master-picker explainers, and the Storage page's cleanup copy.
+  **Care — this is the owner's "nothing may be removed" constraint, so do it the way v0.345.3 did:** go
+  clause by clause, move each sentence under the control it describes (the idiom several panels already use),
+  and re-home any fact the paragraph carried that the per-control copy did not, rather than deleting the
+  block wholesale. A paragraph whose every clause is genuinely new information is *not* a hit — leave it.
 
 - **NEW IDEA (Builder 2026-09-03, measured while sweeping the display-space statistics for A1's blindness) —
   Levels' "From your image" button silently leaves the black point at 0, and nothing says why.** *(Pillar:
@@ -23911,8 +23967,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   pinned by construction (render at what it asks for → the crop fills the preset exactly), by limiting edge,
   and at the cap.
 
-- **NEW IDEA (Builder 2026-08-30, the two halves deliberately left out of the v0.310.0 wallpaper fix) — the
-  other two exports that are still made out of the 1024 px preview.** *(Pillar: image quality — PRIORITY 4;
+- **✅ BOTH HALVES SHIPPED — ~~the other two exports that are still made out of the 1024 px preview.~~**
+  *(Verified by a Builder 2026-09-04 that had picked this entry as open work; it had simply not been struck.
+  `_native_picture_source` (`webapp/routers/stack.py`) now re-renders both from the run's own master —
+  **(a)** the keepsake / scale JPEG at `SHARE_JPEG_MAX_LONG_EDGE` (2560 px), with the entry's own blocker
+  answered rather than dodged: the marks, caption and matte are sized as a *fraction* of the picture, so the
+  furniture scales with it; **(b)** the wallpaper at `wallpaper_source_long_edge(...)`, i.e. gated on the
+  preset's own target size exactly as the cost note asked. Original spec follows.)*
+  *(Pillar: image quality — PRIORITY 4;
   size S each; the second one has a cost gate, read it.)*
   **(a) The keepsake / "with scale & compass" JPEG** (`download_stack_run`, `kind="jpeg"`) is the one the
   Target page's own comment calls "the one that matters on Instagram **or a printed 6×4**" — at 1024 px that
@@ -25831,8 +25893,40 @@ problems. Dogfood it every big-picture run and fix root causes.
     **Grep first:** `seestack/recap.py`, `_recap_hero` and `ShareYourSkyCard` already do 90 % of this for the
     all-time poster; this is a second *facts* source into the same renderer, not new machinery.
 
-- **NEW IDEA (Builder 2026-09-04, spotted while shipping the year poster v0.344.0) — both recap posters use a
-  target's *newest stack preview* as their backdrop, ignoring the cover the owner actually pinned.**
+- **✅ SHIPPED (Builder, v0.345.2, branch `claude/sweet-babbage-i0r8cl`) — ~~both recap posters use a target's
+  *newest stack preview* as their backdrop, ignoring the cover the owner actually pinned.~~** Built exactly as
+  the entry's "Grep first" predicted: the shared helper already existed, so this is the two hero pickers
+  calling it instead of reading the stamp.
+
+  **One definition, now on both posters.** `_recap_hero` (all-time) and `_hero_image` (the year poster's
+  loader) resolve through `targets.current_picture_path` — the same helper the deep-sky wall, the Library
+  tile, `/api/gallery/best` and `/api/imaging-log` already use — so "this target's picture" has one answer on
+  every surface that shows one. Its precedence is the pin, then the stamped newest preview, then the newest
+  run that still has a preview on disk.
+
+  **The Care note is what the second test pins.** A cover whose run was pruned, or whose preview file has
+  gone, must not cost the poster its backdrop: `current_picture_path` already degrades to the newest picture
+  and then to nothing, so a stale pin falls through exactly as an unreadable preview always did.
+
+  **⚪ AND THE REST OF THE CLASS IS CLEAN — swept while here, so nobody re-walks it.** Every remaining
+  `last_stack_preview` reader in `webapp/` is a *presence* test or a cache signature, not a choice of picture:
+  `targets.TargetOut.has_preview`, `lifelist`'s per-target flag, `registry_cache.registry_signature`, and the
+  two stats cache keys. `gallery._montage_tiles` already resolves through the same helper. So after this
+  change no Python surface picks a target's picture by reading the stamp directly.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk path, API shape or default change — two internal helpers
+  resolve the same fact through the app's existing precedence. A library with nothing pinned renders exactly
+  the poster it rendered before.
+
+  **Tests (+3; the two that pin the fix fail before it, `2 failed, 28 passed`).**
+  `tests/webapp/test_recap.py` — the all-time poster's backdrop is the pinned white cover, measured off a
+  corner pixel against the black newest stack that used to win (the unpinned half of the same test pins that
+  the newest stack still backdrops it when nothing is pinned). `tests/webapp/test_year_recap.py` — the same
+  before/after on `/api/recap/year/{year}.jpg`. The third is a *guard*, green either way by construction: a
+  pin pointing at a run id that never existed still gets the newest picture, which is the Care note's
+  requirement and the thing a future "resolve the pin harder" change would break.
+
+  *(Original spec follows.)*
   *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: S. Additive, and the machinery already exists.)*
   `_recap_hero` (the all-time poster) and `_year_hero` (the new year one) both read
   `TargetEntry.last_stack_preview`. But "Set as cover" (v0.145.0) exists precisely so the owner can say *this*
@@ -34195,6 +34289,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **NEW IDEA (Builder 2026-09-04, after losing three separate slots to it in one run) — when an entry ships,
+  strike the "the half X deliberately did NOT build" follow-ons the same commit closed, not just the entry
+  itself.** *(Pillar: maintainability in service of not wasting runs — size XS per sweep, and it is a **Scout**
+  job. Confidence: measured on this run.)* Three entries this run were picked as open work, greped, and turned
+  out to be fully on `main`: the loupe's **preview-space marker** (filed 09-03 as "the half v0.329.5
+  deliberately did NOT build", shipped v0.329.6 *an hour later by the same run*), the Target page's
+  **early-stop night marker** (filed 09-04, shipped v0.342.0), and **"the other two exports still made out of
+  the 1024 px preview"** (both halves shipped — `SHARE_JPEG_MAX_LONG_EDGE` and `wallpaper_source_long_edge`).
+  Two of the three were already correctly *indented* under their shipped parents and cost only a read; the
+  third was a live top-level bullet and cost a full trace. **The pattern is specific enough to act on:** an
+  entry of the form *"the half N deliberately did NOT build"* is the single likeliest thing the **next** run
+  builds, and the run that builds it strikes the parent it was working from — not the follow-on it never
+  read. **Shape:** when curating, for each newly-Shipped entry, grep the file for the sibling phrases
+  ("deliberately left out", "deliberately did NOT build", "the half", "the other two") naming the same
+  version, and strike or indent what that commit closed. **Do NOT** turn this into a code check: the
+  relationship is editorial, and the existing "keep a shipped item's spec *indented*" convention already
+  makes the answer visible by shape once someone applies it.
 
 - **⚪ LOG HYGIENE (Scout 2026-09-04, found by dogfooding a real stack) — the `astropy.stats`
   "Input data contains invalid values (NaNs or infs)…" warning is emitted dozens of times per stack, burying
