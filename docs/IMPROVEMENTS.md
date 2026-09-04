@@ -34410,11 +34410,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   canvas has no uncovered pixel anywhere, so none of the three sites has a NaN to clip. The emitters need a
   **NaN-bearing canvas**: a mosaic union, a reprojected edge, a masked region — i.e. the owner's actual
   shooting style, and the shape the pre-fix suite's own warnings summary confirms: **17 test files emitted
-  99 of them** in the baseline run (76 through `sigma_clipped_stats`, 23 through the `sigma_clip` inside it),
-  led by `webapp/test_preview_crop_geometry` (20), `test_photometric_mosaic_auto` (16),
-  `test_subpixel_mosaic_reference` (10) and `test_stack_pipeline` (7) — mosaic and reprojection fixtures, to a
-  file. **So the bundled sample is the wrong instrument for this one**, and a future run should not read
-  "dogfood shows zero" as "already fixed". `post/color_cal.py:194` and
+  99 of them** in the baseline run (76 through `sigma_clipped_stats`, 23 through a second astropy entry point
+  — see the open half below), led by `webapp/test_preview_crop_geometry` (20), `test_photometric_mosaic_auto`
+  (16), `test_subpixel_mosaic_reference` (10) and `test_stack_pipeline` (7) — mosaic and reprojection
+  fixtures, to a file. **So the bundled sample is the wrong instrument for this one**, and a future run should
+  not read "dogfood shows zero" as "already fixed".
+
+  **What this shipped, exactly, counted the same way: all 76 of the `sigma_clipped_stats` warnings are gone**
+  (post-fix suite: **0** at `astropy/stats/sigma_clipping.py:395`, down from 76 across 12 files). **~30
+  remain from a different site**, filed as the open half directly below rather than swept into this claim. `post/color_cal.py:194` and
   `per_frame.py`'s two other calls **already passed `mask=`** — the entry's line numbers were stale — and
   `coverage_leveling`'s `_robust_stats` / `_sky_mode` never warn on the live path, because every caller hands
   them an already-finite selection. Those two were converted anyway (defensively, and pinned as such), so a
@@ -34438,6 +34442,34 @@ problems. Dogfood it every big-picture run and fix root causes.
   per-frame flatten, and the coverage-leveling helpers — each asserting **no `AstropyUserWarning`** on
   NaN-bearing input, with the raw astropy call kept beside them as the control so a future astropy that stops
   warning cannot quietly turn the test green.
+
+  ---
+
+  **🟡 THE OPEN HALF, WITH THE HOUR OF TRACING ALREADY SPENT ON IT (Builder 2026-09-04, same run) — ~30 of
+  these warnings survive, from a *different* astropy entry point inside `Background2D`, and the obvious fix
+  measurably does not work.** *(Same pillar and size. Read all four bullets before touching it.)*
+  - **Where.** `astropy/stats/sigma_clipping.py:**315**` — the **axis-based** clip (`_sigmaclip_withaxis`),
+    not the `:395` one this entry fixed — reached from `photutils/background/background_2d.py`
+    `_sigmaclip_boxes` ← `_compute_box_statistics` ← `_calculate_stats` ← `Background2D.__init__` ←
+    `seestack/bg/per_frame.py::_fit_bg2d_ladder` ← `_subtract_background_cpu`. That chain is a **captured
+    traceback**, not a reading. Post-fix suite: 30 across `test_stack_pipeline` (11), `webapp/test_pipeline`
+    (11), `test_photometric_mosaic`, `test_photometric_stack`, `test_progress_reel`,
+    `webapp/test_reprocess_all` (2 each).
+  - **The obvious fix does not fix it — measured, so nobody re-spends the hour.** Mirroring
+    `final_gradient._fit_background_2d` (zero-fill the non-finite pixels, OR them into the mask, hand
+    `Background2D` a finite array) leaves the count at **27 on those six files, before and after**, while
+    being bit-for-bit identical on the pixels (checked on two NaN-bearing fixtures). So the NaN is reaching
+    photutils' box statistics by another route — most likely the **low-resolution mesh photutils builds
+    itself**, where a fully-masked box becomes NaN and is then clipped again. The change was reverted rather
+    than shipped: a silent no-op on the on-by-default hot path is worse than the warning it doesn't remove.
+  - **So the next step is photutils' own knobs, measured** (`fill_value`, the mesh-interpolation options, or
+    masking at the mesh level), **not another zero-fill in our caller.**
+  - **How to trace it, because the obvious way silently fails.** pytest's warnings plugin installs its own
+    `showwarning`, so an in-process hook records **nothing** unless you disable it: run
+    `pytest <file> -q -p no:warnings` with a `warnings.showwarning` hook that walks `sys._getframe()` back to
+    the frame you care about. `-W error::astropy.utils.exceptions.AstropyUserWarning` also does **not** work
+    here (it comes back green while the summary still counts the warnings). The reliable counter is pytest's
+    own warnings summary — which is where both the 99 and the 30 in this entry come from.
 
   *(Original entry follows.)*
 
