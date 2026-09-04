@@ -866,12 +866,15 @@ class ActivityCalendarOut(BaseModel):
     sharpest_night: NightActivityOut | None = None
 
 
-def _collect_activity_calendar(lib, targets, *, today, months, lon_deg):
-    """Stream every target's capture timestamps into a per-night accumulator and
-    finalize the trailing-window calendar. Memory-bounded — each project's frames
-    are folded and released before the next opens — and a broken project is
-    skipped, never 500s the dashboard."""
-    from seestack.activity_calendar import accumulate_nights, finalize_calendar
+def _collect_night_acc(lib, targets, *, lon_deg):
+    """Stream every target's capture timestamps into a per-night accumulator.
+
+    Memory-bounded — each project's frames are folded and released before the
+    next opens — and a broken project is skipped, never 500s the dashboard.
+    This is the expensive half (one open + one frame walk per target); the
+    windowing on top of it is arithmetic, which is why the *accumulator* is what
+    gets cached and every consumer slices it afterwards."""
+    from seestack.activity_calendar import accumulate_nights
     from seestack.io.project import Project
 
     acc: dict = {}
@@ -900,15 +903,27 @@ def _collect_activity_calendar(lib, targets, *, today, months, lon_deg):
         finally:
             if proj is not None:
                 proj.close()
+    return acc
+
+
+def _collect_activity_calendar(lib, targets, *, today, months, lon_deg):
+    """The trailing-window calendar, folded and finalized in one call."""
+    from seestack.activity_calendar import finalize_calendar
+
+    acc = _collect_night_acc(lib, targets, lon_deg=lon_deg)
     return finalize_calendar(acc, today=today, months=months)
 
 
-def _cached_activity_calendar(request: Request, months: int):
-    """The trailing-window activity calendar, from the app cache when warm.
+def _cached_night_acc(request: Request):
+    """The folded per-night accumulator plus the local ``today`` it was read at,
+    from the app cache when warm.
 
-    Extracted so the recap poster can reuse the *same* cached result as the
-    Dashboard heatmap — opening every project to read capture timestamps is the
-    expensive part, and asking for a night count shouldn't pay for it twice.
+    Cached at the *accumulator* level rather than per finished calendar, so
+    every consumer of the same fold — the Dashboard heatmap at 12 months, the
+    recap poster at another window, the year recap at a calendar year — pays for
+    the library walk once. The signature deliberately does **not** carry the
+    window: a different window is a different slice of the same fold, not a
+    different fold.
     """
     settings = deps.get_settings(request)
     lib = deps.open_library(request)
@@ -923,20 +938,32 @@ def _cached_activity_calendar(request: Request, months: int):
         today = (datetime.now(timezone.utc) + timedelta(hours=offset_h)).date()
 
         sig = (
-            months, lon,
+            lon,
             tuple(sorted((t.safe_name, t.last_activity_utc or "") for t in targets)),
         )
         cache = getattr(request.app.state, "activity_calendar_cache", None)
         now = time.monotonic()
         if cache and cache["sig"] == sig and (now - cache["at"]) < _ACTIVITY_CACHE_TTL_S:
-            return cache["data"]
-        cal = _collect_activity_calendar(
-            lib, targets, today=today, months=months, lon_deg=lon)
+            return cache["acc"], today
+        acc = _collect_night_acc(lib, targets, lon_deg=lon)
         request.app.state.activity_calendar_cache = {
-            "sig": sig, "at": now, "data": cal}
-        return cal
+            "sig": sig, "at": now, "acc": acc}
+        return acc, today
     finally:
         lib.close()
+
+
+def _cached_activity_calendar(request: Request, months: int):
+    """The trailing-window activity calendar, over the cached night fold.
+
+    Shared so the recap poster reads the *same* nights as the Dashboard heatmap
+    — opening every project to read capture timestamps is the expensive part,
+    and asking for a night count shouldn't pay for it twice.
+    """
+    from seestack.activity_calendar import finalize_calendar
+
+    acc, today = _cached_night_acc(request)
+    return finalize_calendar(acc, today=today, months=months)
 
 
 def _night_out(n) -> NightActivityOut:
@@ -1126,6 +1153,118 @@ def get_recap_poster(request: Request, months: int = 12) -> Response:
         content=buf.getvalue(),
         media_type="image/jpeg",
         headers={"Content-Disposition": 'attachment; filename="my-sky-so-far.jpg"'},
+    )
+
+
+# --- "Your year under the stars": one calendar year, as a story ------------
+#
+# The app has the two ends of the time axis — a *night* (the session recap) and
+# the *whole hobby* ("Your sky, so far") — and nothing in between. This endpoint
+# is the middle: the same nights the Dashboard heatmap already folds, clipped to
+# one calendar year and asked the six questions a beginner would ask about a
+# season. Read-only, and it rides the night fold's existing cache, so a year
+# costs nothing the Dashboard hasn't already paid for.
+
+
+class YearFirstLightOut(BaseModel):
+    """A target seen for the first time this year — with its ``safe`` name when
+    the library still has it, so the page can link straight to it."""
+
+    name: str
+    safe: str | None = None
+
+
+class YearRecapOut(BaseModel):
+    """One calendar year of imaging.
+
+    ``has_anything`` is false for a year with no imaged nights; the page then
+    shows ``empty_message`` (which names the years that *do* have data) rather
+    than a wall of zeros."""
+
+    year: int
+    has_anything: bool
+    headline: str
+    empty_message: str
+    stats: list[RecapStatOut] = []
+    first_light_line: str = ""
+    n_nights: int = 0
+    total_exposure_s: float = 0.0
+    n_frames: int = 0
+    n_targets: int = 0
+    target_names: list[str] = []
+    first_lights: list[YearFirstLightOut] = []
+    longest_night: NightActivityOut | None = None
+    sharpest_night: NightActivityOut | None = None
+    years_with_data: list[int] = []
+
+
+def _safe_by_target_name(request: Request) -> dict[str, str]:
+    """A ``name → safe_name`` map for linking a night's target names to pages.
+
+    Nights carry display names (that is what the heatmap shows); the router owns
+    the registry, so the translation lives here rather than in the pure layer.
+    A name the registry no longer has simply gets no link."""
+    lib = deps.open_library(request)
+    try:
+        return {t.name: t.safe_name for t in lib.list_targets() if t.name}
+    finally:
+        lib.close()
+
+
+@router.get("/api/recap/year/{year}", response_model=YearRecapOut)
+def get_year_recap(request: Request, year: int) -> YearRecapOut:
+    """"Your year under the stars" — one calendar year's nights, hours, targets,
+    first lights and standout nights.
+
+    Nights are the same noon-to-noon observing nights the activity calendar
+    buckets (local time from ``site_lon`` when set, else a frame's ``SITELONG``
+    header, else UTC), so a year boundary falls where the owner's own nights do.
+    A year with nothing in it returns ``has_anything=false`` and the years that
+    do have data, so the caller can offer them."""
+    from fastapi import HTTPException
+
+    from seestack.activity_calendar import nights_from
+    from seestack.yearrecap import (
+        build_year_recap,
+        year_empty_message,
+        year_first_light_line,
+        year_headline,
+        year_stats,
+    )
+
+    # A calendar year, not a free-form int — a bad path segment is a client
+    # mistake, not an empty year, and shouldn't look like one.
+    if not (1900 <= year <= 2999):
+        raise HTTPException(status_code=422, detail="year out of range")
+
+    acc, _today = _cached_night_acc(request)
+    recap = build_year_recap(nights_from(acc), year=year)
+    safe_by_name = _safe_by_target_name(request) if recap.first_light_names else {}
+    return YearRecapOut(
+        year=recap.year,
+        has_anything=recap.has_anything,
+        headline=year_headline(recap),
+        empty_message=year_empty_message(recap),
+        stats=[RecapStatOut(value=v, label=lbl) for v, lbl in year_stats(recap)],
+        first_light_line=year_first_light_line(recap),
+        n_nights=recap.n_nights,
+        total_exposure_s=recap.total_exposure_s,
+        n_frames=recap.n_frames,
+        n_targets=recap.n_targets,
+        target_names=list(recap.target_names),
+        first_lights=[
+            YearFirstLightOut(name=n, safe=safe_by_name.get(n))
+            for n in recap.first_light_names
+        ],
+        longest_night=(
+            _night_out(recap.longest_night)
+            if recap.longest_night is not None else None
+        ),
+        sharpest_night=(
+            _night_out(recap.sharpest_night)
+            if recap.sharpest_night is not None else None
+        ),
+        years_with_data=list(recap.years_with_data),
     )
 
 
