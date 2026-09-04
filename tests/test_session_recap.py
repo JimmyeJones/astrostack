@@ -415,6 +415,81 @@ def test_library_recap_counts_a_target_revisited_later_the_same_night():
     assert recap.start_utc == dusk.isoformat()  # the night starts at A's dusk sub
 
 
+def test_library_recap_keeps_an_unbridged_split_night_whole():
+    """The same shape as the bridged test above with the bridge taken away — one
+    target, one observing night, shot in two goes with bed in between.
+
+    The 6 h gap walk cannot see that as one night: it holds the pre-dawn half
+    alone, and the card headed "Last night" reports half the subs and half the
+    integration. Handing it the observer's night key widens the cluster back
+    over the night it belongs to.
+    """
+    evening = datetime(2026, 7, 1, 21, 0, 0)      # 21:00 → 23:00
+    predawn = datetime(2026, 7, 2, 5, 30, 0)      # 05:30 → 07:30, a 6.5 h gap
+    frames = [_frame(evening + timedelta(minutes=10 * i)) for i in range(13)]
+    frames += [_frame(predawn + timedelta(minutes=10 * i)) for i in range(13)]
+
+    bare = library_session_recap([("M 42", "M_42", frames)])
+    assert bare is not None
+    assert bare.n_frames == 13                    # the pre-dawn half only
+    assert bare.session_exposure_s == 130.0
+
+    whole = library_session_recap([("M 42", "M_42", frames)],
+                                  night_of=_noon_night_key)
+    assert whole is not None
+    assert whole.n_frames == 26                   # the night the owner shot
+    assert whole.session_exposure_s == 260.0
+    assert whole.start_utc == evening.isoformat()
+    assert whole.targets[0].n_frames == 26
+
+
+def test_library_recap_night_key_never_reaches_into_an_earlier_night():
+    """The widening is bounded by the night key, so the properties the gap walk
+    provided still hold: a target last shot a week ago stays out, and a target's
+    own earlier night is not swept in."""
+    old = datetime(2026, 7, 1, 22, 0, 0)
+    evening = datetime(2026, 7, 8, 21, 0, 0)
+    predawn = datetime(2026, 7, 9, 5, 30, 0)
+    m42 = [_frame(old + timedelta(minutes=10 * i)) for i in range(5)]
+    m42 += [_frame(evening + timedelta(minutes=10 * i)) for i in range(13)]
+    m42 += [_frame(predawn + timedelta(minutes=10 * i)) for i in range(13)]
+    ngc = [_frame(old + timedelta(minutes=10 * i)) for i in range(4)]
+
+    recap = library_session_recap(
+        [("M 42", "M_42", m42), ("NGC 7000", "NGC_7000", ngc)],
+        night_of=_noon_night_key)
+    assert recap is not None
+    assert recap.n_targets == 1                   # the week-old target drops out
+    assert {c.safe for c in recap.targets} == {"M_42"}
+    assert recap.n_frames == 26                   # both halves of the 8th, none of the 1st
+    assert recap.start_utc == evening.isoformat()
+
+
+def test_library_recap_night_key_is_inert_without_a_split():
+    """An observer who never splits a night gets the gap walk's own answer, so
+    turning the key on cannot change what a normal library's card says."""
+    night = datetime(2026, 7, 8, 21, 0, 0)
+    a = [_frame(night + timedelta(minutes=10 * i)) for i in range(6)]
+    b = [_frame(night + timedelta(hours=2, minutes=10 * i)) for i in range(4)]
+    pair = [("A", "A", a), ("B", "B", b)]
+    bare = library_session_recap(pair)
+    keyed = library_session_recap(pair, night_of=_noon_night_key)
+    assert bare == keyed
+
+
+def test_library_recap_unplaceable_stamps_never_widen_the_night():
+    """A night key that cannot place a stamp returns ``None``, and ``None`` is
+    never treated as a match — the walk stops there rather than guessing."""
+    evening = datetime(2026, 7, 1, 21, 0, 0)
+    predawn = datetime(2026, 7, 2, 5, 30, 0)
+    frames = [_frame(evening + timedelta(minutes=10 * i)) for i in range(13)]
+    frames += [_frame(predawn + timedelta(minutes=10 * i)) for i in range(13)]
+    recap = library_session_recap([("M 42", "M_42", frames)],
+                                  night_of=lambda _stamp: None)
+    assert recap is not None
+    assert recap.n_frames == 13                   # unchanged from the bare walk
+
+
 def test_recent_session_window_keeps_a_bridged_early_batch():
     """The memory-bound window keeps a >6 h-earlier batch of the same night (so it
     can be bridged), while dropping a genuinely prior night far outside the window."""
@@ -1612,6 +1687,14 @@ def _add_all(proj, nights):
             proj.add_frame(f)
 
 
+def _noon_night_key(stamp):
+    """Noon-to-noon observing-night buckets at longitude 0, the shape the
+    webapp's ``resolve_night_key`` produces."""
+    if not stamp:
+        return None
+    return (datetime.fromisoformat(stamp) - timedelta(hours=12)).date().isoformat()
+
+
 def test_nights_breakdown_marks_the_newest_night_that_stopped_early(tmp_path):
     """Four nights ending at 02:00, then one that stops at 22:30 → the newest
     row says so, and no older row does."""
@@ -1652,11 +1735,16 @@ def test_nights_breakdown_says_nothing_about_a_night_that_ended_as_usual(tmp_pat
 
 
 def test_nights_breakdown_early_stop_reads_the_same_stamps_as_the_dashboard(tmp_path):
-    """A night shot in two goes is ONE row here (``night_of`` merges it) but TWO
-    sessions on the Dashboard. The early-stop judgement must still be computed
-    from the session stamps, or the two surfaces would quote different medians
-    for the same night with no way for the reader to tell which is right."""
-    from seestack.session_recap import early_stop, session_end_stamps
+    """A night shot in two goes is ONE row here (``night_of`` merges it) and one
+    night on the Dashboard too. Both surfaces judge from the *same* stamps —
+    session ends merged by observing night — or they would quote different
+    medians for the same night with no way for the reader to tell which is
+    right."""
+    from seestack.session_recap import (
+        early_stop,
+        merge_end_stamps_by_night,
+        session_end_stamps,
+    )
 
     proj = Project.create(tmp_path / "p", name="t")
     try:
@@ -1682,11 +1770,102 @@ def test_nights_breakdown_early_stop_reads_the_same_stamps_as_the_dashboard(tmp_
 
         rows = nights_breakdown(proj, night_of=_night_of)
         assert len(rows) == 5  # the four split nights merged back into one each
-        assert rows[0].ended_early == early_stop(session_end_stamps(flat))
+        # Exactly what ``/api/last-night`` computes for the same target.
+        assert rows[0].ended_early == early_stop(
+            merge_end_stamps_by_night(session_end_stamps(flat), _night_of))
         assert rows[0].ended_early is not None
-        # Five prior *sessions* — `EARLY_STOP_MAX_PRIOR_NIGHTS`, taken from the
-        # unmerged list — not the four merged nights the rows are built from.
-        assert rows[0].ended_early.n_nights_compared == 5
+        # Four prior *nights* — the same four rows below this one, not the eight
+        # capture sessions they were shot in. This is the number the card reads
+        # out ("earlier than its last N nights"), so it has to be nights.
+        assert rows[0].ended_early.n_nights_compared == 4
+        # The shortfall itself is unchanged on this evenly-split shape — three of
+        # the five session stamps were night ends, so the median already landed
+        # on one. It is the *count* that was wrong, and the shapes where the
+        # median moves are the two tests below.
         assert rows[0].ended_early.minutes_earlier == 450.0
+    finally:
+        proj.close()
+
+
+def test_early_stop_stays_silent_until_there_are_three_real_nights(tmp_path):
+    """Two nights, each shot in two goes, are four session stamps — enough to
+    clear ``EARLY_STOP_MIN_PRIOR_NIGHTS`` by counting, and not enough to have a
+    habit. The constant exists precisely to keep the note off a target's first
+    couple of nights, and counting sessions defeated it: measured on this
+    fixture, the session view announces a 2½ h early stop over "3 nights" that
+    the owner has not shot.
+    """
+    from seestack.session_recap import (
+        early_stop,
+        merge_end_stamps_by_night,
+        session_end_stamps,
+    )
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        base = datetime(2026, 8, 1)
+        nights = []
+        for d in range(2):
+            day = base + timedelta(days=d)
+            nights.append(_night_frames(day, start_h=19, end_h=21))
+            nights.append(_night_frames(day, start_h=28, end_h=29))
+        nights.append(_night_frames(base + timedelta(days=2),
+                                    start_h=19, end_h=21.5))
+        _add_all(proj, nights)
+        flat = [f for night in nights for f in night]
+        stamps = session_end_stamps(flat)
+
+        # What shipped before: four "nights" from two, and a verdict.
+        assert len(stamps) == 5
+        assert early_stop(stamps) is not None
+        # What the two real nights actually support: nothing to say yet.
+        assert early_stop(merge_end_stamps_by_night(stamps, _noon_night_key)) is None
+        assert nights_breakdown(proj, night_of=_noon_night_key)[0].ended_early is None
+    finally:
+        proj.close()
+
+
+def test_early_stop_measures_a_three_goes_night_against_when_it_ended(tmp_path):
+    """The other direction: on a night habitually shot in three goes, only one
+    stamp in three is a true night end, so the median lands on a *mid-night*
+    stop and the shortfall all but vanishes. Measured on this fixture the
+    session view reports **2½ h** for a night that ended **9½ h** early.
+    """
+    from seestack.session_recap import (
+        early_stop,
+        merge_end_stamps_by_night,
+        session_end_stamps,
+    )
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        base = datetime(2026, 8, 1)
+        nights = []
+        for d in range(3):
+            # 19:00–20:30, 03:00–04:00, 10:30–11:00 — three goes, one night.
+            day = base + timedelta(days=d)
+            nights.append(_night_frames(day, start_h=19, end_h=20.5))
+            nights.append(_night_frames(day, start_h=27, end_h=28))
+            nights.append(_night_frames(day, start_h=34.5, end_h=35))
+        # …and one that stopped at 01:30 instead of running on to 11:00.
+        nights.append(_night_frames(base + timedelta(days=3),
+                                    start_h=19, end_h=20.5))
+        nights.append(_night_frames(base + timedelta(days=3),
+                                    start_h=24.5, end_h=25.5))
+        _add_all(proj, nights)
+        flat = [f for night in nights for f in night]
+        stamps = session_end_stamps(flat)
+
+        by_session = early_stop(stamps)
+        assert by_session is not None
+        assert by_session.minutes_earlier == 150.0    # a mid-night stop as the yardstick
+        assert by_session.n_nights_compared == 5      # …over three nights of data
+
+        merged = early_stop(merge_end_stamps_by_night(stamps, _noon_night_key))
+        assert merged is not None
+        assert merged.minutes_earlier == 570.0        # 01:30 against a usual 11:00
+        assert merged.n_nights_compared == 3
+        assert nights_breakdown(
+            proj, night_of=_noon_night_key)[0].ended_early == merged
     finally:
         proj.close()

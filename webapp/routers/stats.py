@@ -576,41 +576,57 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
     return recent, n_stack_runs, n_targets_with_stacks
 
 
-def _collect_last_night(lib, targets):
+def _collect_last_night(lib, targets, night_of=None):
     """Open each project, trim it to its most recent session, and combine every
     target's latest night into one recap. Expensive (opens every project) — the
     caller caches it. A broken project is skipped, never 500s the dashboard.
 
-    Returns ``(recap, early_stops)``: the combined night, plus — per target safe
-    name — whether that target's newest session stopped notably earlier than its
-    own recent nights do (:func:`~seestack.session_recap.early_stop`). The two
-    are collected together because they read the *same* frame list: this loop
-    already materialises every target's frames in order to trim them, so the
-    per-session end stamps cost one pass over rows that are in memory anyway,
-    where a second endpoint would re-open every project to learn the same thing.
-    Only the stamps are kept, never the frames.
+    ``night_of`` is the observer's capture-stamp → observing-night key, passed
+    down so the combined recap covers the whole night rather than the trailing
+    six-hour cluster (see :func:`~seestack.session_recap.library_session_recap`).
+    Because the answer now depends on the observer's longitude, the caller's
+    cache signature carries it too.
+
+    Returns ``(recap, end_stamps)``: the combined night, plus — per target safe
+    name — that target's per-session capture stop times, the raw material for
+    "did this night stop notably earlier than its own recent ones?"
+    (:func:`~seestack.session_recap.early_stop`). The two are collected together
+    because they read the *same* frame list: this loop already materialises every
+    target's frames in order to trim them, so the per-session end stamps cost one
+    pass over rows that are in memory anyway, where a second endpoint would
+    re-open every project to learn the same thing. Only the stamps are kept,
+    never the frames — one short string per capture session, so even a library of
+    a hundred targets shot for a year is a few hundred kilobytes held between
+    scans.
+
+    The **verdict** is deliberately not formed here. It needs the observing-night
+    key, which needs the observer's longitude, and this function's result is
+    cached under a signature that does not include it — so judging inside the
+    cache would make a Settings location change wait out the TTL, and would judge
+    capture *sessions* rather than nights (two of which are one night when a
+    night is shot in two goes). The caller merges and judges; see
+    :func:`get_last_night`.
     """
     from seestack.io.project import Project
     from seestack.session_recap import (
-        early_stop,
         library_session_recap,
         recent_session_window_frames,
         session_end_stamps,
     )
 
     rows: list[tuple[str, str, list]] = []
-    early: dict[str, object] = {}
+    early: dict[str, list[str]] = {}
     for t in targets:
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
             frames = list(proj.iter_frames())
-            # Every night's stop time, before the window trim below throws the
+            # Every session's stop time, before the window trim below throws the
             # older ones away — the habit this target's newest night is judged
             # against.
-            stop = early_stop(session_end_stamps(frames))
-            if stop is not None:
-                early[t.safe_name] = stop
+            stamps = session_end_stamps(frames)
+            if stamps:
+                early[t.safe_name] = stamps
             # Keep only each target's recent-night *window* inside the loop so we
             # never hold every target's full frame list at once (memory-bounded),
             # but — unlike a per-target last-session trim — without severing a
@@ -624,7 +640,7 @@ def _collect_last_night(lib, targets):
         finally:
             if proj is not None:
                 proj.close()
-    return library_session_recap(rows), early
+    return library_session_recap(rows, night_of=night_of), early
 
 
 @router.get("/api/last-night", response_model=LastNightResponse | None)
@@ -638,30 +654,47 @@ def get_last_night(request: Request) -> LastNightResponse | None:
     bucketed noon-to-noon in the observer's local time exactly as the imaging
     calendar and the per-target Nights / Last-session cards do. It is resolved
     *outside* the recap cache so a longitude change in Settings takes effect on
-    the next request rather than waiting out the TTL."""
+    the next request rather than waiting out the TTL.
+
+    The **stopped-early** verdict is formed here, out of the cache, for the same
+    two reasons: it needs that observing-night key (which the cache signature
+    does not include), and the judgement is about *nights*, not capture sessions
+    — a night shot in two goes is one night, and handing both its halves to
+    ``early_stop`` both counts it twice toward "enough nights to have a habit"
+    and dilutes the median with a bedtime that is not when the night ended."""
     from seestack.activity_calendar import night_date_of
+    from seestack.session_recap import early_stop, merge_end_stamps_by_night
 
     settings = deps.get_settings(request)
     lib = deps.open_library(request)
     try:
         targets = lib.list_targets()
-        sig = tuple(sorted(
+        lon = resolve_site_lon(request, lib, settings.site_lon)
+        night_key = resolve_night_key(request, lib, settings.site_lon)
+        # The longitude is part of the signature because it decides where one
+        # observing night ends — so moving the site in Settings re-cuts the night
+        # immediately instead of serving a stale one until the TTL runs out.
+        sig = (lon, tuple(sorted(
             (t.safe_name, t.last_activity_utc or "") for t in targets
-        ))
+        )))
         cache = getattr(request.app.state, "last_night_cache", None)
         now = time.monotonic()
         if cache and cache["sig"] == sig and (now - cache["at"]) < _LAST_NIGHT_CACHE_TTL_S:
-            recap, early = cache["data"]
+            recap, stamps_by_target = cache["data"]
         else:
-            recap, early = _collect_last_night(lib, targets)
+            recap, stamps_by_target = _collect_last_night(lib, targets, night_key)
             request.app.state.last_night_cache = {
-                "sig": sig, "at": now, "data": (recap, early)}
-        lon = resolve_site_lon(request, lib, settings.site_lon)
+                "sig": sig, "at": now, "data": (recap, stamps_by_target)}
     finally:
         lib.close()
 
     if recap is None:
         return None
+    early = {}
+    for safe, stamps in stamps_by_target.items():
+        stop = early_stop(merge_end_stamps_by_night(stamps, night_key))
+        if stop is not None:
+            early[safe] = stop
     night = night_date_of(recap.start_utc, lon) if recap.start_utc else None
     return LastNightResponse(
         n_targets=recap.n_targets,
