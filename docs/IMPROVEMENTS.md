@@ -8462,58 +8462,140 @@ when you take it.
   min-max cancel, single-pass cancel; all fail-before with `ValueError`, pass-after returning `cancelled=True`).
   Upgrade-safe: within-function control-flow change, no config/DB/API-shape/on-disk/default change.
 
-- **⭐ Streak auto-reject silently drops a large fraction of good subs on a bright *elongated* target (edge-on
-  galaxy, Needle/NGC 4565/891, an elongated nebula or comet) — on by default.** *(Stacking-engine correctness;
-  wrong-result, Medium; traced + simulated by a 2026-07-22 adversarial audit; NOT blind-fixed — see why below.)*
-  The shape-only streak detector (`seestack/qc/streaks.py`: bright `>sky+6σ`, long `major ≥ 80 px` half-res,
-  elongated `elongation ≥ 4.0` connected component) flags an edge-on galaxy / elongated bright target as a
-  "streak", and `apply_qc_result_to_db` (`seestack/qc/runner.py:104-108`, default
-  `auto_reject_streaks=True` since `keep_streaked_frames=False`) sets `accept=False, reject_reason="auto:streak"`.
-  `reconcile_streak_rejections` (`runner.py:186-192`) only *un*-rejects when the flag rate exceeds **>50%**
-  (≥10 eligible frames) or **>80%** (3–9 frames). **The gap:** because per-frame streak detection is a marginal
-  Hough decision, a *stationary* extended target flags on a **variable subset** of subs (sharper/brighter subs
-  flag, worse ones don't). If that subset lands in the **~34–50%** band (normal session) or anywhere **≤80%**
-  (short 3–9-sub session), the reconcile guard does **not** fire and those good subs stay `auto:streak`-rejected —
-  up to ~half a session's good frames discarded before they reach the stacker (the existing
-  `test_qc_streak_reconcile.py::test_small_target_minority_streaks_stay_rejected` even encodes a 2-of-6=33% flag
-  rate staying rejected). The per-pixel κ-σ/drizzle rejection in the stack is the *intended* fallback for genuine
-  trails (it's exactly what `keep_streaked_frames=True` relies on), which is why whole-frame rejection here is
-  over-aggressive. **Interacts with the ⭐⭐ top bug:** the reconcile fraction is computed over *all* eligible
-  frames including **accepted-but-unsolved** (`solve_failed`/no-`wcs_json`) subs, which never stack. On a faint
-  field with many solve failures the streaked (solved) galaxy subs are a small fraction of the *diluted*
-  denominator, so reconcile never fires even when they're a large fraction of the *stackable* subs — dropping the
-  few solved subs that ARE the target and worsening the thin-stack. **Why NOT blind-fixed this run:** the real
-  discriminator (transient trail vs stationary object) is **cross-frame pointing stability**, which the per-frame
-  shape detector lacks, and every cheap aggregate alternative (lower the reconcile fraction; raise the streak bar;
-  make whole-frame reject opt-in) is a tradeoff that needs **real elongated-target data** to tune safely — and a
-  wrong threshold change to this on-by-default hot path risks *worsening* the top bug. **Fix directions (pick with
-  real data):** (a) **principled** — have the detector record each flagged component's centroid/orientation
-  (additive nullable columns via `SCHEMA_VERSION`+`_migrate_schema`) and have `reconcile_streak_rejections`
-  re-accept when the flagged components cluster tightly in position across subs (a stationary object), regardless
-  of fraction; (b) **denominator fix** — compute the reconcile fraction over the *stackable* (solved) population,
-  not diluted by accepted-but-unsolved subs (guard the QC-runs-before-solve ordering so it doesn't collapse to the
-  small tier); (c) **cheap interim** — lower the main-tier reconcile fraction (κ-σ safely cleans a re-accepted
-  minority once ≥10 frames), keeping the small tier. Add a fail-before/pass-after regression test with a synthetic
-  variable-subset flag pattern. **Scout: validate on a real edge-on-galaxy stack before flipping.**
-  - **Builder note 2026-07-25 (branch `claude/pensive-faraday-n1ksyw`) — an ordering-safe implementation path for
-    fix-direction (b) (the "denominator" fix), so a future run isn't blocked by the timing objection.** I traced the
-    live call order: `reconcile_streak_rejections` is invoked **inside the QC phase, *before* the solve phase**
-    (`seestack/io/scanner.py:522-525` runs it right after the QC loop; the solve loop only begins at line 527). At that
-    point **no frame carries a `wcs_json` yet**, so naively narrowing the reconcile denominator to the *solved/stackable*
-    population would collapse it to zero on every fresh scan (or into the small-tier branch) and mis-fire — which is
-    exactly the "guard the QC-runs-before-solve ordering" caveat the original entry flags. **The clean way to do (b)
-    without that hazard:** leave the existing pre-solve reconcile **byte-for-byte unchanged** (it stays the transient-trail
-    safety net over the full eligible set), and add a **second, additive reconcile pass at the end of the solve phase**
-    that computes the streak fraction over the **solved** subset only (`wcs_json IS NOT NULL`) — the frames that actually
-    reach the stacker. That directly removes the "accepted-but-unsolved subs dilute the denominator" failure the entry
-    describes (a handful of solved edge-on-galaxy subs no longer hide under hundreds of unsolved faint-field subs), while
-    the pre-solve pass keeps its current conservative contract. It's still **un-reject-only** and still leaves the stack's
-    per-pixel κ-σ/drizzle rejection as the genuine-trail backstop, so the fail-safe direction is unchanged. **Still
-    real-data-gated:** the *fraction/threshold* for the post-solve pass wants tuning on a real elongated-target stack
-    before it ships (same gate as before) — this note only resolves the *ordering* blocker and pins the exact call site,
-    so the remaining work is threshold validation + a fail-before/pass-after test, not architecture. (Recorded, not
-    shipped — a blind threshold flip on this on-by-default hot path still needs the real edge-on-galaxy data the entry
-    asks for.)
+- **✅ SHIPPED (Builder, v0.346.0, branch `claude/sweet-babbage-slg59h`) — ~~Streak auto-reject silently drops a
+  large fraction of good subs on a bright elongated target~~ — built as fix-direction (a), the one the entry
+  itself calls "principled", and therefore **without the real-data gate the other two directions carry**.**
+
+  **Why this could ship when (b) and (c) could not.** Both of those move a *threshold* on the on-by-default hot
+  path — the reconcile fraction, or the streak bar — which is precisely the blind flip AGENTS.md §1 refuses
+  without real elongated-target data, and which risks worsening the ⭐⭐ thin-stack bug. (a) does not touch a
+  threshold: it adds **new evidence** the detector never recorded, and a **second, independent un-reject path**
+  that reads it. Every existing tier, constant and outcome is byte-for-byte what it was; a library with no
+  recorded positions reconciles exactly as this build's predecessor did.
+
+  **The evidence: where the flagged feature sat.** `detect_streaks_with_shape`
+  (`seestack/qc/streaks.py`) now reports the **largest** qualifying component's centroid, normalised 0..1
+  across the frame so the number means the same thing at any sensor size or plane resolution.
+  `FrameMetrics.streak_cx/cy` carries it; `frames.streak_cx/streak_cy` (schema **21**, additive, NULL on every
+  older row) stores it. `detect_streaks` keeps its historical two-value shape and now delegates, so there is
+  one implementation rather than two that can drift — pinned.
+
+  **The rule: one spot, for hours.** `stationary_streak_frames` (pure, `seestack/qc/runner.py`) re-accepts the
+  flagged frames whose component sits within `STATIONARY_CLUSTER_RADIUS` (0.10 of the frame) of the set's
+  **median** position, when at least `STATIONARY_MIN_FRAMES` (4) of them agree **and** those frames span
+  `STATIONARY_MIN_SPAN_S` (1 h). The scope tracks the target, so a bright extended object forms its component
+  in the same part of every sub all night; a satellite, plane or meteor lands somewhere different each time.
+  **The span test is what makes it safe, and it is not decoration:** a Starlink train *does* put near-identical
+  trails at one spot — and is over in minutes, so it stays rejected. Pinned both ways in
+  `test_a_burst_at_one_spot_is_not_stationary`, which asserts the same six positions rescued when spread
+  across the night and refused when packed into ten minutes.
+
+  **This is what the fraction tiers structurally cannot do.** They can only ask "was a majority flagged?", so
+  the entry's whole gap — a marginal Hough decision firing on a *variable subset*, 34–50 % of a session —
+  was invisible to them. The new guard does not use a denominator at all, which also closes the entry's
+  interaction with the ⭐⭐ top bug: accepted-but-unsolved subs diluting the population cannot hide a cluster.
+  And the verdict is **per frame**, not per target: a genuine trail sitting among the object's own subs keeps
+  its rejection on its own evidence (`test_a_trail_among_the_object_frames_keeps_its_rejection`), which is
+  strictly better than the tiers' all-or-nothing re-accept. The centre is a **median** precisely so a minority
+  of real trails cannot drag the cluster onto empty sky.
+
+  **The un-reject-only contract is unchanged**, so the fail-safe direction is unchanged: a genuine trail that
+  slipped through is still cleaned per-pixel by the stack's own κ-σ / drizzle rejection — the same fallback
+  `keep_streaked_frames=True` has always relied on. Nothing is ever *newly* rejected by this change.
+
+  **An upgraded install heals itself, once.** `build_qc_arglist(only_new=True)` skips anything already QC'd, so
+  without a re-offer the owner's existing library would keep discarding the very subs this exists for, forever.
+  It now re-offers exactly the frames that are **currently `auto:streak`-rejected and carry no position** —
+  never a clean sub, never one that already has a position, never a user override (the one state a re-QC could
+  not clear, which would make it re-offer the same frame every scan). Self-terminating by construction: one
+  pass gives each frame a position, a clean re-QC that un-rejects it, or a `qc_error` — all three leave the set.
+
+  **Upgrade-safe (§9):** two additive nullable columns behind a `from_version < 21` migration *and* the
+  correct-by-construction `_reconcile_table_columns` backfill; no config key, no on-disk layout change, no
+  default flipped, no API response shape touched (the positions are engine-internal — `webapp` still serves
+  only `streak_detected`). Pinned by a v20→v21 upgrade test that opens a real-shaped schema-20 DB and asserts
+  every row and value survives with the positions arriving as NULL.
+
+  **Tests (+22; the behavioural ones fail before — verified by neutering `_reconcile_stationary` and watching
+  `test_a_minority_flagged_galaxy_is_rescued` fail with `assert set() == {…}`).**
+  `tests/test_qc_streak_stationary.py` (+16): the pure rule's nine cases — the tracked object, scattered
+  trails, the Starlink burst both ways, the trail among the object's frames, the sample floor, undated /
+  positionless frames as non-evidence, the median-not-mean centre, and the radius and span boundaries stated as
+  boundaries — then six through a real project DB: **the bug itself** (6 of 16 subs, 37 %, under
+  every existing tier), real satellites still dropped, a user override untouched, the majority tier still
+  winning where it applies, an old positionless library behaving exactly as before, and the one-time re-offer
+  picking out precisely the right frame. The sixteenth runs the whole chain **from pixels** — sixteen synthetic
+  Seestar subs, ten clean and six carrying the same feature at the same place across the night, through the
+  real detector, the real `apply_qc_result_to_db` write and the real reconciliation — because no fixture-level
+  test can show that the position actually *reaches* the database from a QC pass.
+  `tests/test_qc_streak_shape.py` (+5): the normalised position, silence
+  on a clean frame, the dominant component naming it, the two-value form agreeing with the detailed one, and a
+  dithered pair landing well inside the cluster radius. `tests/test_project_schema_drift.py` (+1): the v20→v21
+  upgrade.
+
+  **What is left, and it is smaller than it was.** Directions (b) *(reconcile over the solved population)* and
+  (c) *(lower the main-tier fraction)* stay filed and stay **real-data-gated** — but the case they existed to
+  rescue is now covered by evidence rather than by a threshold, so their marginal value is much lower. Do not
+  pick them up as "the rest of this item"; pick them up only if a real elongated-target stack shows the
+  position guard missing something. The remaining known limitation is a **mosaic**, where the object sits in a
+  different place in each panel: the cluster forms for one panel's frames and the rest stay rejected — a
+  partial rescue, in the safe direction, and the panel-aware version would need the pointing split at QC time,
+  which QC runs before.
+
+  *(Original entry follows.)*
+
+  - **⭐ Streak auto-reject silently drops a large fraction of good subs on a bright *elongated* target (edge-on
+    galaxy, Needle/NGC 4565/891, an elongated nebula or comet) — on by default.** *(Stacking-engine correctness;
+    wrong-result, Medium; traced + simulated by a 2026-07-22 adversarial audit; NOT blind-fixed — see why below.)*
+    The shape-only streak detector (`seestack/qc/streaks.py`: bright `>sky+6σ`, long `major ≥ 80 px` half-res,
+    elongated `elongation ≥ 4.0` connected component) flags an edge-on galaxy / elongated bright target as a
+    "streak", and `apply_qc_result_to_db` (`seestack/qc/runner.py:104-108`, default
+    `auto_reject_streaks=True` since `keep_streaked_frames=False`) sets `accept=False, reject_reason="auto:streak"`.
+    `reconcile_streak_rejections` (`runner.py:186-192`) only *un*-rejects when the flag rate exceeds **>50%**
+    (≥10 eligible frames) or **>80%** (3–9 frames). **The gap:** because per-frame streak detection is a marginal
+    Hough decision, a *stationary* extended target flags on a **variable subset** of subs (sharper/brighter subs
+    flag, worse ones don't). If that subset lands in the **~34–50%** band (normal session) or anywhere **≤80%**
+    (short 3–9-sub session), the reconcile guard does **not** fire and those good subs stay `auto:streak`-rejected —
+    up to ~half a session's good frames discarded before they reach the stacker (the existing
+    `test_qc_streak_reconcile.py::test_small_target_minority_streaks_stay_rejected` even encodes a 2-of-6=33% flag
+    rate staying rejected). The per-pixel κ-σ/drizzle rejection in the stack is the *intended* fallback for genuine
+    trails (it's exactly what `keep_streaked_frames=True` relies on), which is why whole-frame rejection here is
+    over-aggressive. **Interacts with the ⭐⭐ top bug:** the reconcile fraction is computed over *all* eligible
+    frames including **accepted-but-unsolved** (`solve_failed`/no-`wcs_json`) subs, which never stack. On a faint
+    field with many solve failures the streaked (solved) galaxy subs are a small fraction of the *diluted*
+    denominator, so reconcile never fires even when they're a large fraction of the *stackable* subs — dropping the
+    few solved subs that ARE the target and worsening the thin-stack. **Why NOT blind-fixed this run:** the real
+    discriminator (transient trail vs stationary object) is **cross-frame pointing stability**, which the per-frame
+    shape detector lacks, and every cheap aggregate alternative (lower the reconcile fraction; raise the streak bar;
+    make whole-frame reject opt-in) is a tradeoff that needs **real elongated-target data** to tune safely — and a
+    wrong threshold change to this on-by-default hot path risks *worsening* the top bug. **Fix directions (pick with
+    real data):** (a) **principled** — have the detector record each flagged component's centroid/orientation
+    (additive nullable columns via `SCHEMA_VERSION`+`_migrate_schema`) and have `reconcile_streak_rejections`
+    re-accept when the flagged components cluster tightly in position across subs (a stationary object), regardless
+    of fraction; (b) **denominator fix** — compute the reconcile fraction over the *stackable* (solved) population,
+    not diluted by accepted-but-unsolved subs (guard the QC-runs-before-solve ordering so it doesn't collapse to the
+    small tier); (c) **cheap interim** — lower the main-tier reconcile fraction (κ-σ safely cleans a re-accepted
+    minority once ≥10 frames), keeping the small tier. Add a fail-before/pass-after regression test with a synthetic
+    variable-subset flag pattern. **Scout: validate on a real edge-on-galaxy stack before flipping.**
+    - **Builder note 2026-07-25 (branch `claude/pensive-faraday-n1ksyw`) — an ordering-safe implementation path for
+      fix-direction (b) (the "denominator" fix), so a future run isn't blocked by the timing objection.** I traced the
+      live call order: `reconcile_streak_rejections` is invoked **inside the QC phase, *before* the solve phase**
+      (`seestack/io/scanner.py:522-525` runs it right after the QC loop; the solve loop only begins at line 527). At that
+      point **no frame carries a `wcs_json` yet**, so naively narrowing the reconcile denominator to the *solved/stackable*
+      population would collapse it to zero on every fresh scan (or into the small-tier branch) and mis-fire — which is
+      exactly the "guard the QC-runs-before-solve ordering" caveat the original entry flags. **The clean way to do (b)
+      without that hazard:** leave the existing pre-solve reconcile **byte-for-byte unchanged** (it stays the transient-trail
+      safety net over the full eligible set), and add a **second, additive reconcile pass at the end of the solve phase**
+      that computes the streak fraction over the **solved** subset only (`wcs_json IS NOT NULL`) — the frames that actually
+      reach the stacker. That directly removes the "accepted-but-unsolved subs dilute the denominator" failure the entry
+      describes (a handful of solved edge-on-galaxy subs no longer hide under hundreds of unsolved faint-field subs), while
+      the pre-solve pass keeps its current conservative contract. It's still **un-reject-only** and still leaves the stack's
+      per-pixel κ-σ/drizzle rejection as the genuine-trail backstop, so the fail-safe direction is unchanged. **Still
+      real-data-gated:** the *fraction/threshold* for the post-solve pass wants tuning on a real elongated-target stack
+      before it ships (same gate as before) — this note only resolves the *ordering* blocker and pins the exact call site,
+      so the remaining work is threshold validation + a fail-before/pass-after test, not architecture. (Recorded, not
+      shipped — a blind threshold flip on this on-by-default hot path still needs the real edge-on-galaxy data the entry
+      asks for.)
 
 > **Builder QA note 2026-07-25 (branch `claude/pensive-faraday-n1ksyw`) — stacking/calibration engine re-audited CLEAN
 > (fresh empirical pass).** Baseline suite green before any change (**2031 passed, 2 skipped**). A dedicated adversarial
@@ -12469,6 +12551,36 @@ to **Shipped**.)_
 > re-discovering finished work.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
+
+- **NEW IDEA (Builder 2026-09-04, the half v0.346.0 deliberately did not build) — a target whose subs were
+  wrongly held out and have since been *restored* keeps the thin picture it was stacked from, and nothing says
+  so.** *(Pillar: autonomy + trust — PRIORITY 2/3; size S–M; confidence: **traced**, the mechanism is v0.346.0's
+  own.)* The streak position guard re-accepts subs an earlier scan had discarded — up to a third of a session
+  on an edge-on galaxy — but the target's **published stack was made without them** and the owner's live
+  settings have `auto_stack` **off**, so nothing will notice. They are left with a picture that is quietly
+  worse than their data, and no reason on screen to re-stack.
+  **The precedent to copy, not to re-derive:** `pipeline._auto_stack_degraded_recheck` already answers exactly
+  this shape for the walk-away readability case — "the best stack this target has is thinner than what is
+  readable now, so redo it once". The honest quantity here is the same comparison, from a different cause:
+  `stack_runs.n_frames_used` on the newest run against the target's accepted+solved count *now*.
+  **Two shapes, and the second is the one that fits the owner's settings.** (a) An unattended re-stack, which
+  is a behaviour change on a target the owner did not ask to be stacked — needs to stay behind `auto_stack`,
+  which is off, so it would help nobody today. (b) A **nudge on the Target page**: *"12 subs were set aside as
+  satellite trails and have since been restored — your picture was made without them. Re-stack?"* with the
+  existing one-click re-stack. That is the shippable one. **Grep first:** `restackgain.py` already computes
+  "how much would re-stacking gain?", and the Target page already carries a re-stack action — this is very
+  likely a new *condition* on machinery that exists, not a new card, and it must go inside the existing
+  grouping rather than adding one more always-on banner (§1's standing IA rule). **Care:** the condition must
+  fire only on a real restoration, not on every target whose newest run predates its newest subs — otherwise it
+  is on screen permanently for anyone still shooting, which is everyone.
+
+- **⚪ CHECKED, NOT A GAP — recorded so the next run doesn't "fix" it (Builder 2026-09-04, while shipping
+  v0.346.0).** The stationary-streak guard needs its clustered frames to span an hour, which a beginner's
+  *first short session* cannot supply — so it looks as though a one-hour target is stranded. It is not:
+  `reconcile_streak_rejections` runs on **every** scan that runs QC and reads the **whole** target, not only
+  the new frames, so night two's scan reconciles nights one and two together and the span is met retroactively.
+  The frames are rescued before the next stack either way. Do not add a per-session fallback; a shorter span is
+  exactly the threshold that would start re-accepting Starlink trains.
 
 - **✅ SHIPPED (Builder, v0.345.0, branch `claude/sweet-babbage-xf90y3`) — ~~the "Last session" card and the
   Nights row *directly beneath it* report different numbers for the same dated night, on the same screen.~~**

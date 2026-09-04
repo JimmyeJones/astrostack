@@ -967,8 +967,10 @@ def run_qc_and_solve(
         # trips the shape-only streak detector on most/all subs, so an unguarded
         # auto-reject would silently discard the whole target. Re-accept the
         # streak rejections when they cover a majority of the target (they can't
-        # be transient trails); stacking's per-pixel rejection still cleans any
-        # genuine trail. No-op in the normal case (a few real satellite subs).
+        # be transient trails), or when the flagged feature stays in one place in
+        # the frame for hours (a tracked object, whatever share of the target it
+        # is); stacking's per-pixel rejection still cleans any genuine trail.
+        # No-op in the normal case (a few real satellite subs).
         if auto_reject_streaks:
             restored = reconcile_streak_rejections(project)
             if restored:
