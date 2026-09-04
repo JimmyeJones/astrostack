@@ -150,6 +150,51 @@ def north_up_pixel_transform(
     return m, np.array([c, f], dtype=float) + m @ half - half, new_w, new_h
 
 
+def follow_north_up_turns(
+    points,  # noqa: ANN001 — iterable of (x, y)
+    width: int, height: int,
+    turns,  # noqa: ANN001 — iterable of float
+) -> tuple[list[tuple[float, float]], int, int] | None:
+    """Carry pixel positions through the North-up rotations a picture took.
+
+    ``points`` are 0-based ``(x, y)`` indices on a ``width`` × ``height`` grid;
+    ``turns`` are the rotations applied to that grid **in order**. Returns the
+    moved points and the final canvas size, or ``None`` for a degenerate grid.
+
+    A picture can take *two* turns — one a past "Adjust → North up → Save" baked
+    into the stored preview, then the remainder a ``?north_up=true`` render still
+    applies — so they are followed one at a time rather than summed: two rotations
+    of a growing canvas do not compose into a single rotation of the first one.
+
+    :func:`north_up_pixel_transform` maps a *rotated* pixel back to the original
+    (``p_in = M·p_out + t``); anything following an object needs the other
+    direction, and ``M`` is a rotation in both of that function's branches, so its
+    transpose is its inverse. Nothing here re-derives an angle sign, which is the
+    whole reason that transform exists — so a baked object label, an on-screen pin
+    and the picture itself can never disagree about where something went.
+    """
+    grid_w, grid_h = int(width), int(height)
+    moved = [(float(x), float(y)) for x, y in points]
+    if grid_w <= 0 or grid_h <= 0:
+        return None
+    for angle in turns:
+        if not angle:
+            continue
+        geom = north_up_pixel_transform(grid_w, grid_h, angle)
+        if geom is None:
+            return None
+        m, t, grid_w, grid_h = geom
+        (m00, m01), (m10, m11) = ((float(m[0][0]), float(m[0][1])),
+                                  (float(m[1][0]), float(m[1][1])))
+        tx, ty = float(t[0]), float(t[1])
+        moved = [
+            ((px - tx) * m00 + (py - ty) * m10,     # Mᵀ·(p_in − t)
+             (px - tx) * m01 + (py - ty) * m11)
+            for px, py in moved
+        ]
+    return moved, grid_w, grid_h
+
+
 def rotate_mask_north_up(mask: np.ndarray, angle_deg: float) -> np.ndarray:
     """Rotate a boolean ``(H, W)`` mask exactly the way
     :func:`rotate_image_north_up` rotates the picture it belongs to.

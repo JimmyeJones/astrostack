@@ -14,7 +14,8 @@ Two halves, split so the interesting one needs no image at all:
 * :func:`place_labels` is **pure geometry** — it turns the field objects (whose
   pixel coordinates live on the run's own FITS grid) into label anchors
   expressed as *fractions* of the picture, optionally re-based onto the
-  rectangle a cropped preview actually shows. Fractions rather than pixels
+  rectangle a cropped preview actually shows and carried through any North-up
+  turn the shared picture takes. Fractions rather than pixels
   because the shared JPEG is re-rendered at share resolution, so its pixel grid
   is not the FITS one; the same reasoning makes ``SkyMarks.bar_px`` a scaled
   fraction.
@@ -127,6 +128,7 @@ def place_labels(
     height_px: int,
     *,
     crop_box: tuple[int, int, int, int] | None = None,
+    north_up_turns=(),  # noqa: ANN001 — sequence of float
 ) -> ObjectLabels:
     """Turn field objects into label anchors on the picture that will be shown.
 
@@ -137,8 +139,20 @@ def place_labels(
     relative to what is on screen rather than to the canvas behind it, and one
     that fell outside the trim is dropped rather than drawn off the edge.
 
+    ``north_up_turns`` are the North-up rotations the picture took *after* that
+    crop, in the order they were applied — so a turned picture can carry its
+    names instead of being shared bare. The turn moves every pixel and grows the
+    canvas, and the anchors follow it through the renderer's own geometry
+    (:func:`seestack.render.orient.follow_north_up_turns`) rather than being
+    abandoned. The rotation is done on the crop rectangle's own grid; the
+    rendered picture is a uniform scaling of it, and a rotate is scale-invariant
+    up to the bounding box's sub-pixel rounding, which is far inside a marker
+    dot.
+
     Objects are returned most-notable-first (closest to the picture's centre),
     which is the order :func:`draw_object_labels` hands out its limited room in.
+    Notability is measured on the **un-turned** picture, so a turn re-places the
+    names without reshuffling which of them a crowded field keeps.
     An unusable frame, an empty catalog match, or a degenerate crop all return
     an empty (falsey) :class:`ObjectLabels`.
     """
@@ -150,7 +164,7 @@ def place_labels(
     if vis_w <= 0 or vis_h <= 0:
         return ObjectLabels()
 
-    placed: list[ObjectLabel] = []
+    kept: list[tuple[str, float, tuple[float, float]]] = []
     for o in objects:
         text = label_text(getattr(o, "catalog_id", ""), getattr(o, "name", ""))
         if not text:
@@ -158,12 +172,29 @@ def place_labels(
         fx = (float(o.x_px) - x0) / vis_w
         fy = (float(o.y_px) - y0) / vis_h
         # Outside what the picture shows — either off the canvas or trimmed away.
+        # Checked before any turn: a rotate only ever moves a point that is inside
+        # the frame to somewhere else inside the (grown) frame.
         if not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0):
             continue
         nx = (fx - 0.5) * 2.0
         ny = (fy - 0.5) * 2.0
-        placed.append(ObjectLabel(
-            text=text, x=fx, y=fy, notability=float((nx * nx + ny * ny) ** 0.5)))
+        kept.append((text, float((nx * nx + ny * ny) ** 0.5),
+                     (fx * vis_w, fy * vis_h)))
+
+    from seestack.render.orient import follow_north_up_turns
+
+    turned = follow_north_up_turns(
+        [pt for _t, _n, pt in kept], int(vis_w), int(vis_h), north_up_turns)
+    if turned is None:
+        return ObjectLabels()
+    points, out_w, out_h = turned
+    if out_w <= 0 or out_h <= 0:
+        return ObjectLabels()
+
+    placed = [
+        ObjectLabel(text=text, x=px / out_w, y=py / out_h, notability=notability)
+        for (text, notability, _src), (px, py) in zip(kept, points, strict=True)
+    ]
     placed.sort(key=lambda lab: (lab.notability, lab.text))
     return ObjectLabels(labels=tuple(placed))
 

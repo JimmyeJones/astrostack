@@ -11,6 +11,7 @@ import {
   objectMarkerLayout,
   scaleBarLayout,
   storedPreviewScaleBar,
+  turnedPreviewView,
 } from "./AnnotatedImage";
 import type { FieldObject, ScaleBar } from "../api/client";
 
@@ -465,5 +466,53 @@ describe("AnnotatedImage — the overlay layer", () => {
     // lightbox, and a screen reader isn't told about a tint it can't see.
     expect(overlay.style.pointerEvents).toBe("none");
     expect(overlay).toHaveAttribute("aria-hidden");
+  });
+});
+
+describe("turnedPreviewView", () => {
+  const objs = [obj({ x_px: 120, y_px: 80 })];
+
+  it("is null for every run the server didn't answer for", () => {
+    // An ordinary run, an older backend, and the server's own refusal all arrive
+    // the same way — so the caller falls back to the crop path and, on a turned
+    // picture, steps aside exactly as it used to.
+    expect(turnedPreviewView(null)).toBeNull();
+    expect(turnedPreviewView(undefined)).toBeNull();
+    expect(turnedPreviewView({})).toBeNull();
+    expect(turnedPreviewView({ preview_objects: null, preview_width: null, preview_height: null }))
+      .toBeNull();
+  });
+
+  it("takes the server's answer when a save turned the stored preview", () => {
+    const v = turnedPreviewView({
+      preview_objects: objs, preview_width: 640, preview_height: 600,
+    });
+    expect(v).not.toBeNull();
+    expect(v!.objects).toBe(objs);
+    expect(v!.width).toBe(640);
+    expect(v!.height).toBe(600);
+  });
+
+  it("carries no scale bar, because a turned frame isn't the field any more", () => {
+    // The bar's length would survive the turn, but its sentence ("the whole
+    // frame is about N full Moons wide") would then describe a frame that has
+    // grown black wedges around the same sky. `storedPreviewScaleBar` says
+    // nothing on a turned preview for the same reason; these two must agree.
+    const v = turnedPreviewView({
+      preview_objects: objs, preview_width: 640, preview_height: 600,
+    });
+    expect(v!.scaleBar).toBeNull();
+    expect(storedPreviewScaleBar(
+      { scale_bar: { arcsec: 60, label: "1\u2032", fraction: 0.2, frame_arcmin: 5,
+                     moon_comparison: "about a fifth of a full Moon wide" } },
+      { preview_north_up_deg: 34 },
+    )).toBeNull();
+  });
+
+  it("refuses a degenerate grid rather than dividing by it", () => {
+    expect(turnedPreviewView({ preview_objects: objs, preview_width: 0, preview_height: 600 }))
+      .toBeNull();
+    expect(turnedPreviewView({ preview_objects: objs, preview_width: 640, preview_height: 0 }))
+      .toBeNull();
   });
 });

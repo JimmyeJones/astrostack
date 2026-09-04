@@ -251,6 +251,43 @@ export function croppedAnnotationView(
 }
 
 /**
+ * The pins for a stored preview a past "Adjust → North up → Save" turned, on the
+ * grid those bytes are actually on — or `null` when there is no such answer.
+ *
+ * A turn is the one geometry this side can't reconstruct: a rotate-with-expand's
+ * canvas is a ceil/floor bounding box and a near-square angle snaps to a lossless
+ * `rot90`, so re-deriving it here would be a second copy of the renderer's
+ * geometry, free to drift from the picture and from the names baked into a share.
+ * The server answers it instead (`preview_objects`, already carrying the crop),
+ * and this just decides whether it did.
+ *
+ * `null` — which is every ordinary run, every older backend, and any preview
+ * whose geometry the server refused to reconcile — means the caller falls back to
+ * {@link croppedAnnotationView} and, on a turned picture, steps aside exactly as
+ * it used to. Pure, so the decision is testable without a DOM.
+ */
+export function turnedPreviewView(
+  annotations:
+    | {
+        preview_objects?: FieldObject[] | null;
+        preview_width?: number | null;
+        preview_height?: number | null;
+      }
+    | null
+    | undefined,
+): { objects: FieldObject[]; scaleBar: ScaleBar | null; width: number; height: number } | null {
+  const objects = annotations?.preview_objects;
+  const width = annotations?.preview_width;
+  const height = annotations?.preview_height;
+  if (!objects || !width || !height || width <= 0 || height <= 0) return null;
+  // No bar: its length is measurable on a turned picture, but the sentence it
+  // carries ("the whole frame is about 5.4 full Moons wide") would then describe
+  // a frame that has grown black wedges around the same sky. `storedPreviewScaleBar`
+  // says nothing there for the same reason, and this agrees with it.
+  return { objects, scaleBar: null, width, height };
+}
+
+/**
  * Which scale bar honestly describes a run's **stored preview** — the bytes every
  * download, share and pasted caption hands over.
  *
