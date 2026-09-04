@@ -12365,6 +12365,40 @@ to **Shipped**.)_
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **✅ SHIPPED (Builder, v0.342.4, branch `claude/sweet-babbage-77bqc1`) — the Dashboard card headed "Last
+  night" was reporting HALF a night, and nobody had swept for the third instance of the class.** Found by
+  finishing the v0.342.3 fix properly: after wiring the session-vs-night distinction through `early_stop`, I
+  grepped every remaining `_split_sessions` / `session_end_stamps` call site and probed the one that had
+  never been asked the question. *(Pillar: trust + friendliness — PRIORITY 3; **measured, not read**.)*
+
+  **The measurement.** One target, one observing night, shot 21:00 → 23:00 and again 05:30 → 07:30 — the
+  owner's own habit, with nothing else running through the gap to bridge it. `library_session_recap` cuts
+  "last night" as the trailing 6 h-gap cluster of the merged timeline, so it held the pre-dawn half alone:
+  **`n_frames=13` of 26, `session_exposure_s=130.0` of 260.0**, on the Dashboard's headline card, under a
+  heading that says "Last night" and beside a `night_date` naming the whole night correctly. The bridged
+  case was already fixed (v0.213-era, and tested); the **unbridged** one — a single target, or a night where
+  every target took its break at the same time — was the hole the bridge test could not see.
+
+  **Why the gap walk cannot fix itself, and what shipped instead.** Six hours is the right rule for "is this
+  the same run of captures"; it is not, and cannot be, a rule about *nights*. So `library_session_recap`
+  takes the same optional `night_of` key `nights_breakdown` already took, and after the gap walk widens the
+  cluster back over frames sharing the newest capture's observing night. **Widening only, bounded by the
+  key:** a target whose last session was a week ago still drops out, a target's own earlier night is never
+  swept in, and an unplaceable stamp (`None`) never matches — so the properties the gap walk provided are
+  unchanged, pinned by their own tests. Without a key the walk is byte-for-byte what it was.
+
+  `/api/last-night` passes the observer's key down, which means the recap now depends on longitude — so the
+  cache signature carries `lon`, exactly as `/api/stats` already does two hundred lines below it and for the
+  same stated reason: a location the owner has just set must not keep serving nights cut for the old one.
+
+  **Tests (+4 engine, +1 endpoint; the endpoint one fails on pre-fix code with `assert 13 == 26`):** the
+  split night is kept whole (26 subs, 260 s, starting at the evening sub); the key never reaches into an
+  earlier night (a week-old target still drops out); the key is **inert** on a library with no split night
+  (`bare == keyed`, so a normal install cannot change); and a key that places nothing widens nothing.
+
+  **Upgrade-safe (§9):** additive keyword with a default that preserves today's behaviour; no config, schema,
+  on-disk, API-shape or default change; the cache is in-memory and rebuilt on every process start.
+
 - **✅ SHIPPED (Builder, v0.342.3, branch `claude/sweet-babbage-77bqc1`) — ~~the early-stop judgement compares
   *sessions*, so a split night quietly makes the app less likely to speak.~~ Measured first, exactly as the
   entry demanded — and the measurement says the entry's own premise was the *smaller* half of the story, and
