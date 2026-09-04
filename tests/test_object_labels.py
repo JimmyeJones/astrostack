@@ -120,6 +120,144 @@ def test_nothing_to_place_is_falsey_rather_than_an_error():
     assert not ObjectLabels()
 
 
+# ---- the pins follow a North-up turn -----------------------------------------
+
+def _rotated_pixel(x, y, w, h, angle):
+    """Where a pixel really lands, measured on the renderer's own output.
+
+    Ground truth rather than a second implementation of the transform: plant one
+    bright pixel, rotate the image with the *same* function the picture goes
+    through (:func:`seestack.render.orient.rotate_image_north_up`), and take the
+    centroid of what comes out — which also absorbs the bicubic splash an
+    off-orthogonal angle leaves behind.
+    """
+    from seestack.render.orient import rotate_image_north_up
+
+    img = np.zeros((h, w, 3), dtype=np.float32)
+    img[int(round(y)), int(round(x))] = 1.0
+    rot = rotate_image_north_up(img, angle)
+    plane = rot[..., 0]
+    hit = plane > plane.max() * 0.3
+    ys, xs = np.nonzero(hit)
+    wts = plane[hit]
+    return ((xs * wts).sum() / wts.sum(), (ys * wts).sum() / wts.sum(),
+            rot.shape[1], rot.shape[0])
+
+
+def test_no_turn_is_exactly_todays_placement():
+    """The turn is opt-in: every existing caller passes nothing and must get the
+    identical anchors, so an un-turned share stays byte-for-byte what it was."""
+    objs = [_Obj("M1", "Crab", 100.0, 60.0), _Obj("M2", "Two", 310.0, 240.0)]
+    assert place_labels(objs, 400, 300) == place_labels(objs, 400, 300,
+                                                        north_up_turns=())
+    assert place_labels(objs, 400, 300) == place_labels(objs, 400, 300,
+                                                        north_up_turns=(0.0,))
+
+
+@pytest.mark.parametrize("angle", [90.0, -90.0, 180.0])
+def test_a_square_turn_moves_the_pins_losslessly(angle):
+    """The common case is a near-orthogonal correction, which the renderer does
+    as a pure ``np.rot90``. The anchors must land on exactly the pixel the image
+    did — no half-pixel, and no flipped axis."""
+    w, h = 400, 300
+    objs = [_Obj("A", "A", 100.0, 60.0), _Obj("B", "B", 330.0, 250.0)]
+    labels = place_labels(objs, w, h, north_up_turns=(angle,))
+    by = {lab.text: lab for lab in labels.labels}
+    for o in objs:
+        gx, gy, nw, nh = _rotated_pixel(o.x_px, o.y_px, w, h, angle)
+        lab = by[o.name]
+        assert lab.x * nw == pytest.approx(gx, abs=1e-6)
+        assert lab.y * nh == pytest.approx(gy, abs=1e-6)
+
+
+@pytest.mark.parametrize("angle", [31.5, 123.0, 7.0, -44.0])
+def test_an_off_square_turn_lands_the_pins_inside_a_marker_dot(angle):
+    """An arbitrary angle goes through ``PIL.Image.rotate(expand=True)``, whose
+    canvas is a ceil/floor bounding box. Measured residual is well under a
+    fifth of a pixel — orders of magnitude inside the dot that gets drawn, which
+    is what "the name points at its object" actually needs."""
+    w, h = 400, 300
+    objs = [_Obj("A", "A", 100.0, 60.0), _Obj("B", "B", 330.0, 250.0),
+            _Obj("C", "C", 200.0, 150.0)]
+    labels = place_labels(objs, w, h, north_up_turns=(angle,))
+    by = {lab.text: lab for lab in labels.labels}
+    for o in objs:
+        gx, gy, nw, nh = _rotated_pixel(o.x_px, o.y_px, w, h, angle)
+        lab = by[o.name]
+        err = ((lab.x * nw - gx) ** 2 + (lab.y * nh - gy) ** 2) ** 0.5
+        assert err < 0.5, (o.name, err)
+        assert 0.0 <= lab.x <= 1.0 and 0.0 <= lab.y <= 1.0
+
+
+def test_two_turns_follow_the_pixels_and_are_not_the_sum_of_one():
+    """A picture a past "Adjust → North up → Save" already turned, then shared
+    with ``?north_up=true``, takes *two* rotations of a growing canvas: the first
+    rotate-with-expand adds black wedges, and the second bounds a frame that now
+    includes them. Summing them into one rotation of the original grid gives a
+    different canvas and a different place — which is why the turns are passed as
+    a sequence. (Two non-square angles on purpose: a leading 90° expands nothing,
+    so it composes exactly and would hide the difference.)"""
+    from seestack.render.orient import rotate_image_north_up
+
+    w, h = 400, 300
+    first, second = 33.0, 41.0
+    obj = _Obj("A", "A", 120.0, 70.0)
+
+    # Ground truth: rotate the marker image the way the pixels are rotated.
+    img = np.zeros((h, w, 3), dtype=np.float32)
+    img[70, 120] = 1.0
+    rot = rotate_image_north_up(rotate_image_north_up(img, first), second)
+    plane = rot[..., 0]
+    hit = plane > plane.max() * 0.3
+    ys, xs = np.nonzero(hit)
+    wts = plane[hit]
+    gx, gy = (xs * wts).sum() / wts.sum(), (ys * wts).sum() / wts.sum()
+
+    lab = place_labels([obj], w, h, north_up_turns=(first, second)).labels[0]
+    assert lab.x * rot.shape[1] == pytest.approx(gx, abs=0.6)
+    assert lab.y * rot.shape[0] == pytest.approx(gy, abs=0.6)
+
+    summed = place_labels([obj], w, h,
+                          north_up_turns=(first + second,)).labels[0]
+    assert (summed.x, summed.y) != (lab.x, lab.y)
+
+
+def test_a_turn_re_places_the_names_without_reshuffling_them():
+    """Notability is "how central is this object in the picture", and a turn
+    doesn't change which objects the picture is about — so a crowded field keeps
+    the same names, in the same order, wherever North ends up."""
+    objs = [_Obj("EDGE", "Edge", 10.0, 10.0),
+            _Obj("MID", "Middle", 200.0, 150.0),
+            _Obj("NEAR", "Near", 210.0, 160.0)]
+    flat = place_labels(objs, 400, 300)
+    turned = place_labels(objs, 400, 300, north_up_turns=(37.0,))
+    assert [lab.text for lab in turned.labels] == [lab.text for lab in flat.labels]
+    assert ([lab.notability for lab in turned.labels]
+            == [lab.notability for lab in flat.labels])
+    assert (turned.labels[0].x, turned.labels[0].y) != (flat.labels[0].x,
+                                                        flat.labels[0].y)
+
+
+def test_a_turn_composes_with_a_crop():
+    """A trimmed preview is cropped *then* turned, so the turn applies to the
+    kept rectangle — not to the canvas behind it. An object at the trim's centre
+    stays at the middle of the picture however far it is turned.
+
+    Within a pixel, not exactly: an anchor is ``index / size``, so the middle of
+    a 200-wide grid is index 99.5 and the object sitting on index 100 is half a
+    pixel off centre before the turn as well as after it. That half pixel is the
+    fraction convention every caller already uses, not drift introduced here —
+    the ground-truth tests above pin the placement itself to the renderer.
+    """
+    box = (100, 75, 300, 225)          # the middle half of a 400×300 canvas
+    for angle in (0.0, 90.0, 41.0):
+        labels = place_labels([_Obj("M1", "Crab", 200.0, 150.0)], 400, 300,
+                              crop_box=box, north_up_turns=(angle,))
+        lab = labels.labels[0]
+        assert abs(lab.x - 0.5) * 150 <= 1.0
+        assert abs(lab.y - 0.5) * 150 <= 1.0
+
+
 # ---- the pixel half ----------------------------------------------------------
 
 def test_an_empty_set_returns_the_picture_unchanged():
