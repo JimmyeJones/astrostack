@@ -1301,8 +1301,9 @@ def _split_night(proj, *, evening_fwhm=3.0, predawn_fwhm=3.0):
 
 
 def test_a_night_shot_in_two_goes_is_two_sessions_without_the_night_key(tmp_path):
-    """The pre-existing behaviour, pinned so the default cannot drift: the
-    last-session recap and the pace estimate genuinely want sessions."""
+    """The pre-existing behaviour of the *unkeyed* call, pinned so the default
+    cannot drift. Every surface that calls itself a night now passes the key;
+    the bare call is what a caller with no longitude still gets."""
     proj = Project.create(tmp_path / "p", name="t")
     try:
         _split_night(proj)
@@ -1867,5 +1868,109 @@ def test_early_stop_measures_a_three_goes_night_against_when_it_ended(tmp_path):
         assert merged.n_nights_compared == 3
         assert nights_breakdown(
             proj, night_of=_noon_night_key)[0].ended_early == merged
+    finally:
+        proj.close()
+
+
+# --- "a six-hour gap is not a night" — the recap's own site ------------------
+#
+# The card is dated with an observing night and sits directly above the Nights
+# rows, which are night-shaped. Without a night key the recap is the trailing
+# *session*, so on a night shot in two goes the two surfaces reported different
+# subs under the identical date — measured on this fixture: 4 vs 10.
+
+def test_recap_of_a_split_night_covers_the_whole_night(tmp_path):
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _split_night(proj)
+        recap = session_recap(proj, night_of=_night_key_utc)
+        assert recap is not None
+        assert recap.n_frames == 10          # both halves, not the trailing 4
+        assert recap.n_kept == 10
+        assert recap.session_exposure_s == 100.0
+        # The span is the night's, evening through pre-dawn.
+        assert recap.start_utc.startswith("2026-07-01T21:00")
+        assert recap.end_utc.startswith("2026-07-02T05:01")
+    finally:
+        proj.close()
+
+
+def test_recap_without_a_night_key_is_still_session_shaped(tmp_path):
+    """The key is optional — a caller with no longitude gets the old answer
+    rather than a guess, exactly as ``nights_breakdown`` degrades."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _split_night(proj)
+        recap = session_recap(proj)
+        assert recap is not None
+        assert recap.n_frames == 4
+    finally:
+        proj.close()
+
+
+def test_recap_and_nights_breakdown_agree_about_a_split_night(tmp_path):
+    """The two cards sit one above the other on the Target page; they must not
+    report different subs for the same dated night."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _split_night(proj)
+        recap = session_recap(proj, night_of=_night_key_utc)
+        [newest] = nights_breakdown(proj, night_of=_night_key_utc)
+        assert recap is not None
+        assert (recap.n_frames, recap.n_kept, recap.session_exposure_s) == (
+            newest.n_frames, newest.n_kept, newest.exposure_s)
+        assert _night_key_utc(recap.start_utc) == _night_key_utc(newest.start_utc)
+    finally:
+        proj.close()
+
+
+def test_consecutive_nights_are_still_separate_in_the_recap(tmp_path):
+    """Merging must only ever roll up *within* a night — two evenings running
+    stay two nights, and the recap covers the newer one alone."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for i in range(4):
+            proj.add_frame(_frame(datetime(2026, 7, 1, 22, 0) + timedelta(minutes=i)))
+        for i in range(7):
+            proj.add_frame(_frame(datetime(2026, 7, 2, 22, 0) + timedelta(minutes=i)))
+        recap = session_recap(proj, night_of=_night_key_utc)
+        assert recap is not None and recap.n_frames == 7
+    finally:
+        proj.close()
+
+
+def test_recap_never_merges_two_undatable_halves(tmp_path):
+    """A night key that can't place a stamp must not guess two unplaceable
+    halves are the same night — the recap then behaves exactly as with no key."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _split_night(proj)
+        blind = session_recap(proj, night_of=lambda _ts: None)
+        plain = session_recap(proj)
+        assert blind is not None and plain is not None
+        assert blind.n_frames == plain.n_frames == 4
+    finally:
+        proj.close()
+
+
+def test_split_night_drift_compares_whole_nights(tmp_path):
+    """The softer-stars nudge compares the newest group against the prior ones.
+    Merged by night, a split prior night is one baseline entry rather than two —
+    so its two halves can no longer be each other's 'prior night'."""
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        # One prior night, itself shot in two goes, with sharp stars…
+        _split_night(proj)                                  # 6 + 4 subs at 3.0 px
+        # …then a soft night.
+        for i in range(8):
+            proj.add_frame(_frame(datetime(2026, 7, 3, 22, 0) + timedelta(minutes=i),
+                                  fwhm_px=5.0))
+        recap = session_recap(proj, night_of=_night_key_utc)
+        assert recap is not None and recap.quality_drift is not None
+        # One prior *night*, so the sub count behind the baseline is the whole
+        # night's ten, not one half's four.
+        assert recap.quality_drift.baseline_fwhm_px == 3.0
+        assert recap.quality_drift.n_baseline == 10
+        assert recap.quality_drift.n_latest == 8
     finally:
         proj.close()

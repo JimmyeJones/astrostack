@@ -2,7 +2,7 @@
  * "Your year under the stars" — one calendar year of imaging, on its own page.
  *
  * The app already had both ends of the time axis and nothing in between: a
- * *night* ("Last session"), and the *whole hobby* ("Your sky, so far"). This is
+ * *night* ("Last night"), and the *whole hobby* ("Your sky, so far"). This is
  * the middle — the season a beginner actually wants to look back on in January
  * and show someone.
  *
@@ -22,6 +22,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { YearShareCard } from "../components/YearShareCard";
 import { formatIntegration } from "../format";
 import {
   defaultRecapYear, longestNightLines, recapYearOptions, sharpestNightLines,
@@ -135,6 +136,9 @@ export function YourYearView() {
               <StatCard key={s.label} value={s.value} label={s.label} />
             ))}
           </SimpleGrid>
+
+          <YearShareCard year={data.year} caption={data.caption}
+            hero={data.hero} />
 
           {(longest || sharpest) ? (
             <SimpleGrid cols={{ base: 1, sm: 2 }}>

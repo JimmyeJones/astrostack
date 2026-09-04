@@ -300,8 +300,8 @@ export function TonightView() {
         <Alert color="blue" icon={<IconTelescope size={18} />} title="Set your observing location">
           <Text size="sm">
             The planner needs to know where you're observing from. It reads your
-            location automatically from a plate-solved Seestar frame
-            (SITELAT/SITELONG) — so once you've solved some subs it'll just work.
+            location automatically from a plate-solved Seestar frame — so once
+            you've solved some subs it'll just work.
             You can also set it manually under{" "}
             <Anchor component={Link} to={settingsLink("observing-site")}>Settings → Observing site</Anchor>.
           </Text>

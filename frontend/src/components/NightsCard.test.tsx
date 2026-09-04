@@ -194,7 +194,7 @@ describe("NightsCard", () => {
     expect(screen.queryByText("2 Jul 2026")).not.toBeInTheDocument();
   });
 
-  it("renders nothing for a target with only one night (Last session covers it)", async () => {
+  it("renders nothing for a target with only one night (Last night covers it)", async () => {
     vi.spyOn(client.api, "targetNights").mockResolvedValue([night()]);
     const { container } = renderCard();
     await waitFor(() => expect(client.api.targetNights).toHaveBeenCalled());

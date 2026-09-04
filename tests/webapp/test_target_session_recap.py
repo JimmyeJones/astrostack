@@ -1,4 +1,4 @@
-"""GET /api/targets/{safe}/session-recap — the "Last session" summary card."""
+"""GET /api/targets/{safe}/session-recap — the "Last night" summary card."""
 
 from __future__ import annotations
 
@@ -239,3 +239,114 @@ def test_an_unsolved_target_costs_the_note_not_the_card(client, built_library):
     recap = client.get("/api/targets/M_42/session-recap").json()
     assert recap["moon_note"] is None
     assert recap["n_frames"] == 3
+
+
+# ---------------------------------------------------------------------------
+# "A six-hour gap is not a night" — the card and the Nights row beneath it
+#
+# The recap is dated with an observing night and rendered directly above the
+# Nights rows. It used to be *session*-shaped, so a night shot in two goes —
+# an evening run, bed, a pre-dawn run — put half the night's subs on the card
+# and all of them on the row, under the identical date.
+# ---------------------------------------------------------------------------
+
+def _add_frames(root, safe: str, stamps: list[str], *, exposure_s: float = 10.0):
+    """Append accepted frames at the given UTC stamps to an existing target."""
+    from seestack.io.library import Library
+    from seestack.io.project import FrameRow
+
+    lib = Library.open_or_create(root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            for i, ts in enumerate(stamps):
+                proj.add_frame(FrameRow(
+                    source_path=f"/x/{safe}-{ts}-{i}.fit",
+                    timestamp_utc=ts, exposure_s=exposure_s))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def _split_night_target(client, root):
+    """M 42 shot in two goes on one UTC observing night: three subs at 21:00 and
+    three more at 05:00 the next morning."""
+    client.put("/api/settings", json={"site_lon": 0.0})
+    _stamp(root, "M_42", {
+        0: {"timestamp_utc": "2026-07-01T21:00:00+00:00"},
+        1: {"timestamp_utc": "2026-07-01T21:10:00+00:00"},
+        2: {"timestamp_utc": "2026-07-01T21:20:00+00:00"},
+    })
+    _add_frames(root, "M_42", [
+        "2026-07-02T05:00:00+00:00",
+        "2026-07-02T05:10:00+00:00",
+        "2026-07-02T05:20:00+00:00",
+    ])
+
+
+def test_recap_of_a_split_night_covers_the_whole_night(client, solved_library,
+                                                       data_root):
+    _split_night_target(client, data_root)
+    recap = client.get("/api/targets/M_42/session-recap").json()
+    assert recap["night_date"] == "2026-07-01"
+    assert recap["n_frames"] == 6          # both halves, not the trailing three
+    assert recap["n_kept"] == 6
+    # …and the span it reports is the night's, evening through pre-dawn.
+    assert recap["start_utc"].startswith("2026-07-01T21:00")
+    assert recap["end_utc"].startswith("2026-07-02T05:20")
+
+
+def test_recap_and_the_nights_row_beneath_it_count_the_same_subs(
+    client, solved_library, data_root
+):
+    """The two cards render one above the other. Same date, same night, same
+    numbers — this is the contradiction the change exists to remove."""
+    _split_night_target(client, data_root)
+    recap = client.get("/api/targets/M_42/session-recap").json()
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert recap["night_date"] == nights[0]["night_date"] == "2026-07-01"
+    assert recap["n_frames"] == nights[0]["n_frames"]
+    assert recap["n_kept"] == nights[0]["n_kept"]
+    assert recap["session_exposure_s"] == nights[0]["exposure_s"]
+
+
+def test_a_split_night_is_still_one_night_at_a_western_longitude(
+    client, solved_library, data_root
+):
+    """The merge uses the observer's own night boundary, not UTC's: at UTC−8 the
+    same two stamps are an evening and a pre-dawn run of one local night."""
+    client.put("/api/settings", json={"site_lon": -122.3})   # Seattle
+    _stamp(data_root, "M_42", {
+        0: {"timestamp_utc": "2026-07-09T05:00:00+00:00"},   # 8 Jul 21:00 local
+        1: {"timestamp_utc": "2026-07-09T05:30:00+00:00"},
+        2: {"timestamp_utc": "2026-07-09T06:00:00+00:00"},
+    })
+    _add_frames(data_root, "M_42", [
+        "2026-07-09T12:30:00+00:00",                         # 9 Jul 04:30 local
+        "2026-07-09T13:00:00+00:00",
+    ])
+    recap = client.get("/api/targets/M_42/session-recap").json()
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert recap["night_date"] == "2026-07-08"
+    assert recap["n_frames"] == 5
+    assert nights[0]["n_frames"] == 5
+
+
+def test_two_nights_running_are_still_two(client, solved_library, data_root):
+    """The merge only ever rolls up *within* a night — the recap must still be
+    about the newest night alone."""
+    client.put("/api/settings", json={"site_lon": 0.0})
+    _stamp(data_root, "M_42", {
+        0: {"timestamp_utc": "2026-07-01T21:00:00+00:00"},
+        1: {"timestamp_utc": "2026-07-01T21:10:00+00:00"},
+        2: {"timestamp_utc": "2026-07-01T21:20:00+00:00"},
+    })
+    _add_frames(data_root, "M_42", [
+        "2026-07-02T21:00:00+00:00",
+        "2026-07-02T21:10:00+00:00",
+    ])
+    recap = client.get("/api/targets/M_42/session-recap").json()
+    assert recap["night_date"] == "2026-07-02"
+    assert recap["n_frames"] == 2

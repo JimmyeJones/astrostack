@@ -82,6 +82,13 @@ describe("TonightView", () => {
       expect(screen.getByText("Set your observing location")).toBeInTheDocument());
     expect(screen.getByRole("link", { name: /Settings/i }))
       .toHaveAttribute("href", "/settings/observing-site");
+    // …and it says so in words a beginner has, not in FITS header keywords: the
+    // reassurance ("it'll just work once you've solved some subs") is the whole
+    // job of the sentence, and nobody it is written for is going to open a
+    // header to look SITELAT up.
+    expect(screen.getByText(/reads your location automatically from a plate-solved/))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/SITELAT|SITELONG/)).toBeNull();
   });
 
   it("still ranks your own targets by depth when no location is known", async () => {
