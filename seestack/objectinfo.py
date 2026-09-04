@@ -20,7 +20,13 @@ from dataclasses import dataclass
 
 from seestack.angularsize import AngularSize, angular_size
 from seestack.bg_advice import BackgroundModeHint, background_mode_hint
-from seestack.framing import FramingHint, MosaicPlan, framing_hint, mosaic_plan
+from seestack.framing import (
+    FrameField,
+    FramingHint,
+    MosaicPlan,
+    framing_hint,
+    mosaic_plan,
+)
 from seestack.lighttravel import LightTravel, light_travel
 from seestack.nightplan import CatalogObject, _angular_sep_deg, load_catalog
 from seestack.target_difficulty import DifficultyHint, target_difficulty
@@ -124,6 +130,7 @@ def identify_object(
     dec_deg: float | None = None,
     *,
     catalog: tuple[CatalogObject, ...] | None = None,
+    field: FrameField | None = None,
 ) -> ObjectInfo | None:
     """Best-effort identify a target from its ``name`` and/or solved centre.
 
@@ -131,6 +138,13 @@ def identify_object(
     (M/NGC/IC/C + number), (2) an exact **common-name** match, then (3) a tight
     **cone match** against a solved ``ra_deg``/``dec_deg``. Returns ``None`` when
     nothing matches confidently, so the caller shows no card rather than a guess.
+
+    ``field`` is the owner's own single-frame field of view
+    (:func:`seestack.framing.frame_field_from_solve`), which decides the "will it
+    fit?" verdict and the mosaic panel count. Omitting it falls back to the S50
+    field the module has always assumed — right for an install with no solved
+    frame to ask, wrong for the owner's S30, which is why every caller that *can*
+    answer should.
     """
     cat = catalog if catalog is not None else load_catalog()
 
@@ -139,12 +153,12 @@ def identify_object(
         if want_desig is not None:
             for obj in cat:
                 if _norm_designation(obj.id) == want_desig:
-                    return _to_info(obj, "name")
+                    return _to_info(obj, "name", field)
         want_name = _norm_name(name)
         if want_name:
             for obj in cat:
                 if obj.name and _norm_name(obj.name) == want_name:
-                    return _to_info(obj, "name")
+                    return _to_info(obj, "name", field)
 
     if ra_deg is not None and dec_deg is not None:
         best: CatalogObject | None = None
@@ -154,7 +168,7 @@ def identify_object(
             if sep < best_sep:
                 best, best_sep = obj, sep
         if best is not None:
-            return _to_info(best, "coords")
+            return _to_info(best, "coords", field)
 
     return None
 
@@ -223,7 +237,8 @@ def confident_object_title(
     return title or None
 
 
-def _to_info(obj: CatalogObject, matched_by: str) -> ObjectInfo:
+def _to_info(obj: CatalogObject, matched_by: str,
+             field: FrameField | None = None) -> ObjectInfo:
     return ObjectInfo(
         id=obj.id,
         name=obj.name,
@@ -234,11 +249,16 @@ def _to_info(obj: CatalogObject, matched_by: str) -> ObjectInfo:
         dec_deg=obj.dec_deg,
         matched_by=matched_by,
         size_arcmin=obj.size_arcmin,
-        framing=framing_hint(obj.size_arcmin),
-        mosaic=mosaic_plan(obj.size_arcmin, obj.size_minor_arcmin),
+        framing=framing_hint(obj.size_arcmin, field=field),
+        mosaic=mosaic_plan(obj.size_arcmin, obj.size_minor_arcmin, field=field),
         blurb=obj.blurb,
         difficulty=target_difficulty(obj.id, obj.type),
-        background_mode_hint=background_mode_hint(obj.type, obj.size_arcmin),
+        # The "it fills each sub" clause is the same field-of-view comparison
+        # the framing verdict makes, so it reads the same telescope — an S30's
+        # 128' frame is not filled by the 80' nebula an S50's 77' one is.
+        background_mode_hint=background_mode_hint(
+            obj.type, obj.size_arcmin,
+            **({"fov_long_arcmin": field.long_arcmin} if field else {})),
         light_travel=light_travel(obj.distance_ly),
         angular_size=angular_size(obj.size_arcmin),
     )

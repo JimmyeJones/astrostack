@@ -42,6 +42,7 @@ from seestack.framing import (
     FramingHint,
     MosaicPlan,
     RecentreNudge,
+    FrameField,
     framing_hint,
     mosaic_plan,
 )
@@ -1005,7 +1006,8 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                  min_altitude_deg: float = 30.0,
                  library_targets: list[LibraryTarget] | None = None,
                  include_catalog: bool = True,
-                 horizon: HorizonProfile | None = None) -> NightPlan:
+                 horizon: HorizonProfile | None = None,
+                 field: FrameField | None = None) -> NightPlan:
     """Rank tonight's targets for ``observer`` at ``when_utc``.
 
     Combines the bundled catalog ("not yet targeted") with the user's library
@@ -1110,8 +1112,9 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 usable_start_utc=o.usable_start_utc.isoformat() if o.usable_start_utc else None,
                 usable_end_utc=o.usable_end_utc.isoformat() if o.usable_end_utc else None,
                 size_arcmin=obj.size_arcmin,
-                framing=framing_hint(obj.size_arcmin),
-                mosaic=mosaic_plan(obj.size_arcmin, obj.size_minor_arcmin),
+                framing=framing_hint(obj.size_arcmin, field=field),
+                mosaic=mosaic_plan(obj.size_arcmin, obj.size_minor_arcmin,
+                                   field=field),
                 difficulty=target_difficulty(obj.id, obj.type),
             ))
 
@@ -1481,6 +1484,7 @@ def suggest_targets(
     limit: int = 3,
     horizon: HorizonProfile | None = None,
     min_usable_minutes: float = 45.0,
+    field: FrameField | None = None,
 ) -> list[SuggestedTarget]:
     """Suggest a few not-yet-captured showpiece targets well-placed tonight.
 
@@ -1512,7 +1516,7 @@ def suggest_targets(
     return well_placed_tonight(
         observer, when_utc, candidates,
         min_altitude_deg=min_altitude_deg, limit=limit, horizon=horizon,
-        min_usable_minutes=min_usable_minutes,
+        min_usable_minutes=min_usable_minutes, field=field,
     )
 
 
@@ -1525,6 +1529,7 @@ def well_placed_tonight(
     limit: int | None = None,
     horizon: HorizonProfile | None = None,
     min_usable_minutes: float = 45.0,
+    field: FrameField | None = None,
 ) -> list[SuggestedTarget]:
     """Rank any set of catalog objects by how well-placed they are tonight.
 
@@ -1569,8 +1574,9 @@ def well_placed_tonight(
             usable_end_utc=o.usable_end_utc.isoformat() if o.usable_end_utc else None,
             score=o.score,
             size_arcmin=obj.size_arcmin,
-            framing=framing_hint(obj.size_arcmin),
-            mosaic=mosaic_plan(obj.size_arcmin, obj.size_minor_arcmin),
+            framing=framing_hint(obj.size_arcmin, field=field),
+            mosaic=mosaic_plan(obj.size_arcmin, obj.size_minor_arcmin,
+                               field=field),
             difficulty=target_difficulty(obj.id, obj.type),
         ))
     out.sort(key=lambda s: (-s.score, -s.max_altitude_deg))

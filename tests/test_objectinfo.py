@@ -253,3 +253,27 @@ def test_no_solved_centre_and_bad_numbers_say_nothing():
     assert confident_object_title("Unsorted", 10.685, None) is None
     assert confident_object_title("Unsorted", math.nan, 41.269) is None
     assert confident_object_title("Unsorted", "not a number", 41.269) is None
+
+
+def test_the_fills_each_sub_clause_reads_the_same_telescope_as_the_framing_line():
+    """`background_mode_hint`'s extra sentence is the same field-of-view
+    comparison the framing verdict makes, so it has to be made against the same
+    field — a 90' nebula fills an S50's 77' frame and does not fill an S30's
+    128' one, and the card must not say both things at once."""
+    from seestack.framing import FrameField
+    from seestack.objectinfo import identify_object
+
+    s30 = FrameField(127.6, 71.8)
+    # M 8 (Lagoon, 90' x 40', a nebula) — big enough for the luminance advice
+    # either way, but only bigger than the *S50's* frame.
+    fallback = identify_object("M8")
+    derived = identify_object("M8", field=s30)
+    assert fallback is not None and derived is not None
+    assert fallback.size_arcmin == derived.size_arcmin
+    assert fallback.background_mode_hint is not None
+    assert derived.background_mode_hint is not None
+    assert "fills each sub" in fallback.background_mode_hint.text
+    assert "fills each sub" not in derived.background_mode_hint.text
+    # …and the framing line agrees with it in the same breath.
+    assert fallback.framing.level == "mosaic"
+    assert derived.framing.level == "tight"

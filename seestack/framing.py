@@ -1,16 +1,24 @@
-"""Will-it-fit framing hint: is a target bigger than the Seestar's field of view?
+"""Will-it-fit framing hint: is a target bigger than *your* field of view?
 
-A very common beginner surprise is that the Seestar's single-frame field of view
-is small (~1.3° across), while some favourite targets — M31 (~3°), the Pleiades,
-the North America Nebula, the Veil — are *larger than one frame*. A beginner who
-points at one of those and shoots a single frame gets a cropped result without
-realising they needed **mosaic mode**.
+A very common beginner surprise is that a smart telescope's single-frame field is
+small, while some favourite targets — M31 (~3°), the Pleiades, the North America
+Nebula, the Veil — are *larger than one frame*. A beginner who points at one of
+those and shoots a single frame gets a cropped result without realising they
+needed **mosaic mode**.
 
 This module answers "will it fit?" from a target's angular size alone: pure,
 offline, no dependency. It compares the object's major-axis size (arcmin, from the
-bundled catalog) against the Seestar's known single-frame field and returns one of
-a few friendly, plain-language verdicts — or ``None`` when the size is unknown (we
-never guess: absent a size, no hint).
+bundled catalog) against a single-frame field and returns one of a few friendly,
+plain-language verdicts — or ``None`` when the size is unknown (we never guess:
+absent a size, no hint).
+
+**Which field, though — that is the whole point of :class:`FrameField`.** The
+answer is a property of the owner's telescope, not a constant: an S30's frame is
+~128' × 72' and an S50's ~77' × 44', a factor of 1.66 on each edge. Pass the field
+derived from the owner's own solved frames (:func:`frame_field_from_solve`)
+wherever one is available, exactly as ``AGENTS.md`` §1 "Owner facts" requires —
+"where the model matters, derive it from the frame's own ``FOCALLEN``/``XPIXSZ``
+rather than assuming either".
 """
 
 from __future__ import annotations
@@ -18,14 +26,83 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-# ZWO Seestar S50 single-frame field of view, in arcminutes. The Seestar images a
-# ~1.29° × 0.73° rectangle (250 mm f/5 over its IMX462 sensor), so a frame is ~77'
-# on its long edge and ~44' on its short edge. Mosaic mode stitches several frames
-# for anything bigger. These are the reference the "will it fit" verdict compares
-# against; they're intentionally the *single-frame* field (mosaic is the fix we
-# point at, not the baseline).
+# ⚠️ These are the **ZWO Seestar S50's** single-frame field in arcminutes — a
+# ~1.29° × 0.72° rectangle (250 mm over its 1920×1080 2.9 µm sensor). They are the
+# *fallback* used only when nothing better is known (an install with no solved
+# frame yet), NOT "the Seestar's field": the owner has an **S30**, whose 150 mm
+# objective gives ~128' × 72' (AGENTS.md §1 "Owner facts", confirmed 2026-07-24).
+# Shipped in v0.130.0 eight days before that confirmation and never revisited, so
+# every framing verdict and panel count was an S50's until v0.352.0.
+# **Do not flip these to the S30's numbers** — that is the same bug with a
+# different wrong answer for the next owner. Derive the field instead:
+# :func:`frame_field_from_solve`.
 SEESTAR_FOV_LONG_ARCMIN = 77.0
 SEESTAR_FOV_SHORT_ARCMIN = 44.0
+
+
+@dataclass(frozen=True)
+class FrameField:
+    """One telescope's single-frame field of view, in arcminutes.
+
+    ``long_arcmin``/``short_arcmin`` are the frame's two edges, longest first —
+    which edge is which on the sky depends on rotation, and every verdict here
+    compares against both, so the pair is all that is needed.
+    """
+
+    long_arcmin: float
+    short_arcmin: float
+
+
+#: The field assumed when the owner's own frames can't answer — see the warning on
+#: the constants above. Callers that *can* answer must pass their own.
+FALLBACK_FIELD = FrameField(SEESTAR_FOV_LONG_ARCMIN, SEESTAR_FOV_SHORT_ARCMIN)
+
+
+def frame_field_from_solve(
+    pixscale_arcsec: float | None,
+    width_px: int | float | None,
+    height_px: int | float | None,
+) -> FrameField | None:
+    """The single-frame field a *solved* frame actually had, or ``None``.
+
+    The plate solve already measured the thing that matters — ``pixscale_arcsec``
+    — and the frame's own pixel dimensions give the rest, so this needs no header
+    read and no assumption about the model. It is also the *honest* number: a
+    measured plate scale beats the header's nominal ``FOCALLEN`` when the two
+    disagree.
+
+    Returns ``None`` when any input is missing or non-positive, or when the
+    result is outside a physically-sensible amateur range (a mis-solved frame
+    must not hand the framing advice an absurd field — the caller then falls back
+    to :data:`FALLBACK_FIELD`, i.e. exactly today's behaviour). The bounds mirror
+    ``fits_loader.fov_deg_from_header``'s 0.05°–20° clamp, in arcminutes.
+    """
+    if pixscale_arcsec is None or width_px is None or height_px is None:
+        return None
+    try:
+        scale = float(pixscale_arcsec)
+        w, h = float(width_px), float(height_px)
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in (scale, w, h)):
+        return None
+    if scale <= 0 or w <= 0 or h <= 0:
+        return None
+    long_arcmin = scale * max(w, h) / 60.0
+    short_arcmin = scale * min(w, h) / 60.0
+    if not (3.0 <= long_arcmin <= 1200.0):  # 0.05° … 20°, as arcminutes
+        return None
+    return FrameField(long_arcmin, short_arcmin)
+
+
+def _edges(
+    field: FrameField | None, fov_long_arcmin: float, fov_short_arcmin: float,
+) -> tuple[float, float]:
+    """The (long, short) edges to judge against: the measured field when there is
+    one, otherwise whatever the caller passed (which defaults to the fallback)."""
+    if field is None:
+        return fov_long_arcmin, fov_short_arcmin
+    return field.long_arcmin, field.short_arcmin
 
 
 @dataclass(frozen=True)
@@ -44,10 +121,16 @@ class FramingHint:
 def framing_hint(
     size_arcmin: float | None,
     *,
+    field: FrameField | None = None,
     fov_long_arcmin: float = SEESTAR_FOV_LONG_ARCMIN,
     fov_short_arcmin: float = SEESTAR_FOV_SHORT_ARCMIN,
 ) -> FramingHint | None:
     """Verdict on whether an object of major-axis ``size_arcmin`` fits one frame.
+
+    ``field`` is the owner's *own* single-frame field
+    (:func:`frame_field_from_solve`) and wins when given; without it the
+    ``fov_*`` arguments apply, which default to the S50 fallback — see the
+    warning on :data:`SEESTAR_FOV_LONG_ARCMIN`.
 
     Returns ``None`` when the size is unknown or non-positive (never guess). The
     frame is rectangular, so we compare against both edges:
@@ -62,6 +145,8 @@ def framing_hint(
     """
     if size_arcmin is None or size_arcmin <= 0:
         return None
+    fov_long_arcmin, fov_short_arcmin = _edges(
+        field, fov_long_arcmin, fov_short_arcmin)
 
     if size_arcmin <= fov_short_arcmin:
         return FramingHint(
@@ -123,11 +208,17 @@ def mosaic_plan(
     size_arcmin: float | None,
     size_minor_arcmin: float | None = None,
     *,
+    field: FrameField | None = None,
     fov_long_arcmin: float = SEESTAR_FOV_LONG_ARCMIN,
     fov_short_arcmin: float = SEESTAR_FOV_SHORT_ARCMIN,
     overlap: float = MOSAIC_PANEL_OVERLAP,
 ) -> MosaicPlan | None:
     """The panel grid needed to capture an object of this angular size.
+
+    ``field`` is the owner's own single-frame field and wins over the ``fov_*``
+    fallbacks — a panel count computed against the wrong telescope is wrong by
+    the square of the field ratio, which for an S30 read as an S50 is M 31 in
+    **15** panels instead of 6.
 
     ``size_arcmin`` is the major axis and ``size_minor_arcmin`` the minor one;
     when the catalog records no minor axis the object is treated as **square**
@@ -140,6 +231,8 @@ def mosaic_plan(
     """
     if size_arcmin is None or size_arcmin <= 0:
         return None
+    fov_long_arcmin, fov_short_arcmin = _edges(
+        field, fov_long_arcmin, fov_short_arcmin)
     major = float(size_arcmin)
     minor = major
     if size_minor_arcmin is not None and size_minor_arcmin > 0:

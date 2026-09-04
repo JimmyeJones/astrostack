@@ -523,3 +523,108 @@ def test_the_nudge_carries_a_chip_sized_phrase_of_the_same_move():
     assert small is not None
     assert small.short == "5' east"
     assert small.short in small.text
+
+
+# --------------------------------------------------------------------------- #
+# The field is the owner's telescope, not a constant
+#
+# `framing.py` shipped with the S50's 77' x 44' baked in (v0.130.0, 2026-07-16),
+# eight days before the owner confirmed an S30 (AGENTS.md §1 "Owner facts"). The
+# fix derives the field from the owner's own solved frames; these pin that it is
+# derived, that the numbers move where they should, and that an install with
+# nothing to derive from is left exactly as it was.
+# --------------------------------------------------------------------------- #
+
+# The two Seestars, as their solved frames report them: 1920x1080 at 2.9 um over
+# a 250 mm (S50) / 150 mm (S30) objective, i.e. pixel scales of 2.392"/px and
+# 3.987"/px. These are the *inputs* the plate solve writes, not the answers.
+_S50_SOLVE = (206.265 * 2.9 / 250.0, 1920, 1080)
+_S30_SOLVE = (206.265 * 2.9 / 150.0, 1920, 1080)
+
+
+def test_a_solved_frame_reports_its_own_field_not_an_assumed_model():
+    from seestack.framing import frame_field_from_solve
+
+    s50 = frame_field_from_solve(*_S50_SOLVE)
+    s30 = frame_field_from_solve(*_S30_SOLVE)
+    assert s50 is not None and s30 is not None
+    # The S50's field is what the module constants have always been.
+    assert s50.long_arcmin == pytest.approx(SEESTAR_FOV_LONG_ARCMIN, abs=1.0)
+    assert s50.short_arcmin == pytest.approx(SEESTAR_FOV_SHORT_ARCMIN, abs=1.0)
+    # The owner's S30 sees 1.66x more sky on each edge — the whole point.
+    assert s30.long_arcmin == pytest.approx(127.6, abs=1.0)
+    assert s30.short_arcmin == pytest.approx(71.8, abs=1.0)
+    assert s30.long_arcmin / s50.long_arcmin == pytest.approx(250.0 / 150.0, rel=1e-3)
+
+
+def test_a_missing_or_absurd_solve_declines_rather_than_inventing_a_field():
+    from seestack.framing import frame_field_from_solve
+
+    assert frame_field_from_solve(None, 1920, 1080) is None
+    assert frame_field_from_solve(2.4, None, 1080) is None
+    assert frame_field_from_solve(2.4, 1920, None) is None
+    assert frame_field_from_solve(0.0, 1920, 1080) is None
+    assert frame_field_from_solve(-2.4, 1920, 1080) is None
+    assert frame_field_from_solve(float("nan"), 1920, 1080) is None
+    assert frame_field_from_solve("wat", 1920, 1080) is None
+    # Out of the physically-sensible band at both ends (a mis-solved frame must
+    # not hand the advice a whole-sky or sub-arcminute field).
+    assert frame_field_from_solve(0.01, 100, 100) is None      # 0.017' long edge
+    assert frame_field_from_solve(60.0, 1920, 1080) is None    # 32° long edge
+
+
+def test_the_owners_own_targets_get_the_right_verdict_and_panel_count():
+    """The measured consequence, on the targets in the owner's real library.
+
+    Read as an S50, an S30 owner is told to shoot 15 panels of M 31 where 6 do
+    it, and to mosaic the Veil and IC 5070 — both of which fit whole in one of
+    their frames. Each row fails on the pre-fix code, which had no way to be
+    told which telescope it was advising.
+    """
+    from seestack.framing import frame_field_from_solve
+
+    s30 = frame_field_from_solve(*_S30_SOLVE)
+    # (major-axis arcmin, S50 verdict/panels, S30 verdict/panels)
+    cases = [
+        ("M 31", 178.0, ("mosaic", 15), ("mosaic", 6)),
+        ("M 44", 95.0, ("mosaic", 6), ("tight", 2)),
+        ("NGC 7000", 120.0, ("mosaic", 6), ("tight", 2)),
+        ("IC 1318", 100.0, ("mosaic", 6), ("tight", 2)),
+        ("M 42", 85.0, ("mosaic", 6), ("tight", 2)),
+        ("NGC 6960", 70.0, ("tight", 2), ("fits", None)),
+        ("IC 5070", 60.0, ("tight", 2), ("fits", None)),
+        ("M 3", 18.0, ("fits", None), ("fits", None)),
+    ]
+    for name, size, (want50_level, want50_panels), (want30_level, want30_panels) in cases:
+        # The old answer, still what an install with nothing solved falls back to.
+        assert framing_hint(size).level == want50_level, name
+        plan50 = mosaic_plan(size)
+        assert (plan50.panels if plan50 else None) == want50_panels, name
+        # The owner's own field.
+        assert framing_hint(size, field=s30).level == want30_level, name
+        plan30 = mosaic_plan(size, field=s30)
+        assert (plan30.panels if plan30 else None) == want30_panels, name
+
+
+def test_a_field_beats_the_fov_arguments_but_absence_changes_nothing():
+    from seestack.framing import FALLBACK_FIELD, FrameField
+
+    wide = FrameField(200.0, 120.0)
+    # `field` wins over an explicit fov pair, so a caller can't half-override.
+    assert framing_hint(100, field=wide, fov_long_arcmin=40,
+                        fov_short_arcmin=20).level == "fits"
+    assert mosaic_plan(100, field=wide, fov_long_arcmin=40,
+                       fov_short_arcmin=20) is None
+    # …and omitting it is byte-for-byte the pre-fix answer.
+    for size in (5.0, 18.0, 43.0, 44.0, 60.0, 77.0, 85.0, 178.0, 300.0):
+        assert framing_hint(size) == framing_hint(size, field=FALLBACK_FIELD)
+        assert mosaic_plan(size) == mosaic_plan(size, field=FALLBACK_FIELD)
+
+
+def test_the_fallback_field_is_exactly_the_constants_it_replaces():
+    """A guard against the fallback drifting away from the module constants that
+    `bg_advice` and every un-migrated caller still import."""
+    from seestack.framing import FALLBACK_FIELD
+
+    assert FALLBACK_FIELD.long_arcmin == SEESTAR_FOV_LONG_ARCMIN
+    assert FALLBACK_FIELD.short_arcmin == SEESTAR_FOV_SHORT_ARCMIN
