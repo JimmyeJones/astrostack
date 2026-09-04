@@ -29,16 +29,22 @@ import type { RejectionOutlook } from "./api/client";
  * Silent when: there is no answer (older backend, a request that failed,
  * nothing solved yet), the saved settings **do** reach a lone outlier, the
  * method was picked by the chain rather than by the user (that is the app doing
- * its job), the run will drizzle (its two-pass rejection is settled by the
- * memory budget at run time, which this cannot know), or there is no depth to
- * talk about. Advisory only: nothing is changed, and the save itself succeeded.
+ * its job), or there is no depth to talk about. Advisory only: nothing is
+ * changed, and the save itself succeeded.
+ *
+ * A **drizzled** default used to be excluded too, on the grounds that the memory
+ * budget settles its two-pass rejection at run time. That only ever points one
+ * way — a pass that is dropped for memory removes even less — and drizzle's clip
+ * is the same κ·σ test with the same κ, so a drizzled mosaic saved at panel
+ * depth 10 is just as blind. It gets its own clause: Auto outlier removal is
+ * overridden while drizzle is on, so "turn it on and save again" would be advice
+ * that changes nothing.
  */
 export function savedRejectionClause(
   outlook: RejectionOutlook | null | undefined,
 ): string | null {
   if (!outlook) return null;
   if (outlook.reaches !== false || !outlook.user_chose) return null;
-  if (outlook.method === "drizzle") return null;
 
   // The depth the question is really about. On a mosaic no pixel ever sees more
   // than its own panel's subs, so a 20-frame four-panel mosaic is a 5-deep stack
@@ -49,6 +55,14 @@ export function savedRejectionClause(
     ? `only about ${depth} sub${depth === 1 ? "" : "s"} land on any one spot of this mosaic`
     : `this target has ${depth} sub${depth === 1 ? "" : "s"}`;
 
+  if (outlook.method === "drizzle") {
+    const need = outlook.lone_outlier_min_frames;
+    return `Heads-up: overnight and one-click stacks will now drizzle, and ${where}`
+      + ` — too few for drizzle's own outlier removal to pick a lone satellite or`
+      + ` plane trail out${need ? ` (it needs about ${need})` : ""}. More subs on`
+      + ` that part of the sky is the fix; Auto outlier removal can't help while`
+      + ` drizzle is on.`;
+  }
   if (outlook.method === "sigma-clip") {
     const need = outlook.lone_outlier_min_frames;
     return `Heads-up: overnight and one-click stacks will now use sigma clipping,`

@@ -65,7 +65,35 @@ describe("rejectionOutlookNote", () => {
     expect(rejectionOutlookNote(undefined, 4)).toBeNull();
   });
 
-  it("is silent on a drizzled run, whose rejection is settled at run time", () => {
-    expect(rejectionOutlookNote(outlook({ method: "drizzle" }), 4)).toBeNull();
+  it("speaks for a drizzled run too — the same clip, so the same blind spot", () => {
+    // This replaces "is silent on a drizzled run": the old silence rested on the
+    // memory budget settling the pass at run time, which only ever makes the
+    // trail *more* likely to survive. The owner drizzles mosaics, whose panels
+    // are exactly the thin stacks this note exists for.
+    const note = rejectionOutlookNote(
+      outlook({ method: "drizzle", n_frames: 40, panel_depth: 10 }), 4);
+    expect(note?.title).toMatch(/won't take these trails out/);
+    expect(note?.text).toContain("drizzle's own outlier removal");
+    expect(note?.text).toMatch(/about 10 land on any one spot of this mosaic/);
+    expect(note?.text).toContain("11");
+  });
+
+  it("does not offer the app's own choice as the drizzle fix", () => {
+    // `auto_reject` is overridden while drizzle is on, so
+    // `auto_reject_on_unattended` would change nothing — name the two things
+    // that do work instead, and withhold the button.
+    const note = rejectionOutlookNote(outlook({ method: "drizzle" }), 4);
+    expect(note?.unattendedChoiceHelps).toBe(false);
+    expect(note?.text).toContain("More subs");
+    expect(note?.text).toContain("without drizzle");
+    // …while the two branches it *does* fix still offer it.
+    expect(rejectionOutlookNote(outlook(), 4)?.unattendedChoiceHelps).toBe(true);
+    expect(rejectionOutlookNote(outlook({ method: "mean" }), 4)
+      ?.unattendedChoiceHelps).toBe(true);
+  });
+
+  it("stays silent on a drizzled run that can reach", () => {
+    expect(rejectionOutlookNote(
+      outlook({ method: "drizzle", reaches: true }), 4)).toBeNull();
   });
 });

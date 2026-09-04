@@ -18,19 +18,30 @@ export interface RejectionReachNudge {
  * `seestack.stackhealth` already says so on the finished picture; this is the
  * same fact said while the toggle that would fix it is still on screen.
  *
+ * Drizzle has the same gap and is no longer skipped. Its two-pass rejection is
+ * the same κ·σ clip with the same κ, so it too reaches nothing until
+ * `kappa_min_frames` subs land on a pixel — and a mosaic panel rarely has them.
+ * It gets no one-click `fix`: `auto_reject` is overridden while drizzle is on
+ * (`_resolve_auto_reject` returns early), so the honest caution here is the
+ * sentence, not a button that would change nothing.
+ *
  * Silent when: the answer is missing (older backend), the rejection will reach a
- * lone outlier, the stack is drizzling (drizzle has its own two-pass rejection
- * and its own hints), or the user asked for no rejection at all — this is a
- * "you're not getting the protection you asked for" caution, never a nag at
- * someone who deliberately turned it off. Advisory: nothing changes until the
- * button is pressed.
+ * lone outlier, or the user asked for no rejection at all — this is a "you're
+ * not getting the protection you asked for" caution, never a nag at someone who
+ * deliberately turned it off. Advisory: nothing changes until the button is
+ * pressed.
  */
 export function rejectionReachNudge(
   reach: StackEstimate["rejection_reach"] | undefined,
   values: Record<string, unknown>,
 ): RejectionReachNudge | null {
-  if (!reach || reach.reaches || reach.method === "drizzle") return null;
-  const wanted = !!values.sigma_clip || !!values.auto_reject || !!values.min_max_reject;
+  if (!reach || reach.reaches) return null;
+  // What counts as "you asked for rejection" depends on which pass would run:
+  // while drizzle is on the three toggles below it are overridden, and the only
+  // rejection that can run is drizzle's own.
+  const wanted = reach.method === "drizzle"
+    ? !!values.drizzle_reject
+    : !!values.sigma_clip || !!values.auto_reject || !!values.min_max_reject;
   if (!wanted) return null;
   const n = reach.n_frames;
   if (n <= 0) return null;
@@ -39,6 +50,18 @@ export function rejectionReachNudge(
     key: "auto_reject" as const,
     label: "Turn on Auto outlier removal",
   };
+  if (reach.method === "drizzle") {
+    const need = reach.lone_outlier_min_frames;
+    return {
+      text: `Drizzle's outlier removal is on, but with ${subs} it can't actually`
+        + " drop a passing satellite, plane or cosmic-ray hit — it clips against"
+        + " each pixel's own spread, so a lone outlier only stands out far enough"
+        + ` to be clipped from about ${need} frames up.`
+        + " More subs are the real fix; on a mosaic it is the subs on one panel"
+        + " that count, not the total.",
+      fix: null,
+    };
+  }
   if (reach.method === "sigma-clip") {
     const need = reach.lone_outlier_min_frames;
     return {

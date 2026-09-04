@@ -22850,8 +22850,61 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **NEW IDEA (Builder 2026-09-02, checked while standing down A6's duplicate — NOT a pixel bug, a reporting
-  one) — a drizzled mosaic can report that outlier rejection ran when no pixel could be clipped.**
+- **✅ SHIPPED (Builder, v0.340.0, branch `claude/sweet-babbage-5iozyk`) — ~~a drizzled mosaic can report that
+  outlier rejection ran when no pixel could be clipped.~~** Built as filed — "no change to any pixel, this is
+  the say-what-it-did half" — and the entry's premise was checked by **measurement** before a line was written,
+  which moved the threshold it should be reported against.
+
+  **What the sweep found, and it is not `_MIN_REJECT_NEFF`.** The entry names the pass's own 3.0 effective-count
+  floor as the honest quantity. It is the right *gate*, but it is not where the pass stops working: the clip is
+  a κ·σ test against statistics that still contain the outlier, exactly like the non-drizzle pass, so it is
+  blind until `kappa_min_frames` — 11 at the default κ=3 — and the 3.0 floor sits below that and never binds
+  first. Measured on a real drizzle stack (one sub carrying a bright block, the rest clean, at depths 4 → 12):
+  the block comes out at the **naive no-rejection average to a part in 1e-3** at every depth up to 10
+  (712.50 of a possible 712.50 at 8 subs), and vanishes at 11. Pinned as a sweep in
+  `tests/test_drizzle_reject.py`, so the number the three surfaces quote is a measurement rather than a reading
+  of the docstring.
+
+  **Four surfaces were saying "protected" about that stack, and every one of them is fixed.**
+  `rejection_reach`'s drizzle branch returned the *dispatch* gate (`n >= 4`) as if it were the reach — so it
+  answered `reaches: True, lone_outlier_min_frames: 4` for a 5-, 8- or 10-sub drizzled run, and for a 40-sub
+  four-panel mosaic ten deep on a spot. It now returns `kappa_min_frames(sigma_kappa)` sized by the same
+  per-pixel `depth` the κ-σ branch uses. Downstream, all three consumers had a `method === "drizzle" →
+  return null` line whose stated reason was that the memory budget settles the pass at run time: the Target
+  page's `rejectionOutlookNote`, the Stack form's `rejectionReachNudge`, and the *Save as defaults*
+  `savedRejectionClause`. **That reason only ever pointed one way** — a pass dropped for memory removes even
+  less — so silence was never the conservative choice. Each now has its own drizzle sentence, and
+  `stackhealth`'s `rejection_blind` note fires on a `drizzle-reject` run whose deepest pixel is under the
+  bound (it was excluded for no better reason than being a different code path).
+
+  **The cure differs, and getting that wrong would have been worse than silence.** `auto_reject` is a no-op
+  while drizzle is on (`_resolve_auto_reject` returns early), so every "turn on Auto outlier removal" line
+  would have been advice that changes nothing. The drizzle wording names the two things that do work — more
+  subs on that part of the sky, or re-stacking without drizzle — and `rejectionOutlookNote` carries a new
+  `unattendedChoiceHelps` flag so the *"Let AstroStack choose on every hands-off stack"* button is withheld
+  rather than offered as a fix it cannot be.
+
+  **Upgrade-safe (§9):** no pixel moves, no option, default, schema, on-disk path or response *shape* changes
+  — one existing response field (`lone_outlier_min_frames`) reports a different number for drizzled runs,
+  which is the fix. An older frontend reading it renders nothing new.
+
+  **Tests (+7 Python, +8 vitest; 2 Python and 4 vitest fail before).** `tests/test_rejection_reach.py`: the
+  κ bound across the whole 4→11 band, the mosaic sized on panel depth not frame count, a loosened κ moving it,
+  and the reach↔note agreement contract extended to the drizzle path. `tests/test_stackhealth.py`: the note
+  firing on a thin drizzled run and on the owner's shape (40 subs, 10 on a spot), staying silent once it is
+  deep enough, and — the guard that matters — min/max still untouched, since its drop is an order statistic,
+  not a κ·σ clip. `tests/test_drizzle_reject.py`: the depth sweep above. Frontend: a drizzle branch and a
+  reaches-true silence for each of the three note builders, plus the withheld button in
+  `RejectionOutlookNote.test.tsx`. The four "is silent on a drizzled run" tests were **rewritten, not
+  deleted** — each pinned the defect, and each now pins the honest answer plus the silence that replaces it.
+
+  **Left open, deliberately:** the entry's `DRZREJ*` **FITS provenance** half. The header cards are stamped
+  where no coverage plane is in scope, so writing the depth into them means plumbing it through the meta
+  builder — a real change to a hot-path function for a card no screen reads, when all four surfaces a person
+  actually looks at are now honest. Filed as an idea below rather than bundled in.
+
+  Original spec, for the record:
+
   *(Pillar: image quality / trust — PRIORITY 4. Size: S.)* A6 fixed `auto_reject` reading a frame count where
   the honest number is a panel's depth — but `_resolve_auto_reject` returns early when `options.drizzle` is
   on, so none of it applies to a **drizzled** run, and the owner drizzles mosaics. Checked, and the pixels are
@@ -22864,6 +22917,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Shape:** feed `auto_reject_depth` (or, better, the coverage plane the pass already computes) into the
   `DRZREJ*` provenance and into `stackhealth`'s `rejection_blind` note, so a drizzled shallow mosaic gets the
   same honest line as a non-drizzled one. No change to any pixel — this is the "say what it did" half.
+
+- **NEW IDEA (Builder 2026-09-04, the half v0.340.0 deliberately left out) — let a finished picture's own FITS
+  header say that its rejection pass reached nothing.** *(Pillar: image quality / trust — PRIORITY 4; size S;
+  **only worth it if a header consumer is named first**.)* v0.340.0 made all four *screens* honest about a
+  rejection pass that ran and could not clip (`rejection_reach`, the Target-page outlook, the Stack-form
+  nudge, the save clause, and `stackhealth`'s `rejection_blind` note). The **file** still self-documents the
+  old way: `REJMODE`/`REJFRAC 0.0` with nothing distinguishing "your data was clean" from "this pass was
+  mathematically blind", which is what a user opening the master in Siril or PixInsight sees, and what the
+  app itself would read back long after the server log has rolled. **Shape:** one card beside the existing
+  `REJ*` block — the per-pixel depth the pass actually had, or a boolean "could not reach" — so the pair is
+  readable without re-deriving it. **Why it was not bundled:** the cards are stamped in a helper with no
+  coverage plane in scope, so it means plumbing the depth (or `coverage_max`) through a hot-path meta builder
+  for a card **no screen currently reads**. Name the consumer first — most likely the History Info panel,
+  which already reads the `REJ*` cards — or leave it: a header field nothing reads is exactly the kind of
+  surface this project is supposed to stop adding.
+
 - **✅ SHIPPED (Builder, v0.330.0, branch `claude/sweet-babbage-i16c1c`) — ~~the "your stack came in well
   under what its subs should give" nudge lives inside a collapsed reveal, so the one person who needs it never
   opens it.~~** Moved to "How's my stack?", which the Target page shows unprompted, exactly as the entry asked
