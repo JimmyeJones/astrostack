@@ -6,7 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
-  bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobKindLabel,
+  bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobHeaderNote,
+  jobKindLabel,
   calibrationMismatchNote, missingSubsNote, readErrorsNote, storageTroubleAlert,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
   skippedFolders, videoFoldersNote,
@@ -812,6 +813,49 @@ describe("JobsView build_master result actions", () => {
     )).toBeInTheDocument();
     const link = screen.getByRole("link", { name: "View masters" });
     expect(link).toHaveAttribute("href", "/calibration");
+  });
+
+  it("says so at once when the frames say they are the wrong kind", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "bm-2", kind: "build_master", state: "done",
+        result: {
+          id: 2, name: "Oops", kind: "dark", n_frames: 40, n_skipped: 0,
+          header_kinds: { light: 40 },
+          header_note: {
+            severity: "warn",
+            message: "Every frame here says something else: 40 say they are "
+              + "light frames (your subs).",
+          },
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(/40 say they are light frames \(your subs\)/))
+      .toBeInTheDocument();
+  });
+});
+
+describe("jobHeaderNote", () => {
+  it("passes a well-formed server note through", () => {
+    expect(jobHeaderNote({ header_note: { severity: "warn", message: "nope" } }))
+      .toEqual({ severity: "warn", message: "nope" });
+    expect(jobHeaderNote({ header_note: { severity: "ok", message: "fine" } }))
+      .toEqual({ severity: "ok", message: "fine" });
+  });
+
+  it("is null when there is nothing to say — the common case", () => {
+    // A camera that doesn't write IMAGETYP, and every older job result.
+    expect(jobHeaderNote({})).toBeNull();
+    expect(jobHeaderNote({ header_note: null })).toBeNull();
+    expect(jobHeaderNote({ header_note: { severity: "warn" } })).toBeNull();
+    expect(jobHeaderNote({ header_note: { severity: "warn", message: "" } })).toBeNull();
+    expect(jobHeaderNote({ header_note: "warn" })).toBeNull();
+  });
+
+  it("never invents a warning out of an unexpected severity", () => {
+    expect(jobHeaderNote({ header_note: { severity: "boom", message: "x" } }))
+      .toEqual({ severity: "ok", message: "x" });
   });
 });
 
