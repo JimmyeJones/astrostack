@@ -6,6 +6,7 @@ import {
   NightsCard,
   earlyStopTooltip,
   formatNightDate,
+  moonTooltip,
   nightDateLabel,
   verdictBadge,
   verdictTooltip,
@@ -308,5 +309,71 @@ describe("NightsCard early-stop marker", () => {
     renderCard();
     await waitFor(() => expect(screen.getByText("Nights")).toBeInTheDocument());
     expect(screen.queryByText("ended early")).not.toBeInTheDocument();
+  });
+});
+
+
+describe("moonTooltip", () => {
+  const hit = {
+    level: "poor",
+    illumination: 0.96,
+    moon_altitude_deg: 41.2,
+    separation_deg: 21.0,
+    text: "A bright 96%-lit Moon was only ~21° from this target while you were "
+      + "shooting, so the sky background is brighter.",
+  };
+
+  it("hands back the server's sentence for a night the Moon hurt", () => {
+    expect(moonTooltip({ moon: hit })).toContain("96%-lit Moon");
+  });
+
+  it("says nothing about a merely passable Moon", () => {
+    // "ok" and "good" carry their numbers and no sentence — silence on a night
+    // that was fine is the design, so this can never become a nag.
+    expect(moonTooltip({ moon: { ...hit, level: "ok", text: null } })).toBeNull();
+    expect(moonTooltip({ moon: { ...hit, level: "good", text: null } })).toBeNull();
+  });
+
+  it("says nothing when the server sent no reading at all", () => {
+    // No site, no solved position, or an older backend: unknown, never "fine".
+    expect(moonTooltip({})).toBeNull();
+    expect(moonTooltip({ moon: null })).toBeNull();
+  });
+
+  it("never invents a sentence from a level alone", () => {
+    expect(moonTooltip({ moon: { ...hit, text: null } })).toBeNull();
+  });
+});
+
+describe("NightsCard bright-Moon marker", () => {
+  const moonHit = {
+    level: "poor",
+    illumination: 0.96,
+    moon_altitude_deg: 41.2,
+    separation_deg: 21.0,
+    text: "A bright 96%-lit Moon was only ~21° from this target while you were "
+      + "shooting, so the sky background is brighter.",
+  };
+
+  it("marks the moonlit night, and leaves the dark one alone", async () => {
+    vi.spyOn(client.api, "targetNights").mockResolvedValue([
+      night({ start_utc: "2026-01-18T22:00:00+00:00",
+        moon: { level: "good", illumination: 0.01, moon_altitude_deg: -30,
+          separation_deg: 60, text: null } }),
+      night({ start_utc: "2026-01-02T22:00:00+00:00", moon: moonHit }),
+    ]);
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Nights")).toBeInTheDocument());
+    expect(screen.getAllByText("bright Moon")).toHaveLength(1);
+    // Reachable without a pointer, exactly as the verdict and early-stop
+    // markers are — the sentence never becomes a row of its own.
+    expect(screen.getByLabelText(/bright Moon: .*96%-lit Moon/)).toBeInTheDocument();
+  });
+
+  it("shows no marker when the server sent no reading", async () => {
+    vi.spyOn(client.api, "targetNights").mockResolvedValue([night(), night()]);
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Nights")).toBeInTheDocument());
+    expect(screen.queryByText("bright Moon")).not.toBeInTheDocument();
   });
 });

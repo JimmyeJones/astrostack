@@ -14,6 +14,149 @@ Newest first.
 
 ---
 
+## v0.354.1 — 2026-09-05 — every file the app writes stops being half a step too dark
+
+The Scout's 2026-09-05 mosaic/output QA audit traced it and the entry sized it correctly: all six float→uint
+packs in `seestack/stack/output.py` spelled `(x * MAX).astype(np.uintN)`, which **truncates toward zero**. So
+every pixel of every PNG, JPEG and TIFF the app has ever written came out biased **downward** — by up to a
+whole step, and by ~½ a step on average — and a value a hair under full scale could never reach the top of the
+container it was written into.
+
+Tiny, and *systematic*, which is why it is worth the fix rather than the note. On the 16-bit "linear" TIFF it
+breaks the reversibility the file's own description sells (`float = black + dn/65535·(white − black)`): the
+recovered float was low by up to a full DN where rounding is honest to ±½. On the 8-bit share/print path the
+same half step is ~0.2 % of full scale off every picture the owner posts.
+
+**One spelling now, not six.** `output.pack_unit(arr, dtype)` is the single "float to integer" for this module
+and `np.rint`s — which is what `render/thumbnail.py` already does for its alpha channel, so this makes the
+outlier the rule rather than inventing one. All six sites call it: the two 16-bit TIFF branches
+(`already_display` and `autostretch`), `_write_preview_png`, `write_full_res_png`, `write_share_jpeg` and
+`_to_uint16_linear`. Callers still clip to `[0, 1]` as they always did, and `rint(1.0 · MAX) == MAX` exactly,
+so there is nothing to overflow.
+
+**The test interaction the entry flagged, re-reasoned rather than loosened.**
+`tests/test_linear_tiff_no_clip.py` asserted `at_full_scale == at_true_max` and `at_zero == at_true_min` on
+`>= rgb.max()` / `<= rgb.min()`. Correct rounding puts every pixel within **half a step** of an anchor onto
+that anchor, so the honest invariant is stated against that band — `rgb.max() − half_step` and
+`rgb.min() + half_step` — and kept as an **exact equality**, not softened to a tolerance. That is a *stronger*
+claim than the original: a truncating packer would put fewer pixels on full scale than the band contains, and
+a clipping one far more, so both still fail it. (Measured: on that fixture the band holds exactly the same
+pixels, so the assertion's number does not move.) `test_an_editor_export_tiff_is_untouched` hand-spelled the
+truncating expression as its reference; "untouched" there means *no rescale and no stretch*, so its reference
+is now `pack_unit` and the intent is unchanged. The round-trip assertion only gets tighter (a full step → ½).
+
+One more site turned up in the full suite and was re-reasoned the same way:
+`tests/webapp/test_video_sharpen_still.py`'s *"the kept original is the cropped soft render"* compared the
+stored PNG against the float array it was written from with **both** sides hand-spelling the truncating pack —
+so the claim only held while the writer truncated too, and a pixel at 5.6 steps broke it the moment it started
+rounding. It now compares the stored **bytes** against `pack_unit` of that array: exact, and stricter than
+before, since the old form allowed a whole step of slack through its float round-trip.
+
+**Upgrade-safe (§9):** no config key, no schema, no on-disk layout, no API shape, no default flipped. Existing
+files on disk are untouched; the only change is that a *newly* written one is ≤1 step per channel brighter and
+correctly rounded. Nothing re-derives a stored number from an exported file.
+
+**Deliberately not swept, and filed instead:** the same construct in `seestack/render/` (`thumbnail.py` ×5,
+`deepening.py`, `orient.py`) is display-only, pinned by a large number of existing render tests that this
+audit did not re-reason, and mixing it in would turn a minimal revertible correctness fix into a broad one.
+The lead is in `IMPROVEMENTS.md` with the site list and the preview↔export parity argument for picking it up.
+
+**Tests (+6 in a new `tests/test_export_rounding.py`, 5 of which fail before; 3 existing assertions
+re-reasoned).** `pack_unit` rounding up and down at both bit depths and a hair under full scale; the ends
+staying exact and in-range; the bias itself measured over 200k values (mean error ≈ −0.5 steps before, < 0.02
+after, max |error| ≤ ½); the linear TIFF round-tripping within half a step with a two-sided residual; and the
+editor PNG download and the share JPEG each landing on the rounded level rather than the truncated one.
+
+Original entry:
+
+  - `seestack/stack/output.py:654` (+400, 413, 428, 446, 525) every float→uint export packs with
+    `(norm * MAX).astype(np.uintN)`, which **truncates toward zero** instead of rounding — so every exported
+    pixel is biased **downward** by up to ~1 LSB (mean ~0.5 LSB), and a value at `norm=0.999985` maps to 65534,
+    never 65535. Worst on `_to_uint16_linear` (the "linear" TIFF), whose docstring sells the file as *losslessly
+    reversible* (`float = black + dn/65535·(white−black)`): the recovered float is systematically low, so the
+    reversibility claim is off by up to a full DN rather than the ±½ DN rounding would give. `thumbnail.py:902`
+    already does the right thing (`np.rint(alpha*255).astype(np.uint8)`) for the alpha channel, so the truncation
+    elsewhere is an oversight, not a considered choice. **Severity: image-quality/correctness, tiny** — ~0.5 LSB
+    out of 65535 is scientifically negligible (the sky's own 1σ still spans ~165 DN under this mapping), so this
+    is near-cosmetic; filed because it is a real, systematic bias on the exact bit-depth path the app advertises
+    as the full data. (Confidence: traced + verified by hand; the mosaic/output QA agent flagged it 2026-09-05.)
+    **Fix direction:** insert `np.round(...)` before each `.astype`; the prior `np.clip(...,0,1)` guarantees no
+    overflow (`round(MAX)==MAX`). **Test-interaction caveat — this is why it is a Builder task, not a one-liner:**
+    `tests/test_linear_tiff_no_clip.py` asserts `at_full_scale == at_true_max` and `at_zero == at_true_min`
+    (strict equality) — rounding maps pixels within ±½ LSB of the anchors to full-scale/zero, so those two
+    invariants must be relaxed to a tolerance (or the fix restricted and the tests re-reasoned); the round-trip
+    test on line ~190 only gets *tighter* (≤½ LSB) and `test_an_editor_export_tiff_is_untouched` pins the
+    `already_display` path at line 400 to truncation, so that reference must move in lockstep if 400 is changed.
+    _(Found by the 2026-09-05 mosaic/output QA audit; the same audit noted two non-bugs recorded so they aren't
+    re-investigated: `output.py:297` `_write_coverage_fits` writes a **2-D** coverage map verbatim without the
+    `.astype(np.float32)` its 3-D branch and `_write_frame_coverage_fits` both apply — a double-size FITS if a
+    float64 2-D map ever reached it, which the production accumulators never emit; and `_same_map`'s
+    `np.array_equal` returns False on identical-NaN maps, moot because coverage maps are 0-filled, never NaN.)_
+
+---
+
+## v0.354.0 — 2026-09-05 — which of your nights the Moon washed out, not just the newest one
+
+v0.278.0 gave the "Last night" card a retrospective Moon verdict, which answers *"why does my newest picture
+look flat?"*. The question right behind it — *"so which of my ten nights on this target were any good?"* — had
+no answer anywhere: the Nights card lists every night a target was shot over with a sharp / soft / hazy
+verdict, and a night that was perfectly sharp under a 96 %-lit Moon 20° away reads as a good night in that
+table while being the one that most needs explaining.
+
+Every row of the Nights card now carries the same reading the "Last night" note is built from, and a dimmed
+**bright Moon** marker appears on the nights the Moon genuinely hurt — bright, up and close. The sentence
+lives in the marker's tooltip and its `aria-label`, exactly as the verdict and `ended early` markers do: ten
+rows of prose would be a wall on the page the owner already calls busy. `good` and `ok` nights carry their
+numbers and say nothing, so a night that was fine is never second-guessed, and nothing is ever filtered or
+rejected on this — moonlit subs are still real signal.
+
+**The filed "Care" note was the whole of the engineering, and it was measured rather than reasoned about.**
+One ephemeris evaluation per row is **24.6 ms**, so a 30-night target would have added **0.74 s** to an
+endpoint that renders on every Target page view. `seestack.nightplan.session_moons` does the whole table in
+one astropy pass instead: **0.075 s at 30 nights, 0.207 s at 120** — and for *bit-identical* floats, which is
+what makes the saving legitimate rather than an approximation. `_moon_geometry` now delegates to the new
+`_moon_geometry_many`, so there is exactly one implementation of the geometry and the batched and scalar
+paths cannot drift; `session_moon` is likewise a one-element call into `session_moons`. Nothing on the
+existing forward-looking planner path moves: a 60-sample comparison pins the delegation as exact, not close.
+
+**Quiet on everything it can't answer.** No configured site and nothing sniffable from the headers, an
+unsolved target with no sky position, a night whose bounds don't parse, or an ephemeris that won't compute
+all read as *unknown* (`moon: null`) rather than as *fine* — and none of them costs the table, which renders
+exactly as before. A target with no datable night touches no ephemeris at all.
+
+**Upgrade-safe (§9):** additive and read-only — one new optional response field (`NightSummaryOut.moon`), one
+new engine function, no config key, no schema, no on-disk change, no default flipped, and no existing number
+moved. An older frontend ignores the field; an older backend leaves the marker absent.
+
+**Tests (+13; all fail before).** `tests/test_session_moon.py` (+4): a 15-session batch spanning all three
+verdict levels reading exactly like `session_moon` one at a time, order preserved, an empty batch that
+touches no ephemeris, and the bit-identical scalar↔batch geometry. `tests/webapp/test_target_nights.py` (+6):
+a moonlit night marked and a dark one not, every number on the row equal to the engine's own verdict for the
+same sky, the whole table costing **one** ephemeris pass (`calls == [2]` for two nights — the cost note,
+pinned), and the three degradations (no site, unsolved target, ephemeris failure) each costing the marker and
+not the table. `NightsCard.test.tsx` (+3 `moonTooltip` cases, +2 render cases): the sentence for a `poor`
+night, silence for `ok` / `good` / absent / text-less, one marker across two rows, and its `aria-label`.
+
+Original entry:
+
+- **NEW IDEA (Builder 2026-08-27, the obvious next slice of the "Was the Moon washing this out?" note shipped
+  in v0.278.0) — say it on the *Nights* card too, so a beginner can see *which* of their nights the Moon hurt,
+  not only the most recent one.** *(Pillar: understand + trust — PRIORITY 3. Size: S.)* v0.278.0 put the
+  retrospective verdict on the "Last session" card, which answers "why does my newest picture look flat?".
+  The question right behind it is "so which of my ten nights on this target were any good?" — and the Nights
+  card already lists every night with a one-word verdict (sharp / soft / hazy) it computes from stored metrics.
+  Adding the Moon level to each row is now cheap: `seestack.nightplan.session_moon` exists and is pure, each
+  night already carries `start_utc`/`end_utc`, and the target's position and the site are already resolved on
+  that endpoint's sibling. **Shape:** a small dimmed "bright Moon" marker on the rows whose verdict is `poor`,
+  never a sentence per row (ten sentences would be a wall), with the existing per-night verdict untouched.
+  **Care — the one real cost:** this is N ephemeris evaluations per page load rather than one. Measure it
+  before shipping; if a 30-night target is slow, compute the Moon level only for the rows actually rendered,
+  or memoise per (night, target) on the app the way the site lookup already is. **Do not** turn it into a
+  filter or an auto-reject: moonlit subs are still real signal, and the whole feature's voice is "here's why,
+  and how to do better next time".
+
+---
+
 ## v0.353.3 — 2026-09-05 — the app stops *recommending* a flat-dark the flat can't use
 
 The other end of v0.353.2, found while fixing it. `recommend_masters` — the answer behind the Stack form's
