@@ -14,6 +14,85 @@ Newest first.
 
 ---
 
+## v0.353.3 — 2026-09-05 — the app stops *recommending* a flat-dark the flat can't use
+
+The other end of v0.353.2, found while fixing it. `recommend_masters` — the answer behind the Stack form's
+**Use recommended** button and its ★ badge — ranks a flat-dark on exposure/gain/temperature distance alone,
+with **no dimension awareness at all** (`_recommend_flat_dark`, `webapp/calibration.py`). With two cameras'
+masters in one library the exposure-perfect-but-wrong-size dark out-ranks the usable one, so one click
+pre-filled a flat-dark the engine then silently dropped — the exact silent mismatch v0.353.2 had to add a
+warning for.
+
+`_recommend_flat_dark` now skips a dark that `dims_conflict`s with the **flat** it would calibrate, so a
+further-but-usable dark wins instead. That is the same "the top pick can fail a gate, don't let it mask a
+bindable one" reasoning `auto_bind_master_ids` already applies to the dark and the flat; the unattended binder
+itself never had this hole (its `_bindable` gate resolves both the flat and the flat-dark against the frames'
+dimensions, so the two provably agree).
+
+**Upgrade-safe (§9):** one-sided like every other size gate in the module — a master or a flat that never
+recorded its dimensions cannot be disproved and still ranks — so nothing an existing library recommends
+changes unless both sides declare a size and differ. It narrows a *recommendation* only; a pick the user
+saved is untouched, and no config, schema, on-disk path, endpoint or response shape moves.
+
+**Tests (+3 `tests/webapp/test_calibration.py`; the first two fail before).** The usable dark preferred over
+the exposure-perfect wrong-size one, no recommendation at all when every candidate is the wrong size, and the
+three can't-disprove shapes still recommending exactly as they do today.
+
+---
+
+## v0.353.2 — 2026-09-05 — a mismatched flat-dark is no longer silently dropped (and the form stops predicting a failure that never comes)
+
+**Verified by the Builder this run** (`claude/sweet-babbage-6guik5`), by reproduction and measurement, then
+fixed on both halves. *(Severity: broken-UX + image quality. Confidence: reproduced.)*
+
+**What was wrong.** The flat-dark is the one calibration pick that is **neither refused nor applied**.
+`CalibrationMasters.validate` never looks at it, and `CalibrationMasters.load` compares it to the **flat** and,
+on a shape mismatch, logs one server-log line and carries on — so the stack succeeds and the flat is normalised
+with its own dark-current + bias pedestal still baked in. That flattens the flat's own contrast, so part of the
+vignetting survives into every frame, and nothing anywhere told the user. Meanwhile the Stack form rendered the
+*shared* red blocker for that slot — `masterSizeWarning("flat-dark", …)`, i.e. **"Stacking with it will
+fail"** — which is simply not what happens. So the app predicted a failure that never came, and stayed silent
+about the thing it actually did. This is the same untruth `biasSizeWarning` was carved out of the shared helper
+to avoid, one slot along.
+
+**Measured** (synthetic 60×40 flat with a 40 % corner vignette riding on a 500 ADU pedestal, a flat light
+divided by the resulting `flat_norm`): a **matching** flat-dark leaves the corrected light flat to 1.0000
+max/min; a **wrong-shaped** one leaves **1.1333** — a ~13 % residual vignette, bit-for-bit identical to picking
+no flat-dark at all.
+
+**Engine.** `CalibrationMasters` gained `flat_dark_shape_mismatch` — `((fd_h, fd_w), (flat_h, flat_w))`, set
+only on a positive conflict — and `calibration_warnings` now names both sizes and says what it costs
+("your flat still carries its own dark pedestal, which leaves some vignetting uncorrected"). It is emitted
+**before** the `dark is None` early return, so a flat-only bundle reports it too, and it is gated on
+`flat_norm is not None` so a flat that was itself ignored (non-finite / non-positive mean) doesn't earn a note
+about a subtraction that was moot. The stacker already carries `calibration_warnings` onto `StackResult`, so
+this surfaces on the Jobs card, History, the Stack form and the Editor with no new wiring.
+
+**Frontend.** A dedicated `flatDarkSizeWarning(flatDark, flat)` (`calibrationFit.ts`) replaces the shared
+blocker on that slot — amber, not red — and is measured **against the flat**, which is the engine's own test
+rather than a second opinion about the frames. One-sided like the rest of that module: a master or a flat that
+never recorded a size is never flagged.
+
+**The third silent flat-dark, found while fixing the first two.** Clearing the **Master flat** left
+`flat_dark_master_id` set: the form hides that picker (and both its warnings) once there is no flat, and
+`CalibrationMasters.load` only ever loads a flat-dark inside its `if flat_path:` branch — so the pick was
+submitted, ignored, and invisible. A pure `flatPickPatch(flatId)` now clears the flat-dark with the flat it
+belonged to, so the form's state can't hold a pick the engine will never read.
+
+**Upgrade-safe (§9):** one additive dataclass field with a default, one additional advisory string in a list
+that already varies in length, no config, schema, on-disk path, endpoint or response *shape* change, no default
+flipped, and not one pixel of anyone's stack moves — the flat-dark that was skipped is still skipped.
+
+**Tests (+3 engine, +5 unit, +1 rendered; the two engine assertions and the form one fail before).**
+`tests/test_calibrate.py`: the mismatch recorded and reported with both sizes *plus* the measured 1.1333-vs-1.0
+residual either side of it; silence when the flat itself was unusable; and the note riding alongside the
+dark-exposure warning (the early-return case). `calibrationFit.test.ts`: the honest wording, that it is
+measured against the flat and not the frames, the can't-disprove cases, and both `flatPickPatch` branches.
+`Stack.test.tsx`: the form renders "keeps its own dark pedestal" and both sizes, and no longer the "will fail"
+blocker.
+
+---
+
 ## From "Bugs (fix these first)" — the 2026-09-05 bulk move
 
 The 227 resolved entries below were cut verbatim out of

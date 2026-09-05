@@ -1080,9 +1080,18 @@ def _recommend_flat_dark(
     """Pick the dark master that best matches the recommended flat's exposure.
 
     Flat-darks calibrate the *flat* (not the lights), so they match the flat's
-    exposure/gain/temperature. Returns ``None`` when there is no recommended
-    flat, the flat has no recorded exposure, or no dark matches it closely
-    enough (see :data:`_FLAT_DARK_MAX_DIST`)."""
+    exposure/gain/temperature — **and its dimensions**. A dark built for another
+    camera or binning mode cannot be subtracted from this flat at all:
+    ``CalibrationMasters.load`` compares the two shapes and, on a mismatch,
+    silently skips the subtraction and normalises the flat with its own pedestal
+    still in it. Recommending one would put exactly that silent mismatch on the
+    Stack form behind a ★, so a further-but-usable dark is preferred instead —
+    the same "the top pick can fail a gate" reasoning the unattended binder uses
+    for the dark and the flat.
+
+    Returns ``None`` when there is no recommended flat, the flat has no recorded
+    exposure, or no dark matches it closely enough (see
+    :data:`_FLAT_DARK_MAX_DIST`)."""
     if not flat or not darks:
         return None
     flat_exp = flat.get("exposure_s")
@@ -1096,6 +1105,10 @@ def _recommend_flat_dark(
         try:
             did = int(d["id"])
         except (KeyError, TypeError, ValueError):
+            continue
+        # One-sided, like every other size gate in this module: a master or a flat
+        # that never recorded its dimensions can't be disproved, so it still ranks.
+        if dims_conflict(d, flat.get("width_px"), flat.get("height_px")):
             continue
         dist = _match_distance(d, exposure_s=flat_exp, gain=flat_gain,
                                sensor_temp_c=flat_temp, kind="dark")

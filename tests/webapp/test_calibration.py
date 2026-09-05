@@ -363,6 +363,55 @@ def test_recommend_masters_no_flat_dark_when_no_close_exposure():
     assert rec["flat_dark_master_id"] is None
 
 
+def test_recommend_masters_skips_a_flat_dark_the_flat_cannot_use():
+    # A flat-dark is subtracted from the *flat*, and the engine compares the two
+    # shapes: a mismatch is skipped silently, leaving the flat with its own
+    # pedestal in it. Recommending the exposure-perfect-but-wrong-size dark would
+    # put that silent mismatch on the form behind a ★, so the usable dark wins
+    # even though it ranks further away.
+    masters = [
+        {"id": 1, "kind": "dark", "exposure_s": 2.0, "gain": 80.0, "exists": True,
+         "width_px": 240, "height_px": 160},   # perfect match, wrong camera
+        {"id": 2, "kind": "dark", "exposure_s": 2.5, "gain": 80.0, "exists": True,
+         "width_px": 480, "height_px": 320},   # further, but usable
+        {"id": 3, "kind": "flat", "exposure_s": 2.0, "gain": 80.0, "exists": True,
+         "width_px": 480, "height_px": 320},
+    ]
+    rec = calibration.recommend_masters(masters, exposure_s=30.0, gain=80.0)
+    assert rec["flat_master_id"] == 3
+    assert rec["flat_dark_master_id"] == 2
+
+
+def test_recommend_masters_no_flat_dark_when_every_one_is_the_wrong_size():
+    masters = [
+        {"id": 1, "kind": "dark", "exposure_s": 2.0, "gain": 80.0, "exists": True,
+         "width_px": 240, "height_px": 160},
+        {"id": 2, "kind": "flat", "exposure_s": 2.0, "gain": 80.0, "exists": True,
+         "width_px": 480, "height_px": 320},
+    ]
+    rec = calibration.recommend_masters(masters, exposure_s=30.0, gain=80.0)
+    assert rec["flat_master_id"] == 2
+    assert rec["flat_dark_master_id"] is None
+
+
+def test_recommend_masters_flat_dark_size_gate_is_one_sided():
+    # A master built before dimensions were recorded, or a flat that never
+    # recorded its own, can't be disproved — so nothing changes on upgrade.
+    for dark_dims, flat_dims in (
+        ({}, {"width_px": 480, "height_px": 320}),
+        ({"width_px": 240, "height_px": 160}, {}),
+        ({"width_px": None, "height_px": None}, {"width_px": 480, "height_px": 320}),
+    ):
+        masters = [
+            {"id": 1, "kind": "dark", "exposure_s": 2.0, "gain": 80.0,
+             "exists": True, **dark_dims},
+            {"id": 2, "kind": "flat", "exposure_s": 2.0, "gain": 80.0,
+             "exists": True, **flat_dims},
+        ]
+        rec = calibration.recommend_masters(masters, exposure_s=30.0, gain=80.0)
+        assert rec["flat_dark_master_id"] == 1
+
+
 def test_recommend_masters_picks_bias_by_gain():
     # Bias is exposure-independent (zero-second pedestal): matched on gain/temp
     # like a flat. The gain-80 bias must win over the gain-200 one for 80-gain

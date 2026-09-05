@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   bayerConflicts, biasCanScaleDark, biasSizeWarning, darkScalingBlockedNote,
-  exposureMismatch, flatBayerWarning, masterFitsFrames, masterOptionSuffix,
-  masterRecommendation, masterSizeWarning, tempMismatch,
+  exposureMismatch, flatBayerWarning, flatDarkSizeWarning, flatPickPatch,
+  masterFitsFrames, masterOptionSuffix, masterRecommendation, masterSizeWarning,
+  tempMismatch,
 } from "./calibrationFit";
 
 const SUBS = { width_px: 1080, height_px: 1920 };
@@ -161,6 +162,53 @@ describe("biasSizeWarning", () => {
     expect(biasSizeWarning(fits, SUBS, null)).toBeNull();
     expect(biasSizeWarning(fits, SUBS, fits)).toBeNull();
     expect(biasSizeWarning(null, SUBS, null)).toBeNull();
+  });
+});
+
+describe("flatDarkSizeWarning", () => {
+  const FLAT = { width_px: 1080, height_px: 1920 };
+
+  it("says what actually happens instead of 'stacking will fail'", () => {
+    // The engine never validates the flat-dark: it compares it to the flat, and
+    // on a mismatch skips the subtraction and stacks anyway. The old shared
+    // wording sent the beginner off to fix a stack that was going to succeed,
+    // and never mentioned the flat it quietly made worse.
+    const warn = flatDarkSizeWarning({ width_px: 540, height_px: 960 }, FLAT);
+    expect(warn).toContain("540×960");
+    expect(warn).toContain("1080×1920");
+    expect(warn).not.toContain("will fail");
+    expect(warn).toContain("vignetting");
+  });
+
+  it("is measured against the flat, which is the engine's own test", () => {
+    // A flat-dark that matches the flat is fine even if neither matches the
+    // frames — that clash is the *flat's* blocker, and it is already flagged.
+    expect(flatDarkSizeWarning({ width_px: 540, height_px: 960 },
+                               { width_px: 540, height_px: 960 })).toBeNull();
+  });
+
+  it("never flags what it cannot disprove", () => {
+    expect(flatDarkSizeWarning(null, FLAT)).toBeNull();
+    expect(flatDarkSizeWarning({ width_px: 540, height_px: 960 }, null)).toBeNull();
+    expect(flatDarkSizeWarning({ width_px: null, height_px: null }, FLAT)).toBeNull();
+    expect(flatDarkSizeWarning({ width_px: 540, height_px: 960 },
+                               { width_px: null, height_px: null })).toBeNull();
+  });
+});
+
+describe("flatPickPatch", () => {
+  it("keeps the flat-dark while there is a flat for it to calibrate", () => {
+    expect(flatPickPatch("3")).toEqual({ flat_master_id: "3" });
+  });
+
+  it("clears the flat-dark when the flat is cleared", () => {
+    // With no flat the engine never loads the flat-dark at all (it lives inside
+    // `CalibrationMasters.load`'s `if flat_path:` branch), and the form hides its
+    // picker and both its warnings — so a stale pick is submitted, ignored, and
+    // invisible.
+    expect(flatPickPatch(null)).toEqual({
+      flat_master_id: null, flat_dark_master_id: null,
+    });
   });
 });
 

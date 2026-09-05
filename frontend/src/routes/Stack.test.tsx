@@ -178,6 +178,43 @@ describe("StackView", () => {
     expect(screen.queryByText("Use recommended")).not.toBeInTheDocument();
   });
 
+  it("tells the truth about a wrong-sized flat-dark instead of 'will fail'", async () => {
+    // The engine compares the flat-dark to the *flat* and, on a mismatch, skips
+    // the subtraction and stacks anyway — leaving the flat with its own pedestal
+    // in it. The form used to render the shared red "Stacking with it will fail"
+    // blocker here, which is simply not what happens.
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 2, name: "Dark 2s (other camera)", kind: "dark", filename: "d2.fits",
+        n_frames: 20, method: "median", exposure_s: 2, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 240, height_px: 160,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+      { id: 3, name: "Flat 2s", kind: "flat", filename: "f3.fits", n_frames: 20,
+        method: "median", exposure_s: 2, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null,
+                width_px: 480, height_px: 320 },
+      dark_master_id: null, flat_master_id: 3, flat_dark_master_id: 2,
+      bias_master_id: null,
+      scores: { "2": 1, "3": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Use recommended")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Use recommended"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/keeps its own dark pedestal/)).toBeInTheDocument());
+    expect(screen.getByText(/240×160.*480×320/)).toBeInTheDocument();
+    expect(screen.queryByText(/flat-dark is 240×160.*will fail/)).not.toBeInTheDocument();
+  });
+
   it("warns when a chosen dark's exposure is far from the subs", async () => {
     mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
