@@ -1068,6 +1068,9 @@ export interface StorageInfo {
   total_bytes: number;
   output_bytes: number;
   cache_bytes: number;
+  // The prepared full-size picture archive, if one has been built. Optional:
+  // an older backend doesn't report it, and 0 means there is nothing to show.
+  exports_bytes?: number;
   disk: {
     total_gb?: number;
     used_gb?: number;
@@ -3124,6 +3127,11 @@ export const api = {
       "/api/gallery/pictures-archive", { method: "POST" }),
   galleryPicturesArchiveUrl: (jobId: string) =>
     `/api/gallery/pictures-archive/${encodeURIComponent(jobId)}`,
+  // Throw the prepared archive away. It is a *cache* — building it again costs
+  // only time — so the Storage page can offer the space back like any other.
+  clearPicturesArchive: () =>
+    req<{ removed: boolean; freed_bytes: number }>(
+      "/api/gallery/pictures-archive", { method: "DELETE" }),
 
   // "Try it with a sample image" onboarding demo
   getSampleStatus: () => req<SampleStatus>("/api/sample"),

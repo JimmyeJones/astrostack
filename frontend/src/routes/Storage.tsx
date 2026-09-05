@@ -139,6 +139,50 @@ function TargetRow({ row, total }: { row: TargetStorage; total: number }) {
   );
 }
 
+/** The prepared full-size picture archive, when one exists.
+ *
+ * "Full-size versions" (the Gallery card) builds one zip of every finished
+ * picture at print size and keeps it — a season of mosaics is easily gigabytes.
+ * Storage is where a NAS owner comes to ask "what is using my disk?", so a file
+ * this big must be *nameable* here rather than turning up as unexplained usage.
+ * It is a cache in the same sense the others on this page are: deleting it costs
+ * only the time to build it again, which is what the copy says.
+ */
+function PreparedDownloadRow({ bytes }: { bytes: number }) {
+  const qc = useQueryClient();
+  const clear = useMutation({
+    mutationFn: () => api.clearPicturesArchive(),
+    onSuccess: (r) => {
+      notifications.show({
+        message: r.removed
+          ? `Deleted the prepared download (${gb(r.freed_bytes)} freed)`
+          : "There was nothing left to delete",
+        color: "teal",
+      });
+      qc.invalidateQueries({ queryKey: ["storage"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  return (
+    <Card withBorder padding="sm" radius="md">
+      <Group justify="space-between" wrap="nowrap">
+        <div>
+          <Text size="sm" fw={500}>Prepared download: {gb(bytes)}</Text>
+          <Text size="xs" c="dimmed">
+            The full-size copy of your pictures, from "Full-size versions" on the
+            Gallery. Safe to delete — you can build it again whenever you want it.
+          </Text>
+        </div>
+        <Button size="xs" variant="subtle" color="red" loading={clear.isPending}
+          leftSection={<IconTrash size={14} />} onClick={() => clear.mutate()}>
+          Delete
+        </Button>
+      </Group>
+    </Card>
+  );
+}
+
 export function StorageView() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["storage"], queryFn: api.getStorage,
@@ -208,6 +252,10 @@ export function StorageView() {
         clearing everything on this page still leaves you able to rebuild your whole library from
         them. Tidying up that folder is yours to do, and worth having a backup of.
       </Text>
+
+      {(data.exports_bytes ?? 0) > 0
+        ? <PreparedDownloadRow bytes={data.exports_bytes ?? 0} />
+        : null}
 
       {data.targets.length === 0 ? (
         <Card withBorder padding="xl">

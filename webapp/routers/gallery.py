@@ -1080,6 +1080,37 @@ def start_pictures_archive(request: Request) -> dict:
     return {"job_id": job.id, "already_running": False}
 
 
+@router.delete("/api/gallery/pictures-archive")
+def clear_pictures_archive(request: Request) -> dict:
+    """Delete the prepared full-size archive and give the space back.
+
+    It is a cache in exactly the sense the Storage page's other clearables are:
+    every byte in it can be made again from pictures that stay where they are,
+    so deleting it costs only the time to rebuild. Nothing else is touched — not
+    the library, not a stack run, and (as everywhere) nothing in ``incoming/``.
+    Idempotent: with no archive built, ``removed`` is ``False`` and nothing is
+    an error.
+    """
+    settings = deps.get_settings(request)
+    path = picturesarchive.archive_path(settings)
+    freed = 0
+    removed = False
+    for f in (path, path.with_suffix(path.suffix + ".part")):
+        try:
+            size = f.stat().st_size
+        except OSError:
+            continue
+        try:
+            f.unlink()
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Could not delete the prepared download: {exc}") from exc
+        freed += size
+        removed = True
+    return {"removed": removed, "freed_bytes": freed}
+
+
 @router.get("/api/gallery/pictures-archive/{job_id}")
 def download_pictures_archive(job_id: str, request: Request):
     """Hand over the archive a finished ``pictures_archive`` job built.

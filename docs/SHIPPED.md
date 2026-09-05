@@ -14,6 +14,36 @@ Newest first.
 
 ---
 
+## v0.357.1 — 2026-09-05 — The prepared download is nameable disk, and clearable
+
+Follow-on to v0.357.0, closing the one thing it left on a NAS with a fixed disk allowance: **the archive
+was real disk usage that no screen could account for.** "Full-size versions" writes a season of pictures at
+print size into `<data_root>/exports/` — easily gigabytes — and it lives *outside* the library, so the
+Storage page's own totals walked straight past it. That page exists to answer "what is using my disk?"; a
+multi-gigabyte file it cannot name is the one answer it must not give.
+
+`StorageResponse` gains `exports_bytes` (additive, defaulted `0`, measured with the same best-effort
+`_dir_bytes` every other figure on the page uses), and `DELETE /api/gallery/pictures-archive` gives the
+space back. It is a cache in exactly the sense the page's other clearables are — every byte can be made
+again from pictures that stay where they are — so the row says *"Safe to delete — you can build it again
+whenever you want it"* and the delete is **idempotent**: with nothing built, `removed` is `False` and it is
+not an error. The stale `.part` file of an interrupted build is swept with it.
+
+Self-hiding: `exports_bytes` of 0 — every install that never presses the button, and an older backend that
+doesn't report the field — renders nothing at all.
+
+**Upgrade-safe (§9):** one additive response field with a default, one new endpoint, one conditional row.
+No config, schema, on-disk layout or default change; the deletion is scoped to the two paths this module
+owns and cannot reach the library or `incoming/` (§10), pinned by a snapshot test.
+
+**Tests (+3 Python, +2 vitest).** `tests/webapp/test_pictures_archive.py`: storage reports 0 before a build
+and the file's exact size after; deleting frees it, zeroes the figure, leaves the library and `incoming/`
+byte-identical, and is a no-op the second time; and a job whose archive has been deleted 404s with *"build
+it again"* rather than a dead link, with a rebuild still working. `Storage.test.tsx`: the row names the
+size and offers the delete, and says nothing when there is nothing prepared.
+
+---
+
 ## v0.357.0 — 2026-09-05 — "Full-size versions": every finished picture at print size, as one job-built archive
 
 **The gap this closes was already admitted in shipped copy.** `/api/gallery/pictures.zip` streams each
