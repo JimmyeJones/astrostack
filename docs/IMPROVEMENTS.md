@@ -286,7 +286,20 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
     declare one, refuse (or warn + skip) the master on a mismatch — the same fail-closed shape as the existing
     dimension guard. Small, additive, testable; do it only alongside a real trigger.
 
-- **⚪ MINOR / TEST-ONLY (Scout QA audit 2026-08-26, traced) — the non-windowed `reproject_rgb` omits the
+- **✅ SHIPPED (Builder, v0.353.1, branch `claude/sweet-babbage-flru3c`) — ~~the non-windowed `reproject_rgb`
+  omits the `FRAME_EDGE_INSET_PX` border trim that the production windowed path applies.~~** Built as the
+  entry's **first** fix direction (parity), not the docstring one: the two functions now compute `inset`
+  identically — including the same "a frame too small to spare it gets none" guard — so the whole-canvas
+  variant can't be adopted on the hot path expecting a trim it didn't do. **No production pixel moves**:
+  `reproject_rgb` still has exactly one caller, `tests/test_windowed_stack.py` (grepped, not assumed), and
+  `align_one` calls the windowed path as before. **Test (+1, fails before):** on a same-pointing pair the two
+  paths' valid masks are now element-for-element equal over the window, and the ring they both drop is checked
+  to be the inset one rather than "everything is valid". The existing full-vs-windowed comparison, which
+  masked the difference away by intersecting the two validity maps, still passes untouched.
+
+  *(Original note, for the trace.)*
+
+  - **⚪ MINOR / TEST-ONLY (Scout QA audit 2026-08-26, traced) — the non-windowed `reproject_rgb` omits the
     `FRAME_EDGE_INSET_PX` border trim that the production windowed path applies, so the outer 3-px
     debayer-artifact ring would leak in as valid pixels.** `reproject_rgb` (`seestack/stack/align.py` ~325)
   validates with `0 <= src <= size-1` and **no** inset, unlike `reproject_rgb_windowed` (~276) which excludes
@@ -24855,6 +24868,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.353.1** — Engine parity: **`reproject_rgb` now trims the same frame edge the production path does.** The whole-canvas variant validated on a bare `0 <= src <= size-1` while `reproject_rgb_windowed` — the one `align_one` actually calls — insets by `FRAME_EDGE_INSET_PX` to keep the debayer/reproject artefact ring out of the stack. No production pixel moves (`reproject_rgb` has one caller, a test); the point is that the simpler signature is no longer a trap. Tests: +1 `tests/test_windowed_stack.py` (fails before).
 - **v0.353.0** — Data-integrity / image quality: **a master flat built on a different colour-filter phase is refused instead of tinting every frame.** `CalibrationMasters.validate` compared `arr.shape` only, so a flat whose CFA phase is one pixel out of step with the lights was divided into the raw Bayer mosaic per *colour* — correcting every red photosite with a green value. It now fails fast (the same shape as the dimension guard) when both sides declare one of the four real phases and they differ; a dark or bias corrects each physical pixel, so it is never refused and earns an advisory instead. The unattended binders (`calibration.bayer_conflict`, `auto_bind_master_ids`, `_bind_saved_calibration_masters`) skip such a flat so a walk-away stack can't turn into an error, `coverage_miss_reason` names the phase, and the Stack form warns at pick time (`flatBayerWarning`). Inert on every master built before `BAYERPAT` was read. Tests: +7 `tests/test_calibrate.py`, +3 `tests/webapp/test_auto_stack_saved_masters.py`, +5 `tests/webapp/test_calibration.py`, +8 vitest.
 - **2026-09-05 — the R2 bulk move.** 227 resolved entries and 24 QA sweep/audit records were cut out of "Bugs (fix these first)" (12,375 lines → 991) and appended verbatim to [`SHIPPED.md`](SHIPPED.md) and [`PROCESS-NOTES.md`](PROCESS-NOTES.md). **Grep those two files, not this one, for anything that shipped before v0.352.3.** One line rather than 227 auto-truncated ones: re-adding a summary per entry would put a fifth of the cut straight back, and both destination files are the grep target by their own front matter (AGENTS.md §2, §4).
 - **v0.352.2** — Friendliness: **"shoot it in mosaic mode" now says how big a mosaic.** With the measured framing verdict on screen the Target page hides `ObjectInfoCard`'s catalogue line — and the panel plan lives inside it — while History renders no such card at all, so the one number answering the beginner's next question had nowhere to appear. `FramingVerdictNote` now renders `mosaic.text` from the shared `["identify", safe]` query (one request, not two), on the `partial` verdict only. Found by re-running `scripts/agent-dogfood.sh`, which also closed the "coverage vs panel count" lead: at v0.352.0's derived field the sample reads 15 % ↔ 3×3 = 9 panels, which agree. Tests: +3 `FramingVerdictNote.test.tsx`.

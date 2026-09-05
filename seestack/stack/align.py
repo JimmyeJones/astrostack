@@ -327,6 +327,14 @@ def reproject_rgb(
 
     Returns ``(aligned_rgb, valid_mask)`` where pixels outside the source frame
     are NaN in ``aligned_rgb`` and False in ``valid_mask``.
+
+    The source frame's outer ``FRAME_EDGE_INSET_PX`` ring counts as *outside*,
+    exactly as in :func:`reproject_rgb_windowed` — that border carries debayer
+    and reproject edge artefacts, and nothing that goes into a stack should
+    trust it. The two functions must agree on this: the windowed one is what the
+    production stacker calls, and a whole-canvas variant that quietly accepted a
+    wider frame would be a trap for the next caller who reached for the simpler
+    signature. As there, the inset is dropped on a frame too small to spare it.
     """
     from astropy.wcs.utils import pixel_to_pixel
 
@@ -341,9 +349,10 @@ def reproject_rgb(
     src_y = np.asarray(src_y, dtype=np.float32)
 
     h_src, w_src = src_rgb.shape[:2]
+    inset = FRAME_EDGE_INSET_PX if min(h_src, w_src) > 4 * FRAME_EDGE_INSET_PX else 0
     valid = np.isfinite(src_x) & np.isfinite(src_y)
-    valid &= (src_x >= 0) & (src_x <= w_src - 1)
-    valid &= (src_y >= 0) & (src_y <= h_src - 1)
+    valid &= (src_x >= inset) & (src_x <= w_src - 1 - inset)
+    valid &= (src_y >= inset) & (src_y <= h_src - 1 - inset)
 
     # Decide CPU vs GPU.
     if use_gpu is None:
