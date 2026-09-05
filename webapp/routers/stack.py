@@ -2339,12 +2339,13 @@ def _render_sub_through_recipe(src_path: str, pattern: str, recipe_json: str) ->
     from PIL import Image
 
     from seestack.edit.recipe import recipe_from_dict
+    from seestack.stack.output import pack_unit
     from webapp.routers.editor import render_sub_display_array
 
     recipe = recipe_from_dict(json.loads(recipe_json))
     out = render_sub_display_array(src_path, recipe, bayer_pattern=pattern,
                                    max_width=1024)
-    u8 = (np.clip(np.nan_to_num(out), 0.0, 1.0) * 255).astype(np.uint8)
+    u8 = pack_unit(np.clip(np.nan_to_num(out), 0.0, 1.0))
     buf = io.BytesIO()
     Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
     return buf.getvalue()

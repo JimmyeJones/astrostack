@@ -21,6 +21,11 @@ from typing import NamedTuple
 
 import numpy as np
 
+# The one spelling of "[0,1] float → integer image" in the engine. Safe to import
+# at module level despite this file being imported *back* from ``stack.output``:
+# that module has no top-level ``seestack`` imports, so there is no cycle.
+from seestack.stack.output import pack_unit
+
 log = logging.getLogger(__name__)
 
 THUMB_SIZE = 256
@@ -133,7 +138,7 @@ def generate_thumbnail(
     rgb_small = _downsample_rgb(rgb, target_h, target_w)
 
     stretched = autostretch(rgb_small)
-    out = (np.clip(stretched, 0.0, 1.0) * 255).astype(np.uint8)
+    out = pack_unit(np.clip(stretched, 0.0, 1.0))
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(out).save(out_path, format="PNG")
@@ -219,7 +224,7 @@ def render_sub_preview(
         stretched = asinh_stretch(rgb, stretch=float(stretch), black=float(black))
     else:
         stretched = _autostretch_for_export(rgb)
-    out = (np.clip(np.nan_to_num(stretched), 0.0, 1.0) * 255).astype(np.uint8)
+    out = pack_unit(np.clip(np.nan_to_num(stretched), 0.0, 1.0))
     buf = io.BytesIO()
     Image.fromarray(out, mode="RGB").save(buf, format="PNG")
     return buf.getvalue()
@@ -413,7 +418,7 @@ def render_stack_png(
     disp = np.clip(np.nan_to_num(stretched), 0.0, 1.0)
     if north_up:
         disp = _apply_north_up(disp, fits_path)
-    u8 = (disp * 255).astype(np.uint8)
+    u8 = pack_unit(disp)
     buf = io.BytesIO()
     Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
     return buf.getvalue()
@@ -502,7 +507,7 @@ def render_preview_png_full_res(
     disp = np.clip(np.nan_to_num(stretched), 0.0, 1.0)
     if north_up:
         disp = _apply_north_up(disp, fits_path)
-    u8 = (disp * 255).astype(np.uint8)
+    u8 = pack_unit(disp)
     img = Image.fromarray(u8, mode="RGB")
     h, w = u8.shape[:2]
     long_edge = max(h, w)
@@ -665,7 +670,7 @@ def orient_preview_north_up(
     with Image.open(io.BytesIO(preview_png)) as src:
         rgb = np.asarray(src.convert("RGB"), dtype=np.float32) / 255.0
     rotated = np.clip(rotate_image_north_up(rgb, angle), 0.0, 1.0)
-    u8 = (rotated * 255).astype(np.uint8)
+    u8 = pack_unit(rotated)
     buf = io.BytesIO()
     Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
     return buf.getvalue()
@@ -899,7 +904,7 @@ def rejection_overlay_png(rejection_map: np.ndarray,
 
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
     rgba[..., 0], rgba[..., 1], rgba[..., 2] = REJECTION_TINT_RGB
-    rgba[..., 3] = np.rint(alpha * 255.0).astype(np.uint8)
+    rgba[..., 3] = pack_unit(alpha)
     buf = io.BytesIO()
     Image.fromarray(rgba, mode="RGBA").save(buf, format="PNG")
     return buf.getvalue()

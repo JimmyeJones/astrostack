@@ -14,6 +14,134 @@ Newest first.
 
 ---
 
+## v0.355.0 — 2026-09-05 — "Your mosaic, panel by panel": a map of where the mosaic is thin
+
+The mosaic depth-readiness *number* shipped earlier: the goal is scaled by panel count, so a 4-panel mosaic
+with an hour on each honestly reads "a quarter done" instead of "plenty". That tells a beginner **how much**
+is left. It does not tell them **where** — and for the §1 owner, a heavy mosaic user shooting one target
+across many nights, *where* is the actionable half. A mosaic whose total looks healthy can still have one
+corner at a fifth of the others, and that corner is grainier than the whole rest of the picture however good
+the total is. Working that out today means reading the frames table and doing the geometry by eye.
+
+**One definition of "panel", not a second one.** `seestack/mosaicmap.py` clusters the target's accepted **and
+solved** subs with `seestack.stack.pointings.pointing_groups` — the same function, at the same
+`PANEL_LINK_DIST_DEG`, that QC grading, photometric normalization and quality weighting already use to decide
+"compare this sub against its own panel". Its soundness gate comes along with it: unless at least two groups
+each carry `MIN_POINTING_FRAMES` subs, the map is `None` and the card renders nothing at all. So a single
+field, a dithered set too tight to separate, an unsolved target and a handful of mis-solved strays all behave
+**exactly** as they do today. `MIN_PANEL_FRAMES` is that same constant re-exported, not a second floor picked
+by hand.
+
+**Laid out the way the sky tiles, not as a row of cells.** Panel centres are averaged as unit vectors (wrap-
+and pole-safe, the reasoning `pointings.py` already gives), offsets are taken from the mosaic's own centre
+with RA scaled by cos(dec), and each axis is single-linkage-binned at **half the closest panel-to-panel
+separation** — panels on one row share a Dec to well inside that while the next row is a full step away, so
+the two can't merge and a slightly scattered pointing still gets its own line. Row 0 is the highest Dec and
+column 0 the highest RA, i.e. North-up / East-left, the orientation every astro image is drawn in, so the grid
+matches the picture above it. A grid wider or taller than `MAX_GRID_SIDE` (24) is scattered pointings rather
+than a mosaic, and returns nothing.
+
+**Honest rather than complete.** The thin-panel call is measured against the **median** panel, not the mean,
+so two starved panels cannot drag their own yardstick down to where they look normal (pinned by a test: with
+the mean, 3×60 subs and 2×5 puts the bar where nothing would be said). It also needs an **absolute** shortfall
+of five minutes, so a mosaic's first half hour isn't nagged about a 4-vs-1-minute gap that means nothing. On
+an even mosaic `thin` is `None` and the sentence says so — inventing a "worst panel" out of a 3 % spread would
+send a beginner chasing noise. The sentence names the panel positionally ("thinnest at the bottom-right"),
+because the reader is looking at their own picture, not at our labelling, and its durations go through
+`sharecard.format_duration` — the app's one integration vocabulary — rather than a third spelling.
+
+**Where it lives.** `GET /api/targets/{safe}/mosaic-map` (read-only; rejects nothing, re-weights nothing,
+re-stacks nothing) returns the map or `null`. `MosaicMapCard` joins the Target page's existing **Planning**
+tab inside `InsightTabs` — per the standing IA rule, a later analysis card joins a group rather than becoming
+a tenth stacked card, and there is no new page and no new always-on banner. It self-hides on `null`, on an
+empty panel list *and* on a rejected request, so an older backend without the endpoint degrades to today's
+page. Cells carry their numbers in `aria-label` as well as a tooltip, so the map is readable without a
+pointer, and a gap in an L-shaped mosaic is drawn as a hole rather than squeezed out (which would move every
+other panel away from where it is in the sky).
+
+**Fast enough for a card that mounts with the page — measured, not assumed.** `InsightTabs` keeps every group
+mounted (so switching tab refetches nothing), so this endpoint runs on *every* Target page load. The clustering
+is O(n²), and the owner's largest target carries ~5,477 subs: unfolded that measured **2.2 s**. Pointings are
+therefore folded onto a 0.01° grid (`FOLD_GRID_DEG`) before clustering — **0.06 s** for the same 5,400 subs, a
+36× cut — and the fold's sizes are carried into the gate through a new, defaulted
+`pointing_groups(weights=…)`, so a panel is still "substantial" by the **frames** it holds and there is still
+exactly one gate rather than a hand-written copy of the rule beside it. 0.01° is ~36″: an order of magnitude
+below a dither and 25× below `PANEL_LINK_DIST_DEG`, so a fold moves a pointing by at most ~0.007° and can only
+change a link decision for a pair sitting within ~3 % of the link distance, where the module's own margin is
+~2×. Counts and integration are exact either way, and a test pins that a scattered, genuinely-folded 600-sub
+mosaic produces the same panels, counts and integration as the unfolded data. The frames themselves come from
+a new narrow `Project.accepted_solved_pointings()` (three columns, no `FrameRow` per sub) — the same reasoning
+`solved_frame_geometry` already carries.
+
+**Upgrade-safe (§9):** one new engine module, one new narrow read-only `Project` method, one additive and
+defaulted parameter on `pointing_groups` (its three existing callers are byte-for-byte unaffected), one
+additive read-only endpoint, two new Pydantic models, one new component. No config key, no schema change, no
+on-disk change, no default flipped, no existing endpoint or response field touched.
+
+**Tests: +15 Python engine, +3 `tests/test_pointings.py`, +6 API, +11 vitest.** `tests/test_mosaic_map.py`
+pins the silences (single field, unsolved, strays below the floor), the layout orientation, per-panel
+accounting, the median yardstick, the absolute floor, the RA-wrap case, order-independence, the position
+wording, and both halves of the fold (same map as unfolded; a folded cell still centred on its own frames).
+`tests/test_pointings.py` pins `weights` — default unchanged, a folded caller getting the unfolded answer, and
+a thin group not smuggled past the floor by a fold.
+`tests/webapp/test_mosaic_map.py` pins the endpoint against a real Library/Project: the `null` on a
+single-field target, the grid and sentence on a mosaic, the named thin panel, and — the two that matter — that
+**set-aside** subs and **unsolved** subs are excluded, since either would point the owner at the wrong corner.
+`MosaicMapCard.test.tsx` covers the card, both silences, and the three pure helpers.
+
+**Deliberately left open:** care note (3)'s second slice — feeding the thinnest panel into Tonight's
+where-to-point hint. It is a clean follow-on and wants its own run.
+
+---
+
+## v0.354.2 — 2026-09-05 — the picture on screen stops being half a step darker than the picture you download
+
+v0.354.1 routed the six exports in `seestack/stack/output.py` through `pack_unit`, which `np.rint`s. It left
+the display side alone on purpose (filed as a lead), and that turned a uniform-but-wrong app into an
+inconsistent one: from that version, **the editor's live preview, the gallery/History preview, the full-res
+preview render, the loupe, the star-mask overlay and the deepening reel were each up to a whole step darker
+than the PNG or TIFF written from the very same display-space pixels** — a systematic ≤1/255 divergence on
+exactly the path whose whole promise is "you get what you saw".
+
+Sweeping it turned up more than the lead had framed. Fifteen hand-spelled `(x * 255).astype(np.uint8)` sites
+existed across `seestack/render/{thumbnail,deepening,orient}.py`, `seestack/printexport.py`,
+`seestack/stack/stacker.py` (the quick-look preview), `seestack/gui/compare_dialog.py`,
+`webapp/routers/{editor,stack}.py`, `webapp/pipeline.py` and `webapp/video.py`. **Two of them were exports,
+not previews**, and had been missed by the v0.354.1 sweep only because they live outside `stack/output.py`:
+
+* `printexport.render_print` — the image that goes to a print lab, and a file the owner keeps.
+* `webapp.video._write_tiff16` — the 16-bit TIFF behind a finished Moon/Sun capture.
+
+All fifteen now call `output.pack_unit` (already public and documented for exactly this). The alpha channel in
+`render/thumbnail.py`, which had always been the lone `np.rint`, goes through it too, so there is one spelling
+in the app rather than "the rule, plus the site that anticipated it".
+
+**A grep drift guard, because fifteen hand-spellings are how this happened.** `test_no_float_to_integer_pack_
+truncates_anywhere_in_the_app` scans `seestack/` and `webapp/` for the construct and fails with the offending
+paths. A boolean mask promoted with `mask.astype(np.uint8) * 255` is a different construct and does not match.
+
+**Two deliberate non-changes.** `THUMB_VERSION` is **not** bumped: it exists to discard cached thumbnails when
+the pipeline changes enough to matter, and a ≤1/255 shift does not justify re-rendering every cached thumbnail
+on the owner's install. And `webapp/sample_data.py`'s `np.clip(img, 0, 65535).astype(np.uint16)` is left
+alone — it packs synthetic ADU, not a `[0,1]` unit image, so it is not this construct.
+
+**Three test helpers re-reasoned, not loosened.** `tests/test_full_res_asinh_parity.py::_to_u8`,
+`tests/test_thumbnail.py`'s stretch-parity expectation and their imports each re-implemented the truncating
+pack while reconstructing what the app should produce, so each failed the moment the app started rounding.
+They are about the *curve* and the *stretch*, not about the packing spelling, so they now call `pack_unit` as
+the code does — and every one stays an exact `np.array_equal`, so a genuine divergence is still caught. The
+packing itself is pinned separately, by the new file.
+
+**Upgrade-safe (§9):** pixel-level only. No config, schema, on-disk, API or default change; no cache
+invalidated; every affected value moves by at most one step of an 8- or 16-bit container.
+
+**Tests: +7 `tests/test_preview_rounding_parity.py`, all 7 failing before the fix.** The parity claim itself
+(one display-space stack rendered by the preview path and by the download path must land on the same byte),
+the full-res preview render, the North-up rotation's 8-bit round trip, `render_print`, the deepening reel,
+the Moon still's TIFF, and the drift guard.
+
+---
+
 ## v0.354.1 — 2026-09-05 — every file the app writes stops being half a step too dark
 
 The Scout's 2026-09-05 mosaic/output QA audit traced it and the entry sized it correctly: all six float→uint
