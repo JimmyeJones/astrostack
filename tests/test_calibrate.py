@@ -517,6 +517,85 @@ def test_flat_dark_shape_mismatch_is_skipped(tmp_path):
     np.testing.assert_allclose(cal.apply_raw(raw), 300.0, rtol=1e-5)
 
 
+def _vignetted_flat_masters(tmp_path, *, pedestal=500.0, flat_dark_shape=None):
+    """A vignetted flat riding on ``pedestal``, plus a flat-dark of that pedestal.
+
+    ``flat_dark_shape`` defaults to the flat's own shape; pass a different one to
+    build the mismatched flat-dark the guard below is about.
+    """
+    h, w = 40, 60
+    yy, xx = np.mgrid[0:h, 0:w]
+    r = np.hypot(yy - h / 2, xx - w / 2) / np.hypot(h / 2, w / 2)
+    illum = (1.0 - 0.4 * r ** 2).astype(np.float32)  # 40% corner vignette
+    flat = (illum * 2000.0 + pedestal).astype(np.float32)
+    save_master(tmp_path / "flat.fits", flat, MasterMeta("flat", 10, w, h, "median"))
+    fdh, fdw = flat_dark_shape or (h, w)
+    flat_dark = np.full((fdh, fdw), pedestal, dtype=np.float32)
+    save_master(tmp_path / "fd.fits", flat_dark,
+                MasterMeta("dark", 10, fdw, fdh, "median"))
+    return illum, str(tmp_path / "flat.fits"), str(tmp_path / "fd.fits")
+
+
+def test_mismatched_flat_dark_is_reported_and_measurably_worsens_the_flat(tmp_path):
+    # The one calibration pick that is neither refused nor applied: the stack
+    # succeeds and the flat is normalised with its own pedestal still in it, so
+    # part of the vignetting survives. Before this warning the only trace was a
+    # server-log line the walk-away user never reads.
+    illum, flat_path, fd_path = _vignetted_flat_masters(
+        tmp_path, flat_dark_shape=(42, 60))
+    cal = CalibrationMasters.load(flat_path=flat_path, flat_dark_path=fd_path)
+    assert cal.flat_dark_shape_mismatch == ((42, 60), (40, 60))
+    warns = cal.calibration_warnings(10.0)
+    assert len(warns) == 1
+    # Both sizes named, w×h like every sibling warning, and it must NOT claim the
+    # stack fails — that was the untruth on the Stack form.
+    assert "60×42" in warns[0] and "60×40" in warns[0]
+    assert "vignetting" in warns[0]
+    # Measured: dividing a perfectly-flat-illuminated light by this flat leaves a
+    # real residual, where a matching flat-dark leaves none.
+    light = (illum * 1000.0).astype(np.float32)
+    bad = cal.apply_raw(light)
+    assert bad.max() / bad.min() > 1.1  # ~13% residual vignette
+
+    _, flat_ok, fd_ok = _vignetted_flat_masters(tmp_path)
+    good = CalibrationMasters.load(flat_path=flat_ok, flat_dark_path=fd_ok)
+    assert good.flat_dark_shape_mismatch is None
+    assert good.calibration_warnings(10.0) == []
+    corrected = good.apply_raw(light)
+    assert corrected.max() / corrected.min() == pytest.approx(1.0, abs=1e-3)
+
+
+def test_flat_dark_mismatch_warning_is_silent_without_a_usable_flat(tmp_path):
+    # A flat whose mean is non-positive is ignored entirely, so the flat-dark
+    # that couldn't be subtracted from it changes nothing worth mentioning.
+    flat = np.zeros((4, 4), dtype=np.float32)
+    save_master(tmp_path / "flat.fits", flat, MasterMeta("flat", 10, 4, 4, "median"))
+    flat_dark = np.full((2, 2), 1.0, dtype=np.float32)
+    save_master(tmp_path / "fd.fits", flat_dark, MasterMeta("dark", 10, 2, 2, "median"))
+    cal = CalibrationMasters.load(
+        flat_path=str(tmp_path / "flat.fits"),
+        flat_dark_path=str(tmp_path / "fd.fits"),
+    )
+    assert cal.flat_norm is None
+    assert cal.calibration_warnings(10.0) == []
+
+
+def test_flat_dark_mismatch_warning_rides_alongside_the_dark_warnings(tmp_path):
+    # The flat-dark note is emitted before the `dark is None` early return, so it
+    # must survive both with and without a master dark in the bundle.
+    _, flat_path, fd_path = _vignetted_flat_masters(tmp_path, flat_dark_shape=(42, 60))
+    dark = np.full((40, 60), 5.0, dtype=np.float32)
+    save_master(tmp_path / "dark.fits", dark,
+                MasterMeta("dark", 10, 60, 40, "median", exposure_s=30.0))
+    warns = CalibrationMasters.load(
+        dark_path=str(tmp_path / "dark.fits"),
+        flat_path=flat_path, flat_dark_path=fd_path,
+    ).calibration_warnings(10.0)
+    assert len(warns) == 2
+    assert any("flat-dark" in w for w in warns)
+    assert any("Master dark is 30s" in w for w in warns)
+
+
 def test_flat_dark_nonfinite_pixel_does_not_drop_the_whole_flat(tmp_path):
     # An imported third-party flat-dark carrying an inf pixel used to make the
     # flat's nanmean non-finite, silently dropping the *entire* flat (so the

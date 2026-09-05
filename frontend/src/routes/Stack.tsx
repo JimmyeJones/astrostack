@@ -17,7 +17,8 @@ import { SampleTourNote } from "../components/SampleTourNote";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import {
   biasSizeWarning, darkScalingBlockedNote, exposureMismatch, flatBayerWarning,
-  masterOptionSuffix, masterRecommendation, masterSizeWarning, tempMismatch,
+  flatDarkSizeWarning, flatPickPatch, masterOptionSuffix, masterRecommendation,
+  masterSizeWarning, tempMismatch,
 } from "../calibrationFit";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
@@ -518,7 +519,11 @@ export function StackView() {
   // and flats only — a dark/bias corrects each physical pixel, so its phase is
   // irrelevant and flagging it would be noise.
   const flatBayerWarn = flatBayerWarning(flatM, frameDims);
-  const flatDarkSizeWarning = masterSizeWarning("flat-dark", flatDarkM, frameDims);
+  // The flat-dark is the *other* slot where a size clash isn't fatal: the engine
+  // compares it to the flat, and on a mismatch simply skips the subtraction and
+  // stacks anyway — leaving the flat with its own pedestal in it. So this one
+  // reads amber and says what actually happens, not "stacking will fail".
+  const flatDarkSizeWarn = flatDarkSizeWarning(flatDarkM, flatM);
   // The bias is the one slot where a size clash isn't fatal: with a dark chosen
   // it is never subtracted from the lights, so the shared "stacking will fail"
   // line would be untrue — the scaling note above covers what its size *does*
@@ -992,7 +997,10 @@ export function StackView() {
                   <Select
                     label="Master flat" placeholder="None" clearable
                     data={flatOpts} value={asStr(values.flat_master_id)}
-                    onChange={(v) => set("flat_master_id", v)}
+                    // Clearing the flat clears the flat-dark with it — see
+                    // `flatPickPatch` for why a stale one is invisible *and*
+                    // inert rather than merely redundant.
+                    onChange={(v) => setValues((p) => ({ ...p, ...flatPickPatch(v) }))}
                     disabled={flatOpts.length === 0}
                   />
                 </Group>
@@ -1057,9 +1065,9 @@ export function StackView() {
                     onChange={(v) => set("flat_dark_master_id", v)}
                   />
                 ) : null}
-                {flatDarkSizeWarning ? (
-                  <Alert color="red" variant="light" py={6} px="sm">
-                    <Text size="xs">{flatDarkSizeWarning}</Text>
+                {flatDarkSizeWarn ? (
+                  <Alert color="yellow" variant="light" py={6} px="sm">
+                    <Text size="xs">{flatDarkSizeWarn}</Text>
                   </Alert>
                 ) : null}
                 {flatDarkWarning ? (

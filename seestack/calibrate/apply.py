@@ -126,6 +126,16 @@ class CalibrationMasters:
     dark_bayer_pattern: str | None = None
     flat_bayer_pattern: str | None = None
     bias_bayer_pattern: str | None = None
+    # ``((flat_dark_h, flat_dark_w), (flat_h, flat_w))`` when a flat-dark was
+    # supplied whose shape doesn't match the flat, so it was **not** subtracted
+    # before normalising; ``None`` whenever the flat-dark was applied (or none was
+    # given). Unlike a wrong-shaped dark/flat — which :meth:`validate` refuses —
+    # this one is silently survivable: the stack succeeds and the flat is simply
+    # normalised with its own dark-current + bias pedestal still in it, which
+    # flattens the flat's own contrast and leaves part of the vignetting
+    # uncorrected. Recorded so :meth:`calibration_warnings` can say so, the same
+    # way a wrong-shaped bias that blocks dark exposure-scaling does.
+    flat_dark_shape_mismatch: tuple[tuple[int, int], tuple[int, int]] | None = None
     # When True *and* a master bias is available, a master dark shot at a
     # different exposure than the light is scaled to the light's integration
     # time before subtraction (see :meth:`_effective_dark`). Off by default.
@@ -179,6 +189,7 @@ class CalibrationMasters:
         bias_nodata_mask = None
         bias_exposure_s = None
         bias_bayer = None
+        flat_dark_shape_mismatch = None
         if dark_path:
             dark, dark_meta = load_master(dark_path)
             dark = np.asarray(dark, dtype=np.float32)
@@ -235,6 +246,17 @@ class CalibrationMasters:
                         "flat-dark subtraction", flat_dark_path,
                         flat_dark.shape, flat.shape,
                     )
+                    # Remember it so the user hears about it too. The log line
+                    # above reached the server log only, and this is the one
+                    # calibration slot whose mismatch neither fails the stack nor
+                    # changes what the picker said — it just quietly produces a
+                    # worse flat.
+                    # ``load_master`` refuses anything that isn't a 2-D frame, so
+                    # both shapes are (h, w).
+                    flat_dark_shape_mismatch = (
+                        (int(flat_dark.shape[0]), int(flat_dark.shape[1])),
+                        (int(flat.shape[0]), int(flat.shape[1])),
+                    )
             mean = float(np.nanmean(flat))
             if not np.isfinite(mean):
                 log.warning("flat master %s has a non-finite mean; ignoring it", flat_path)
@@ -253,6 +275,7 @@ class CalibrationMasters:
                    dark_temp_c=dark_temp_c,
                    dark_bayer_pattern=dark_bayer, flat_bayer_pattern=flat_bayer,
                    bias_bayer_pattern=bias_bayer,
+                   flat_dark_shape_mismatch=flat_dark_shape_mismatch,
                    scale_dark_to_light=scale_dark_to_light)
 
     @property
@@ -365,6 +388,12 @@ class CalibrationMasters:
         blames the result on their sky. (The flat is the fatal case, because a
         flat divides per colour; :meth:`validate` refuses that one.)
 
+        A **flat-dark** whose shape doesn't match the flat gets one too. It is
+        the only calibration pick that is neither refused nor applied — the flat
+        is simply normalised with its own pedestal still in it (see
+        :attr:`flat_dark_shape_mismatch`), so without this the user is told
+        nothing at all.
+
         ``validate()`` only checks master *shape*. But a master dark shot at a
         different **exposure** than the lights silently over/under-subtracts its
         pedestal on the default (non-scaling) path — ``apply_raw`` subtracts the
@@ -395,6 +424,23 @@ class CalibrationMasters:
                     f"but it was shot on a different camera or readout mode, so it "
                     f"may not match your sensor's hot pixels."
                 )
+        # A flat-dark whose shape doesn't match the flat is the one calibration
+        # pick that is neither refused nor applied: the stack succeeds, and the
+        # only trace is a server-log line the walk-away user never reads. The
+        # flat is then normalised with its own dark-current + bias pedestal still
+        # in it, which flattens its contrast and leaves part of the vignetting
+        # uncorrected on every frame — so say it, the same way a wrong-shaped
+        # bias that blocks dark exposure-scaling is said below.
+        if self.flat_norm is not None and self.flat_dark_shape_mismatch is not None:
+            (fdh, fdw), (fh, fw) = self.flat_dark_shape_mismatch
+            warnings.append(
+                f"Your flat-dark is {fdw}×{fdh} but the flat is {fw}×{fh} — it "
+                f"was built for a different camera or binning mode, so it "
+                f"couldn't be subtracted. Your flat still carries its own dark "
+                f"pedestal, which leaves some vignetting uncorrected. Use a "
+                f"flat-dark shot with the same camera and readout mode as the "
+                f"flat, or leave it out."
+            )
         if self.dark is None:
             return warnings
         de = self.dark_exposure_s
