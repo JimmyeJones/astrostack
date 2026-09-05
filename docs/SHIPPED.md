@@ -47,7 +47,8 @@ that reason, and the display-space check rides on the run rows the roll-up is al
 library with many runs before shipping; if it isn't free, don't do it — the roll-up is on the Dashboard's
 hot poll"*). On a synthetic project with **400 runs and 1,400 meta rows**, both scans together cost
 **1.11 ms**, against **11.15 ms** for the `iter_stack_runs` walk the roll-up already pays on the same
-target — a tenth of a cost already being paid, behind the existing 30 s cache. And a target with **no**
+target — a tenth of a cost already being paid, behind the existing 30 s cache. (The v0.362.1 display-space
+check below adds **1.38 ms** across the same 400 runs, measured the same way.) And a target with **no**
 stack runs is never asked at all (it cannot carry either marker), which a test pins by spying on
 `Project.iter_meta_prefix`.
 

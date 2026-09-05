@@ -608,8 +608,10 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
             proj = Project.open(lib.target_dir(t))
             target_runs = 0
             # Runs the app already shows edited, collected on the pass that is
-            # reading these rows anyway — no second listing, no JSON parse for a
-            # run that carries no options at all.
+            # reading these rows anyway — no second listing. It does parse each
+            # run's options: measured at 1.38 ms across 400 runs, against 11.45 ms
+            # for the ``iter_stack_runs`` walk being paid on the same target, and
+            # behind the 30 s cache below.
             shown_edited: set[int] = set()
             for run in proj.iter_stack_runs():
                 target_runs += 1
