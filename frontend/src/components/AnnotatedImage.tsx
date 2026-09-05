@@ -251,15 +251,25 @@ export function croppedAnnotationView(
 }
 
 /**
- * The pins for a stored preview a past "Adjust → North up → Save" turned, on the
- * grid those bytes are actually on — or `null` when there is no such answer.
+ * The pins, bar and rose for a stored preview a past "Adjust → North up → Save"
+ * turned, on the grid those bytes are actually on — or `null` when there is no
+ * such answer.
  *
  * A turn is the one geometry this side can't reconstruct: a rotate-with-expand's
  * canvas is a ceil/floor bounding box and a near-square angle snaps to a lossless
  * `rot90`, so re-deriving it here would be a second copy of the renderer's
  * geometry, free to drift from the picture and from the names baked into a share.
- * The server answers it instead (`preview_objects`, already carrying the crop),
- * and this just decides whether it did.
+ * The server answers it instead (`preview_objects` / `preview_scale_bar` /
+ * `preview_directions`, all already carrying the crop), and this just decides
+ * whether it did.
+ *
+ * The bar's `fraction` arrives re-based onto the grown canvas, so it draws the
+ * right piece of sky; its `moon_comparison` deliberately still answers for the
+ * **field** the telescope saw rather than for the black wedges the turn added
+ * (see the server's `_bar_on_turned_canvas`, where that choice is recorded), so a
+ * surface printing the sentence should say which of the two it means. A run whose
+ * WCS can't be read gets pins on the turned grid and `null` for both marks, which
+ * is the same "no sky coordinates" state an un-turned run of that kind is in.
  *
  * `null` — which is every ordinary run, every older backend, and any preview
  * whose geometry the server refused to reconcile — means the caller falls back to
@@ -272,19 +282,29 @@ export function turnedPreviewView(
         preview_objects?: FieldObject[] | null;
         preview_width?: number | null;
         preview_height?: number | null;
+        preview_scale_bar?: ScaleBar | null;
+        preview_directions?: SkyDirections | null;
       }
     | null
     | undefined,
-): { objects: FieldObject[]; scaleBar: ScaleBar | null; width: number; height: number } | null {
+): {
+  objects: FieldObject[];
+  scaleBar: ScaleBar | null;
+  directions: SkyDirections | null;
+  width: number;
+  height: number;
+} | null {
   const objects = annotations?.preview_objects;
   const width = annotations?.preview_width;
   const height = annotations?.preview_height;
   if (!objects || !width || !height || width <= 0 || height <= 0) return null;
-  // No bar: its length is measurable on a turned picture, but the sentence it
-  // carries ("the whole frame is about 5.4 full Moons wide") would then describe
-  // a frame that has grown black wedges around the same sky. `storedPreviewScaleBar`
-  // says nothing there for the same reason, and this agrees with it.
-  return { objects, scaleBar: null, width, height };
+  return {
+    objects,
+    scaleBar: annotations?.preview_scale_bar ?? null,
+    directions: annotations?.preview_directions ?? null,
+    width,
+    height,
+  };
 }
 
 /**
@@ -298,10 +318,15 @@ export function turnedPreviewView(
  * - a **crop** (the auto-edit's border trim) → the server's `preview_scale_bar`,
  *   measured on the visible rectangle. An older backend that doesn't send one
  *   gets *no* clause rather than the canvas-sized overstatement.
- * - a preview whose geometry can't be reconciled with the canvas, or one a past
- *   "North up → Save" turned (a rotate-with-expand grows the frame around the
- *   same sky) → nothing measured on the canvas describes those bytes, so say
- *   nothing. This is what the on-screen note already does for the same reasons.
+ * - a preview a past **"North up → Save"** turned → the same field, so the same
+ *   `preview_scale_bar`: a rotate-with-expand grows the frame around the sky
+ *   without capturing any more of it, and the server keeps that bar's sentence
+ *   answering for the field for exactly that reason. (Its `fraction` is re-based
+ *   onto the grown canvas, which is what the *drawn* bar needs and the caption
+ *   never reads.) An older backend sends none, and says nothing as before.
+ * - a preview whose geometry can't be reconciled with the canvas → nothing
+ *   measured on the canvas describes those bytes, so say nothing. This is what
+ *   the on-screen note already does for the same reason.
  * - anything else — every ordinary run — → the plain `scale_bar`, unchanged.
  */
 export function storedPreviewScaleBar(
@@ -316,8 +341,10 @@ export function storedPreviewScaleBar(
   },
 ): ScaleBar | null {
   if (!annotations) return null;
-  if (run.preview_geometry_unknown || run.preview_north_up_deg) return null;
-  if (run.preview_crop) return annotations.preview_scale_bar ?? null;
+  if (run.preview_geometry_unknown) return null;
+  if (run.preview_crop || run.preview_north_up_deg) {
+    return annotations.preview_scale_bar ?? null;
+  }
   return annotations.scale_bar ?? null;
 }
 
