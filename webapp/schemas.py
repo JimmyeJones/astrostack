@@ -382,6 +382,24 @@ class NightEarlyStopOut(BaseModel):
     n_nights_compared: int      # how many earlier nights the median was over
 
 
+class NightMoonOut(BaseModel):
+    """How much the Moon washed out one of a target's capture nights.
+
+    The same retrospective reading the "Last night" card already carries for the
+    *newest* session (``seestack.nightplan.session_moon``), attached to every row
+    of the Nights table so a beginner can see *which* of their ten nights the
+    Moon hurt rather than only the most recent one. ``text`` is a finished
+    sentence **only** on a ``poor`` night — bright, up and close — so the card can
+    mark that row and stay silent on the rest.
+    """
+
+    level: str                  # "good" | "ok" | "poor"
+    illumination: float         # illuminated fraction of the Moon's disk, 0..1
+    moon_altitude_deg: float    # < 0 = below the horizon, so it can't have hurt
+    separation_deg: float       # Moon-to-target angular distance
+    text: str | None = None     # the one plain-language sentence, "poor" only
+
+
 class NightSummaryOut(BaseModel):
     """One capture night in the per-target "Nights" breakdown."""
 
@@ -413,6 +431,12 @@ class NightSummaryOut(BaseModel):
     # other row, and an older frontend simply ignores it) — it is the Dashboard
     # "Last night" fact in the one place it survives past breakfast.
     ended_early: NightEarlyStopOut | None = None
+    # How bright and how close the Moon was while this night was being shot.
+    # Additive and optional: ``None`` when the site or the target's sky position
+    # isn't known (or the ephemeris wouldn't compute), and an older frontend
+    # simply ignores it. Never a reason to reject anything — moonlit subs are
+    # still real signal; this only explains a washed-out night.
+    moon: NightMoonOut | None = None
 
 
 class FocusTrendPointOut(BaseModel):

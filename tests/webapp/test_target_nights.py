@@ -412,3 +412,141 @@ def test_nights_early_stop_agrees_with_the_dashboard_last_night_card(
     assert card["safe"] == "M_42"
     for key in ("stopped_utc", "minutes_earlier", "n_nights_compared"):
         assert row[key] == card[key]
+
+
+# ---------------------------------------------------------------------------
+# "Which of my nights did the Moon wash out?" — the per-row Moon reading
+# ---------------------------------------------------------------------------
+
+_LONDON = {"site_lat": 51.5, "site_lon": -0.1}
+# A bright Moon close to M 42 (the same night the "Last night" card's Moon note
+# is pinned on), and a new-Moon night two weeks later that is below the horizon
+# at this hour besides.
+_MOON_HIT = "2026-01-02T22:0{}:00+00:00"
+_DARK_MOON = "2026-01-18T22:0{}:00+00:00"
+
+
+def _two_nights_one_moonlit(data_root) -> None:
+    _stamp(data_root, "M_42", {
+        0: {"timestamp_utc": _MOON_HIT.format(0)},
+        1: {"timestamp_utc": _MOON_HIT.format(6)},
+        2: {"timestamp_utc": _DARK_MOON.format(0)},
+    })
+
+
+def test_a_moonlit_night_is_marked_and_a_dark_one_is_not(
+    client, solved_library, data_root,
+):
+    """The whole point: with ten nights on one target, the beginner can see which
+    of them the Moon hurt — not only the most recent, which is all the "Last
+    night" card can ever speak for."""
+    client.put("/api/settings", json=_LONDON)
+    _two_nights_one_moonlit(data_root)
+
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert len(nights) == 2
+    dark, moonlit = nights[0], nights[1]        # newest first: 18 Jan, then 2 Jan
+    assert moonlit["start_utc"].startswith("2026-01-02")
+    assert moonlit["moon"]["level"] == "poor"
+    assert "Moon" in moonlit["moon"]["text"]
+    assert moonlit["moon"]["illumination"] > 0.65
+    # A dark-Moon night carries its numbers and says nothing — silence on a good
+    # night is the design, so this can never become a nag.
+    assert dark["start_utc"].startswith("2026-01-18")
+    assert dark["moon"]["level"] == "good"
+    assert dark["moon"]["text"] is None
+
+
+def test_the_row_matches_the_engine_verdict_for_the_same_sky(
+    client, solved_library, data_root,
+):
+    """The router must not re-derive the astronomy: every number on the row comes
+    from the same helper the "Last night" note is built from."""
+    from datetime import datetime
+
+    from seestack.nightplan import Observer, session_moon
+
+    client.put("/api/settings", json=_LONDON)
+    _two_nights_one_moonlit(data_root)
+
+    target = next(t for t in client.get("/api/targets").json()
+                  if t["safe_name"] == "M_42")
+    expected = session_moon(
+        Observer(lat_deg=51.5, lon_deg=-0.1),
+        target["ra_deg"], target["dec_deg"],
+        datetime.fromisoformat(_MOON_HIT.format(0)),
+        datetime.fromisoformat(_MOON_HIT.format(6)),
+    )
+    row = client.get("/api/targets/M_42/nights").json()[1]["moon"]
+    assert row["level"] == expected.level
+    assert row["text"] == expected.text
+    assert row["illumination"] == expected.illumination
+    assert row["moon_altitude_deg"] == expected.moon_altitude_deg
+    assert row["separation_deg"] == expected.separation_deg
+
+
+def test_the_whole_table_costs_one_ephemeris_pass(
+    client, solved_library, data_root, monkeypatch,
+):
+    """The cost note this was filed with: one ephemeris evaluation per row would
+    put ~25 ms × N on a card that renders on every Target page view. The batched
+    helper does the whole table in one pass, and this pins that it stays one."""
+    import seestack.nightplan as nightplan
+
+    calls: list[int] = []
+    real = nightplan._moon_geometry_many
+
+    def counting(observer, ra, dec, ats):  # noqa: ANN001, ANN202
+        calls.append(len(ats))
+        return real(observer, ra, dec, ats)
+
+    monkeypatch.setattr(nightplan, "_moon_geometry_many", counting)
+    client.put("/api/settings", json=_LONDON)
+    _two_nights_one_moonlit(data_root)
+
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert len(nights) == 2
+    assert calls == [2]
+
+
+def test_an_unknown_site_costs_the_marker_not_the_card(
+    client, solved_library, data_root, monkeypatch,
+):
+    """No configured location and nothing in the headers → the rows still render,
+    just without a Moon reading. It must read as "unknown", never as "fine"."""
+    import webapp.site_location as site_location
+
+    monkeypatch.setattr(site_location, "detect_site_from_library", lambda lib, **k: None)
+    _two_nights_one_moonlit(data_root)
+
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert len(nights) == 2
+    assert all(n["moon"] is None for n in nights)
+    assert sum(n["n_frames"] for n in nights) == 3      # the table itself is intact
+
+
+def test_an_unsolved_target_costs_the_marker_not_the_card(client, built_library):
+    """`built_library` is ingested but never plate-solved, so there is no position
+    to measure a separation from — and the Nights table still works."""
+    client.put("/api/settings", json=_LONDON)
+    nights = client.get("/api/targets/M_42/nights").json()
+    assert all(n["moon"] is None for n in nights)
+
+
+def test_an_ephemeris_failure_never_costs_the_table(
+    client, solved_library, data_root, monkeypatch,
+):
+    """An ephemeris hiccup must degrade to "nothing to say" rather than 500 the
+    card — the same contract the single-session note already holds to."""
+    import seestack.nightplan as nightplan
+
+    def boom(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+        raise RuntimeError("ephemeris unavailable")
+
+    monkeypatch.setattr(nightplan, "_moon_geometry_many", boom)
+    client.put("/api/settings", json=_LONDON)
+    _two_nights_one_moonlit(data_root)
+
+    r = client.get("/api/targets/M_42/nights")
+    assert r.status_code == 200
+    assert all(n["moon"] is None for n in r.json())

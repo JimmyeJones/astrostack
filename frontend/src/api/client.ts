@@ -701,6 +701,29 @@ export interface NightSummary {
   // Set on the newest row only, when that night stopped notably earlier than
   // this target's own recent nights. Optional: an older backend doesn't send it.
   ended_early?: NightEarlyStop | null;
+  // How bright and how close the Moon was while this night was shot. Optional:
+  // an older backend doesn't send it, and it is null when the site or the
+  // target's sky position isn't known.
+  moon?: NightMoon | null;
+}
+
+/** How much the Moon washed out one capture night — the retrospective reading
+ *  the "Last night" card carries for the newest session, given per night.
+ *
+ *  `text` is a finished sentence only on a `poor` night (a bright Moon, up and
+ *  close), which is the only case the Nights card marks; `good` and `ok` rows
+ *  carry the numbers and say nothing, so this can never become a nag. */
+export interface NightMoon {
+  /** "good" | "ok" | "poor". */
+  level: string;
+  /** Illuminated fraction of the Moon's disk, 0..1. */
+  illumination: number;
+  /** Moon altitude in degrees; below 0 it can't have affected the shot. */
+  moon_altitude_deg: number;
+  /** Moon-to-target angular distance, degrees. */
+  separation_deg: number;
+  /** The one plain-language sentence, on a "poor" night only. */
+  text?: string | null;
 }
 
 /** The Dashboard "Last night" early-stop measurement, as carried on a night row

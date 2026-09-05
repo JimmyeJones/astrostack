@@ -91,6 +91,27 @@ export function earlyStopTooltip(n: Pick<NightSummary, "ended_early">): string |
     + "Worth a look if you didn't stop on purpose.";
 }
 
+/** "A bright 96%-lit Moon was only ~21° from this target while you were
+ *  shooting…" — the tooltip behind a night's `bright Moon` marker, or null when
+ *  the Moon wasn't a problem that night (or wasn't computable).
+ *
+ *  The Dashboard's "Last night" card already says this, but only ever for the
+ *  *most recent* session: a beginner looking at ten nights of one target and
+ *  wondering which of them were any good gets no answer from it once a second
+ *  night has been shot. Here it is an annotation on the row for the night it
+ *  describes, so it stays a fact about that night rather than a nag.
+ *
+ *  Marked on `poor` nights only — bright, up and close — which is the one case
+ *  the server writes a sentence for (`session_moon`). A merely passable Moon
+ *  carries its numbers and says nothing, so a good night is never second-guessed;
+ *  and moonlit subs are still real signal, so this never rejects or filters
+ *  anything, it only explains a washed-out night. */
+export function moonTooltip(n: Pick<NightSummary, "moon">): string | null {
+  const m = n.moon;
+  if (!m || m.level !== "poor" || !m.text) return null;
+  return m.text;
+}
+
 /** Colour + label for a night's one-word verdict badge, or null (no badge) when
  *  there's too little measured to judge ("" verdict). Pure/testable. */
 export function verdictBadge(verdict: string): { color: string; label: string } | null {
@@ -118,6 +139,7 @@ function NightRow({
   const badge = verdictBadge(n.verdict);
   const tip = verdictTooltip(n);
   const earlyTip = earlyStopTooltip(n);
+  const moonTip = moonTooltip(n);
   const subs = n.n_set_aside > 0 ? `${n.n_kept}/${n.n_frames}` : String(n.n_frames);
   // Only offer "Set aside" when the night still has kept subs to drop and its
   // bounds are known (a night with no datable frames can't be targeted).
@@ -139,6 +161,18 @@ function NightRow({
               <Badge size="xs" variant="light" color="orange"
                 aria-label={`ended early: ${earlyTip}`}>
                 ended early
+              </Badge>
+            </Tooltip>
+          ) : null}
+          {moonTip ? (
+            // Same idiom as the two markers above: a dimmed word on the row it
+            // describes, with the sentence in the tooltip (and in `aria-label`,
+            // so it is reachable without a pointer). Ten rows of prose would be a
+            // wall on the page the owner already calls busy.
+            <Tooltip label={moonTip} multiline w={280}>
+              <Badge size="xs" variant="light" color="gray"
+                aria-label={`bright Moon: ${moonTip}`}>
+                bright Moon
               </Badge>
             </Tooltip>
           ) : null}

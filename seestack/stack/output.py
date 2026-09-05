@@ -386,6 +386,30 @@ def _write_frame_coverage_fits(path: Path, frame_coverage: np.ndarray) -> None:
 
 # ---- TIFF + preview ------------------------------------------------------
 
+def pack_unit(arr: np.ndarray, dtype: type = np.uint8) -> np.ndarray:
+    """A ``[0, 1]`` image packed into ``uint8``/``uint16``, **rounded** not truncated.
+
+    The one spelling of "float to integer" for every file this module writes, so
+    the six export paths can't disagree about it again.
+
+    ``(x * MAX).astype(uintN)`` — what all six used to do — truncates toward
+    zero, so every exported pixel came out biased **downward** by up to a full
+    step and by ~½ a step on average: a systematic darkening of every PNG, JPEG
+    and TIFF the app has ever written, and, on the 8-bit share/print path, ~0.2 %
+    of full scale rather than a rounding error. Worst on the "full data" 16-bit
+    linear TIFF, whose own description sells it as reversible
+    (``float = black + dn/65535·(white−black)``): truncation makes the recovered
+    float systematically low by up to a whole DN where rounding is honest to
+    ±½ DN. ``np.rint`` is what the alpha channel in ``render/thumbnail.py``
+    already does, so this makes the outlier the rule rather than inventing one.
+
+    The caller is responsible for clipping to ``[0, 1]`` (all six already do);
+    ``rint(1.0 * MAX) == MAX`` exactly, so there is no overflow to guard.
+    """
+    info = np.iinfo(dtype)
+    return np.rint(arr * float(info.max)).astype(dtype)
+
+
 def _write_tiff(path: Path, rgb: np.ndarray, *, mode: str = "linear",
                 already_display: bool = False) -> None:
     """16-bit RGB TIFF in either linear or autostretched form.
@@ -397,7 +421,7 @@ def _write_tiff(path: Path, rgb: np.ndarray, *, mode: str = "linear",
 
     description: str | None = None
     if already_display:
-        u16 = (np.clip(np.nan_to_num(rgb, nan=0.0), 0.0, 1.0) * 65535.0).astype(np.uint16)
+        u16 = pack_unit(np.clip(np.nan_to_num(rgb, nan=0.0), 0.0, 1.0), np.uint16)
     elif mode == "linear":
         u16 = _to_uint16_linear(rgb)
         # Write down the affine mapping, so the file is reversible: a reader can
@@ -410,7 +434,7 @@ def _write_tiff(path: Path, rgb: np.ndarray, *, mode: str = "linear",
         )
     elif mode == "autostretch":
         stretched = _autostretch_for_export(rgb)
-        u16 = (np.clip(stretched, 0.0, 1.0) * 65535.0).astype(np.uint16)
+        u16 = pack_unit(np.clip(stretched, 0.0, 1.0), np.uint16)
     else:
         raise ValueError(f"unknown tiff mode: {mode!r}")
     tifffile.imwrite(path, u16, photometric="rgb", compression="zlib",
@@ -425,7 +449,7 @@ def _write_preview_png(path: Path, rgb: np.ndarray, *, max_width: int = 1024,
 
     stretched = np.nan_to_num(rgb, nan=0.0) if already_display else _autostretch_for_export(rgb)
     h, w = stretched.shape[:2]
-    u8 = (np.clip(stretched, 0.0, 1.0) * 255).astype(np.uint8)
+    u8 = pack_unit(np.clip(stretched, 0.0, 1.0))
     if w > max_width:
         new_w = max_width
         new_h = int(round(h * (new_w / w)))
@@ -443,7 +467,7 @@ def write_full_res_png(path: Path, rgb: np.ndarray) -> Path:
     from PIL import Image
 
     arr = np.nan_to_num(np.asarray(rgb, dtype=np.float32), nan=0.0)
-    u8 = (np.clip(arr, 0.0, 1.0) * 255.0).astype(np.uint8)
+    u8 = pack_unit(np.clip(arr, 0.0, 1.0))
     if u8.ndim == 2:
         u8 = np.stack([u8, u8, u8], axis=-1)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -522,7 +546,7 @@ def write_share_jpeg(path: Path, rgb: np.ndarray, *, max_long_edge: int = 2048,
     from PIL import Image
 
     arr = np.nan_to_num(np.asarray(rgb, dtype=np.float32), nan=0.0)
-    u8 = (np.clip(arr, 0.0, 1.0) * 255.0).astype(np.uint8)
+    u8 = pack_unit(np.clip(arr, 0.0, 1.0))
     if u8.ndim == 2:
         u8 = np.stack([u8, u8, u8], axis=-1)
     img = Image.fromarray(u8, mode="RGB")
@@ -651,7 +675,7 @@ def _to_uint16_linear(rgb: np.ndarray) -> np.ndarray:
     lo, hi = linear_scale_anchors(arr)
     norm = (arr - lo) / (hi - lo)
     norm = np.where(finite, np.clip(norm, 0.0, 1.0), 0.0)
-    return (norm * 65535.0).astype(np.uint16)
+    return pack_unit(norm, np.uint16)
 
 
 def linear_scale_anchors(rgb: np.ndarray) -> tuple[float, float]:
