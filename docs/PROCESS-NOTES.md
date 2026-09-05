@@ -18,6 +18,44 @@ is a queue.
 
 ---
 
+## DOGFOOD BASELINE — running-app probe at v0.352.1 (Builder 2026-09-05)
+
+`scripts/agent-dogfood.sh` on a scratch data root with the bundled sample loaded
+and stacked, Playwright full-page at 1440 px and 420 px plus the overflow probe.
+**Nothing overflowing, no console errors.** Tallest pages, full-page scroll
+height:
+
+| page | phone (420) | desktop (1440) |
+|---|---|---|
+| `/targets/<T>` | **3,014 px** | 2,010 px |
+| `/life-list` | 3,008 px | 1,453 px |
+| `/targets/<T>/edit/1` | 2,815 px | 1,841 px |
+| `/` | 1,785 px | — |
+| `/targets/<T>/stack` | 1,748 px | — |
+
+**The IA number has now been stable across three measurements and ~14 versions.**
+The v0.338.1 probe recorded in `AGENTS.md` §1 put the tallest page — the Target
+page — at **3,014 px on a phone**, and this run measures **3,014 px**, exactly.
+That is a third independent reading agreeing with the standing advice in that
+banner: **do not open a speculative IA slice.** (The +26 px the second run of the
+day shows is the v0.352.2 panel-count line this run deliberately added, not
+drift.)
+
+**What the pass found**, both filed and shipped rather than left here: the
+"coverage vs panel count" lead closed by measurement (the sample derives a
+40′ × 26.7′ field from its own `pixscale_arcsec`, so 15 % coverage ↔ 3×3 = 9
+panels, which agree — the lead was written against the pre-v0.352.0 S50 count),
+and the real bug behind the screenshot, that the panel count had nowhere left to
+appear once the measured verdict suppressed the predicted line (v0.352.2). Full
+write-ups in `IMPROVEMENTS.md` → "Bugs (fix these first)".
+
+**Worth knowing for the next dogfood run:** the sample's frames *do* carry
+`pixscale_arcsec` (5.0 on 480 × 320), so the derived-field path is exercised by
+the sample, not only by a real library. A framing/mosaic number read off the
+sample is therefore trustworthy — which is why the pre-v0.352.0 2×2 stood out.
+
+---
+
 ## Released "In progress" claims and collision diaries (moved 2026-09-04)
 
 *Moved wholesale out of `IMPROVEMENTS.md` → "In progress", which had grown to 420
