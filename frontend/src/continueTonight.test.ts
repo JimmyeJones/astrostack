@@ -139,4 +139,39 @@ describe("pickContinueTonight", () => {
     expect(out.runnersUp).toHaveLength(2);
     expect(out.runnersUp.map((r) => r.target.target_safe)).toEqual(["b", "c"]);
   });
+  it("skips a target the adjacent 'Point here right now' card already named", () => {
+    // Both Dashboard cards rank the same owned library by different rules, so
+    // they routinely landed on the same target and it was printed twice, one
+    // card apart. Excluding it moves this card down to the next-best target
+    // rather than blanking it out.
+    const p = plan([
+      target({ name: "A", target_safe: "a", total_exposure_s: 4 * 3600 }),
+      target({ name: "B", target_safe: "b", total_exposure_s: 3 * 3600 }),
+    ]);
+    expect(pickContinueTonight(p)!.pick.target.target_safe).toBe("a");
+    const out = pickContinueTonight(p, undefined, 2, ["a"])!;
+    expect(out.pick.target.target_safe).toBe("b");
+    expect(out.runnersUp).toHaveLength(0);
+  });
+
+  it("returns null when every improvable target is already recommended", () => {
+    // One started target, already named by the sibling card: say nothing rather
+    // than repeat it. The Dashboard is simply one card shorter.
+    const p = plan([target({ name: "A", target_safe: "a", total_exposure_s: 4 * 3600 })]);
+    expect(pickContinueTonight(p, undefined, 2, ["a"])).toBeNull();
+  });
+
+  it("is unchanged when nothing has been recommended yet", () => {
+    // The older-backend / still-loading path: no exclusions must reproduce the
+    // pre-existing pick exactly, for undefined, null and an empty list alike.
+    const p = plan([
+      target({ name: "A", target_safe: "a", total_exposure_s: 4 * 3600 }),
+      target({ name: "B", target_safe: "b", total_exposure_s: 3 * 3600 }),
+    ]);
+    for (const shown of [undefined, null, []]) {
+      const out = pickContinueTonight(p, undefined, 2, shown)!;
+      expect(out.pick.target.target_safe).toBe("a");
+      expect(out.runnersUp.map((r) => r.target.target_safe)).toEqual(["b"]);
+    }
+  });
 });

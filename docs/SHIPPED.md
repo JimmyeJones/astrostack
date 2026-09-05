@@ -14,6 +14,123 @@ Newest first.
 
 ---
 
+## v0.355.1 — 2026-09-05 — Two Dashboard cards stopped recommending the same target twice
+
+**Closed as built-differently + a verified duplication fixed.** The filed idea below ("Finish what you
+started") asked for a Dashboard card that ranks the targets you have already started by marginal payoff.
+Both halves of the reshape it ended on had already been sized and declined with measurements (its own
+2026-08-29 note: the marginal-gain sort is `total_exposure_s` in a physics costume, and the per-row gain
+line would be a third, weaker derivation of a claim `grainProjection.ts` already makes from *measured*
+grain). Re-checking it at v0.355.0 turned up the reason it should be closed outright rather than left
+open: **the capability it asks for already shipped**, as `GET /api/plan/best-tonight`
+(`seestack.nightplan.rank_targets_now`, scoring `_sky_component × _depth_component` where the depth term
+*is* `noise_gain_from_more_time`) rendered by `components/dashboard/PointHereTonightCard.tsx`. That card
+ranks the owned library by exactly "how much would another hour help", and says it in words
+(`_depth_sentence`: *"another hour would cut its noise about 33%"*).
+
+**What that re-check did find, and what shipped.** `PointHereTonightCard` and `ContinueTonightCard` sit
+directly above one another on the Dashboard (`routes/Dashboard.tsx:390-391`), share a teal
+`IconTelescope`, and rank **the same owned library** by two different rules — best-placed-now × marginal
+gain, versus closest-to-its-goal. On a beginner's library (the §1 owner has a handful of targets going)
+they routinely land on the *same* target, so the Dashboard printed one recommendation twice, one card
+apart, under two headings, in two voices. That is the "a beginner reading two of them shouldn't have to
+reconcile them" problem the *"say it in one voice"* idea names, and it is the owner's standing "extremely
+busy UI" complaint compounding by accretion.
+
+`pickContinueTonight` gained a fourth argument, `alreadyRecommended` (an optional iterable of target
+`safe` names), filtered out alongside the existing `already_targeted && score > 0` gate.
+`ContinueTonightCard` fills it from the sibling's own `/best-tonight` answer, read through the **same**
+`BEST_TONIGHT_QUERY_KEY` / `MAX_SHOWN` / `REFRESH_MS` constants now exported from
+`PointHereTonightCard` — so it is a TanStack cache hit and costs no extra request, and "what that card
+showed" cannot drift from "what this card excludes". The exclusion moves the pick **down to the
+next-best started target** rather than blanking the card, so a beginner with several targets now gets a
+second, genuinely different suggestion; with only one, the card hides and the Dashboard is one card
+shorter. Nothing was removed: both cards, and every line on them, still exist.
+
+**Degrades to today's behaviour exactly** where it must: `retry: false` on the sibling query, so an older
+backend that 404s `/best-tonight` leaves nothing to exclude; `undefined` / `null` / `[]` all reproduce the
+pre-existing pick bit-for-bit (pinned by a test that asserts all three); and the card holds off while the
+answer is in flight rather than rendering a pick it may swap a moment later.
+
+**Upgrade-safe (§9):** frontend-only. No config, DB, on-disk, API-shape or default change — no backend
+file was touched. **Tests (+6, all fail-before):** `continueTonight.test.ts` (skips a named target and
+moves down; returns null when the only improvable target is already named; unchanged for
+undefined/null/empty) and `ContinueTonightCard.test.tsx` (the duplicate is not printed and the runner-up
+is promoted; self-hides when the only started target is already recommended above; still recommends when
+the backend 404s the sibling endpoint).
+
+Original entry, for the record:
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-26 #6) — "Finish what you started": a Dashboard nudge that ranks the
+  targets you *already have data on* by how much one more clear night would improve them, so the beginner's
+  scarce clear-sky time goes to the picture that will gain the most rather than to yet another new object.**
+  *(Pillar: autonomy + friendliness + planning — PRIORITY 2–3. Size: M.)* The existing "Tonight" planner ranks
+  what to shoot by sky position / difficulty; nothing ranks the targets you've *started* by marginal payoff.
+  A beginner with six half-done targets has no idea which one is closest to "great" — they just shoot whatever's
+  up. The signal is already computed per target: the √N noise-vs-integration curve (the "Is it enough yet?" goal
+  card and the `integrationTrend` verdict both use it), so "another hour cuts this target's noise ~N%" exists;
+  this feature simply *sorts targets by that number* and shows the top few as a "one more night here pays off
+  most" card — each row: target thumbnail, current integration, and the plain-language gain (**"~2 h more →
+  about 30% less noise"**, using the same wording the goal card already produces). **Sane default:** show the
+  3–4 targets on the *steep* part of their curve (biggest gain per hour) and hide targets already near their
+  goal (diminishing returns) — so it never nags you to over-shoot something that's already done. **Trust:** it's
+  a suggestion, not an auto-action; clicking a row opens the target. **Feasibility:** read-only roll-up over the
+  library's project DBs (the Dashboard already does several such roll-ups and caches them on `app.state`); no
+  new engine work, no networked dependency. **Grep before building:** confirm the noise-gain phrasing helper
+  (search `integrationTrend` / "less noise" / the goal-card copy) so this reuses the one source of truth rather
+  than re-deriving the curve — and that no existing Dashboard card already ranks targets this way.
+  **Builder 2026-08-27 — did that grep, and the answer is "mostly yes, one already does". Reshape this before
+  building it.** `ContinueTonightCard` (`continueTonight.ts` → `pickContinueTonight`) already ranks the
+  targets you have started, already drops the ones with "plenty" of integration so it never nags you to
+  over-shoot, already reads the goals from `/api/library-progress`, and already shows a pick plus two dimmed
+  runners-up you can click through to. `LibraryProgressCard` is the second Dashboard card over the same data.
+  So the *card* this entry describes largely exists; a third one ranking started targets would be exactly the
+  feature-piling the owner's "extremely busy" priority warns against. **What is genuinely missing is the
+  ranking key, not the card:** `pickContinueTonight` sorts by *closest to its goal* (highest readiness
+  fraction), which is not the same question as *where does one more hour buy the most noise reduction* — on a
+  target already at 80 % of goal the marginal gain can be small, and a target at 30 % on the steep part of its
+  √t curve would gain far more. **So the shippable slice is: give the existing card the marginal-gain sort**
+  (or a "biggest gain per hour" line on each row, using the wording the goal card already produces), rather
+  than a new card. Note `integrationTrend` needs *per-target stack history* (two runs spanning a real
+  integration increase, with measured `noise_sigma`), which `/api/library-progress` does not carry — so either
+  extend that roll-up additively or fall back to the ideal √t projection from `total_exposure_s` + goal, which
+  needs no new data at all and is the honest thing to say for a target with only one stack.
+
+  **⚠️ Builder 2026-08-29 (branch `claude/compassionate-galileo-92mr4d`) — sized it, MEASURED the proposed sort,
+  and stood down. Do not build the reshaped slice above as written; the arithmetic makes it degenerate.**
+  Marginal noise gain from one more hour is `1 − √(t/(t+1))`, which is **strictly decreasing in `t`** — measured
+  across the range a Seestar owner actually sits in:
+
+  | integration so far | one more hour cuts noise |
+  |---|---|
+  | 0.5 h | 42.3 % |
+  | 1 h | 29.3 % |
+  | 2 h | 18.4 % |
+  | 4 h | 10.6 % |
+  | 8 h | 5.7 % |
+  | 16 h | 3.0 % |
+
+  So sorting by "biggest gain per hour" is **exactly** sorting by *least integration so far*, ascending — it is
+  `total_exposure_s` wearing a physics costume. On a card whose entire purpose is *finish what you started*, it
+  would recommend whichever target you have shot **least**, every single night, and never let anything reach its
+  goal. That is strictly worse than the readiness sort `pickContinueTonight` has today, which at least converges
+  on a finished picture. The premise — "a target at 30 % on the steep part of its √t curve would gain far more"
+  — is *true* and still doesn't make it the right recommendation: the beginner is not maximising instantaneous
+  dσ/dt, they are trying to finish a picture.
+  **The other half — a "~1 h more → about 11 % less noise" *line* on each row, keeping the sort** — was also
+  considered and declined, for two reasons worth recording: (1) the app already answers this **better** on the
+  Target page, from *measured* grain rather than an ideal curve (`components/target/grainProjection.ts`, with
+  `CLEAN_SIGMA`/`GRAINY_SIGMA` anchored to the owner's own real stacks), and `/tonight`'s `PlannedTarget` carries
+  `total_exposure_s` but **no `noise_sigma`**, so a line here could only be the *weaker* ideal-curve version of a
+  claim made properly elsewhere — a third derivation of the same physics, which this entry itself warns against;
+  and (2) it is one more always-on line on every row of a Dashboard card, against the owner's standing "the UI is
+  extremely busy" priority. **If the owner ever asks for this**, the shape that would actually earn its place is
+  putting the *measured* projection here — i.e. extending `/api/library-progress` (or the tonight rows) with each
+  target's newest `noise_sigma`, then reusing `grainProjection` verbatim. That is a real, if larger, item; the
+  ranking change is not.
+
+---
+
 ## v0.355.0 — 2026-09-05 — "Your mosaic, panel by panel": a map of where the mosaic is thin
 
 The mosaic depth-readiness *number* shipped earlier: the goal is scaled by panel count, so a 4-panel mosaic
