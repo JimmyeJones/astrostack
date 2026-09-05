@@ -20,7 +20,12 @@ from __future__ import annotations
 import numpy as np
 import tifffile
 
-from seestack.stack.output import _to_uint16_linear, _write_tiff, linear_scale_anchors
+from seestack.stack.output import (
+    _to_uint16_linear,
+    _write_tiff,
+    linear_scale_anchors,
+    pack_unit,
+)
 
 
 def _seestar_like_stack(h: int = 180, w: int = 240) -> np.ndarray:
@@ -48,13 +53,21 @@ def test_the_brightest_pixels_are_not_flattened_into_white():
     rgb = _seestar_like_stack()
     u16 = _to_uint16_linear(rgb)
 
-    at_true_max = int((rgb >= rgb.max()).sum())
+    # The packing *rounds* (it used to truncate, biasing every pixel down by up
+    # to a whole DN), so the honest invariant is that only pixels within half a
+    # step of the data's own maximum may land on full scale — which is what
+    # correct rounding means, and is still not clipping. Stated as an exact
+    # equality, not a tolerance: it is a stronger claim than the pre-rounding
+    # `>= rgb.max()` one, since a truncating packer would put *fewer* pixels
+    # there than this and a clipping one far more.
+    lo, hi = linear_scale_anchors(rgb)
+    half_step = (hi - lo) / 65535.0 / 2.0
+    at_true_max = int((rgb >= rgb.max() - half_step).sum())
     at_full_scale = int((u16 == 65535).sum())
-    # The old percentile window put ~0.1% of the image (hundreds of pixels here)
-    # at full scale; only the genuine maximum may sit there now.
     assert at_full_scale == at_true_max, (
         f"{at_full_scale} pixels saturated in the TIFF but only {at_true_max} "
-        "are at the data's own maximum — the highlights are being clipped"
+        "are within half a step of the data's own maximum — the highlights are "
+        "being clipped"
     )
     assert at_full_scale < rgb.size * 0.001
 
@@ -78,11 +91,15 @@ def test_the_faint_end_is_not_piled_up_on_black():
     rgb = _seestar_like_stack()
     u16 = _to_uint16_linear(rgb)
 
-    at_true_min = int((rgb <= rgb.min()).sum())
+    # Same half-step reasoning as the highlight guard above, at the other end.
+    lo, hi = linear_scale_anchors(rgb)
+    half_step = (hi - lo) / 65535.0 / 2.0
+    at_true_min = int((rgb <= rgb.min() + half_step).sum())
     at_zero = int((u16 == 0).sum())
     assert at_zero == at_true_min, (
-        f"{at_zero} pixels are black in the TIFF but only {at_true_min} are at "
-        "the data's own minimum — the shadows are being clipped"
+        f"{at_zero} pixels are black in the TIFF but only {at_true_min} are "
+        "within half a step of the data's own minimum — the shadows are being "
+        "clipped"
     )
 
 
@@ -201,4 +218,7 @@ def test_an_editor_export_tiff_is_untouched(tmp_path):
     with tifffile.TiffFile(path) as tf:
         assert "black=" not in (tf.pages[0].description or "")
         data = tf.asarray()
-    assert np.array_equal(data, (rgb * 65535.0).astype(np.uint16))
+    # Verbatim means "no rescale and no stretch" — the packing itself rounds,
+    # like every other export, so the reference is `pack_unit` and not the
+    # truncating `(x * 65535).astype(...)` this used to spell by hand.
+    assert np.array_equal(data, pack_unit(rgb, np.uint16))

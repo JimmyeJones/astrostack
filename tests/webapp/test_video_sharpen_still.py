@@ -615,16 +615,24 @@ def test_a_still_the_stack_cropped_and_sharpened_can_have_its_sharpening_changed
     # Rebuilt from the soft original at the new strength, never compounded on
     # top of the picture that was there — which is the whole reason the stack
     # kept that original in the first place.
+    from seestack.stack.output import pack_unit
     from seestack.video.detail import sharpen_still
 
     out_dir = video.result_dir(settings, "Lunar_video")
     with Image.open(out_dir / video.FULL_PNG_NAME) as img:
-        kept = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
+        kept_u8 = np.asarray(img.convert("RGB"), dtype=np.uint8)
+    kept = kept_u8.astype(np.float32) / 255.0
+    # Compared against the *same* packing the writer uses (`pack_unit`, which
+    # rounds), and on the stored bytes rather than on a float round-trip of
+    # them — both sides used to hand-spell `(x * 255).astype(uint8)`, which
+    # truncates, so the claim only held while the writer truncated too and a
+    # value like 5.6 steps disagreed the moment it started rounding. This is a
+    # stricter statement, not a looser one: the file must equal the array it was
+    # written from, byte for byte, with no half-step of slack anywhere.
     assert np.array_equal(
-        (np.clip(kept, 0.0, 1.0) * 255.0).astype(np.uint8),
-        (np.clip(cropped_soft, 0.0, 1.0) * 255.0).astype(np.uint8),
+        kept_u8, pack_unit(np.clip(cropped_soft, 0.0, 1.0)),
     ), "the kept original is the cropped soft render"
-    expected = (np.clip(sharpen_still(kept, 1.8), 0.0, 1.0) * 255.0).astype(np.uint8)
+    expected = pack_unit(np.clip(sharpen_still(kept, 1.8), 0.0, 1.0))
     assert after.shape == before.shape == expected.shape
     assert np.array_equal(after, expected)
     assert _detail(after) > _detail(before)
