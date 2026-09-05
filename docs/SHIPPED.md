@@ -14,6 +14,40 @@ Newest first.
 
 ---
 
+## v0.356.1 — 2026-09-05 — The Stack form says it too: `pickedMasterContentWarnings` on the picked masters
+
+**The other half of v0.356.0, at the place the master is actually used.** v0.356.0 tells you what a master
+is made of on the Calibration page and on the finished build job. Neither is where the damage happens: the
+owner picks masters on the **Stack form**, often months after building them, and that form already checks
+whether a master *can* be applied (size, colour-filter phase, exposure, temperature) without ever asking
+the question underneath — is it made of the right kind of frame at all? A master dark built from a night's
+subs passes every one of those checks. It fits, it applies, and it subtracts a picture of the sky out of
+every frame of the stack.
+
+**What shipped.** One pure `pickedMasterContentWarnings` (`frontend/src/calibrationFit.ts`) over the four
+picked slots (dark, flat, flat-dark, bias), returning the **server's own** sentence
+(`calibration.header_kind_note`, already on each row of `/api/calibration/masters`) prefixed with the slot
+and the master's name. The Stack form renders them as **one** alert above the size/phase blockers, not
+four — and it goes first, because of the four kinds of wrong pick this form can catch, this is the one that
+silently ruins the picture rather than failing loudly. **Orange, not red**, and deliberately: red on this
+form means *"stacking with it will fail"*, and a stack with a mis-built master **succeeds** — which is the
+entire problem with it. Borrowing the blocker colour for a non-blocker would make both colours mean less.
+
+**Against the owner's standing "extremely busy UI" priority:** this is exactly the shape that entry asks
+for — *conditional on something rare*, not one more always-on block. It needs a master whose frames
+declared a kind **and** disagreed with the slot; a master whose frames never said, and every master built
+before v0.356.0, produce nothing at all. Pinned by a test that picks a confirmed-good master and asserts
+the form stays silent.
+
+**Upgrade-safe (§9):** frontend-only, additive, no API/schema/default change, no behaviour change — the
+stack still stacks with whatever is picked. Purely a sentence.
+
+**Tests (+6):** `calibrationFit.test.ts` (+4 — the slot/name prefixing, silence on confirmed/absent/older
+masters, no line from a warning with no message, an unnamed master), `Stack.test.tsx` (+2 — the warning
+appears only once the master is actually picked, and a confirmed-good master says nothing).
+
+---
+
 ## v0.356.0 — 2026-09-05 — A master says what its own frames claimed to be (`frame_kind_from_header` + `header_kind_note`)
 
 **Shipped: step (2) of the lead below, exactly as the lead ordered it — a read-only surface, and nothing

@@ -3,6 +3,7 @@ import {
   bayerConflicts, biasCanScaleDark, biasSizeWarning, darkScalingBlockedNote,
   exposureMismatch, flatBayerWarning, flatDarkSizeWarning, flatPickPatch,
   masterFitsFrames, masterOptionSuffix, masterRecommendation, masterSizeWarning,
+  pickedMasterContentWarnings,
   tempMismatch,
 } from "./calibrationFit";
 
@@ -369,5 +370,42 @@ describe("masterOptionSuffix — colour filter", () => {
       { width_px: 540, height_px: 960, bayer_pattern: "GRBG" },
       RGGB_SUBS, "flat",
     )).toBe(" — wrong size for this target");
+  });
+});
+
+describe("pickedMasterContentWarnings", () => {
+  const warn = (message: string) => ({ header_note: { severity: "warn", message } });
+
+  it("names the slot and the master for each disagreeing pick", () => {
+    expect(pickedMasterContentWarnings([
+      { slot: "dark", master: { name: "Dark 30s", ...warn("40 say they are light frames.") } },
+      { slot: "flat", master: { name: "Flat", ...warn("everything else.") } },
+    ])).toEqual([
+      'Master dark "Dark 30s": 40 say they are light frames.',
+      'Master flat "Flat": everything else.',
+    ]);
+  });
+
+  it("stays silent on a confirmed master, an unnamed kind, and a missing pick", () => {
+    // The overwhelmingly common case — the form must not grow a permanent
+    // fourth warning block.
+    expect(pickedMasterContentWarnings([
+      { slot: "dark", master: { name: "D", header_note: { severity: "ok", message: "All 40 say dark." } } },
+      { slot: "flat", master: { name: "F", header_note: null } },
+      { slot: "bias", master: { name: "B" } },          // built before the check existed
+      { slot: "flat-dark", master: null },              // nothing picked
+    ])).toEqual([]);
+  });
+
+  it("never invents a line out of a warning with no message", () => {
+    expect(pickedMasterContentWarnings([
+      { slot: "dark", master: { name: "D", header_note: { severity: "warn" } } },
+      { slot: "flat", master: { name: "F", header_note: { severity: "warn", message: "" } } },
+    ])).toEqual([]);
+  });
+
+  it("copes with a master that has no name", () => {
+    expect(pickedMasterContentWarnings([{ slot: "bias", master: warn("nope.") }]))
+      .toEqual(["Master bias: nope."]);
   });
 });
