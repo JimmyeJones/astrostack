@@ -23,6 +23,7 @@ from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
 from webapp import __version__ as APP_VERSION
 from webapp.config import Settings
 from webapp.jobs import Job, JobManager
+from webapp.preview_orient import baked_north_up_deg
 from webapp.schemas import (
     STACK_DEFAULTS_META_KEY,
     coerce_stack_options,
@@ -1520,6 +1521,61 @@ def render_run_recipe_fullres_png(
     return buf.getvalue()
 
 
+def render_run_full_res_png(
+    run, recipe_json: str | None, *,  # noqa: ANN001 — a StackRunRow, detached from the DB
+    north_up: bool = False, max_long_edge: int = 8000,
+) -> bytes:
+    """PNG bytes of **the run's current picture** at native resolution.
+
+    The one place that decides *which* full-resolution render a finished run
+    means — the saved editor recipe when its preview is a baked display-space
+    edit, otherwise the STF (or the asinh curve History's "Adjust" saved), plus
+    the North-up turn the stored preview already carries. Both callers go
+    through it: the per-run download button
+    (``…/stack-runs/{id}/full-res-png``) and the whole-library archive
+    (:func:`submit_pictures_archive`), so a picture in the zip cannot come out
+    looking different from the same picture downloaded on its own.
+
+    ``recipe_json`` is the run's saved editor recipe *when its preview is
+    display-space* — the caller reads it, because only the caller has the
+    project open. ``None`` (no recipe, or a corrupt one) renders the master.
+    Blocking: run it in a threadpool from async code.
+    """
+    recipe_dict = None
+    if recipe_json:
+        with contextlib.suppress(json.JSONDecodeError):
+            parsed = json.loads(recipe_json)
+            if isinstance(parsed, dict):
+                recipe_dict = parsed
+
+    # A run whose preview a past "Adjust → North up → Save" turned shows that
+    # turned picture *everywhere* — the thumbnail, the big view, the share JPEG,
+    # the wallpaper — because all of them serve the stored bytes. This render
+    # starts from the FITS instead, which is on the canvas grid, so without this
+    # it would hand back the same picture rotated back: a download that visibly
+    # disagrees with the picture it claims to be. The turn is applied whenever
+    # the stored bytes carry one, whether or not the caller asked for it — and
+    # asking for it as well is the same render, not a second rotation, because
+    # both mean "the run's own full North-up correction".
+    render_north_up = bool(north_up) or bool(baked_north_up_deg(run))
+
+    if recipe_dict is not None:
+        return render_run_recipe_fullres_png(
+            run.fits_path, recipe_dict,
+            max_long_edge=max_long_edge, north_up=render_north_up)
+    # A run the user tuned in History's "Adjust" has its stored preview baked
+    # through the *asinh* curve, not the STF — and the thumbnail, share-JPEG and
+    # wallpaper all serve those bytes. Carry the saved stretch/black into the
+    # full-res render so this download shows the same picture instead of
+    # silently reverting to the autostretch. An unadjusted run (columns NULL)
+    # keeps the STF exactly as before.
+    from seestack.render.thumbnail import render_preview_png_full_res
+
+    return render_preview_png_full_res(
+        run.fits_path, max_long_edge=max_long_edge, north_up=render_north_up,
+        stretch=run.preview_stretch, black=run.preview_black)
+
+
 def _apply_editor_to_run(lib: Library, safe: str, run_id: int,
                          recipe_dict: dict | None,
                          *, output_name: str | None, tiff_mode: str,
@@ -1649,6 +1705,49 @@ def submit_editor_export(settings: Settings, jm: JobManager, safe: str, run_id: 
             lib.close()
 
     return jm.submit("editor_export", body, target=safe)
+
+
+def submit_pictures_archive(settings: Settings, jm: JobManager) -> Job:
+    """Build one zip holding **every finished picture at full resolution**.
+
+    The bulk download that already exists streams each target's stored *preview*
+    (1024 px) — right for a phone album, not for printing. A target's
+    native-resolution picture has no file on disk, so the full-size answer has to
+    be rendered target by target, which is minutes of work on a real library:
+    hence a job, with progress and cancel, rather than a request that would time
+    out. The finished archive's path comes back in the job result; the download
+    endpoint hands it over.
+
+    Nothing the user owns is written: no new run, no new preview, no export
+    marker — just the archive, under ``<data_root>/exports/``, replacing the
+    previous one so a NAS never carries two.
+    """
+    def body(job: Job) -> dict[str, Any]:
+        from webapp import picturesarchive
+
+        picks = picturesarchive.plan_full_size_pictures(settings)
+        if not picks:
+            raise FileNotFoundError("no finished pictures to put in an archive")
+        report = picturesarchive.build_full_size_archive(
+            settings, picks,
+            progress=_progress(jm, job),
+            should_stop=job.cancel_requested,
+        )
+        if report.cancelled:
+            # The truthy-dict cancellation sentinel `JobManager` looks for, so a
+            # cancelled build isn't recorded as a finished one with no file.
+            return {"cancelled": True, "path": "", "n_pictures": 0}
+        return {
+            "path": report.path,
+            "filename": report.filename,
+            "n_pictures": report.n_pictures,
+            "n_full_res": report.n_full_res,
+            "n_preview_only": report.n_preview_only,
+            "size_bytes": report.size_bytes,
+            "skipped": report.skipped,
+        }
+
+    return jm.submit("pictures_archive", body)
 
 
 def submit_editor_png(settings: Settings, jm: JobManager, safe: str, run_id: int,

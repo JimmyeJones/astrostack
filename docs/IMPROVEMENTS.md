@@ -4398,46 +4398,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   same picture in all three. **Grep first:** `/api/imaging-log` and the Dashboard tiles make the same choice —
   check whether they take the third path too before deciding which is canonical.
 
-- **NEW IDEA (Builder 2026-08-27, the half deliberately left out of the v0.285.0 pictures zip) — let "Download
-  all my pictures" hand over the *edited, full-size* picture where one exists, not only the display preview.**
-  *(Pillar: get/share + trust, PRIORITY 3; size S–M; additive, read-only, opt-in by shape. Confidence: the gap
-  is certain; the right default is the open question.)*
-  v0.285.0 ships each target's **preview** — deliberately, because "what you download is what you saw" is the
-  honest default and it needs no re-render. But a beginner who spent an evening in the editor and exported a
-  full-res picture reasonably expects *that* file in their backup, and the app already knows where it is: the
-  editor's export path is recorded per run (the same marker `/api/gallery/unexported-edits` reads to tell a
-  target's saved edit from its exported one). A zip that silently holds only the small preview is the kind of
-  quiet shortfall that costs trust the first time someone tries to print from it.
-  **Shape.** Per target, prefer the run's **exported edit** if the file exists, else the TIFF/FITS if the user
-  asked for full-size, else the preview — surfaced as one plain-language choice next to the button (*"pictures
-  as shown"* vs *"full-size files"*), defaulting to the current behaviour so nothing changes for anyone who
-  doesn't ask. Keep the streaming shape exactly as it is (it is already size-blind), keep `_skipped.txt`, and
-  keep the `safe_name`-derived entry names. **Cautions:** full-size FITS of a big mosaic is hundreds of MB per
-  target, so the copy next to the option has to say roughly how big the download will be before someone taps it
-  on a phone; and the picker must never re-render or re-export anything — if there is no exported file, fall
-  back, don't build one.
-
-  **⚠️ Builder 2026-08-30 (branch `claude/compassionate-galileo-1bqxek`) — sized this against the real code,
-  shipped the honest half (**v0.308.1**) and left the rest, deliberately. Read this before picking it up.**
-  **What I fixed, because it was a plain untruth in shipped copy:** `MyDeepSkyWallCard` told the user
-  *"\"Download all\" gives you the **full-size pictures themselves** in a zip"*. It does not — `_library_pictures`
-  resolves `current_picture_path`, which is a *preview* path in all three of its steps, and `_write_preview_png`
-  caps a preview at **1024 px**. Someone backing up a season and later trying to print would find that out at the
-  worst possible moment. The line now says the pictures are "at the size you see it here — right for a phone
-  album, not for printing" and points at the per-picture **Full-res PNG** that genuinely is full size. A test
-  pins that the old phrase is gone and the new one, plus the pointer, is there.
-  **Why the feature half didn't ship with it — the spec's own "prefer the TIFF" is a trap.** A *stack's* TIFF is
-  written `tiff_mode="linear"` (`write_stack_outputs` → `_write_tiff`), i.e. **unstretched**, so it opens looking
-  black. Only an **editor export** writes a display-space TIFF (`already_display=True`). So "prefer the TIFF"
-  would hand a beginner a black file for every target they never opened in the editor — worse than the preview it
-  replaced, and precisely the trust cost this entry exists to avoid. The file that *is* the full-size picture for
-  an ordinary run is the **full-res PNG**, and that has no file on disk: `…/full-res-png` renders it per request
-  (no cache), which the entry's own caution rightly forbids inside a streaming picker.
-  **So the honest shape is a job, not a query parameter** — the same shape "Finish them all" already uses:
-  render each target's full-res PNG into a staged archive with progress, then hand over the finished file. That
-  is an **L**, not the S–M filed here, and it needs a decision about where the staging bytes live on a NAS with a
-  fixed disk allowance. Re-file it that way rather than bolting `?full=true` onto the streaming endpoint.
-
 - **✅ SHIPPED (Builder, v0.306.4, branch `claude/compassionate-galileo-aj7ysy`) — ~~`POST /api/scan` accepts a
   raw client-supplied filesystem `root` and scans/ingests from it unconfined, the one ingest endpoint that
   isn't confined to `incoming/`.~~** Confined, exactly as the fix direction's first option asked, with the
@@ -24733,6 +24693,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.357.0** — Get/share + trust, and the honest end of a limitation the app already admitted in its own copy: **"Full-size versions" — every finished picture at print size, in one archive.** `/api/gallery/pictures.zip` streams each target's stored *preview* (capped at 1024 px by `_write_preview_png`), which the card has said since v0.308.1 is *"right for a phone album, not for printing"* — leaving one route to a printable backup: open every target and press **Full-res PNG**. It cannot be a second query parameter, because a target's native-resolution picture has no file on disk (it is rendered from the master FITS plus the run's saved recipe), so `POST /api/gallery/pictures-archive` submits a **`pictures_archive` job** with progress and cancel and `GET …/pictures-archive/{job_id}` hands over what it built — the editor's own submit-poll-download shape. The *which render* decision moved into one shared `pipeline.render_run_full_res_png` used by both callers, so an archive member is byte-for-byte the PNG that run's own button serves (pinned by a test); member naming moved to `picturesarchive.unique_entry_name` for the same reason. A pruned master falls back to its preview and the archive **says so** in `_preview_size.txt`; an unreadable picture lands in `_skipped.txt`. One archive at a time in a new `<data_root>/exports/`, written `.part`-then-rename, cancel leaves nothing, peak memory one picture. Nothing the user owns is written — no run, no preview, nothing in `incoming/` (§10), pinned by a snapshot test. Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +11 `tests/webapp/test_pictures_archive.py`, +2 `MyDeepSkyWallCard.test.tsx`, +1 `Jobs.test.tsx`.
 - **v0.356.2** — Follow-through on v0.356.0, from driving `header_kind_note` adversarially rather than reading it: **the note stops relabelling the owner's own frames, and stops being able to 500 the Calibration page.** A folder of flat-darks in the dark slot is correct, but was confirmed as *"All 40 frames say they are dark frames"* — they said flat-dark; a tally whose kinds aren't exactly the slot's now echoes what they actually said, biggest group first, with the single-kind wording untouched. And the tally comes out of the registry's own JSON, which nothing validates on read: a hand-edited string or list raised `AttributeError` inside `list_masters` (the whole page, not one row), and an unrecognised key was echoed verbatim as *"3 say they are xyz frames"*. Both now degrade to silence, the same answer the function already gives for "no frame said". Neither was reachable from the app's own writes — the function was correct for its producer and brittle for its store. Tests: +3 `tests/webapp/test_calibration.py`.
 - **v0.356.1** — Autonomy + image quality, the other half of v0.356.0: **the Stack form says it too, where the master is actually used.** The form already checks whether a master *can* be applied (size, colour phase, exposure, temperature) but never asked what it is made of — and a master dark built from a night's subs passes all four, then subtracts a picture of the sky out of every frame. One pure `pickedMasterContentWarnings` over the four picked slots renders the server's own `header_kind_note` sentence as **one** orange alert (red on this form means "stacking will fail", and this stack succeeds — which is the problem) above the size/phase blockers (not four), first, because it is the only one of them that ruins the picture silently instead of failing loudly. Conditional on something rare — a master whose frames declared a kind *and* disagreed — so a confirmed-good master, and every master built before v0.356.0, add nothing to the form; pinned by its own test. Frontend-only, no API/schema/default change. Tests: +4 `calibrationFit.test.ts`, +2 `Stack.test.tsx`.
 - **v0.356.0** — Autonomy + image quality: **a master calibration frame now says what its own frames claimed to be.** The Calibration build form takes a folder path in a text box and a kind from a dropdown, and nothing checked the two agree — point it at a night's subs with "Dark" selected and the app built a "master dark" out of light frames, registered it as a success, and every stack it touched then had a picture of the sky subtracted out. New `seestack.io.fits_loader.frame_kind_from_header` reads the standard `IMAGETYP` card **one-sidedly** (an exact table, never a substring test — `'Dark Flat'` contains both needles and gets its own `dark_flat` answer; anything unrecognised or missing is `None` = *"this frame didn't say"*). `MasterMeta.header_kinds` tallies it over the frames that actually reached the combine, and one pure `calibration.header_kind_note` turns that into one sentence used by **both** the finished build job and the Calibration master list, so the two can't drift: *"All 40 frames say they are dark frames."* or *"…40 say they are light frames (your subs). This is not a dark master — delete it and point the build at a folder of dark frames."* Self-hiding when no frame carried a card we recognise, which covers a camera that doesn't write one **and** every master built before this version. Read-only: nothing gates a build, filters a folder, or classifies anything at ingest — that was step (3) of the lead and stays undone. Ships step (2) of the `IMAGETYP` lead; full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +3 `tests/test_fits_loader.py`, +4 `tests/test_calibrate.py`, +9 `tests/webapp/test_calibration.py`, +4 `Jobs.test.tsx`, +2 `Calibration.test.tsx`.

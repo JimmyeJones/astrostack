@@ -1,7 +1,11 @@
 import { Button, Card, Group, Stack, Text } from "@mantine/core";
-import { IconDownload, IconFileZip, IconLayoutGrid } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { notifications } from "@mantine/notifications";
+import { IconDownload, IconFileZip, IconLayoutGrid, IconPhotoDown } from "@tabler/icons-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import { pngProgressLabel } from "./editor/pngProgress";
+import { isJobPollAbort, pollJobUntilDone } from "./editor/pollJob";
 
 /** How many pictures the wall holds. Matches the backend's default cap — past
  * roughly nine, each picture is too small to enjoy at social-media sizes, and
@@ -33,6 +37,48 @@ export function MyDeepSkyWallCard() {
   const { data } = useQuery({
     queryKey: ["library-summary"], queryFn: api.getLibrarySummary,
     staleTime: 60_000,
+  });
+
+  // "Full-size pictures": the same pictures rendered at native resolution. It
+  // cannot be a plain download link like the two above — nothing on disk holds a
+  // target's full-size picture — so it starts a job, reports where it has got
+  // to, and sends the browser to the finished file. Same shape as the editor's
+  // full-res PNG button, which is the render this repeats per target.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const [fullProgress, setFullProgress] = useState<string | null>(null);
+  const buildFullSize = useMutation({
+    mutationFn: async () => {
+      setFullProgress("Preparing…");
+      const { job_id } = await api.startPicturesArchive();
+      const job = await pollJobUntilDone(job_id, {
+        getJob: api.getJob,
+        isAbandoned: () => !mounted.current,
+        failureMessage: "Preparing your pictures failed",
+        onProgress: (j) => setFullProgress(pngProgressLabel(j)),
+      });
+      return { jobId: job_id, n: Number(job.result?.n_pictures) || 0 };
+    },
+    onSuccess: ({ jobId, n }) => {
+      const a = document.createElement("a");
+      a.href = api.galleryPicturesArchiveUrl(jobId);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      notifications.show({
+        message: n > 0
+          ? `${n} full-size pictures ready — your download is starting.`
+          : "Your pictures are ready — the download is starting.",
+        color: "teal",
+      });
+    },
+    onError: (e: Error) => {
+      if (!isJobPollAbort(e)) notifications.show({ message: e.message, color: "red" });
+    },
+    onSettled: () => setFullProgress(null),
   });
 
   const heroes = data?.heroes ?? [];
@@ -80,6 +126,16 @@ export function MyDeepSkyWallCard() {
             component="a" href={api.galleryPicturesZipUrl()} download>
             {`Download all ${total} pictures`}
           </Button>
+          {/* The printable answer, next to the phone-album one. Separate rather
+              than a size dropdown on the button above: this one takes minutes
+              (every picture is re-rendered), and a download that silently
+              becomes a wait is the surprise worth avoiding. */}
+          <Button size="xs" variant="light" color="teal"
+            leftSection={<IconPhotoDown size={14} />}
+            loading={buildFullSize.isPending}
+            onClick={() => buildFullSize.mutate()}>
+            {fullProgress ?? "Full-size versions"}
+          </Button>
         </Group>
         <Text size="xs" c="dimmed">
           {canWall
@@ -97,8 +153,9 @@ export function MyDeepSkyWallCard() {
               their season up and later tries to print from it would find that
               out at the worst possible moment. */}
           Each one is the picture at the size you see it here — right for a phone
-          album, not for printing. To print one, open it and choose
-          "Full-res PNG".
+          album, not for printing. For printing, "Full-size versions" makes the
+          same pictures again at their true size; it takes a few minutes, because
+          each one is rendered fresh.
         </Text>
       </Stack>
     </Card>

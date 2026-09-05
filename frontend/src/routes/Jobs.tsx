@@ -49,6 +49,7 @@ const KIND_LABEL: Record<string, string> = {
   channel_combine: "Channel combine",
   video_stack: "Stacking Moon/Sun video",
   video_grade: "Checking Moon/Sun video",
+  pictures_archive: "Preparing your full-size pictures",
 };
 
 /** Human-readable name for an engine job kind (pure, tested). */
@@ -1000,6 +1001,17 @@ function JobResultActions({ job }: { job: Job }) {
       <Button size="xs" variant="light" leftSection={<IconDownload size={14} />}
         component="a" href={api.editPngUrl(String(r.safe), Number(r.run_id), job.id)}>
         Download PNG
+      </Button>
+    );
+  } else if (job.kind === "pictures_archive" && r.path) {
+    // The archive outlives the page that started it, so someone who navigated
+    // away (or closed the tab mid-build) can still collect it from here rather
+    // than paying for the whole render again.
+    const n = Number(r.n_pictures) || 0;
+    action = (
+      <Button size="xs" variant="light" leftSection={<IconDownload size={14} />}
+        component="a" href={api.galleryPicturesArchiveUrl(job.id)}>
+        {n > 0 ? `Download ${n} full-size pictures` : "Download pictures"}
       </Button>
     );
   } else if (job.kind === "editor_export" && r.safe) {

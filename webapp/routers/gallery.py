@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from seestack.edit.proxy import rejection_map_path_for
 from seestack.stack.output import save_display_jpeg
 from seestack.stackhealth import seam_verdict
-from webapp import deps
+from webapp import deps, picturesarchive
 from webapp.capture_nights import capture_night_count, capture_night_range
 from webapp.run_options import parse_run_options, run_has_reusable_options
 from webapp.site_location import resolve_site_lon
@@ -879,37 +879,11 @@ class _ZipStreamBuffer(io.RawIOBase):
         return chunk
 
 
-def _unique_entry_name(stem: str, suffix: str, used: dict[str, int]) -> str:
-    """``"<stem><suffix>"``, with a ``-2``/``-3`` suffix when that name is taken.
-
-    ``used`` is the caller's running tally, keyed case-insensitively so the
-    archive stays unambiguous on a case-insensitive filesystem (a Mac or Windows
-    unzip would otherwise silently overwrite one member with the other).
-
-    The **generated** ``-N`` name is reserved in ``used`` too, not just the base
-    name: without that, a later real stem that happens to equal an earlier
-    generated name (e.g. a ``pic-2`` target after two ``pic`` collisions, or a
-    third source that sanitises onto a suffixed same-day still) would be treated
-    as fresh and emitted unchanged, colliding with the earlier generated member —
-    and ``zipfile`` accepts the duplicate (a ``UserWarning``) while every unzip
-    tool silently overwrites, dropping a picture from a "download all" backup. So
-    we advance past any generated name that is itself already taken.
-    """
-    name = f"{stem}{suffix}"
-    seen = used.get(name.lower())
-    if not seen:
-        used[name.lower()] = 1
-        return name
-    # Name taken: find the next `-N` form that is itself free, then reserve it so
-    # a future real stem equal to it collides rather than duplicating.
-    n = seen + 1
-    candidate = f"{stem}-{n}{suffix}"
-    while candidate.lower() in used:
-        n += 1
-        candidate = f"{stem}-{n}{suffix}"
-    used[name.lower()] = n
-    used[candidate.lower()] = 1
-    return candidate
+# Member naming lives in `webapp.picturesarchive` so both downloads that call
+# themselves "all my pictures" — this streaming one and the full-size archive —
+# name their members by exactly one rule. Re-exported under the old private name
+# because that is what this module's callers (and its tests) already say.
+_unique_entry_name = picturesarchive.unique_entry_name
 
 
 def _video_still_pictures(
@@ -1074,3 +1048,60 @@ def download_all_pictures(request: Request):
             "Content-Disposition": 'attachment; filename="my-astrostack-pictures.zip"',
         },
     )
+
+
+@router.post("/api/gallery/pictures-archive")
+def start_pictures_archive(request: Request) -> dict:
+    """Start building the **full-size** version of "all my pictures".
+
+    The zip above is the picture at the size the app shows it (a stored preview,
+    capped at 1024 px) — right for a phone album, wrong for printing. This builds
+    the archive at *native* resolution instead, rendering each target's picture
+    the same way its own "Full-res PNG" button does.
+
+    It has to be a job rather than a second streaming response: a target's
+    full-resolution picture has no file on disk (it is rendered on demand from
+    the master FITS and the run's saved recipe), so a real library is minutes of
+    rendering — long past any browser's patience for a download that hasn't
+    started. Poll the job, then GET ``…/pictures-archive/{job_id}``.
+
+    A build already in flight is returned rather than queued a second time: the
+    worker is single-threaded, so two presses would otherwise mean waiting twice
+    for one file.
+    """
+    from webapp import pipeline
+
+    settings = deps.get_settings(request)
+    jm = deps.get_job_manager(request)
+    active = jm.active_of_kind("pictures_archive")
+    if active is not None:
+        return {"job_id": active.id, "already_running": True}
+    job = pipeline.submit_pictures_archive(settings, jm)
+    return {"job_id": job.id, "already_running": False}
+
+
+@router.get("/api/gallery/pictures-archive/{job_id}")
+def download_pictures_archive(job_id: str, request: Request):
+    """Hand over the archive a finished ``pictures_archive`` job built.
+
+    Mirrors the editor's render-then-download pattern: the path comes from the
+    job's own result, never from the client, so nothing here can be pointed at
+    an arbitrary file.
+    """
+    from fastapi.responses import FileResponse
+
+    jm = deps.get_job_manager(request)
+    job = jm.get(job_id)
+    if job is None or job.kind != "pictures_archive":
+        raise HTTPException(status_code=404, detail="No such job")
+    if job.state != "done" or not job.result:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Your pictures aren't ready yet (job {job.state})")
+    path = job.result.get("path")
+    if not path or not Path(path).exists():
+        raise HTTPException(
+            status_code=404,
+            detail="That archive has been cleared — build it again.")
+    filename = job.result.get("filename") or Path(path).name
+    return FileResponse(path, media_type="application/zip", filename=filename)
