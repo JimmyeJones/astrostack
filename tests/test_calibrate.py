@@ -1050,3 +1050,113 @@ def test_master_meta_supplied_count_is_build_time_only(tmp_path):
     _, meta = load_master(path)
     assert meta.n_frames == 4
     assert meta.n_supplied is None
+
+
+# --- Bayer-phase guards on the masters ------------------------------------
+#
+# Masters are applied to the *raw Bayer mosaic*, so a master built on a different
+# CFA phase lines its red photosites up with the lights' green ones. Harmless for
+# a pedestal (a dark/bias corrects each physical pixel), fatal for a flat (which
+# divides per colour). Before these, ``validate`` compared only ``arr.shape`` and
+# the phase was never read at all.
+
+
+def _rggb_flat(tmp_path, name, pattern):
+    """A 4×4 master flat whose two Bayer colours want different corrections.
+
+    Columns alternate 200/100, i.e. exactly the pattern a CFA phase error swaps:
+    apply the wrong phase and every "200" photosite gets the "100" correction.
+    """
+    flat = np.tile(np.array([200.0, 100.0, 200.0, 100.0], dtype=np.float32), (4, 1))
+    save_master(tmp_path / name, flat,
+                MasterMeta("flat", 10, 4, 4, "median", bayer_pattern=pattern))
+    return str(tmp_path / name)
+
+
+def test_validate_refuses_a_flat_from_a_different_bayer_phase(tmp_path):
+    cal = CalibrationMasters.load(flat_path=_rggb_flat(tmp_path, "f.fits", "GRBG"))
+    assert cal.flat_bayer_pattern == "GRBG"
+    with pytest.raises(ValueError, match="colour-filter layout"):
+        cal.validate((4, 4), "RGGB")
+
+
+def test_validate_accepts_a_flat_on_the_same_bayer_phase(tmp_path):
+    cal = CalibrationMasters.load(flat_path=_rggb_flat(tmp_path, "f.fits", "rggb "))
+    # Case and whitespace are header noise, not a different sensor.
+    cal.validate((4, 4), "RGGB")
+
+
+def test_validate_bayer_guard_needs_both_sides_to_declare_a_phase(tmp_path):
+    # The whole upgrade-safety of the guard: it can only fire on a *positive*
+    # conflict. A master built before the phase was stamped, a target whose
+    # frames never recorded one, a caller that doesn't pass it, and an
+    # unrecognised card all keep working exactly as they did.
+    unstamped = CalibrationMasters.load(
+        flat_path=_rggb_flat(tmp_path, "plain.fits", None))
+    assert unstamped.flat_bayer_pattern is None
+    unstamped.validate((4, 4), "RGGB")
+
+    stamped = CalibrationMasters.load(flat_path=_rggb_flat(tmp_path, "f.fits", "GRBG"))
+    stamped.validate((4, 4))          # caller passes nothing — old signature
+    stamped.validate((4, 4), None)    # target never recorded a phase
+    stamped.validate((4, 4), "MONO")  # not one of the four real CFA phases
+
+
+def test_validate_bayer_guard_ignores_a_dark_and_a_bias(tmp_path):
+    # A pedestal corrects each physical pixel, so its phase is irrelevant — it
+    # must not fail the stack (it earns an advisory instead, below).
+    dark = np.zeros((4, 4), dtype=np.float32)
+    bias = np.zeros((4, 4), dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "mean", bayer_pattern="GRBG"))
+    save_master(tmp_path / "b.fits", bias,
+                MasterMeta("bias", 0, 4, 4, "mean", bayer_pattern="BGGR"))
+    CalibrationMasters.load(dark_path=str(tmp_path / "d.fits")).validate((4, 4), "RGGB")
+    CalibrationMasters.load(bias_path=str(tmp_path / "b.fits")).validate((4, 4), "RGGB")
+
+
+def test_wrong_phase_flat_really_would_swap_the_corrections(tmp_path):
+    # The measurement behind the guard: it is not a provenance nicety. With the
+    # flat one phase out, the two Bayer colours get each other's correction, so a
+    # uniform raw frame comes out with a 2× colour split instead of flat.
+    path = _rggb_flat(tmp_path, "f.fits", "GRBG")
+    cal = CalibrationMasters.load(flat_path=path)
+    raw = np.full((4, 4), 1000.0, dtype=np.float32)
+    right = cal.apply_raw(raw)
+    # Simulate the phase error by rolling the flat one pixel across the mosaic.
+    cal.flat_norm = np.roll(cal.flat_norm, 1, axis=1)
+    wrong = cal.apply_raw(raw)
+    assert not np.allclose(right, wrong)
+    assert wrong[0, 0] / wrong[0, 1] == pytest.approx(right[0, 1] / right[0, 0])
+
+
+def test_calibration_warns_but_does_not_fail_on_a_dark_phase_mismatch(tmp_path):
+    dark = np.zeros((4, 4), dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=10.0,
+                           bayer_pattern="BGGR"))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    (warn,) = cal.calibration_warnings(light_exposure_s=10.0,
+                                       light_bayer_pattern="RGGB")
+    assert "BGGR" in warn and "RGGB" in warn
+    assert "still subtracted" in warn
+    # Matching phases, and either side undeclared, stay silent.
+    assert cal.calibration_warnings(10.0, None, "BGGR") == []
+    assert cal.calibration_warnings(10.0, None, None) == []
+
+
+def test_calibration_warns_on_a_bias_phase_mismatch_only_when_it_applies(tmp_path):
+    # A bias is subtracted from the lights only when no dark is set; with a dark
+    # present it never touches a pixel, so it must not earn a warning either.
+    bias = np.zeros((4, 4), dtype=np.float32)
+    dark = np.zeros((4, 4), dtype=np.float32)
+    save_master(tmp_path / "b.fits", bias,
+                MasterMeta("bias", 0, 4, 4, "mean", bayer_pattern="BGGR"))
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=10.0))
+    bias_only = CalibrationMasters.load(bias_path=str(tmp_path / "b.fits"))
+    (warn,) = bias_only.calibration_warnings(None, None, "RGGB")
+    assert "Master bias" in warn
+    with_dark = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"),
+                                        bias_path=str(tmp_path / "b.fits"))
+    assert with_dark.calibration_warnings(10.0, None, "RGGB") == []

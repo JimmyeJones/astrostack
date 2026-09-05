@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  biasCanScaleDark, biasSizeWarning, darkScalingBlockedNote, exposureMismatch,
-  masterFitsFrames, masterOptionSuffix, masterRecommendation, masterSizeWarning,
-  tempMismatch,
+  bayerConflicts, biasCanScaleDark, biasSizeWarning, darkScalingBlockedNote,
+  exposureMismatch, flatBayerWarning, masterFitsFrames, masterOptionSuffix,
+  masterRecommendation, masterSizeWarning, tempMismatch,
 } from "./calibrationFit";
 
 const SUBS = { width_px: 1080, height_px: 1920 };
@@ -263,5 +263,63 @@ describe("masterRecommendation", () => {
   it("recommends a bias for the lights only when no dark is recommended", () => {
     const rec = masterRecommendation({ ...best, dark_master_id: null });
     expect(rec.biasId).toBe(4);
+  });
+});
+
+const RGGB_SUBS = { width_px: 1080, height_px: 1920, bayer_pattern: "RGGB" };
+
+describe("bayerConflicts", () => {
+  it("flags a master built on a different colour-filter phase", () => {
+    expect(bayerConflicts({ bayer_pattern: "GRBG" }, RGGB_SUBS)).toBe(true);
+  });
+
+  it("treats header case and whitespace as the same sensor", () => {
+    expect(bayerConflicts({ bayer_pattern: " rggb " }, RGGB_SUBS)).toBe(false);
+  });
+
+  it("never flags what it cannot disprove", () => {
+    // A master from before AstroStack stamped BAYERPAT, a target whose frames
+    // never recorded one, and anything that isn't a real CFA phase.
+    expect(bayerConflicts({}, RGGB_SUBS)).toBe(false);
+    expect(bayerConflicts({ bayer_pattern: null }, RGGB_SUBS)).toBe(false);
+    expect(bayerConflicts({ bayer_pattern: "GRBG" }, SUBS)).toBe(false);
+    expect(bayerConflicts({ bayer_pattern: "MONO" }, RGGB_SUBS)).toBe(false);
+    expect(bayerConflicts(null, RGGB_SUBS)).toBe(false);
+  });
+});
+
+describe("flatBayerWarning", () => {
+  it("names both layouts and says the stack will fail", () => {
+    const warn = flatBayerWarning({ bayer_pattern: "GRBG" }, RGGB_SUBS);
+    expect(warn).toContain("GRBG");
+    expect(warn).toContain("RGGB");
+    expect(warn).toContain("will fail");
+  });
+
+  it("stays silent on a matching flat, an unstamped one, and no pick", () => {
+    expect(flatBayerWarning({ bayer_pattern: "RGGB" }, RGGB_SUBS)).toBeNull();
+    expect(flatBayerWarning({ bayer_pattern: null }, RGGB_SUBS)).toBeNull();
+    expect(flatBayerWarning({ bayer_pattern: "GRBG" }, SUBS)).toBeNull();
+    expect(flatBayerWarning(null, RGGB_SUBS)).toBeNull();
+  });
+});
+
+describe("masterOptionSuffix — colour filter", () => {
+  it("badges a flat on another phase, but only a flat", () => {
+    const grbg = { width_px: 1080, height_px: 1920, bayer_pattern: "GRBG" };
+    expect(masterOptionSuffix(grbg, RGGB_SUBS, "flat"))
+      .toBe(" — wrong colour filter for this target");
+    // A dark/bias corrects each physical pixel, so its phase changes nothing.
+    expect(masterOptionSuffix(grbg, RGGB_SUBS, "dark")).toBe("");
+    expect(masterOptionSuffix(grbg, RGGB_SUBS, "bias")).toBe("");
+    // And with no kind given (the pre-existing two-argument call) — unchanged.
+    expect(masterOptionSuffix(grbg, RGGB_SUBS)).toBe("");
+  });
+
+  it("prefers the size clash when a flat is both wrong size and wrong phase", () => {
+    expect(masterOptionSuffix(
+      { width_px: 540, height_px: 960, bayer_pattern: "GRBG" },
+      RGGB_SUBS, "flat",
+    )).toBe(" — wrong size for this target");
   });
 });

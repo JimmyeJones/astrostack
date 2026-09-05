@@ -2468,6 +2468,7 @@ def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
         sensor_temp_c=_med([f.sensor_temp_c for f in frames]),
         width_px=calibration.modal_dim([f.width_px for f in frames]),
         height_px=calibration.modal_dim([f.height_px for f in frames]),
+        bayer_pattern=calibration.modal_bayer([f.bayer_pattern for f in frames]),
     )
 
 
@@ -2476,6 +2477,11 @@ def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
 #: each resolves to, plus a human word for the log line. They are *ids*, not
 #: paths: the file is always resolved server-side from the library's own master
 #: registry, so a saved default can never smuggle a raw filesystem path into a run.
+#: "not read yet" for a lazily-resolved value whose legitimate answer is ``None``
+#: (the subs' colour-filter phase, which is unknown on a library that never
+#: recorded one) — so the read happens at most once either way.
+_UNREAD = object()
+
 _SAVED_MASTER_BINDINGS = (
     ("dark_master_id", "dark_path", "dark"),
     ("flat_master_id", "flat_path", "flat"),
@@ -2542,6 +2548,7 @@ def _apply_saved_calibration_masters(
         return []  # a path is already set (reused run options) — leave it alone
 
     dims: tuple[int | None, int | None] | None = None
+    cfa: str | None | object = _UNREAD
 
     def _sub_dims() -> tuple[int | None, int | None]:
         """The subs' modal raw dimensions, read once and only when needed."""
@@ -2551,6 +2558,14 @@ def _apply_saved_calibration_masters(
             dims = (calibration.modal_dim([f.width_px for f in frames]),
                     calibration.modal_dim([f.height_px for f in frames]))
         return dims
+
+    def _sub_bayer() -> str | None:
+        """The subs' modal colour-filter phase, read once and only when needed."""
+        nonlocal cfa
+        if cfa is _UNREAD:
+            frames = list(proj.iter_frames(accepted_only=True))
+            cfa = calibration.modal_bayer([f.bayer_pattern for f in frames])
+        return cfa  # type: ignore[return-value]
 
     def _dims_conflict(entry: dict[str, Any]) -> bool:
         return calibration.dims_conflict(entry, *_sub_dims())
@@ -2584,6 +2599,20 @@ def _apply_saved_calibration_masters(
                         *_sub_dims())
             skipped.append(_skip_sentence(word, _dims_reason(entry, _sub_dims())))
             continue
+        # Same fail-soft reasoning, one axis over: a saved *flat* built on another
+        # colour-filter phase is refused by ``CalibrationMasters.validate`` (it
+        # would divide red photosites by a green correction and tint every frame),
+        # so binding it would turn a walk-away stack into an error. Flats only —
+        # a dark or bias corrects each physical pixel, so its phase is irrelevant
+        # and the engine merely mentions it.
+        if path_key == "flat_path" and calibration.bayer_conflict(
+                entry, _sub_bayer()):
+            log.warning("saved %s master %r has a %s colour-filter layout, but "
+                        "this target's subs are %s — skipping it rather than "
+                        "failing the stack", word, mid,
+                        entry.get("bayer_pattern"), _sub_bayer())
+            skipped.append(_skip_sentence(word, _bayer_reason(entry, _sub_bayer())))
+            continue
         opts_dict[path_key] = str(path)
         bound.append(word)
     if bound:
@@ -2611,6 +2640,15 @@ def _dims_reason(entry: dict[str, Any],
     :func:`calibration.dims_conflict` only fires on a positive conflict)."""
     return (f"it's {entry.get('width_px')}×{entry.get('height_px')} pixels, but "
             f"this target's subs are {sub_dims[0]}×{sub_dims[1]}")
+
+
+def _bayer_reason(entry: dict[str, Any], sub_bayer: str | None) -> str:
+    """The colour-filter-layout half of :func:`_skip_sentence` (both sides are
+    known — :func:`calibration.bayer_conflict` only fires on a positive
+    conflict)."""
+    return (f"it was built on a {entry.get('bayer_pattern')} colour-filter "
+            f"layout, but this target's subs are {sub_bayer} — a different "
+            f"camera or readout mode, so dividing by it would tint every frame")
 
 
 def _auto_bind_calibration(settings: Settings, proj: Any, opts_dict: dict[str, Any]) -> None:

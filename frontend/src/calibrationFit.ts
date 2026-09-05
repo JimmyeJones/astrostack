@@ -17,12 +17,61 @@ export interface MasterDims {
   name?: string;
   width_px?: number | null;
   height_px?: number | null;
+  bayer_pattern?: string | null;
 }
 
 /** The target's frame size, as reported by `calibration-suggestions.params`. */
 export interface FrameDims {
   width_px?: number | null;
   height_px?: number | null;
+  bayer_pattern?: string | null;
+}
+
+/** The four real 2×2 colour-filter phases. Anything else — a blank card, a mono
+ * master, an older backend's missing field — reads as *undeclared*, so the check
+ * below can only ever fire on a positive conflict. Mirrors the engine's
+ * `_norm_bayer`. */
+const CFA_PHASES = ["RGGB", "BGGR", "GRBG", "GBRG"];
+
+function normBayer(pattern: string | null | undefined): string | null {
+  if (!pattern) return null;
+  const p = String(pattern).trim().toUpperCase();
+  return CFA_PHASES.includes(p) ? p : null;
+}
+
+/** True when the master's colour-filter phase and the subs' are both known and
+ * differ — the same one-sided rule as `masterFitsFrames`. */
+export function bayerConflicts(
+  master: MasterDims | null | undefined,
+  frames: FrameDims | null | undefined,
+): boolean {
+  const mine = normBayer(master?.bayer_pattern);
+  const theirs = normBayer(frames?.bayer_pattern);
+  return mine !== null && theirs !== null && mine !== theirs;
+}
+
+/** The plain-language warning for a chosen **flat** built on another colour-filter
+ * phase, or null when it matches (or we can't tell).
+ *
+ * Flats only, and that asymmetry is the point: a flat divides into the raw Bayer
+ * mosaic *per colour*, so one phase out corrects every red photosite with a green
+ * value — the picture keeps its detail and comes out the wrong colour on every
+ * frame. `CalibrationMasters.validate` therefore refuses it outright, exactly as
+ * it refuses a wrong *size*, which is why this reads as a blocker rather than an
+ * advisory. A dark or bias corrects each physical pixel, so its phase changes
+ * nothing and it is never flagged here. */
+export function flatBayerWarning(
+  flat: MasterDims | null | undefined,
+  frames: FrameDims | null | undefined,
+): string | null {
+  if (!flat || !bayerConflicts(flat, frames)) return null;
+  return (
+    `This flat was built on a ${normBayer(flat.bayer_pattern)} colour-filter ` +
+    `layout, but this target's frames are ${normBayer(frames?.bayer_pattern)} — ` +
+    `a different camera or readout mode, so dividing by it would swap the colour ` +
+    `channels and tint every frame. Stacking with it will fail; pick a matching ` +
+    `flat or leave this blank.`
+  );
 }
 
 /** True when the master's size and the subs' size are both known and differ.
@@ -64,8 +113,15 @@ export function masterSizeWarning(
 export function masterOptionSuffix(
   master: MasterDims | null | undefined,
   frames: FrameDims | null | undefined,
+  kind?: string,
 ): string {
-  return masterFitsFrames(master, frames) ? "" : " — wrong size for this target";
+  if (!masterFitsFrames(master, frames)) return " — wrong size for this target";
+  // Flats only: a dark/bias on another phase is still perfectly usable (see
+  // `flatBayerWarning`), so badging it unusable would be a lie.
+  if (kind === "flat" && bayerConflicts(master, frames)) {
+    return " — wrong colour filter for this target";
+  }
+  return "";
 }
 
 /** The bias slot's own size warning — which is *not* the generic one.

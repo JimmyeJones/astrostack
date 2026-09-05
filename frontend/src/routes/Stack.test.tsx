@@ -1853,6 +1853,73 @@ describe("StackView", () => {
     expect(screen.queryByText(/wrong size for this target/)).not.toBeInTheDocument();
   });
 
+  it("flags a flat built on another colour-filter phase, and only a flat", async () => {
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(
+      { flat_master_id: 7, dark_master_id: 9 });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 7, name: "Other Sensor Flat", kind: "flat", filename: "f7.fits",
+        n_frames: 20, method: "median", exposure_s: 2, gain: 80,
+        sensor_temp_c: null, bayer_pattern: "GRBG", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+      { id: 9, name: "Other Sensor Dark", kind: "dark", filename: "d9.fits",
+        n_frames: 20, method: "median", exposure_s: 30, gain: 80,
+        sensor_temp_c: null, bayer_pattern: "GRBG", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null,
+                width_px: 480, height_px: 320, bayer_pattern: "RGGB" },
+      dark_master_id: null, flat_master_id: null, flat_dark_master_id: null,
+      bias_master_id: null, scores: {}, n_frames: 12,
+    });
+
+    renderStack();
+
+    // The flat is the right size but a phase out — dividing the raw Bayer mosaic
+    // by it corrects red photosites with green values, so the engine refuses it.
+    await waitFor(() =>
+      expect(screen.getByText(/swap the colour channels/)).toBeInTheDocument());
+    expect(screen.getByText(/Other Sensor Flat.*wrong colour filter/))
+      .toBeInTheDocument();
+    // The dark is on that same phase and is perfectly usable — a pedestal
+    // corrects each physical pixel — so it must NOT be badged.
+    expect(screen.queryByText(/Other Sensor Dark.*wrong colour filter/))
+      .not.toBeInTheDocument();
+  });
+
+  it("stays quiet on a flat whose colour filter matches, or that predates the stamp",
+     async () => {
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ flat_master_id: 7 });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 7, name: "Matching Flat", kind: "flat", filename: "f7.fits",
+        n_frames: 20, method: "median", exposure_s: 2, gain: 80,
+        sensor_temp_c: null, bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+      { id: 8, name: "Legacy Flat", kind: "flat", filename: "f8.fits",
+        n_frames: 20, method: "median", exposure_s: 2, gain: 80,
+        sensor_temp_c: null, bayer_pattern: null, width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null,
+                width_px: 480, height_px: 320, bayer_pattern: "RGGB" },
+      dark_master_id: null, flat_master_id: 7, flat_dark_master_id: null,
+      bias_master_id: null, scores: { "7": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
+    expect(screen.queryByText(/swap the colour channels/)).not.toBeInTheDocument();
+    // Every master the owner already has predates the BAYERPAT stamp — none of
+    // them may start reading as unusable on upgrade.
+    expect(screen.queryByText(/wrong colour filter/)).not.toBeInTheDocument();
+  });
+
   // --- background-mode nudge (big emission nebula → Luminance) --------------
 
   const bgSchema = [
