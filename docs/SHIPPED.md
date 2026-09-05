@@ -14,6 +14,32 @@ Newest first.
 
 ---
 
+## v0.353.3 — 2026-09-05 — the app stops *recommending* a flat-dark the flat can't use
+
+The other end of v0.353.2, found while fixing it. `recommend_masters` — the answer behind the Stack form's
+**Use recommended** button and its ★ badge — ranks a flat-dark on exposure/gain/temperature distance alone,
+with **no dimension awareness at all** (`_recommend_flat_dark`, `webapp/calibration.py`). With two cameras'
+masters in one library the exposure-perfect-but-wrong-size dark out-ranks the usable one, so one click
+pre-filled a flat-dark the engine then silently dropped — the exact silent mismatch v0.353.2 had to add a
+warning for.
+
+`_recommend_flat_dark` now skips a dark that `dims_conflict`s with the **flat** it would calibrate, so a
+further-but-usable dark wins instead. That is the same "the top pick can fail a gate, don't let it mask a
+bindable one" reasoning `auto_bind_master_ids` already applies to the dark and the flat; the unattended binder
+itself never had this hole (its `_bindable` gate resolves both the flat and the flat-dark against the frames'
+dimensions, so the two provably agree).
+
+**Upgrade-safe (§9):** one-sided like every other size gate in the module — a master or a flat that never
+recorded its dimensions cannot be disproved and still ranks — so nothing an existing library recommends
+changes unless both sides declare a size and differ. It narrows a *recommendation* only; a pick the user
+saved is untouched, and no config, schema, on-disk path, endpoint or response shape moves.
+
+**Tests (+3 `tests/webapp/test_calibration.py`; the first two fail before).** The usable dark preferred over
+the exposure-perfect wrong-size one, no recommendation at all when every candidate is the wrong size, and the
+three can't-disprove shapes still recommending exactly as they do today.
+
+---
+
 ## v0.353.2 — 2026-09-05 — a mismatched flat-dark is no longer silently dropped (and the form stops predicting a failure that never comes)
 
 **Verified by the Builder this run** (`claude/sweet-babbage-6guik5`), by reproduction and measurement, then
