@@ -19,7 +19,8 @@ M42_RA, M42_DEC, M42_SIZE_ARCMIN = 83.822, -5.391, 85.0
 
 
 def _add_run(data_root, safe: str, *, ra: float, dec: float, w: int, h: int,
-             arcsec_per_px: float, with_wcs: bool = True) -> int:
+             arcsec_per_px: float, with_wcs: bool = True,
+             is_mosaic: bool | None = None) -> int:
     """Register a stack run backed by a real 3-channel master FITS whose header
     carries a TAN WCS centred on (ra, dec) — exactly as the stacker merges the
     canvas WCS into ``master.fits`` — so the endpoint reads the field geometry
@@ -27,7 +28,7 @@ def _add_run(data_root, safe: str, *, ra: float, dec: float, w: int, h: int,
     lib = Library.open_or_create(data_root / "library")
     try:
         tdir = lib.target_dir(lib.find_target(safe))
-        fits_path = tdir / f"framing_{ra}_{dec}_{w}x{h}.fits"
+        fits_path = tdir / f"framing_{ra}_{dec}_{w}x{h}_{is_mosaic}.fits"
         hdu = fits.PrimaryHDU(data=np.zeros((3, h, w), dtype=np.float32))
         if with_wcs:
             hdr = hdu.header
@@ -50,7 +51,7 @@ def _add_run(data_root, safe: str, *, ra: float, dec: float, w: int, h: int,
                 output_basename="master", fits_path=str(fits_path), tiff_path=None,
                 preview_path=None, n_frames_used=3,
                 canvas_h=h, canvas_w=w, coverage_min=1, coverage_max=3,
-                options_json="{}",
+                options_json="{}", is_mosaic=is_mosaic,
             ))
         finally:
             proj.close()
@@ -261,3 +262,88 @@ def test_a_well_framed_or_oversized_picture_gets_no_nudge(client, solved_library
     body = client.get(f"/api/targets/{safe}/stack-runs/{oversized}/framing").json()
     assert body["level"] == "partial"
     assert body["nudge"] is None
+
+
+# ---------------------------------------------------------------------------
+# A MOSAIC picture. The owner is a heavy mosaic user (AGENTS.md §1), and every
+# number here is measured against the run's *canvas* — which on a mosaic is
+# several frames of sky. Calling that canvas "your frame", or telling them to go
+# and shoot the mosaic they already shot, is the bug.
+# ---------------------------------------------------------------------------
+
+
+def test_a_mosaic_is_not_told_to_go_and_shoot_a_mosaic(client, solved_library):
+    safe = _m42(client)
+    # A 2×2-ish mosaic canvas that still can't hold all of an 85′ nebula.
+    run_id = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC,
+                      w=2160, h=3840, arcsec_per_px=1.2, is_mosaic=True)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "partial"
+    assert body["canvas"] == "mosaic"
+    assert "your frame" not in body["text"]
+    assert "Shoot it in mosaic mode" not in body["text"]
+    assert "bigger than this mosaic" in body["text"]
+    assert "Adding more panels" in body["text"]
+
+
+def test_a_single_field_run_keeps_the_frame_wording_it_always_had(client,
+                                                                 solved_library):
+    """The same geometry recorded as a single field is unchanged — this is a
+    wording fix for mosaics, not a rewrite of the verdict everyone else sees."""
+    safe = _m42(client)
+    run_id = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC,
+                      w=1080, h=1920, arcsec_per_px=2.4, is_mosaic=False)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "partial"
+    assert body["canvas"] == "frame"
+    assert "is bigger than your frame" in body["text"]
+    assert "Shoot it in mosaic mode" in body["text"]
+
+
+def test_a_run_from_before_is_mosaic_existed_reads_as_a_single_frame(client,
+                                                                    solved_library):
+    """Upgrade safety (§9): `is_mosaic` is NULL for runs recorded before schema 8,
+    and those must keep the exact sentences they have always been given rather
+    than being guessed into the mosaic voice."""
+    safe = _m42(client)
+    run_id = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC,
+                      w=1080, h=1920, arcsec_per_px=2.4, is_mosaic=None)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["canvas"] == "frame"
+    assert "is bigger than your frame" in body["text"]
+
+
+def test_a_mosaic_that_clipped_its_target_talks_about_the_mosaic(client,
+                                                                solved_library):
+    safe = _m42(client)
+    # Big enough to hold M 42 whole, but pointed 1° north of it.
+    run_id = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC + 1.0,
+                      w=4000, h=3000, arcsec_per_px=3.0, is_mosaic=True)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "clipped"
+    assert body["canvas"] == "mosaic"
+    assert "edge of this mosaic" in body["text"]
+    assert "re-centre the mosaic next session" in body["text"]
+    # The "which way" half is unaffected — a clipped mosaic is still re-pointed.
+    assert body["nudge"]["direction"] == "south"
+
+
+def test_the_mosaic_verdict_changes_only_the_words_not_the_measurements(
+        client, solved_library):
+    """One canvas, two `is_mosaic` records: the coverage figures must be
+    identical, because they were never a claim about a single frame."""
+    safe = _m42(client)
+    as_frame = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC + 1.0,
+                        w=4000, h=3000, arcsec_per_px=3.0, is_mosaic=False)
+    as_mosaic = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC + 1.0,
+                         w=4000, h=3000, arcsec_per_px=3.0, is_mosaic=True)
+
+    a = client.get(f"/api/targets/{safe}/stack-runs/{as_frame}/framing").json()
+    b = client.get(f"/api/targets/{safe}/stack-runs/{as_mosaic}/framing").json()
+    for key in ("level", "coverage", "off_centre", "object_name", "size_arcmin"):
+        assert a[key] == b[key], key
+    assert a["text"] != b["text"]

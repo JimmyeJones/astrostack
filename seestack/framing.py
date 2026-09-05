@@ -251,6 +251,20 @@ def mosaic_plan(
     )
 
 
+# What shape of picture a verdict is judging. Everything this function measures
+# is measured against the run's **canvas**, and on a single-field stack that
+# canvas *is* one frame of sky — so "your frame", "this picture" and "the canvas"
+# are the same thing and "shoot it in mosaic mode" is the right next step.
+#
+# A **mosaic** canvas is several frames wide, and then the frame-shaped wording
+# says two things this function never tested: it calls a multi-panel canvas "your
+# frame", and it tells an owner who already shot a mosaic to go and shoot one.
+# The owner of this app is a heavy mosaic user (``AGENTS.md`` §1), so that is the
+# common case, not the exotic one — hence a canvas kind rather than one voice.
+CANVAS_FRAME = "frame"
+CANVAS_MOSAIC = "mosaic"
+
+
 @dataclass(frozen=True)
 class FramingResult:
     """A plain-language "did I frame it well?" verdict for a *finished* stack.
@@ -260,15 +274,20 @@ class FramingResult:
     stable machine token the UI can style on; ``text`` is the ready-to-render
     beginner sentence, which — like the hint's — is prefixed by the caller with
     the object's name. ``coverage`` is the fraction (0–1) of the object's extent
-    that made it into the frame, and ``off_centre`` how far its centre sits from
-    the frame's, as a fraction of the half-frame (0 = dead centre, 1 = on the
+    that made it into the canvas, and ``off_centre`` how far its centre sits from
+    the canvas's, as a fraction of the half-canvas (0 = dead centre, 1 = on the
     edge).
+
+    ``canvas`` is :data:`CANVAS_FRAME` or :data:`CANVAS_MOSAIC` — which shape of
+    picture the sentence is talking about, so a UI writing its own heading can
+    match the wording instead of contradicting it.
     """
 
     level: str        # "centred" | "off_centre" | "clipped" | "partial"
     text: str
     coverage: float
     off_centre: float
+    canvas: str = CANVAS_FRAME
 
 
 # How far off-centre (as a fraction of the half-frame) an object may sit before
@@ -295,6 +314,7 @@ def framing_result_verdict(
     height_px: int,
     arcsec_per_px: float,
     size_arcmin: float | None,
+    canvas: str = CANVAS_FRAME,
 ) -> FramingResult | None:
     """Judge how well a finished stack framed its target.
 
@@ -312,6 +332,15 @@ def framing_result_verdict(
     its catalog position. That is deliberately generous for an elongated galaxy
     seen edge-on (its minor axis is smaller), so the verdict errs toward "some of
     it is outside" rather than quietly promising a beginner that all of it landed.
+
+    ``canvas`` says whether the picture being judged is one frame of sky
+    (:data:`CANVAS_FRAME`, the default and every caller's behaviour before this
+    argument existed) or a multi-panel mosaic (:data:`CANVAS_MOSAIC`). Only the
+    **wording** changes: every number here is measured against the canvas either
+    way. It matters because the frame-shaped sentences claim things this function
+    cannot see — that the canvas is a single frame, and that shooting a mosaic is
+    the fix — and on a mosaic both are false, the second of them advice the owner
+    has already taken.
     """
     if size_arcmin is None or size_arcmin <= 0:
         return None
@@ -338,36 +367,61 @@ def framing_result_verdict(
         abs(y_px - half_y) / half_y if half_y > 0 else 0.0,
     )
 
+    mosaic = canvas == CANVAS_MOSAIC
+    kind = CANVAS_MOSAIC if mosaic else CANVAS_FRAME
+
     if coverage < _ALL_IN:
         # Two very different problems share "some of it is missing", and they have
         # opposite fixes: an object that *would* have fitted was simply pointed at
         # badly (re-centre), while one bigger than the canvas can never fit in a
-        # single frame however well aimed (mosaic mode). Say the right one.
-        fits_in_frame = 2.0 * radius_px <= hi_x and 2.0 * radius_px <= hi_y
-        if fits_in_frame:
+        # picture this size however well aimed (a mosaic, or a bigger one). Say
+        # the right one.
+        fits_in_canvas = 2.0 * radius_px <= hi_x and 2.0 * radius_px <= hi_y
+        if fits_in_canvas:
+            if mosaic:
+                return FramingResult(
+                    "clipped",
+                    f"runs off the edge of this mosaic — about {_rounded_pct(coverage)}% "
+                    "of it made it in. It would fit whole, so just re-centre the mosaic "
+                    "next session.",
+                    coverage, off_centre, kind,
+                )
             return FramingResult(
                 "clipped",
                 f"runs off the edge of the frame — about {_rounded_pct(coverage)}% of "
                 "it made it in. It would fit whole, so just re-centre it next session.",
-                coverage, off_centre,
+                coverage, off_centre, kind,
+            )
+        if mosaic:
+            # They already shot a mosaic; "shoot it in mosaic mode" would be
+            # advice they took. The honest next step is a wider one.
+            return FramingResult(
+                "partial",
+                f"is bigger than this mosaic — only about {_rounded_pct(coverage)}% of "
+                "it is in this picture. Adding more panels next session would capture "
+                "the rest.",
+                coverage, off_centre, kind,
             )
         return FramingResult(
             "partial",
             f"is bigger than your frame — only about {_rounded_pct(coverage)}% of it "
             "is in this picture. Shoot it in mosaic mode to capture all of it.",
-            coverage, off_centre,
+            coverage, off_centre, kind,
         )
     if off_centre > _OFF_CENTRE_LIMIT:
         return FramingResult(
             "off_centre",
-            "is all in frame, but sits well off to one side. Re-centring it next "
+            ("is all in this mosaic" if mosaic else "is all in frame")
+            + ", but sits well off to one side. Re-centring it next "
             "session would give it more room and a bit more margin to crop with.",
-            coverage, off_centre,
+            coverage, off_centre, kind,
         )
     return FramingResult(
         "centred",
-        "is nicely centred and completely inside the frame — well framed.",
-        coverage, off_centre,
+        "is nicely centred and completely inside "
+        + ("this mosaic" if mosaic else "the frame")
+        + " — well framed.",
+        coverage, off_centre, kind,
     )
 
 
