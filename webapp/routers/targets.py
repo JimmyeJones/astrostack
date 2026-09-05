@@ -36,6 +36,7 @@ from webapp.schemas import (
     MergeSuggestionTarget,
     MosaicPlanOut,
     NightEarlyStopOut,
+    NightMoonOut,
     NightSummaryOut,
     ObjectInfoOut,
     RestackGainOut,
@@ -705,6 +706,63 @@ def _session_moon_note(observer, target_pos, start_utc: str | None,  # noqa: ANN
         return None
 
 
+def _parse_utc(value: str | None) -> datetime | None:
+    """An ISO timestamp as timezone-aware UTC, or ``None`` if it won't parse.
+
+    The Moon helpers need aware datetimes; the frames table stores naive UTC
+    strings for most Seestar subs and aware ones for some imports, so both have
+    to read as the same instant.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+
+
+def _night_moons(observer, target_pos, nights) -> list:  # noqa: ANN001
+    """One :class:`~seestack.nightplan.SessionMoon` per night, or ``None`` each.
+
+    The retrospective Moon reading the "Last night" card already gives the newest
+    session, given for **every** night the target was shot over — which is the
+    question right behind it ("so which of my ten nights were any good?").
+
+    Batched on purpose. One ephemeris evaluation per row would put ~25 ms × N on
+    a card that renders on every Target page view (0.74 s on a 30-night target,
+    measured); :func:`~seestack.nightplan.session_moons` does the whole table in
+    one pass for the same numbers (0.075 s at 30). Rows whose bounds don't parse
+    keep their place in the list as ``None``, so the caller can zip them back
+    against the nights without re-indexing.
+
+    Quiet on everything it can't answer: no site, no solved target position, no
+    datable night, or an ephemeris that won't compute all read as "nothing to
+    say" rather than costing the card.
+    """
+    ra, dec = target_pos
+    blank: list = [None] * len(nights)
+    if observer is None or ra is None or dec is None or not nights:
+        return blank
+    spans = [(_parse_utc(n.start_utc), _parse_utc(n.end_utc)) for n in nights]
+    datable = [i for i, (start, _) in enumerate(spans) if start is not None]
+    if not datable:
+        return blank
+    from seestack.nightplan import session_moons
+
+    try:
+        readings = session_moons(
+            observer, float(ra), float(dec),
+            [(spans[i][0], spans[i][1]) for i in datable],
+        )
+    except Exception:  # noqa: BLE001 — an ephemeris hiccup must not cost the card
+        log.debug("per-night Moon readings unavailable", exc_info=True)
+        return blank
+    for i, reading in zip(datable, readings, strict=True):
+        blank[i] = reading
+    return blank
+
+
 @router.get("/{safe}/session-recap", response_model=SessionRecapOut | None)
 def target_session_recap(safe: str, request: Request) -> SessionRecapOut | None:
     """A friendly, plain-language recap of the target's most recent capture
@@ -857,6 +915,14 @@ def target_nights(safe: str, request: Request) -> list[NightSummaryOut]:
     already tomorrow in UTC — so the two cards disagreed about which night a
     session was.
 
+    Each row also carries how bright and how close the **Moon** was while that
+    night was being shot, so a beginner can see which of their ten nights the Moon
+    washed out — not only the most recent one, which is all the "Last night" card
+    can ever speak for. Informational, like the rest of the row: moonlit subs are
+    still real signal, so nothing is filtered or rejected on it. ``null`` when the
+    site or the target's sky position isn't known, and the whole table costs one
+    ephemeris pass rather than one per night (see :func:`_night_moons`).
+
     A row is **one observing night**, not one capture session. Those differ when
     a night is shot in two goes more than six hours apart — an evening run, bed,
     then a pre-dawn run — which used to produce two rows carrying the *identical*
@@ -872,9 +938,14 @@ def target_nights(safe: str, request: Request) -> list[NightSummaryOut]:
     try:
         _night_key = resolve_night_key(request, lib, settings.site_lon)
         nights = nights_breakdown(proj, night_of=_night_key)
+        entry = lib.find_target(safe)
+        observer = _recap_observer(request, lib, settings)
+        target_pos = (entry.ra_deg, entry.dec_deg) if entry is not None else (None, None)
     finally:
         proj.close()
         lib.close()
+
+    moons = _night_moons(observer, target_pos, nights)
 
     return [
         NightSummaryOut(
@@ -900,8 +971,19 @@ def target_nights(safe: str, request: Request) -> list[NightSummaryOut]:
                 if n.ended_early is not None
                 else None
             ),
+            moon=(
+                NightMoonOut(
+                    level=m.level,
+                    illumination=m.illumination,
+                    moon_altitude_deg=m.moon_altitude_deg,
+                    separation_deg=m.separation_deg,
+                    text=m.text,
+                )
+                if m is not None
+                else None
+            ),
         )
-        for n in nights
+        for n, m in zip(nights, moons, strict=True)
     ]
 
 

@@ -10867,22 +10867,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   picture and the keepsake's caption sits beneath it, so they should compose, but it is worth *looking* at
   rather than reasoning about — that is exactly how the v0.282.1 tofu box was found.
 
-- **NEW IDEA (Builder 2026-08-27, the obvious next slice of the "Was the Moon washing this out?" note shipped
-  in v0.278.0) — say it on the *Nights* card too, so a beginner can see *which* of their nights the Moon hurt,
-  not only the most recent one.** *(Pillar: understand + trust — PRIORITY 3. Size: S.)* v0.278.0 put the
-  retrospective verdict on the "Last session" card, which answers "why does my newest picture look flat?".
-  The question right behind it is "so which of my ten nights on this target were any good?" — and the Nights
-  card already lists every night with a one-word verdict (sharp / soft / hazy) it computes from stored metrics.
-  Adding the Moon level to each row is now cheap: `seestack.nightplan.session_moon` exists and is pure, each
-  night already carries `start_utc`/`end_utc`, and the target's position and the site are already resolved on
-  that endpoint's sibling. **Shape:** a small dimmed "bright Moon" marker on the rows whose verdict is `poor`,
-  never a sentence per row (ten sentences would be a wall), with the existing per-night verdict untouched.
-  **Care — the one real cost:** this is N ephemeris evaluations per page load rather than one. Measure it
-  before shipping; if a 30-night target is slow, compute the Moon level only for the rows actually rendered,
-  or memoise per (night, target) on the app the way the site lookup already is. **Do not** turn it into a
-  filter or an auto-reject: moonlit subs are still real signal, and the whole feature's voice is "here's why,
-  and how to do better next time".
-
 - **NEW IDEA (Builder 2026-08-27, spotted while fixing the two "dataclass tolerates, Pydantic doesn't" list
   endpoints in v0.277.5) — a tiny test that pins the *rule* rather than the four instances: every list endpoint
   that reads a per-item file off disk degrades per item.** *(Pillar: trust / maintainability — PRIORITY 3.
@@ -24883,6 +24867,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.354.0** — Friendliness/understand: **the Nights card says which of your nights the Moon washed out, not just the newest one.** v0.278.0 put a retrospective Moon verdict on the "Last night" card; the question behind it ("so which of my ten nights were any good?") had no answer, and a sharp night under a 96%-lit Moon 20° away reads as a good night in the Nights table. Every row now carries the same reading (`NightSummaryOut.moon`) and a dimmed **bright Moon** marker appears on `poor` nights, sentence in the tooltip + `aria-label` like the verdict and `ended early` markers; `good`/`ok` say nothing and nothing is ever filtered on it. The filed cost note was measured, not reasoned about: 24.6 ms/row would have added 0.74 s to a 30-night page, so `seestack.nightplan.session_moons` does the table in one astropy pass (0.075 s at 30) for **bit-identical** floats — `_moon_geometry` now delegates to `_moon_geometry_many`, so scalar and batched cannot drift. Unknown site / unsolved target / ephemeris failure all read as `null`, never as "fine". Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +4 `tests/test_session_moon.py`, +6 `tests/webapp/test_target_nights.py`, +5 `NightsCard.test.tsx`.
 - **v0.353.3** — Autonomy/correctness: **the app stops *recommending* a flat-dark the flat can't use.** `recommend_masters` — the answer behind the Stack form's "Use recommended" button and its ★ — ranked a flat-dark on exposure/gain/temperature alone, with no dimension awareness, so with two cameras' masters in one library the exposure-perfect-but-wrong-size dark out-ranked the usable one and one click pre-filled the silent mismatch v0.353.2 had to warn about. `_recommend_flat_dark` now skips a dark that `dims_conflict`s with the **flat** it would calibrate. One-sided, so an unrecorded dimension changes nothing on upgrade; the unattended `auto_bind_master_ids` never had the hole (its `_bindable` gate covers both). Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +3 `tests/webapp/test_calibration.py`.
 - **v0.353.2** — Broken-UX + image quality: **a mismatched flat-dark is no longer silently dropped, and the Stack form stops predicting a failure that never comes.** The flat-dark is the one calibration pick that is neither refused nor applied — `CalibrationMasters.validate` never looks at it and `load` just skips the subtraction on a shape mismatch — so the stack succeeded with the flat's own pedestal still baked in (measured: a 40 % vignette corrected to 1.0000 with a matching flat-dark, **1.1333** without), while the form rendered the shared red *"Stacking with it will fail"* blocker. `CalibrationMasters.flat_dark_shape_mismatch` + a `calibration_warnings` line now say it on the finished run, and a dedicated `flatDarkSizeWarning` (amber, measured against the **flat**, which is the engine's own test) says it honestly at pick time. Same carve-out as `biasSizeWarning`, one slot along. Also closes the third silent flat-dark found on the way: clearing the **Master flat** left `flat_dark_master_id` set, submitted, ignored (the engine only loads one inside `if flat_path:`) and invisible — `flatPickPatch` now clears it with its flat. Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +3 `tests/test_calibrate.py`, +5 `calibrationFit.test.ts`, +1 `Stack.test.tsx`.
 - **v0.353.1** — Engine parity: **`reproject_rgb` now trims the same frame edge the production path does.** The whole-canvas variant validated on a bare `0 <= src <= size-1` while `reproject_rgb_windowed` — the one `align_one` actually calls — insets by `FRAME_EDGE_INSET_PX` to keep the debayer/reproject artefact ring out of the stack. No production pixel moves (`reproject_rgb` has one caller, a test); the point is that the simpler signature is no longer a trap. Tests: +1 `tests/test_windowed_stack.py` (fails before).
