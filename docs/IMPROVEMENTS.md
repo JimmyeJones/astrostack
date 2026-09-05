@@ -7663,6 +7663,21 @@ problems. Dogfood it every big-picture run and fix root causes.
   PRIORITY-1 slice for a focused run.)_
 ### Autonomy — "just works" (PRIORITY 2)
 
+- **LEAD (Builder 2026-09-05, could not finish — needs one real Seestar dark frame to settle) — nothing in the
+  app reads `IMAGETYP`, the standard FITS keyword that says whether a frame is a light, dark, flat or bias.**
+  Grepped this run: `IMAGETYP`/`FRAMETYP` appear **nowhere** in `seestack/` or `webapp/`, so frame *kind* is
+  inferred purely from where the file sits. **Why it matters:** the filed "auto-detect the Seestar's
+  calibration-frame folders" idea (Scout 2026-08-26 #6, in this section) is blocked on the unknown folder-naming
+  convention — but a header the frame carries itself needs no naming guess, and AGENTS.md §1 prefers deriving a
+  fact from the frame (`FOCALLEN`/`XPIXSZ`) over assuming one. If Seestar darks carry
+  `IMAGETYP = 'Dark Frame'`, the detector is a one-sided header read: act only on a *recognised* value, ignore
+  everything else, exactly like `_norm_bayer`. **The gate, and why this is a lead not a task:** whether Seestar
+  writes the card at all is unknowable from this repo, and the on-by-default ingest path is the wrong place to
+  find out — misreading it would classify light subs as calibration frames. **Order if picked up:** (1) confirm
+  the card on one real Seestar dark; (2) surface it read-only first (the Calibration page's frame picker, or the
+  master-build summary saying "these 40 all say Dark Frame"); (3) only then consider anything at ingest. *(S–M;
+  autonomy + image quality — PRIORITY 2/4.)*
+
 - **✅ SHIPPED (Builder, v0.338.0, branch `claude/sweet-babbage-f00hj6`) — ~~give the *junk-target cleanup
   nudge* the same filename evidence the ingest reject just learned, so a pre-convention library's leftover
   output targets stop hiding behind a frame count.~~** Built to the filed shape, including both of its "do
