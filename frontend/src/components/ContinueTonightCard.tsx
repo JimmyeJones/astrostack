@@ -11,6 +11,9 @@ import {
 } from "../continueTonight";
 import { readinessColor } from "../readiness";
 import { recentreNudgeRowBadge, usableWindowNote } from "../tonight";
+import {
+  BEST_TONIGHT_QUERY_KEY, MAX_SHOWN, REFRESH_MS,
+} from "./dashboard/PointHereTonightCard";
 
 /**
  * "Point here tonight" — one calm recommendation of which target *you've already
@@ -29,6 +32,13 @@ import { recentreNudgeRowBadge, usableWindowNote } from "../tonight";
  * started target that's up tonight and not already done). So it never nags a
  * user with no site set, and never duplicates the "set a location" prompt the
  * Tonight page already shows.
+ *
+ * It also never repeats a target the adjacent "Point here right now" card has
+ * already named. The two cards read the same owned library and rank it by two
+ * different rules, so on a small library they routinely picked the *same*
+ * target and the Dashboard said it twice, one card apart, under two headings.
+ * Skipping those names moves this card down to the next-best target — a second,
+ * genuinely different suggestion — and hides it entirely when there isn't one.
  */
 function windowLine(pick: TonightPick): string | null {
   const win = usableWindowNote(pick.target.usable_start_utc, pick.target.usable_end_utc);
@@ -66,10 +76,34 @@ export function ContinueTonightCard() {
     staleTime: 60_000,
   });
 
+  // What the adjacent "Point here right now" card is already recommending. Both
+  // cards rank *the same* owned library, by two deliberately different rules
+  // (that card: best-placed at this moment × how much another hour cuts its
+  // noise; this one: closest to a finished picture), so they frequently landed
+  // on the same target and printed it twice, one card apart, under two
+  // headings — the Dashboard saying the same thing twice in two voices, which
+  // is exactly the "extremely busy" clutter the owner asked us to stop adding.
+  // Same query key, fn and staleTime as that card, so this is a cache hit and
+  // costs no extra request. `retry: false` because an older backend 404s the
+  // endpoint — then there's nothing to exclude and the card behaves exactly as
+  // it did before.
+  const best = useQuery({
+    queryKey: BEST_TONIGHT_QUERY_KEY,
+    queryFn: () => api.getBestTonight(MAX_SHOWN),
+    staleTime: REFRESH_MS,
+    retry: false,
+  });
+
   const goals: GoalSecondsBySafe = {};
   for (const p of progress.data ?? []) goals[p.safe] = p.goal_s;
 
-  const plan = pickContinueTonight(tonight.data, goals);
+  // Hold off while that answer is still in flight rather than render a pick we
+  // may have to swap a moment later: a recommendation that changes target under
+  // the reader is worse than one that arrives a beat late.
+  if (best.isPending) return null;
+  const alreadyShown = (best.data?.picks ?? []).map((p) => p.safe);
+
+  const plan = pickContinueTonight(tonight.data, goals, 2, alreadyShown);
   if (!plan) return null;
 
   const { pick, runnersUp } = plan;
