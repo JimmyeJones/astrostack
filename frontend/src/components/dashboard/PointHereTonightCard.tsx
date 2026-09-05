@@ -3,7 +3,8 @@ import { IconTelescope } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import type { BestTonight, MosaicDepthMap, TonightPick } from "../../api/client";
+import type { BestTonight, TonightPick } from "../../api/client";
+import { useMosaicAim } from "../../hooks/useMosaicAim";
 
 // How often to re-ask. "Right now" goes stale as the sky turns, but not fast —
 // ten minutes is well inside the resolution of an altitude recommendation and
@@ -60,25 +61,6 @@ export function pointHereSubtitle(data: BestTonight | undefined): string | null 
   const m = mins % 60;
   const left = m === 0 ? `${h} h` : `${h} h ${m} m`;
   return `About ${left} of dark sky left tonight.`;
-}
-
-/** The lead pick's "…and here's the corner to aim at" line, or null (pure, tested).
- *
- * The card answers *which target*; on a mosaic that leaves the other half of the
- * question — a 3×3 whose total looks healthy can still have one corner at a
- * fifth of the others, and pointing the scope at the mosaic again spreads the
- * night evenly over panels that don't need it equally. The §1 owner is a heavy
- * mosaic user, so this is their common case, not an edge one.
- *
- * The sentence itself comes from the backend (`seestack.mosaicmap.aim_hint`),
- * never rebuilt here: "thinnest at the bottom-right" and "about 40 min" are the
- * app's shared vocabulary for where a panel sits and how long an integration is,
- * and a second spelling on this card is how the two drift apart. So an older
- * backend that doesn't send the clause shows nothing rather than a locally
- * invented one — the same silence as a single-field target or an even mosaic. */
-export function pointHereAimLine(map: MosaicDepthMap | null | undefined): string | null {
-  const hint = map?.aim_hint;
-  return typeof hint === "string" && hint.trim() ? hint : null;
 }
 
 function PickRow({ pick, lead, aim }: { pick: TonightPick; lead: boolean; aim?: string | null }) {
@@ -139,26 +121,14 @@ export function PointHereTonightCard() {
     // An older backend 404s this; that's a quiet no-op, not an error to retry.
     retry: false,
   });
-  // The lead pick's mosaic map, for the "which corner?" line. Only the lead —
-  // the card acts on one recommendation, and three extra project reads on every
-  // Dashboard load to annotate rows nobody is being told to shoot is a cost with
-  // no reader. Same query key as the Target page's own map card, so the two
-  // share one cache entry and can never quote different panels; `retry: false`
-  // because an older backend 404s this and that is a quiet no-op, not an error.
-  const leadSafe = q.data?.picks?.[0]?.safe ?? null;
-  const mosaic = useQuery({
-    queryKey: ["mosaic-map", leadSafe],
-    queryFn: () => api.mosaicMap(leadSafe as string),
-    enabled: !!leadSafe,
-    staleTime: REFRESH_MS,
-    retry: false,
-  });
+  // The lead pick's "which corner?" clause, shared with the Tonight page's own
+  // "Worth more time" list so the two can never name different panels.
+  const aim = useMosaicAim(q.data?.picks?.[0]?.safe);
 
   const title = pointHereTitle(q.data);
   const subtitle = pointHereSubtitle(q.data);
   if (!q.data || !title) return null;
 
-  const aim = pointHereAimLine(mosaic.data);
   const picks = q.data.picks.slice(0, MAX_SHOWN);
   return (
     <Paper withBorder p="md" radius="md" data-testid="point-here-tonight-card">

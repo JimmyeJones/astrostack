@@ -14,6 +14,37 @@ Newest first.
 
 ---
 
+## v0.361.1 — 2026-09-05 — …and so does the Tonight page, off one shared hook
+
+The same clause, on the page the follow-on actually named. v0.361.0 put the mosaic aim line on the
+Dashboard's recommendation card; the **Tonight** page — "Plan a night", the screen a beginner opens to decide
+where to point — carries its own `WorthMoreTimeList` off the *same* `/best-tonight` answer and had nothing.
+Shipping only the Dashboard half would have left the where-to-point hint missing from the where-to-point page.
+
+**One hook, not two copies.** `frontend/src/hooks/useMosaicAim.ts` holds the pure `mosaicAimLine` (moved out of
+`PointHereTonightCard`, unchanged) and a `useMosaicAim(safe)` that owns all three decisions the two surfaces
+must agree on: the `["mosaic-map", safe]` key they share with the Target page's own map card (so no surface
+costs a second request and none can quote a different panel), the **lead pick only** (this list runs to eight
+rows, and a project read per row to annotate targets nobody is being told to shoot first is a cost with no
+reader), and `retry: false` (an older backend 404s the endpoint — a quiet no-op, not an error). A card that
+wants the clause now asks for it in one line, and there is nowhere for a second policy to grow.
+
+**Fixture moved out of a test file.** The map fixture had been exported from `useMosaicAim.test.ts`; importing
+a test file registers its suites in the importing file too, so the pure assertions were quietly running twice
+(9 tests reported in a 7-test file). It now lives in `frontend/src/test/mosaicMapFixture.ts` beside the other
+shared test helpers, which is what that directory is for.
+
+**Upgrade-safe (§9):** frontend only. No engine, API, schema, config, on-disk or default change; one extra
+line inside a card that already self-hides, and the whole thing is silent on a single field, an even mosaic, a
+failed request and an older backend.
+
+**Tests: +4 `WorthMoreTimeList.test.tsx`** — the clause on the top mosaic, only on the top row and only one
+lookup, silence for a single field, the recommendation surviving a failed map request, and no request at all
+when there is nothing to rank — plus the two `mosaicAimLine` cases moved to `useMosaicAim.test.ts` with the
+helper. Frontend suite: 229 files / 3,161 tests green.
+
+---
+
 ## v0.361.0 — 2026-09-05 — "Point here right now" also says *which corner* of the mosaic
 
 The follow-on v0.355.0 filed and deliberately left open ("care note (3)'s second slice — feeding the thinnest
