@@ -1139,13 +1139,18 @@ def _png_width(png_data: bytes) -> int:
 
 
 def _unrotated_preview_size(fits_path: str) -> tuple[int, int] | None:
-    """The ``(width, height)`` a run's preview had *before* any North-up turn.
+    """The ``(width, height)`` a **full-canvas** preview of this run has, before
+    any North-up turn.
 
     ``save_stack_preview`` renders through ``render_stack_png`` at
     :data:`~seestack.render.thumbnail.PREVIEW_MAX_WIDTH`, so the master's own
-    dimensions give that grid exactly. ``None`` when the master can't be read, so
-    the caller falls back to the stored PNG's size (which is the same thing for
-    every preview nobody saved North-up)."""
+    dimensions give that grid exactly. ``None`` when the master can't be read.
+
+    **It is the canvas's grid, not necessarily the stored preview's** — a
+    "Process target" run's preview is a *crop* of the canvas, and one rendered off
+    the edit proxy then capped at 1024 px is not a fixed fraction of this either.
+    Use :func:`_unrotated_stored_preview_size`, which reads the stored bytes; this
+    is its last-resort fallback."""
     from seestack.io.wcs_io import celestial_wcs_from_fits
     from seestack.render.thumbnail import preview_grid_size
 
@@ -1158,24 +1163,75 @@ def _unrotated_preview_size(fits_path: str) -> tuple[int, int] | None:
     return preview_grid_size(full_w, full_h)
 
 
-def _unrotated_preview_width(png_data: bytes, fits_path: str | None,
-                             baked_north_up: float) -> int:
-    """The width of a run's preview **before** any North-up turn — what the scale
-    bar's stored fraction is a fraction *of*.
+def _unrotated_stored_preview_size(png_data: bytes, fits_path: str | None,
+                                   baked_north_up: float,
+                                   crop: PreviewCrop | str | None = None,
+                                   ) -> tuple[int, int] | None:
+    """The ``(width, height)`` a run's **stored preview** had before the North-up
+    turn a past "Adjust → North up → Save" baked into it.
 
     A rotate-with-expand grows the canvas without changing the pixel scale, so
-    measuring the bar against a preview a past save already rotated draws it the
-    wrong length. The stored bytes are the only thing on hand, so recover the
-    un-rotated grid the way it was made: ``save_stack_preview`` renders through
-    ``render_stack_png`` at :data:`~seestack.render.thumbnail.PREVIEW_MAX_WIDTH`,
-    so the master's own dimensions give it exactly. Falls back to the PNG's own
-    width — which is right for every un-rotated preview, i.e. all of them until
-    someone saves one North-up — whenever there is no baked rotation to undo or
-    no master to read it from."""
+    anything measured as a fraction of the picture — the scale bar's length, the
+    wallpaper's target pixel — has to be scaled against the *un-turned* grid. The
+    stored bytes are turned, so that grid has to be recovered.
+
+    **Recovered from the stored bytes themselves, not from the master's
+    dimensions.** The canvas grid (:func:`_unrotated_preview_size`) is only the
+    same thing for a preview that shows the whole canvas: a "Process target" run's
+    preview is a *crop* of it, rendered off the edit proxy (≤1500 px) and then
+    capped at 1024 px by ``_write_preview_png``, so it is neither the canvas grid
+    nor a fixed fraction of it. Measured on a 1000×800 canvas cropped to 70 %, the
+    canvas-grid answer was **1.43× too wide**, which drew the shared JPEG's scale
+    bar over 10.2′ of sky under a "5′" label.
+
+    What *is* known exactly is the shape of the rectangle the preview shows (the
+    crop box on the canvas) and the size the turn produced (the stored PNG). Turn
+    that rectangle with the renderer's own
+    :func:`~seestack.render.orient.follow_north_up_turns` and the ratio of the two
+    widths is the decimation the preview went through — scale-free, so it needs no
+    assumption about which grid the render used. Falls back to the stored PNG's
+    own size when there is no turn to undo (every ordinary run), and to the canvas
+    grid when the master or the turn can't be read.
+    """
+    from seestack.wallpaper import png_size
+
+    stored = png_size(png_data)
     if not baked_north_up or not fits_path:
-        return _png_width(png_data)
-    flat = _unrotated_preview_size(fits_path)
-    return flat[0] if flat is not None else _png_width(png_data)
+        return stored
+    box = None
+    if stored is not None:
+        from seestack.io.wcs_io import celestial_wcs_from_fits
+
+        try:
+            _wcs, full_w, full_h = celestial_wcs_from_fits(fits_path)
+        except Exception:  # noqa: BLE001 — an unreadable master falls back below
+            full_w = full_h = 0
+        if full_w > 0 and full_h > 0:
+            bx0, by0, bx1, by1 = crop_pixel_box(
+                crop if isinstance(crop, PreviewCrop) else None, full_w, full_h)
+            box = (bx1 - bx0, by1 - by0)
+    if box is not None:
+        from seestack.render.orient import follow_north_up_turns
+
+        turned = follow_north_up_turns([], box[0], box[1], (baked_north_up,))
+        if turned is not None and turned[1] > 0 and turned[2] > 0:
+            scale = float(stored[0]) / float(turned[1])
+            flat_w, flat_h = round(box[0] * scale), round(box[1] * scale)
+            if flat_w > 0 and flat_h > 0:
+                return flat_w, flat_h
+    return _unrotated_preview_size(fits_path) or stored
+
+
+def _unrotated_preview_width(png_data: bytes, fits_path: str | None,
+                             baked_north_up: float,
+                             crop: PreviewCrop | str | None = None) -> int:
+    """The width of a run's stored preview **before** any North-up turn — what the
+    scale bar's stored fraction is a fraction *of*.
+
+    Thin wrapper over :func:`_unrotated_stored_preview_size`; ``0`` (meaning "no
+    bar") when nothing can be read."""
+    size = _unrotated_stored_preview_size(png_data, fits_path, baked_north_up, crop)
+    return size[0] if size is not None else 0
 
 
 def _sky_marks_for_run(fits_path: str | None, preview_width: int,
@@ -1824,25 +1880,23 @@ def _target_pixel_in_preview(run: Any, entry: Any,
     crop and the zoom clip), because getting either half wrong re-centres the
     picture on empty sky.
     """
-    from seestack.wallpaper import (
-        png_size,
-        rotate_point_north_up,
-        wallpaper_target_pixel,
-    )
+    from seestack.wallpaper import rotate_point_north_up, wallpaper_target_pixel
 
     ra = entry.ra_deg if entry is not None else None
     dec = entry.dec_deg if entry is not None else None
     if ra is None or dec is None or not run.fits_path:
         return None
     baked = baked_north_up_deg(run)
-    flat_size = png_size(preview_png)
-    if baked:
-        flat_size = _unrotated_preview_size(run.fits_path) or flat_size
+    crop = parse_preview_crop(run.preview_crop_json)
+    # The un-turned grid these bytes sit on. Recovered from the bytes rather than
+    # from the master's dimensions: `wallpaper_target_pixel` maps into the
+    # *cropped* rectangle, so handing it the full-canvas grid re-centres a
+    # processed-and-turned picture by the crop's own ratio.
+    flat_size = _unrotated_stored_preview_size(preview_png, run.fits_path, baked, crop)
     if flat_size is None:
         return None
     target_px = wallpaper_target_pixel(
-        run.fits_path, ra, dec, flat_size[0], flat_size[1],
-        parse_preview_crop(run.preview_crop_json))
+        run.fits_path, ra, dec, flat_size[0], flat_size[1], crop)
     if target_px is not None and baked:
         target_px = rotate_point_north_up(
             target_px[0], target_px[1], flat_size[0], flat_size[1], baked)
@@ -3605,7 +3659,8 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # picture *before* any North-up turn — including one a past save baked in.
         # Only paid for when marks were actually asked for.
         preview_width = (
-            _unrotated_preview_width(preview, run.fits_path, baked_north_up)
+            _unrotated_preview_width(preview, run.fits_path, baked_north_up,
+                                     parse_preview_crop(run.preview_crop_json))
             if scale else 0
         )
         # How far the pixels the marks are drawn on sit from the FITS grid, so the

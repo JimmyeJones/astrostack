@@ -14,6 +14,47 @@ Newest first.
 
 ---
 
+## v0.358.1 — 2026-09-05 — A picture that was processed *and* turned stops mis-measuring itself
+
+**Verified bug, found while shipping v0.358.0 and reproduced before it was fixed.** Two surfaces recovered
+"how wide was this preview before the North-up turn?" from the **master FITS's** dimensions
+(`_unrotated_preview_size` → `preview_grid_size`). That is the *canvas's* preview grid, and it is only the
+stored preview's grid when the preview shows the whole canvas. "Process target" makes it a **crop** of the
+canvas — rendered off the edit proxy (≤1500 px) and then capped at 1024 px by `_write_preview_png`, so it is
+neither the canvas grid nor a fixed fraction of it — and `_save_processed_preview(north_up=True)` (the
+Adjust panel's *keep my processed picture* save) then records a turn on those very bytes. Both states on one
+run is the owner's own workflow: process a mosaic, then save it North-up.
+
+**What it did, measured.** On a 1000×800 canvas trimmed to 70 %:
+* **The shared JPEG's scale bar was drawn 1.43× too long** — spanning **10.2′ of sky under a "5′" label**.
+  That mark is baked into the file a beginner posts, so the wrong number travels with the picture.
+* **The wallpaper / zoom clip re-centred by the same ratio** — the target pixel landed at x = 14.3 where the
+  object was at 10.0, on a ~56 px-wide picture. Pinned by a test that fails on the pre-fix code with exactly
+  that pair.
+
+**The fix is to stop guessing the grid and read it.** New `_unrotated_stored_preview_size` recovers it from
+facts that are actually known: the shape of the rectangle the preview shows (the crop box on the canvas) and
+the size the turn produced (the stored PNG). Turning that rectangle with the renderer's own
+`follow_north_up_turns` and taking the ratio of the two widths gives the decimation the preview went
+through — **scale-free, so it assumes nothing about which grid the render used**, and it goes through the
+same transform the picture did, so a near-square angle's `rot90` snap can't make the two disagree.
+`_unrotated_preview_width` is now a thin wrapper over it; `_unrotated_preview_size` keeps its old job as the
+last-resort fallback, with a docstring that says what it actually answers.
+
+**Upgrade-safe (§9):** two internal helpers and their two call sites; no config, schema, on-disk, API or
+default change. Every run with no baked turn keeps the stored PNG's own size, which is byte-for-byte what
+the callers used before; the un-cropped turned case resolves to the same number it did (pinned by the
+existing `test_share_north_up_double_rotation` suite, untouched).
+
+**Tests (+4).** `tests/webapp/test_preview_crop_geometry.py`: the recovery lands on the picture the save
+turned, not on the canvas (parametrised over a slanted 34° turn **and** a square 90° one, because the
+renderer snaps near-square angles); the drawn bar's on-sky length equals its own label on a
+cropped-and-turned picture, with the canvas-grid answer asserted to be a *different, wrong* number so the
+check isn't vacuous; and the wallpaper's target pixel lands where the object is, pinned against the
+renderer's own rotation of the point.
+
+---
+
 ## v0.358.0 — 2026-09-05 — The scale bar and the compass survive a North-up save
 
 Closes the entry that asked for **a decision before any code**: *what is the scale bar's Moon sentence a
