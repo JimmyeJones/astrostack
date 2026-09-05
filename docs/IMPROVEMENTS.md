@@ -77,11 +77,106 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟡 LEAD, NOT YET A VERIFIED BUG (Builder 2026-09-04, the thread that led to the v0.352.0 field-of-view fix
-  and was not itself closed by it) — the "only N% of it is in this picture" verdict and the "About a C×R
-  mosaic" plan are two claims about one object that can still contradict each other, because they measure
-  against different things.** *(Pillar: trust + friendliness — PRIORITY 3; size S to check, unknown to fix.
-  Confidence: **observed on a running app, arithmetic not yet traced** — which is why this is a lead.)*
+- **✅ SHIPPED, THE HALF OF THE LEAD BELOW THAT COULD BE VERIFIED FROM THE CODE (Builder, v0.352.1, branch
+  `claude/sweet-babbage-wpbtmu`) — ~~the "did I frame it well?" verdict calls a MOSAIC canvas "your frame",
+  and tells an owner who already shot a mosaic to "shoot it in mosaic mode".~~** *(Pillar: trust +
+  friendliness — PRIORITY 3, on the owner's dominant workflow. Confidence: HIGH, traced in
+  `seestack/framing.py` and pinned by tests at all three layers.)*
+
+  **The defect, which is exactly the lead's "they measure against different things".**
+  `framing_result_verdict` measures **everything against the run's canvas** — coverage, off-centre, and the
+  `fits_in_frame` branch that chooses between "re-centre it" and "shoot a mosaic". On a single-field stack
+  that canvas *is* one frame of sky, so the frame-shaped sentences are true. On a **mosaic** canvas — which
+  is several frames wide, and which is what the owner shoots for `M 31`, `M 44`, `NGC 6960`, `NGC 7000`,
+  `IC 5070`, `IC 1318`, `M 3` (`<T>_mosaic_sub/`, AGENTS.md §1) — the same sentences assert two things the
+  arithmetic never tested:
+  * *"is bigger than **your frame**"* / *"completely inside **the frame**"* / *"is all **in frame**"* /
+    *"runs off the edge of **the frame**"* — a claim about a single frame, made from a multi-panel canvas;
+  * *"**Shoot it in mosaic mode** to capture all of it"* — advice the owner has already taken. The honest
+    next step for a mosaic that still clipped its target is *more panels*, not "start shooting mosaics".
+  The client's own headings said it twice over: `FramingVerdictNote`'s `TITLE` map hard-codes *"It's bigger
+  than one frame"* and *"Part of it is outside the frame"* above the sentence, so a mosaic got the wrong
+  claim in the heading **and** in the body.
+
+  **What shipped.** `seestack/framing.py` gains `CANVAS_FRAME` / `CANVAS_MOSAIC` and an optional
+  `canvas=` argument to `framing_result_verdict`; `FramingResult` carries the kind so a UI writing its own
+  heading can't contradict the sentence under it. All four levels get mosaic wording ("bigger than this
+  mosaic … Adding more panels next session would capture the rest"; "runs off the edge of this mosaic …
+  re-centre the mosaic next session"; "is all in this mosaic"; "completely inside this mosaic"), and the
+  local `fits_in_frame` is renamed `fits_in_canvas` for what it actually tests. **Only the words change** —
+  a test asserts `level`, `coverage` and `off_centre` are identical on either canvas.
+  `webapp/framing_advice.framing_payload` takes `is_mosaic=` and exposes an additive `"canvas"` field;
+  `webapp/routers/stack.stack_run_framing` reads it from the run's own **`stack_runs.is_mosaic`** — the
+  stacker's authoritative record — rather than re-deriving it, and `newest_picture_nudge` passes the same.
+  `FramingVerdictNote` gains an exported `framingTitle()` with the two mosaic headings.
+
+  **Upgrade-safe (§9):** no config, schema, on-disk or default change; one additive response field and one
+  additive dataclass field with a default. `is_mosaic` is **NULL for runs recorded before schema 8**, and a
+  `None`/absent value reads as a single frame — so an old run, an old backend and any caller that doesn't
+  pass `canvas` get byte-identical sentences. Pinned by tests at both layers.
+
+  **Tests (+6 engine, +5 endpoint, +3 vitest; the mosaic-wording ones fail before).** `tests/test_framing.py`:
+  the mosaic partial/clipped/centred/off-centre sentences, the verb-first contract still holding, the
+  numbers being identical on either canvas, and the frame default (including an unrecognised token falling
+  back to the frame voice rather than inventing a third).
+  `tests/webapp/test_stack_framing.py`: a mosaic run not being told to shoot a mosaic, a single-field run
+  keeping its exact wording, a pre-schema-8 `is_mosaic=NULL` run doing the same, a clipped mosaic keeping
+  its nudge, and one canvas recorded both ways differing only in `text`.
+  `FramingVerdictNote.test.tsx`: both mosaic headings, and `framingTitle` keeping the frame headings for
+  `canvas: "frame"` and for an older backend that omits the field.
+
+  **See the entry below for the rest of the lead — closed by measurement, not by this fix.**
+
+- **✅ CLOSED BY RE-DOGFOODING, PLUS ONE REAL BUG IT UNCOVERED (Builder, v0.352.2, branch
+  `claude/sweet-babbage-wpbtmu`, 2026-09-05) — ~~the "only N% of it is in this picture" verdict and the
+  "About a C×R mosaic" plan contradict each other.~~ THEY NO LONGER DO: v0.352.0 fixed it, and the lead was
+  written against the pre-fix numbers. What the re-run *did* find is that the panel count then had nowhere
+  left to appear.** *(Read this instead of re-investigating the lead below it.)*
+
+  **The contradiction is gone, and here is the arithmetic rather than an assertion.** Re-ran
+  `scripts/agent-dogfood.sh` at v0.352.1 exactly as the lead asks. The sample's own frames carry
+  `pixscale_arcsec = 5.0` on a 480 × 320 frame, so `frame_field_from_solve` now derives a **40′ × 26.7′**
+  field instead of falling back to the S50's 77′ × 44′. On that field `mosaic_plan(85, 60)` returns
+  **3×3 = 9 panels**, not the 2×2 the lead saw — and 9 is *consistent* with the 15 % coverage: the verdict
+  models M 42 as an 85′ square (7,225 sq′) against a 1,067 sq′ canvas → 14.8 %, and covering 7,225 sq′ needs
+  ≥ 6.8 frames, i.e. a 3×3 once the 10 % stitch overlap is paid for. **The two sentences were only ever
+  inconsistent because one of them was an S50's**, which is precisely what v0.352.0 fixed. Nothing further
+  to reconcile; the "coverage measures the canvas, panels measure one frame" distinction the lead worried
+  about is real but is not a contradiction — it is the difference between "what you got" and "what to shoot",
+  and on a mosaic canvas v0.352.1 now says which is which in words.
+
+  **The real bug the screenshot showed instead: the panel count had nowhere left to appear.** With the
+  measured verdict on screen, the Target page renders `ObjectInfoCard` with
+  `hideFraming={!!measuredFraming}` — and the panel plan lives **inside** that suppressed line
+  (`framingWithMosaic` renders hint + plan as one `<Text>`). History renders `FramingVerdictNote` and no
+  `ObjectInfoCard` at all. So on both surfaces the card said *"Shoot it in mosaic mode to capture all of it"*
+  and **nothing anywhere on the page said how big a mosaic** — which is the exact gap `MosaicPlan`'s own
+  docstring exists to close (*"stops exactly where their next question starts: how big a mosaic?"*). It was
+  collateral damage of the de-duplication that (correctly) drops the *predicted* line in favour of the
+  *measured* one; the measured one just never carried a plan of its own.
+
+  **What shipped.** `FramingVerdictNote` reads the shared `["identify", safe]` query — the same key the
+  Target page and `ObjectInfoCard` already use, so react-query serves it from **one** request — and renders
+  `mosaic.text` under the verdict, **only on `partial`**: that is the one level whose fix is panels rather
+  than a better pointing, and the query is `enabled` on that level so a clipped/centred picture costs no
+  request at all. Verified in the running app: the sample's card now reads *"…only about 15% of it is in
+  this picture. Shoot it in mosaic mode to capture all of it."* / *"About a 3×3 mosaic (9 panels) covers all
+  of it."*
+
+  **Upgrade-safe (§9):** frontend-only, additive, no backend/config/schema/API change. An object with no
+  vetted grid (`mosaic: null`, or an older backend that omits the field) renders exactly as before.
+
+  **Tests (+3 `FramingVerdictNote.test.tsx`):** the plan appearing on a `partial` verdict; a `clipped`
+  verdict showing no plan *and never calling* `identifyTarget`; and a `partial` verdict whose catalogue has
+  no grid rendering unchanged rather than an empty line.
+
+  *(Original lead follows, for the record.)*
+
+- **🟡 LEAD — CLOSED, see the entry directly above. Do not re-investigate.** *(Builder 2026-09-04, the thread
+  that led to the v0.352.0 field-of-view fix.)* The "only N% of it is in this picture" verdict and the
+  "About a C×R mosaic" plan were said to contradict each other. They no longer do: the lead was written
+  against a panel count computed for an **S50**, which v0.352.0 replaced with the owner's own derived field.
+  Re-measured on the running app at v0.352.1 — 15 % coverage ↔ 3×3 = 9 panels, which agree.
   On the bundled sample's Target page, the framing banner read *"Orion Nebula is bigger than your frame — only
   about **15%** of it is in this picture"* while the object card below it planned *"about a **2×2** mosaic
   (4 panels)"*. Those cannot both be right: 15 % of the object's area implies needing ~1/0.15 ≈ 6.7 frames,
@@ -36072,6 +36167,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.352.2** — Friendliness: **"shoot it in mosaic mode" now says how big a mosaic.** With the measured framing verdict on screen the Target page hides `ObjectInfoCard`'s catalogue line — and the panel plan lives inside it — while History renders no such card at all, so the one number answering the beginner's next question had nowhere to appear. `FramingVerdictNote` now renders `mosaic.text` from the shared `["identify", safe]` query (one request, not two), on the `partial` verdict only. Found by re-running `scripts/agent-dogfood.sh`, which also closed the "coverage vs panel count" lead: at v0.352.0's derived field the sample reads 15 % ↔ 3×3 = 9 panels, which agree. Tests: +3 `FramingVerdictNote.test.tsx`.
+- **v0.352.1** — Trust/friendliness: **a mosaic picture is no longer called "your frame", nor told to go and shoot the mosaic it already is.** `framing_result_verdict` measures everything against the run's *canvas*, but worded all four verdicts as if that canvas were one frame — so on the owner's dominant workflow the "did I frame it well?" card claimed a multi-panel canvas was a single frame and advised "Shoot it in mosaic mode". A `canvas=` kind (`CANVAS_FRAME`/`CANVAS_MOSAIC`) read from the run's own `stack_runs.is_mosaic` picks the wording; every number is unchanged, and a run from before schema 8 (`is_mosaic` NULL) keeps byte-identical sentences. Tests: +6 `tests/test_framing.py`, +5 `tests/webapp/test_stack_framing.py`, +3 `FramingVerdictNote.test.tsx`.
 - **v0.288.0** — Share/back-up: **"Download all my pictures" now really means all of them.** The zip walked
   library targets only, so it silently left out every finished Moon and Sun still — for a Seestar owner
   usually the first picture they were proud of, and the one they'd most notice missing from a backup. The
