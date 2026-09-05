@@ -2131,7 +2131,12 @@ def run_stack(
         else:
             # Fail fast on a camera/binning mismatch (raw dims = the un-debayered
             # reference frame size) rather than silently skipping every frame.
-            calibration.validate(ref_shape)
+            # The reference frame's CFA phase stands in for the session's (a
+            # target is one camera in one readout mode). A flat whose own phase
+            # disagrees is refused here — it would divide red photosites by a
+            # green correction and tint every frame — while a dark/bias phase
+            # mismatch only earns an advisory below.
+            calibration.validate(ref_shape, ref.bayer_pattern)
             log.info("Calibration: applying %s master(s)", calibration.describe())
             # Advisory (non-fatal): a master dark whose exposure/temperature
             # doesn't match the lights silently over/under-subtracts on every
@@ -2140,7 +2145,7 @@ def run_stack(
             # came out crushed or grainy — the reference frame's exposure/
             # temperature stands in for the (uniform) session.
             calib_warnings = list(calibration.calibration_warnings(
-                ref.exposure_s, ref.sensor_temp_c
+                ref.exposure_s, ref.sensor_temp_c, ref.bayer_pattern
             ))
             for _warn in calib_warnings:
                 log.warning("Calibration: %s", _warn)

@@ -228,22 +228,67 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   just-modified" so a skewed-ahead clock can't strand a file forever. Only worth doing if the owner reports
   files that never ingest until a rescan.
 
-- **⚪ HARDENING NOTE (Scout QA audit 2026-08-26, traced — not firing on the production path, file-only) —
-  the master calibration `apply` validates only the master's *shape*, never its Bayer pattern.** `validate`
-  (`seestack/calibrate/apply.py` ~261) compares `tuple(arr.shape)` only; `load` reads `dark_meta`/`bias_meta`
-  but never reads or compares `bayer_pattern` (populated by `load_master`, `masters.py` ~342). A dark/flat with
-  the same dimensions but a different CFA phase (e.g. a sub-frame readout offset shifting the Bayer phase by
-  one pixel) would be applied per-pixel with no guard — for a **flat** this swaps channels and wrecks colour.
-  Harmless for darks (dark current is per physical pixel) and for the common single-camera case where the
-  phase always matches, so this is an **unguarded gap, not a live bug** on normal Seestar inputs. *(Severity:
-  wrong-result-if-triggered / colour; confidence traced, trigger requires unusual or mixed-source masters.)*
-  **Fix direction:** carry `bayer_pattern` onto `CalibrationMasters` and, when both the master and the light
-  declare one, refuse (or warn + skip) the master on a mismatch — the same fail-closed shape as the existing
-  dimension guard. Small, additive, testable; do it only alongside a real trigger.
+- **✅ SHIPPED (Builder, v0.353.0, branch `claude/sweet-babbage-flru3c`) — ~~the master calibration `apply`
+  validates only the master's *shape*, never its Bayer pattern.~~** Built to the filed fix direction exactly,
+  including its *"refuse (or warn + skip)"* split — which turned out to be the whole design, because the two
+  halves belong to different kinds of master.
+
+  **The flat is refused; the pedestal is only mentioned.** A flat divides into the raw Bayer mosaic *per
+  colour*, so one phase out corrects every red photosite with a green value: the picture keeps its detail and
+  comes out the wrong colour on every frame, which is far harder to notice than an error. `validate` therefore
+  raises on it, the same fail-closed shape the dimension guard already has. A dark or bias corrects each
+  *physical* pixel, so its phase genuinely changes nothing — refusing there would cost the user calibration for
+  no reason — and it earns an advisory in `calibration_warnings` instead, because a phase that disagrees still
+  means the master came off another sensor. Pinned by a test that measures the swap rather than asserting it: a
+  uniform raw frame through a one-phase-out flat comes out with the two Bayer colours' corrections exchanged.
+
+  **The guard can only fire on a positive conflict**, which is what makes it upgrade-safe (§9). `_norm_bayer`
+  reads only the four real CFA phases, and both sides must declare one and differ — so a master built before
+  this field was read (every master the owner already has), a target whose frames never recorded a phase, a
+  caller using the old signature, and an unrecognised card all behave exactly as before. Both new arguments are
+  optional and defaulted; no config, schema, on-disk path, response *shape* or default changed.
+
+  **The three surfaces that would otherwise turn this into a worse bug are all handled.** A hard failure is only
+  an improvement if nothing binds such a flat behind the user's back, so the unattended paths gate on the same
+  predicate the way they already gate on size: `calibration.bayer_conflict` (the one-sided twin of
+  `dims_conflict`) skips a phase-mismatched flat in `auto_bind_master_ids` — letting a further-but-matching flat
+  bind rather than being masked — and in `_bind_saved_calibration_masters`, which records the usual
+  plain-language "your saved master flat wasn't used: …" sentence on the run. `coverage_miss_reason` names the
+  phase too, so the Calibration page's "why doesn't this master cover that target?" clause can't fall through to
+  "another master is a closer match". And the Stack form says it at *pick* time — `flatBayerWarning` renders the
+  red blocker and the picker badges the option — so the warning fires before the night is spent, not after.
+
+  **Tests (+7 engine, +3 saved-master, +5 webapp, +8 vitest; 6 of the engine ones fail before).**
+  `tests/test_calibrate.py`: the flat refused, a matching flat (and header case/whitespace) accepted, all four
+  "can't be disproved" shapes staying silent, dark and bias never refused, the measured colour swap, and the
+  dark/bias advisory including the "a bias with a dark present never applies, so it never warns" case.
+  `tests/webapp/test_auto_stack_saved_masters.py`: the saved flat skipped with its sentence, matching and
+  unstamped flats still binding, a mismatched saved *dark* still binding.
+  `tests/webapp/test_calibration.py`: `bayer_conflict`/`modal_bayer` one-sidedness, the auto-binder skipping the
+  flat but keeping the dark and then binding a further matching flat, the gate inert without both sides, and
+  `coverage_miss_reason` naming the phase for a flat and not for a dark.
+  `calibrationFit.test.ts` + `Stack.test.tsx`: the predicate, the wording, the flat-only picker badge, size
+  winning over phase when both clash, and an unstamped flat never reading as unusable on upgrade.
+
+  *(Original note, for the trace.)*
+
+  - **⚪ HARDENING NOTE (Scout QA audit 2026-08-26, traced — not firing on the production path, file-only) —
+    the master calibration `apply` validates only the master's *shape*, never its Bayer pattern.** `validate`
+    (`seestack/calibrate/apply.py` ~261) compares `tuple(arr.shape)` only; `load` reads `dark_meta`/`bias_meta`
+    but never reads or compares `bayer_pattern` (populated by `load_master`, `masters.py` ~342). A dark/flat
+    with the same dimensions but a different CFA phase (e.g. a sub-frame readout offset shifting the Bayer
+    phase by one pixel) would be applied per-pixel with no guard — for a **flat** this swaps channels and
+    wrecks colour. Harmless for darks (dark current is per physical pixel) and for the common single-camera
+    case where the phase always matches, so this is an **unguarded gap, not a live bug** on normal Seestar
+    inputs. *(Severity: wrong-result-if-triggered / colour; confidence traced, trigger requires unusual or
+    mixed-source masters.)*
+    **Fix direction:** carry `bayer_pattern` onto `CalibrationMasters` and, when both the master and the light
+    declare one, refuse (or warn + skip) the master on a mismatch — the same fail-closed shape as the existing
+    dimension guard. Small, additive, testable; do it only alongside a real trigger.
 
 - **⚪ MINOR / TEST-ONLY (Scout QA audit 2026-08-26, traced) — the non-windowed `reproject_rgb` omits the
-  `FRAME_EDGE_INSET_PX` border trim that the production windowed path applies, so the outer 3-px
-  debayer-artifact ring would leak in as valid pixels.** `reproject_rgb` (`seestack/stack/align.py` ~325)
+    `FRAME_EDGE_INSET_PX` border trim that the production windowed path applies, so the outer 3-px
+    debayer-artifact ring would leak in as valid pixels.** `reproject_rgb` (`seestack/stack/align.py` ~325)
   validates with `0 <= src <= size-1` and **no** inset, unlike `reproject_rgb_windowed` (~276) which excludes
   the intentional inset ring. **The production stacker only calls the windowed path** (`align_one`); the
   non-windowed `reproject_rgb`'s sole caller is `tests/test_windowed_stack.py`, so this is *not* a live
@@ -24810,6 +24855,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.353.0** — Data-integrity / image quality: **a master flat built on a different colour-filter phase is refused instead of tinting every frame.** `CalibrationMasters.validate` compared `arr.shape` only, so a flat whose CFA phase is one pixel out of step with the lights was divided into the raw Bayer mosaic per *colour* — correcting every red photosite with a green value. It now fails fast (the same shape as the dimension guard) when both sides declare one of the four real phases and they differ; a dark or bias corrects each physical pixel, so it is never refused and earns an advisory instead. The unattended binders (`calibration.bayer_conflict`, `auto_bind_master_ids`, `_bind_saved_calibration_masters`) skip such a flat so a walk-away stack can't turn into an error, `coverage_miss_reason` names the phase, and the Stack form warns at pick time (`flatBayerWarning`). Inert on every master built before `BAYERPAT` was read. Tests: +7 `tests/test_calibrate.py`, +3 `tests/webapp/test_auto_stack_saved_masters.py`, +5 `tests/webapp/test_calibration.py`, +8 vitest.
 - **2026-09-05 — the R2 bulk move.** 227 resolved entries and 24 QA sweep/audit records were cut out of "Bugs (fix these first)" (12,375 lines → 991) and appended verbatim to [`SHIPPED.md`](SHIPPED.md) and [`PROCESS-NOTES.md`](PROCESS-NOTES.md). **Grep those two files, not this one, for anything that shipped before v0.352.3.** One line rather than 227 auto-truncated ones: re-adding a summary per entry would put a fifth of the cut straight back, and both destination files are the grep target by their own front matter (AGENTS.md §2, §4).
 - **v0.352.2** — Friendliness: **"shoot it in mosaic mode" now says how big a mosaic.** With the measured framing verdict on screen the Target page hides `ObjectInfoCard`'s catalogue line — and the panel plan lives inside it — while History renders no such card at all, so the one number answering the beginner's next question had nowhere to appear. `FramingVerdictNote` now renders `mosaic.text` from the shared `["identify", safe]` query (one request, not two), on the `partial` verdict only. Found by re-running `scripts/agent-dogfood.sh`, which also closed the "coverage vs panel count" lead: at v0.352.0's derived field the sample reads 15 % ↔ 3×3 = 9 panels, which agree. Tests: +3 `FramingVerdictNote.test.tsx`.
 - **v0.352.1** — Trust/friendliness: **a mosaic picture is no longer called "your frame", nor told to go and shoot the mosaic it already is.** `framing_result_verdict` measures everything against the run's *canvas*, but worded all four verdicts as if that canvas were one frame — so on the owner's dominant workflow the "did I frame it well?" card claimed a multi-panel canvas was a single frame and advised "Shoot it in mosaic mode". A `canvas=` kind (`CANVAS_FRAME`/`CANVAS_MOSAIC`) read from the run's own `stack_runs.is_mosaic` picks the wording; every number is unchanged, and a run from before schema 8 (`is_mosaic` NULL) keeps byte-identical sentences. Tests: +6 `tests/test_framing.py`, +5 `tests/webapp/test_stack_framing.py`, +3 `FramingVerdictNote.test.tsx`.

@@ -44,6 +44,22 @@ _EXPOSURE_MISMATCH_TOL = EXPOSURE_MISMATCH_TOL
 _TEMP_MISMATCH_TOL_C = TEMP_MISMATCH_TOL_C
 
 
+def _norm_bayer(pattern: str | None) -> str | None:
+    """Normalise a ``BAYERPAT`` string for comparison, or ``None`` if unusable.
+
+    Masters and frames both carry the pattern as free FITS text, so ``'rggb'``,
+    ``' RGGB '`` and ``'RGGB'`` are the same sensor. Anything that isn't one of
+    the four 2×2 CFA phases (a blank card, an ``'NONE'``, a mono master) reads as
+    *undeclared* — the guards below only ever fire when **both** sides declare a
+    real, different phase, so an unknown value can never fail a stack that works
+    today.
+    """
+    if not pattern:
+        return None
+    p = str(pattern).strip().upper()
+    return p if p in ("RGGB", "BGGR", "GRBG", "GBRG") else None
+
+
 def _sanitize_pedestal(arr: np.ndarray) -> np.ndarray:
     """Replace non-finite master dark/bias pixels with 0.0 (= no correction).
 
@@ -99,6 +115,17 @@ class CalibrationMasters:
     # (:meth:`calibration_warnings`) — dark current varies with temperature, so a
     # dark shot far from the lights' temperature leaves a residual.
     dark_temp_c: float | None = None
+    # The ``BAYERPAT`` each master declares (normalised, ``None`` when the header
+    # didn't carry one — every master built before this field was read, and any
+    # third-party import without the card). Masters are applied to the **raw
+    # Bayer mosaic**, so a master whose CFA phase is shifted relative to the
+    # lights lines its red pixels up with their green ones. That is harmless for
+    # a dark or bias (dark current and read pedestal are per *physical* pixel)
+    # and wrecks the colour of every frame for a flat, which is multiplicative
+    # per colour — see :meth:`validate` and :meth:`calibration_warnings`.
+    dark_bayer_pattern: str | None = None
+    flat_bayer_pattern: str | None = None
+    bias_bayer_pattern: str | None = None
     # When True *and* a master bias is available, a master dark shot at a
     # different exposure than the light is scaled to the light's integration
     # time before subtraction (see :meth:`_effective_dark`). Off by default.
@@ -145,10 +172,13 @@ class CalibrationMasters:
         dark_nodata_mask = None
         dark_exposure_s = None
         dark_temp_c = None
+        dark_bayer = None
         flat_norm = None
+        flat_bayer = None
         bias = None
         bias_nodata_mask = None
         bias_exposure_s = None
+        bias_bayer = None
         if dark_path:
             dark, dark_meta = load_master(dark_path)
             dark = np.asarray(dark, dtype=np.float32)
@@ -160,6 +190,7 @@ class CalibrationMasters:
             dark = _sanitize_pedestal(dark)
             dark_exposure_s = dark_meta.exposure_s
             dark_temp_c = dark_meta.sensor_temp_c
+            dark_bayer = _norm_bayer(dark_meta.bayer_pattern)
         if bias_path:
             bias, bias_meta = load_master(bias_path)
             bias = np.asarray(bias, dtype=np.float32)
@@ -170,9 +201,11 @@ class CalibrationMasters:
             bias_nodata_mask = bias_nodata if bool(bias_nodata.any()) else None
             bias = _sanitize_pedestal(bias)
             bias_exposure_s = bias_meta.exposure_s
+            bias_bayer = _norm_bayer(bias_meta.bayer_pattern)
         if flat_path:
-            flat, _ = load_master(flat_path)
+            flat, flat_meta = load_master(flat_path)
             flat = np.asarray(flat, dtype=np.float32)
+            flat_bayer = _norm_bayer(flat_meta.bayer_pattern)
             # Map non-finite flat pixels to NaN so an ``inf`` is handled exactly
             # like a NaN below (ignored by ``nanmean`` and floored to 1.0 = no
             # correction there) instead of poisoning the mean and dropping the
@@ -218,6 +251,8 @@ class CalibrationMasters:
                    dark_path=dark_path, flat_path=flat_path, bias_path=bias_path,
                    dark_exposure_s=dark_exposure_s, bias_exposure_s=bias_exposure_s,
                    dark_temp_c=dark_temp_c,
+                   dark_bayer_pattern=dark_bayer, flat_bayer_pattern=flat_bayer,
+                   bias_bayer_pattern=bias_bayer,
                    scale_dark_to_light=scale_dark_to_light)
 
     @property
@@ -258,12 +293,34 @@ class CalibrationMasters:
             parts.append("flat")
         return "+".join(parts) if parts else "none"
 
-    def validate(self, shape: tuple[int, int]) -> None:
-        """Raise ``ValueError`` if a loaded master doesn't match ``shape``.
+    def validate(
+        self,
+        shape: tuple[int, int],
+        light_bayer_pattern: str | None = None,
+    ) -> None:
+        """Raise ``ValueError`` if a loaded master doesn't match the lights.
 
         Called once, up front, against the reference frame's raw dimensions so
         a camera/binning mismatch fails fast with a clear message instead of
         silently skipping the correction on every frame.
+
+        ``light_bayer_pattern`` (the reference frame's ``BAYERPAT``) additionally
+        fails a **flat** whose own declared CFA phase differs. Shape alone is not
+        enough for a flat: it is divided into the *raw Bayer mosaic*, so a flat
+        one pixel out of phase divides every red photosite by a green correction
+        and vice versa — the picture keeps its detail and comes out the wrong
+        colour on every single frame, which is far harder to notice (and to
+        diagnose) than a hard failure. Refusing is the same fail-closed shape the
+        dimension guard already has.
+
+        Deliberately narrow, so it cannot fail a stack that works today: it fires
+        only when the flat **and** the lights each declare one of the four real
+        CFA phases and those phases differ (see :func:`_norm_bayer`). Omit the
+        argument, or leave either side's header without a usable ``BAYERPAT`` —
+        which is every master built before this field was read — and nothing
+        changes. A dark or bias phase mismatch is *not* fatal (it corrects per
+        physical pixel, so the phase is irrelevant) and is reported by
+        :meth:`calibration_warnings` instead.
         """
         # Only validate a master that can actually touch a pixel. A master bias
         # is subtracted only when no dark is set (see ``_bias_applies``); with a
@@ -280,14 +337,33 @@ class CalibrationMasters:
                     f"but the frames are {shape[1]}×{shape[0]} — they must match "
                     f"(same camera, binning and no debayering)."
                 )
+        light_cfa = _norm_bayer(light_bayer_pattern)
+        flat_cfa = self.flat_bayer_pattern
+        if (self.flat_norm is not None and light_cfa is not None
+                and flat_cfa is not None and flat_cfa != light_cfa):
+            raise ValueError(
+                f"calibration flat master has a {flat_cfa} colour-filter layout "
+                f"but your subs are {light_cfa} — dividing by it would swap the "
+                f"colour channels and tint every frame. Use a flat shot with the "
+                f"same camera and readout mode as your lights."
+            )
 
     def calibration_warnings(
         self,
         light_exposure_s: float | None,
         light_temp_c: float | None = None,
+        light_bayer_pattern: str | None = None,
     ) -> list[str]:
         """Advisory (non-fatal) warnings that the master dark doesn't match the
         lights it's calibrating.
+
+        ``light_bayer_pattern`` adds one more: a dark or bias whose declared CFA
+        phase differs from the lights'. That one is *not* fatal — a pedestal is
+        subtracted per physical pixel, so its Bayer phase genuinely doesn't
+        matter — but a phase that disagrees means the master came off a different
+        sensor or readout mode, which is worth saying out loud before the user
+        blames the result on their sky. (The flat is the fatal case, because a
+        flat divides per colour; :meth:`validate` refuses that one.)
 
         ``validate()`` only checks master *shape*. But a master dark shot at a
         different **exposure** than the lights silently over/under-subtracts its
@@ -302,6 +378,23 @@ class CalibrationMasters:
         correct the exposure difference itself).
         """
         warnings: list[str] = []
+        # Whichever pedestal actually reaches the lights (never both — see
+        # ``_bias_applies``): its CFA phase disagreeing with theirs is a
+        # provenance smell, not a wrong result.
+        light_cfa = _norm_bayer(light_bayer_pattern)
+        if light_cfa is not None:
+            pedestal = ("dark", self.dark_bayer_pattern) if self.dark is not None else (
+                ("bias", self.bias_bayer_pattern) if self._bias_applies else (None, None)
+            )
+            name, cfa = pedestal
+            if name is not None and cfa is not None and cfa != light_cfa:
+                warnings.append(
+                    f"Master {name} has a {cfa} colour-filter layout but your subs "
+                    f"are {light_cfa} — it was still subtracted (a {name} corrects "
+                    f"each physical pixel, so the layout doesn't change the maths), "
+                    f"but it was shot on a different camera or readout mode, so it "
+                    f"may not match your sensor's hot pixels."
+                )
         if self.dark is None:
             return warnings
         de = self.dark_exposure_s
