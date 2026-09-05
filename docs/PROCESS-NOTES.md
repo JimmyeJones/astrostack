@@ -18,6 +18,44 @@ is a queue.
 
 ---
 
+## QA SWEEP — stacking engine + calibration + QC (Scout 2026-09-05, mostly clean)
+
+Adversarial read of the stack → result path on `origin/main` at v0.353.3. Recorded here so the next Scout
+doesn't re-audit the same modules; the rotation should move to the webapp routers / watcher / ingest next.
+
+**Traced clean (no verified defect):**
+- `seestack/stack/accumulator.py` — `WeightedSumAccumulator` (weight vs frame-count coverage, any-channel
+  `covered`), `MinMaxRejectAccumulator` (k-set ±inf identities, the count≥2k+1 / 3≤count<2k+1 / <3 bands,
+  `rejection_counts`), `WelfordAccumulator` (n<2 → NaN variance widen). NaN/coverage semantics hold throughout.
+- `seestack/stack/weighting.py` — geometric-mean of clipped [min_weight,1] factors, per-panel positional
+  medians with target-wide fallback, `combine_weights_with_photometric` (1/s² inverse-variance).
+- `seestack/stack/photometric.py` — `ref/transparency_score` scale, per-panel references, neutral fallbacks.
+- `seestack/stack/pointings.py` — union-find single-linkage clustering (wrap/pole-safe), `pointing_groups`
+  soundness gate.
+- `seestack/stack/align.py` — windowed reproject inset/pad, subpixel refine NaN-ring propagation
+  (`cval=1.0`, `>1e-6`), CPU/GPU parity via the explicit valid mask.
+- `seestack/calibrate/apply.py` — pedestal sanitisation, `_effective_dark` exposure-scaling with dark/bias
+  no-data masks, the `_bias_applies` (never double-subtract) and Bayer-phase guards, `apply_raw` fresh-array
+  contract.
+- `seestack/qc/metrics.py` + `qc/grading.py` — green-channel float promotion (no uint16 wrap), modified-z
+  grading with per-panel + global caps and the `reconsider` fixed-point.
+- `seestack/bg/coverage_leveling.py` — per-level detrend-then-threshold, starved-level rescue, `_sky_mode`.
+
+**Parallel agents:** `seestack/stack/drizzle_path.py` (+ its stacker dispatch) traced **CLEAN** by a dedicated
+agent — NaN/coverage, two-pass rejection at low neff, float64 variance floor, memory bounds, WCS geometry all
+correct. `seestack/stack/mosaic.py` + `output.py` traced clean on every corruption axis; it surfaced one
+low-severity item.
+
+**One item filed** (IMPROVEMENTS.md → Bugs, "Minor / low-priority" batch): the float→uint export path
+truncates instead of rounds (`output.py:654` +5 siblings), biasing every exported pixel down ~0.5 LSB and
+nicking the linear TIFF's "reversible" claim. Near-cosmetic; a Builder task rather than a one-liner because
+`test_linear_tiff_no_clip.py`'s strict `at_full_scale == at_true_max` invariants need relaxing under rounding.
+Two non-bugs recorded inline in that entry so they aren't re-investigated (`_write_coverage_fits` 2-D-dtype
+nit; `_same_map` `array_equal`-on-NaN, moot on 0-filled maps).
+
+**Also curated:** cut the v0.353.0 + v0.353.1 entries (shipped, still sitting in "Bugs") to SHIPPED.md and
+reparented the orphaned Scout QA note; filed one new beginner feature ("Your mosaic, panel by panel").
+
 ## DOGFOOD BASELINE — running-app probe at v0.352.1 (Builder 2026-09-05)
 
 `scripts/agent-dogfood.sh` on a scratch data root with the bundled sample loaded
