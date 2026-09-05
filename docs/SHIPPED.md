@@ -14,6 +14,87 @@ Newest first.
 
 ---
 
+## v0.354.1 — 2026-09-05 — every file the app writes stops being half a step too dark
+
+The Scout's 2026-09-05 mosaic/output QA audit traced it and the entry sized it correctly: all six float→uint
+packs in `seestack/stack/output.py` spelled `(x * MAX).astype(np.uintN)`, which **truncates toward zero**. So
+every pixel of every PNG, JPEG and TIFF the app has ever written came out biased **downward** — by up to a
+whole step, and by ~½ a step on average — and a value a hair under full scale could never reach the top of the
+container it was written into.
+
+Tiny, and *systematic*, which is why it is worth the fix rather than the note. On the 16-bit "linear" TIFF it
+breaks the reversibility the file's own description sells (`float = black + dn/65535·(white − black)`): the
+recovered float was low by up to a full DN where rounding is honest to ±½. On the 8-bit share/print path the
+same half step is ~0.2 % of full scale off every picture the owner posts.
+
+**One spelling now, not six.** `output.pack_unit(arr, dtype)` is the single "float to integer" for this module
+and `np.rint`s — which is what `render/thumbnail.py` already does for its alpha channel, so this makes the
+outlier the rule rather than inventing one. All six sites call it: the two 16-bit TIFF branches
+(`already_display` and `autostretch`), `_write_preview_png`, `write_full_res_png`, `write_share_jpeg` and
+`_to_uint16_linear`. Callers still clip to `[0, 1]` as they always did, and `rint(1.0 · MAX) == MAX` exactly,
+so there is nothing to overflow.
+
+**The test interaction the entry flagged, re-reasoned rather than loosened.**
+`tests/test_linear_tiff_no_clip.py` asserted `at_full_scale == at_true_max` and `at_zero == at_true_min` on
+`>= rgb.max()` / `<= rgb.min()`. Correct rounding puts every pixel within **half a step** of an anchor onto
+that anchor, so the honest invariant is stated against that band — `rgb.max() − half_step` and
+`rgb.min() + half_step` — and kept as an **exact equality**, not softened to a tolerance. That is a *stronger*
+claim than the original: a truncating packer would put fewer pixels on full scale than the band contains, and
+a clipping one far more, so both still fail it. (Measured: on that fixture the band holds exactly the same
+pixels, so the assertion's number does not move.) `test_an_editor_export_tiff_is_untouched` hand-spelled the
+truncating expression as its reference; "untouched" there means *no rescale and no stretch*, so its reference
+is now `pack_unit` and the intent is unchanged. The round-trip assertion only gets tighter (a full step → ½).
+
+One more site turned up in the full suite and was re-reasoned the same way:
+`tests/webapp/test_video_sharpen_still.py`'s *"the kept original is the cropped soft render"* compared the
+stored PNG against the float array it was written from with **both** sides hand-spelling the truncating pack —
+so the claim only held while the writer truncated too, and a pixel at 5.6 steps broke it the moment it started
+rounding. It now compares the stored **bytes** against `pack_unit` of that array: exact, and stricter than
+before, since the old form allowed a whole step of slack through its float round-trip.
+
+**Upgrade-safe (§9):** no config key, no schema, no on-disk layout, no API shape, no default flipped. Existing
+files on disk are untouched; the only change is that a *newly* written one is ≤1 step per channel brighter and
+correctly rounded. Nothing re-derives a stored number from an exported file.
+
+**Deliberately not swept, and filed instead:** the same construct in `seestack/render/` (`thumbnail.py` ×5,
+`deepening.py`, `orient.py`) is display-only, pinned by a large number of existing render tests that this
+audit did not re-reason, and mixing it in would turn a minimal revertible correctness fix into a broad one.
+The lead is in `IMPROVEMENTS.md` with the site list and the preview↔export parity argument for picking it up.
+
+**Tests (+6 in a new `tests/test_export_rounding.py`, 5 of which fail before; 3 existing assertions
+re-reasoned).** `pack_unit` rounding up and down at both bit depths and a hair under full scale; the ends
+staying exact and in-range; the bias itself measured over 200k values (mean error ≈ −0.5 steps before, < 0.02
+after, max |error| ≤ ½); the linear TIFF round-tripping within half a step with a two-sided residual; and the
+editor PNG download and the share JPEG each landing on the rounded level rather than the truncated one.
+
+Original entry:
+
+  - `seestack/stack/output.py:654` (+400, 413, 428, 446, 525) every float→uint export packs with
+    `(norm * MAX).astype(np.uintN)`, which **truncates toward zero** instead of rounding — so every exported
+    pixel is biased **downward** by up to ~1 LSB (mean ~0.5 LSB), and a value at `norm=0.999985` maps to 65534,
+    never 65535. Worst on `_to_uint16_linear` (the "linear" TIFF), whose docstring sells the file as *losslessly
+    reversible* (`float = black + dn/65535·(white−black)`): the recovered float is systematically low, so the
+    reversibility claim is off by up to a full DN rather than the ±½ DN rounding would give. `thumbnail.py:902`
+    already does the right thing (`np.rint(alpha*255).astype(np.uint8)`) for the alpha channel, so the truncation
+    elsewhere is an oversight, not a considered choice. **Severity: image-quality/correctness, tiny** — ~0.5 LSB
+    out of 65535 is scientifically negligible (the sky's own 1σ still spans ~165 DN under this mapping), so this
+    is near-cosmetic; filed because it is a real, systematic bias on the exact bit-depth path the app advertises
+    as the full data. (Confidence: traced + verified by hand; the mosaic/output QA agent flagged it 2026-09-05.)
+    **Fix direction:** insert `np.round(...)` before each `.astype`; the prior `np.clip(...,0,1)` guarantees no
+    overflow (`round(MAX)==MAX`). **Test-interaction caveat — this is why it is a Builder task, not a one-liner:**
+    `tests/test_linear_tiff_no_clip.py` asserts `at_full_scale == at_true_max` and `at_zero == at_true_min`
+    (strict equality) — rounding maps pixels within ±½ LSB of the anchors to full-scale/zero, so those two
+    invariants must be relaxed to a tolerance (or the fix restricted and the tests re-reasoned); the round-trip
+    test on line ~190 only gets *tighter* (≤½ LSB) and `test_an_editor_export_tiff_is_untouched` pins the
+    `already_display` path at line 400 to truncation, so that reference must move in lockstep if 400 is changed.
+    _(Found by the 2026-09-05 mosaic/output QA audit; the same audit noted two non-bugs recorded so they aren't
+    re-investigated: `output.py:297` `_write_coverage_fits` writes a **2-D** coverage map verbatim without the
+    `.astype(np.float32)` its 3-D branch and `_write_frame_coverage_fits` both apply — a double-size FITS if a
+    float64 2-D map ever reached it, which the production accumulators never emit; and `_same_map`'s
+    `np.array_equal` returns False on identical-NaN maps, moot because coverage maps are 0-filled, never NaN.)_
+
+---
+
 ## v0.354.0 — 2026-09-05 — which of your nights the Moon washed out, not just the newest one
 
 v0.278.0 gave the "Last night" card a retrospective Moon verdict, which answers *"why does my newest picture

@@ -944,29 +944,27 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > used by both sites so they can't drift again. Curation + 2 ideas filed below.
 >
 - **Minor / low-priority (traced, filed for completeness — fix only if touching these files):**
-  - `seestack/stack/output.py:654` (+400, 413, 428, 446, 525) every float→uint export packs with
-    `(norm * MAX).astype(np.uintN)`, which **truncates toward zero** instead of rounding — so every exported
-    pixel is biased **downward** by up to ~1 LSB (mean ~0.5 LSB), and a value at `norm=0.999985` maps to 65534,
-    never 65535. Worst on `_to_uint16_linear` (the "linear" TIFF), whose docstring sells the file as *losslessly
-    reversible* (`float = black + dn/65535·(white−black)`): the recovered float is systematically low, so the
-    reversibility claim is off by up to a full DN rather than the ±½ DN rounding would give. `thumbnail.py:902`
-    already does the right thing (`np.rint(alpha*255).astype(np.uint8)`) for the alpha channel, so the truncation
-    elsewhere is an oversight, not a considered choice. **Severity: image-quality/correctness, tiny** — ~0.5 LSB
-    out of 65535 is scientifically negligible (the sky's own 1σ still spans ~165 DN under this mapping), so this
-    is near-cosmetic; filed because it is a real, systematic bias on the exact bit-depth path the app advertises
-    as the full data. (Confidence: traced + verified by hand; the mosaic/output QA agent flagged it 2026-09-05.)
-    **Fix direction:** insert `np.round(...)` before each `.astype`; the prior `np.clip(...,0,1)` guarantees no
-    overflow (`round(MAX)==MAX`). **Test-interaction caveat — this is why it is a Builder task, not a one-liner:**
-    `tests/test_linear_tiff_no_clip.py` asserts `at_full_scale == at_true_max` and `at_zero == at_true_min`
-    (strict equality) — rounding maps pixels within ±½ LSB of the anchors to full-scale/zero, so those two
-    invariants must be relaxed to a tolerance (or the fix restricted and the tests re-reasoned); the round-trip
-    test on line ~190 only gets *tighter* (≤½ LSB) and `test_an_editor_export_tiff_is_untouched` pins the
-    `already_display` path at line 400 to truncation, so that reference must move in lockstep if 400 is changed.
-    _(Found by the 2026-09-05 mosaic/output QA audit; the same audit noted two non-bugs recorded so they aren't
-    re-investigated: `output.py:297` `_write_coverage_fits` writes a **2-D** coverage map verbatim without the
-    `.astype(np.float32)` its 3-D branch and `_write_frame_coverage_fits` both apply — a double-size FITS if a
-    float64 2-D map ever reached it, which the production accumulators never emit; and `_same_map`'s
-    `np.array_equal` returns False on identical-NaN maps, moot because coverage maps are 0-filled, never NaN.)_
+  - ~~`seestack/stack/output.py:654` (+400, 413, 428, 446, 525) every float→uint export **truncates**
+    instead of rounding, biasing every exported pixel downward by ~½ a step.~~ — **FIXED v0.354.1** (all six
+    sites now go through one shared `output.pack_unit`, which `np.rint`s; the entry, the measurements and the
+    test re-reasoning are in [`SHIPPED.md`](SHIPPED.md)). **Two non-bugs from the same 2026-09-05 mosaic/output
+    QA audit are kept here so they aren't re-investigated:** `output.py` `_write_coverage_fits` writes a **2-D**
+    coverage map verbatim without the `.astype(np.float32)` its 3-D branch and `_write_frame_coverage_fits` both
+    apply — a double-size FITS if a float64 2-D map ever reached it, which the production accumulators never
+    emit; and `_same_map`'s `np.array_equal` returns False on identical-NaN maps, moot because coverage maps are
+    0-filled, never NaN.
+  - **LEAD, the half v0.354.1 deliberately did NOT sweep (Builder 2026-09-05) — the same truncating pack lives
+    in `seestack/render/`, on the *display* side.** `thumbnail.py:136, 222, 416, 505, 668`,
+    `deepening.py:271` and `orient.py:277` all still spell `(x * 255).astype(np.uint8)` (the boolean
+    `mask.astype(np.uint8) * 255` sites are not this construct and must be left alone). Same ~½-step downward
+    bias, but on a *preview* rather than on a file the owner keeps, and 8 bits of a screen image is where it
+    matters least — so the value is the preview↔export **parity** argument, not the pixels: `output.py` now
+    rounds and these do not, which is a ≤1/255 divergence between what the editor shows and what it writes.
+    **Deliberately left rather than swept** because it is display bytes pinned by a large number of existing
+    render tests, none of which the 2026-09-05 audit re-reasoned, and mixing them in would have made a minimal,
+    revertible correctness fix into a broad one. If picked up: route them through `output.pack_unit` (already
+    public and documented for exactly this), and expect to re-reason each pinned byte value honestly rather than
+    loosening it. *(XS code / S test re-reasoning; image-quality/parity — PRIORITY 1/4.)*
   - `seestack/stack/weighting.py:97` the FWHM factor computes `(best_fwhm / f.fwhm_px) ** 2` with a Python float, so a
     pathologically tiny `fwhm_px` would raise `OverflowError` (before `np.clip` can clamp it) rather than saturate.
     **Unreachable on real data** — every writer of `fwhm_px` traces to `median_fwhm`, which persists only values in
@@ -24840,6 +24838,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.354.1** — Image-quality/correctness: **every file the app writes stops being half a step too dark.** All six float→uint packs in `seestack/stack/output.py` spelled `(x * MAX).astype(np.uintN)`, which truncates toward zero — a systematic ~½-step downward bias on every PNG, JPEG and TIFF, and a break of the reversibility the "full data" linear TIFF's own description sells (recovered float low by up to a whole DN where rounding is honest to ±½). One shared `output.pack_unit` now `np.rint`s for all six, matching what `render/thumbnail.py` already did for alpha. `test_linear_tiff_no_clip.py`'s two strict-equality anchors were **re-reasoned, not loosened** — stated against the half-step band and still exact, which a truncating or a clipping packer both still fail. The display-side twins in `seestack/render/` are filed as a lead, not swept. Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +6 `tests/test_export_rounding.py` (5 fail before), 3 re-reasoned in `tests/test_linear_tiff_no_clip.py` and 2 in `tests/webapp/test_video_sharpen_still.py`.
 - **v0.354.0** — Friendliness/understand: **the Nights card says which of your nights the Moon washed out, not just the newest one.** v0.278.0 put a retrospective Moon verdict on the "Last night" card; the question behind it ("so which of my ten nights were any good?") had no answer, and a sharp night under a 96%-lit Moon 20° away reads as a good night in the Nights table. Every row now carries the same reading (`NightSummaryOut.moon`) and a dimmed **bright Moon** marker appears on `poor` nights, sentence in the tooltip + `aria-label` like the verdict and `ended early` markers; `good`/`ok` say nothing and nothing is ever filtered on it. The filed cost note was measured, not reasoned about: 24.6 ms/row would have added 0.74 s to a 30-night page, so `seestack.nightplan.session_moons` does the table in one astropy pass (0.075 s at 30) for **bit-identical** floats — `_moon_geometry` now delegates to `_moon_geometry_many`, so scalar and batched cannot drift. Unknown site / unsolved target / ephemeris failure all read as `null`, never as "fine". Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +4 `tests/test_session_moon.py`, +6 `tests/webapp/test_target_nights.py`, +5 `NightsCard.test.tsx`.
 - **v0.353.3** — Autonomy/correctness: **the app stops *recommending* a flat-dark the flat can't use.** `recommend_masters` — the answer behind the Stack form's "Use recommended" button and its ★ — ranked a flat-dark on exposure/gain/temperature alone, with no dimension awareness, so with two cameras' masters in one library the exposure-perfect-but-wrong-size dark out-ranked the usable one and one click pre-filled the silent mismatch v0.353.2 had to warn about. `_recommend_flat_dark` now skips a dark that `dims_conflict`s with the **flat** it would calibrate. One-sided, so an unrecorded dimension changes nothing on upgrade; the unattended `auto_bind_master_ids` never had the hole (its `_bindable` gate covers both). Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +3 `tests/webapp/test_calibration.py`.
 - **v0.353.2** — Broken-UX + image quality: **a mismatched flat-dark is no longer silently dropped, and the Stack form stops predicting a failure that never comes.** The flat-dark is the one calibration pick that is neither refused nor applied — `CalibrationMasters.validate` never looks at it and `load` just skips the subtraction on a shape mismatch — so the stack succeeded with the flat's own pedestal still baked in (measured: a 40 % vignette corrected to 1.0000 with a matching flat-dark, **1.1333** without), while the form rendered the shared red *"Stacking with it will fail"* blocker. `CalibrationMasters.flat_dark_shape_mismatch` + a `calibration_warnings` line now say it on the finished run, and a dedicated `flatDarkSizeWarning` (amber, measured against the **flat**, which is the engine's own test) says it honestly at pick time. Same carve-out as `biasSizeWarning`, one slot along. Also closes the third silent flat-dark found on the way: clearing the **Master flat** left `flat_dark_master_id` set, submitted, ignored (the engine only loads one inside `if flat_path:`) and invisible — `flatPickPatch` now clears it with its flat. Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +3 `tests/test_calibrate.py`, +5 `calibrationFit.test.ts`, +1 `Stack.test.tsx`.
