@@ -601,6 +601,22 @@ export function buildMasterSummary(r: Record<string, unknown>): string {
   return `${line}.`;
 }
 
+/** What the built master's source frames said they were (`IMAGETYP`), as the
+ * server's own sentence — or null when nothing said, which is the common case
+ * for a camera that doesn't write the card and must stay silent rather than
+ * guess. The wording is computed server-side (`calibration.header_kind_note`)
+ * so the Calibration page and this panel can't drift apart; this only picks it
+ * out of an untyped job result. Pure. */
+export function jobHeaderNote(
+  r: Record<string, unknown>,
+): { severity: string; message: string } | null {
+  const note = r.header_note;
+  if (!note || typeof note !== "object") return null;
+  const { severity, message } = note as Record<string, unknown>;
+  if (typeof message !== "string" || !message) return null;
+  return { severity: severity === "warn" ? "warn" : "ok", message };
+}
+
 /** One target the walk-away auto-stack is holding back because too few of its
  * subs have been located (plate-solved) to make anything but single-frame
  * speckle — the `auto_stack_held_thin` entries the pipeline job records. */
@@ -956,11 +972,19 @@ function JobResultActions({ job }: { job: Job }) {
   }
   if (job.kind === "build_master") {
     const skipped = Number(r.n_skipped ?? 0) || 0;
+    const headerNote = jobHeaderNote(r);
     return (
       <Stack gap={4} mt="xs">
         <Text size="sm" c={skipped > 0 ? "orange" : undefined}>
           {buildMasterSummary(r)}
         </Text>
+        {/* "…and they say they're darks" — or "…and they say they're your
+            subs", which is the one mistake this build can't otherwise catch. */}
+        {headerNote ? (
+          <Text size="sm" c={headerNote.severity === "warn" ? "yellow.7" : "dimmed"}>
+            {headerNote.message}
+          </Text>
+        ) : null}
         <Group>
           <Button size="xs" variant="light" leftSection={<IconFlask size={14} />}
             component={Link} to="/calibration">

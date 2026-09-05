@@ -99,4 +99,34 @@ describe("CalibrationView", () => {
       expect(screen.getByText("Covers all 2 of your targets")).toBeInTheDocument());
     expect(screen.queryByText(/no matching master/)).not.toBeInTheDocument();
   });
+
+  it("shows what the master's own frames said they were", async () => {
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({
+      header_kinds: { light: 40 },
+      header_note: {
+        severity: "warn",
+        message: "Every frame here says something else: 40 say they are light "
+          + "frames (your subs). This is not a dark master — delete it and point "
+          + "the build at a folder of dark frames.",
+      },
+    })]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
+    renderView();
+
+    await waitFor(() =>
+      expect(screen.getByText(/40 say they are light frames \(your subs\)/))
+        .toBeInTheDocument());
+  });
+
+  it("says nothing when the frames never said what they were", async () => {
+    // A camera that doesn't write IMAGETYP is unknown, not suspect — and every
+    // master built before the check existed carries no tally at all.
+    vi.spyOn(client.api, "listCalibrationMasters")
+      .mockResolvedValue([mk({ header_note: null })]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
+    renderView();
+
+    await waitFor(() => expect(screen.getByText("Dark 30s")).toBeInTheDocument());
+    expect(screen.queryByText(/say they are/)).not.toBeInTheDocument();
+  });
 });

@@ -68,6 +68,15 @@ class MasterMeta:
     # :attr:`n_frames` plus any skipped frames when no sampling happened; larger
     # when it did, which is the only case worth telling the user about.
     n_supplied: int | None = None
+    # What the combined frames' own ``IMAGETYP`` cards said, as
+    # ``{'dark': 40}`` — a tally over the frames that actually went into the
+    # master, counting only *recognised* values (see
+    # :func:`seestack.io.fits_loader.frame_kind_from_header`). Empty when no
+    # frame carried a card we recognise, which is the common case for cameras
+    # that don't write one and must read as "unknown", never as a mismatch.
+    # Build-time provenance like :attr:`n_supplied`: not written into the master's
+    # FITS header, so a master loaded back off disk reports ``None``.
+    header_kinds: dict[str, int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -162,7 +171,7 @@ def build_master(
     -------
     (master_2d_float32, MasterMeta), or ``None`` if cancelled via ``should_stop``.
     """
-    from seestack.io.fits_loader import load_seestar_raw
+    from seestack.io.fits_loader import frame_kind_from_header, load_seestar_raw
 
     if kind not in VALID_KINDS:
         raise ValueError(f"unknown calibration kind {kind!r} (expected one of {VALID_KINDS})")
@@ -229,6 +238,10 @@ def build_master(
     gains: list[float] = []
     temps: list[float] = []
     patterns: list[str] = []
+    # Tallied over the frames that actually make it into the combine, so the
+    # count the user is shown is the count the master is made of — a frame
+    # skipped for shape never contributes its opinion.
+    header_kinds: dict[str, int] = {}
     for name, raw, info in loaded:
         if tuple(raw.shape) != ref_shape:
             log.warning("master %s: skipping %s (shape %s != %s)",
@@ -237,6 +250,9 @@ def build_master(
                 skipped.append((name, "wrong size"))
             continue
         arrays.append(raw)
+        declared = frame_kind_from_header(getattr(info, "raw_header", None) or {})
+        if declared:
+            header_kinds[declared] = header_kinds.get(declared, 0) + 1
         if info.exposure_s is not None:
             exposures.append(info.exposure_s)
         if info.gain is not None:
@@ -300,6 +316,7 @@ def build_master(
         sensor_temp_c=float(np.median(temps)) if temps else None,
         bayer_pattern=_mode(patterns),
         n_supplied=n_supplied,
+        header_kinds=header_kinds,
     )
     return master, meta
 

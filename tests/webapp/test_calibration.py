@@ -1677,3 +1677,136 @@ def test_suggestions_confident_is_empty_when_no_master_matches(
     body = client.get("/api/targets/M_42/calibration-suggestions").json()
     assert body["dark_master_id"] == dark["id"]
     assert body["confident"] == {}
+
+
+# ---- "do these frames say they're the kind you asked for?" -----------------
+
+
+def test_header_kind_note_is_silent_when_no_frame_said():
+    """A camera that doesn't write ``IMAGETYP`` is *unknown*, not suspect — the
+    page must say nothing rather than accuse a perfectly good master."""
+    assert calibration.header_kind_note("dark", None, 40) is None
+    assert calibration.header_kind_note("dark", {}, 40) is None
+    # A zero/garbage tally is the same as no tally.
+    assert calibration.header_kind_note("dark", {"light": 0}, 40) is None
+    assert calibration.header_kind_note("dark", {"light": "lots"}, 40) is None
+
+
+def test_header_kind_note_confirms_a_matching_folder():
+    note = calibration.header_kind_note("dark", {"dark": 40}, 40)
+    assert note == {"severity": "ok",
+                    "message": "All 40 frames say they are dark frames."}
+
+
+def test_header_kind_note_says_how_many_stayed_quiet():
+    """Only some frames carrying the card is still a pass — but the count has to
+    be honest about which number it is talking about."""
+    note = calibration.header_kind_note("dark", {"dark": 38}, 40)
+    assert note["severity"] == "ok"
+    assert note["message"] == (
+        "38 say they are dark frames, of the 40 that went in; "
+        "the rest didn't say.")
+
+
+def test_header_kind_note_catches_a_master_dark_built_from_light_subs():
+    """The mistake the whole check exists for: the build points at a night's
+    subs, and every stack it touches then has a picture of the sky subtracted."""
+    note = calibration.header_kind_note("dark", {"light": 40}, 40)
+    assert note["severity"] == "warn"
+    assert "40 say they are light frames (your subs)" in note["message"]
+    assert "not a dark master" in note["message"]
+
+
+def test_header_kind_note_flags_a_mixed_folder_and_leads_with_the_worst():
+    note = calibration.header_kind_note("dark", {"dark": 20, "light": 3, "flat": 9}, 32)
+    assert note["severity"] == "warn"
+    assert "20 say they are dark frames" in note["message"]
+    # Worst first, so the headline names the biggest disagreement.
+    assert note["message"].index("9 say they are flat frames") < \
+        note["message"].index("3 say they are light frames")
+
+
+def test_header_kind_note_accepts_a_flat_dark_as_a_dark():
+    """A flat-dark *is* a dark exposure — matched to the flats. Warning about it
+    would train the owner to ignore the warning."""
+    assert calibration.header_kind_note("dark", {"dark_flat": 30}, 30)["severity"] == "ok"
+    # …but it is not a flat, and a flat master built from them is wrong.
+    assert calibration.header_kind_note("flat", {"dark_flat": 30}, 30)["severity"] == "warn"
+
+
+def test_header_kind_note_singular_reads_as_english():
+    """A one-frame master is a real (if odd) thing; the sentence must still parse."""
+    note = calibration.header_kind_note("bias", {"light": 1}, 1)
+    assert "1 says it is a light frame (one of your subs)" in note["message"]
+    ok = calibration.header_kind_note("bias", {"bias": 1}, 1)
+    assert ok["message"] == "The only frame says it is a bias frame."
+
+
+def test_header_kind_note_never_claims_fewer_frames_than_declared():
+    """``n_frames`` is the master's own count; a tally larger than it (a stale or
+    hand-edited registry entry) must not produce "40 of the 3 frames"."""
+    note = calibration.header_kind_note("dark", {"dark": 40}, 3)
+    assert note["message"] == "All 40 frames say they are dark frames."
+    assert calibration.header_kind_note("dark", {"dark": 40}, None)["severity"] == "ok"
+
+
+def test_build_master_job_says_what_the_frames_claimed_to_be(client, tmp_path):
+    """End to end: build a 'dark' master out of frames that say they're lights,
+    and the finished job carries both the tally and the plain-language verdict —
+    said at the moment it happens, not only next time the page loads."""
+    src = tmp_path / "not_darks"
+    src.mkdir(parents=True, exist_ok=True)
+    for i in range(3):
+        hdu = fits.PrimaryHDU(data=np.full((8, 8), 100.0, dtype=np.float32))
+        hdu.header["EXPTIME"] = 30.0
+        hdu.header["IMAGETYP"] = "Light Frame"
+        hdu.writeto(src / f"sub_{i}.fit", overwrite=True)
+
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": str(src)})
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"])
+    assert body["state"] == "done"
+    assert body["result"]["header_kinds"] == {"light": 3}
+    assert body["result"]["header_note"]["severity"] == "warn"
+    assert "light frames (your subs)" in body["result"]["header_note"]["message"]
+
+    # …and the master list keeps saying it, so the mistake is still visible on
+    # the Calibration page long after the job scrolled away.
+    masters = client.get("/api/calibration/masters").json()
+    row = [m for m in masters if m["id"] == body["result"]["id"]][0]
+    assert row["header_kinds"] == {"light": 3}
+    assert row["header_note"]["severity"] == "warn"
+
+
+def test_a_good_dark_folder_is_confirmed_not_warned(client, tmp_path):
+    src = tmp_path / "real_darks"
+    src.mkdir(parents=True, exist_ok=True)
+    for i in range(3):
+        hdu = fits.PrimaryHDU(data=np.full((8, 8), 100.0, dtype=np.float32))
+        hdu.header["EXPTIME"] = 30.0
+        hdu.header["IMAGETYP"] = "Dark Frame"
+        hdu.writeto(src / f"dark_{i}.fit", overwrite=True)
+
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": str(src)})
+    body = _wait_job(client, r.json()["job_id"])
+    assert body["state"] == "done"
+    assert body["result"]["header_note"] == {
+        "severity": "ok", "message": "All 3 frames say they are dark frames."}
+
+
+def test_a_master_built_before_the_check_existed_says_nothing(client, tmp_path):
+    """Upgrade safety: an existing registry entry has no ``header_kinds`` key.
+    It must list exactly as before, with the note absent — not an empty warning."""
+    src = tmp_path / "quiet_darks"
+    _write_darks(src, n=3, shape=(8, 8))   # no IMAGETYP written
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": str(src)})
+    body = _wait_job(client, r.json()["job_id"])
+    assert body["state"] == "done"
+    assert body["result"]["header_note"] is None
+
+    masters = client.get("/api/calibration/masters").json()
+    row = [m for m in masters if m["id"] == body["result"]["id"]][0]
+    assert row["header_note"] is None

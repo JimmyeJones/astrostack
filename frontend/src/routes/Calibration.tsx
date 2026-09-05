@@ -162,6 +162,18 @@ export function CalibrationView() {
                       {!m.exists ? (
                         <Badge size="xs" color="red" variant="light">file missing</Badge>
                       ) : null}
+                      {/* Do these frames say they're the kind of frame this
+                          master claims to be? The build takes a folder path and
+                          a dropdown, and nothing else checks the two agree — so
+                          a folder of subs silently becomes a "master dark".
+                          Self-hiding: null when no frame carried an IMAGETYP we
+                          recognise, and on every master built before v0.356.0. */}
+                      {m.header_note ? (
+                        <Text size="xs"
+                          c={m.header_note.severity === "warn" ? "yellow.7" : "dimmed"}>
+                          {m.header_note.message}
+                        </Text>
+                      ) : null}
                       {/* Which of the user's targets this master can actually be
                           applied to — the question the page otherwise makes them
                           answer one target at a time. */}

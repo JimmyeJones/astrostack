@@ -14,6 +14,114 @@ Newest first.
 
 ---
 
+## v0.356.1 — 2026-09-05 — The Stack form says it too: `pickedMasterContentWarnings` on the picked masters
+
+**The other half of v0.356.0, at the place the master is actually used.** v0.356.0 tells you what a master
+is made of on the Calibration page and on the finished build job. Neither is where the damage happens: the
+owner picks masters on the **Stack form**, often months after building them, and that form already checks
+whether a master *can* be applied (size, colour-filter phase, exposure, temperature) without ever asking
+the question underneath — is it made of the right kind of frame at all? A master dark built from a night's
+subs passes every one of those checks. It fits, it applies, and it subtracts a picture of the sky out of
+every frame of the stack.
+
+**What shipped.** One pure `pickedMasterContentWarnings` (`frontend/src/calibrationFit.ts`) over the four
+picked slots (dark, flat, flat-dark, bias), returning the **server's own** sentence
+(`calibration.header_kind_note`, already on each row of `/api/calibration/masters`) prefixed with the slot
+and the master's name. The Stack form renders them as **one** alert above the size/phase blockers, not
+four — and it goes first, because of the four kinds of wrong pick this form can catch, this is the one that
+silently ruins the picture rather than failing loudly. **Orange, not red**, and deliberately: red on this
+form means *"stacking with it will fail"*, and a stack with a mis-built master **succeeds** — which is the
+entire problem with it. Borrowing the blocker colour for a non-blocker would make both colours mean less.
+
+**Against the owner's standing "extremely busy UI" priority:** this is exactly the shape that entry asks
+for — *conditional on something rare*, not one more always-on block. It needs a master whose frames
+declared a kind **and** disagreed with the slot; a master whose frames never said, and every master built
+before v0.356.0, produce nothing at all. Pinned by a test that picks a confirmed-good master and asserts
+the form stays silent.
+
+**Upgrade-safe (§9):** frontend-only, additive, no API/schema/default change, no behaviour change — the
+stack still stacks with whatever is picked. Purely a sentence.
+
+**Tests (+6):** `calibrationFit.test.ts` (+4 — the slot/name prefixing, silence on confirmed/absent/older
+masters, no line from a warning with no message, an unnamed master), `Stack.test.tsx` (+2 — the warning
+appears only once the master is actually picked, and a confirmed-good master says nothing).
+
+---
+
+## v0.356.0 — 2026-09-05 — A master says what its own frames claimed to be (`frame_kind_from_header` + `header_kind_note`)
+
+**Shipped: step (2) of the lead below, exactly as the lead ordered it — a read-only surface, and nothing
+at ingest.** The Calibration build form takes a *folder path* in a text box and a kind from a dropdown,
+and until now **nothing checked that the two agree**. Point it at a night's subs with "Dark" selected and
+it builds a "master dark" out of light frames, registers it as a success, and every stack that master
+touches then has a picture of the sky subtracted out of it — with no warning at any point. The frames
+themselves usually know what they are: `IMAGETYP` is the standard FITS card for it, and the lead's grep
+found the app reads it nowhere.
+
+**What shipped, in three pieces:**
+- `seestack/io/fits_loader.frame_kind_from_header` — the one-sided read the lead prescribed. An **exact**
+  table over the normalised value of `IMAGETYP`/`IMAGETYPE`/`FRAMETYP`/`FRAME`, never a substring test
+  (`'Dark Flat'` contains both "dark" and "flat", so a substring match answers differently depending on
+  which needle is tried first — it is neither, and gets its own `dark_flat` answer). Anything unrecognised,
+  empty or missing is `None` = *"this frame didn't say"*, which is a different answer from "light". Whether
+  a Seestar writes the card at all is still unknown from this repo — and it no longer needs to be, because
+  every consumer degrades to silence.
+- `seestack.calibrate.masters.MasterMeta.header_kinds` — a tally (`{'dark': 40}`) over the frames that
+  **actually reached the combine**, so a frame set aside for the wrong shape gets no vote. Build-time
+  provenance like `n_supplied`: persisted in the registry entry, deliberately *not* written into the
+  master's FITS header, so `save_master`/`load_master` are untouched and the on-disk format is unchanged.
+- `webapp.calibration.header_kind_note` — one pure function turning that tally into one plain-language
+  sentence, used by **both** the finished build job and the Calibration master list so the two cannot
+  drift. *"All 40 frames say they are dark frames."* when they agree; *"Every frame here says something
+  else: 40 say they are light frames (your subs). This is not a dark master — delete it and point the
+  build at a folder of dark frames."* when they don't. A flat-dark counts as a dark (it **is** a dark
+  exposure, matched to the flats) so the check can't train the owner to ignore it.
+
+**Self-hiding by construction, and that is the safety property.** No frame carrying a recognised card →
+the helper returns `None` and both surfaces say nothing. That covers a camera that doesn't write the card
+*and* every master built before this version, whose registry entry has no `header_kinds` key at all —
+pinned by its own test rather than assumed.
+
+**Upgrade-safe (§9):** no config, no DB, no on-disk layout change, no default flipped, no behaviour change
+of any kind — the build still builds whatever it is pointed at. Two additive keys on the master-list rows
+and two on the build-job result, which an older frontend ignores. Read-only throughout: it reads the same
+files the build was already reading, and `incoming/` is untouched (§10).
+
+**Tests (+18):** `tests/test_fits_loader.py` (+3 — the standard spellings and punctuation variants; the
+`Dark Flat` ambiguity resolving to `dark_flat` under all four spellings; unrecognised/empty/missing → `None`),
+`tests/test_calibrate.py` (+4 — the tally on a real dark folder, on a folder of lights, empty when no frame
+says, and only counting frames that reached the combine), `tests/webapp/test_calibration.py` (+9 — the note's
+silence on an empty/garbage tally, the matching and partially-quiet confirmations, the light-subs catch, a
+mixed folder listing its worst disagreement first, flat-dark accepted as a dark but not as a flat, singular
+grammar, a tally larger than `n_frames`, plus three end-to-end through the build endpoint and the master
+list), `frontend/src/routes/Jobs.test.tsx` (+4) and `Calibration.test.tsx` (+2).
+
+**What is deliberately still not done — and the lead's own step (3) is the reason.** Nothing *acts* on the
+card: it does not gate a build, filter a folder, or classify anything at ingest. The next honest step, if
+anyone wants it, is to show the same note where a master is **picked** (the Stack form's calibration
+suggestions) — still read-only. Acting on it at ingest remains what the lead said it was: the wrong place
+to find out.
+
+*Original lead, for the record:*
+
+- **LEAD (Builder 2026-09-05, could not finish — needs one real Seestar dark frame to settle) — nothing in the
+  app reads `IMAGETYP`, the standard FITS keyword that says whether a frame is a light, dark, flat or bias.**
+  Grepped this run: `IMAGETYP`/`FRAMETYP` appear **nowhere** in `seestack/` or `webapp/`, so frame *kind* is
+  inferred purely from where the file sits. **Why it matters:** the filed "auto-detect the Seestar's
+  calibration-frame folders" idea (Scout 2026-08-26 #6, in this section) is blocked on the unknown folder-naming
+  convention — but a header the frame carries itself needs no naming guess, and AGENTS.md §1 prefers deriving a
+  fact from the frame (`FOCALLEN`/`XPIXSZ`) over assuming one. If Seestar darks carry
+  `IMAGETYP = 'Dark Frame'`, the detector is a one-sided header read: act only on a *recognised* value, ignore
+  everything else, exactly like `_norm_bayer`. **The gate, and why this is a lead not a task:** whether Seestar
+  writes the card at all is unknowable from this repo, and the on-by-default ingest path is the wrong place to
+  find out — misreading it would classify light subs as calibration frames. **Order if picked up:** (1) confirm
+  the card on one real Seestar dark; (2) surface it read-only first (the Calibration page's frame picker, or the
+  master-build summary saying "these 40 all say Dark Frame"); (3) only then consider anything at ingest. *(S–M;
+  autonomy + image quality — PRIORITY 2/4.)*
+
+
+---
+
 ## v0.355.1 — 2026-09-05 — Two Dashboard cards stopped recommending the same target twice
 
 **Closed as built-differently + a verified duplication fixed.** The filed idea below ("Finish what you
