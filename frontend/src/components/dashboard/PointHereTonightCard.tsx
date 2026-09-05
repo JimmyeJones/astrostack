@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { BestTonight, TonightPick } from "../../api/client";
+import { useMosaicAim } from "../../hooks/useMosaicAim";
 
 // How often to re-ask. "Right now" goes stale as the sky turns, but not fast —
 // ten minutes is well inside the resolution of an altitude recommendation and
@@ -62,7 +63,7 @@ export function pointHereSubtitle(data: BestTonight | undefined): string | null 
   return `About ${left} of dark sky left tonight.`;
 }
 
-function PickRow({ pick, lead }: { pick: TonightPick; lead: boolean }) {
+function PickRow({ pick, lead, aim }: { pick: TonightPick; lead: boolean; aim?: string | null }) {
   return (
     <Stack gap={2}>
       <Group gap={8} wrap="wrap">
@@ -74,6 +75,9 @@ function PickRow({ pick, lead }: { pick: TonightPick; lead: boolean }) {
         ) : null}
       </Group>
       <Text size="xs" c="dimmed">{pick.reason}</Text>
+      {lead && aim ? (
+        <Text size="xs" c="dimmed" data-testid="point-here-aim">{aim}</Text>
+      ) : null}
       {lead ? (
         <Group gap="sm" mt={4}>
           <Button size="xs" variant="light" component={Link}
@@ -98,6 +102,11 @@ function PickRow({ pick, lead }: { pick: TonightPick; lead: boolean }) {
  * this one". The Tonight planner answers "is X up on date D" once you've picked
  * X; this picks for you, from your own library, and says why in one sentence.
  *
+ * When the winner is a **mosaic with a thin panel**, it also says *which corner*
+ * — "which target" is only half the answer for the §1 owner, whose mosaics span
+ * many nights and rarely fill evenly. That line is silent on a single field, on
+ * an even mosaic, and against a backend too old to send it.
+ *
  * Read-only and self-hiding: it never starts a capture or changes a setting, and
  * it renders nothing at all when the backend has nothing to recommend (no
  * targets, nothing above the horizon, or the night all but over) or is too old to
@@ -112,6 +121,10 @@ export function PointHereTonightCard() {
     // An older backend 404s this; that's a quiet no-op, not an error to retry.
     retry: false,
   });
+  // The lead pick's "which corner?" clause, shared with the Tonight page's own
+  // "Worth more time" list so the two can never name different panels.
+  const aim = useMosaicAim(q.data?.picks?.[0]?.safe);
+
   const title = pointHereTitle(q.data);
   const subtitle = pointHereSubtitle(q.data);
   if (!q.data || !title) return null;
@@ -127,7 +140,9 @@ export function PointHereTonightCard() {
       </Group>
       {subtitle ? <Text size="xs" c="dimmed" mb="sm">{subtitle}</Text> : null}
       <Stack gap="md">
-        {picks.map((p, i) => <PickRow key={p.safe} pick={p} lead={i === 0} />)}
+        {picks.map((p, i) => (
+          <PickRow key={p.safe} pick={p} lead={i === 0} aim={i === 0 ? aim : null} />
+        ))}
       </Stack>
     </Paper>
   );

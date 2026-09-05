@@ -111,5 +111,30 @@ def test_unsolved_subs_have_no_pointing_to_map(client, built_library, data_root)
     assert sum(p["n_frames"] for p in body["panels"]) == 120
 
 
+def test_the_thin_panel_also_comes_back_as_a_one_clause_aim_hint(client, built_library,
+                                                                 data_root):
+    """The Dashboard's "point here right now" card has room for a line, not the
+    card sentence. The clause has to arrive from the same response — and agree
+    with it about which corner — so the two surfaces cannot name different
+    panels."""
+    _seed_panels(data_root, _mosaic(2, 2, subs=120, per_panel={(1, 1): 10}))
+
+    body = client.get("/api/targets/M_42/mosaic-map").json()
+    hint = body["aim_hint"]
+    assert hint is not None
+    assert "bottom-right" in hint and "bottom-right" in body["text"]
+    assert len(hint) < len(body["text"])
+
+
+def test_an_even_mosaic_sends_no_aim_hint(client, built_library, data_root):
+    """`text` still reassures; there is simply no corner to point at, so the
+    recommendation card shows exactly what it shows today."""
+    _seed_panels(data_root, _mosaic(2, 2))
+
+    body = client.get("/api/targets/M_42/mosaic-map").json()
+    assert body["thin"] is None
+    assert body["aim_hint"] is None
+
+
 def test_a_missing_target_is_a_404(client, built_library):
     assert client.get("/api/targets/NOPE/mosaic-map").status_code == 404
