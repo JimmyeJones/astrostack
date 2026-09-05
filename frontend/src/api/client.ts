@@ -1445,9 +1445,18 @@ export interface StackAnnotations {
   // The same bar measured on the part of the canvas the *stored preview* shows,
   // for runs the auto-edit trimmed — so the drawn bar, the frame width and the
   // "N full Moons wide" sentence all describe the picture on screen rather than
-  // the larger canvas behind it. null when the run isn't cropped (use
-  // `scale_bar`) or has no usable WCS; absent on an older backend, same meaning.
+  // the larger canvas behind it. On a preview a past "North up → Save" turned,
+  // the `fraction` is re-based onto the grown canvas (so the drawn length is
+  // still the right piece of sky) while the sentence keeps answering for the
+  // field, not for the black wedges the turn added. null when the preview is
+  // neither cropped nor turned (use `scale_bar`) or the run has no usable WCS;
+  // absent on an older backend, same meaning.
   preview_scale_bar?: ScaleBar | null;
+  // Where North/East point on the *stored preview's* own grid — `directions`
+  // carried through the turn a past save baked in. null unless a save really did
+  // turn the picture (use `directions`); absent on an older backend, same
+  // meaning — the rose then steps aside on a turned preview as it used to.
+  preview_directions?: SkyDirections | null;
   // The same objects placed on the *stored preview's* own grid — its crop, then
   // the North-up turn a past "Adjust → North up → Save" baked into those bytes.
   // A crop this side can compose exactly (it's a shift); a turn it cannot (a
