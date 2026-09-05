@@ -538,6 +538,14 @@ def submit_build_master(
             # 200 darks and reads "built from 64 frames" has no way to tell
             # whether 136 failed or the app is broken; it did neither.
             "n_supplied": meta.n_supplied,
+            # What the frames' own IMAGETYP cards said, and the plain-language
+            # verdict on whether they agree with the kind that was asked for —
+            # so "you just built a master dark out of your subs" is said at the
+            # moment it happens, not only next time the Calibration page loads.
+            # Both are None/absent when no frame carried a card we recognise.
+            "header_kinds": dict(meta.header_kinds or {}),
+            "header_note": calibration.header_kind_note(
+                entry["kind"], meta.header_kinds, entry["n_frames"]),
         }
 
     return jm.submit("build_master", body)

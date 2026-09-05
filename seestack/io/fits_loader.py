@@ -444,6 +444,60 @@ def _interp_rb(plane: np.ndarray, layout: tuple, channel: str) -> np.ndarray:
     return out
 
 
+# ---- frame kind (IMAGETYP) ----------------------------------------------
+
+#: The header keys that carry "what kind of frame is this". ``IMAGETYP`` is the
+#: de-facto standard (SBIG/MaxIm/N.I.N.A./ASIAIR/INDI all write it); the rest are
+#: the spellings other capture software uses.
+FRAME_KIND_KEYS = ("IMAGETYP", "IMAGETYPE", "FRAMETYP", "FRAME")
+
+#: Normalised header value → the kind we recognise it as. Deliberately an
+#: **exact** table rather than substring matching: ``'Dark Flat'`` contains both
+#: "dark" and "flat", so a substring test would answer differently depending on
+#: which needle is tried first. Anything not listed here is *unrecognised*, which
+#: is a different answer from "light" — see :func:`frame_kind_from_header`.
+_FRAME_KINDS: dict[str, str] = {
+    "light": "light", "light frame": "light", "science": "light",
+    "science frame": "light", "object": "light",
+    "dark": "dark", "dark frame": "dark",
+    "flat": "flat", "flat frame": "flat", "flat field": "flat",
+    "flatfield": "flat", "sky flat": "flat", "dome flat": "flat",
+    "bias": "bias", "bias frame": "bias", "zero": "bias", "offset": "bias",
+    # A "flat dark" is a dark exposure matched to the flats — physically a dark,
+    # but worth keeping distinct so a summary can echo what the frame actually
+    # said rather than silently relabelling it.
+    "dark flat": "dark_flat", "flat dark": "dark_flat",
+    "darkflat": "dark_flat", "flatdark": "dark_flat",
+}
+
+
+def frame_kind_from_header(header: Any) -> str | None:
+    """What the frame *says* it is: ``'light' | 'dark' | 'flat' | 'bias' |
+    'dark_flat'``, or ``None`` when it doesn't say.
+
+    Reads ``IMAGETYP`` (and its siblings) — the standard FITS keyword for frame
+    kind — and answers **one-sidedly**: only a value in the recognised table
+    produces an answer, and everything else (a missing card, an empty string, a
+    capture program's private wording) is ``None`` = "this frame didn't say".
+    That asymmetry is the whole safety property, and the reason this is a read
+    rather than a rule: a caller may tell the user what a *recognised* card said,
+    but must never infer "this is a light" from the absence of one.
+
+    Whether a given camera writes the card at all is a property of that camera,
+    not of this repo — so every consumer has to degrade gracefully to ``None``.
+
+    ``header`` is anything dict-like (an ``astropy`` header or
+    :attr:`FitsHeaderInfo.raw_header`). Pure; no I/O.
+    """
+    raw = _get_str(header, FRAME_KIND_KEYS)
+    if not raw:
+        return None
+    # Normalise the punctuation capture software varies on ('DARK_FRAME',
+    # 'Dark-Frame', 'dark  frame') without touching the words themselves.
+    norm = " ".join(raw.replace("_", " ").replace("-", " ").lower().split())
+    return _FRAME_KINDS.get(norm)
+
+
 # ---- header helpers -----------------------------------------------------
 
 

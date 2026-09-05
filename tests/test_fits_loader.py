@@ -450,3 +450,52 @@ def test_a_non_seestar_instrument_is_named_as_written():
     from seestack.io.fits_loader import camera_name_from_header
 
     assert camera_name_from_header(Header({"INSTRUME": "Canon EOS 6D"})) == "Canon EOS 6D"
+
+
+def test_frame_kind_reads_the_standard_imagetyp_spellings():
+    """`IMAGETYP` is the standard "what kind of frame is this" card, and capture
+    software spells it a dozen ways. Recognise the ones that are unambiguous."""
+    from astropy.io.fits import Header
+
+    from seestack.io.fits_loader import frame_kind_from_header
+
+    assert frame_kind_from_header(Header({"IMAGETYP": "Light Frame"})) == "light"
+    assert frame_kind_from_header(Header({"IMAGETYP": "LIGHT"})) == "light"
+    assert frame_kind_from_header(Header({"IMAGETYP": "Dark Frame"})) == "dark"
+    assert frame_kind_from_header(Header({"IMAGETYP": "dark"})) == "dark"
+    assert frame_kind_from_header(Header({"IMAGETYP": "Flat Field"})) == "flat"
+    assert frame_kind_from_header(Header({"IMAGETYP": "Bias Frame"})) == "bias"
+    # Punctuation and spacing vary; the words don't.
+    assert frame_kind_from_header(Header({"IMAGETYP": "DARK_FRAME"})) == "dark"
+    assert frame_kind_from_header(Header({"IMAGETYP": " Dark-Frame "})) == "dark"
+    # The other keys the same fact is written under.
+    assert frame_kind_from_header(Header({"FRAMETYP": "Bias"})) == "bias"
+    assert frame_kind_from_header({"IMAGETYPE": "Flat"}) == "flat"
+
+
+def test_a_flat_dark_is_its_own_answer_not_whichever_word_matched_first():
+    """'Dark Flat' contains both "dark" and "flat", so a substring test would
+    answer differently depending on which needle it tried first. It is neither —
+    it is a dark exposure taken to match the flats, and says so."""
+    from astropy.io.fits import Header
+
+    from seestack.io.fits_loader import frame_kind_from_header
+
+    for spelling in ("Dark Flat", "flat dark", "FLATDARK", "dark_flat"):
+        assert frame_kind_from_header(Header({"IMAGETYP": spelling})) == "dark_flat"
+
+
+def test_an_unrecognised_or_missing_frame_kind_is_none_never_a_guess():
+    """The read is one-sided on purpose: a caller may say what a *recognised*
+    card said, but must never infer "this is a light" from the absence of one.
+    Whether a given camera writes the card at all is a property of the camera."""
+    from astropy.io.fits import Header
+
+    from seestack.io.fits_loader import frame_kind_from_header
+
+    assert frame_kind_from_header(Header()) is None
+    assert frame_kind_from_header(Header({"EXPTIME": 30.0})) is None
+    assert frame_kind_from_header(Header({"IMAGETYP": ""})) is None
+    assert frame_kind_from_header(Header({"IMAGETYP": "   "})) is None
+    assert frame_kind_from_header(Header({"IMAGETYP": "Tricolour"})) is None
+    assert frame_kind_from_header({}) is None
