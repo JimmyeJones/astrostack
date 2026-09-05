@@ -106,7 +106,7 @@ describe("FirstImageCard", () => {
     view.unmount();
 
     vi.restoreAllMocks();
-    mount(sys(), stats({ ...base, n_edited_runs: 1, n_exported_runs: 1 }));
+    mount(sys(), stats({ ...base, n_edited_runs: 1, n_finished_pictures: 1 }));
     await screen.findByTestId("first-image-card");
     expect(screen.getByText(/whole journey/)).toBeInTheDocument();
   });
@@ -115,7 +115,7 @@ describe("FirstImageCard", () => {
     localStorage.setItem("astrostack.dashboard.firstImageStarted", "1");
     mount(sys(), stats({
       n_frames: 40, n_frames_accepted: 32, n_stack_runs: 1,
-      n_edited_runs: 1, n_exported_runs: 1,
+      n_edited_runs: 1, n_finished_pictures: 1,
     }));
 
     await screen.findByTestId("first-image-card");

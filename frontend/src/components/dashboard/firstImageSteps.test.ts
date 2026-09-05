@@ -38,7 +38,7 @@ describe("firstImageSteps", () => {
   it("ticks each step off from the signals the Dashboard already has", () => {
     const steps = firstImageSteps(sys(), stats({
       n_frames: 40, n_frames_accepted: 32, n_stack_runs: 1,
-      n_edited_runs: 1, n_exported_runs: 1,
+      n_edited_runs: 1, n_finished_pictures: 1,
     }));
     expect(steps.map((s) => s.done)).toEqual([true, true, true, true, true, true]);
     expect(firstImageComplete(steps)).toBe(true);
@@ -58,7 +58,7 @@ describe("firstImageSteps", () => {
     const edited = stats({ ...stacked, n_edited_runs: 2 });
     expect(firstImageNextStep(firstImageSteps(sys(), edited))?.key).toBe("export");
 
-    const exported = stats({ ...edited, n_exported_runs: 1 });
+    const exported = stats({ ...edited, n_finished_pictures: 1 });
     expect(firstImageNextStep(firstImageSteps(sys(), exported))).toBeNull();
   });
 
@@ -67,7 +67,7 @@ describe("firstImageSteps", () => {
     // reading is "that step is still to do" — never a tick the app can't see.
     const st = stats({ n_frames: 40, n_frames_accepted: 32, n_stack_runs: 1 });
     delete (st as { n_edited_runs?: number }).n_edited_runs;
-    delete (st as { n_exported_runs?: number }).n_exported_runs;
+    delete (st as { n_finished_pictures?: number }).n_finished_pictures;
     const steps = firstImageSteps(sys(), st);
     expect(steps.find((s) => s.key === "edit")?.done).toBe(false);
     expect(steps.find((s) => s.key === "export")?.done).toBe(false);
@@ -156,7 +156,7 @@ describe("firstImageDone", () => {
     expect(firstImageDone(firstImageSteps(sys(), none), none)).toBe(false);
     const all = stats({
       n_frames: 40, n_frames_accepted: 32, n_stack_runs: 1,
-      n_edited_runs: 1, n_exported_runs: 1,
+      n_edited_runs: 1, n_finished_pictures: 1,
     });
     expect(firstImageDone(firstImageSteps(sys(), all), all)).toBe(true);
   });
@@ -180,7 +180,7 @@ describe("firstImageDone", () => {
 
     const deep = stats({
       n_frames: 40, n_frames_accepted: 32, n_stack_runs: 1,
-      n_edited_runs: 1, n_exported_runs: 1,
+      n_edited_runs: 1, n_finished_pictures: 1,
     });
     const done = firstImageDoneMessage(firstImageSteps(sys(), deep));
     // The finishing steps are now ticked boxes, so the congratulation says the
