@@ -3115,6 +3115,15 @@ export const api = {
   // and the recap poster this is a href/download, not a fetch: the browser saves
   // the archive, and nothing is written on the server.
   galleryPicturesZipUrl: () => `/api/gallery/pictures.zip`,
+  // The same pictures at **full resolution**. Not a href/download: a target's
+  // native-resolution picture has no file on disk (it is rendered from the
+  // master FITS on demand), so the archive is built by a job first — start it,
+  // poll `getJob`, then send the browser to `galleryPicturesArchiveUrl`.
+  startPicturesArchive: () =>
+    req<{ job_id: string; already_running: boolean }>(
+      "/api/gallery/pictures-archive", { method: "POST" }),
+  galleryPicturesArchiveUrl: (jobId: string) =>
+    `/api/gallery/pictures-archive/${encodeURIComponent(jobId)}`,
 
   // "Try it with a sample image" onboarding demo
   getSampleStatus: () => req<SampleStatus>("/api/sample"),

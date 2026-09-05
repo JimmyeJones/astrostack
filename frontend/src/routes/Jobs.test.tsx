@@ -198,6 +198,24 @@ describe("JobsView process_target result actions", () => {
     expect(screen.getByText("Stacked 8 frames into a new master.")).toBeInTheDocument();
   });
 
+  it("keeps a finished full-size archive collectable from the Jobs page", async () => {
+    // The build takes minutes, so the tab that started it is often gone by the
+    // time it lands. Without this row the only way back to the finished file is
+    // to render every picture again.
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "arch-1", kind: "pictures_archive", target: null, state: "done",
+        result: { path: "/data/exports/my-astrostack-pictures-full.zip",
+                  n_pictures: 12, n_full_res: 12 },
+      }),
+    ]);
+    renderJobsRouted();
+    const link = await screen.findByRole("link",
+      { name: "Download 12 full-size pictures" });
+    expect(link).toHaveAttribute("href", "/api/gallery/pictures-archive/arch-1");
+    expect(screen.getByText("Preparing your full-size pictures")).toBeInTheDocument();
+  });
+
   it("falls back to History when the backend didn't report a run id", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({
@@ -899,6 +917,7 @@ describe("jobKindLabel", () => {
     expect(jobKindLabel("editor_batch")).toBe("Batch export");
     expect(jobKindLabel("build_master")).toBe("Building calibration master");
     expect(jobKindLabel("channel_combine")).toBe("Channel combine");
+    expect(jobKindLabel("pictures_archive")).toBe("Preparing your full-size pictures");
   });
   it("falls back to the raw kind for an unknown job type", () => {
     expect(jobKindLabel("some_future_kind")).toBe("some_future_kind");
