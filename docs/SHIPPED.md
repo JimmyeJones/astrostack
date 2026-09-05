@@ -14,6 +14,59 @@ Newest first.
 
 ---
 
+## v0.361.0 — 2026-09-05 — "Point here right now" also says *which corner* of the mosaic
+
+The follow-on v0.355.0 filed and deliberately left open ("care note (3)'s second slice — feeding the thinnest
+panel into Tonight's where-to-point hint").
+
+**The gap.** The Dashboard's one recommendation card answers *which target* — best-placed right now × how much
+another hour would actually cut its noise. For the §1 owner, a heavy mosaic user shooting one target across
+many nights, that is half the question. A 3×3 whose **total** looks healthy can still have one corner at a
+fifth of the others, and that corner is grainier than the rest of the picture however good the total is;
+pointing the scope at the mosaic again spreads tonight evenly over panels that don't need it equally. v0.355.0
+already computes exactly which corner — but only on the Target page, which is not where a beginner stands when
+the sky unexpectedly clears.
+
+**One fact, one vocabulary, two lengths.** `MosaicDepthMap.text` is the *card's* sentence: it explains what a
+thin panel means and what to do about it, which is right where the reader came to look at their mosaic. A
+recommendation row has space for one clause, so new `seestack.mosaicmap.aim_hint(m)` says the same fact short —
+built from the same two helpers, `panel_position_words` and `sharecard.format_duration`, that the long sentence
+uses. That is the point of putting it in the engine rather than in the card: "the bottom-right" and "about
+40 min" are the app's shared spellings for where a panel sits and how long an integration is, and a second
+spelling per surface is exactly how two screens end up naming different corners. A test pins that the clause
+and the paragraph agree about the position, and that the clause is the shorter of the two.
+
+**Silent by default, in every sense.** `aim_hint` returns `None` when there is no map (not a mosaic — the
+engine's own shared `pointing_groups` gate, not a second opinion) **and** when the mosaic is even. On an even
+mosaic `text` still reassures, but there is no corner to aim at, and turning a 3 % spread into advice would
+send a beginner chasing noise. So a single-field owner, a tight dither, an unsolved target and a well-filled
+mosaic all see precisely the card they see today.
+
+**Where it is read, and what it costs.** `MosaicDepthMapOut` gains an additive, defaulted `aim_hint`;
+`PointHereTonightCard` reads it for the **lead pick only**. Three extra project reads on every Dashboard load,
+to annotate rows nobody is being told to shoot, is a cost with no reader. The query uses the Target page's own
+`["mosaic-map", safe]` key, so when the owner opens the target the two surfaces share one cache entry — no
+second request, and by construction they cannot quote different panels. `retry: false`, because an older
+backend 404s the endpoint and that is a quiet no-op. The frontend never rebuilds the sentence locally: a
+backend too old to send the clause shows nothing rather than a locally invented wording.
+
+**Upgrade-safe (§9):** one new pure engine function, one additive and defaulted response field, one additive
+optional field on the frontend type, one extra line inside an existing self-hiding card. No config key, no
+schema change, no on-disk change, no default flipped, no existing endpoint or response field touched, and
+nothing new is always-on — per the standing IA rule the line joins a card that already exists rather than
+becoming another banner.
+
+**Tests: +4 Python engine, +2 API, +7 vitest.** `tests/test_mosaic_map.py` pins the clause naming the corner
+and both sides of the comparison, its agreement with the long sentence, its brevity, both silences (even
+mosaic, not a mosaic, and `None` passed straight through), and that the wording follows the thin panel around
+a 3×3 rather than settling on one corner. `tests/webapp/test_mosaic_map.py` pins the field arriving on the
+same response as `text` and agreeing with it, and the even-mosaic `null`. `PointHereTonightCard.test.tsx`
+covers the pure helper (pass-through, the three silences, and the older-backend case with the key deleted) and
+the card: the line rendering for the winner, only for the winner, the single lookup for the lead `safe`, no
+lookup at all when there is nothing to recommend, and a failed map request leaving the recommendation intact.
+
+---
+
 ## v0.358.1 — 2026-09-05 — A picture that was processed *and* turned stops mis-measuring itself
 
 **Verified bug, found while shipping v0.358.0 and reproduced before it was fixed.** Two surfaces recovered
@@ -580,8 +633,9 @@ single-field target, the grid and sentence on a mosaic, the named thin panel, an
 **set-aside** subs and **unsolved** subs are excluded, since either would point the owner at the wrong corner.
 `MosaicMapCard.test.tsx` covers the card, both silences, and the three pure helpers.
 
-**Deliberately left open:** care note (3)'s second slice — feeding the thinnest panel into Tonight's
-where-to-point hint. It is a clean follow-on and wants its own run.
+**Deliberately left open at the time:** care note (3)'s second slice — feeding the thinnest panel into
+Tonight's where-to-point hint. **Shipped in v0.361.0** (`seestack.mosaicmap.aim_hint` +
+`MosaicDepthMapOut.aim_hint` + the lead-pick line in `PointHereTonightCard`); see that entry.
 
 ---
 

@@ -177,6 +177,33 @@ def panel_position_words(row: int, col: int, rows: int, cols: int) -> str:
     return vertical or horizontal or "single"
 
 
+def aim_hint(m: MosaicDepthMap | None) -> str | None:
+    """One short clause for a "where do I point?" card, or ``None``.
+
+    :attr:`MosaicDepthMap.text` is the *card's* sentence — it explains what a
+    thin panel means and what to do about it, which is right where the reader
+    came to look at their mosaic. A "point here right now" recommendation has
+    room for one clause, so this is the same fact said short, from the same two
+    helpers (:func:`panel_position_words` and ``sharecard.format_duration``) —
+    the app keeps one vocabulary for where a panel sits and how long an
+    integration is, rather than growing a second spelling per surface.
+
+    ``None`` — say nothing at all — when there is no map (not a mosaic) or the
+    mosaic is even. On an even mosaic there is no corner to aim at, and turning
+    a 3 % spread into advice would send a beginner chasing noise; the caller
+    then shows exactly what it shows today.
+    """
+    if m is None or m.thin is None:
+        return None
+    from seestack.sharecard import format_duration
+
+    where = panel_position_words(m.thin.row, m.thin.col, m.rows, m.cols)
+    return (
+        f"Thinnest at the {where}: about {format_duration(m.thin.exposure_s)} "
+        f"there against {format_duration(m.median_exposure_s)} on a typical panel."
+    )
+
+
 def _verdict_text(panels: list[MosaicPanel], rows: int, cols: int,
                   median_s: float, thin: MosaicPanel | None) -> str:
     from seestack.sharecard import format_duration

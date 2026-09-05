@@ -705,6 +705,10 @@ export interface MosaicDepthMap {
   median_exposure_s: number;
   thin?: MosaicPanel | null;
   text: string;
+  /** The same fact as `text` in one clause, for a surface with room for a line
+   *  rather than a paragraph. `null`/absent on an even mosaic (nothing to aim
+   *  at) and on a backend too old to send it. */
+  aim_hint?: string | null;
 }
 
 export interface NightSummary {

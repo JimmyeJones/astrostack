@@ -464,6 +464,11 @@ class MosaicDepthMapOut(BaseModel):
     # ``None`` on an even mosaic — there is nothing to point at.
     thin: MosaicPanelOut | None = None
     text: str                # one plain-language sentence
+    # The same fact as `text`, said in one clause, for a surface with room for a
+    # line rather than a paragraph (the Dashboard's "point here right now"
+    # recommendation). ``None`` on an even mosaic — there is no corner to aim at.
+    # Additive and defaulted, so an older frontend simply ignores it.
+    aim_hint: str | None = None
 
 
 class FocusTrendPointOut(BaseModel):
