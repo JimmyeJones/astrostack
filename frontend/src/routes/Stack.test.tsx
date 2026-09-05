@@ -107,6 +107,70 @@ describe("StackView", () => {
     await waitFor(() => expect(screen.queryByText("Use recommended")).not.toBeInTheDocument());
   });
 
+  it("says so when a picked master is built from the wrong kind of frame", async () => {
+    // The build form takes a folder path and a kind from a dropdown, so a
+    // "master dark" made of light subs is a typo away — it fits, it applies, and
+    // it subtracts a picture of the sky out of every frame.
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 30s", kind: "dark", filename: "d1.fits", n_frames: 40,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true,
+        header_kinds: { light: 40 },
+        header_note: {
+          severity: "warn",
+          message: "Every frame here says something else: 40 say they are light "
+            + "frames (your subs).",
+        } },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null, bias_master_id: null,
+      scores: { "1": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+    // Nothing is picked yet, so nothing is said.
+    await waitFor(() => expect(screen.getByText("Use recommended")).toBeInTheDocument());
+    expect(screen.queryByText(/say they are light frames/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Use recommended"));
+    await waitFor(() =>
+      expect(screen.getByText(/Master dark "Dark 30s": Every frame here says/))
+        .toBeInTheDocument());
+  });
+
+  it("stays quiet about a master whose frames confirmed what they were", async () => {
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 30s", kind: "dark", filename: "d1.fits", n_frames: 40,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true,
+        header_kinds: { dark: 40 },
+        header_note: { severity: "ok", message: "All 40 frames say they are dark frames." } },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null, bias_master_id: null,
+      scores: { "1": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+    await waitFor(() => expect(screen.getByText("Use recommended")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Use recommended"));
+    await waitFor(() =>
+      expect(screen.queryByText("Use recommended")).not.toBeInTheDocument());
+    // (`Master dark` alone is the picker's own label, so match the note's shape.)
+    expect(screen.queryByText(/^Master dark "Dark 30s":/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/All 40 frames say/)).not.toBeInTheDocument();
+  });
+
   it("nudges when masters exist but nothing is selected, then hides once applied", async () => {
     mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
