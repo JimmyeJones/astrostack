@@ -2,10 +2,12 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { PointHereTonightCard, pointHereSubtitle, pointHereTitle } from "./PointHereTonightCard";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  PointHereTonightCard, pointHereAimLine, pointHereSubtitle, pointHereTitle,
+} from "./PointHereTonightCard";
 import * as client from "../../api/client";
-import type { BestTonight, TonightPick } from "../../api/client";
+import type { BestTonight, MosaicDepthMap, TonightPick } from "../../api/client";
 
 function pick(overrides: Partial<TonightPick> = {}): TonightPick {
   return {
@@ -41,6 +43,32 @@ function renderCard() {
     </MantineProvider>,
   );
 }
+
+function panel(row: number, col: number, subs: number) {
+  return { row, col, n_frames: subs, exposure_s: subs * 10, ra_deg: 10, dec_deg: 41 };
+}
+
+/** A 2×2 mosaic whose bottom-right corner is a tenth of the others. */
+function mosaicMap(overrides: Partial<MosaicDepthMap> = {}): MosaicDepthMap {
+  return {
+    panels: [panel(0, 0, 120), panel(0, 1, 120), panel(1, 0, 120), panel(1, 1, 12)],
+    rows: 2, cols: 2, median_exposure_s: 1200,
+    thin: panel(1, 1, 12),
+    text: "Your 2×2 mosaic is thinnest at the bottom-right: about 2 min there "
+      + "against 20 min on a typical panel. That part of the picture will look "
+      + "grainier than the rest until it catches up — more time on this mosaic "
+      + "is what evens it out.",
+    aim_hint: "Thinnest at the bottom-right: about 2 min there against 20 min "
+      + "on a typical panel.",
+    ...overrides,
+  };
+}
+
+// Every render asks for the lead pick's mosaic map; a single-field target is the
+// `null` answer, which is what most of these tests want.
+beforeEach(() => {
+  vi.spyOn(client.api, "mosaicMap").mockResolvedValue(null);
+});
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -153,5 +181,75 @@ describe("PointHereTonightCard", () => {
     expect(screen.queryByText(/° up$/)).toBeNull();
     // Said exactly once, in the subtitle — not once per pick underneath it.
     expect(screen.getAllByText(/Set your location in Settings/)).toHaveLength(1);
+  });
+});
+
+describe("pointHereAimLine", () => {
+  it("passes the backend's clause through when a panel is behind", () => {
+    expect(pointHereAimLine(mosaicMap()))
+      .toBe("Thinnest at the bottom-right: about 2 min there against 20 min "
+        + "on a typical panel.");
+  });
+  it("says nothing for a single field, an even mosaic, or an older backend", () => {
+    expect(pointHereAimLine(null)).toBeNull();          // not a mosaic
+    expect(pointHereAimLine(undefined)).toBeNull();     // request failed / pending
+    // An even mosaic: the long sentence still reassures, but there is no corner.
+    expect(pointHereAimLine(mosaicMap({ thin: null, aim_hint: null }))).toBeNull();
+    // A backend too old to send the clause must not be papered over locally —
+    // the wording lives in the engine so both surfaces quote one sentence.
+    const old = mosaicMap();
+    delete (old as { aim_hint?: unknown }).aim_hint;
+    expect(pointHereAimLine(old)).toBeNull();
+  });
+});
+
+describe("PointHereTonightCard — which corner of the mosaic", () => {
+  it("tells the owner where the winning mosaic is thin", async () => {
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload());
+    vi.spyOn(client.api, "mosaicMap").mockResolvedValue(mosaicMap());
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getByTestId("point-here-aim")).toBeInTheDocument());
+    expect(screen.getByTestId("point-here-aim"))
+      .toHaveTextContent(/Thinnest at the bottom-right/);
+    // Only the target it is actually recommending gets looked up.
+    expect(client.api.mosaicMap).toHaveBeenCalledTimes(1);
+    expect(client.api.mosaicMap).toHaveBeenCalledWith("M_31");
+  });
+
+  it("says nothing extra for a single-field target", async () => {
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload());
+    renderCard();
+    await waitFor(() => expect(screen.getByText("M 31")).toBeInTheDocument());
+    await waitFor(() => expect(client.api.mosaicMap).toHaveBeenCalled());
+    expect(screen.queryByTestId("point-here-aim")).toBeNull();
+  });
+
+  it("stays silent when the map request fails, and still recommends the target", async () => {
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload());
+    vi.spyOn(client.api, "mosaicMap").mockRejectedValue(new Error("404"));
+    renderCard();
+    await waitFor(() => expect(screen.getByText("M 31")).toBeInTheDocument());
+    await waitFor(() => expect(client.api.mosaicMap).toHaveBeenCalled());
+    expect(screen.queryByTestId("point-here-aim")).toBeNull();
+  });
+
+  it("annotates only the leader, never a runner-up", async () => {
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload({
+      picks: [pick(), pick({ safe: "NGC_7000", name: "NGC 7000", score: 40 })],
+    }));
+    vi.spyOn(client.api, "mosaicMap").mockResolvedValue(mosaicMap());
+    renderCard();
+    await waitFor(() => expect(screen.getByText("NGC 7000")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getAllByTestId("point-here-aim")).toHaveLength(1));
+    expect(client.api.mosaicMap).not.toHaveBeenCalledWith("NGC_7000");
+  });
+
+  it("asks for no map at all when there is nothing to recommend", async () => {
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload({ picks: [] }));
+    renderCard();
+    await waitFor(() => expect(client.api.getBestTonight).toHaveBeenCalled());
+    expect(client.api.mosaicMap).not.toHaveBeenCalled();
   });
 });
