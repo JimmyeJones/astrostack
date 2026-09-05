@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as client from "../../api/client";
 import type { StackFraming } from "../../api/client";
-import { FramingVerdictNote } from "./FramingVerdictNote";
+import { FramingVerdictNote, framingTitle } from "./FramingVerdictNote";
 
 function renderNote(qc: QueryClient = new QueryClient()) {
   return render(
@@ -237,5 +237,55 @@ describe("FramingVerdictNote — the offer tells the truth", () => {
 
     await screen.findByText("Nicely framed");
     expect(screen.queryByTestId("framing-nudge")).not.toBeInTheDocument();
+  });
+
+  it("headlines a mosaic as a mosaic, never as 'one frame'", async () => {
+    // The heading is written by the client, so it can contradict the sentence
+    // underneath it: a mosaic canvas is several frames of sky, and "It's bigger
+    // than one frame" over "is bigger than this mosaic" reads as a bug.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "partial",
+        canvas: "mosaic",
+        coverage: 0.4,
+        text: "is bigger than this mosaic — only about 40% of it is in this "
+          + "picture. Adding more panels next session would capture the rest.",
+      }));
+    renderNote();
+
+    expect(await screen.findByText("It's bigger than this mosaic")).toBeInTheDocument();
+    expect(screen.queryByText("It's bigger than one frame")).not.toBeInTheDocument();
+  });
+
+  it("headlines a clipped mosaic as a mosaic too", async () => {
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "clipped",
+        canvas: "mosaic",
+        coverage: 0.7,
+        text: "runs off the edge of this mosaic — about 70% of it made it in. "
+          + "It would fit whole, so just re-centre the mosaic next session.",
+      }));
+    renderNote();
+
+    expect(
+      await screen.findByText("Part of it is outside this mosaic"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the frame headings for a single field and for an older backend", async () => {
+    // `canvas` is additive: a backend that omits it read as one frame before,
+    // and must keep reading that way.
+    expect(framingTitle({ level: "partial", canvas: undefined }))
+      .toBe("It's bigger than one frame");
+    expect(framingTitle({ level: "partial", canvas: "frame" }))
+      .toBe("It's bigger than one frame");
+    expect(framingTitle({ level: "clipped", canvas: "frame" }))
+      .toBe("Part of it is outside the frame");
+    // The two headings that never mention a frame are shared by both shapes.
+    expect(framingTitle({ level: "centred", canvas: "mosaic" }))
+      .toBe(framingTitle({ level: "centred", canvas: "frame" }));
+    expect(framingTitle({ level: "off_centre", canvas: "mosaic" }))
+      .toBe(framingTitle({ level: "off_centre", canvas: "frame" }));
   });
 });

@@ -1459,6 +1459,11 @@ export interface StackFraming {
   // Null/omitted when the correction is too small to act on, or the verdict
   // isn't one a better pointing fixes.
   nudge?: StackRecentreNudge | null;
+  // Additive: which shape of picture the sentence is about. A mosaic canvas is
+  // several frames wide, so calling it "your frame" — or telling an owner who
+  // already shot a mosaic to shoot one — is wrong. Omitted by an older backend,
+  // which read as a single frame, so `undefined` means "frame".
+  canvas?: "frame" | "mosaic";
 }
 
 /** "Next time, nudge your Seestar about 0.4° west…" — the actionable half of a

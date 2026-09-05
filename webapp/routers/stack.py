@@ -6,6 +6,7 @@ import contextlib
 import json
 import os
 from collections.abc import Sequence
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -1335,7 +1336,8 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
     threadpool so they never block the job worker."""
     from seestack.objectinfo import identify_object
 
-    _, fits_path = _run_fits_path(request, safe, run_id)  # raises 404 for an unknown run
+    run = _run_row(request, safe, run_id)  # raises 404 for an unknown run
+    fits_path = run.fits_path
     lib = deps.open_library(request)
     try:
         entry = lib.find_target(safe)
@@ -1352,9 +1354,15 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
     # planner repeats its *nudge* on the row of a target the user already owns —
     # the one moment "nudge a little south" is actionable is while they're
     # pointing the scope, not the morning after. One definition, one voice.
+    # The run's own `is_mosaic` — the stacker's authoritative record of whether it
+    # built a union canvas — only picks the wording: a mosaic owner must not be
+    # told their multi-panel picture is "your frame", nor advised to go and shoot
+    # the mosaic they already shot. `None` (a run from before schema 8) reads as a
+    # single frame, which is exactly what this endpoint said before.
     from webapp.framing_advice import framing_payload
 
-    return await run_in_threadpool(framing_payload, fits_path, info)
+    return await run_in_threadpool(
+        partial(framing_payload, fits_path, info, is_mosaic=run.is_mosaic))
 
 
 def _object_payload(o: Any, x_px: float | None = None,

@@ -23,12 +23,21 @@ from pathlib import Path
 from typing import Any
 
 
-def framing_payload(fits_path: str | None, info) -> dict[str, Any] | None:  # noqa: ANN001
+def framing_payload(
+    fits_path: str | None, info, *, is_mosaic: bool | None = None,  # noqa: ANN001
+) -> dict[str, Any] | None:
     """The full "did I frame it well?" answer for one finished stack, or ``None``.
 
     ``info`` is the catalog match for the target (an
     :func:`seestack.objectinfo.identify_object` result); the caller has already
     established it is not ``None`` and carries a vetted ``size_arcmin``.
+
+    ``is_mosaic`` is the run's own ``stack_runs.is_mosaic`` — the stacker's
+    authoritative record of whether it built a union/mosaic canvas — and only
+    changes the *wording* of the verdict (see
+    :func:`seestack.framing.framing_result_verdict`). ``None``, which is what a
+    run recorded before schema 8 carries, reads as a single frame, i.e. exactly
+    the sentences this endpoint has always returned.
 
     ``None`` — never a guess — when the run has no FITS, no usable celestial WCS,
     no measurable plate scale, or the object's position can't be projected onto
@@ -38,6 +47,8 @@ def framing_payload(fits_path: str | None, info) -> dict[str, Any] | None:  # no
     if not fits_path or info is None or info.size_arcmin is None:
         return None
     from seestack.framing import (
+        CANVAS_FRAME,
+        CANVAS_MOSAIC,
         framing_result_verdict,
         recentre_nudge,
         recentre_outcome,
@@ -66,6 +77,7 @@ def framing_payload(fits_path: str | None, info) -> dict[str, Any] | None:  # no
     v = framing_result_verdict(
         x_px=x_px, y_px=y_px, width_px=width, height_px=height,
         arcsec_per_px=scale, size_arcmin=info.size_arcmin,
+        canvas=CANVAS_MOSAIC if is_mosaic else CANVAS_FRAME,
     )
     if v is None:
         return None
@@ -93,6 +105,9 @@ def framing_payload(fits_path: str | None, info) -> dict[str, Any] | None:  # no
         "text": v.text,
         "coverage": v.coverage,
         "off_centre": v.off_centre,
+        # Which shape of picture the sentence above is about ("frame" or
+        # "mosaic"), so a UI heading can't contradict the sentence under it.
+        "canvas": v.canvas,
         # Which way, and how far, to move the mount so it lands in the middle
         # next time. `null` when the correction is too small to act on, or the
         # verdict isn't one a re-point fixes.
@@ -153,7 +168,8 @@ def newest_picture_nudge(proj, info):  # noqa: ANN001, ANN201
         if not run.fits_path or not Path(run.fits_path).exists():
             continue
         try:
-            payload = framing_payload(run.fits_path, info)
+            payload = framing_payload(run.fits_path, info,
+                                      is_mosaic=getattr(run, "is_mosaic", None))
         except Exception:  # noqa: BLE001 — an unreadable master is "no advice"
             return None
         if payload is None:
