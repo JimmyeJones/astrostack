@@ -114,4 +114,28 @@ describe("StorageView", () => {
     fireEvent.click(screen.getByRole("button", { name: /clear cache/i }));
     expect(await screen.findByText(/Editor previews \(0 MB\)/i)).toBeInTheDocument();
   });
+
+  it("names the prepared full-size download and offers the space back", async () => {
+    // A season of mosaics at print size is gigabytes. Storage is where a NAS
+    // owner asks what is using the disk, so it must be nameable here rather
+    // than turning up as usage nothing accounts for.
+    vi.spyOn(client.api, "getStorage")
+      .mockResolvedValue(mkStorage({ exports_bytes: 3 * 1024 ** 3 }));
+    const clear = vi.spyOn(client.api, "clearPicturesArchive")
+      .mockResolvedValue({ removed: true, freed_bytes: 3 * 1024 ** 3 });
+    renderStorage();
+
+    expect(await screen.findByText(/Prepared download: 3.00 GB/)).toBeInTheDocument();
+    expect(screen.getByText(/Safe to delete/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /delete/i }));
+    await waitFor(() => expect(clear).toHaveBeenCalled());
+  });
+
+  it("says nothing about a prepared download when there isn't one", async () => {
+    // Including on an older backend that doesn't report the field at all.
+    vi.spyOn(client.api, "getStorage").mockResolvedValue(mkStorage({ exports_bytes: 0 }));
+    renderStorage();
+    await waitFor(() => expect(screen.getByText(/Library total:/)).toBeInTheDocument());
+    expect(screen.queryByText(/Prepared download/)).toBeNull();
+  });
 });

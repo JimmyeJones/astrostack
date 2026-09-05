@@ -299,6 +299,68 @@ def test_no_pictures_at_all_fails_the_job_rather_than_writing_an_empty_zip(
     assert "no finished pictures" in (job["error"] or "")
 
 
+def test_storage_names_the_prepared_archive(client, solved_library):
+    """A season of pictures at print size is gigabytes sitting outside the
+    library, so the page whose whole job is "what is using my disk?" has to be
+    able to account for it."""
+    assert client.get("/api/storage").json()["exports_bytes"] == 0
+
+    _add_run(solved_library, _safes(client)[0], w=900, h=700)
+    _build(client)
+
+    reported = client.get("/api/storage").json()["exports_bytes"]
+    from webapp import picturesarchive
+    on_disk = picturesarchive.archive_path(
+        type("S", (), {"data_root": str(solved_library)})()).stat().st_size
+    assert reported == on_disk > 0
+
+
+def test_deleting_the_prepared_archive_frees_it_and_nothing_else(
+    client, solved_library,
+):
+    """It is a cache: every byte can be made again from pictures that stay put.
+    Deleting it must take that file and only that file."""
+    safe = _safes(client)[0]
+    _add_run(solved_library, safe, w=900, h=700)
+    _build(client)
+
+    def _snapshot(root: Path) -> set[str]:
+        return {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()}
+
+    library_before = _snapshot(Path(solved_library) / "library")
+    incoming_before = _snapshot(Path(solved_library) / "incoming")
+
+    r = client.delete("/api/gallery/pictures-archive")
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"] is True
+    assert r.json()["freed_bytes"] > 0
+    assert client.get("/api/storage").json()["exports_bytes"] == 0
+    assert _snapshot(Path(solved_library) / "library") == library_before
+    assert _snapshot(Path(solved_library) / "incoming") == incoming_before
+
+    # Idempotent: pressing it again is not an error, it just has nothing to do.
+    again = client.delete("/api/gallery/pictures-archive")
+    assert again.status_code == 200
+    assert again.json() == {"removed": False, "freed_bytes": 0}
+
+
+def test_a_deleted_archive_is_offered_again_rather_than_404ing_silently(
+    client, solved_library,
+):
+    """The job that built it is still in the list, so its download link outlives
+    the file. It has to say the archive is gone, and building again has to work."""
+    _add_run(solved_library, _safes(client)[0], w=700, h=500)
+    built = _build(client)
+    client.delete("/api/gallery/pictures-archive")
+
+    gone = client.get(f"/api/gallery/pictures-archive/{built['job_id']}")
+    assert gone.status_code == 404
+    assert "build it again" in gone.json()["detail"]
+
+    rebuilt = _build(client)
+    assert _archive(client, rebuilt["job_id"]).namelist()
+
+
 def test_cancelling_leaves_no_archive(client, solved_library):
     """A half-built backup that looked complete would be worse than none: a
     cancelled build removes its part file and reports no path."""
