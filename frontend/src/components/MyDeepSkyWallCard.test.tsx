@@ -1,6 +1,7 @@
 import { MantineProvider } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MyDeepSkyWallCard } from "./MyDeepSkyWallCard";
 import * as client from "../api/client";
@@ -69,8 +70,52 @@ describe("MyDeepSkyWallCard", () => {
     await screen.findByRole("link", { name: /Download all 2 pictures/ });
     expect(screen.queryByText(/full-size pictures themselves/)).toBeNull();
     expect(screen.getByText(/at the size you see it here/)).toBeInTheDocument();
-    // …and it says where a print-size copy actually lives.
-    expect(screen.getByText(/Full-res PNG/)).toBeInTheDocument();
+    // …and it says where a print-size copy actually lives: the button beside it.
+    expect(screen.getByRole("button", { name: /Full-size versions/ })).toBeInTheDocument();
+    expect(screen.getByText(/For printing/)).toBeInTheDocument();
+  });
+
+  it("builds the full-size archive as a job, then downloads what it built", async () => {
+    // A target's native-resolution picture has no file on disk — it is rendered
+    // per target — so this one can't be a plain href like its two neighbours.
+    // It starts a job, follows it, and only then sends the browser to the file.
+    vi.spyOn(client.api, "getLibrarySummary")
+      .mockResolvedValue(summary([hero("m_42"), hero("m_31")]));
+    const start = vi.spyOn(client.api, "startPicturesArchive")
+      .mockResolvedValue({ job_id: "job-7", already_running: false });
+    vi.spyOn(client.api, "getJob").mockResolvedValue({
+      id: "job-7", kind: "pictures_archive", state: "done",
+      result: { n_pictures: 2, path: "/data/exports/x.zip" },
+    } as never);
+    const clicks: string[] = [];
+    HTMLAnchorElement.prototype.click = vi.fn(function (this: HTMLAnchorElement) {
+      clicks.push(this.getAttribute("href") ?? "");
+    });
+    renderCard();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Full-size versions/ }));
+    await waitFor(() => expect(start).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(clicks).toEqual(["/api/gallery/pictures-archive/job-7"]));
+  });
+
+  it("says what went wrong instead of pretending the download started", async () => {
+    vi.spyOn(client.api, "getLibrarySummary")
+      .mockResolvedValue(summary([hero("m_42"), hero("m_31")]));
+    vi.spyOn(client.api, "startPicturesArchive")
+      .mockRejectedValue(new Error("You don't have any finished pictures yet."));
+    const show = vi.spyOn(notifications, "show").mockImplementation(() => "");
+    const clicks: string[] = [];
+    HTMLAnchorElement.prototype.click = vi.fn(function (this: HTMLAnchorElement) {
+      clicks.push(this.getAttribute("href") ?? "");
+    });
+    renderCard();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Full-size versions/ }));
+    await waitFor(() => expect(show).toHaveBeenCalledWith(expect.objectContaining({
+      color: "red", message: "You don't have any finished pictures yet.",
+    })));
+    expect(clicks).toEqual([]);
   });
 
   it("says how many it is showing when the library holds more than fit", async () => {

@@ -14,6 +14,146 @@ Newest first.
 
 ---
 
+## v0.357.1 — 2026-09-05 — The prepared download is nameable disk, and clearable
+
+Follow-on to v0.357.0, closing the one thing it left on a NAS with a fixed disk allowance: **the archive
+was real disk usage that no screen could account for.** "Full-size versions" writes a season of pictures at
+print size into `<data_root>/exports/` — easily gigabytes — and it lives *outside* the library, so the
+Storage page's own totals walked straight past it. That page exists to answer "what is using my disk?"; a
+multi-gigabyte file it cannot name is the one answer it must not give.
+
+`StorageResponse` gains `exports_bytes` (additive, defaulted `0`, measured with the same best-effort
+`_dir_bytes` every other figure on the page uses), and `DELETE /api/gallery/pictures-archive` gives the
+space back. It is a cache in exactly the sense the page's other clearables are — every byte can be made
+again from pictures that stay where they are — so the row says *"Safe to delete — you can build it again
+whenever you want it"* and the delete is **idempotent**: with nothing built, `removed` is `False` and it is
+not an error. The stale `.part` file of an interrupted build is swept with it.
+
+Self-hiding: `exports_bytes` of 0 — every install that never presses the button, and an older backend that
+doesn't report the field — renders nothing at all.
+
+**Upgrade-safe (§9):** one additive response field with a default, one new endpoint, one conditional row.
+No config, schema, on-disk layout or default change; the deletion is scoped to the two paths this module
+owns and cannot reach the library or `incoming/` (§10), pinned by a snapshot test.
+
+**Tests (+3 Python, +2 vitest).** `tests/webapp/test_pictures_archive.py`: storage reports 0 before a build
+and the file's exact size after; deleting frees it, zeroes the figure, leaves the library and `incoming/`
+byte-identical, and is a no-op the second time; and a job whose archive has been deleted 404s with *"build
+it again"* rather than a dead link, with a rebuild still working. `Storage.test.tsx`: the row names the
+size and offers the delete, and says nothing when there is nothing prepared.
+
+---
+
+## v0.357.0 — 2026-09-05 — "Full-size versions": every finished picture at print size, as one job-built archive
+
+**The gap this closes was already admitted in shipped copy.** `/api/gallery/pictures.zip` streams each
+target's stored *preview*, which `_write_preview_png` caps at 1024 px, and since v0.308.1 the card that
+offers it says so in as many words — *"the picture at the size you see it here — right for a phone album,
+not for printing"*. So someone backing up a season, or printing the picture they spent an evening editing,
+had one route: open every target and press **Full-res PNG**, one at a time. That is exactly the friction a
+bulk download exists to remove.
+
+**Why it is a job and not a second query parameter** — the reasoning the 2026-08-30 note left as the
+re-file. A target's native-resolution picture has **no file on disk**: it is rendered per request from the
+master FITS plus the run's saved editor recipe. "Prefer the TIFF" is worse than the preview it would
+replace (a stack's TIFF is written linear, so it opens black), and rendering inside a streaming response
+means a download that silently becomes a twenty-minute wait with no progress and no way back. So:
+`POST /api/gallery/pictures-archive` submits a **`pictures_archive` job** with progress and cancel,
+`GET /api/gallery/pictures-archive/{job_id}` hands over what it built — the same submit-poll-download shape
+the editor's PNG, share and print exports already use.
+
+**One render, not a second one.** The decision about *which* full-resolution render a finished run means —
+the saved recipe when its preview is a baked display-space edit, otherwise the STF (or the asinh curve
+History's "Adjust" saved), plus the North-up turn the stored bytes already carry — moved out of the
+per-run endpoint into `pipeline.render_run_full_res_png`, which both callers now use. A test asserts the
+archive's member is **byte-for-byte** the same PNG that target's own "Full-res PNG" button serves; two
+renders of one picture that disagreed is the kind of bug nobody notices until they compare prints.
+Member naming moved the same way: `picturesarchive.unique_entry_name` is now the one rule both archives
+name by (gallery.py re-exports it under its old private name), so two downloads that both call themselves
+"all my pictures" cannot disagree about which picture is `M_42-2.png`.
+
+**What is in it.** The same population as the streaming zip — each target's current picture (pinned cover,
+else newest run with a preview) plus every finished Moon/Sun still. A still's `stack.png` is already
+written at native resolution, so it is copied verbatim rather than re-rendered. A run whose master FITS has
+been pruned cannot be rendered at full size: its preview goes in anyway and the archive names it in a
+`_preview_size.txt` note, because dropping a picture from a *backup* is the worst answer and slipping the
+small one in silently is the second-worst. An unreadable picture is skipped into `_skipped.txt`, the same
+promise the streaming zip makes.
+
+**Disk, on a NAS with a fixed allowance.** One archive at a time, in a new app-owned
+`<data_root>/exports/`: the previous one is deleted before the next is built, it is written to a `.part`
+file and renamed on success, and a cancelled build removes its part file and reports no path — a
+half-archive that looked complete would be worse than none. Peak memory is one picture: each is rendered,
+written into the zip and dropped before the next starts. Stored, not deflated (PNGs are already
+compressed). A second press while one is building returns the running job rather than queueing a duplicate.
+
+**Nothing the user owns is written** — no new stack run, no new preview, no export marker, and nothing at
+all inside `incoming/` (AGENTS.md §10), pinned by a test that snapshots both trees around a build.
+
+**Upgrade-safe (§9):** two new endpoints, one new module, one new job kind, one new button. No config key,
+no schema change, no existing response shape touched, no default flipped, nothing on disk moved — the
+`exports/` directory is created on first use and is a cache, safe to delete by hand.
+
+**Discoverable and recoverable.** The button sits in `MyDeepSkyWallCard` beside the two downloads it
+completes, and the copy that used to point at the per-picture "Full-res PNG" now points at it and says it
+takes a few minutes because each picture is rendered fresh. The build outlives the tab that started it, so
+the Jobs page carries a **Download N full-size pictures** action on the finished job rather than making
+someone render the whole library again.
+
+**Tests (+11 Python, +3 vitest).** `tests/webapp/test_pictures_archive.py`: full resolution rather than the
+preview cap; byte-for-byte agreement with the per-run download; the pinned cover winning over the newest
+run; the pruned-master fallback *and* its note; one corrupt master not sinking the archive; the Moon still
+riding along verbatim; two builds leaving one file and no `.part`; the archive being the only thing
+written; the 404/409 download guards including a job of another kind; the empty-library refusal; and a
+cancelled build leaving nothing behind. `MyDeepSkyWallCard.test.tsx` (+2, one rewritten to pin the new
+copy): the job-then-download flow, and an error that says what went wrong instead of pretending a download
+started. `Jobs.test.tsx` (+1, +1 assertion): the job label and the recovery link.
+
+*(Original entry, cut from `IMPROVEMENTS.md` — the filing, and the 2026-08-30 sizing note that re-filed it
+as this shape.)*
+
+- **NEW IDEA (Builder 2026-08-27, the half deliberately left out of the v0.285.0 pictures zip) — let "Download
+  all my pictures" hand over the *edited, full-size* picture where one exists, not only the display preview.**
+  *(Pillar: get/share + trust, PRIORITY 3; size S–M; additive, read-only, opt-in by shape. Confidence: the gap
+  is certain; the right default is the open question.)*
+  v0.285.0 ships each target's **preview** — deliberately, because "what you download is what you saw" is the
+  honest default and it needs no re-render. But a beginner who spent an evening in the editor and exported a
+  full-res picture reasonably expects *that* file in their backup, and the app already knows where it is: the
+  editor's export path is recorded per run (the same marker `/api/gallery/unexported-edits` reads to tell a
+  target's saved edit from its exported one). A zip that silently holds only the small preview is the kind of
+  quiet shortfall that costs trust the first time someone tries to print from it.
+  **Shape.** Per target, prefer the run's **exported edit** if the file exists, else the TIFF/FITS if the user
+  asked for full-size, else the preview — surfaced as one plain-language choice next to the button (*"pictures
+  as shown"* vs *"full-size files"*), defaulting to the current behaviour so nothing changes for anyone who
+  doesn't ask. Keep the streaming shape exactly as it is (it is already size-blind), keep `_skipped.txt`, and
+  keep the `safe_name`-derived entry names. **Cautions:** full-size FITS of a big mosaic is hundreds of MB per
+  target, so the copy next to the option has to say roughly how big the download will be before someone taps it
+  on a phone; and the picker must never re-render or re-export anything — if there is no exported file, fall
+  back, don't build one.
+
+  **⚠️ Builder 2026-08-30 (branch `claude/compassionate-galileo-1bqxek`) — sized this against the real code,
+  shipped the honest half (**v0.308.1**) and left the rest, deliberately. Read this before picking it up.**
+  **What I fixed, because it was a plain untruth in shipped copy:** `MyDeepSkyWallCard` told the user
+  *"\"Download all\" gives you the **full-size pictures themselves** in a zip"*. It does not — `_library_pictures`
+  resolves `current_picture_path`, which is a *preview* path in all three of its steps, and `_write_preview_png`
+  caps a preview at **1024 px**. Someone backing up a season and later trying to print would find that out at the
+  worst possible moment. The line now says the pictures are "at the size you see it here — right for a phone
+  album, not for printing" and points at the per-picture **Full-res PNG** that genuinely is full size. A test
+  pins that the old phrase is gone and the new one, plus the pointer, is there.
+  **Why the feature half didn't ship with it — the spec's own "prefer the TIFF" is a trap.** A *stack's* TIFF is
+  written `tiff_mode="linear"` (`write_stack_outputs` → `_write_tiff`), i.e. **unstretched**, so it opens looking
+  black. Only an **editor export** writes a display-space TIFF (`already_display=True`). So "prefer the TIFF"
+  would hand a beginner a black file for every target they never opened in the editor — worse than the preview it
+  replaced, and precisely the trust cost this entry exists to avoid. The file that *is* the full-size picture for
+  an ordinary run is the **full-res PNG**, and that has no file on disk: `…/full-res-png` renders it per request
+  (no cache), which the entry's own caution rightly forbids inside a streaming picker.
+  **So the honest shape is a job, not a query parameter** — the same shape "Finish them all" already uses:
+  render each target's full-res PNG into a staged archive with progress, then hand over the finished file. That
+  is an **L**, not the S–M filed here, and it needs a decision about where the staging bytes live on a NAS with a
+  fixed disk allowance. Re-file it that way rather than bolting `?full=true` onto the streaming endpoint.
+
+---
+
 ## v0.356.2 — 2026-09-05 — `header_kind_note` says what the frames said, and survives whatever the registry holds
 
 **Two gaps in v0.356.0, found by driving the function adversarially rather than by reading it.**

@@ -24,7 +24,7 @@ from seestack.core.cache import CacheManager
 from seestack.edit.proxy import proxy_dir
 from seestack.io.project import StackRunRow
 from seestack.render.thumbnail import thumbs_dir
-from webapp import deps
+from webapp import deps, picturesarchive
 from webapp.storage_estimate import estimate_nightly_bytes
 
 router = APIRouter(tags=["storage"])
@@ -133,6 +133,13 @@ class StorageResponse(BaseModel):
     total_bytes: int
     output_bytes: int
     cache_bytes: int
+    #: The prepared full-size picture archive ("Full-size versions" on the
+    #: Gallery), which is a season of pictures at print size and easily
+    #: gigabytes. It lives outside the library, so without this line it is disk
+    #: the page cannot account for — the one question this page exists to
+    #: answer. ``0`` when none has been built, which is the default and every
+    #: install that never presses the button.
+    exports_bytes: int = 0
     disk: dict
 
 
@@ -215,6 +222,9 @@ def get_storage(request: Request) -> StorageResponse:
         total_bytes=library_bytes,
         output_bytes=sum(r.output_bytes for r in rows),
         cache_bytes=sum(r.cache_bytes for r in rows),
+        # Best-effort like every other figure here: a missing directory is 0.
+        exports_bytes=_dir_bytes(
+            picturesarchive.archive_dir(deps.get_settings(request))),
         disk=disk,
     )
 

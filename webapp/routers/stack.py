@@ -907,10 +907,10 @@ async def download_full_res_png(
             raise HTTPException(
                 status_code=404,
                 detail="No FITS for this run to render at full resolution")
-        basename, fits_path = run.output_basename, run.fits_path
-        # The stretch History's "Adjust" save baked into the stored preview, if
-        # the user tuned one (NULL on an unadjusted or display-space run).
-        preview_stretch, preview_black = run.preview_stretch, run.preview_black
+        basename = run.output_basename
+        # The saved editor recipe, when the run's preview is a baked display-space
+        # edit — read here because only here is the project open. (The stretch
+        # History's "Adjust" saved rides on the run row itself.)
         recipe_json = None
         if _preview_is_display_space(run.options_json):
             recipe_json = proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}")
@@ -918,46 +918,17 @@ async def download_full_res_png(
         proj.close()
         lib.close()
 
-    recipe_dict = None
-    if recipe_json:
-        with contextlib.suppress(json.JSONDecodeError):
-            parsed = json.loads(recipe_json)
-            if isinstance(parsed, dict):
-                recipe_dict = parsed
-
-    # A run whose preview a past "Adjust → North up → Save" turned shows that
-    # turned picture *everywhere* — the thumbnail, the big view, the share JPEG,
-    # the wallpaper — because all of them serve the stored bytes. This render
-    # starts from the FITS instead, which is on the canvas grid, so without this
-    # it would hand back the same picture rotated back: a download that visibly
-    # disagrees with the picture the user clicked on, under a menu item that says
-    # it is that picture at full size. The turn is applied whenever the stored
-    # bytes carry one, whether or not this request asked for it — and asking for
-    # it as well is the same render, not a second rotation, because both mean
-    # "the run's own full North-up correction".
-    # In the threadpool because the recovered-angle path reads the preview's PNG
-    # header and the master's WCS, and this endpoint is async.
-    render_north_up = bool(north_up) or bool(
-        await run_in_threadpool(baked_north_up_deg, run))
-
-    if recipe_dict is not None:
-        png = await run_in_threadpool(
-            pipeline.render_run_recipe_fullres_png, fits_path, recipe_dict,
-            max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=render_north_up,
-        )
-    else:
-        # A run the user tuned in History's "Adjust" has its stored preview baked
-        # through the *asinh* curve, not the STF — and the thumbnail, share-JPEG
-        # and wallpaper all serve those bytes. Carry the saved stretch/black into
-        # the full-res render so this download shows the same picture instead of
-        # silently reverting to the autostretch. An unadjusted run (columns NULL)
-        # keeps the STF exactly as before.
-        from seestack.render.thumbnail import render_preview_png_full_res
-        png = await run_in_threadpool(
-            render_preview_png_full_res, fits_path,
-            max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE, north_up=render_north_up,
-            stretch=preview_stretch, black=preview_black,
-        )
+    # Which render a finished run *means* at full resolution — the saved recipe
+    # when its preview is a baked display-space edit, else the STF (or the asinh
+    # curve History's "Adjust" saved), and the North-up turn either way — is
+    # decided once, in `pipeline.render_run_full_res_png`, so this button and the
+    # whole-library archive can never hand over two different pictures of one run.
+    # In the threadpool because it renders (and the recovered-angle path reads the
+    # preview's PNG header and the master's WCS), and this endpoint is async.
+    png = await run_in_threadpool(
+        pipeline.render_run_full_res_png, run, recipe_json,
+        north_up=bool(north_up), max_long_edge=_FULL_RES_PNG_MAX_LONG_EDGE,
+    )
     filename = f"{basename}_fullres.png"
     return Response(
         content=png, media_type="image/png",
