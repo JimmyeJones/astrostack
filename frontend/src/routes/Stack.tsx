@@ -16,8 +16,8 @@ import { backgroundModeLabel, backgroundModeNudge } from "../backgroundModeNudge
 import { SampleTourNote } from "../components/SampleTourNote";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import {
-  biasSizeWarning, darkScalingBlockedNote, exposureMismatch, masterOptionSuffix,
-  masterRecommendation, masterSizeWarning, tempMismatch,
+  biasSizeWarning, darkScalingBlockedNote, exposureMismatch, flatBayerWarning,
+  masterOptionSuffix, masterRecommendation, masterSizeWarning, tempMismatch,
 } from "../calibrationFit";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
@@ -380,7 +380,7 @@ export function StackView() {
       .map((m) => {
         // A master built for another camera/binning can't be applied at all, so
         // say so in the picker rather than only after it's chosen.
-        const misfit = masterOptionSuffix(m, frameDims);
+        const misfit = masterOptionSuffix(m, frameDims, kind);
         const star = !misfit && m.id === recId ? " ★ recommended" : "";
         return {
           value: String(m.id),
@@ -513,6 +513,11 @@ export function StackView() {
   // the "I added darks and nothing happened" confusion worth heading off.
   const darkSizeWarning = masterSizeWarning("dark", darkM, frameDims);
   const flatSizeWarning = masterSizeWarning("flat", flatM, frameDims);
+  // The flat's other hard blocker: a different colour-filter phase. Same shape as
+  // the size clash (the engine refuses it, the walk-away path silently skips it),
+  // and flats only — a dark/bias corrects each physical pixel, so its phase is
+  // irrelevant and flagging it would be noise.
+  const flatBayerWarn = flatBayerWarning(flatM, frameDims);
   const flatDarkSizeWarning = masterSizeWarning("flat-dark", flatDarkM, frameDims);
   // The bias is the one slot where a size clash isn't fatal: with a dark chosen
   // it is never subtracted from the lights, so the shared "stacking will fail"
@@ -999,6 +1004,11 @@ export function StackView() {
                 {flatSizeWarning ? (
                   <Alert color="red" variant="light" py={6} px="sm">
                     <Text size="xs">{flatSizeWarning}</Text>
+                  </Alert>
+                ) : null}
+                {!flatSizeWarning && flatBayerWarn ? (
+                  <Alert color="red" variant="light" py={6} px="sm">
+                    <Text size="xs">{flatBayerWarn}</Text>
                   </Alert>
                 ) : null}
                 {darkWarning ? (

@@ -107,6 +107,12 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
         masters, exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c)
     rec["params"]["width_px"] = calibration.modal_dim([f.width_px for f in frames])
     rec["params"]["height_px"] = calibration.modal_dim([f.height_px for f in frames])
+    # The subs' own colour-filter phase, so the form's "Use recommended" lands on
+    # a flat the engine will actually accept (a flat one phase out divides red
+    # photosites by a green correction — ``CalibrationMasters.validate`` refuses
+    # it). Additive: an older client ignores the key.
+    rec["params"]["bayer_pattern"] = calibration.modal_bayer(
+        [f.bayer_pattern for f in frames])
     rec["n_frames"] = len(frames)
     # One source of truth for "is this master a poor match?" — see the docstring.
     # ``exposure_frac`` is measured against the *master's* exposure
@@ -132,6 +138,7 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
         settings.resolved_library_root, masters,
         exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c,
         width_px=rec["params"]["width_px"], height_px=rec["params"]["height_px"],
+        bayer_pattern=rec["params"]["bayer_pattern"],
     )
     return rec
 
@@ -211,6 +218,8 @@ def _target_acquisition(lib: Any, entry: Any) -> dict[str, Any] | None:
             [f.sensor_temp_c for f in frames if f.sensor_temp_c is not None]),
         "width_px": calibration.modal_dim([f.width_px for f in frames]),
         "height_px": calibration.modal_dim([f.height_px for f in frames]),
+        "bayer_pattern": calibration.modal_bayer(
+            [f.bayer_pattern for f in frames]),
     }
 
 

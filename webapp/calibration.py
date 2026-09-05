@@ -228,6 +228,48 @@ def dims_conflict(
         return False
 
 
+def modal_bayer(vals: list[Any]) -> str | None:
+    """Most common usable ``BAYERPAT`` in *vals*, or ``None``.
+
+    The string twin of :func:`modal_dim`, and it borrows the engine's own
+    normaliser so "is this the same sensor layout?" has exactly one answer across
+    the app: anything that isn't one of the four real 2×2 CFA phases (a blank
+    card, a mono frame) is ignored rather than voted for.
+    """
+    from seestack.calibrate.apply import _norm_bayer
+
+    counts: dict[str, int] = {}
+    for v in vals:
+        p = _norm_bayer(v)
+        if p is None:
+            continue
+        counts[p] = counts.get(p, 0) + 1
+    return max(counts, key=lambda k: counts[k]) if counts else None
+
+
+def bayer_conflict(master: dict[str, Any], bayer_pattern: str | None) -> bool:
+    """True when *master* was provably built on a different colour-filter phase.
+
+    Same one-sided rule as :func:`dims_conflict`: a master (or a target) that
+    never recorded a usable ``BAYERPAT`` cannot be *disproved*, so it is not a
+    conflict, and nothing that binds today stops binding.
+
+    Only meaningful for a **flat**, which is divided into the raw Bayer mosaic
+    per colour — one pixel out of phase and every red photosite is corrected by a
+    green value, which tints the whole picture. A dark or bias corrects each
+    physical pixel, so its phase genuinely doesn't matter and callers must not
+    gate on this; ``CalibrationMasters.calibration_warnings`` mentions it there
+    instead. The engine refuses a mismatched flat outright
+    (``CalibrationMasters.validate``), so the unattended binders share this test
+    for the same reason they share ``dims_conflict``: binding one would turn a
+    walk-away stack into an error.
+    """
+    from seestack.calibrate.apply import _norm_bayer
+
+    mine, theirs = _norm_bayer(master.get("bayer_pattern")), _norm_bayer(bayer_pattern)
+    return mine is not None and theirs is not None and mine != theirs
+
+
 def _match_distance(
     master: dict[str, Any], *, exposure_s: float | None,
     gain: float | None, sensor_temp_c: float | None, kind: str,
@@ -362,6 +404,7 @@ def auto_bind_master_paths(
     sensor_temp_c: float | None = None,
     width_px: int | None = None,
     height_px: int | None = None,
+    bayer_pattern: str | None = None,
 ) -> dict[str, Any]:
     """Calibration master *paths* safe to auto-apply in an *unattended* stack.
 
@@ -377,7 +420,8 @@ def auto_bind_master_paths(
     """
     bound = auto_bind_master_ids(
         library_root, masters, exposure_s=exposure_s, gain=gain,
-        sensor_temp_c=sensor_temp_c, width_px=width_px, height_px=height_px)
+        sensor_temp_c=sensor_temp_c, width_px=width_px, height_px=height_px,
+        bayer_pattern=bayer_pattern)
     out: dict[str, Any] = {}
     for id_key, path_key in _BOUND_ID_TO_PATH_KEY.items():
         mid = bound.get(id_key)
@@ -400,6 +444,7 @@ def auto_bind_master_ids(
     sensor_temp_c: float | None = None,
     width_px: int | None = None,
     height_px: int | None = None,
+    bayer_pattern: str | None = None,
 ) -> dict[str, Any]:
     """Calibration master *ids* safe to auto-apply in an *unattended* stack.
 
@@ -573,6 +618,13 @@ def auto_bind_master_ids(
     )
     for cand in flat_candidates:
         if not _flat_match_confident(cand, gain=gain, sensor_temp_c=sensor_temp_c):
+            continue
+        # A flat divides into the raw Bayer mosaic per colour, so one built on a
+        # different CFA phase would tint every frame — and the engine refuses it
+        # outright (``CalibrationMasters.validate``), which would turn a
+        # walk-away stack into an error. Skip it here for the same reason the
+        # dimension gate exists, and let a further-but-matching flat bind.
+        if bayer_conflict(cand, bayer_pattern):
             continue
         p = _bindable(cand.get("id"))
         if p is None:
@@ -795,7 +847,7 @@ def _fmt_seconds(value: float) -> str:
 #: dict keeps the helper pure and unit-testable without a Library/Project.
 COVERAGE_TARGET_KEYS = (
     "name", "safe_name", "exposure_s", "gain", "sensor_temp_c",
-    "width_px", "height_px",
+    "width_px", "height_px", "bayer_pattern",
 )
 
 
@@ -806,6 +858,7 @@ def coverage_miss_reason(
     sensor_temp_c: float | None = None,
     width_px: int | None = None,
     height_px: int | None = None,
+    bayer_pattern: str | None = None,
 ) -> str | None:
     """*Why* the unattended binder can't apply ``master`` to these subs, in one
     plain-language clause — or ``None`` when nothing about the master itself
@@ -839,6 +892,14 @@ def coverage_miss_reason(
                 "can't confirm it fits your subs")
 
     kind = str(master.get("kind") or "")
+    # 1b. Colour-filter phase — flats only, and the same one-sided test the binder
+    #     uses. A flat divides into the raw Bayer mosaic per colour, so one phase
+    #     out corrects red photosites with green values and tints every frame; the
+    #     engine refuses it, so the binder skips it.
+    if kind == "flat" and bayer_conflict(master, bayer_pattern):
+        return (f"it was built on a {master.get('bayer_pattern')} colour-filter "
+                f"layout, your subs are {bayer_pattern} — a different camera or "
+                f"readout mode")
     # 2. Gain / sensor temperature — the shared confidence gate for every kind.
     confident = {
         "dark": _dark_match_confident, "flat": _flat_match_confident,
@@ -944,6 +1005,7 @@ def master_coverage(
                 exposure_s=t.get("exposure_s"), gain=t.get("gain"),
                 sensor_temp_c=t.get("sensor_temp_c"),
                 width_px=t.get("width_px"), height_px=t.get("height_px"),
+                bayer_pattern=t.get("bayer_pattern"),
             )
         except Exception:  # noqa: BLE001 — a roll-up is a nicety, never a 500
             log.warning("master coverage probe failed for %r", t.get("name"))
@@ -976,6 +1038,7 @@ def master_coverage(
                 m, exposure_s=t.get("exposure_s"), gain=t.get("gain"),
                 sensor_temp_c=t.get("sensor_temp_c"),
                 width_px=t.get("width_px"), height_px=t.get("height_px"),
+                bayer_pattern=t.get("bayer_pattern"),
             )
             if reason is None:
                 reason = (

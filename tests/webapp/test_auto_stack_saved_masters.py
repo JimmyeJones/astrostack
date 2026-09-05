@@ -50,11 +50,13 @@ def _capture_opts(monkeypatch):
 
 
 def _register(root, kind: str, *, name: str, width=FRAME_W, height=FRAME_H,
-              exposure_s: float | None = 30.0) -> dict:
+              exposure_s: float | None = 30.0,
+              bayer_pattern: str | None = None) -> dict:
     from seestack.calibrate.masters import MasterMeta
 
     arr = np.full((height or 4, width or 4), 42.0, dtype=np.float32)
-    meta = MasterMeta(kind, 5, width, height, "median", exposure_s=exposure_s)
+    meta = MasterMeta(kind, 5, width, height, "median", exposure_s=exposure_s,
+                      bayer_pattern=bayer_pattern)
     return calibration.register_master(root, name=name, array=arr, meta=meta)
 
 
@@ -399,3 +401,61 @@ def test_an_older_result_without_the_field_degrades_to_no_warnings(
 
     assert summary["calibration_warnings"] == []
     assert _recorded_warnings(solved_library) == []
+
+
+def test_wrong_bayer_phase_saved_flat_is_skipped_not_stacked(
+        solved_library, monkeypatch):
+    """A saved *flat* built on another colour-filter phase must be dropped, not
+    bound.
+
+    ``CalibrationMasters.validate`` refuses it — dividing the raw Bayer mosaic by
+    a flat one phase out corrects red photosites with green values and tints
+    every frame — so binding it would turn a walk-away stack into an error, which
+    is exactly what this fail-soft binder exists to prevent. The subs in the
+    fixture are RGGB (see ``conftest``)."""
+    root = solved_library / "library"
+    wrong = _register(root, "flat", name="Other Sensor", bayer_pattern="GRBG")
+
+    opts = _stack_with_saved_defaults(
+        solved_library, {"flat_master_id": wrong["id"]}, monkeypatch)
+
+    assert not opts.flat_path  # never bound
+    skips = _recorded_skips(solved_library)
+    assert len(skips) == 1
+    assert skips[0] == (
+        "Your saved master flat wasn't used: it was built on a GRBG "
+        "colour-filter layout, but this target's subs are RGGB — a different "
+        "camera or readout mode, so dividing by it would tint every frame.")
+
+
+def test_matching_and_unstamped_saved_flats_still_bind(solved_library, monkeypatch):
+    """The guard's whole upgrade-safety: it fires only on a *positive* conflict.
+
+    A flat on the subs' own phase binds, and so does one from before AstroStack
+    stamped ``BAYERPAT`` — every master the owner already has."""
+    root = solved_library / "library"
+    same = _register(root, "flat", name="Same Sensor", bayer_pattern="RGGB")
+    opts = _stack_with_saved_defaults(
+        solved_library, {"flat_master_id": same["id"]}, monkeypatch)
+    assert opts.flat_path
+    assert _recorded_skips(solved_library) == []
+
+    legacy = _register(root, "flat", name="Legacy Flat", bayer_pattern=None)
+    opts = _stack_with_saved_defaults(
+        solved_library, {"flat_master_id": legacy["id"]}, monkeypatch)
+    assert opts.flat_path
+    assert _recorded_skips(solved_library) == []
+
+
+def test_wrong_bayer_phase_saved_dark_still_binds(solved_library, monkeypatch):
+    """A pedestal corrects each *physical* pixel, so its phase is irrelevant — the
+    dark must still be applied (the engine only mentions it in the run's
+    calibration warnings)."""
+    root = solved_library / "library"
+    dark = _register(root, "dark", name="Other Sensor Dark", bayer_pattern="BGGR")
+
+    opts = _stack_with_saved_defaults(
+        solved_library, {"dark_master_id": dark["id"]}, monkeypatch)
+
+    assert opts.dark_path
+    assert _recorded_skips(solved_library) == []

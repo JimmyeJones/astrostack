@@ -401,13 +401,14 @@ def test_recommend_masters_skips_missing_and_handles_empty():
 
 
 def _register(root, kind, exposure_s=None, gain=None, sensor_temp_c=None,
-              width=4, height=4):
+              width=4, height=4, bayer_pattern=None):
     from seestack.calibrate.masters import MasterMeta
     return calibration.register_master(
         root, name=f"{kind} {exposure_s}",
         array=np.full((height, width), 1.0, dtype=np.float32),
         meta=MasterMeta(kind, 5, width, height, "median", exposure_s=exposure_s,
-                        gain=gain, sensor_temp_c=sensor_temp_c))
+                        gain=gain, sensor_temp_c=sensor_temp_c,
+                        bayer_pattern=bayer_pattern))
 
 
 def test_auto_bind_binds_confident_dark_and_flat(tmp_path):
@@ -732,13 +733,15 @@ def test_auto_bind_still_uncalibrated_when_no_dark_is_bindable(tmp_path):
     assert "bias_path" not in bound
 
 
-def _fake_proj_with_frames(exposure_s=30.0, gain=80.0, width=4, height=4):
+def _fake_proj_with_frames(exposure_s=30.0, gain=80.0, width=4, height=4,
+                           bayer_pattern="RGGB"):
     """A minimal stand-in for a Project exposing ``iter_frames`` for
     ``_auto_bind_calibration`` — just the frame attributes it reads."""
     from types import SimpleNamespace
 
     frame = SimpleNamespace(exposure_s=exposure_s, gain=gain, sensor_temp_c=None,
-                            width_px=width, height_px=height)
+                            width_px=width, height_px=height,
+                            bayer_pattern=bayer_pattern)
 
     class _Proj:
         def iter_frames(self, accepted_only=False):  # noqa: ARG002
@@ -988,6 +991,87 @@ def test_diagnose_flags_wrong_camera_flats_in_the_plural(tmp_path):
     assert advice is not None
     assert "None of your master flats" in advice
     assert "480×320" in advice
+
+
+def test_bayer_conflict_only_refuses_a_provable_mismatch():
+    """The colour-filter twin of the size rule: one-sided, so nothing that binds
+    today stops binding. Only a flat is ever gated on it (a dark/bias corrects
+    each physical pixel), but the predicate itself is kind-agnostic."""
+    grbg = {"bayer_pattern": "GRBG"}
+    assert calibration.bayer_conflict(grbg, "RGGB") is True
+    assert calibration.bayer_conflict(grbg, "grbg ") is False  # header noise
+    assert calibration.bayer_conflict(grbg, None) is False
+    assert calibration.bayer_conflict(grbg, "MONO") is False   # not a CFA phase
+    assert calibration.bayer_conflict({}, "RGGB") is False
+    assert calibration.bayer_conflict({"bayer_pattern": ""}, "RGGB") is False
+
+
+def test_modal_bayer_votes_only_on_real_cfa_phases():
+    assert calibration.modal_bayer(["RGGB", "rggb", "GRBG"]) == "RGGB"
+    assert calibration.modal_bayer(["", None, "MONO"]) is None
+    assert calibration.modal_bayer([]) is None
+
+
+def test_auto_bind_skips_a_bayer_mismatched_flat_but_keeps_the_dark(tmp_path):
+    """A flat from a sensor with a different Bayer phase must NOT be auto-bound:
+    the engine refuses it (it would divide red photosites by a green correction
+    and tint every frame), so binding it would abort the walk-away stack — the
+    same reasoning as the dimension gate. The *dark* on that phase still binds,
+    because a pedestal corrects each physical pixel."""
+    root = tmp_path / "lib"
+    dark = _register(root, "dark", exposure_s=30.0, gain=80.0, bayer_pattern="GRBG")
+    _register(root, "flat", exposure_s=2.0, gain=80.0, bayer_pattern="GRBG")
+
+    bound = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root),
+        exposure_s=30.0, gain=80.0, bayer_pattern="RGGB")
+    assert Path(bound["dark_path"]).name == dark["filename"]
+    assert "flat_path" not in bound
+
+    # A further-but-matching flat binds rather than being masked by the refused
+    # one — the same "don't let an unbindable top pick hide a bindable one" rule
+    # the dimension gate already follows.
+    same = _register(root, "flat", exposure_s=2.0, gain=80.0, bayer_pattern="RGGB")
+    bound2 = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root),
+        exposure_s=30.0, gain=80.0, bayer_pattern="RGGB")
+    assert Path(bound2["flat_path"]).name == same["filename"]
+
+
+def test_auto_bind_bayer_gate_is_inert_without_both_sides(tmp_path):
+    """Every master the owner already has predates the ``BAYERPAT`` stamp, and a
+    caller that passes no phase is the old signature — both must bind exactly as
+    before."""
+    root = tmp_path / "lib"
+    legacy = _register(root, "flat", exposure_s=2.0, gain=80.0)  # no BAYERPAT
+    bound = calibration.auto_bind_master_paths(
+        root, calibration.list_masters(root),
+        exposure_s=30.0, gain=80.0, bayer_pattern="RGGB")
+    assert Path(bound["flat_path"]).name == legacy["filename"]
+
+    root2 = tmp_path / "lib2"
+    stamped = _register(root2, "flat", exposure_s=2.0, gain=80.0,
+                        bayer_pattern="GRBG")
+    bound2 = calibration.auto_bind_master_paths(
+        root2, calibration.list_masters(root2), exposure_s=30.0, gain=80.0)
+    assert Path(bound2["flat_path"]).name == stamped["filename"]
+
+
+def test_coverage_miss_reason_names_the_bayer_phase(tmp_path):
+    """The "why doesn't this master cover that target?" clause must name the real
+    blocker, not fall through to "another master is a closer match"."""
+    reason = calibration.coverage_miss_reason(
+        {"kind": "flat", "bayer_pattern": "GRBG", "width_px": 4, "height_px": 4,
+         "exists": True},
+        exposure_s=30.0, gain=80.0, width_px=4, height_px=4,
+        bayer_pattern="RGGB")
+    assert reason is not None and "GRBG" in reason and "RGGB" in reason
+    # A dark on that same phase is not blocked by it.
+    assert calibration.coverage_miss_reason(
+        {"kind": "dark", "bayer_pattern": "GRBG", "width_px": 4, "height_px": 4,
+         "exists": True, "exposure_s": 30.0},
+        exposure_s=30.0, gain=80.0, width_px=4, height_px=4,
+        bayer_pattern="RGGB") is None
 
 
 def test_dims_conflict_only_refuses_a_provable_mismatch():

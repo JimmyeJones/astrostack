@@ -2365,6 +2365,11 @@ export interface CalibrationSuggestions {
     // for a different camera/binning (which would fail the stack outright).
     // Optional: an older backend omits them.
     width_px?: number | null; height_px?: number | null;
+    // The subs' modal colour-filter phase (`BAYERPAT`), so the form can flag a
+    // *flat* built on a different one — the engine refuses it, because dividing
+    // the raw Bayer mosaic by a flat one phase out corrects red photosites with
+    // green values and tints every frame. Optional: an older backend omits it.
+    bayer_pattern?: string | null;
   };
   dark_master_id: number | null;
   flat_master_id: number | null;
