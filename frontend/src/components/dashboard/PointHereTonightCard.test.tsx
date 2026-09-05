@@ -3,11 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  PointHereTonightCard, pointHereAimLine, pointHereSubtitle, pointHereTitle,
-} from "./PointHereTonightCard";
+import { PointHereTonightCard, pointHereSubtitle, pointHereTitle } from "./PointHereTonightCard";
 import * as client from "../../api/client";
-import type { BestTonight, MosaicDepthMap, TonightPick } from "../../api/client";
+import { mosaicMap } from "../../test/mosaicMapFixture";
+import type { BestTonight, TonightPick } from "../../api/client";
 
 function pick(overrides: Partial<TonightPick> = {}): TonightPick {
   return {
@@ -42,26 +41,6 @@ function renderCard() {
       </QueryClientProvider>
     </MantineProvider>,
   );
-}
-
-function panel(row: number, col: number, subs: number) {
-  return { row, col, n_frames: subs, exposure_s: subs * 10, ra_deg: 10, dec_deg: 41 };
-}
-
-/** A 2×2 mosaic whose bottom-right corner is a tenth of the others. */
-function mosaicMap(overrides: Partial<MosaicDepthMap> = {}): MosaicDepthMap {
-  return {
-    panels: [panel(0, 0, 120), panel(0, 1, 120), panel(1, 0, 120), panel(1, 1, 12)],
-    rows: 2, cols: 2, median_exposure_s: 1200,
-    thin: panel(1, 1, 12),
-    text: "Your 2×2 mosaic is thinnest at the bottom-right: about 2 min there "
-      + "against 20 min on a typical panel. That part of the picture will look "
-      + "grainier than the rest until it catches up — more time on this mosaic "
-      + "is what evens it out.",
-    aim_hint: "Thinnest at the bottom-right: about 2 min there against 20 min "
-      + "on a typical panel.",
-    ...overrides,
-  };
 }
 
 // Every render asks for the lead pick's mosaic map; a single-field target is the
@@ -181,25 +160,6 @@ describe("PointHereTonightCard", () => {
     expect(screen.queryByText(/° up$/)).toBeNull();
     // Said exactly once, in the subtitle — not once per pick underneath it.
     expect(screen.getAllByText(/Set your location in Settings/)).toHaveLength(1);
-  });
-});
-
-describe("pointHereAimLine", () => {
-  it("passes the backend's clause through when a panel is behind", () => {
-    expect(pointHereAimLine(mosaicMap()))
-      .toBe("Thinnest at the bottom-right: about 2 min there against 20 min "
-        + "on a typical panel.");
-  });
-  it("says nothing for a single field, an even mosaic, or an older backend", () => {
-    expect(pointHereAimLine(null)).toBeNull();          // not a mosaic
-    expect(pointHereAimLine(undefined)).toBeNull();     // request failed / pending
-    // An even mosaic: the long sentence still reassures, but there is no corner.
-    expect(pointHereAimLine(mosaicMap({ thin: null, aim_hint: null }))).toBeNull();
-    // A backend too old to send the clause must not be papered over locally —
-    // the wording lives in the engine so both surfaces quote one sentence.
-    const old = mosaicMap();
-    delete (old as { aim_hint?: unknown }).aim_hint;
-    expect(pointHereAimLine(old)).toBeNull();
   });
 });
 

@@ -2,10 +2,11 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorthMoreTimeList } from "./WorthMoreTimeList";
 import * as client from "../../api/client";
+import { mosaicMap } from "../../test/mosaicMapFixture";
 import type { BestTonight, TonightPick } from "../../api/client";
 
 function pick(overrides: Partial<TonightPick> = {}): TonightPick {
@@ -48,6 +49,12 @@ function renderList() {
   );
 }
 
+// Every render asks for the lead pick's mosaic map; a single-field target is the
+// `null` answer, which is what most of these tests want.
+beforeEach(() => {
+  vi.spyOn(client.api, "mosaicMap").mockResolvedValue(null);
+});
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("WorthMoreTimeList", () => {
@@ -83,5 +90,51 @@ describe("WorthMoreTimeList", () => {
     renderList();
     await waitFor(() => expect(client.api.getBestTonight).toHaveBeenCalled());
     expect(screen.queryByTestId("worth-more-time")).not.toBeInTheDocument();
+  });
+
+  it("tells the owner which corner of the top mosaic is thin", async () => {
+    // This is the page a beginner opens to decide where to point, so "which
+    // target" is only half the answer for a mosaic that fills unevenly.
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload({
+      picks: [pick(), pick({ safe: "M_42", name: "M 42", reason: "Second best." })],
+    }));
+    vi.spyOn(client.api, "mosaicMap").mockResolvedValue(mosaicMap());
+    renderList();
+    await waitFor(() =>
+      expect(screen.getByTestId("worth-more-time-aim")).toBeInTheDocument());
+    expect(screen.getByTestId("worth-more-time-aim"))
+      .toHaveTextContent(/Thinnest at the bottom-right/);
+    // The list runs to eight rows; only the one being recommended first is
+    // looked up, and only it is annotated.
+    expect(screen.getAllByTestId("worth-more-time-aim")).toHaveLength(1);
+    expect(client.api.mosaicMap).toHaveBeenCalledTimes(1);
+    expect(client.api.mosaicMap).toHaveBeenCalledWith("M_31");
+  });
+
+  it("says nothing extra for a single-field target", async () => {
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload());
+    renderList();
+    await waitFor(() =>
+      expect(screen.getByTestId("worth-more-time")).toBeInTheDocument());
+    await waitFor(() => expect(client.api.mosaicMap).toHaveBeenCalled());
+    expect(screen.queryByTestId("worth-more-time-aim")).toBeNull();
+  });
+
+  it("still ranks the targets when the map request fails", async () => {
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload());
+    vi.spyOn(client.api, "mosaicMap").mockRejectedValue(new Error("404"));
+    renderList();
+    await waitFor(() =>
+      expect(screen.getByTestId("worth-more-time")).toBeInTheDocument());
+    await waitFor(() => expect(client.api.mosaicMap).toHaveBeenCalled());
+    expect(screen.queryByTestId("worth-more-time-aim")).toBeNull();
+    expect(screen.getByRole("link", { name: "M 31" })).toBeInTheDocument();
+  });
+
+  it("asks for no map at all when there is nothing to rank", async () => {
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload({ picks: [] }));
+    renderList();
+    await waitFor(() => expect(client.api.getBestTonight).toHaveBeenCalled());
+    expect(client.api.mosaicMap).not.toHaveBeenCalled();
   });
 });
