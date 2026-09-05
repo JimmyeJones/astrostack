@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as client from "../../api/client";
 import type { StackFraming } from "../../api/client";
-import { FramingVerdictNote } from "./FramingVerdictNote";
+import { FramingVerdictNote, framingTitle } from "./FramingVerdictNote";
 
 function renderNote(qc: QueryClient = new QueryClient()) {
   return render(
@@ -237,5 +237,116 @@ describe("FramingVerdictNote — the offer tells the truth", () => {
 
     await screen.findByText("Nicely framed");
     expect(screen.queryByTestId("framing-nudge")).not.toBeInTheDocument();
+  });
+
+  it("headlines a mosaic as a mosaic, never as 'one frame'", async () => {
+    // The heading is written by the client, so it can contradict the sentence
+    // underneath it: a mosaic canvas is several frames of sky, and "It's bigger
+    // than one frame" over "is bigger than this mosaic" reads as a bug.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "partial",
+        canvas: "mosaic",
+        coverage: 0.4,
+        text: "is bigger than this mosaic — only about 40% of it is in this "
+          + "picture. Adding more panels next session would capture the rest.",
+      }));
+    renderNote();
+
+    expect(await screen.findByText("It's bigger than this mosaic")).toBeInTheDocument();
+    expect(screen.queryByText("It's bigger than one frame")).not.toBeInTheDocument();
+  });
+
+  it("headlines a clipped mosaic as a mosaic too", async () => {
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "clipped",
+        canvas: "mosaic",
+        coverage: 0.7,
+        text: "runs off the edge of this mosaic — about 70% of it made it in. "
+          + "It would fit whole, so just re-centre the mosaic next session.",
+      }));
+    renderNote();
+
+    expect(
+      await screen.findByText("Part of it is outside this mosaic"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the frame headings for a single field and for an older backend", async () => {
+    // `canvas` is additive: a backend that omits it read as one frame before,
+    // and must keep reading that way.
+    expect(framingTitle({ level: "partial", canvas: undefined }))
+      .toBe("It's bigger than one frame");
+    expect(framingTitle({ level: "partial", canvas: "frame" }))
+      .toBe("It's bigger than one frame");
+    expect(framingTitle({ level: "clipped", canvas: "frame" }))
+      .toBe("Part of it is outside the frame");
+    // The two headings that never mention a frame are shared by both shapes.
+    expect(framingTitle({ level: "centred", canvas: "mosaic" }))
+      .toBe(framingTitle({ level: "centred", canvas: "frame" }));
+    expect(framingTitle({ level: "off_centre", canvas: "mosaic" }))
+      .toBe(framingTitle({ level: "off_centre", canvas: "frame" }));
+  });
+
+  it("answers 'how big a mosaic, then?' on an oversized picture", async () => {
+    // The verdict says "shoot it in mosaic mode" / "add more panels" and stops
+    // where the beginner's next question starts. The Target page suppresses the
+    // catalogue line (and the panel plan inside it) whenever this note shows, and
+    // History never renders that card, so the count had nowhere else to appear.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "partial",
+        coverage: 0.15,
+        text: "is bigger than your frame — only about 15% of it is in this "
+          + "picture. Shoot it in mosaic mode to capture all of it.",
+      }));
+    const identify = vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M 42", name: "Orion Nebula", type: "nebula", constellation: "Orion",
+      constellation_abbr: "Ori", ra_deg: 83.822, dec_deg: -5.391,
+      matched_by: "name", size_arcmin: 85,
+      mosaic: { cols: 3, rows: 3, panels: 9,
+        text: "About a 3×3 mosaic (9 panels) covers all of it." },
+    });
+    renderNote();
+
+    expect(await screen.findByTestId("framing-mosaic-plan")).toHaveTextContent(
+      "About a 3×3 mosaic (9 panels) covers all of it.");
+    expect(identify).toHaveBeenCalledWith("M_42");
+  });
+
+  it("does not ask for a plan on a verdict a re-point fixes", async () => {
+    // `clipped`, `off_centre` and `centred` are fixed by aim, not by panels — and
+    // a plan there would be a second, unrelated answer on the same card. It must
+    // not even cost the request.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "clipped",
+        coverage: 0.68,
+        text: "runs off the edge of the frame — about 70% of it made it in. It "
+          + "would fit whole, so just re-centre it next session.",
+      }));
+    const identify = vi.spyOn(client.api, "identifyTarget");
+    renderNote();
+
+    await screen.findByText("Part of it is outside the frame");
+    expect(screen.queryByTestId("framing-mosaic-plan")).not.toBeInTheDocument();
+    expect(identify).not.toHaveBeenCalled();
+  });
+
+  it("says nothing extra when the catalogue has no panel plan", async () => {
+    // An un-vetted object, or one that fits a frame, has no grid to offer — the
+    // note renders exactly as it did before rather than showing an empty line.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({ level: "partial", coverage: 0.4, text: "is bigger than your frame." }));
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M 42", name: "Orion Nebula", type: "nebula", constellation: "Orion",
+      constellation_abbr: "Ori", ra_deg: 83.822, dec_deg: -5.391,
+      matched_by: "name", mosaic: null,
+    });
+    renderNote();
+
+    await screen.findByText("It's bigger than one frame");
+    expect(screen.queryByTestId("framing-mosaic-plan")).not.toBeInTheDocument();
   });
 });

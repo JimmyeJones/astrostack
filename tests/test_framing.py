@@ -189,6 +189,89 @@ def test_the_verdict_names_no_object_so_the_caller_can_prefix_it():
 
 
 # ---------------------------------------------------------------------------
+# …and the same verdict on a MOSAIC canvas, where the frame-shaped wording is
+# two claims the geometry never tested: that the canvas is one frame, and that
+# shooting a mosaic is the fix. The owner is a heavy mosaic user (AGENTS.md §1),
+# so this is the common case.
+# ---------------------------------------------------------------------------
+
+
+def test_a_mosaic_is_never_called_your_frame_and_never_told_to_shoot_one():
+    # The object is bigger than even the mosaic canvas: before, this told an
+    # owner who had already shot a mosaic that their picture was "your frame"
+    # and that they should "shoot it in mosaic mode".
+    v = verdict(500, 400, 180, canvas="mosaic")
+    assert v is not None
+    assert v.level == "partial"          # the level is unchanged — only the words
+    assert v.canvas == "mosaic"
+    assert "your frame" not in v.text
+    assert "Shoot it in mosaic mode" not in v.text
+    assert "bigger than this mosaic" in v.text
+    assert "Adding more panels" in v.text
+
+
+def test_a_mosaic_clipped_verdict_talks_about_the_mosaic_not_the_frame():
+    v = verdict(500, 60, 30, canvas="mosaic")
+    assert v is not None
+    assert v.level == "clipped"
+    assert v.canvas == "mosaic"
+    assert "edge of this mosaic" in v.text
+    assert "edge of the frame" not in v.text
+    assert "re-centre the mosaic next session" in v.text
+
+
+def test_the_well_framed_mosaic_verdicts_say_mosaic_too():
+    centred = verdict(500, 400, 30, canvas="mosaic")
+    off = verdict(900, 700, 10, canvas="mosaic")
+    assert centred is not None and off is not None
+    assert centred.level == "centred" and off.level == "off_centre"
+    for v in (centred, off):
+        assert v.canvas == "mosaic"
+        assert "mosaic" in v.text
+        # "is all in frame" / "inside the frame" are the claims being removed;
+        # "well framed" is a judgement, not a claim about one frame, so it stays.
+        assert "in frame" not in v.text
+        assert "the frame" not in v.text
+
+
+def test_a_mosaic_verdict_still_starts_with_a_verb_so_the_caller_can_prefix_it():
+    for v in (verdict(500, 400, 30, canvas="mosaic"),
+              verdict(900, 700, 10, canvas="mosaic"),
+              verdict(500, 60, 30, canvas="mosaic"),
+              verdict(500, 400, 180, canvas="mosaic")):
+        assert v is not None
+        assert v.text[0].islower()
+
+
+def test_the_numbers_are_identical_on_either_canvas_only_the_words_change():
+    # The wording is the whole change: every measurement here is made against the
+    # canvas either way, so a mosaic must never get a different coverage figure.
+    for x, y, size in ((500, 400, 30), (900, 700, 10), (500, 60, 30),
+                       (500, 400, 180)):
+        a = verdict(x, y, size)
+        b = verdict(x, y, size, canvas="mosaic")
+        assert a is not None and b is not None
+        assert (a.level, a.coverage, a.off_centre) == (b.level, b.coverage,
+                                                       b.off_centre)
+        assert a.text != b.text
+
+
+def test_the_default_canvas_is_a_single_frame_so_old_callers_are_unchanged():
+    # Upgrade safety: a caller that never passes `canvas` — and a run recorded
+    # before `is_mosaic` existed — gets byte-identical sentences.
+    for x, y, size in ((500, 400, 30), (900, 700, 10), (500, 60, 30),
+                       (500, 400, 180)):
+        v = verdict(x, y, size)
+        assert v is not None
+        assert v.canvas == "frame"
+        assert v.text == verdict(x, y, size, canvas="frame").text
+    # An unrecognised token is not a mosaic claim — it falls back to the frame
+    # wording rather than inventing a third voice.
+    v = verdict(500, 400, 180, canvas="something-else")
+    assert v is not None and "your frame" in v.text
+
+
+# ---------------------------------------------------------------------------
 # "Re-centre this picture" — the crop offered on an off-centre verdict.
 # ---------------------------------------------------------------------------
 
