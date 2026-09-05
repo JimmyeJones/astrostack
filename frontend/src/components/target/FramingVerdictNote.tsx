@@ -94,6 +94,17 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
     queryFn: () => api.getRecipe(safe, runId),
     enabled: !!recentre,
   });
+  // …and the panel count that answers "how big a mosaic, then?". Same query key
+  // the Target page and `ObjectInfoCard` already use, so react-query serves it
+  // from one request; the grid itself is computed against the owner's *own*
+  // measured frame field, which is what makes it agree with the coverage figure
+  // above rather than contradict it.
+  const identity = useQuery({
+    queryKey: ["identify", safe],
+    queryFn: () => api.identifyTarget(safe),
+    enabled: v?.level === "partial",
+  });
+  const plan = v?.level === "partial" ? identity.data?.mosaic?.text : undefined;
   if (!v) return null;
   const tone = TONE[v.level] ?? TONE.centred;
   // A *disabled* crop op isn't shrinking anything, which `cropCoverageFraction`
@@ -117,6 +128,16 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
       }
     >
       <Text size="sm">{`${v.object_name} ${v.text}`}</Text>
+      {/* "Shoot it in mosaic mode" / "Adding more panels" stops exactly where the
+          beginner's next question starts: *how big a mosaic?* — which is the very
+          gap `MosaicPlan` exists to close. The Target page hides the catalogue
+          line (and the plan inside it) whenever this measured verdict is on
+          screen, and History never renders that card at all, so on both surfaces
+          the panel count had nowhere left to appear. Only on `partial`: that's
+          the one verdict whose fix is panels rather than a better pointing. */}
+      {plan ? (
+        <Text size="sm" mt={6} data-testid="framing-mosaic-plan">{plan}</Text>
+      ) : null}
       {/* "Re-centre it next session" is only advice you can act on once you know
           which way. Absent on an older backend, or where a re-point isn't the fix. */}
       {v.nudge ? (
