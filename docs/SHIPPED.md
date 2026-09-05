@@ -93,6 +93,50 @@ blocker.
 
 ---
 
+## v0.353.1 — 2026-09-05 — reproject_rgb trims the same frame edge reproject_rgb_windowed does
+
+**Shipped by the Builder** (`claude/sweet-babbage-flru3c`). The non-windowed `reproject_rgb`
+(`seestack/stack/align.py`) omitted the `FRAME_EDGE_INSET_PX` border trim the production windowed path
+(`reproject_rgb_windowed`) applies, so the outer 3-px debayer-artifact ring would have leaked in as valid
+pixels. Built as the filed entry's **first** fix direction (parity), not the docstring one: the two functions
+now compute `inset` identically — including the same "a frame too small to spare it gets none" guard — so the
+whole-canvas variant can't be adopted on the hot path expecting a trim it didn't do. **No production pixel
+moves**: `reproject_rgb` still has exactly one caller, `tests/test_windowed_stack.py` (grepped, not assumed),
+and `align_one` calls the windowed path as before. **Test (+1, fails before):** on a same-pointing pair the two
+paths' valid masks are now element-for-element equal over the window, and the ring they both drop is checked to
+be the inset one rather than "everything is valid". The existing full-vs-windowed comparison, which masked the
+difference away by intersecting the two validity maps, still passes untouched. *(Originally filed 2026-08-26 as
+MINOR / test-only, traced.)*
+
+---
+
+## v0.353.0 — 2026-09-05 — refuse a master flat whose Bayer phase differs from the subs
+
+**Shipped by the Builder** (`claude/sweet-babbage-flru3c`). The master calibration `apply`
+(`seestack/calibrate/apply.py`) validated only the master's *shape*, never its Bayer pattern — so a
+dark/flat with matching dimensions but a different CFA phase (e.g. a sub-frame readout offset shifting the
+Bayer phase by one pixel) would be applied per-pixel with no guard. For a **flat** — which divides into the raw
+Bayer mosaic *per colour* — that corrects every red photosite with a green value: the picture keeps its detail
+and comes out the wrong colour on every frame, harder to notice than a hard failure.
+
+**The flat is refused; the pedestal is only mentioned.** `validate` now raises on a phase-mismatched flat (the
+same fail-closed shape the dimension guard has), pinned by a test measuring the swap: a uniform raw frame
+through a one-phase-out flat comes out with the two Bayer colours' corrections exchanged. A dark or bias
+corrects each *physical* pixel, so its phase changes nothing — it earns an advisory in `calibration_warnings`
+instead. **Upgrade-safe:** `_norm_bayer` reads only the four real CFA phases and both sides must declare one and
+differ, so every master built before this field was read (every master the owner already has), an unrecorded
+phase, and the old signature all behave exactly as before; both new arguments are optional and defaulted.
+
+**The three surfaces that would otherwise make this a worse bug are handled:** `calibration.bayer_conflict`
+skips a phase-mismatched flat in `auto_bind_master_ids` and `_bind_saved_calibration_masters` (letting a
+further-but-matching flat bind, with the usual plain-language "your saved master flat wasn't used: …"
+sentence); `coverage_miss_reason` names the phase on the Calibration page; and the Stack form's
+`flatBayerWarning` renders the red blocker at *pick* time, before the night is spent. **Tests (+7 engine,
++3 saved-master, +5 webapp, +8 vitest; 6 engine ones fail before).** *(Originally filed 2026-08-26 as a
+hardening note, traced — not firing on the production path, file-only.)*
+
+---
+
 ## From "Bugs (fix these first)" — the 2026-09-05 bulk move
 
 The 227 resolved entries below were cut verbatim out of
