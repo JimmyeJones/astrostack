@@ -87,6 +87,20 @@ class StatsResponse(BaseModel):
     #: user have a picture yet?" has to count them separately, or tell someone
     #: holding a finished Moon picture that they haven't made one.
     n_video_stills: int = 0
+    #: Stack runs that carry a **saved editor recipe** — i.e. pictures that have
+    #: been finished in the editor, whether the user clicked Auto themselves or
+    #: an unattended auto-edit did it for them (the step is about the picture
+    #: being finished, not about who pressed the button).
+    #:
+    #: Additive with a default, so an older frontend ignores it and an older
+    #: backend that never sends it reads as 0 = "not done yet".
+    n_edited_runs: int = 0
+    #: Stack runs whose edit has been **exported** as its own picture
+    #: (``editor_exported:<id>``, stamped by ``pipeline._apply_editor_to_run``).
+    #: This is the last step of the journey: until it happens the Gallery
+    #: thumbnail is still the un-edited stack, which is the whole reason the
+    #: un-exported-edit nudge exists.
+    n_exported_runs: int = 0
 
 
 # The combined "Last night" card opens each project to read its frames, so it's
@@ -521,7 +535,26 @@ def get_library_missing_files(request: Request) -> LibraryMissingFilesOut:
     return out
 
 
-def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, int]:
+def _count_meta_prefix(proj, prefix: str) -> int:
+    """How many ``<prefix><run_id>`` annotations this project carries.
+
+    One prefix scan of ``project_meta`` (:meth:`Project.iter_meta_prefix`) — the
+    same cheap read the un-exported-edits scan uses, and for the same reason:
+    asking "has this target been edited at all?" must not cost a run listing.
+    Keys whose tail isn't a run id are ignored, so a future annotation sharing
+    the prefix space can't inflate the count.
+    """
+    n = 0
+    for key, _value in proj.iter_meta_prefix(prefix):
+        try:
+            int(key[len(prefix):])
+        except ValueError:  # a meta key we don't own — ignore it
+            continue
+        n += 1
+    return n
+
+
+def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, int, int, int]:
     """Open each target's project and collect its stack runs. Expensive — this
     is what the cache below is protecting.
 
@@ -529,12 +562,29 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
     window by the observing night it belongs to (see
     :mod:`webapp.capture_nights`); it is part of the cache signature, so a
     changed location re-rolls rather than serving nights bucketed for the old
-    one."""
+    one.
+
+    Returns ``(recent, n_stack_runs, n_targets_with_stacks, n_edited_runs,
+    n_exported_runs)``. The last two are what the Dashboard's "Your first image"
+    checklist needs to see the **end** of the journey: a run carrying a saved
+    editor recipe (``editor_recipe:<id>``) has been finished in the editor, and
+    one carrying the export marker (``editor_exported:<id>``) has had that edit
+    saved as its own picture. Both ride along on a walk this function already
+    does — the project is open, and each is one ``project_meta`` prefix scan,
+    skipped entirely for a target with no runs — rather than costing a second
+    cross-target read (see :func:`_count_meta_prefix`).
+    """
     from seestack.io.project import Project
+    from webapp.routers.editor import (
+        EXPORTED_RECIPE_META_PREFIX,
+        RECIPE_META_PREFIX,
+    )
 
     recent: list[RecentStack] = []
     n_stack_runs = 0
     n_targets_with_stacks = 0
+    n_edited_runs = 0
+    n_exported_runs = 0
     for t in targets:
         proj = None
         try:
@@ -567,13 +617,18 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
             n_stack_runs += target_runs
             if target_runs:
                 n_targets_with_stacks += 1
+                # Only a target that has actually been stacked can carry either
+                # annotation, so a never-stacked target costs nothing extra.
+                n_edited_runs += _count_meta_prefix(proj, RECIPE_META_PREFIX)
+                n_exported_runs += _count_meta_prefix(
+                    proj, EXPORTED_RECIPE_META_PREFIX)
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
             pass
         finally:
             if proj is not None:
                 proj.close()
     recent.sort(key=lambda r: r.timestamp_utc, reverse=True)
-    return recent, n_stack_runs, n_targets_with_stacks
+    return recent, n_stack_runs, n_targets_with_stacks, n_edited_runs, n_exported_runs
 
 
 def _collect_last_night(lib, targets, night_of=None):
@@ -780,14 +835,13 @@ def get_stats(request: Request, recent_limit: int = 8) -> StatsResponse:
         cache = getattr(request.app.state, "stats_cache", None)
         now = time.monotonic()
         if cache and cache["sig"] == sig and (now - cache["at"]) < _STATS_CACHE_TTL_S:
-            recent, n_stack_runs, n_targets_with_stacks = cache["data"]
+            (recent, n_stack_runs, n_targets_with_stacks,
+             n_edited_runs, n_exported_runs) = cache["data"]
         else:
-            recent, n_stack_runs, n_targets_with_stacks = _rollup_stacks(
-                lib, targets, lon)
-            request.app.state.stats_cache = {
-                "sig": sig, "at": now,
-                "data": (recent, n_stack_runs, n_targets_with_stacks),
-            }
+            rolled = _rollup_stacks(lib, targets, lon)
+            (recent, n_stack_runs, n_targets_with_stacks,
+             n_edited_runs, n_exported_runs) = rolled
+            request.app.state.stats_cache = {"sig": sig, "at": now, "data": rolled}
     finally:
         lib.close()
 
@@ -827,6 +881,8 @@ def get_stats(request: Request, recent_limit: int = 8) -> StatsResponse:
         recent_stacks=recent[:recent_limit],
         disk=disk,
         n_video_stills=video.count_results(settings),
+        n_edited_runs=n_edited_runs,
+        n_exported_runs=n_exported_runs,
     )
 
 
