@@ -1354,14 +1354,16 @@ def _object_payload(o: Any, x_px: float | None = None,
     }
 
 
-def _turned_preview_objects(run: Any, objs: Any, crop: PreviewCrop | str | None,
-                            width: int, height: int):  # noqa: ANN202
-    """The field objects placed on a run's **stored preview** when a past
-    "Adjust → North up → Save" turned those bytes.
+def _turned_preview_grid(run: Any, crop: PreviewCrop | str | None,
+                         width: int, height: int):  # noqa: ANN202
+    """The pixel grid a run's **stored preview** sits on when a past "Adjust →
+    North up → Save" turned those bytes: ``(x0, y0, x1, y1, out_w, out_h)``.
 
-    Returns ``(pairs, preview_w, preview_h)`` where ``pairs`` is
-    ``[(object, (x, y)), …]`` on the turned grid — or ``(None, None, None)``
-    whenever there is nothing to answer, which is every ordinary run:
+    ``(x0, y0, x1, y1)`` is the kept rectangle of the FITS canvas (the auto-edit's
+    border trim, or the whole canvas), and ``out_w``/``out_h`` the size of the
+    canvas the turn grew out of it — the geometry every mark placed on those bytes
+    has to follow. ``None`` whenever there is nothing to answer, which is every
+    ordinary run:
 
     * no baked turn (the client's own crop composition is exact, and an
       un-turned uncropped picture needs no re-basing at all);
@@ -1370,28 +1372,83 @@ def _turned_preview_objects(run: Any, objs: Any, crop: PreviewCrop | str | None,
       JPEG's labels and the scale bar make, for the same reason;
     * a degenerate grid.
 
+    One definition, so the pins, the scale bar and the compass rose can't end up
+    on three slightly different canvases: the size comes from the renderer's own
+    :func:`~seestack.render.orient.follow_north_up_turns` rather than from a
+    ceil/floor bounding box re-derived here.
+    """
+    baked = float(run.preview_north_up_deg or 0.0)
+    if not baked or width <= 0 or height <= 0 or crop == CROP_UNKNOWN:
+        return None
+    from seestack.render.orient import follow_north_up_turns
+
+    x0, y0, x1, y1 = crop_pixel_box(
+        crop if isinstance(crop, PreviewCrop) else None, width, height)
+    turned = follow_north_up_turns([], x1 - x0, y1 - y0, (baked,))
+    if turned is None:
+        return None
+    _, out_w, out_h = turned
+    if out_w <= 0 or out_h <= 0:
+        return None
+    return x0, y0, x1, y1, out_w, out_h
+
+
+def _turned_preview_objects(run: Any, objs: Any, crop: PreviewCrop | str | None,
+                            width: int, height: int):  # noqa: ANN202
+    """The field objects placed on a run's **stored preview** when a past
+    "Adjust → North up → Save" turned those bytes.
+
+    Returns ``(pairs, preview_w, preview_h)`` where ``pairs`` is
+    ``[(object, (x, y)), …]`` on the turned grid — or ``(None, None, None)``
+    whenever :func:`_turned_preview_grid` has no answer (every ordinary run).
+
     The pixels went crop-then-turn, so the objects do too: shifted into the kept
     rectangle (an object the trim cut away drops out), then carried through the
     turn by :func:`~seestack.render.orient.follow_north_up_turns` — the renderer's
     own geometry, so a pin on screen, a baked label and the picture itself cannot
     disagree about where something went.
     """
-    baked = float(run.preview_north_up_deg or 0.0)
-    if not baked or width <= 0 or height <= 0 or crop == CROP_UNKNOWN:
+    grid = _turned_preview_grid(run, crop, width, height)
+    if grid is None:
         return None, None, None
     from seestack.render.orient import follow_north_up_turns
 
-    x0, y0, x1, y1 = crop_pixel_box(
-        crop if isinstance(crop, PreviewCrop) else None, width, height)
+    x0, y0, x1, y1, out_w, out_h = grid
+    baked = float(run.preview_north_up_deg or 0.0)
     inside = [o for o in objs if x0 <= o.x_px <= x1 and y0 <= o.y_px <= y1]
     turned = follow_north_up_turns(
         [(o.x_px - x0, o.y_px - y0) for o in inside], x1 - x0, y1 - y0, (baked,))
     if turned is None:
         return None, None, None
-    moved, out_w, out_h = turned
-    if out_w <= 0 or out_h <= 0:
-        return None, None, None
+    moved, _, _ = turned
     return list(zip(inside, moved, strict=True)), out_w, out_h
+
+
+def _bar_on_turned_canvas(bar: Any, unturned_w: int, turned_w: int):  # noqa: ANN202
+    """The same scale bar drawn on a picture a North-up turn has grown.
+
+    A rotate-with-expand changes the canvas without changing the pixel scale, so
+    the bar's on-sky *length* is unchanged and only its share of the (now wider)
+    picture moves: ``fraction · unturned_w / turned_w``. That is exactly the
+    arithmetic the baked share JPEG already does — it draws the bar at
+    ``fraction × _unrotated_preview_width`` px onto the turned pixels — so the
+    file and the screen stay one answer.
+
+    **``frame_arcmin`` / ``moon_comparison`` are deliberately left alone**, and
+    that is the decision this helper records. A turn grows the *frame* by adding
+    black wedges, not by capturing more sky, so re-measuring the sentence on the
+    turned canvas would make a beginner's caption claim a field up to ~1.4× wider
+    than they actually shot — precisely the overstatement ``preview_scale_bar``
+    was introduced to remove for the crop case. The sentence therefore answers
+    for the **sky the telescope saw** (the kept rectangle), while the drawn bar
+    answers, exactly, for the pixels on screen; the surfaces that print the
+    sentence say which of the two they mean.
+    """
+    from dataclasses import replace
+
+    if bar is None or unturned_w <= 0 or turned_w <= 0:
+        return bar
+    return replace(bar, fraction=bar.fraction * unturned_w / turned_w)
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/annotations")
@@ -1412,6 +1469,10 @@ async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dic
     set placed on the **stored preview's** grid for the one geometry a browser
     cannot reconstruct — a turn a past "Adjust → North up → Save" baked into
     those bytes. ``null`` for every other run; see :func:`_turned_preview_objects`.
+    ``preview_scale_bar`` and ``preview_directions`` are the other two marks on
+    that same grid, so a picture the owner saved North-up keeps its scale bar and
+    its compass instead of being told they can't be placed — the shared JPEG has
+    baked both onto exactly those pixels since v0.284.0.
 
     Runs the header read + projection in a threadpool so it never blocks the job
     worker."""
@@ -1421,7 +1482,7 @@ async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dic
     def work() -> dict[str, Any]:
         from seestack.annotate import objects_in_field
         from seestack.io.wcs_io import celestial_wcs_from_fits
-        from seestack.skymarks import sky_directions
+        from seestack.skymarks import rotated, sky_directions
 
         wcs, width, height = celestial_wcs_from_fits(fits_path) if fits_path else (None, 0, 0)
         objs = objects_in_field(wcs, width, height)
@@ -1454,10 +1515,27 @@ async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dic
         # ``None`` unless the run really is cropped, so an uncropped run's payload
         # is byte-for-byte what it was.
         crop = parse_preview_crop(run.preview_crop_json)
+        # …and it can also be a picture a past "Adjust → North up → Save" turned.
+        # A turn keeps the pixel scale and grows the canvas, so both marks are
+        # answerable on those bytes — which is what the shared JPEG has baked
+        # since v0.284.0. The screen used to stand both of them down anyway, so a
+        # run the owner saved North-up had a scale bar and a rose in the file and
+        # neither on the card it was shared from.
+        turned_grid = _turned_preview_grid(run, crop, width, height)
         preview_bar = None
-        if isinstance(crop, PreviewCrop):
-            cx0, cy0, cx1, cy1 = crop_pixel_box(crop, width, height)
+        if isinstance(crop, PreviewCrop) or turned_grid is not None:
+            cx0, cy0, cx1, cy1 = crop_pixel_box(
+                crop if isinstance(crop, PreviewCrop) else None, width, height)
             preview_bar = _scale_bar_from_wcs(wcs, cx1 - cx0, cy1 - cy0)
+            if turned_grid is not None:
+                preview_bar = _bar_on_turned_canvas(
+                    preview_bar, cx1 - cx0, turned_grid[4])
+        # The rose follows the pixels through the same turn the picture took —
+        # `rotated` is the helper the baked marks use, so the two cannot drift.
+        preview_dirs = (
+            rotated(directions, float(run.preview_north_up_deg or 0.0))
+            if turned_grid is not None else None
+        )
         preview_objs, preview_w, preview_h = _turned_preview_objects(
             run, objs, crop, width, height)
         return {
@@ -1491,10 +1569,25 @@ async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dic
             # the visible field, so it is a complete, self-consistent answer rather
             # than a rescaled fraction — and its `frame_arcmin` / `moon_comparison`
             # describe the picture on screen instead of the canvas behind it.
-            # ``null`` when the run isn't cropped (use `scale_bar`) or has no
-            # usable WCS. Absent on an older backend, which reads the same way.
+            # On a preview a past "North up → Save" turned, the `fraction` is
+            # additionally re-based onto the grown canvas so the drawn length is
+            # still the right piece of sky, while the sentence keeps answering for
+            # the field rather than for the black wedges the turn added — see
+            # :func:`_bar_on_turned_canvas`, which is where that decision lives.
+            # ``null`` when the preview is neither cropped nor turned (use
+            # `scale_bar`) or the run has no usable WCS. Absent on an older
+            # backend, which reads the same way.
             "preview_scale_bar": (
                 preview_bar.to_dict() if preview_bar is not None else None
+            ),
+            # Where North and East point on the **stored preview's own grid** —
+            # `directions` carried through the turn a past save baked into those
+            # bytes. ``null`` unless a save really did turn the picture (use
+            # `directions`), or the run has no usable orientation.
+            "preview_directions": (
+                {"north_deg": preview_dirs.north_deg,
+                 "east_deg": preview_dirs.east_deg}
+                if preview_dirs is not None else None
             ),
             "objects": [_object_payload(o) for o in objs],
             # The same objects placed on the **stored preview's own grid** — its

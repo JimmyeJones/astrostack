@@ -381,10 +381,23 @@ describe("storedPreviewScaleBar", () => {
   });
 
   it("says nothing about a preview that isn't a plain view of the canvas", () => {
-    // Geometry that can't be reconciled, and a rotate-with-expand that grew the
-    // frame around the same sky — the on-screen note already declines both.
+    // Geometry that can't be reconciled at all — the on-screen note declines it
+    // for the same reason.
     expect(storedPreviewScaleBar(ann, { preview_geometry_unknown: true })).toBeNull();
-    expect(storedPreviewScaleBar(ann, { preview_north_up_deg: 30 })).toBeNull();
+  });
+
+  it("uses the preview bar on a picture a past North-up save turned", () => {
+    // A rotate-with-expand grows the frame around the *same* sky, so the caption
+    // takes the server's preview bar — whose sentence answers for the field —
+    // rather than the canvas's, which would describe the un-turned rectangle by
+    // luck rather than by rule. (Its `fraction` is re-based onto the grown
+    // canvas for the drawn bar; a caption never reads that field.)
+    expect(storedPreviewScaleBar(ann, { preview_north_up_deg: 30 })).toBe(croppedBar);
+  });
+
+  it("still says nothing on a turned preview an older backend can't measure", () => {
+    expect(storedPreviewScaleBar({ scale_bar: canvasBar }, { preview_north_up_deg: 30 }))
+      .toBeNull();
   });
 
   it("says nothing when the annotations haven't loaded", () => {
@@ -529,20 +542,34 @@ describe("turnedPreviewView", () => {
     expect(v!.height).toBe(600);
   });
 
-  it("carries no scale bar, because a turned frame isn't the field any more", () => {
-    // The bar's length would survive the turn, but its sentence ("the whole
-    // frame is about N full Moons wide") would then describe a frame that has
-    // grown black wedges around the same sky. `storedPreviewScaleBar` says
-    // nothing on a turned preview for the same reason; these two must agree.
+  it("carries the server's bar and rose for the turned grid", () => {
+    // The two marks the shared JPEG has baked onto exactly these bytes since
+    // v0.284.0. The bar's `fraction` arrives already re-based onto the grown
+    // canvas, so nothing here rescales it; its sentence still answers for the
+    // field, which is the decision the server records.
+    const turnedBar: ScaleBar = {
+      arcsec: 1800, label: "30\u2032", fraction: 0.14, frame_arcmin: 166.6,
+      moon_comparison: "the whole frame is about 5.4 full Moons wide",
+    };
     const v = turnedPreviewView({
       preview_objects: objs, preview_width: 640, preview_height: 600,
+      preview_scale_bar: turnedBar,
+      preview_directions: { north_deg: 124, east_deg: 34 },
     });
+    expect(v!.scaleBar).toBe(turnedBar);
+    expect(v!.directions).toEqual({ north_deg: 124, east_deg: 34 });
+  });
+
+  it("has no marks when the run has no sky coordinates to measure them from", () => {
+    // A turned preview of an unsolved run: the pins are still placeable (there
+    // simply aren't any), and both marks are absent \u2014 the same "no sky
+    // coordinates" state an un-turned run of that kind is in.
+    const v = turnedPreviewView({
+      preview_objects: [], preview_width: 640, preview_height: 600,
+    });
+    expect(v).not.toBeNull();
     expect(v!.scaleBar).toBeNull();
-    expect(storedPreviewScaleBar(
-      { scale_bar: { arcsec: 60, label: "1\u2032", fraction: 0.2, frame_arcmin: 5,
-                     moon_comparison: "about a fifth of a full Moon wide" } },
-      { preview_north_up_deg: 34 },
-    )).toBeNull();
+    expect(v!.directions).toBeNull();
   });
 
   it("refuses a degenerate grid rather than dividing by it", () => {

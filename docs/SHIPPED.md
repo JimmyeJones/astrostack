@@ -14,6 +14,58 @@ Newest first.
 
 ---
 
+## v0.358.0 — 2026-09-05 — The scale bar and the compass survive a North-up save
+
+Closes the entry that asked for **a decision before any code**: *what is the scale bar's Moon sentence a
+claim about?* v0.350.0 brought the object pins back on a picture a past "Adjust → North up → Save" turned and
+left the other two marks standing down, because a rotate-with-expand grows the *frame* with black wedges
+without capturing one more arcsecond of sky.
+
+**The gap that made it worth answering.** The **shared JPEG has baked a scale bar and a North/East rose onto
+exactly those pixels since v0.284.0** (`_sky_marks_for_run` sizes the bar against `_unrotated_preview_width`
+and turns the rose with `skymarks.rotated`). The card the picture was shared *from* said, in as many words,
+that neither could be placed on it. So a run the owner saved North-up had both marks in the file and neither
+on screen — a screen↔file disagreement, not merely a missing feature.
+
+**The decision, recorded: (b), the sentence answers for the field.** The crop case's *mechanism* is "measure
+the visible rectangle", but its stated *harm* was that a canvas-sized sentence **overstated the field** of a
+trimmed picture by up to ~1/0.7×. On a crop the two coincide; on a turn they diverge, and re-measuring on the
+turned canvas would overstate what the owner actually shot by the growth factor — the same harm, from the
+other side. So `frame_arcmin` / `moon_comparison` keep answering for the sky the telescope saw (the kept
+rectangle), only `fraction` is re-based onto the grown canvas, and the surface that prints the sentence says
+which rectangle it means rather than leaving the reader to do the sum: *"The whole frame is about 5.4 full
+Moons wide — that's the sky you captured; the black corners the North-up turn added aren't counted."* The
+decision lives in `webapp.routers.stack._bar_on_turned_canvas`'s docstring, beside the arithmetic it governs.
+
+**What shipped.** `_turned_preview_grid` extracts the turned-canvas geometry that `_turned_preview_objects`
+already derived, so the pins, the bar and the rose are placed on **one** grid rather than three that agree by
+luck; it still comes from the renderer's own `follow_north_up_turns`. The annotations payload gains
+`preview_directions` (`skymarks.rotated` of the flat answer — the baked share's own helper) and extends
+`preview_scale_bar` to the turned case. Frontend: `turnedPreviewView` returns both marks, `storedPreviewScaleBar`
+takes the preview bar on a turned run (so **the copied caption gets its scale clause back** too), and History
+draws them instead of standing down. A backend that sends the pins but not the marks still gets a note naming
+exactly what is missing; a run with no WCS gets the ordinary "no sky coordinates" line, because that is what
+it is.
+
+**Parity is the test, not agreement.** The strongest assertion pins the served bar against
+`_sky_marks_for_run`'s `bar_px` for the same run — `fraction × turned_width == fraction × unrotated_width` in
+pixels — and the rose against that helper's `directions`, so the file and the screen are one answer that
+cannot drift rather than two that match today.
+
+**Upgrade-safe (§9):** two additive response fields (one new, one whose null case widens), no config, schema,
+on-disk or default change; every un-turned run's payload is byte-for-byte what it was, pinned by its own test.
+
+**Tests (+8 Python, +5 vitest, 1 rewritten).** `tests/webapp/test_stack_annotations.py`: an un-turned run
+still answers three nulls; a turned run's bar and rose match the baked marks exactly; the sentence, field
+width and bar length are the un-turned canvas's while `fraction` shrinks by the growth factor; crop-then-turn
+measures the bar on the kept rectangle and re-bases it onto the turned one; a square turn carries the rose
+round by exactly +90°; an unreconcilable geometry and a run with no WCS both refuse. `AnnotatedImage.test.tsx`
+covers the caption's new branch, the older-backend silence, and the two marks riding the turned view;
+`History.test.tsx` swaps the test that pinned the old stand-down for the bar rendering with its clause, and
+adds the "pins placed, marks not" note.
+
+---
+
 ## v0.357.1 — 2026-09-05 — The prepared download is nameable disk, and clearable
 
 Follow-on to v0.357.0, closing the one thing it left on a NAS with a fixed disk allowance: **the archive

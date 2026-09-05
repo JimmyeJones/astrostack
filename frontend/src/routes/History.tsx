@@ -1073,13 +1073,20 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
     annotations.data?.height ?? run.canvas_h,
     annotations.data?.preview_scale_bar ?? null,
   );
-  // The scale bar and the compass still step aside on any turned picture: the
-  // bar's own length would survive the turn, but the sentence it carries ("the
-  // whole frame is about 5.4 full Moons wide") describes a *field*, and a turned
-  // frame has grown black wedges around the same sky. The pins have no such
-  // problem — a name points at a thing, not at the edges.
-  const cantPlaceMarks = imageIsNorthUp || geometryUnplaceable;
-  const cantPlaceObjects = cantPlaceMarks && !turnedView;
+  // All three marks now survive a turn a past save baked in — the server places
+  // them on the preview's own grid, the same grid (and the same helpers) the
+  // shared JPEG has baked a bar and a rose onto since v0.284.0. What still can't
+  // be placed is a turn happening *now* (the live Adjust render, or
+  // `?north_up=true` on the way out), and a geometry that isn't a crop at all.
+  const cantPlaceObjects = (imageIsNorthUp && !turnedView) || geometryUnplaceable;
+  // …plus the one case where the pins are answerable and the two marks are not:
+  // a backend that predates them. A run with no usable WCS is *not* that — it
+  // has no bar to place anywhere, which the scale line below already says in
+  // plain language — so this asks whether a bar exists at all before claiming
+  // one is missing.
+  const turnedMarksMissing =
+    !!turnedView && !turnedView.scaleBar && !!annotations.data?.scale_bar;
+  const cantPlaceMarks = cantPlaceObjects || turnedMarksMissing;
   // The rejection tint is measured against the stored bytes, so it lands only
   // while those bytes are what's on screen — but it no longer has to step aside
   // for an on-the-fly North-up turn: the overlay endpoint takes the same turn
@@ -1103,9 +1110,12 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             // The rose rides the same toggle as the bar — they are one idea
             // ("how big, and which way up?") and the *baked* share picture has
             // drawn them as a pair since v0.284.0. A crop doesn't turn a
-            // picture, so the directions need no crop composition; the
-            // rotation/unreconcilable cases hide it with everything else.
-            directions={annotations.data?.directions ?? null}
+            // picture, so the directions need no crop composition; a turn a past
+            // save baked in does, and the server answers that one on the
+            // preview's own grid (`preview_directions`), so the rose follows the
+            // pixels instead of standing down.
+            directions={turnedView ? turnedView.directions
+              : (annotations.data?.directions ?? null)}
             showCompass={scale && !cantPlaceMarks}
             // The server sizes the tint to the *stored* preview — including any
             // North-up turn a past save baked into it, and now the one this
@@ -1135,9 +1145,9 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             : applyNorthUp
             ? "Turn off “Rotate so North is up” to place object pins, the scale bar and the compass — they’re measured on the un-rotated image."
             : turnedView
-            // The pins followed the turn, so only the two marks are missing —
-            // and this line only renders when the scale toggle asked for them.
-            ? "This picture was saved rotated so North is up. The object pins follow the turn, but the scale bar and the compass describe the un-rotated frame, so they can’t be placed on it. Open Adjust and save it un-rotated to use them."
+            // The pins followed the turn but this server didn't send the marks
+            // for the turned grid, so only those two are missing.
+            ? "This picture was saved rotated so North is up. The object pins follow the turn, but this version can’t place the scale bar or the compass on it. Open Adjust and save it un-rotated to use them."
             : "This picture was saved rotated so North is up, so object pins, the scale bar and the compass can’t be placed on it — they’re measured on the un-rotated image. Open Adjust and save it un-rotated to use them."}
         </Text>
       ) : null}
@@ -1180,11 +1190,17 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         <Text size="xs" c={view.scaleBar ? "grape.3" : "dimmed"} mt={6}>
           {/* `view.scaleBar`, not the raw one: on a picture the auto-edit trimmed
               this sentence has to describe the *visible* field, the same
-              rectangle the bar above it is drawn on. */}
+              rectangle the bar above it is drawn on. On a picture a past save
+              turned, the two rectangles genuinely differ — the bar is drawn on
+              the grown canvas, the sentence answers for the sky — so the extra
+              clause says which, rather than leaving the reader to do the sum. */}
           {view.scaleBar
             // Capitalise the plain-language Moon sentence for the caption.
-            ? view.scaleBar.moon_comparison.charAt(0).toUpperCase()
+            ? (view.scaleBar.moon_comparison.charAt(0).toUpperCase()
               + view.scaleBar.moon_comparison.slice(1)
+              + (turnedView
+                ? " — that’s the sky you captured; the black corners the North-up turn added aren’t counted."
+                : ""))
             : "This picture has no sky coordinates, so its scale can't be measured"}
         </Text>
       ) : null}
