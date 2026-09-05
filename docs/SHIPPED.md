@@ -52,7 +52,9 @@ check below adds **1.38 ms** across the same 400 runs, measured the same way.) A
 stack runs is never asked at all (it cannot carry either marker), which a test pins by spying on
 `Project.iter_meta_prefix`.
 
-**The steps.** "Finish it in the editor" ticks on a *saved recipe* — which an unattended auto-edit writes
+**The steps.** "Finish it in the editor" ticks on a *saved recipe* — or on a finished picture, since
+pressing Export without ever pressing Save leaves the export marker and no recipe, and a step reading the
+recipe alone would sit unticked *above* a ticked one — — which an unattended auto-edit writes
 too, so the label is about the picture being finished, never about who pressed the button (the same
 tick↔label honesty the solve step was fixed for). "Save your edited version" ticks on the export marker,
 and says why it matters in the app's own terms: until you export, the thumbnail everyone sees is still
