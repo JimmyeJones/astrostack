@@ -14,7 +14,7 @@ Newest first.
 
 ---
 
-## v0.362.0 — 2026-09-05 — The first-image checklist carries the whole journey: n_edited_runs / n_exported_runs
+## v0.362.0 + v0.362.1 — 2026-09-05 — The first-image checklist carries the whole journey: n_edited_runs / n_finished_pictures
 
 **Friendliness / autonomy (PRIORITY 3), the filed idea built as filed.** The Dashboard's "Your first
 image" card walked a beginner from an empty app to a stack and then *stopped* — and a fresh stack is
@@ -26,9 +26,22 @@ nothing cheap reported whether either had happened.
 **Two counters on a walk that already happens.** `_rollup_stacks` (`webapp/routers/stats.py`) opens every
 target's project anyway; it now also counts the runs carrying a saved editor recipe
 (`editor_recipe:<id>`) and the runs whose edit has been exported (`editor_exported:<id>`), via one
-`project_meta` prefix scan each (`_count_meta_prefix` over `Project.iter_meta_prefix` — the same cheap
-read the un-exported-edits scan uses). Served as additive, defaulted `n_edited_runs` / `n_exported_runs`
-on `StatsResponse`.
+`project_meta` prefix scan each (`_run_ids_with_meta_prefix` over `Project.iter_meta_prefix` — the same
+cheap read the un-exported-edits scan uses). Served as additive, defaulted `n_edited_runs` /
+`n_finished_pictures` on `StatsResponse`.
+
+**v0.362.1 — the correction the dogfood pass caught, and it is the interesting half.** Booting the real
+app (`scripts/agent-dogfood.sh`) and looking at the card showed the export step still open on a picture
+the app had *already* finished: a hands-off "Process this target" saves the recipe **and bakes it into
+the run's stored preview** (`preview_display_space`), with no export anywhere — so the second counter,
+defined as "has an export marker", asked a walk-away owner to go and finish something that was finished,
+under a hint claiming their thumbnail was the un-edited stack when it was their edit. It also
+contradicted `stack._unexported_edit`, which reads that same marker and correctly stays silent on such a
+run. The counter is therefore **`n_finished_pictures`** — the union, by run id, of runs carrying the
+export marker and runs whose own options say the preview is the edited render, read through the existing
+`stack._preview_is_display_space` so the checklist and the nudge cannot drift apart. Unioned rather than
+summed because a run can carry both. The ids (not counts) come back from the prefix scan for exactly
+that reason, and the display-space check rides on the run rows the roll-up is already reading.
 
 **The entry's care note answered with a measurement, not an argument** (*"measure the added cost on a
 library with many runs before shipping; if it isn't free, don't do it — the roll-up is on the Dashboard's
@@ -57,10 +70,11 @@ two finishing ones. Pinned by a test that also asserts the flag is not quietly a
 change, no default flipped, no existing field touched. An older frontend ignores them; an older backend
 omitting them reads as "not done yet", which is the safe reading. Nothing is written anywhere.
 
-**Tests (+4 Python, +5 vitest, 8 updated).** `tests/webapp/test_stats.py`: the two counters through the
-endpoint as the markers appear one at a time; only `<prefix><run_id>` keys counting (`project_meta` is a
-shared key space, so `editor_recipe:default` and `editor_recipes_seen` must not inflate it); the cost
-guard above; and one corrupt project not costing the answer. `firstImageSteps.test.ts`: the six-step
+**Tests (+6 Python, +5 vitest, 8 updated).** `tests/webapp/test_stats.py`: the two counters through the
+endpoint as the markers appear one at a time; the in-place auto-edit counting as finished with no export
+in sight (fails before v0.362.1); one run carrying both markers counting once; only `<prefix><run_id>`
+keys counting (`project_meta` is a shared key space, so `editor_recipe:default` and `editor_recipes_seen`
+must not inflate it); the cost guard above; and one corrupt project not costing the answer. `firstImageSteps.test.ts`: the six-step
 order, the stacked→edit→export progression, an older backend's missing counts reading as not-done, and
 `firstImageHasPicture` being blind to the finishing steps. `FirstImageCard.test.tsx`: the established
 install still silent *and* un-armed, the first-time stacker pointed at the editor, and the export ask

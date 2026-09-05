@@ -213,19 +213,70 @@ def test_stats_counts_finished_and_saved_pictures(client, solved_library):
     assert body["n_stack_runs"] == 1
     # A stack nobody has opened in the editor yet: both steps still to do.
     assert body["n_edited_runs"] == 0
-    assert body["n_exported_runs"] == 0
+    assert body["n_finished_pictures"] == 0
 
     _set_run_meta(solved_library, safe, f"editor_recipe:{run_id}", "{\"ops\": []}")
     _uncache_stats(client)
     body = client.get("/api/stats").json()
     assert body["n_edited_runs"] == 1
-    assert body["n_exported_runs"] == 0
+    assert body["n_finished_pictures"] == 0
 
     _set_run_meta(solved_library, safe, f"editor_exported:{run_id}", "{\"ops\": []}")
     _uncache_stats(client)
     body = client.get("/api/stats").json()
     assert body["n_edited_runs"] == 1
-    assert body["n_exported_runs"] == 1
+    assert body["n_finished_pictures"] == 1
+
+
+def test_stats_counts_an_in_place_auto_edit_as_finished(client, solved_library):
+    """A hands-off "Process this target" finishes the picture *in place*: it saves
+    the recipe **and** bakes it into the run's stored preview
+    (``preview_display_space``), with no export anywhere.
+
+    Counting only the export marker would have the checklist tell a walk-away
+    owner to go and finish a picture the app already finished — and would
+    contradict the un-exported-edit nudge, which reads this same marker and stays
+    silent for exactly this run.
+    """
+    from seestack.io.library import Library as _Library
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_stack_run(solved_library, safe)
+    _set_run_meta(solved_library, safe, f"editor_recipe:{run_id}", "{\"ops\": []}")
+    lib = _Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.set_run_preview_display_space(run_id)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    _uncache_stats(client)
+
+    body = client.get("/api/stats").json()
+    assert body["n_edited_runs"] == 1
+    assert body["n_finished_pictures"] == 1
+
+
+def test_stats_finished_pictures_dont_double_count_one_run(client, solved_library):
+    """A run that was auto-edited in place and *then* exported is one finished
+    picture, not two — the two markers are unioned by run id."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_stack_run(solved_library, safe)
+    _set_run_meta(solved_library, safe, f"editor_exported:{run_id}", "{\"ops\": []}")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.set_run_preview_display_space(run_id)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    _uncache_stats(client)
+
+    assert client.get("/api/stats").json()["n_finished_pictures"] == 1
 
 
 def test_stats_edit_counters_ignore_meta_that_isnt_a_run(client, solved_library):

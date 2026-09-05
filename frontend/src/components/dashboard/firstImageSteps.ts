@@ -16,7 +16,7 @@ import { settingsLink } from "../../settingsSections";
  * The last two — finish it in the editor, then save that version — are the half
  * of the journey the card used to only *mention* in its congratulation, because
  * nothing cheap reported them. `/api/stats` now carries `n_edited_runs` /
- * `n_exported_runs` (counted on the library roll-up it already does), so a
+ * `n_finished_pictures` (counted on the library roll-up it already does), so a
  * beginner who has just made their first stack is told what to do with it
  * instead of being congratulated and left on a linear, unstretched picture.
  *
@@ -124,6 +124,11 @@ export function firstImageSteps(
     },
     {
       key: "export",
+      // Ticks on the *visible* picture being the finished one, which an in-place
+      // "Process target" Auto edit already achieves without any export — so a
+      // walk-away owner is never told to go and finish something the app
+      // finished for them. The hint below only ever leads when the step is
+      // genuinely open, and there its claim about the thumbnail is exactly true.
       label: "Save your edited version",
       hint: "Press Export in the editor to save your edit as its own picture — "
         + "until you do, the thumbnail everyone sees is still the un-edited "
@@ -133,7 +138,7 @@ export function firstImageSteps(
       // both are open the card shows both links, and two identically-named ones
       // tell the user nothing about which is which.
       action: "Open your edit",
-      done: (stats?.n_exported_runs ?? 0) > 0,
+      done: (stats?.n_finished_pictures ?? 0) > 0,
     },
   ];
 }
