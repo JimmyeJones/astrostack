@@ -62,6 +62,17 @@ describe("firstImageSteps", () => {
     expect(firstImageNextStep(firstImageSteps(sys(), exported))).toBeNull();
   });
 
+  it("never leaves an earlier step open under a later one that is done", () => {
+    // Export without ever pressing Save: the export marker exists and no recipe
+    // does. Reading the recipe alone would tick "Save your edited version" while
+    // "Finish it in the editor" above it stayed open, which reads as a bug.
+    const steps = firstImageSteps(sys(), stats({
+      n_frames: 40, n_frames_accepted: 32, n_stack_runs: 1, n_finished_pictures: 1,
+    }));
+    expect(steps.map((s) => s.done)).toEqual([true, true, true, true, true, true]);
+    expect(firstImageComplete(steps)).toBe(true);
+  });
+
   it("reads an older backend's missing edit/export counts as not done", () => {
     // Additive fields: a backend from before them sends neither, and the safe
     // reading is "that step is still to do" — never a tick the app can't see.

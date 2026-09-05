@@ -120,7 +120,12 @@ export function firstImageSteps(
         + "one click, and nothing you do there touches the original.",
       href: "/gallery",
       action: "Open a picture",
-      done: (stats?.n_edited_runs ?? 0) > 0,
+      // A finished picture counts here too, and not only for tidiness: pressing
+      // Export without ever pressing Save leaves the export marker and no saved
+      // recipe, and this step reading the recipe alone would then sit unticked
+      // *above* a ticked "Save your edited version". A later step being done is
+      // proof this one was.
+      done: (stats?.n_edited_runs ?? 0) > 0 || (stats?.n_finished_pictures ?? 0) > 0,
     },
     {
       key: "export",
