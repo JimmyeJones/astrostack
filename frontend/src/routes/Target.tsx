@@ -36,6 +36,7 @@ import { TransparencyTrendCard } from "../components/TransparencyTrendCard";
 import { NextSessionCard } from "../components/NextSessionCard";
 import { BestMonthsStrip } from "../components/BestMonthsStrip";
 import { MoonInterferenceCard } from "../components/MoonInterferenceCard";
+import { MosaicMapCard } from "../components/target/MosaicMapCard";
 import { DeepeningReelCard } from "../components/DeepeningReelCard";
 import { SessionRecapCard } from "../components/SessionRecapCard";
 import { StackHealthCard } from "../components/StackHealthCard";
@@ -1852,6 +1853,11 @@ export function TargetView() {
               {/* Which months of the year this object is actually up. Self-hides
                   without a location/position. */}
               <BestMonthsStrip safe={safe} />
+              {/* "Your mosaic, panel by panel" — where a mosaic is thin, so the
+                  next clear night goes where it actually helps. Planning, not
+                  another banner: it joins this group rather than being appended
+                  to the page, and self-hides on anything that isn't a mosaic. */}
+              <MosaicMapCard safe={safe} />
               {/* "Is the Moon going to wash this out tonight?" — a plain-language
                   Moon-interference readout so a beginner points at a bright target
                   instead of wasting a bright-Moon night. Self-hides without a

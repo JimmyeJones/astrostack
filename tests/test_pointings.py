@@ -7,7 +7,11 @@ well-separated targets in one folder split into two.
 
 from __future__ import annotations
 
-from seestack.stack.pointings import MIN_POINTING_FRAMES, detect_mixed_pointings
+from seestack.stack.pointings import (
+    MIN_POINTING_FRAMES,
+    detect_mixed_pointings,
+    pointing_groups,
+)
 
 
 def _pointing(ra: float, dec: float, n: int) -> list[tuple[float, float]]:
@@ -81,3 +85,38 @@ def test_none_and_nonfinite_coords_ignored():
     frames += [(None, -5.4), (float("nan"), 1.0), (83.6, None)]
     # Only the 20 valid single-pointing frames remain → not bimodal.
     assert detect_mixed_pointings(frames) is None
+
+
+# --- pointing_groups(weights=…) --------------------------------------------
+#
+# Added for the mosaic depth map, which folds identical pointings together before
+# clustering (the clustering is O(n²) and a target carries thousands of subs on a
+# handful of panels). The gate has to keep meaning "substantial by the *frames* it
+# holds", or a folded caller would see panels appear and disappear against the
+# same data — which is exactly the "three hand-mirrored predicates that disagreed"
+# failure this parameter exists to avoid.
+
+
+def test_weights_default_to_one_each_so_nothing_changes():
+    frames = _pointing(83.6, -5.4, 12) + _pointing(84.6, -5.4, 12)
+    plain = pointing_groups(frames, min_members=10)
+    weighted = pointing_groups(frames, min_members=10, weights=[1] * len(frames))
+    assert plain is not None
+    assert plain == weighted
+
+
+def test_a_folded_caller_gets_the_same_answer_as_an_unfolded_one():
+    """Two panels of 12 subs each, folded to one entry per panel. Without the
+    weights the folded call sees two groups of *one* and refuses to split."""
+    unfolded = [(83.6, -5.4)] * 12 + [(84.6, -5.4)] * 12
+    folded = [(83.6, -5.4), (84.6, -5.4)]
+
+    assert pointing_groups(unfolded, min_members=10) is not None
+    assert pointing_groups(folded, min_members=10) is None            # unweighted
+    assert pointing_groups(folded, min_members=10, weights=[12, 12]) is not None
+
+
+def test_a_weighted_group_below_the_floor_is_still_not_a_panel():
+    """The floor is on frames, so a fold does not smuggle a thin group past it."""
+    folded = [(83.6, -5.4), (84.6, -5.4)]
+    assert pointing_groups(folded, min_members=10, weights=[12, 4]) is None

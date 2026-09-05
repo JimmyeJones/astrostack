@@ -679,6 +679,34 @@ export interface TargetNight {
   kept_exposure_s: number;
 }
 
+/** One panel of a mosaic and how much time has landed on it.
+ *
+ *  `row` 0 is the top (highest Dec) and `col` 0 the left (highest RA), so the
+ *  grid draws North-up / East-left — the orientation every astro image is in. */
+export interface MosaicPanel {
+  row: number;
+  col: number;
+  n_frames: number;
+  exposure_s: number;
+  ra_deg: number;
+  dec_deg: number;
+}
+
+/** "Your mosaic, panel by panel" — where a mosaic is thin.
+ *
+ *  `null` from the endpoint whenever the target isn't clearly a mosaic (the
+ *  engine's own shared panel gate decides), so the card renders nothing at all
+ *  for a single-field target. `thin` is set only when one panel is *materially*
+ *  behind the rest; on an even mosaic there is nothing to point at. */
+export interface MosaicDepthMap {
+  panels: MosaicPanel[];
+  rows: number;
+  cols: number;
+  median_exposure_s: number;
+  thin?: MosaicPanel | null;
+  text: string;
+}
+
 export interface NightSummary {
   start_utc: string | null;
   end_utc: string | null;
@@ -2513,6 +2541,8 @@ export const api = {
     req<BestFrame>(`/api/targets/${safe}/best-frame`),
   targetNights: (safe: string) =>
     req<NightSummary[]>(`/api/targets/${safe}/nights`),
+  mosaicMap: (safe: string) =>
+    req<MosaicDepthMap | null>(`/api/targets/${safe}/mosaic-map`),
   focusTrend: (safe: string) =>
     req<FocusTrend | null>(`/api/targets/${safe}/focus-trend`),
   transparencyTrend: (safe: string) =>
