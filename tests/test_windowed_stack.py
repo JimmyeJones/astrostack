@@ -142,3 +142,37 @@ def test_windowed_reproject_window_is_small_for_mosaic_panel():
     win_area = win.shape[0] * win.shape[1]
     canvas_area = dst_shape[0] * dst_shape[1]
     assert win_area < 0.5 * canvas_area
+
+
+def test_full_and_windowed_reproject_trust_the_same_frame_edge():
+    """Both reprojections must exclude the source frame's outer artefact ring.
+
+    ``reproject_rgb_windowed`` is what the stacker actually calls, and it insets
+    the trusted region by ``FRAME_EDGE_INSET_PX`` so debayer/reproject edge
+    artefacts can't enter the stack. The whole-canvas ``reproject_rgb`` used to
+    validate on the bare ``0 <= src <= size-1`` instead, so it accepted that ring
+    as good data — harmless while nothing on the hot path called it, and a trap
+    for the next caller who reached for the simpler signature.
+    """
+    from seestack.stack.align import FRAME_EDGE_INSET_PX
+
+    rng = np.random.default_rng(11)
+    src_rgb = rng.random((320, 480, 3)).astype(np.float32)
+    src_wcs = wcs_from_text(make_synth_wcs_text())
+    # Same pointing, so the whole frame lands on the canvas and the only thing
+    # that can differ between the two paths is where each stops trusting it.
+    dst_wcs = wcs_from_text(make_synth_wcs_text())
+    dst_shape = (320, 480)
+
+    _, full_valid = reproject_rgb(src_rgb, src_wcs, dst_wcs, dst_shape, use_gpu=False)
+    result = reproject_rgb_windowed(src_rgb, src_wcs, dst_wcs, dst_shape, use_gpu=False)
+    assert result is not None
+    _, win_valid, y0, x0 = result
+
+    wh, ww = win_valid.shape[:2]
+    np.testing.assert_array_equal(
+        full_valid[y0:y0 + wh, x0:x0 + ww], win_valid)
+    # …and it really is the inset ring both are dropping, not "everything valid".
+    assert not full_valid[0, 0].any()
+    assert not full_valid[FRAME_EDGE_INSET_PX - 1, FRAME_EDGE_INSET_PX - 1].any()
+    assert full_valid[FRAME_EDGE_INSET_PX, FRAME_EDGE_INSET_PX].all()
