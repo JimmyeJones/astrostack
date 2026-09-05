@@ -18,7 +18,7 @@ import { StackOptionControl as FieldControl } from "../components/StackOptionCon
 import {
   biasSizeWarning, darkScalingBlockedNote, exposureMismatch, flatBayerWarning,
   flatDarkSizeWarning, flatPickPatch, masterOptionSuffix, masterRecommendation,
-  masterSizeWarning, tempMismatch,
+  masterSizeWarning, pickedMasterContentWarnings, tempMismatch,
 } from "../calibrationFit";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
@@ -514,6 +514,16 @@ export function StackView() {
   // the "I added darks and nothing happened" confusion worth heading off.
   const darkSizeWarning = masterSizeWarning("dark", darkM, frameDims);
   const flatSizeWarning = masterSizeWarning("flat", flatM, frameDims);
+  // …and the question underneath the size/phase checks: is the master made of the
+  // right kind of frame at all? A "master dark" built from a night's subs fits
+  // perfectly and subtracts a picture of the sky out of every frame. Silent
+  // unless the frames' own IMAGETYP cards said so (v0.356.0 onwards).
+  const contentWarnings = pickedMasterContentWarnings([
+    { slot: "dark", master: darkM },
+    { slot: "flat", master: flatM },
+    { slot: "flat-dark", master: flatDarkM },
+    { slot: "bias", master: biasM },
+  ]);
   // The flat's other hard blocker: a different colour-filter phase. Same shape as
   // the size clash (the engine refuses it, the walk-away path silently skips it),
   // and flats only — a dark/bias corrects each physical pixel, so its phase is
@@ -1004,6 +1014,20 @@ export function StackView() {
                     disabled={flatOpts.length === 0}
                   />
                 </Group>
+                {/* Before "does it fit?": is it made of the right thing at all?
+                    One alert for every slot rather than four, because this fires
+                    on a mistake that is rare — and when it does fire it is the
+                    most damaging pick on the form, so it goes first. Orange, not
+                    red: red on this form means "stacking will fail", and this
+                    stack will *succeed* — that is the whole problem with it. */}
+                {contentWarnings.length ? (
+                  <Alert color="orange" variant="light" py={6} px="sm"
+                    icon={<IconAlertTriangle size={16} />}>
+                    {contentWarnings.map((w) => (
+                      <Text size="xs" key={w}>{w}</Text>
+                    ))}
+                  </Alert>
+                ) : null}
                 {darkSizeWarning ? (
                   <Alert color="red" variant="light" py={6} px="sm">
                     <Text size="xs">{darkSizeWarning}</Text>

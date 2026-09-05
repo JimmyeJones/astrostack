@@ -1239,3 +1239,64 @@ def test_calibration_warns_on_a_bias_phase_mismatch_only_when_it_applies(tmp_pat
     with_dark = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"),
                                         bias_path=str(tmp_path / "b.fits"))
     assert with_dark.calibration_warnings(10.0, None, "RGGB") == []
+
+
+def test_build_master_tallies_what_the_frames_say_they_are(tmp_path):
+    """The build takes a folder and a kind picked from a dropdown; nothing else
+    checks the two agree. Record what the frames themselves said so the app can."""
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"d_{i}.fits"
+        hdu = fits.PrimaryHDU(data=np.full((4, 4), 100.0, dtype=np.float32))
+        hdu.header["IMAGETYP"] = "Dark Frame"
+        hdu.writeto(p, overwrite=True)
+        paths.append(p)
+    _master, meta = build_master(paths, kind="dark", method="median")
+    assert meta.header_kinds == {"dark": 3}
+
+
+def test_build_master_tallies_a_folder_of_lights_as_lights(tmp_path):
+    """The mistake this exists to catch: a beginner points the dark build at a
+    night's subs. The master still builds — it just knows what it's made of."""
+    paths = []
+    for i in range(4):
+        p = tmp_path / f"l_{i}.fits"
+        hdu = fits.PrimaryHDU(data=np.full((4, 4), 100.0, dtype=np.float32))
+        hdu.header["IMAGETYP"] = "LIGHT"
+        hdu.writeto(p, overwrite=True)
+        paths.append(p)
+    _master, meta = build_master(paths, kind="dark", method="median")
+    assert meta.header_kinds == {"light": 4}
+
+
+def test_build_master_header_kinds_is_empty_when_no_frame_says(tmp_path):
+    """A camera that doesn't write IMAGETYP must read as *unknown*, never as a
+    mismatch — the app stays silent rather than accusing a fine master."""
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"d_{i}.fits"
+        _write_raw(p, np.full((4, 4), 100.0, dtype=np.float32), exptime=30.0)
+        paths.append(p)
+    _master, meta = build_master(paths, kind="dark", method="median")
+    assert meta.header_kinds == {}
+
+
+def test_build_master_only_counts_frames_that_reach_the_combine(tmp_path):
+    """A frame set aside for the wrong shape never went into the master, so it
+    doesn't get a vote on what the master is made of."""
+    good = np.full((4, 4), 100.0, dtype=np.float32)
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"d_{i}.fits"
+        hdu = fits.PrimaryHDU(data=good)
+        hdu.header["IMAGETYP"] = "Dark"
+        hdu.writeto(p, overwrite=True)
+        paths.append(p)
+    odd = tmp_path / "odd.fits"
+    hdu = fits.PrimaryHDU(data=np.full((6, 6), 100.0, dtype=np.float32))
+    hdu.header["IMAGETYP"] = "Light Frame"
+    hdu.writeto(odd, overwrite=True)
+    paths.append(odd)
+    _master, meta = build_master(paths, kind="dark", method="median")
+    assert meta.n_frames == 3
+    assert meta.header_kinds == {"dark": 3}

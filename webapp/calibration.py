@@ -105,6 +105,94 @@ def _write_id_high_water(library_root: str | Path, value: int) -> None:
     write_text_durably(path, str(int(value)))
 
 
+#: Which ``IMAGETYP`` values are *right* for each kind of master we build. A
+#: flat-dark is a dark exposure taken to match the flats, so it belongs in a dark
+#: master; nothing else crosses over.
+_KIND_ACCEPTS: dict[str, frozenset[str]] = {
+    "dark": frozenset({"dark", "dark_flat"}),
+    "flat": frozenset({"flat"}),
+    "bias": frozenset({"bias"}),
+}
+
+#: Plain-language ``(singular, plural)`` for each declared kind, for the note
+#: below. "light" carries the reminder of what a light *is*, because that is the
+#: mistake this whole check exists to catch — pointing the build at your subs.
+_KIND_WORDS: dict[str, tuple[str, str]] = {
+    "light": ("a light frame (one of your subs)", "light frames (your subs)"),
+    "dark": ("a dark frame", "dark frames"),
+    "flat": ("a flat frame", "flat frames"),
+    "bias": ("a bias frame", "bias frames"),
+    "dark_flat": ("a flat-dark frame", "flat-dark frames"),
+}
+
+
+def _says(kind: str, n: int) -> str:
+    """"3 say they are dark frames" / "1 says it is a dark frame" — the frames'
+    own claim, in a number that agrees with itself."""
+    sing, plural = _KIND_WORDS.get(kind, (f"a {kind} frame", f"{kind} frames"))
+    return f"{n} says it is {sing}" if n == 1 else f"{n} say they are {plural}"
+
+
+def header_kind_note(
+    kind: str, header_kinds: dict[str, Any] | None, n_frames: int | None,
+) -> dict[str, str] | None:
+    """"Do these frames say they're the kind of frame you asked for?"
+
+    The build form takes a *folder path* and a kind the user picks from a
+    dropdown — nothing checks that the two agree, so pointing it at a night's
+    subs silently produces a "master dark" made of light frames, which then
+    subtracts a picture of the sky out of every stack it touches. The frames
+    themselves usually know: ``IMAGETYP`` is the standard FITS card for it.
+
+    Returns ``{'severity': 'ok'|'warn', 'message': …}``, or **``None`` when no
+    frame carried a card we recognise** — the common case for a camera that
+    doesn't write one, and one that must stay silent rather than guess. Only
+    *recognised* values count (see
+    :func:`seestack.io.fits_loader.frame_kind_from_header`); a frame that said
+    nothing is reported as not having said, never as a mismatch.
+
+    Pure function over the tally :func:`seestack.calibrate.masters.build_master`
+    stamps on the master, so the same sentence can be shown on the build job and
+    on the master list without the two drifting apart.
+    """
+    counts = {
+        str(k): int(v) for k, v in (header_kinds or {}).items()
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and int(v) > 0
+    }
+    if not counts:
+        return None
+    kind = str(kind).lower()
+    accepts = _KIND_ACCEPTS.get(kind, frozenset())
+    want_one, want = _KIND_WORDS.get(kind, (f"a {kind} frame", f"{kind} frames"))
+    n_declared = sum(counts.values())
+    total = max(int(n_frames or 0), n_declared)
+    wrong = {k: n for k, n in counts.items() if k not in accepts}
+    right = n_declared - sum(wrong.values())
+
+    if not wrong:
+        if n_declared >= total:
+            head = (f"The only frame says it is {want_one}" if total == 1
+                    else f"All {total} frames say they are {want}")
+            return {"severity": "ok", "message": f"{head}."}
+        return {"severity": "ok",
+                "message": (f"{_says(kind, n_declared)}, of the {total} that went "
+                            f"in; the rest didn't say.")}
+
+    # Worst first, so the headline names the biggest disagreement rather than
+    # whichever kind happened to sort first.
+    listed = ", ".join(_says(k, n)
+                       for k, n in sorted(wrong.items(), key=lambda kv: -kv[1]))
+    if right:
+        return {"severity": "warn",
+                "message": (f"These frames disagree: {_says(kind, right)}, but "
+                            f"{listed}. A master should be built from one kind of "
+                            f"frame only — rebuild it from a folder of {want}.")}
+    return {"severity": "warn",
+            "message": (f"Every frame here says something else: {listed}. This is "
+                        f"not a {kind} master — delete it and point the build at a "
+                        f"folder of {want}.")}
+
+
 def list_masters(library_root: str | Path) -> list[dict[str, Any]]:
     """Return all registered masters (newest first), dropping any whose file
     has since been deleted from disk."""
@@ -112,7 +200,14 @@ def list_masters(library_root: str | Path) -> list[dict[str, Any]]:
     out = []
     for e in entries:
         fp = calibration_dir(library_root) / e.get("filename", "")
-        e = dict(e, exists=fp.exists())
+        # ``header_note`` is derived, not stored: the tally is what's persisted,
+        # so the wording can be improved later without rewriting the registry.
+        # Absent on every master built before v0.356.0 — the helper returns None
+        # there and the row simply says nothing, which is the honest answer.
+        e = dict(e, exists=fp.exists(),
+                 header_note=header_kind_note(
+                     str(e.get("kind", "")), e.get("header_kinds"),
+                     e.get("n_frames")))
         out.append(e)
     out.sort(key=lambda e: e.get("created_utc", ""), reverse=True)
     return out
@@ -1166,6 +1261,11 @@ def register_master(
             "width_px": meta.width_px,
             "height_px": meta.height_px,
             "created_utc": datetime.now(timezone.utc).isoformat(),
+            # What the source frames' own IMAGETYP cards said. Stored as the
+            # tally rather than a sentence so the wording stays derived
+            # (:func:`header_kind_note`); `{}` means "none of them said", which
+            # is exactly what an older entry's missing key also reads as.
+            "header_kinds": dict(getattr(meta, "header_kinds", None) or {}),
         }
         entries.append(entry)
         _write_registry(library_root, entries)

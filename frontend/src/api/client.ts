@@ -2265,6 +2265,13 @@ export interface CalibrationMaster {
   height_px: number;
   created_utc: string;
   exists: boolean;
+  // What the source frames' own `IMAGETYP` cards said, and the server's
+  // plain-language verdict on whether that agrees with the kind of master this
+  // is. Both absent on masters built before v0.356.0, and `header_note` is null
+  // whenever no frame carried a card we recognise — a camera that doesn't write
+  // one is silent, not suspect.
+  header_kinds?: Record<string, number> | null;
+  header_note?: { severity: "ok" | "warn"; message: string } | null;
 }
 
 // A Seestar Moon/Sun video capture sitting in the incoming folder (a `*_video/`

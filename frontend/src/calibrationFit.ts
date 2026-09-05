@@ -361,3 +361,38 @@ export function masterRecommendation(
   const biasId = cBias ?? (darkId === null ? num(sug?.bias_master_id) : null);
   return { darkId, flatId, flatDarkId, biasId, scaleDark };
 }
+
+/** The master fields the "is this even the right kind of frame?" check needs. */
+export interface MasterContent {
+  name?: string;
+  header_note?: { severity?: string; message?: string } | null;
+}
+
+/** One line per *picked* master whose own frames say they are the wrong kind of
+ * frame — the server's sentence, prefixed with which slot it came from.
+ *
+ * The size and colour-phase checks above ask whether a master *can* be applied.
+ * This asks the question underneath them: is it made of the right thing at all?
+ * The build form takes a folder path in a text box and a kind from a dropdown, so
+ * a master dark built from a night's subs is a plain typo away — it fits, it
+ * applies, and it subtracts a picture of the sky out of every frame. The server
+ * has already read the frames' own `IMAGETYP` cards and written the verdict
+ * (`calibration.header_kind_note`); this only decides *whether to say it here*.
+ *
+ * One-sided in the same way as every other check on this form: a master whose
+ * frames never declared a kind, and every master built before v0.356.0, carry no
+ * note at all and are never flagged. Returns `[]` when there is nothing to say,
+ * which is the overwhelmingly common case — the form must not grow a permanent
+ * fourth warning block. */
+export function pickedMasterContentWarnings(
+  picks: Array<{ slot: string; master: MasterContent | null | undefined }>,
+): string[] {
+  const out: string[] = [];
+  for (const { slot, master } of picks) {
+    const note = master?.header_note;
+    if (!note || note.severity !== "warn" || !note.message) continue;
+    const named = master?.name ? ` "${master.name}"` : "";
+    out.push(`Master ${slot}${named}: ${note.message}`);
+  }
+  return out;
+}
