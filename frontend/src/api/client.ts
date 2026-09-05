@@ -1013,6 +1013,14 @@ export interface DashboardStats {
   // counters above genuinely cannot see (a video ingests no FITS, solves
   // nothing and creates no stack run).
   n_video_stills?: number;
+  // Pictures that have been given a finished look in the editor (a saved
+  // recipe), and pictures whose *visible* version is that finished look — an
+  // export, or an in-place "Process target" Auto edit whose preview already is
+  // the edited render. Optional: an older backend never sends them, and every
+  // reader treats a missing value as 0 — i.e. "that step isn't done yet", which
+  // is the safe reading.
+  n_edited_runs?: number;
+  n_finished_pictures?: number;
   recent_stacks: {
     safe: string;
     target_name: string;

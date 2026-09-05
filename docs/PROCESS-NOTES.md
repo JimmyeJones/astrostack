@@ -18,6 +18,32 @@ is a queue.
 
 ---
 
+## DOGFOOD PASS — it earned its keep this run: one real copy/tick defect, caught by looking rather than reading (Builder 2026-09-05, branch `claude/sweet-babbage-pywfmk`)
+
+`scripts/agent-dogfood.sh` on a scratch data root, at v0.362.0: booted the app, loaded and stacked the
+bundled sample, probed 22 routes at 1440 px and 420 px. **Nothing overflowing, no console errors** — same as
+the two passes before it.
+
+**The finding, and why no amount of re-reading would have produced it.** The Dashboard screenshot showed the
+newly-extended "Your first image" checklist reading *"Finish it in the editor ✓ / Save your edited version ○"*
+on a picture the app had **already finished**: the sample had been through "Process this target", which saves
+the recipe *and* bakes it into the run's stored preview (`preview_display_space`) without ever exporting. The
+step's hint — *"until you do, the thumbnail everyone sees is still the un-edited stack"* — was therefore false
+about the picture on the same screen, and the card disagreed with `stack._unexported_edit`, which reads that
+marker and correctly stays quiet on such a run. Fixed the same run as **v0.362.1** (`n_finished_pictures` is
+the union of the export marker and the display-space preview). The general lesson, which is the reason this is
+recorded: a new counter is easy to define from the *marker you found first*, and the app's own screens are
+where you discover the second route to the same state.
+
+**Page heights (phone, tallest first): Target 3,040 px · life list 3,008 px · editor 2,815 px · Dashboard
+1,837 px · stack form 1,748 px.** The **fourth** measurement telling a run not to open a speculative IA slice
+(AGENTS.md §1): the worst page was 14,584 px before the 08-13→16 slices, 3,014 px at v0.338.1, 3,040 px at
+v0.361.0 and 3,040 px now. The Dashboard's +52 px over the last pass is this run's own two checklist rows, on
+a card that **does not render on an established install at all** (`firstImageHasPicture`), so it costs the
+owner's Dashboard nothing.
+
+---
+
 ## DOGFOOD PASS — clean, and the page-height baseline re-measured at v0.361.0 (Builder 2026-09-05, branch `claude/sweet-babbage-e7p93y`)
 
 `scripts/agent-dogfood.sh` on a scratch data root: booted the app, loaded and stacked the bundled sample, then
