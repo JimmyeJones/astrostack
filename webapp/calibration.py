@@ -154,10 +154,22 @@ def header_kind_note(
     Pure function over the tally :func:`seestack.calibrate.masters.build_master`
     stamps on the master, so the same sentence can be shown on the build job and
     on the master list without the two drifting apart.
+
+    Total over the registry's own JSON, which nothing validates on read, so every
+    shape it could hold is tolerated: a non-mapping, a key that isn't one of the
+    five kinds the engine emits, a bool/float/negative count. Each is dropped
+    rather than described — the Calibration page must not 500 on a hand-edited
+    registry, and a count this function can't stand behind is the same as no count.
     """
+    if not isinstance(header_kinds, dict):
+        header_kinds = {}
     counts = {
-        str(k): int(v) for k, v in (header_kinds or {}).items()
-        if isinstance(v, (int, float)) and not isinstance(v, bool) and int(v) > 0
+        str(k): int(v) for k, v in header_kinds.items()
+        # Only the kinds `frame_kind_from_header` can actually emit: an unknown
+        # key would otherwise be echoed at the user as "3 say they are xyz
+        # frames", inventing a claim out of a corrupted tally.
+        if str(k) in _KIND_WORDS
+        and isinstance(v, (int, float)) and not isinstance(v, bool) and int(v) > 0
     }
     if not counts:
         return None
@@ -169,7 +181,21 @@ def header_kind_note(
     wrong = {k: n for k, n in counts.items() if k not in accepts}
     right = n_declared - sum(wrong.values())
 
+    # Worst first, so a headline names the biggest group rather than whichever
+    # kind happened to sort first.
+    def listing(tally: dict[str, int]) -> str:
+        return ", ".join(_says(k, n)
+                         for k, n in sorted(tally.items(), key=lambda kv: -kv[1]))
+
     if not wrong:
+        # Say what they *said*, not what the slot is called: a folder of
+        # flat-darks in the dark slot belongs there, and echoing it back as
+        # "dark frames" would quietly relabel the owner's own frames.
+        if set(counts) != {kind}:
+            tail = "" if n_declared >= total else " The rest didn't say."
+            return {"severity": "ok",
+                    "message": (f"These frames fit a {kind} master: "
+                                f"{listing(counts)}.{tail}")}
         if n_declared >= total:
             head = (f"The only frame says it is {want_one}" if total == 1
                     else f"All {total} frames say they are {want}")
@@ -178,10 +204,7 @@ def header_kind_note(
                 "message": (f"{_says(kind, n_declared)}, of the {total} that went "
                             f"in; the rest didn't say.")}
 
-    # Worst first, so the headline names the biggest disagreement rather than
-    # whichever kind happened to sort first.
-    listed = ", ".join(_says(k, n)
-                       for k, n in sorted(wrong.items(), key=lambda kv: -kv[1]))
+    listed = listing(wrong)
     if right:
         return {"severity": "warn",
                 "message": (f"These frames disagree: {_says(kind, right)}, but "

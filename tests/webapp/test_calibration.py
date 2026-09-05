@@ -1810,3 +1810,41 @@ def test_a_master_built_before_the_check_existed_says_nothing(client, tmp_path):
     masters = client.get("/api/calibration/masters").json()
     row = [m for m in masters if m["id"] == body["result"]["id"]][0]
     assert row["header_note"] is None
+
+
+def test_header_kind_note_echoes_what_the_frames_said_not_the_slot_name():
+    """A folder of flat-darks belongs in the dark slot — but they said "flat-dark",
+    and reporting that back as "dark frames" quietly relabels the owner's frames.
+    The whole point of the note is to say what they said."""
+    note = calibration.header_kind_note("dark", {"dark_flat": 40}, 40)
+    assert note == {"severity": "ok",
+                    "message": "These frames fit a dark master: "
+                               "40 say they are flat-dark frames."}
+    mixed = calibration.header_kind_note("dark", {"dark": 30, "dark_flat": 10}, 40)
+    assert mixed["severity"] == "ok"
+    # Biggest group first, same as the disagreement listing.
+    assert mixed["message"] == ("These frames fit a dark master: 30 say they are "
+                               "dark frames, 10 say they are flat-dark frames.")
+    quiet = calibration.header_kind_note("dark", {"dark_flat": 30}, 40)
+    assert quiet["message"].endswith("The rest didn't say.")
+
+
+def test_header_kind_note_survives_a_registry_holding_anything():
+    """The tally comes out of the registry's own JSON, which nothing validates on
+    read. Every shape it could hold must degrade to silence — the Calibration page
+    must not 500 on a hand-edited registry, and a count the note can't stand
+    behind is the same as no count at all."""
+    for junk in ("notadict", ["dark"], 7, {"dark": True}, {"dark": -2},
+                 {"dark": None}, {None: 3}):
+        assert calibration.header_kind_note("dark", junk, 3) is None
+
+
+def test_header_kind_note_never_echoes_a_kind_the_engine_cannot_emit():
+    """An unknown key would otherwise be read back at the user as "3 say they are
+    xyz frames" — a claim invented out of a corrupted tally."""
+    assert calibration.header_kind_note("dark", {"xyz": 3}, 3) is None
+    # …and a real kind alongside junk still speaks for itself.
+    note = calibration.header_kind_note("dark", {"xyz": 3, "light": 2}, 5)
+    assert note["severity"] == "warn"
+    assert "xyz" not in note["message"]
+    assert "2 say they are light frames (your subs)" in note["message"]
