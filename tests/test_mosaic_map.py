@@ -16,6 +16,7 @@ import pytest
 from seestack.mosaicmap import (
     MIN_PANEL_FRAMES,
     THIN_FRACTION,
+    aim_hint,
     mosaic_depth_map,
     panel_position_words,
 )
@@ -234,3 +235,52 @@ def test_the_fold_keeps_each_panel_centre_where_the_frames_are():
     assert left.ra_deg == pytest.approx(200.0 + 0.5 / math.cos(math.radians(30.0)))
     assert right.ra_deg == pytest.approx(200.0)
     assert left.dec_deg == pytest.approx(30.0)
+
+
+# --- aim_hint: the same fact, short enough for a "point here right now" card ---
+
+
+def test_the_aim_hint_names_the_corner_and_both_sides_of_the_comparison():
+    """The Dashboard's recommendation has room for one clause, not a paragraph.
+    It must still say *where* and *how far behind*, in the app's one position and
+    duration vocabulary — the long card sentence's own words, not a second
+    spelling."""
+    m = mosaic_depth_map(_grid(2, 2, subs=60, per_panel={(1, 1): 6}))
+
+    assert m is not None and m.thin is not None
+    hint = aim_hint(m)
+    assert hint is not None
+    assert "bottom-right" in hint
+    assert "1 min" in hint and "10 min" in hint
+    # Short: one sentence for a card row, where `text` is three for a panel.
+    assert hint.count(".") == 1
+    assert len(hint) < len(m.text)
+    # And it agrees with the long sentence about where the thin panel is.
+    assert panel_position_words(m.thin.row, m.thin.col, m.rows, m.cols) in m.text
+
+
+def test_an_even_mosaic_offers_no_corner_to_aim_at():
+    """`text` still reassures on an even mosaic, but there is nothing to *point*
+    at — so the recommendation card stays exactly as it is today."""
+    m = mosaic_depth_map(_grid(2, 2, subs=60, per_panel={(0, 1): 58}))
+
+    assert m is not None and m.thin is None
+    assert aim_hint(m) is None
+
+
+def test_a_target_that_is_not_a_mosaic_offers_no_hint_and_does_not_raise():
+    """The caller passes whatever the map endpoint returned, `None` included."""
+    assert aim_hint(None) is None
+    assert aim_hint(mosaic_depth_map([(200.0, 30.0, SUB_S)] * 40)) is None
+
+
+def test_the_aim_hint_follows_the_thin_panel_around_the_grid():
+    """Positional wording is the whole point — it has to track the panel that is
+    actually behind, not settle on one corner."""
+    for (row, col), where in (((0, 0), "top-left"), ((0, 2), "top-right"),
+                              ((2, 0), "bottom-left"), ((1, 1), "middle")):
+        m = mosaic_depth_map(_grid(3, 3, subs=60, per_panel={(row, col): 6}))
+        assert m is not None and m.thin is not None
+        assert (m.thin.row, m.thin.col) == (row, col)
+        hint = aim_hint(m)
+        assert hint is not None and f"the {where}:" in hint

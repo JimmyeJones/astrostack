@@ -18,6 +18,30 @@ is a queue.
 
 ---
 
+## DOGFOOD PASS — clean, and the page-height baseline re-measured at v0.361.0 (Builder 2026-09-05, branch `claude/sweet-babbage-e7p93y`)
+
+`scripts/agent-dogfood.sh` on a scratch data root: booted the app, loaded and stacked the bundled sample, then
+probed 22 routes at 1440 px and 420 px. **Nothing overflowing, no console errors.** Recorded so the next run
+does not re-run it looking for the same answer.
+
+**Page heights (phone, tallest first): Target 3,040 px · life list 3,008 px · editor 2,815 px · Dashboard
+1,785 px.** The standing IA rule (AGENTS.md §1) says to measure before opening another slice, and this is the
+**third** measurement to say don't: the worst page was 14,584 px before the 08-13→16 slices, **3,014 px** at
+v0.338.1, and 3,040 px now — 26 px over roughly 23 versions, which is the cards those versions added landing
+inside the existing grouping rather than stacking on top of it. So the rule is working and there is nothing
+here to slice.
+
+**Two things that look like findings and are not, checked so they are not re-filed.**
+
+1. The Dashboard's *"Your first image — 3 of 4 done"* checklist leaves **step 2 (set up plate solving)** unticked
+   while steps 3 and 4 are struck through, under a banner saying solving is *"required before you can stack
+   anything"* — next to a finished stack. That is honest and container-specific: the dogfood container has no
+   ASTAP binary, and the bundled sample ships pre-solved, so the sample legitimately stacked without the
+   solver being set up. The owner's Docker image bundles ASTAP, so this state is not reachable there.
+2. The sample's stack renders as colour speckle on a dark field. That is the **sample data** — six synthetic
+   subs — not a stacking or editor defect; the editor's own measured line under the picture agrees
+   (*"stars ≈ 2.1 px FWHM · background noise σ 0.001"*).
+
 ## DOGFOOD + COLOUR-CALIBRATION AUDIT — both clean, two leads measured out (Builder 2026-09-05, branch `claude/sweet-babbage-9bfqke`)
 
 Recorded so no future run re-derives any of this. Nothing below is open work; the one real finding of the

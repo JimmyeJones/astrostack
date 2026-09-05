@@ -1010,7 +1010,7 @@ def target_mosaic_map(safe: str, request: Request) -> MosaicDepthMapOut | None:
     Reads the frames the stacker would combine — accepted **and** plate-solved —
     because an unsolved sub has no pointing to place on the map.
     """
-    from seestack.mosaicmap import mosaic_depth_map
+    from seestack.mosaicmap import aim_hint, mosaic_depth_map
 
     _lib, proj = deps.open_target_project(request, safe)
     try:
@@ -1035,6 +1035,7 @@ def target_mosaic_map(safe: str, request: Request) -> MosaicDepthMapOut | None:
         median_exposure_s=m.median_exposure_s,
         thin=_panel(m.thin) if m.thin is not None else None,
         text=m.text,
+        aim_hint=aim_hint(m),
     )
 
 
