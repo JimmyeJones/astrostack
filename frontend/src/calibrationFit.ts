@@ -144,6 +144,54 @@ export function biasSizeWarning(
   return masterSizeWarning("bias", bias, frames);
 }
 
+/** The flat-dark slot's own size warning — also *not* the generic one.
+ *
+ * Same shape as `biasSizeWarning`, for the same reason: the shared
+ * "stacking with it will fail" line is untrue here. `CalibrationMasters.validate`
+ * never looks at the flat-dark, and `CalibrationMasters.load` compares it to the
+ * **flat** (not to the frames) and, on a mismatch, just skips the subtraction and
+ * carries on. So the stack succeeds — it simply produces a *worse* flat, one
+ * normalised with its own dark-current + bias pedestal still in it, which
+ * flattens the flat's contrast and leaves part of the vignetting uncorrected on
+ * every frame. Telling the beginner their stack will fail sends them off to fix
+ * something that isn't broken and hides the thing that is.
+ *
+ * Compared against the flat, which is the engine's actual test — and one-sided
+ * like the rest of this module, so a master or a flat that never recorded a size
+ * is never flagged. */
+export function flatDarkSizeWarning(
+  flatDark: MasterDims | null | undefined,
+  flat: MasterDims | null | undefined,
+): string | null {
+  if (!flatDark || !flat) return null;
+  if (masterFitsFrames(flatDark, flat as FrameDims)) return null;
+  return (
+    `This flat-dark is ${flatDark.width_px}×${flatDark.height_px} but your flat ` +
+    `is ${flat.width_px}×${flat.height_px} — it was built for a different camera ` +
+    `or binning mode, so it can't be subtracted from the flat. Stacking still ` +
+    `works, but your flat keeps its own dark pedestal, so vignetting is ` +
+    `corrected less accurately. Pick a flat-dark that matches the flat, or leave ` +
+    `this blank.`
+  );
+}
+
+/** Which calibration fields the Stack form should write when the **Master flat**
+ * pick changes.
+ *
+ * Clearing the flat must clear the flat-dark with it. A flat-dark is subtracted
+ * *from the flat*, so `CalibrationMasters.load` only ever loads one inside its
+ * `if flat_path:` branch — with no flat the pick is submitted and silently
+ * ignored. And the form hides the flat-dark picker (and both its warnings) once
+ * the flat is gone, so nothing on screen would say the stale pick was still
+ * there. */
+export function flatPickPatch(
+  flatId: string | null,
+): { flat_master_id: string | null; flat_dark_master_id?: null } {
+  return flatId
+    ? { flat_master_id: flatId }
+    : { flat_master_id: null, flat_dark_master_id: null };
+}
+
 /** Can this bias actually hold the readout pedestal fixed while the dark is
  * rescaled? Mirrors the engine's `_dark_scaling_applies` shape test.
  *
