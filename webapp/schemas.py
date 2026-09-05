@@ -439,6 +439,33 @@ class NightSummaryOut(BaseModel):
     moon: NightMoonOut | None = None
 
 
+class MosaicPanelOut(BaseModel):
+    """One panel of a mosaic and how much time has landed on it."""
+
+    row: int                 # 0 = top (highest Dec), drawn North-up
+    col: int                 # 0 = left (highest RA), drawn East-left
+    n_frames: int            # accepted, solved subs on this panel
+    exposure_s: float        # their total integration
+    ra_deg: float            # the panel's own centre…
+    dec_deg: float           # …so a tooltip can say where it is
+
+
+class MosaicDepthMapOut(BaseModel):
+    """"Your mosaic, panel by panel" — where the mosaic is thin.
+
+    ``null`` from the endpoint whenever the target isn't clearly a mosaic; the
+    card then renders nothing at all, so a single-field target is unaffected."""
+
+    panels: list[MosaicPanelOut]
+    rows: int
+    cols: int
+    median_exposure_s: float
+    # The thinnest panel, only when it is *materially* thinner than the rest.
+    # ``None`` on an even mosaic — there is nothing to point at.
+    thin: MosaicPanelOut | None = None
+    text: str                # one plain-language sentence
+
+
 class FocusTrendPointOut(BaseModel):
     """One accepted, measured sub on the focus-trend sparkline."""
 

@@ -34,6 +34,8 @@ from webapp.schemas import (
     MergeRequest,
     MergeSuggestionOut,
     MergeSuggestionTarget,
+    MosaicDepthMapOut,
+    MosaicPanelOut,
     MosaicPlanOut,
     NightEarlyStopOut,
     NightMoonOut,
@@ -985,6 +987,55 @@ def target_nights(safe: str, request: Request) -> list[NightSummaryOut]:
         )
         for n, m in zip(nights, moons, strict=True)
     ]
+
+
+@router.get("/{safe}/mosaic-map", response_model=MosaicDepthMapOut | None)
+def target_mosaic_map(safe: str, request: Request) -> MosaicDepthMapOut | None:
+    """"Your mosaic, panel by panel" — where this mosaic is thin, or ``null``.
+
+    The readiness figure already scales a mosaic's goal by its panel count, so a
+    4-panel mosaic with an hour on each honestly reads "a quarter done". That
+    says *how much* is left; this says **where**. For the §1 owner — a heavy
+    mosaic user shooting one target across many nights — a mosaic whose total
+    looks healthy can still have one corner at a fifth of the others, and that
+    corner is grainier than the rest of the picture however good the total is.
+
+    Read-only and advisory: it rejects nothing, re-weights nothing, and changes
+    no stack. ``null`` — so the card renders nothing at all — whenever the
+    target isn't clearly a mosaic, which is the engine's own shared panel gate
+    (:func:`seestack.stack.pointings.pointing_groups`) and not a second opinion
+    about what a panel is. A single field, a dithered set too tight to separate,
+    and an unsolved target therefore all behave exactly as they do today.
+
+    Reads the frames the stacker would combine — accepted **and** plate-solved —
+    because an unsolved sub has no pointing to place on the map.
+    """
+    from seestack.mosaicmap import mosaic_depth_map
+
+    _lib, proj = deps.open_target_project(request, safe)
+    try:
+        frames = proj.accepted_solved_pointings()
+    finally:
+        proj.close()
+        _lib.close()
+
+    m = mosaic_depth_map(frames)
+    if m is None:
+        return None
+
+    def _panel(p) -> MosaicPanelOut:  # noqa: ANN001
+        return MosaicPanelOut(
+            row=p.row, col=p.col, n_frames=p.n_frames,
+            exposure_s=p.exposure_s, ra_deg=p.ra_deg, dec_deg=p.dec_deg,
+        )
+
+    return MosaicDepthMapOut(
+        panels=[_panel(p) for p in m.panels],
+        rows=m.rows, cols=m.cols,
+        median_exposure_s=m.median_exposure_s,
+        thin=_panel(m.thin) if m.thin is not None else None,
+        text=m.text,
+    )
 
 
 def latest_stack_weighting(proj) -> str:
