@@ -15,6 +15,9 @@ import { CalibrationBadge } from "../components/CalibrationBadge";
 import { RejectionBadge } from "../components/RejectionBadge";
 import { QueryError } from "../components/QueryError";
 import { splitClipLeft, splitFraction, splitLeftPct } from "../components/editor/splitCompare";
+import {
+  NorthUpViewToggle, loadNorthUpView, saveNorthUpView,
+} from "../components/NorthUpViewToggle";
 
 // A compare target is referenced in the URL as "<safe>:<run_id>" (safe target
 // keys never contain a colon), so a bookmarkable /compare?a=M_42:3&b=M_42:7 URL
@@ -103,6 +106,53 @@ export function nightsComparison(
   return na > nb
     ? { winner: "A", more: na, fewer: nb }
     : { winner: "B", more: nb, fewer: na };
+}
+
+/** What one side of a comparison knows about its own orientation — the two
+ *  fields of `stackAnnotations` that answer "which way is North on this
+ *  picture?". `undefined` is "we haven't been told" (the fetch hasn't landed, the
+ *  run has no FITS to read, or the backend predates the fields). */
+export interface CompareSideOrientation {
+  north_up_deg?: number | null;
+  directions?: unknown | null;
+}
+
+/**
+ * Should Compare offer the **North up** view, and which side does the turn
+ * actually move?
+ *
+ * On the Target hero and the Gallery lightbox this is a per-picture question:
+ * offer the turn wherever it would visibly do something. Here it is a question
+ * about a *pair*, and the difference matters. The Seestar is alt-az, so two
+ * nights on the same object land at different field rotations — which is exactly
+ * why Split and Blink can be hard to read: you are scrubbing between two
+ * pictures of the same sky that don't line up. Turning **both** to North-up is
+ * what makes the comparison valid.
+ *
+ * So the toggle is offered only when the turn would leave *both* sides North-up:
+ * at least one of them has a rotation to apply (`north_up_deg` is a number), and
+ * neither is a picture with no usable orientation at all (`directions` null —
+ * an unsolved run, or one whose WCS the renderer can't use). A side that reports
+ * a `directions` rose but no `north_up_deg` is *already* North-up and keeps its
+ * stored bytes; turning the other one brings the pair into agreement. Without
+ * that second condition, turning one side of a pair whose other side can't turn
+ * would make the two agree *less*, which is the opposite of the point.
+ */
+export function compareNorthUpOffer(
+  a: CompareSideOrientation | undefined | null,
+  b: CompareSideOrientation | undefined | null,
+): { offer: boolean; turnA: boolean; turnB: boolean } {
+  const turns = (s: CompareSideOrientation | undefined | null) =>
+    typeof s?.north_up_deg === "number";
+  const oriented = (s: CompareSideOrientation | undefined | null) =>
+    turns(s) || (s?.directions ?? null) !== null;
+  const turnA = turns(a);
+  const turnB = turns(b);
+  return {
+    offer: (turnA || turnB) && oriented(a) && oriented(b),
+    turnA,
+    turnB,
+  };
 }
 
 type CompareMode = "side" | "split" | "blink";
@@ -206,7 +256,10 @@ function AbMetaStrip({ a, b }: { a: GalleryItem; b: GalleryItem }) {
 
 /** Blink comparator: alternates the two images in one frame on a timer so a
  * subtle difference (noise, a cleaned trail, sharper stars) pops out. */
-function Blink({ a, b }: { a: GalleryItem; b: GalleryItem }) {
+function Blink(
+  { a, b, srcA, srcB }:
+  { a: GalleryItem; b: GalleryItem; srcA: string; srcB: string },
+) {
   const [showA, setShowA] = useState(true);
   const [running, setRunning] = useState(true);
   const timer = useRef<number | undefined>(undefined);
@@ -222,7 +275,7 @@ function Blink({ a, b }: { a: GalleryItem; b: GalleryItem }) {
     <Stack gap="xs" align="center">
       <AbMetaStrip a={a} b={b} />
       <div style={{ position: "relative", width: "100%", maxWidth: 640 }}>
-        <Image src={current.preview_url} fit="contain" bg="#000" h={420} radius="sm" />
+        <Image src={showA ? srcA : srcB} fit="contain" bg="#000" h={420} radius="sm" />
         <Badge
           style={{ position: "absolute", top: 8, left: 8 }}
           color={showA ? "blue" : "grape"} variant="filled"
@@ -252,7 +305,10 @@ function Blink({ a, b }: { a: GalleryItem; b: GalleryItem }) {
  * two stacks differ (faint detail emerging, noise dropping, a cleaned trail) —
  * the most direct answer to "did my new stack actually get better?". Reuses the
  * editor's tested split-divider geometry. Left of the divider is A, right is B. */
-function Split({ a, b }: { a: GalleryItem; b: GalleryItem }) {
+function Split(
+  { a, b, srcA, srcB }:
+  { a: GalleryItem; b: GalleryItem; srcA: string; srcB: string },
+) {
   const [frac, setFrac] = useState(0.5);
   const dragging = useRef(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -291,12 +347,12 @@ function Split({ a, b }: { a: GalleryItem; b: GalleryItem }) {
         }}
       >
         {/* Base (right of divider): B. */}
-        <img src={b.preview_url} alt={`B: ${b.output_basename}`}
+        <img src={srcB} alt={`B: ${b.output_basename}`}
           draggable={false}
           style={{ display: "block", width: "100%", maxHeight: 420,
             objectFit: "contain", background: "#000" }} />
         {/* Overlay (left of divider): A, clipped. */}
-        <img src={a.preview_url} alt={`A: ${a.output_basename}`}
+        <img src={srcA} alt={`A: ${a.output_basename}`}
           draggable={false}
           style={{
             position: "absolute", inset: 0, width: "100%", height: "100%",
@@ -323,10 +379,54 @@ function Split({ a, b }: { a: GalleryItem; b: GalleryItem }) {
 export function CompareView() {
   const [params] = useSearchParams();
   const [mode, setMode] = useState<CompareMode>("side");
+  // "Show both of these the way every reference photo of the object is" — a
+  // *view*, not a save; nothing on disk changes. Off by default and remembered
+  // per viewer, in the same `localStorage` key the Target hero and the Gallery
+  // lightbox use, so turning it on anywhere turns it on everywhere.
+  const [northUp, setNorthUp] = useState(loadNorthUpView);
   const refA = parseRef(params.get("a"));
   const refB = parseRef(params.get("b"));
 
   const gallery = useQuery({ queryKey: ["gallery"], queryFn: api.getGallery });
+
+  // Resolve the two sides before the early returns below, so the orientation
+  // queries can be declared unconditionally (hooks rule) and keyed on the runs
+  // they actually describe.
+  const items = gallery.data?.items ?? [];
+  const find = (r: { safe: string; run_id: number } | null) =>
+    (r ? items.find((it) => it.safe === r.safe && it.run_id === r.run_id) : null) ?? null;
+  const a = find(refA);
+  const b = find(refB);
+
+  // The same endpoint, cache key and staleness the Target hero and the Gallery
+  // lightbox use, so a picture opened there has already answered this. Two
+  // requests for a two-picture page whose whole job is weighing those two
+  // against each other — proportionate, unlike the Gallery, where the same fetch
+  // per *card* is why that page waits until one is opened.
+  const annA = useQuery({
+    queryKey: ["annotations", a?.safe, a?.run_id],
+    queryFn: () => api.stackAnnotations(a!.safe, a!.run_id),
+    enabled: !!a?.has_fits,
+    staleTime: Infinity,
+  });
+  const annB = useQuery({
+    queryKey: ["annotations", b?.safe, b?.run_id],
+    queryFn: () => api.stackAnnotations(b!.safe, b!.run_id),
+    enabled: !!b?.has_fits,
+    staleTime: Infinity,
+  });
+  const { offer: canNorthUp, turnA, turnB } =
+    compareNorthUpOffer(annA.data, annB.data);
+  const turned = northUp && canNorthUp;
+  // What each side is actually showing. The turn is applied on the way out of
+  // the server and written nowhere; a side that is already North-up keeps its
+  // stored bytes, so the pair still ends up agreeing.
+  const srcA = a
+    ? (turned && turnA ? api.stackPreviewNorthUpUrl(a.safe, a.run_id) : a.preview_url)
+    : "";
+  const srcB = b
+    ? (turned && turnB ? api.stackPreviewNorthUpUrl(b.safe, b.run_id) : b.preview_url)
+    : "";
 
   const backToGallery = (
     <Button component={Link} to="/gallery" variant="subtle" size="xs"
@@ -354,12 +454,6 @@ export function CompareView() {
   if (gallery.isLoading) {
     return <Center h={300}><Loader /></Center>;
   }
-
-  const items = gallery.data?.items ?? [];
-  const find = (r: { safe: string; run_id: number }) =>
-    items.find((it) => it.safe === r.safe && it.run_id === r.run_id) ?? null;
-  const a = find(refA);
-  const b = find(refB);
 
   if (!a || !b) {
     return (
@@ -395,6 +489,16 @@ export function CompareView() {
             ]}
             aria-label="Compare mode"
           />
+          {/* Offered only where turning would leave *both* pictures North-up —
+              see `compareNorthUpOffer`. Turns both sides at once, because the
+              point here is that the two line up with each other, not just with
+              the sky. */}
+          {canNorthUp ? (
+            <NorthUpViewToggle
+              on={northUp}
+              onChange={(on) => { setNorthUp(on); saveNorthUpView(on); }}
+            />
+          ) : null}
           {backToGallery}
         </Group>
       </Group>
@@ -450,7 +554,8 @@ export function CompareView() {
                   <CardMeta item={it} />
                 </Group>
                 {it.has_preview ? (
-                  <Image src={it.preview_url} fit="contain" bg="#000" h={420} radius="sm" />
+                  <Image src={tag === "A" ? srcA : srcB} fit="contain" bg="#000"
+                    h={420} radius="sm" />
                 ) : (
                   <Center h={420} bg="dark.6"><Text c="dimmed">No preview</Text></Center>
                 )}
@@ -460,11 +565,11 @@ export function CompareView() {
         </SimpleGrid>
       ) : mode === "split" ? (
         <Paper withBorder p="sm" radius="md">
-          <Split a={a} b={b} />
+          <Split a={a} b={b} srcA={srcA} srcB={srcB} />
         </Paper>
       ) : (
         <Paper withBorder p="sm" radius="md">
-          <Blink a={a} b={b} />
+          <Blink a={a} b={b} srcA={srcA} srcB={srcB} />
         </Paper>
       )}
     </Stack>

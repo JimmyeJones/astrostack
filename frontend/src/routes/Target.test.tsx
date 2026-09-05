@@ -2109,6 +2109,29 @@ describe("TargetView content order (IA slice (c))", () => {
     expect(precedes(screen.getByText("Is it enough yet?"), table)).toBe(true);
   });
 
+  it("offers one link into the run-vs-run compare, and only once there are two pictures", async () => {
+    // `/compare` has been a full A/B route since v0.150, but a beginner who
+    // never opens History never finds it. The link lives in the existing Story
+    // group (panels stay mounted, so it is in the DOM whichever tab is active)
+    // and self-hides on a target that has only been stacked once.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    const runs = vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ id: 9 })]);
+
+    const one = renderTarget();
+    await screen.findByTestId("latest-picture");
+    expect(screen.queryByTestId("compare-with-last")).toBeNull();
+    one.unmount();
+
+    runs.mockResolvedValue([mkRun({ id: 9 }), mkRun({ id: 7 })]);
+    renderTarget();
+    await waitFor(() =>
+      expect(screen.getByTestId("compare-with-last")).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /Compare with my last one/ }))
+      .toHaveAttribute("href", "/compare?a=M_42:9&b=M_42:7");
+  });
+
   it("shows the target's newest finished picture on the page itself", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
