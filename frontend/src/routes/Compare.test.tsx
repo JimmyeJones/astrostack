@@ -5,8 +5,9 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CompareView, parseRef, compareHref, noiseComparison, panelComparison,
-  nightsComparison, compareDateLabel,
+  nightsComparison, compareDateLabel, compareNorthUpOffer,
 } from "./Compare";
+import { NORTH_UP_VIEW_KEY } from "../components/NorthUpViewToggle";
 import * as client from "../api/client";
 import type { GalleryItem } from "../api/client";
 
@@ -393,5 +394,130 @@ describe("CompareView", () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [item(3, "M_42")] });
     renderCompare("?a=M_42:3&b=M_42:999");
     expect(await screen.findByText(/no longer exists/)).toBeInTheDocument();
+  });
+});
+
+describe("compareNorthUpOffer", () => {
+  const side = (north_up_deg: number | null, directions: unknown = { north_deg: 0 }) =>
+    ({ north_up_deg, directions });
+
+  it("offers the turn when both sides end up North-up", () => {
+    expect(compareNorthUpOffer(side(118.5), side(-40))).toEqual(
+      { offer: true, turnA: true, turnB: true });
+  });
+
+  it("still offers it when only one side needs turning — the other is already North-up", () => {
+    // `directions` present with no `north_up_deg` means "oriented, nothing to
+    // correct". Turning the other side is exactly what brings the pair into
+    // agreement, so this is the case the toggle is most useful in.
+    expect(compareNorthUpOffer(side(118.5), side(null))).toEqual(
+      { offer: true, turnA: true, turnB: false });
+    expect(compareNorthUpOffer(side(null), side(118.5))).toEqual(
+      { offer: true, turnA: false, turnB: true });
+  });
+
+  it("offers nothing when neither side would move", () => {
+    expect(compareNorthUpOffer(side(null), side(null)).offer).toBe(false);
+  });
+
+  it("offers nothing when a side has no usable orientation at all", () => {
+    // An unsolved run reports neither. Turning only the side that *can* turn
+    // would make the two agree less, not more — so stand down entirely.
+    expect(compareNorthUpOffer(side(118.5), { north_up_deg: null, directions: null })
+      .offer).toBe(false);
+    expect(compareNorthUpOffer(side(118.5), undefined).offer).toBe(false);
+    expect(compareNorthUpOffer(undefined, undefined).offer).toBe(false);
+  });
+
+  it("reads an older backend that omits the fields as 'no toggle'", () => {
+    expect(compareNorthUpOffer({}, {}).offer).toBe(false);
+  });
+});
+
+describe("CompareView — the North-up view", () => {
+  const annotations = (north_up_deg: number | null) => ({
+    width: 1920, height: 1080, objects: [], scale_bar: null, north_up_deg,
+    directions: { north_deg: 0, east_deg: 90 },
+  } as unknown as Awaited<ReturnType<typeof client.api.stackAnnotations>>);
+
+  afterEach(() => window.localStorage.clear());
+
+  function twoRuns() {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    return { a, b };
+  }
+
+  it("offers no turn when neither picture would move", async () => {
+    twoRuns();
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations(null));
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(client.api.stackAnnotations).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
+  });
+
+  it("turns BOTH pictures at once, so the two line up with each other", async () => {
+    twoRuns();
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations(118.5));
+    renderCompare("?a=M_42:3&b=M_42:7");
+
+    const toggle = await screen.findByTestId("north-up-view");
+    // Before: the stored bytes on both sides.
+    expect(screen.getAllByRole("img").map((el) => el.getAttribute("src")))
+      .toEqual(["/p/M_42/3", "/p/M_42/7"]);
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(
+      screen.getAllByRole("img").map((el) => el.getAttribute("src")),
+    ).toEqual([
+      client.api.stackPreviewNorthUpUrl("M_42", 3),
+      client.api.stackPreviewNorthUpUrl("M_42", 7),
+    ]));
+  });
+
+  it("carries the turn into Split and Blink, the modes that need it most", async () => {
+    twoRuns();
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations(118.5));
+    renderCompare("?a=M_42:3&b=M_42:7");
+
+    fireEvent.click(await screen.findByTestId("north-up-view"));
+    fireEvent.click(screen.getByText("Split"));
+    await waitFor(() => {
+      const srcs = screen.getAllByRole("img").map((el) => el.getAttribute("src"));
+      expect(srcs).toContain(client.api.stackPreviewNorthUpUrl("M_42", 3));
+      expect(srcs).toContain(client.api.stackPreviewNorthUpUrl("M_42", 7));
+    });
+
+    fireEvent.click(screen.getByText("Blink"));
+    await waitFor(() => {
+      const srcs = screen.getAllByRole("img").map((el) => el.getAttribute("src"));
+      // Blink shows one at a time, and whichever it is has been turned.
+      expect(srcs.some((s) => s?.includes("north_up=true"))).toBe(true);
+    });
+  });
+
+  it("remembers the choice per viewer, in the key the other surfaces share", async () => {
+    twoRuns();
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations(118.5));
+    renderCompare("?a=M_42:3&b=M_42:7");
+    fireEvent.click(await screen.findByTestId("north-up-view"));
+    await waitFor(() =>
+      expect(window.localStorage.getItem(NORTH_UP_VIEW_KEY)).toBe("1"));
+  });
+
+  it("stands down when one side is an unsolved run", async () => {
+    twoRuns();
+    vi.spyOn(client.api, "stackAnnotations").mockImplementation(
+      async (_safe: string, id: number) => (id === 3
+        ? annotations(118.5)
+        : ({ width: 1920, height: 1080, objects: [], scale_bar: null,
+             north_up_deg: null, directions: null,
+           } as unknown as Awaited<ReturnType<typeof client.api.stackAnnotations>>)),
+    );
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(client.api.stackAnnotations).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
   });
 });
