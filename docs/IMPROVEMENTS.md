@@ -228,93 +228,12 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   just-modified" so a skewed-ahead clock can't strand a file forever. Only worth doing if the owner reports
   files that never ingest until a rescan.
 
-- **✅ SHIPPED (Builder, v0.353.0, branch `claude/sweet-babbage-flru3c`) — ~~the master calibration `apply`
-  validates only the master's *shape*, never its Bayer pattern.~~** Built to the filed fix direction exactly,
-  including its *"refuse (or warn + skip)"* split — which turned out to be the whole design, because the two
-  halves belong to different kinds of master.
-
-  **The flat is refused; the pedestal is only mentioned.** A flat divides into the raw Bayer mosaic *per
-  colour*, so one phase out corrects every red photosite with a green value: the picture keeps its detail and
-  comes out the wrong colour on every frame, which is far harder to notice than an error. `validate` therefore
-  raises on it, the same fail-closed shape the dimension guard already has. A dark or bias corrects each
-  *physical* pixel, so its phase genuinely changes nothing — refusing there would cost the user calibration for
-  no reason — and it earns an advisory in `calibration_warnings` instead, because a phase that disagrees still
-  means the master came off another sensor. Pinned by a test that measures the swap rather than asserting it: a
-  uniform raw frame through a one-phase-out flat comes out with the two Bayer colours' corrections exchanged.
-
-  **The guard can only fire on a positive conflict**, which is what makes it upgrade-safe (§9). `_norm_bayer`
-  reads only the four real CFA phases, and both sides must declare one and differ — so a master built before
-  this field was read (every master the owner already has), a target whose frames never recorded a phase, a
-  caller using the old signature, and an unrecognised card all behave exactly as before. Both new arguments are
-  optional and defaulted; no config, schema, on-disk path, response *shape* or default changed.
-
-  **The three surfaces that would otherwise turn this into a worse bug are all handled.** A hard failure is only
-  an improvement if nothing binds such a flat behind the user's back, so the unattended paths gate on the same
-  predicate the way they already gate on size: `calibration.bayer_conflict` (the one-sided twin of
-  `dims_conflict`) skips a phase-mismatched flat in `auto_bind_master_ids` — letting a further-but-matching flat
-  bind rather than being masked — and in `_bind_saved_calibration_masters`, which records the usual
-  plain-language "your saved master flat wasn't used: …" sentence on the run. `coverage_miss_reason` names the
-  phase too, so the Calibration page's "why doesn't this master cover that target?" clause can't fall through to
-  "another master is a closer match". And the Stack form says it at *pick* time — `flatBayerWarning` renders the
-  red blocker and the picker badges the option — so the warning fires before the night is spent, not after.
-
-  **Tests (+7 engine, +3 saved-master, +5 webapp, +8 vitest; 6 of the engine ones fail before).**
-  `tests/test_calibrate.py`: the flat refused, a matching flat (and header case/whitespace) accepted, all four
-  "can't be disproved" shapes staying silent, dark and bias never refused, the measured colour swap, and the
-  dark/bias advisory including the "a bias with a dark present never applies, so it never warns" case.
-  `tests/webapp/test_auto_stack_saved_masters.py`: the saved flat skipped with its sentence, matching and
-  unstamped flats still binding, a mismatched saved *dark* still binding.
-  `tests/webapp/test_calibration.py`: `bayer_conflict`/`modal_bayer` one-sidedness, the auto-binder skipping the
-  flat but keeping the dark and then binding a further matching flat, the gate inert without both sides, and
-  `coverage_miss_reason` naming the phase for a flat and not for a dark.
-  `calibrationFit.test.ts` + `Stack.test.tsx`: the predicate, the wording, the flat-only picker badge, size
-  winning over phase when both clash, and an unstamped flat never reading as unusable on upgrade.
-
-  *(Original note, for the trace.)*
-
-  - **⚪ HARDENING NOTE (Scout QA audit 2026-08-26, traced — not firing on the production path, file-only) —
-    the master calibration `apply` validates only the master's *shape*, never its Bayer pattern.** `validate`
-    (`seestack/calibrate/apply.py` ~261) compares `tuple(arr.shape)` only; `load` reads `dark_meta`/`bias_meta`
-    but never reads or compares `bayer_pattern` (populated by `load_master`, `masters.py` ~342). A dark/flat
-    with the same dimensions but a different CFA phase (e.g. a sub-frame readout offset shifting the Bayer
-    phase by one pixel) would be applied per-pixel with no guard — for a **flat** this swaps channels and
-    wrecks colour. Harmless for darks (dark current is per physical pixel) and for the common single-camera
-    case where the phase always matches, so this is an **unguarded gap, not a live bug** on normal Seestar
-    inputs. *(Severity: wrong-result-if-triggered / colour; confidence traced, trigger requires unusual or
-    mixed-source masters.)*
-    **Fix direction:** carry `bayer_pattern` onto `CalibrationMasters` and, when both the master and the light
-    declare one, refuse (or warn + skip) the master on a mismatch — the same fail-closed shape as the existing
-    dimension guard. Small, additive, testable; do it only alongside a real trigger.
-
-- **✅ SHIPPED (Builder, v0.353.1, branch `claude/sweet-babbage-flru3c`) — ~~the non-windowed `reproject_rgb`
-  omits the `FRAME_EDGE_INSET_PX` border trim that the production windowed path applies.~~** Built as the
-  entry's **first** fix direction (parity), not the docstring one: the two functions now compute `inset`
-  identically — including the same "a frame too small to spare it gets none" guard — so the whole-canvas
-  variant can't be adopted on the hot path expecting a trim it didn't do. **No production pixel moves**:
-  `reproject_rgb` still has exactly one caller, `tests/test_windowed_stack.py` (grepped, not assumed), and
-  `align_one` calls the windowed path as before. **Test (+1, fails before):** on a same-pointing pair the two
-  paths' valid masks are now element-for-element equal over the window, and the ring they both drop is checked
-  to be the inset one rather than "everything is valid". The existing full-vs-windowed comparison, which
-  masked the difference away by intersecting the two validity maps, still passes untouched.
-
-  *(Original note, for the trace.)*
-
-  - **⚪ MINOR / TEST-ONLY (Scout QA audit 2026-08-26, traced) — the non-windowed `reproject_rgb` omits the
-    `FRAME_EDGE_INSET_PX` border trim that the production windowed path applies, so the outer 3-px
-    debayer-artifact ring would leak in as valid pixels.** `reproject_rgb` (`seestack/stack/align.py` ~325)
-  validates with `0 <= src <= size-1` and **no** inset, unlike `reproject_rgb_windowed` (~276) which excludes
-  the intentional inset ring. **The production stacker only calls the windowed path** (`align_one`); the
-  non-windowed `reproject_rgb`'s sole caller is `tests/test_windowed_stack.py`, so this is *not* a live
-  wrong-result. *(Severity: cosmetic/latent; confidence traced.)* **Fix direction:** either apply the same
-  `FRAME_EDGE_INSET_PX` inset in `reproject_rgb` for parity, or add a one-line docstring noting it's the
-  no-inset test variant, so a future caller doesn't adopt it on the hot path expecting the border trim.
-
-  *(Scout QA note 2026-08-26: also investigated the master-flat global-vs-per-channel normalization
+- **⚪ Scout QA note (2026-08-26, traced — not filed; recorded so it isn't re-investigated):** also investigated the master-flat global-vs-per-channel normalization
   (`apply.py` ~205, `flat / np.nanmean(flat)`) and did **not** file it — the per-channel QE tint it leaves is
   a single per-channel scale that the downstream `post/color_cal.calibrate_color` white-balance fully absorbs,
   so it is not a real image-quality bug. The spatial (vignetting/dust) correction, the part that matters, is
   applied correctly. And the drizzle `_count`-as-`neff` per-channel over-count is negligible for normal RGB
-  (needs per-channel NaNs, which co-debayered channels don't have).)*
+  (needs per-channel NaNs, which co-debayered channels don't have).
 
   - ~~**🟠 LATENT (found incidentally by the same 2026-08-17 audit, repro-verified, NOT the owner's current
     regression) — auto-grade compares quality metrics across a mosaic TARGET-WIDE, when its panels are
@@ -1025,6 +944,29 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > used by both sites so they can't drift again. Curation + 2 ideas filed below.
 >
 - **Minor / low-priority (traced, filed for completeness — fix only if touching these files):**
+  - `seestack/stack/output.py:654` (+400, 413, 428, 446, 525) every float→uint export packs with
+    `(norm * MAX).astype(np.uintN)`, which **truncates toward zero** instead of rounding — so every exported
+    pixel is biased **downward** by up to ~1 LSB (mean ~0.5 LSB), and a value at `norm=0.999985` maps to 65534,
+    never 65535. Worst on `_to_uint16_linear` (the "linear" TIFF), whose docstring sells the file as *losslessly
+    reversible* (`float = black + dn/65535·(white−black)`): the recovered float is systematically low, so the
+    reversibility claim is off by up to a full DN rather than the ±½ DN rounding would give. `thumbnail.py:902`
+    already does the right thing (`np.rint(alpha*255).astype(np.uint8)`) for the alpha channel, so the truncation
+    elsewhere is an oversight, not a considered choice. **Severity: image-quality/correctness, tiny** — ~0.5 LSB
+    out of 65535 is scientifically negligible (the sky's own 1σ still spans ~165 DN under this mapping), so this
+    is near-cosmetic; filed because it is a real, systematic bias on the exact bit-depth path the app advertises
+    as the full data. (Confidence: traced + verified by hand; the mosaic/output QA agent flagged it 2026-09-05.)
+    **Fix direction:** insert `np.round(...)` before each `.astype`; the prior `np.clip(...,0,1)` guarantees no
+    overflow (`round(MAX)==MAX`). **Test-interaction caveat — this is why it is a Builder task, not a one-liner:**
+    `tests/test_linear_tiff_no_clip.py` asserts `at_full_scale == at_true_max` and `at_zero == at_true_min`
+    (strict equality) — rounding maps pixels within ±½ LSB of the anchors to full-scale/zero, so those two
+    invariants must be relaxed to a tolerance (or the fix restricted and the tests re-reasoned); the round-trip
+    test on line ~190 only gets *tighter* (≤½ LSB) and `test_an_editor_export_tiff_is_untouched` pins the
+    `already_display` path at line 400 to truncation, so that reference must move in lockstep if 400 is changed.
+    _(Found by the 2026-09-05 mosaic/output QA audit; the same audit noted two non-bugs recorded so they aren't
+    re-investigated: `output.py:297` `_write_coverage_fits` writes a **2-D** coverage map verbatim without the
+    `.astype(np.float32)` its 3-D branch and `_write_frame_coverage_fits` both apply — a double-size FITS if a
+    float64 2-D map ever reached it, which the production accumulators never emit; and `_same_map`'s
+    `np.array_equal` returns False on identical-NaN maps, moot because coverage maps are 0-filled, never NaN.)_
   - `seestack/stack/weighting.py:97` the FWHM factor computes `(best_fwhm / f.fwhm_px) ** 2` with a Python float, so a
     pathologically tiny `fwhm_px` would raise `OverflowError` (before `np.clip` can clamp it) rather than saturate.
     **Unreachable on real data** — every writer of `fwhm_px` traces to `median_fwhm`, which persists only values in
@@ -15051,6 +14993,37 @@ problems. Dogfood it every big-picture run and fix root causes.
   already touching the drizzle path — not worth a dedicated Builder slot on its own.
 
 ### Features that serve real workflows
+
+- **NEW BEGINNER FEATURE (Scout 2026-09-05) — "Your mosaic, panel by panel": a small map of where your mosaic
+  is thin, so you know where to point next.** *(Pillar: 3 friendliness + 2 autonomy for the owner's dominant
+  workflow; size M.)* The mosaic depth-readiness *number* already shipped (SHIPPED.md: the goal is scaled by
+  panel count, so a 4-panel mosaic 1 h/panel now honestly reads "a quarter done" instead of "plenty"). That
+  tells the beginner **how much** is left; it does not tell them **where**. For a heavy mosaic user shooting one
+  target across many nights, the actionable next step is spatial: *"every panel has ~60 min except the
+  bottom-right, which has 12 — point there on the next clear night and it evens out."* Today they'd have to
+  infer that by eye from the frames table.
+  - **What it is:** on a mosaic target only, a compact grid/heatmap of the target's panels — each panel a cell
+    tinted by its own integration time (or accepted-sub count), with the thinnest panel called out in one plain
+    sentence. Read-only, appears automatically when the target is a mosaic; nothing to configure.
+  - **Why it clears the beginner bar:** sane default (panels auto-detected, no knobs), plain-language, and it is
+    a planning aid a non-expert immediately understands — not pro tooling. It also closes a real friendliness
+    gap: a mosaic that looks "done" in total can have one badly-under-exposed corner that drags the whole
+    picture, and nothing currently surfaces that.
+  - **Reuses machinery that already exists:** `cluster_pointings` / `pointing_groups`
+    (`seestack/stack/pointings.py`, `PANEL_LINK_DIST_DEG`) already clusters solved subs into panels for QC
+    grading, quality weighting and photometric normalization — this is the same clustering, summarised per
+    cluster (n subs, Σ exposure, panel centre RA/Dec) and served through a small read-only endpoint. Per-frame
+    `ra_center_deg`/`dec_center_deg`/exposure are already in `project.sqlite`.
+  - **Care / slices:** (1) geometry — lay panels out by their **relative** RA/Dec offsets from the mosaic
+    centre (RA scaled by cos(dec)) so the grid matches how the sky actually tiles, not a bare row of cells;
+    small canvas, so a rough scatter-to-grid snap is fine. (2) Gate on the *same* soundness check
+    `pointing_groups` already applies (≥2 substantial groups) so a single-field or too-tightly-dithered target
+    shows nothing and behaves exactly as today. (3) First slice can be a read-only Target-page card; a "add it
+    to Tonight's where-to-point hint" follow-up is a natural second slice but keep them separate. (4) Additive
+    endpoint + one component; no schema, config, on-disk or default change — trivially upgrade-safe. **Grep
+    `panelComparison` / `readinessRow` first:** those are the post-stack "did the panels *even out* in
+    brightness" verdict and the aggregate readiness number respectively — this is neither; confirm no overlap
+    before building.
 
 - **✅ SLICES (a)+(c) SHIPPED (Builder, v0.343.0, branch `claude/sweet-babbage-l67sz2`) — ~~"Your year under
   the stars": a year-bounded recap of a season of imaging.~~** Built as filed, as composition over the night
