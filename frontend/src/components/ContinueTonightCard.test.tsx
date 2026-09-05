@@ -4,7 +4,9 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContinueTonightCard } from "./ContinueTonightCard";
-import type { NightPlan, PlannedTarget, TargetProgress } from "../api/client";
+import type {
+  BestTonight, NightPlan, PlannedTarget, TargetProgress,
+} from "../api/client";
 import * as client from "../api/client";
 
 function owned(over: Partial<PlannedTarget> = {}): PlannedTarget {
@@ -50,6 +52,33 @@ function plan(targets: PlannedTarget[]): NightPlan {
   } as unknown as NightPlan;
 }
 
+// The adjacent "Point here right now" card's answer. The card under test reads
+// the same `/best-tonight` response so it never repeats a target that card has
+// already named; an empty `picks` list is the ordinary "nothing to exclude".
+function bestTonight(safes: string[] = []): BestTonight {
+  return {
+    location_source: "settings",
+    observer: { lat_deg: 51.5, lon_deg: -0.13, elevation_m: 30 },
+    generated_utc: "2026-07-24T00:00:00Z",
+    dark_now: true,
+    dark_minutes_left: 300,
+    min_altitude_deg: 30,
+    picks: safes.map((safe) => ({
+      safe,
+      name: safe.toUpperCase(),
+      ra_deg: 0,
+      dec_deg: 0,
+      altitude_now_deg: 60,
+      minutes_usable_left: 200,
+      hours_captured: 1,
+      frames_accepted: 100,
+      noise_gain: 0.3,
+      score: 50,
+      reason: "reason",
+    })),
+  } as unknown as BestTonight;
+}
+
 function renderCard() {
   return render(
     <MantineProvider>
@@ -73,6 +102,7 @@ describe("ContinueTonightCard", () => {
       ]),
     );
     vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight());
     renderCard();
     await waitFor(() =>
       expect(screen.getByText("Point here tonight")).toBeInTheDocument(),
@@ -90,6 +120,7 @@ describe("ContinueTonightCard", () => {
       plan([owned({ target_safe: "m31", score: 0 })]), // never clears the floor
     );
     vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight());
     const { container } = renderCard();
     await waitFor(() => expect(client.api.getTonight).toHaveBeenCalled());
     expect(container.querySelector(".mantine-Paper-root")).toBeNull();
@@ -112,6 +143,7 @@ describe("ContinueTonightCard", () => {
       ]),
     );
     vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight());
     renderCard();
     expect(await screen.findByText("Nudge 1.0° south")).toBeInTheDocument();
   });
@@ -122,6 +154,7 @@ describe("ContinueTonightCard", () => {
       plan([owned({ name: "M31", target_safe: "m31", total_exposure_s: 4.5 * 3600 })]),
     );
     vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight());
     renderCard();
     await waitFor(() =>
       expect(screen.getByText("Point here tonight")).toBeInTheDocument(),
@@ -142,6 +175,7 @@ describe("ContinueTonightCard", () => {
       { safe: "m31", name: "M31", total_exposure_s: 4.5 * 3600, object_type: "Galaxy", goal_s: 4 * 3600 },
     ];
     vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue(progress);
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight());
     renderCard();
     await waitFor(() =>
       expect(screen.getByText("Point here tonight")).toBeInTheDocument(),
@@ -149,5 +183,50 @@ describe("ContinueTonightCard", () => {
     // Heading M81 is the pick; M31 must not be the headline (no runner-up here).
     expect(screen.getByText("M81")).toBeInTheDocument();
     expect(screen.queryByText("M31")).toBeNull();
+  });
+  it("doesn't repeat the target the 'Point here right now' card already named", async () => {
+    // Both cards sit on the Dashboard one above the other and rank the same
+    // owned library. Without this, a beginner with two started targets read the
+    // same name twice under two headings.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(
+      plan([
+        owned({ name: "M31", target_safe: "m31", total_exposure_s: 4.5 * 3600, score: 50 }),
+        owned({ name: "M81", target_safe: "m81", total_exposure_s: 1 * 3600, score: 90 }),
+      ]),
+    );
+    vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight(["m31"]));
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getByText("Point here tonight")).toBeInTheDocument(),
+    );
+    // M31 would have been the pick; it's already recommended above, so this card
+    // offers the next-best started target instead.
+    expect(screen.getByText("M81")).toBeInTheDocument();
+    expect(screen.queryByText("M31")).toBeNull();
+  });
+
+  it("self-hides when the only started target is already recommended above", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(
+      plan([owned({ name: "M31", target_safe: "m31", total_exposure_s: 4.5 * 3600 })]),
+    );
+    vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight(["m31"]));
+    const { container } = renderCard();
+    await waitFor(() => expect(client.api.getBestTonight).toHaveBeenCalled());
+    expect(container.querySelector(".mantine-Paper-root")).toBeNull();
+  });
+
+  it("still recommends when the backend is too old to know /best-tonight", async () => {
+    // An older backend 404s the sibling endpoint. Nothing to exclude, so the
+    // card must behave exactly as it did before this dedup existed.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(
+      plan([owned({ name: "M31", target_safe: "m31", total_exposure_s: 4.5 * 3600 })]),
+    );
+    vi.spyOn(client.api, "getLibraryProgress").mockResolvedValue([]);
+    vi.spyOn(client.api, "getBestTonight").mockRejectedValue(new Error("404"));
+    renderCard();
+    expect(await screen.findByText("Point here tonight")).toBeInTheDocument();
+    expect(screen.getByText("M31")).toBeInTheDocument();
   });
 });
