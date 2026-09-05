@@ -20,6 +20,8 @@ import math
 
 import numpy as np
 
+from seestack.stack.output import pack_unit
+
 #: Below this correction (degrees) the frame is already close enough to North-up
 #: that rotating would only add interpolation blur and black corners for nothing,
 #: so the option isn't offered / is a no-op.
@@ -274,7 +276,7 @@ def rotate_image_north_up(rgb: np.ndarray, angle_deg: float) -> np.ndarray:
         # np.rot90 rotates CCW by k·90°, matching PIL.Image.rotate's CCW sense.
         return np.ascontiguousarray(np.rot90(arr, k=k))
 
-    u8 = (np.clip(np.nan_to_num(arr), 0.0, 1.0) * 255.0).astype(np.uint8)
+    u8 = pack_unit(np.clip(np.nan_to_num(arr), 0.0, 1.0))
     img = Image.fromarray(u8, mode="RGB").rotate(
         angle_deg, resample=Image.BICUBIC, expand=True, fillcolor=(0, 0, 0))
     return np.asarray(img, dtype=np.float32) / 255.0

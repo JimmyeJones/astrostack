@@ -1490,6 +1490,7 @@ def render_run_recipe_fullres_png(
     from PIL import Image
 
     from seestack.render.thumbnail import _apply_north_up
+    from seestack.stack.output import pack_unit
 
     def _noop_progress(*_a: Any, **_k: Any) -> None:  # this path has no job to report to
         return None
@@ -1498,7 +1499,7 @@ def render_run_recipe_fullres_png(
     disp = np.clip(np.nan_to_num(np.asarray(out, dtype=np.float32)), 0.0, 1.0)
     if north_up:
         disp = _apply_north_up(disp, fits_path)
-    u8 = (disp * 255).astype(np.uint8)
+    u8 = pack_unit(disp)
     img = Image.fromarray(u8, mode="RGB")
     h, w = u8.shape[:2]
     long_edge = max(h, w)

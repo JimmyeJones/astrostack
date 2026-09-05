@@ -43,6 +43,7 @@ from seestack.render.thumbnail import (
     render_preview_png_full_res,
     render_stack_png,
 )
+from seestack.stack.output import pack_unit
 
 #: Slider pairs whose black point leaves the sky *visible* (an unclipped median),
 #: so the sky-level comparison below has something to measure. A high ``black``
@@ -84,7 +85,13 @@ def _png_rgb(data: bytes) -> np.ndarray:
 
 
 def _to_u8(stretched: np.ndarray) -> np.ndarray:
-    return (np.clip(np.nan_to_num(stretched), 0.0, 1.0) * 255).astype(np.uint8)
+    """Packed with the app's one float→byte rule rather than a hand-spelled copy
+    of it. This file compares *curves*; re-implementing the pack here made every
+    exact assertion fail the moment the packing was fixed to round rather than
+    truncate. The rounding itself is pinned by
+    ``tests/test_preview_rounding_parity.py``, and these stay exact
+    ``array_equal``s, so a genuine curve divergence is still caught."""
+    return pack_unit(np.clip(np.nan_to_num(stretched), 0.0, 1.0))
 
 
 def _sky_levels(img: np.ndarray) -> list[float]:

@@ -135,7 +135,7 @@ def test_render_sub_preview_matches_the_export_preview_stretch(tmp_path):
     so the two halves of the reveal differ only in noise/detail, not brightness."""
     from seestack.io.fits_loader import bilinear_debayer, load_seestar_raw
     from seestack.render.thumbnail import _downsample_rgb, render_sub_preview
-    from seestack.stack.output import _autostretch_for_export
+    from seestack.stack.output import _autostretch_for_export, pack_unit
 
     fits_path = write_seestar_fits(tmp_path / "in.fit", width=480, height=320,
                                    n_stars=40, seed=7)
@@ -146,8 +146,12 @@ def test_render_sub_preview_matches_the_export_preview_stretch(tmp_path):
     rgb = bilinear_debayer(rgb, pattern="RGGB")
     h, w = rgb.shape[:2]
     rgb = _downsample_rgb(rgb, max(1, round(h * (240 / w))), 240)
-    expected = (np.clip(np.nan_to_num(_autostretch_for_export(rgb)), 0, 1) * 255).astype(
-        np.uint8)
+    # Packed with the app's one float→byte rule, not a hand-spelled copy of it:
+    # this test is about the *stretch* matching, and re-implementing the pack here
+    # made it fail when the packing was fixed to round rather than truncate (the
+    # rounding itself is pinned by `tests/test_preview_rounding_parity.py`). Still
+    # an exact `array_equal`, so a genuine stretch divergence is still caught.
+    expected = pack_unit(np.clip(np.nan_to_num(_autostretch_for_export(rgb)), 0, 1))
 
     from io import BytesIO
 

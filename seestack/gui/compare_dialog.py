@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from seestack.stack.output import pack_unit
+
 log = logging.getLogger(__name__)
 
 
@@ -117,7 +119,7 @@ class _ImagePane(QLabel):
         from seestack.gui.thumbnail import autostretch
 
         stretched = autostretch(rgb)
-        u8 = (np.clip(stretched, 0.0, 1.0) * 255).astype(np.uint8)
+        u8 = pack_unit(np.clip(stretched, 0.0, 1.0))
         h, w = u8.shape[:2]
         # Downsize for display.
         if w > 1200 or h > 1200:

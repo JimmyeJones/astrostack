@@ -61,7 +61,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from seestack.stack.output import write_full_res_png
+from seestack.stack.output import pack_unit, write_full_res_png
 from seestack.video.detail import SHARPEN_MAX, sharpen_still
 from seestack.video.discover import VideoCapture, find_video_capture
 from seestack.video.ffmpeg import (
@@ -400,7 +400,7 @@ def _write_tiff16(path: Path, rgb) -> None:
     import numpy as np
     import tifffile
 
-    u16 = (np.clip(np.nan_to_num(rgb, nan=0.0), 0.0, 1.0) * 65535.0).astype(np.uint16)
+    u16 = pack_unit(np.clip(np.nan_to_num(rgb, nan=0.0), 0.0, 1.0), np.uint16)
     tifffile.imwrite(path, u16, photometric="rgb", compression="zlib")
 
 

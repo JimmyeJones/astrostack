@@ -14,6 +14,54 @@ Newest first.
 
 ---
 
+## v0.354.2 — 2026-09-05 — the picture on screen stops being half a step darker than the picture you download
+
+v0.354.1 routed the six exports in `seestack/stack/output.py` through `pack_unit`, which `np.rint`s. It left
+the display side alone on purpose (filed as a lead), and that turned a uniform-but-wrong app into an
+inconsistent one: from that version, **the editor's live preview, the gallery/History preview, the full-res
+preview render, the loupe, the star-mask overlay and the deepening reel were each up to a whole step darker
+than the PNG or TIFF written from the very same display-space pixels** — a systematic ≤1/255 divergence on
+exactly the path whose whole promise is "you get what you saw".
+
+Sweeping it turned up more than the lead had framed. Fifteen hand-spelled `(x * 255).astype(np.uint8)` sites
+existed across `seestack/render/{thumbnail,deepening,orient}.py`, `seestack/printexport.py`,
+`seestack/stack/stacker.py` (the quick-look preview), `seestack/gui/compare_dialog.py`,
+`webapp/routers/{editor,stack}.py`, `webapp/pipeline.py` and `webapp/video.py`. **Two of them were exports,
+not previews**, and had been missed by the v0.354.1 sweep only because they live outside `stack/output.py`:
+
+* `printexport.render_print` — the image that goes to a print lab, and a file the owner keeps.
+* `webapp.video._write_tiff16` — the 16-bit TIFF behind a finished Moon/Sun capture.
+
+All fifteen now call `output.pack_unit` (already public and documented for exactly this). The alpha channel in
+`render/thumbnail.py`, which had always been the lone `np.rint`, goes through it too, so there is one spelling
+in the app rather than "the rule, plus the site that anticipated it".
+
+**A grep drift guard, because fifteen hand-spellings are how this happened.** `test_no_float_to_integer_pack_
+truncates_anywhere_in_the_app` scans `seestack/` and `webapp/` for the construct and fails with the offending
+paths. A boolean mask promoted with `mask.astype(np.uint8) * 255` is a different construct and does not match.
+
+**Two deliberate non-changes.** `THUMB_VERSION` is **not** bumped: it exists to discard cached thumbnails when
+the pipeline changes enough to matter, and a ≤1/255 shift does not justify re-rendering every cached thumbnail
+on the owner's install. And `webapp/sample_data.py`'s `np.clip(img, 0, 65535).astype(np.uint16)` is left
+alone — it packs synthetic ADU, not a `[0,1]` unit image, so it is not this construct.
+
+**Three test helpers re-reasoned, not loosened.** `tests/test_full_res_asinh_parity.py::_to_u8`,
+`tests/test_thumbnail.py`'s stretch-parity expectation and their imports each re-implemented the truncating
+pack while reconstructing what the app should produce, so each failed the moment the app started rounding.
+They are about the *curve* and the *stretch*, not about the packing spelling, so they now call `pack_unit` as
+the code does — and every one stays an exact `np.array_equal`, so a genuine divergence is still caught. The
+packing itself is pinned separately, by the new file.
+
+**Upgrade-safe (§9):** pixel-level only. No config, schema, on-disk, API or default change; no cache
+invalidated; every affected value moves by at most one step of an 8- or 16-bit container.
+
+**Tests: +7 `tests/test_preview_rounding_parity.py`, all 7 failing before the fix.** The parity claim itself
+(one display-space stack rendered by the preview path and by the download path must land on the same byte),
+the full-res preview render, the North-up rotation's 8-bit round trip, `render_print`, the deepening reel,
+the Moon still's TIFF, and the drift guard.
+
+---
+
 ## v0.354.1 — 2026-09-05 — every file the app writes stops being half a step too dark
 
 The Scout's 2026-09-05 mosaic/output QA audit traced it and the entry sized it correctly: all six float→uint
