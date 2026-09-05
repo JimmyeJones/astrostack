@@ -412,16 +412,53 @@ describe("HistoryView", () => {
     expect(screen.queryByText(/saved rotated so North is up/)).not.toBeInTheDocument();
   });
 
-  it("still stands the scale bar down on a turned picture, and says which half is missing", async () => {
-    // The bar's length would survive the turn, but its sentence describes a
-    // *field* and a turned frame has grown black wedges round the same sky. So
-    // the pins come back and the two marks don't — and the note says exactly
-    // that, rather than the old "none of them can be placed".
+  it("shows the scale bar on a turned picture, saying it measures the sky and not the wedges", async () => {
+    // The shared JPEG has baked a bar onto exactly these pixels since v0.284.0
+    // while the card it was shared from said one couldn't be placed. It now
+    // renders — and because a rotate-with-expand grows the frame with black
+    // corners without capturing more sky, the sentence says which rectangle it
+    // is a claim about rather than leaving the reader to do the sum.
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ has_preview: true, preview_north_up_deg: 90 }),
     ]);
     vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
-      width: 1000, height: 600, objects: [], scale_bar: null,
+      width: 1000, height: 600, objects: [],
+      scale_bar: {
+        arcsec: 1800, label: "30′", fraction: 0.18, frame_arcmin: 166.6,
+        moon_comparison: "the whole frame is about 5.4 full Moons wide",
+      },
+      preview_scale_bar: {
+        arcsec: 1800, label: "30′", fraction: 0.11, frame_arcmin: 166.6,
+        moon_comparison: "the whole frame is about 5.4 full Moons wide",
+      },
+      preview_directions: { north_deg: 90, east_deg: 0 },
+      preview_objects: [], preview_width: 600, preview_height: 1000,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Scale"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/the sky you captured/)).toBeInTheDocument());
+    expect(screen.getByText(/about 5\.4 full Moons wide/)).toBeInTheDocument();
+    expect(screen.queryByText(/can’t place the scale bar/)).not.toBeInTheDocument();
+  });
+
+  it("says only the two marks are missing when the server placed the pins but not them", async () => {
+    // A backend that predates the turned marks: the pins arrive, the bar and the
+    // rose don't, and the run does have a WCS — so the note names exactly what is
+    // missing rather than claiming the picture has no sky coordinates.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, preview_north_up_deg: 90 }),
+    ]);
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600, objects: [],
+      scale_bar: {
+        arcsec: 1800, label: "30′", fraction: 0.18, frame_arcmin: 166.6,
+        moon_comparison: "the whole frame is about 5.4 full Moons wide",
+      },
       preview_objects: [], preview_width: 600, preview_height: 1000,
     });
 

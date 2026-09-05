@@ -445,3 +445,165 @@ def test_annotations_404_for_unknown_run(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     r = client.get(f"/api/targets/{safe}/stack-runs/999999/annotations")
     assert r.status_code == 404
+
+
+# ---- the scale bar and the rose on a preview a past save turned ---------------
+
+def test_no_preview_marks_on_a_run_nothing_turned(client, solved_library):
+    """The two extra marks exist only for the geometry the browser can't
+    reconstruct. An ordinary run's stored preview *is* the canvas, so `scale_bar`
+    and `directions` already describe it and the payload must be byte-for-byte
+    what it was."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=1000, h=800,
+                      arcsec_per_px=3.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    assert body["directions"] is not None
+    assert body["preview_scale_bar"] is None
+    assert body["preview_directions"] is None
+
+
+def test_a_saved_north_up_preview_keeps_its_scale_bar_and_its_rose(
+    client, solved_library,
+):
+    """The point of it: the shared JPEG has baked a bar and a rose onto exactly
+    these pixels since v0.284.0, while the card it was shared *from* said neither
+    could be placed. Both come back — and they are pinned against the baked
+    marks' own helper, so the file and the screen are one answer rather than two
+    that happen to agree today.
+    """
+    from webapp.routers.stack import _sky_marks_for_run
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = 1000, 800
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=w, h=h,
+                      arcsec_per_px=3.0)
+    _bake_north_up(solved_library, safe, run_id, 34.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    shown = body["preview_scale_bar"]
+    rose = body["preview_directions"]
+    assert shown is not None and rose is not None
+    turned_w = body["preview_width"]
+    assert turned_w and turned_w > w  # a rotate-with-expand really did grow it
+
+    # Ground truth: what the *baked* share draws on these very bytes. Its bar is
+    # `fraction × un-rotated width` px; ours is `fraction × turned width` px, and
+    # the two have to be the same number of pixels or the file and the screen
+    # would draw two different lengths over one picture.
+    marks = _sky_marks_for_run(_run_fits(solved_library, safe, run_id), w, 34.0)
+    assert marks.bar_px is not None
+    assert shown["fraction"] * turned_w == pytest.approx(marks.bar_px, rel=1e-9)
+    assert shown["label"] == body["scale_bar"]["label"]
+    assert rose["north_deg"] == pytest.approx(marks.directions.north_deg, abs=1e-9)
+    assert rose["east_deg"] == pytest.approx(marks.directions.east_deg, abs=1e-9)
+
+
+def test_the_turned_bar_answers_for_the_sky_not_for_the_black_corners(
+    client, solved_library,
+):
+    """The decision this feature had to make, pinned. A turn grows the *frame*
+    with black wedges without capturing one more arcsecond of sky, so the
+    sentence a beginner reads and shares — "the whole frame is about N full Moons
+    wide" — keeps answering for the field. Re-measuring it on the turned canvas
+    would overstate what they shot by the growth factor, which is exactly the
+    overstatement `preview_scale_bar` was introduced to remove for the crop case.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = 1000, 800
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=w, h=h,
+                      arcsec_per_px=3.0)
+    _bake_north_up(solved_library, safe, run_id, 34.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    canvas, shown = body["scale_bar"], body["preview_scale_bar"]
+    # The sky is the same sky: same field width, same sentence, same bar length.
+    assert shown["frame_arcmin"] == pytest.approx(canvas["frame_arcmin"])
+    assert shown["moon_comparison"] == canvas["moon_comparison"]
+    assert shown["arcsec"] == canvas["arcsec"]
+    # Only the drawn share moved, and it moved *down*, because the same bar now
+    # sits on a wider canvas.
+    grown = body["preview_width"] / w
+    assert grown > 1.0
+    assert shown["fraction"] == pytest.approx(canvas["fraction"] / grown)
+
+
+def test_a_turned_and_cropped_preview_measures_the_bar_on_the_kept_rectangle(
+    client, solved_library,
+):
+    """Crop then turn, for the bar as well as for the pins: the sentence is the
+    *trimmed* field's (not the canvas's), and the drawn fraction is re-based onto
+    the canvas the turn grew out of that rectangle."""
+    from seestack.io.wcs_io import arcsec_per_px, celestial_wcs_from_fits
+    from seestack.previewcrop import PreviewCrop
+    from seestack.scalebar import scale_bar_for
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    w, h = 1000, 800
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=w, h=h,
+                      arcsec_per_px=3.0)
+    _set_crop(solved_library, safe, run_id, PreviewCrop(x0=0.2, y0=0.1, x1=0.8, y1=0.9))
+    _bake_north_up(solved_library, safe, run_id, 90.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    # A square turn is lossless, so the kept 600×640 rectangle becomes 640×600.
+    assert (body["preview_width"], body["preview_height"]) == (640, 600)
+    wcs, gw, gh = celestial_wcs_from_fits(_run_fits(solved_library, safe, run_id))
+    field = scale_bar_for(arcsec_per_px(wcs), 600, 640)
+    assert field is not None
+    shown = body["preview_scale_bar"]
+    # The sentence is the kept rectangle's…
+    assert shown["moon_comparison"] == field.moon_comparison
+    assert shown["frame_arcmin"] == pytest.approx(field.frame_arcmin)
+    # …and the drawn length is that same bar re-based onto the 640-wide canvas.
+    assert shown["fraction"] * 640 == pytest.approx(field.fraction * 600)
+
+
+def test_a_square_turn_carries_the_rose_round_with_the_pixels(
+    client, solved_library,
+):
+    """A 90° CCW turn of the picture moves every on-screen direction by +90°,
+    which is the whole reason the rose can follow it exactly. Asserted against
+    the un-turned answer the same payload carries, so it can't drift from it."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=1000, h=800,
+                      arcsec_per_px=3.0)
+    _bake_north_up(solved_library, safe, run_id, 90.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    flat, rose = body["directions"], body["preview_directions"]
+    for key in ("north_deg", "east_deg"):
+        moved = ((rose[key] - flat[key]) + 180.0) % 360.0 - 180.0
+        assert moved == pytest.approx(90.0, abs=1e-6)
+
+
+def test_an_unreconcilable_preview_geometry_refuses_the_marks_too(
+    client, solved_library,
+):
+    """A preview that isn't a crop of the canvas at all can't be answered for —
+    the same stand-down the pins and the shared JPEG's own marks make."""
+    from seestack.previewcrop import UNKNOWN
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=1000, h=800,
+                      arcsec_per_px=3.0)
+    _set_crop(solved_library, safe, run_id, UNKNOWN)
+    _bake_north_up(solved_library, safe, run_id, 34.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    assert body["preview_scale_bar"] is None
+    assert body["preview_directions"] is None
+
+
+def test_a_turned_run_with_no_wcs_offers_no_marks_rather_than_erroring(
+    client, solved_library,
+):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run(solved_library, safe, ra=10.68, dec=41.27, w=1000, h=800,
+                      arcsec_per_px=3.0, with_wcs=False)
+    _bake_north_up(solved_library, safe, run_id, 34.0)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/annotations").json()
+    assert body["preview_scale_bar"] is None
+    assert body["preview_directions"] is None

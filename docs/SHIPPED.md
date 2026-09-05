@@ -14,6 +14,99 @@ Newest first.
 
 ---
 
+## v0.358.1 — 2026-09-05 — A picture that was processed *and* turned stops mis-measuring itself
+
+**Verified bug, found while shipping v0.358.0 and reproduced before it was fixed.** Two surfaces recovered
+"how wide was this preview before the North-up turn?" from the **master FITS's** dimensions
+(`_unrotated_preview_size` → `preview_grid_size`). That is the *canvas's* preview grid, and it is only the
+stored preview's grid when the preview shows the whole canvas. "Process target" makes it a **crop** of the
+canvas — rendered off the edit proxy (≤1500 px) and then capped at 1024 px by `_write_preview_png`, so it is
+neither the canvas grid nor a fixed fraction of it — and `_save_processed_preview(north_up=True)` (the
+Adjust panel's *keep my processed picture* save) then records a turn on those very bytes. Both states on one
+run is the owner's own workflow: process a mosaic, then save it North-up.
+
+**What it did, measured.** On a 1000×800 canvas trimmed to 70 %:
+* **The shared JPEG's scale bar was drawn 1.43× too long** — spanning **10.2′ of sky under a "5′" label**.
+  That mark is baked into the file a beginner posts, so the wrong number travels with the picture.
+* **The wallpaper / zoom clip re-centred by the same ratio** — the target pixel landed at x = 14.3 where the
+  object was at 10.0, on a ~56 px-wide picture. Pinned by a test that fails on the pre-fix code with exactly
+  that pair.
+
+**The fix is to stop guessing the grid and read it.** New `_unrotated_stored_preview_size` recovers it from
+facts that are actually known: the shape of the rectangle the preview shows (the crop box on the canvas) and
+the size the turn produced (the stored PNG). Turning that rectangle with the renderer's own
+`follow_north_up_turns` and taking the ratio of the two widths gives the decimation the preview went
+through — **scale-free, so it assumes nothing about which grid the render used**, and it goes through the
+same transform the picture did, so a near-square angle's `rot90` snap can't make the two disagree.
+`_unrotated_preview_width` is now a thin wrapper over it; `_unrotated_preview_size` keeps its old job as the
+last-resort fallback, with a docstring that says what it actually answers.
+
+**Upgrade-safe (§9):** two internal helpers and their two call sites; no config, schema, on-disk, API or
+default change. Every run with no baked turn keeps the stored PNG's own size, which is byte-for-byte what
+the callers used before; the un-cropped turned case resolves to the same number it did (pinned by the
+existing `test_share_north_up_double_rotation` suite, untouched).
+
+**Tests (+4).** `tests/webapp/test_preview_crop_geometry.py`: the recovery lands on the picture the save
+turned, not on the canvas (parametrised over a slanted 34° turn **and** a square 90° one, because the
+renderer snaps near-square angles); the drawn bar's on-sky length equals its own label on a
+cropped-and-turned picture, with the canvas-grid answer asserted to be a *different, wrong* number so the
+check isn't vacuous; and the wallpaper's target pixel lands where the object is, pinned against the
+renderer's own rotation of the point.
+
+---
+
+## v0.358.0 — 2026-09-05 — The scale bar and the compass survive a North-up save
+
+Closes the entry that asked for **a decision before any code**: *what is the scale bar's Moon sentence a
+claim about?* v0.350.0 brought the object pins back on a picture a past "Adjust → North up → Save" turned and
+left the other two marks standing down, because a rotate-with-expand grows the *frame* with black wedges
+without capturing one more arcsecond of sky.
+
+**The gap that made it worth answering.** The **shared JPEG has baked a scale bar and a North/East rose onto
+exactly those pixels since v0.284.0** (`_sky_marks_for_run` sizes the bar against `_unrotated_preview_width`
+and turns the rose with `skymarks.rotated`). The card the picture was shared *from* said, in as many words,
+that neither could be placed on it. So a run the owner saved North-up had both marks in the file and neither
+on screen — a screen↔file disagreement, not merely a missing feature.
+
+**The decision, recorded: (b), the sentence answers for the field.** The crop case's *mechanism* is "measure
+the visible rectangle", but its stated *harm* was that a canvas-sized sentence **overstated the field** of a
+trimmed picture by up to ~1/0.7×. On a crop the two coincide; on a turn they diverge, and re-measuring on the
+turned canvas would overstate what the owner actually shot by the growth factor — the same harm, from the
+other side. So `frame_arcmin` / `moon_comparison` keep answering for the sky the telescope saw (the kept
+rectangle), only `fraction` is re-based onto the grown canvas, and the surface that prints the sentence says
+which rectangle it means rather than leaving the reader to do the sum: *"The whole frame is about 5.4 full
+Moons wide — that's the sky you captured; the black corners the North-up turn added aren't counted."* The
+decision lives in `webapp.routers.stack._bar_on_turned_canvas`'s docstring, beside the arithmetic it governs.
+
+**What shipped.** `_turned_preview_grid` extracts the turned-canvas geometry that `_turned_preview_objects`
+already derived, so the pins, the bar and the rose are placed on **one** grid rather than three that agree by
+luck; it still comes from the renderer's own `follow_north_up_turns`. The annotations payload gains
+`preview_directions` (`skymarks.rotated` of the flat answer — the baked share's own helper) and extends
+`preview_scale_bar` to the turned case. Frontend: `turnedPreviewView` returns both marks, `storedPreviewScaleBar`
+takes the preview bar on a turned run (so **the copied caption gets its scale clause back** too), and History
+draws them instead of standing down. A backend that sends the pins but not the marks still gets a note naming
+exactly what is missing; a run with no WCS gets the ordinary "no sky coordinates" line, because that is what
+it is.
+
+**Parity is the test, not agreement.** The strongest assertion pins the served bar against
+`_sky_marks_for_run`'s `bar_px` for the same run — `fraction × turned_width == fraction × unrotated_width` in
+pixels — and the rose against that helper's `directions`, so the file and the screen are one answer that
+cannot drift rather than two that match today.
+
+**Upgrade-safe (§9):** two additive response fields (one new, one whose null case widens), no config, schema,
+on-disk or default change; every un-turned run's payload is byte-for-byte what it was, pinned by its own test.
+
+**Tests (+8 Python, +5 vitest, 1 rewritten).** `tests/webapp/test_stack_annotations.py`: an un-turned run
+still answers three nulls; a turned run's bar and rose match the baked marks exactly; the sentence, field
+width and bar length are the un-turned canvas's while `fraction` shrinks by the growth factor; crop-then-turn
+measures the bar on the kept rectangle and re-bases it onto the turned one; a square turn carries the rose
+round by exactly +90°; an unreconcilable geometry and a run with no WCS both refuse. `AnnotatedImage.test.tsx`
+covers the caption's new branch, the older-backend silence, and the two marks riding the turned view;
+`History.test.tsx` swaps the test that pinned the old stand-down for the bar rendering with its clause, and
+adds the "pins placed, marks not" note.
+
+---
+
 ## v0.357.1 — 2026-09-05 — The prepared download is nameable disk, and clearable
 
 Follow-on to v0.357.0, closing the one thing it left on a NAS with a fixed disk allowance: **the archive

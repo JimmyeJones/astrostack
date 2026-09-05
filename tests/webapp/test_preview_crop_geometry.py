@@ -501,3 +501,159 @@ def test_wallpaper_endpoint_serves_a_cropped_preview(client, solved_library):
     assert r.status_code == 200
     im = Image.open(BytesIO(r.content))
     assert im.size[0] > 0 and im.size[1] > 0
+
+
+# ---- a preview that is BOTH cropped and turned ---------------------------
+#
+# "Process target" trims the border; "Adjust → North up → Save" with *keep my
+# processed picture* then turns those same bytes (`_save_processed_preview`
+# records both). Everything that scales against "the preview's un-turned width"
+# was recovering it from the **master's** dimensions, which is the *canvas* grid,
+# not the cropped picture's — so on such a run the shared scale bar was drawn
+# 1/crop_w_frac too long under an unchanged label, and the wallpaper re-centred
+# by the same ratio.
+
+def _bake_turn(data_root, safe: str, run_id: int, preview_path: Path,
+               deg: float) -> tuple[int, int]:
+    """Turn a run's stored preview and record the angle — what
+    ``_save_processed_preview(north_up=True)`` leaves behind on a processed run.
+
+    Returns the ``(width, height)`` those bytes had *before* the turn, which is
+    the number every consumer has to recover.
+    """
+    from PIL import Image
+
+    from seestack.render.orient import rotate_image_north_up
+
+    with Image.open(preview_path) as img:
+        flat_w, flat_h = img.size
+        arr = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
+    turned = rotate_image_north_up(arr, deg)
+    Image.fromarray(np.clip(turned * 255.0, 0.0, 255.0).astype(np.uint8),
+                    mode="RGB").save(preview_path, format="PNG")
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.set_stack_preview_north_up(run_id, deg)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    return flat_w, flat_h
+
+
+@pytest.mark.parametrize("deg", [34.0, 90.0])
+def test_the_unturned_size_is_recovered_from_the_bytes_not_the_master(
+    client, solved_library, deg,
+):
+    """The recovery has to land on the *picture*, not on the canvas behind it.
+
+    A square turn is exercised as well as a slanted one because the renderer
+    snaps a near-square angle to a lossless ``rot90``, and a recovery that
+    re-derived the rotate-with-expand arithmetic instead of asking the renderer
+    would disagree there.
+    """
+    from webapp.routers.stack import (
+        _unrotated_preview_size,
+        _unrotated_stored_preview_size,
+    )
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, fits_path, preview_path = _make_trimmable_mosaic_run(solved_library, safe)
+    assert _auto_edit(solved_library, safe, run_id) is not None
+    crop = parse_preview_crop(_run_row(solved_library, safe, run_id).preview_crop_json)
+    assert isinstance(crop, PreviewCrop)
+    flat = _bake_turn(solved_library, safe, run_id, preview_path, deg)
+    stored = preview_path.read_bytes()
+
+    got = _unrotated_stored_preview_size(stored, str(fits_path), deg, crop)
+    assert got is not None
+    assert abs(got[0] - flat[0]) <= 1 and abs(got[1] - flat[1]) <= 1
+
+    # Non-vacuous: the canvas-grid answer this replaced is a different number.
+    assert _unrotated_preview_size(str(fits_path)) != flat
+    # And with no turn to undo — every ordinary run — it is the stored size,
+    # which is what the caller used before any of this existed.
+    from seestack.wallpaper import png_size
+    assert _unrotated_stored_preview_size(stored, str(fits_path), 0.0, crop) \
+        == png_size(stored)
+
+
+def test_the_shared_scale_bar_survives_a_crop_and_a_turn_together(
+    client, solved_library,
+):
+    """The honest check, on the picture that is actually shared: how long the
+    drawn bar *is* on the sky must equal what it is labelled."""
+    from webapp.routers.stack import (
+        _sky_marks_for_run,
+        _unrotated_preview_size,
+        _unrotated_preview_width,
+    )
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, fits_path, preview_path = _make_trimmable_mosaic_run(solved_library, safe)
+    assert _auto_edit(solved_library, safe, run_id) is not None
+    crop = parse_preview_crop(_run_row(solved_library, safe, run_id).preview_crop_json)
+    assert isinstance(crop, PreviewCrop)
+    flat_w, _flat_h = _bake_turn(solved_library, safe, run_id, preview_path, 34.0)
+    stored = preview_path.read_bytes()
+
+    # A turn keeps the pixel scale, so the bar's length in *preview* pixels is
+    # what it was — measure it against the picture the crop left.
+    visible_arcsec = _W * 3.6 * crop.w_frac
+    width = _unrotated_preview_width(stored, str(fits_path), 34.0, crop)
+    marks = _sky_marks_for_run(str(fits_path), width, 34.0, crop)
+    assert marks.bar_px
+    assert _implied_arcsec(marks, flat_w, visible_arcsec) == pytest.approx(
+        _label_arcsec(marks.bar_label), rel=0.02)
+
+    # The pre-fix drawing — sized against the canvas grid — really did claim a
+    # length it didn't have, so the assertion above isn't vacuous.
+    stale_w = _unrotated_preview_size(str(fits_path))[0]
+    assert stale_w != flat_w
+    stale = _sky_marks_for_run(str(fits_path), stale_w, 34.0, crop)
+    assert _implied_arcsec(stale, flat_w, visible_arcsec) != pytest.approx(
+        _label_arcsec(stale.bar_label), rel=0.05)
+
+
+def test_the_wallpaper_still_centres_through_a_crop_and_a_turn(
+    client, solved_library,
+):
+    """The second consumer of the same recovery: the wallpaper's target pixel is
+    mapped into the *cropped* rectangle, so a full-canvas grid width moves the
+    centre by the crop's own ratio before the turn is even applied."""
+    from seestack.io.wcs_io import celestial_wcs_from_fits
+    from seestack.previewcrop import crop_pixel_box
+    from webapp.routers.stack import _target_pixel_in_preview
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, fits_path, preview_path = _make_trimmable_mosaic_run(solved_library, safe)
+    assert _auto_edit(solved_library, safe, run_id) is not None
+    crop = parse_preview_crop(_run_row(solved_library, safe, run_id).preview_crop_json)
+    assert isinstance(crop, PreviewCrop)
+    wcs, full_w, full_h = celestial_wcs_from_fits(fits_path)
+    ra, dec = (float(v) for v in wcs.all_pix2world(_COV_X0 + 8, _COV_Y0 + 6, 0))
+
+    flat_w, flat_h = _bake_turn(solved_library, safe, run_id, preview_path, 34.0)
+    stored = preview_path.read_bytes()
+    run = _run_row(solved_library, safe, run_id)
+
+    class _Entry:
+        ra_deg = ra
+        dec_deg = dec
+
+    got = _target_pixel_in_preview(run, _Entry(), stored)
+    assert got is not None
+
+    # Ground truth: place the point on the *cropped* preview the save turned, then
+    # take it through the same rotation the picture took.
+    from seestack.wallpaper import rotate_point_north_up, wallpaper_target_pixel
+    x0, y0, _x1, _y1 = crop_pixel_box(crop, full_w, full_h)
+    flat_px = wallpaper_target_pixel(fits_path, ra, dec, flat_w, flat_h, crop)
+    assert flat_px is not None
+    want = rotate_point_north_up(flat_px[0], flat_px[1], flat_w, flat_h, 34.0)
+    assert got[0] == pytest.approx(want[0], abs=1.0)
+    assert got[1] == pytest.approx(want[1], abs=1.0)
+    # …and the point really is off-centre, so a centred fallback wouldn't pass.
+    assert abs(flat_px[0] - flat_w / 2) > 2 or abs(flat_px[1] - flat_h / 2) > 2
