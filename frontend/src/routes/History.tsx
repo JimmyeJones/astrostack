@@ -45,6 +45,7 @@ import { removedOverlayCaption } from "../removed";
 import { tiffDownloadHint } from "../tiffDownload";
 import { Sparkline } from "../components/Sparkline";
 import { DownloadMenuItem } from "../components/DownloadMenuItem";
+import { sameTargetCompareHref } from "../compareWithLast";
 
 export type RunSort = "newest" | "cleanest";
 
@@ -98,11 +99,13 @@ export function previousRunId(runs: StackRun[], id: number): number | null {
   return runs[idx + 1].id;
 }
 
-// Build the bookmarkable /compare URL for two runs of the *same* target. The
-// Compare view resolves each "<safe>:<run_id>" ref against the gallery (which
-// carries every run), so a same-target link works with no backend change.
+// Build the bookmarkable /compare URL for two runs of the *same* target. Kept
+// as this module's name for it, delegating to the one shared spelling in
+// `compareWithLast.ts` — the Target page's "Compare with my last one" link
+// builds the same URL, and two surfaces asking one question must not be able to
+// disagree about where it goes.
 export function historyCompareHref(safe: string, aId: number, bId: number): string {
-  return `/compare?a=${safe}:${aId}&b=${safe}:${bId}`;
+  return sameTargetCompareHref(safe, aId, bId);
 }
 
 // Extract this target's background-noise σ across runs in chronological order
