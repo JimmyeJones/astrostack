@@ -18,6 +18,68 @@ is a queue.
 
 ---
 
+## DOGFOOD + COLOUR-CALIBRATION AUDIT — both clean, two leads measured out (Builder 2026-09-05, branch `claude/sweet-babbage-9bfqke`)
+
+Recorded so no future run re-derives any of this. Nothing below is open work; the one real finding of the
+run shipped as v0.355.1 and its write-up is in [`SHIPPED.md`](SHIPPED.md).
+
+**1. Dogfood pass (`scripts/agent-dogfood.sh`, full: boot + sample + stack + Playwright probe) — clean.**
+`nothing overflowing, no console errors`. Full-page scroll heights, tallest first:
+`[phone] /targets/<T>` **3,040 px**, `[phone] /life-list` 3,008, `[phone] .../edit/1` 2,815,
+`[desktop] /targets/<T>` 2,037, `[phone] /` 1,785. The tallest page is still the Target page and it has
+moved **+26 px** since the v0.338.1 measurement (3,014 px) — the third consecutive measurement saying
+**do not open a speculative IA slice** (AGENTS.md §1's standing rule; the two earlier ones are under
+"DOGFOOD BASELINE" in `IMPROVEMENTS.md`). The Target page carries one `NoticeBoard` ("1 more note"), the
+Dashboard's seven analysis cards are behind `InsightTabs`, and the editor's pipeline/export column reads
+cleanly at 1440 px. Screenshots were scratch-only, never the repo.
+
+Two cosmetic things seen and deliberately **not** filed, because neither reaches the owner (ASTAP is bundled
+in the Docker image, so the install this run booted is not the owner's): the Dashboard's "Plate-solving isn't
+set up yet" banner says solving *"is required before you can stack anything"* on an install that has already
+stacked pre-solved sample frames; and the "Your first image" checklist reads *"Next: Plate solving"* with
+steps 3 and 4 already ticked. Both are honest for a real Seestar owner, whose frames are not pre-solved.
+
+**2. `seestack/post/color_cal.py` adversarial audit — no bug. Two candidate defects were reproduced at the
+per-star level and then measured out at the level that matters.** This module is on the priority-1/4 path
+(it is the white balance behind every Auto picture) and is not in the ~18 recorded stacking-engine audits.
+
+- **`_aperture_photometry` zero-fills uncovered (NaN) pixels, so a star beside a mosaic coverage edge has its
+  background under-subtracted — real, reproduced, and irrelevant to the answer.** `ch = np.where(isfinite,
+  rgb, 0.0)` means an annulus (`r_in=r+2`, `r_out=r+5`) that overlaps uncovered canvas measures a background
+  that is too low, and because a raw OSC sky is green-heavy the bias is *per-channel*, i.e. it skews the
+  star's **colour**. Reproduced on a single star 5 px from a coverage edge: flux +4.5 %, **R/G 1.0002 →
+  0.9793 (−2.1 %), B/G 1.0003 → 0.9837 (−1.7 %)**. **But `_solve_gray_star` takes the median of hundreds of
+  stars.** On a synthetic 2×2 dithered mosaic union canvas (1240², 2.6 % uncovered, ragged border + interior
+  gap, ~700 planted stars) only **1.4 % of kept stars** are contaminated, and dropping them moves the solved
+  scale by the *same magnitude and with no consistent sign* as dropping the same number of **random** stars —
+  measured over five seeds: contaminated-drop ΔR `+0.87 / +1.85 / 0.00 / 0.00 / −0.51 %` against a
+  random-drop control of `|ΔR|` `0.86 / 0.73 / 0.09 / 0.35 / 0.52 %`. So the per-star bias is real and the
+  net effect on the white balance is median jitter, not a systematic shift. **Do not "fix" this**: filtering
+  edge-contaminated stars would change the answer by less than the noise, and could push a small or
+  star-poor canvas below `min_stars` into the background-neutral fallback — a real regression bought for
+  nothing. Worth revisiting **only** if the solver ever stops being a median (a weighted or mean-based fit
+  would inherit the bias directly).
+- **The annulus offsets `radius + 2` / `radius + 5` are hard-coded absolute pixels and are *not* scaled for
+  the editor's decimated proxy — the A2 class — but scaling them does not improve preview↔export parity.**
+  `edit/ops/tone._color_calibrate` scales `detect_fwhm_px` and `aperture_radius_px` by `ctx.scaled_px` (the
+  A2-era fix) and the annulus offsets ride along unscaled, so at proxy scale 8 the preview samples its
+  background in a ring **28–52 full-res px** from the star where the export uses **6–9 px**. Measured on a
+  1200² scene with structured nebulosity and 400 colour-spread stars, comparing the proxy's solved scale
+  against the full-res one: today's absolute offsets give ΔR/ΔB of `−1.63/+1.50 %` (×2), `−0.15/+5.47 %`
+  (×4), `+0.26/+1.70 %` (×8); annulus offsets made **proportional** to the aperture (matching the full-res
+  4→6,9 ratios) give `+0.18/−0.81 %`, `+0.82/+4.90 %`, `+5.98/−1.33 %` — better at ×2, no better at ×4,
+  **markedly worse at ×8**, where a proportional annulus is only ~1.5 px wide and its background estimate
+  goes noisy. The divergence is dominated by the **star population itself** changing with decimation (332 →
+  323 → 224 → 66 detections), which is an inherent proxy limit, not a parameter bug. So this is **not** a
+  live A2 instance and the obvious fix is not an improvement; leave the offsets alone.
+
+**3. The "Finish what you started" idea was closed as already-built, not implemented.** Its capability is
+`GET /api/plan/best-tonight` (`rank_targets_now`) + `PointHereTonightCard`; both halves of its 2026-08-29
+reshape had already been declined with measurements. Closing it surfaced the duplication that shipped as
+v0.355.1. Entry cut verbatim to `SHIPPED.md`.
+
+---
+
 ## QA SWEEP — stacking engine + calibration + QC (Scout 2026-09-05, mostly clean)
 
 Adversarial read of the stack → result path on `origin/main` at v0.353.3. Recorded here so the next Scout
