@@ -5,18 +5,19 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import {
-  firstImageComplete, firstImageDone, firstImageDoneMessage, firstImageNextStep,
-  firstImageSteps,
+  firstImageComplete, firstImageDone, firstImageDoneMessage, firstImageHasPicture,
+  firstImageNextStep, firstImageSteps,
 } from "./firstImageSteps";
 
 // Two localStorage flags, both defensively guarded so a disabled/broken store can
 // never break the Dashboard (same pattern as the readiness-banner dismissal):
 //
-//  * `STARTED_KEY` is set the first time the card renders with a step still open.
-//    It's what keeps this card off an *established* install: an upgrade of a box
-//    that already has stacks has every step ticked on first render, never sets
-//    the flag, and so never shows the card at all — no "well done on your first
-//    picture" for someone with 300 of them.
+//  * `STARTED_KEY` is set the first time the card renders on an install that has
+//    no picture yet. It's what keeps this card off an *established* install: an
+//    upgrade of a box that already has stacks never sets the flag, and so never
+//    shows the card at all — no "well done on your first picture" for someone
+//    with 300 of them, and no checklist appearing for the first time because a
+//    later step (finish it, save it) was added under them.
 //  * `DISMISS_KEY` is the user saying "got it", after which it stays gone.
 const STARTED_KEY = "astrostack.dashboard.firstImageStarted";
 const DISMISS_KEY = "astrostack.dashboard.firstImageDismissed";
@@ -56,20 +57,26 @@ export function FirstImageCard() {
   const loaded = !!stats.data && !!system.data;
   const steps = firstImageSteps(system.data, stats.data);
   // "Done" counts a stacked Moon/Sun still, which no step can ever tick — see
-  // `firstImageDone`. `complete` stays the strict four-step reading, because the
+  // `firstImageDone`. `complete` stays the strict every-step reading, because the
   // progress bar is about *those* steps and must not claim them.
   const complete = firstImageComplete(steps);
   const done = firstImageDone(steps, stats.data);
   const next = firstImageNextStep(steps);
+  // Whether this install has ever made a picture at all — the *first-picture*
+  // steps only, deliberately blind to the two editor steps. Both flags below key
+  // off this rather than off `done`, so adding the finishing steps cannot make
+  // an established box (plenty of stacks, no exported edit) look mid-journey and
+  // start showing a card it has never shown.
+  const hasPicture = firstImageHasPicture(steps, stats.data);
 
   // Remember that this install was *seen* mid-journey, so the congratulation at
   // the end only ever reaches someone who actually walked it here.
   useEffect(() => {
-    if (loaded && !done) writeFlag(STARTED_KEY);
-  }, [loaded, done]);
+    if (loaded && !hasPicture) writeFlag(STARTED_KEY);
+  }, [loaded, hasPicture]);
 
   if (!loaded || dismissed) return null;
-  if (done && !readFlag(STARTED_KEY)) return null;
+  if (hasPicture && !readFlag(STARTED_KEY)) return null;
 
   const doneCount = steps.filter((s) => s.done).length;
   return (
@@ -110,7 +117,7 @@ export function FirstImageCard() {
           <Text size="sm" c="dimmed">
             {next
               ? `Next: ${next.hint}`
-              : "Four steps from a folder of subs to a finished picture."}
+              : "Six steps from a folder of subs to a finished picture."}
           </Text>
           <List spacing={6} size="sm" center>
             {steps.map((s) => (

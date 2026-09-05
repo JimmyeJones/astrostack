@@ -1013,6 +1013,12 @@ export interface DashboardStats {
   // counters above genuinely cannot see (a video ingests no FITS, solves
   // nothing and creates no stack run).
   n_video_stills?: number;
+  // Pictures that have been finished in the editor (a saved recipe) and
+  // pictures whose edit has been exported as its own image. Optional: an older
+  // backend never sends them, and every reader treats a missing value as 0 —
+  // i.e. "that step isn't done yet", which is the safe reading.
+  n_edited_runs?: number;
+  n_exported_runs?: number;
   recent_stacks: {
     safe: string;
     target_name: string;

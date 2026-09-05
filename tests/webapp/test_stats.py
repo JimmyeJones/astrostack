@@ -172,3 +172,130 @@ def test_stats_counts_finished_moon_sun_stills(client, data_root):
     (video / "Solar_video" / "meta.json").write_text("{}", encoding="utf-8")
 
     assert client.get("/api/stats").json()["n_video_stills"] == 1
+
+
+def _set_run_meta(root, safe, key: str, value: str = "{}") -> None:
+    """Write one ``project_meta`` row on a target's project."""
+    lib = Library.open_or_create(root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.set_meta(key, value)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def _uncache_stats(client) -> None:
+    """Drop the roll-up cache.
+
+    Saving an editor recipe writes only a ``project_meta`` row: it bumps neither
+    ``last_activity_utc`` nor ``last_stack_preview``, so the cache signature is
+    unchanged and the 30 s TTL is what refreshes the counters in the running app.
+    The tests want the answer now, not in 30 s.
+    """
+    client.app.state.stats_cache = None
+
+
+def test_stats_counts_finished_and_saved_pictures(client, solved_library):
+    """The two counters the "Your first image" checklist reads for the *end* of
+    the journey — finished in the editor, then exported as its own picture.
+
+    Both are per-run ``project_meta`` markers (``editor_recipe:<id>`` /
+    ``editor_exported:<id>``) that nothing cheap reported before, which is why
+    the card could only ever *mention* the last two steps in its congratulation.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_stack_run(solved_library, safe)
+
+    body = client.get("/api/stats").json()
+    assert body["n_stack_runs"] == 1
+    # A stack nobody has opened in the editor yet: both steps still to do.
+    assert body["n_edited_runs"] == 0
+    assert body["n_exported_runs"] == 0
+
+    _set_run_meta(solved_library, safe, f"editor_recipe:{run_id}", "{\"ops\": []}")
+    _uncache_stats(client)
+    body = client.get("/api/stats").json()
+    assert body["n_edited_runs"] == 1
+    assert body["n_exported_runs"] == 0
+
+    _set_run_meta(solved_library, safe, f"editor_exported:{run_id}", "{\"ops\": []}")
+    _uncache_stats(client)
+    body = client.get("/api/stats").json()
+    assert body["n_edited_runs"] == 1
+    assert body["n_exported_runs"] == 1
+
+
+def test_stats_edit_counters_ignore_meta_that_isnt_a_run(client, solved_library):
+    """Only ``<prefix><run_id>`` keys count.
+
+    ``project_meta`` is a shared key space — the stack defaults, the target's
+    integration goal and every per-run annotation live in it — so a counter that
+    took any key starting with the prefix would drift the moment a neighbouring
+    feature borrowed it.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_stack_run(solved_library, safe)
+    _set_run_meta(solved_library, safe, f"editor_recipe:{run_id}")
+    # Not a run id: a hand-edited row, or a future key sharing the prefix.
+    _set_run_meta(solved_library, safe, "editor_recipe:default")
+    _set_run_meta(solved_library, safe, "editor_recipes_seen", "3")
+    _uncache_stats(client)
+
+    assert client.get("/api/stats").json()["n_edited_runs"] == 1
+
+
+def test_stats_edit_counters_dont_read_an_unstacked_target(client, solved_library,
+                                                           monkeypatch):
+    """The care note on this feature: it must ride along on a walk that already
+    happens, never add a read of its own.
+
+    A target with no stack runs cannot carry either marker, so it must not be
+    asked — otherwise every library poll pays two extra prefix scans per target
+    for an answer that is structurally zero.
+    """
+    from seestack.io.project import Project
+
+    scans: list[str] = []
+    real = Project.iter_meta_prefix
+
+    def spying(self, prefix):
+        scans.append(prefix)
+        return real(self, prefix)
+
+    monkeypatch.setattr(Project, "iter_meta_prefix", spying)
+
+    # Nothing stacked anywhere in this library yet.
+    assert client.get("/api/stats").json()["n_edited_runs"] == 0
+    assert scans == []
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_stack_run(solved_library, safe)
+    client.get("/api/stats")
+    # Exactly the two prefixes, and only for the one target that has a run —
+    # the library's *other* target is still never opened for them.
+    assert scans == ["editor_recipe:", "editor_exported:"]
+
+
+def test_stats_edit_counters_survive_a_broken_project(client, solved_library):
+    """One unreadable project must not cost the whole answer — the same
+    degrade-don't-500 rule the rest of the roll-up already follows."""
+    from seestack.io.library import Library as _Library
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_stack_run(solved_library, safe)
+    _set_run_meta(solved_library, safe, f"editor_recipe:{run_id}")
+
+    lib = _Library.open_or_create(solved_library / "library")
+    try:
+        others = [t for t in lib.list_targets() if t.safe_name != safe]
+        assert others, "fixture should carry a second target"
+        (lib.target_dir(others[0]) / "project.sqlite").write_bytes(b"not a database")
+    finally:
+        lib.close()
+    _uncache_stats(client)
+
+    body = client.get("/api/stats").json()
+    assert body["n_edited_runs"] == 1

@@ -14,6 +14,73 @@ Newest first.
 
 ---
 
+## v0.362.0 — 2026-09-05 — The first-image checklist carries the whole journey: n_edited_runs / n_exported_runs
+
+**Friendliness / autonomy (PRIORITY 3), the filed idea built as filed.** The Dashboard's "Your first
+image" card walked a beginner from an empty app to a stack and then *stopped* — and a fresh stack is
+linear, flat and dark on purpose, which is exactly the point at which a beginner is most likely to
+conclude the app is broken. The card knew this: its congratulation said *"Open it in the editor to
+finish it off, then share it."* But that was a sentence in a well-done, not a step with a link, because
+nothing cheap reported whether either had happened.
+
+**Two counters on a walk that already happens.** `_rollup_stacks` (`webapp/routers/stats.py`) opens every
+target's project anyway; it now also counts the runs carrying a saved editor recipe
+(`editor_recipe:<id>`) and the runs whose edit has been exported (`editor_exported:<id>`), via one
+`project_meta` prefix scan each (`_count_meta_prefix` over `Project.iter_meta_prefix` — the same cheap
+read the un-exported-edits scan uses). Served as additive, defaulted `n_edited_runs` / `n_exported_runs`
+on `StatsResponse`.
+
+**The entry's care note answered with a measurement, not an argument** (*"measure the added cost on a
+library with many runs before shipping; if it isn't free, don't do it — the roll-up is on the Dashboard's
+hot poll"*). On a synthetic project with **400 runs and 1,400 meta rows**, both scans together cost
+**1.11 ms**, against **11.15 ms** for the `iter_stack_runs` walk the roll-up already pays on the same
+target — a tenth of a cost already being paid, behind the existing 30 s cache. And a target with **no**
+stack runs is never asked at all (it cannot carry either marker), which a test pins by spying on
+`Project.iter_meta_prefix`.
+
+**The steps.** "Finish it in the editor" ticks on a *saved recipe* — which an unattended auto-edit writes
+too, so the label is about the picture being finished, never about who pressed the button (the same
+tick↔label honesty the solve step was fixed for). "Save your edited version" ticks on the export marker,
+and says why it matters in the app's own terms: until you export, the thumbnail everyone sees is still
+the un-edited stack — which is the whole reason the un-exported-edit nudge exists.
+
+**The upgrade-safety decision, and the reason it is a separate predicate.** Adding steps to a checklist
+that hides itself on established installs is not free: `FirstImageCard` keeps itself off a box that
+already had pictures by only ever arming its `STARTED` flag when nothing was done yet. Deciding that from
+*all six* steps would make the owner's install — hundreds of stacks, no exported edit — look like a
+beginner mid-journey, and a card that has never appeared on that Dashboard would appear on upgrade, on
+the one screen the owner already calls busy. So the flag and the "never show" guard read a new
+`firstImageHasPicture` — the four *first-picture* steps (or a Moon/Sun still), deliberately blind to the
+two finishing ones. Pinned by a test that also asserts the flag is not quietly armed.
+
+**Upgrade-safe (§9):** two additive, defaulted response fields; no config key, no schema, no on-disk
+change, no default flipped, no existing field touched. An older frontend ignores them; an older backend
+omitting them reads as "not done yet", which is the safe reading. Nothing is written anywhere.
+
+**Tests (+4 Python, +5 vitest, 8 updated).** `tests/webapp/test_stats.py`: the two counters through the
+endpoint as the markers appear one at a time; only `<prefix><run_id>` keys counting (`project_meta` is a
+shared key space, so `editor_recipe:default` and `editor_recipes_seen` must not inflate it); the cost
+guard above; and one corrupt project not costing the answer. `firstImageSteps.test.ts`: the six-step
+order, the stacked→edit→export progression, an older backend's missing counts reading as not-done, and
+`firstImageHasPicture` being blind to the finishing steps. `FirstImageCard.test.tsx`: the established
+install still silent *and* un-armed, the first-time stacker pointed at the editor, and the export ask
+turning into the congratulation.
+
+*(Original entry follows.)*
+
+- **NEW IDEA (Builder 2026-07-30, spotted while building the "Your first image" card) — the checklist can't see the
+  last two steps of the journey (edit + share) because nothing cheap reports them.** `/api/stats` knows frames,
+  accepted frames and stack runs, but not "this user has saved an edit recipe" or "this user has exported/shared a
+  picture" — both of which live in per-run project meta and would need a per-run walk to count. **Idea:** have the
+  library-level roll-up that `_rollup_stacks` already does (it opens each target's project anyway, and is cached)
+  also count runs that carry a saved recipe and runs that have a share/export artifact, and serve them as two
+  additive `n_edited_runs` / `n_shared_runs` counters. That's one cheap addition to a walk that already happens, and
+  it would let the first-image card carry the *whole* journey — plus give the Dashboard an honest "you've finished N
+  of your M stacks" signal. **Care:** measure the added cost on a library with many runs before shipping; if it
+  isn't free, don't do it (the roll-up is on the Dashboard's hot poll). (S–M, friendliness — PRIORITY 3.)
+
+---
+
 ## v0.361.1 — 2026-09-05 — …and so does the Tonight page, off one shared hook
 
 The same clause, on the page the follow-on actually named. v0.361.0 put the mosaic aim line on the
