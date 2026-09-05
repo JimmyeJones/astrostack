@@ -8,11 +8,18 @@ import type { BestTonight, TonightPick } from "../../api/client";
 // How often to re-ask. "Right now" goes stale as the sky turns, but not fast —
 // ten minutes is well inside the resolution of an altitude recommendation and
 // keeps an idle Dashboard from grinding the ephemeris.
-const REFRESH_MS = 10 * 60 * 1000;
+export const REFRESH_MS = 10 * 60 * 1000;
 
 // Show the winner plus at most this many runners-up. One clear recommendation is
 // the point; a long ranked list is the decision paralysis this replaces.
-const MAX_SHOWN = 3;
+//
+// Exported (with the refresh window) because the sibling "Point here tonight"
+// card reads the *same* `/best-tonight` answer to avoid recommending a target
+// this card has already named. Sharing the constants keeps the two queries on
+// one cache entry — the sibling costs no extra request — and keeps "what this
+// card showed" and "what the sibling excludes" from drifting apart.
+export const MAX_SHOWN = 3;
+export const BEST_TONIGHT_QUERY_KEY = ["best-tonight"] as const;
 
 /** The card's headline, or null when there's nothing worth showing (pure, tested).
  *
@@ -98,7 +105,7 @@ function PickRow({ pick, lead }: { pick: TonightPick; lead: boolean }) {
  */
 export function PointHereTonightCard() {
   const q = useQuery({
-    queryKey: ["best-tonight"],
+    queryKey: BEST_TONIGHT_QUERY_KEY,
     queryFn: () => api.getBestTonight(MAX_SHOWN),
     staleTime: REFRESH_MS,
     refetchInterval: REFRESH_MS,

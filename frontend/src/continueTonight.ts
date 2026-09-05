@@ -50,6 +50,14 @@ export type GoalSecondsBySafe = Record<string, number | null | undefined>;
  * left to gain, so "continue" would be pointless — the "try something new" card
  * covers that case).
  *
+ * `alreadyRecommended` is the set of target `safe` names another card on the
+ * same screen has already put in front of the user (today: the adjacent "Point
+ * here right now" card, which ranks the same owned library by a *different*
+ * rule — how well-placed it is at this moment × how much another hour would cut
+ * its noise). Passing them in stops the Dashboard recommending one target twice
+ * under two headings; when that leaves nothing, the caller renders nothing and
+ * the Dashboard is simply one card shorter.
+ *
  * Among the targets that survive that filter, the recommendation is the one
  * closest to a finished picture (highest readiness fraction), breaking ties by
  * tonight's observability score — a target you can nearly *finish* tonight beats
@@ -62,13 +70,25 @@ export function pickContinueTonight(
   plan: NightPlan | undefined | null,
   goalSecondsBySafe?: GoalSecondsBySafe,
   maxRunnersUp = 2,
+  alreadyRecommended?: Iterable<string> | null,
 ): ContinueTonightPlan | null {
   const targets = plan?.targets;
   if (!targets || targets.length === 0) return null;
 
+  // Targets a sibling card on the same screen has already named. Excluded here
+  // rather than deduped in the UI so the *pick* moves down to the next-best
+  // target instead of being blanked out: a beginner who has one started target
+  // should see it recommended once, and a beginner with six should get a second,
+  // different suggestion — not the same name twice under two headings.
+  const shown = new Set(alreadyRecommended ?? []);
+
   // Owned (already-started) targets that are actually shootable tonight.
   const owned = targets.filter(
-    (t) => t.already_targeted && !!t.target_safe && t.score > 0,
+    (t) =>
+      t.already_targeted &&
+      !!t.target_safe &&
+      t.score > 0 &&
+      !shown.has(t.target_safe),
   );
   if (owned.length === 0) return null;
 
