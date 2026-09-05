@@ -36,6 +36,7 @@ from seestack.edit.proxy import (
 )
 from seestack.edit.recipe import Recipe, preview_crop_of_recipe, recipe_from_dict
 from seestack.edit.registry import EditContext, get_op
+from seestack.stack.output import pack_unit
 from seestack.edit import auto_prefs as auto_prefs_mod
 from seestack.edit import presets as presets_mod
 from webapp import deps
@@ -339,7 +340,7 @@ def _render_png(project_dir: Path, run, recipe: Recipe) -> bytes:
     from PIL import Image
 
     out = render_run_display_array(project_dir, run, recipe)
-    u8 = (np.clip(np.nan_to_num(out), 0.0, 1.0) * 255).astype(np.uint8)
+    u8 = pack_unit(np.clip(np.nan_to_num(out), 0.0, 1.0))
     buf = io.BytesIO()
     Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
     return buf.getvalue()
@@ -426,7 +427,7 @@ def _render_star_mask_png(project_dir: Path, run, size_px: float, grow: float,
     if recipe is not None:
         from seestack.edit.ops.geometry import apply_geometry_to_map
         mask = apply_geometry_to_map(mask, recipe, ctx)
-    u8 = (np.clip(np.nan_to_num(mask), 0.0, 1.0) * 255).astype(np.uint8)
+    u8 = pack_unit(np.clip(np.nan_to_num(mask), 0.0, 1.0))
     buf = io.BytesIO()
     Image.fromarray(u8, mode="L").save(buf, format="PNG")
     return buf.getvalue()
@@ -1422,7 +1423,7 @@ def _render_loupe_png(project_dir: Path, run, rec: Recipe,
                       frozen_fits=whole.fitted, frozen_deltas=whole.field_deltas)
     out = apply_recipe(window, _without_geometry(rec), ctx)
 
-    u8 = (np.clip(np.nan_to_num(out), 0.0, 1.0) * 255).astype(np.uint8)
+    u8 = pack_unit(np.clip(np.nan_to_num(out), 0.0, 1.0))
     buf = io.BytesIO()
     Image.fromarray(u8, mode="RGB").save(buf, format="PNG")
     return buf.getvalue(), {"x": x0, "y": y0, "width": w, "height": h,

@@ -134,6 +134,7 @@ def pointing_groups(
     *,
     min_members: int,
     eligible: list[bool] | None = None,
+    weights: list[int] | None = None,
     link_dist_deg: float = PANEL_LINK_DIST_DEG,
 ) -> list[int] | None:
     """Per-index **mosaic panel** label, or ``None`` when there is no sound split.
@@ -159,13 +160,22 @@ def pointing_groups(
     group's size — a caller that can only use frames carrying a particular
     metric passes that here, so a panel is "substantial" by the population it
     can actually contribute.
+
+    ``weights`` (default: one each) says how many frames each entry stands for,
+    for a caller that has already folded identical pointings together before
+    calling — the clustering is O(n²), so a target with thousands of subs on a
+    handful of panels is far cheaper to cluster as its distinct pointings. A
+    group is still "substantial" by the **frames** it holds, not by the number of
+    folded entries, so the gate means exactly the same thing either way; that is
+    the point of the parameter, and why it is here rather than in a second
+    hand-written copy of this rule.
     """
     labels = cluster_pointings(radecs, link_dist_deg=link_dist_deg)
     counts: dict[int, int] = {}
     for i, label in enumerate(labels):
         if label < 0 or (eligible is not None and not eligible[i]):
             continue
-        counts[label] = counts.get(label, 0) + 1
+        counts[label] = counts.get(label, 0) + (1 if weights is None else int(weights[i]))
     substantial = {label for label, n in counts.items() if n >= max(1, int(min_members))}
     if len(substantial) < 2:
         return None

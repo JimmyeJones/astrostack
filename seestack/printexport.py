@@ -33,6 +33,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from seestack.stack.output import pack_unit
+
 # Below this, a print looks visibly soft at arm's length. 300 is the darkroom
 # ideal and 150 is the floor most consumer labs quote; we take the floor as the
 # *qualifying* bar (so a modest stack still gets an honest small print) and let
@@ -247,7 +249,7 @@ def render_print(rgb: np.ndarray, option: PrintOption):
     from PIL import Image
 
     arr = np.nan_to_num(np.asarray(rgb, dtype=np.float32), nan=0.0)
-    u8 = (np.clip(arr, 0.0, 1.0) * 255.0).astype(np.uint8)
+    u8 = pack_unit(np.clip(arr, 0.0, 1.0))
     if u8.ndim == 2:
         u8 = np.stack([u8, u8, u8], axis=-1)
     img = Image.fromarray(u8, mode="RGB")

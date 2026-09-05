@@ -953,18 +953,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
     apply — a double-size FITS if a float64 2-D map ever reached it, which the production accumulators never
     emit; and `_same_map`'s `np.array_equal` returns False on identical-NaN maps, moot because coverage maps are
     0-filled, never NaN.
-  - **LEAD, the half v0.354.1 deliberately did NOT sweep (Builder 2026-09-05) — the same truncating pack lives
-    in `seestack/render/`, on the *display* side.** `thumbnail.py:136, 222, 416, 505, 668`,
-    `deepening.py:271` and `orient.py:277` all still spell `(x * 255).astype(np.uint8)` (the boolean
-    `mask.astype(np.uint8) * 255` sites are not this construct and must be left alone). Same ~½-step downward
-    bias, but on a *preview* rather than on a file the owner keeps, and 8 bits of a screen image is where it
-    matters least — so the value is the preview↔export **parity** argument, not the pixels: `output.py` now
-    rounds and these do not, which is a ≤1/255 divergence between what the editor shows and what it writes.
-    **Deliberately left rather than swept** because it is display bytes pinned by a large number of existing
-    render tests, none of which the 2026-09-05 audit re-reasoned, and mixing them in would have made a minimal,
-    revertible correctness fix into a broad one. If picked up: route them through `output.pack_unit` (already
-    public and documented for exactly this), and expect to re-reason each pinned byte value honestly rather than
-    loosening it. *(XS code / S test re-reasoning; image-quality/parity — PRIORITY 1/4.)*
+  - ~~**LEAD — the same truncating pack lives in `seestack/render/`, on the *display* side.**~~ —
+    **FIXED v0.354.2**, and wider than the lead framed it: fifteen hand-spelled sites across
+    `seestack/render/`, `seestack/printexport.py`, `seestack/stack/stacker.py`, `webapp/routers/`,
+    `webapp/pipeline.py` and `webapp/video.py` now go through `output.pack_unit`, with a drift test that
+    greps the tree so a sixteenth can't appear silently. Two of them — `printexport.render_print` and the
+    Moon still's 16-bit TIFF — were *exports* the v0.354.1 sweep had missed because they live outside
+    `stack/output.py`. Entry in [`SHIPPED.md`](SHIPPED.md).
   - `seestack/stack/weighting.py:97` the FWHM factor computes `(best_fwhm / f.fwhm_px) ** 2` with a Python float, so a
     pathologically tiny `fwhm_px` would raise `OverflowError` (before `np.clip` can clamp it) rather than saturate.
     **Unreachable on real data** — every writer of `fwhm_px` traces to `median_fwhm`, which persists only values in
@@ -14992,36 +14987,13 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-09-05) — "Your mosaic, panel by panel": a small map of where your mosaic
-  is thin, so you know where to point next.** *(Pillar: 3 friendliness + 2 autonomy for the owner's dominant
-  workflow; size M.)* The mosaic depth-readiness *number* already shipped (SHIPPED.md: the goal is scaled by
-  panel count, so a 4-panel mosaic 1 h/panel now honestly reads "a quarter done" instead of "plenty"). That
-  tells the beginner **how much** is left; it does not tell them **where**. For a heavy mosaic user shooting one
-  target across many nights, the actionable next step is spatial: *"every panel has ~60 min except the
-  bottom-right, which has 12 — point there on the next clear night and it evens out."* Today they'd have to
-  infer that by eye from the frames table.
-  - **What it is:** on a mosaic target only, a compact grid/heatmap of the target's panels — each panel a cell
-    tinted by its own integration time (or accepted-sub count), with the thinnest panel called out in one plain
-    sentence. Read-only, appears automatically when the target is a mosaic; nothing to configure.
-  - **Why it clears the beginner bar:** sane default (panels auto-detected, no knobs), plain-language, and it is
-    a planning aid a non-expert immediately understands — not pro tooling. It also closes a real friendliness
-    gap: a mosaic that looks "done" in total can have one badly-under-exposed corner that drags the whole
-    picture, and nothing currently surfaces that.
-  - **Reuses machinery that already exists:** `cluster_pointings` / `pointing_groups`
-    (`seestack/stack/pointings.py`, `PANEL_LINK_DIST_DEG`) already clusters solved subs into panels for QC
-    grading, quality weighting and photometric normalization — this is the same clustering, summarised per
-    cluster (n subs, Σ exposure, panel centre RA/Dec) and served through a small read-only endpoint. Per-frame
-    `ra_center_deg`/`dec_center_deg`/exposure are already in `project.sqlite`.
-  - **Care / slices:** (1) geometry — lay panels out by their **relative** RA/Dec offsets from the mosaic
-    centre (RA scaled by cos(dec)) so the grid matches how the sky actually tiles, not a bare row of cells;
-    small canvas, so a rough scatter-to-grid snap is fine. (2) Gate on the *same* soundness check
-    `pointing_groups` already applies (≥2 substantial groups) so a single-field or too-tightly-dithered target
-    shows nothing and behaves exactly as today. (3) First slice can be a read-only Target-page card; a "add it
-    to Tonight's where-to-point hint" follow-up is a natural second slice but keep them separate. (4) Additive
-    endpoint + one component; no schema, config, on-disk or default change — trivially upgrade-safe. **Grep
-    `panelComparison` / `readinessRow` first:** those are the post-stack "did the panels *even out* in
-    brightness" verdict and the aggregate readiness number respectively — this is neither; confirm no overlap
-    before building.
+- **✅ SHIPPED (Builder, v0.355.0) — ~~"Your mosaic, panel by panel": a small map of where your mosaic is
+  thin, so you know where to point next.~~** Built as filed, on the engine's own shared panel gate
+  (`pointing_groups`) so the app holds one opinion about what a panel is. `seestack/mosaicmap.py` +
+  `GET /api/targets/{safe}/mosaic-map` + a self-hiding `MosaicMapCard` inside the Target page's
+  existing **Planning** tab — no new page and no new always-on banner. Care note (3)'s "add it to
+  Tonight's where-to-point hint" follow-up is deliberately still open. Entry in
+  [`SHIPPED.md`](SHIPPED.md).
 
 - **✅ SLICES (a)+(c) SHIPPED (Builder, v0.343.0, branch `claude/sweet-babbage-l67sz2`) — ~~"Your year under
   the stars": a year-bounded recap of a season of imaging.~~** Built as filed, as composition over the night
@@ -24838,6 +24810,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.355.0** — Friendliness/planning, on the owner's dominant workflow: **"Your mosaic, panel by panel" — a small map of where your mosaic is thin.** The readiness figure already scales a mosaic's goal by panel count, so it says *how much* is left; nothing said **where**, and a mosaic whose total looks healthy can still have one corner at a fifth of the others — grainier than the rest of the picture however good the total is. New `seestack/mosaicmap.py` clusters the accepted+solved subs with the engine's **existing** `pointing_groups` gate (so a single field, a tight dither and an unsolved target all show nothing, exactly as today), sums each panel's own integration, lays the panels out North-up/East-left from their real RA·cos(dec)/Dec offsets, and says one sentence: the thin panel named positionally ("thinnest at the bottom-right"), or a plain "nothing is being held back" when the mosaic is even. Median not mean, so two thin panels can't drag their own yardstick down; plus an absolute 5-minute shortfall so a young mosaic isn't nagged. `GET /api/targets/{safe}/mosaic-map` returns `null` for everything that isn't a mosaic and the card then renders nothing at all; it joins the Target page's existing **Planning** tab rather than adding a tenth stacked card. The card mounts with the page, so the O(n²) clustering was measured (2.2 s at the owner's 5,400-sub scale) and folded onto a 0.01° grid before clustering (0.06 s), with the fold's sizes carried into the gate by a new defaulted `pointing_groups(weights=…)` so there is still exactly one gate. Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +15 `tests/test_mosaic_map.py`, +3 `tests/test_pointings.py`, +6 `tests/webapp/test_mosaic_map.py`, +11 `MosaicMapCard.test.tsx`.
+- **v0.354.2** — Image-quality/parity: **the picture on screen stops being half a step darker than the picture you download.** v0.354.1 made the six exports in `stack/output.py` round; every *other* float→byte site still spelled `(x * 255).astype(np.uint8)`, which truncates — so from that version the editor's live preview, the gallery/History preview, the full-res preview render, the loupe, the star-mask overlay and the deepening reel were each up to a whole step darker than the PNG/TIFF written from the same display-space pixels. Fifteen sites now go through `output.pack_unit`, two of them *exports* the v0.354.1 sweep had missed because they live outside `stack/output.py`: `printexport.render_print` (the file that goes to a print lab) and `webapp.video._write_tiff16` (the Moon/Sun still). `THUMB_VERSION` deliberately **not** bumped — a ≤1/255 change does not justify re-rendering every cached thumbnail on the owner's install. Three test helpers that re-implemented the truncating pack in their own expectations were re-pointed at `pack_unit`, not loosened: each stays an exact `array_equal`. Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +7 `tests/test_preview_rounding_parity.py` (all 7 fail before), including a grep drift guard over `seestack/` + `webapp/` so a sixteenth site can't appear silently.
 - **v0.354.1** — Image-quality/correctness: **every file the app writes stops being half a step too dark.** All six float→uint packs in `seestack/stack/output.py` spelled `(x * MAX).astype(np.uintN)`, which truncates toward zero — a systematic ~½-step downward bias on every PNG, JPEG and TIFF, and a break of the reversibility the "full data" linear TIFF's own description sells (recovered float low by up to a whole DN where rounding is honest to ±½). One shared `output.pack_unit` now `np.rint`s for all six, matching what `render/thumbnail.py` already did for alpha. `test_linear_tiff_no_clip.py`'s two strict-equality anchors were **re-reasoned, not loosened** — stated against the half-step band and still exact, which a truncating or a clipping packer both still fail. The display-side twins in `seestack/render/` are filed as a lead, not swept. Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +6 `tests/test_export_rounding.py` (5 fail before), 3 re-reasoned in `tests/test_linear_tiff_no_clip.py` and 2 in `tests/webapp/test_video_sharpen_still.py`.
 - **v0.354.0** — Friendliness/understand: **the Nights card says which of your nights the Moon washed out, not just the newest one.** v0.278.0 put a retrospective Moon verdict on the "Last night" card; the question behind it ("so which of my ten nights were any good?") had no answer, and a sharp night under a 96%-lit Moon 20° away reads as a good night in the Nights table. Every row now carries the same reading (`NightSummaryOut.moon`) and a dimmed **bright Moon** marker appears on `poor` nights, sentence in the tooltip + `aria-label` like the verdict and `ended early` markers; `good`/`ok` say nothing and nothing is ever filtered on it. The filed cost note was measured, not reasoned about: 24.6 ms/row would have added 0.74 s to a 30-night page, so `seestack.nightplan.session_moons` does the table in one astropy pass (0.075 s at 30) for **bit-identical** floats — `_moon_geometry` now delegates to `_moon_geometry_many`, so scalar and batched cannot drift. Unknown site / unsolved target / ephemeris failure all read as `null`, never as "fine". Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +4 `tests/test_session_moon.py`, +6 `tests/webapp/test_target_nights.py`, +5 `NightsCard.test.tsx`.
 - **v0.353.3** — Autonomy/correctness: **the app stops *recommending* a flat-dark the flat can't use.** `recommend_masters` — the answer behind the Stack form's "Use recommended" button and its ★ — ranked a flat-dark on exposure/gain/temperature alone, with no dimension awareness, so with two cameras' masters in one library the exposure-perfect-but-wrong-size dark out-ranked the usable one and one click pre-filled the silent mismatch v0.353.2 had to warn about. `_recommend_flat_dark` now skips a dark that `dims_conflict`s with the **flat** it would calibrate. One-sided, so an unrecorded dimension changes nothing on upgrade; the unattended `auto_bind_master_ids` never had the hole (its `_bindable` gate covers both). Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +3 `tests/webapp/test_calibration.py`.

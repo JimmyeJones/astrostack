@@ -1119,6 +1119,30 @@ class Project:
         except (TypeError, ValueError):
             return None
 
+    def accepted_solved_pointings(
+        self,
+    ) -> list[tuple[float | None, float | None, float | None]]:
+        """``(ra_center_deg, dec_center_deg, exposure_s)`` for the frames the
+        stacker would combine — accepted **and** plate-solved, in id order.
+
+        Deliberately **three columns**, like :meth:`solved_frame_geometry` and
+        :meth:`source_paths`: this is asked from a request handler on a target
+        that can carry thousands of subs, and building a ``FrameRow`` per frame
+        to read three numbers off each is the shape of cost this app has had to
+        remove before. Rows with a NULL centre are kept rather than filtered —
+        the consumer decides what a missing pointing means, and the ``wcs_json``
+        filter is the one that says "the stacker would use this frame".
+        """
+        assert self._conn is not None
+        return [
+            (row[0], row[1], row[2])
+            for row in self._conn.execute(
+                "SELECT ra_center_deg, dec_center_deg, exposure_s FROM frames "
+                "WHERE accept = 1 AND wcs_json IS NOT NULL AND wcs_json != '' "
+                "ORDER BY id"
+            )
+        ]
+
     def source_paths(self) -> list[str]:
         """Every registered frame's ``source_path``, in id order.
 
