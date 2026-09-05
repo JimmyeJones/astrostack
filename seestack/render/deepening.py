@@ -37,6 +37,7 @@ from seestack.render.thumbnail import (
     _robust_median_sigma,
     load_stack_rgb,
 )
+from seestack.stack.output import pack_unit
 
 log = logging.getLogger(__name__)
 
@@ -268,7 +269,7 @@ def render_deepening_frames(fits_paths: list[str | Path], *,
             # No usable linear reference (every frame display-space-flat); show
             # what we have rather than nothing.
             disp = np.clip(np.nan_to_num(rgb), 0.0, 1.0)
-        u8 = (disp * 255).astype(np.uint8)
+        u8 = pack_unit(disp)
         images.append(Image.fromarray(u8, mode="RGB"))
         frame_labels.append(label)
 

@@ -52,7 +52,7 @@ from seestack.stack.accumulator import (
 from seestack.stack.align import (
     REF_PATCH_MIN_COVERAGE, align_one, extract_reference_patch,
 )
-from seestack.stack.output import _sanitize_basename
+from seestack.stack.output import _sanitize_basename, pack_unit
 from seestack.stack.pointings import (
     PANEL_LINK_DIST_DEG,
     cluster_pointings,
@@ -3660,7 +3660,7 @@ def _render_preview(rgb: np.ndarray, max_w: int):
     from seestack.render.thumbnail import autostretch
 
     stretched = autostretch(rgb.astype(np.float32, copy=False))
-    u8 = (np.clip(stretched, 0, 1) * 255).astype(np.uint8)
+    u8 = pack_unit(np.clip(stretched, 0, 1))
     h, w = u8.shape[:2]
     if w > max_w:
         new_w = max_w
