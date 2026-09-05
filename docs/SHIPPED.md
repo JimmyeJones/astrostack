@@ -14,6 +14,39 @@ Newest first.
 
 ---
 
+## v0.356.2 — 2026-09-05 — `header_kind_note` says what the frames said, and survives whatever the registry holds
+
+**Two gaps in v0.356.0, found by driving the function adversarially rather than by reading it.**
+
+**(1) It relabelled the owner's own frames.** A folder of flat-darks in the dark slot is *correct* — a
+flat-dark is a dark exposure matched to the flats — and v0.356.0 confirmed it as *"All 40 frames say they
+are dark frames."* They said no such thing; they said flat-dark. For a note whose entire purpose is to
+report what the frames declared, quietly restating it as the slot's name is the one thing it must not do.
+A tally whose kinds are not exactly the slot's now echoes them: *"These frames fit a dark master: 30 say
+they are dark frames, 10 say they are flat-dark frames."* — biggest group first, matching the
+disagreement listing. The single-kind wording is untouched, so the common case reads exactly as before.
+
+**(2) It could 500 the Calibration page.** The tally comes out of the master registry's own JSON, which
+nothing validates on read, and `header_kind_note` called `.items()` on it — so a hand-edited registry
+holding a string or a list raised `AttributeError` inside `list_masters`, taking down the page rather than
+one row. Worse, an unrecognised *key* was echoed at the user verbatim (`{"xyz": 3}` → *"3 say they are xyz
+frames"*), inventing a claim out of a corrupted tally. Now: a non-mapping is treated as empty, and only
+the five kinds `frame_kind_from_header` can actually emit are counted. Every other shape — a bool, a
+float, a negative, a `None` key, an unknown kind — degrades to silence, which is the same answer the
+function already gives for "no frame said".
+
+Neither could be reached from the app's own writes (`build_master` only ever emits recognised keys with
+positive int counts), which is why both survived the first pass: the function was correct for its
+producer and brittle for its *store*. Reading a persisted structure back is a different contract.
+
+**Upgrade-safe (§9):** one pure function, no config/DB/on-disk/API/default change.
+
+**Tests (+3, all fail before):** `tests/webapp/test_calibration.py` — the flat-dark echo and its mixed and
+partial forms; seven junk registry shapes all reading as silence; an unknown kind never echoed, with a
+recognised kind alongside it still speaking.
+
+---
+
 ## v0.356.1 — 2026-09-05 — The Stack form says it too: `pickedMasterContentWarnings` on the picked masters
 
 **The other half of v0.356.0, at the place the master is actually used.** v0.356.0 tells you what a master
