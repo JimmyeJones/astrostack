@@ -14,6 +14,68 @@ Newest first.
 
 ---
 
+## v0.354.0 — 2026-09-05 — which of your nights the Moon washed out, not just the newest one
+
+v0.278.0 gave the "Last night" card a retrospective Moon verdict, which answers *"why does my newest picture
+look flat?"*. The question right behind it — *"so which of my ten nights on this target were any good?"* — had
+no answer anywhere: the Nights card lists every night a target was shot over with a sharp / soft / hazy
+verdict, and a night that was perfectly sharp under a 96 %-lit Moon 20° away reads as a good night in that
+table while being the one that most needs explaining.
+
+Every row of the Nights card now carries the same reading the "Last night" note is built from, and a dimmed
+**bright Moon** marker appears on the nights the Moon genuinely hurt — bright, up and close. The sentence
+lives in the marker's tooltip and its `aria-label`, exactly as the verdict and `ended early` markers do: ten
+rows of prose would be a wall on the page the owner already calls busy. `good` and `ok` nights carry their
+numbers and say nothing, so a night that was fine is never second-guessed, and nothing is ever filtered or
+rejected on this — moonlit subs are still real signal.
+
+**The filed "Care" note was the whole of the engineering, and it was measured rather than reasoned about.**
+One ephemeris evaluation per row is **24.6 ms**, so a 30-night target would have added **0.74 s** to an
+endpoint that renders on every Target page view. `seestack.nightplan.session_moons` does the whole table in
+one astropy pass instead: **0.075 s at 30 nights, 0.207 s at 120** — and for *bit-identical* floats, which is
+what makes the saving legitimate rather than an approximation. `_moon_geometry` now delegates to the new
+`_moon_geometry_many`, so there is exactly one implementation of the geometry and the batched and scalar
+paths cannot drift; `session_moon` is likewise a one-element call into `session_moons`. Nothing on the
+existing forward-looking planner path moves: a 60-sample comparison pins the delegation as exact, not close.
+
+**Quiet on everything it can't answer.** No configured site and nothing sniffable from the headers, an
+unsolved target with no sky position, a night whose bounds don't parse, or an ephemeris that won't compute
+all read as *unknown* (`moon: null`) rather than as *fine* — and none of them costs the table, which renders
+exactly as before. A target with no datable night touches no ephemeris at all.
+
+**Upgrade-safe (§9):** additive and read-only — one new optional response field (`NightSummaryOut.moon`), one
+new engine function, no config key, no schema, no on-disk change, no default flipped, and no existing number
+moved. An older frontend ignores the field; an older backend leaves the marker absent.
+
+**Tests (+13; all fail before).** `tests/test_session_moon.py` (+4): a 15-session batch spanning all three
+verdict levels reading exactly like `session_moon` one at a time, order preserved, an empty batch that
+touches no ephemeris, and the bit-identical scalar↔batch geometry. `tests/webapp/test_target_nights.py` (+6):
+a moonlit night marked and a dark one not, every number on the row equal to the engine's own verdict for the
+same sky, the whole table costing **one** ephemeris pass (`calls == [2]` for two nights — the cost note,
+pinned), and the three degradations (no site, unsolved target, ephemeris failure) each costing the marker and
+not the table. `NightsCard.test.tsx` (+3 `moonTooltip` cases, +2 render cases): the sentence for a `poor`
+night, silence for `ok` / `good` / absent / text-less, one marker across two rows, and its `aria-label`.
+
+Original entry:
+
+- **NEW IDEA (Builder 2026-08-27, the obvious next slice of the "Was the Moon washing this out?" note shipped
+  in v0.278.0) — say it on the *Nights* card too, so a beginner can see *which* of their nights the Moon hurt,
+  not only the most recent one.** *(Pillar: understand + trust — PRIORITY 3. Size: S.)* v0.278.0 put the
+  retrospective verdict on the "Last session" card, which answers "why does my newest picture look flat?".
+  The question right behind it is "so which of my ten nights on this target were any good?" — and the Nights
+  card already lists every night with a one-word verdict (sharp / soft / hazy) it computes from stored metrics.
+  Adding the Moon level to each row is now cheap: `seestack.nightplan.session_moon` exists and is pure, each
+  night already carries `start_utc`/`end_utc`, and the target's position and the site are already resolved on
+  that endpoint's sibling. **Shape:** a small dimmed "bright Moon" marker on the rows whose verdict is `poor`,
+  never a sentence per row (ten sentences would be a wall), with the existing per-night verdict untouched.
+  **Care — the one real cost:** this is N ephemeris evaluations per page load rather than one. Measure it
+  before shipping; if a 30-night target is slow, compute the Moon level only for the rows actually rendered,
+  or memoise per (night, target) on the app the way the site lookup already is. **Do not** turn it into a
+  filter or an auto-reject: moonlit subs are still real signal, and the whole feature's voice is "here's why,
+  and how to do better next time".
+
+---
+
 ## v0.353.3 — 2026-09-05 — the app stops *recommending* a flat-dark the flat can't use
 
 The other end of v0.353.2, found while fixing it. `recommend_masters` — the answer behind the Stack form's

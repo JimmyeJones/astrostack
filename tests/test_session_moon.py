@@ -145,3 +145,67 @@ def test_it_agrees_with_the_forward_looking_readout_on_the_same_instant():
     illum, alt, sep = _moon_geometry(LONDON, ra, dec, FULL_MOON_UP)
     level, _ = _moon_verdict(illum, alt, sep)
     assert session_moon(LONDON, ra, dec, FULL_MOON_UP).level == level
+
+
+# ---------------------------------------------------------------------------
+# session_moons — the same verdict for a whole table of nights, in one pass
+# ---------------------------------------------------------------------------
+
+def test_a_batch_of_sessions_reads_exactly_like_one_at_a_time():
+    """`session_moon` is a one-element call into `session_moons`, so a single
+    night and a ten-night table are graded by the same code. This pins that
+    across a spread that actually contains all three verdict levels — the way a
+    batched ephemeris silently drifting from the scalar one would show up."""
+    from seestack.nightplan import session_moons
+
+    ra, dec = _near_the_moon(FULL_MOON_UP)
+    sessions = [
+        (FULL_MOON_UP + timedelta(days=d), FULL_MOON_UP + timedelta(days=d, hours=3))
+        for d in range(0, 30, 2)
+    ]
+    batched = session_moons(LONDON, ra, dec, sessions)
+    one_by_one = [session_moon(LONDON, ra, dec, s, e) for s, e in sessions]
+
+    assert batched == one_by_one
+    # A run that only ever saw one level would pin nothing about the blending.
+    assert {v.level for v in batched} >= {"good", "poor"}
+
+
+def test_a_batch_keeps_the_caller_s_order():
+    """The rows are zipped straight back onto the nights table, so position is
+    part of the contract — not just the set of readings."""
+    from seestack.nightplan import session_moons
+
+    ra, dec = _near_the_moon(FULL_MOON_UP)
+    sessions = [(NEW_MOON_DOWN, None), (FULL_MOON_UP, None)]
+    batched = session_moons(LONDON, ra, dec, sessions)
+    assert [v.at_utc for v in batched] == [
+        session_moon(LONDON, ra, dec, NEW_MOON_DOWN).at_utc,
+        session_moon(LONDON, ra, dec, FULL_MOON_UP).at_utc,
+    ]
+
+
+def test_an_empty_batch_touches_no_ephemeris(monkeypatch):
+    """A target with no datable night must cost nothing at all — the caller's
+    "no site / no position / nothing to say" paths all end up here."""
+    import seestack.nightplan as nightplan
+
+    def boom(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+        raise AssertionError("the ephemeris must not be touched for an empty batch")
+
+    monkeypatch.setattr(nightplan, "_moon_geometry_many", boom)
+    assert nightplan.session_moons(LONDON, 83.8, -5.4, []) == []
+
+
+def test_the_batched_geometry_is_bit_identical_to_the_scalar_one():
+    """`_moon_geometry` delegates to `_moon_geometry_many`, which is what lets a
+    thirty-night table cost one pass instead of thirty. The saving is only
+    legitimate if the floats are the *same* floats, so pin it exactly rather than
+    to a tolerance."""
+    from seestack.nightplan import _moon_geometry, _moon_geometry_many
+
+    ra, dec = _near_the_moon(FULL_MOON_UP)
+    ats = [FULL_MOON_UP + timedelta(hours=7 * i) for i in range(12)]
+    assert _moon_geometry_many(LONDON, ra, dec, ats) == [
+        _moon_geometry(LONDON, ra, dec, at) for at in ats
+    ]
