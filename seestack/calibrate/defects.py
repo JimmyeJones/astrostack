@@ -252,7 +252,9 @@ class DefectMap:
         """
         if frame.ndim != 2 or frame.shape != self.mask.shape or self.n_defects == 0:
             return 0
-        vals = np.asarray(frame, dtype=np.float32)[self.nbr_ys, self.nbr_xs]
+        # Gather first, cast after: casting the *frame* would copy the whole
+        # mosaic on a non-float32 input, where the gather is only (8, N_defects).
+        vals = frame[self.nbr_ys, self.nbr_xs].astype(np.float32, copy=False)
         vals = np.where(self.nbr_valid & np.isfinite(vals), vals, np.nan)
         # An all-NaN column (no usable neighbour) warns; it is the documented
         # "leave it alone" case, handled by the finite test below.
