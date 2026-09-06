@@ -7507,10 +7507,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   entries), no schema/config/API/default change; upgrade-safe by construction. Tests: `tests/test_framing.py`
   (`test_every_catalog_object_now_carries_a_size` guards the catalog stays fully sized so a future addition
   without a vetted size is caught), and `tests/test_objectinfo.py`'s no-size test rewritten to a synthetic
-  sizeless entry (the real catalog no longer has one). **Follow-up still open:** (b′) on the Target page,
-  prefer a plate-solved frame's *actual* field size when available (a mosaic result is larger than one frame,
-  so the catalog "mosaic" verdict would otherwise mislead a target already shot as a mosaic). _(Original idea
-  kept below.)_
+  sizeless entry (the real catalog no longer has one). ~~**Follow-up still open:** (b′) on the Target page,
+  prefer a plate-solved frame's *actual* field size when available.~~ — **SHIPPED; struck 2026-09-06**, and
+  the reason it mattered was bigger than this entry knew: the constants here are the **S50's** 77′ × 44′,
+  while the owner has an **S30** (~128′ × 72′), so every verdict was a frame 1.66× too small on each edge.
+  `framing.FrameField` + `framing.frame_field_from_solve` + `webapp/frame_field.py` now derive the field from
+  the owner's own solved frames' `pixscale_arcsec` — exactly what AGENTS.md §1 "Owner facts" prescribes — and
+  the Target page's identify route and both Tonight-planner routes pass it. Grep `frame_field_from_solve`
+  before reading any "still open" sentence in this entry. _(Original idea kept below.)_
   <details><summary>Original idea</summary>
   (M, autonomy/friendliness — PRIORITY 2/3; beginner bar ✔.) A very common beginner surprise: the Seestar's
   field of view is only ~1.3° across, but M31 (~3°), the Veil, the North America Nebula, the Pleiades, etc.
