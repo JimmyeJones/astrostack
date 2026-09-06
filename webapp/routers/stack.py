@@ -3251,6 +3251,20 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
         # overlay — the same as False, without claiming the run refused one.
         if header.get("REJMAP"):
             rejection["has_map"] = rejection_map_path_for(fits_path).exists()
+        # …and whether the pass could clip a lone satellite/plane at all, which
+        # ``fraction`` on its own cannot say: a κ·σ clip is blind to a single
+        # trail until ``kappa_min_frames`` samples land on one pixel, so a thin
+        # mosaic panel records 0 % for a picture that still carries the trail. The
+        # stacker stamps the depth it had, the depth it needed and the verdict
+        # (``REJDEPTH``/``REJNEED``/``REJREACH``) so the panel can tell a clean
+        # sky from a blind pass without re-deriving either number. All three are
+        # absent on runs recorded before the cards existed, which reads as "no
+        # verdict" and leaves the line exactly as it was.
+        for hk, k in (("REJDEPTH", "peak_depth"), ("REJNEED", "min_depth")):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                rejection[k] = int(header[hk])
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            rejection["reaches"] = bool(header["REJREACH"])
 
     # "Your picture came out slightly less zoomed-in" — an unattended run whose
     # drizzle canvas didn't fit the memory budget and was stepped down to the
