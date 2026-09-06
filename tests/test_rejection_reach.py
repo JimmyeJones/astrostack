@@ -198,3 +198,51 @@ def test_reach_and_the_note_agree_on_a_drizzled_run_too():
         )
         blind = any(note.kind == "rejection_blind" for note in stack_health(run, []))
         assert blind is (not reach.reaches), f"disagreed at {n} frames"
+
+
+# --- lone_outlier_min_depth: the one definition the three surfaces share -------
+
+def test_min_depth_is_the_order_statistic_floor_for_min_max():
+    """Min/max removes an extreme from three samples up, whatever κ says — the
+    bound is an order statistic, not a κ·σ test."""
+    from seestack.stack.stacker import lone_outlier_min_depth
+
+    for kappa in (1.0, 2.0, 3.0, 5.0):
+        assert lone_outlier_min_depth("min-max-reject", kappa) == MIN_MAX_MIN_FRAMES
+
+
+@pytest.mark.parametrize("mode", ["sigma-clip", "drizzle", "drizzle-reject"])
+def test_every_kappa_sigma_spelling_shares_kappa_min_frames(mode):
+    """The two drizzle spellings matter: ``combine_method`` says ``"drizzle"``
+    (what will run) and ``RejectionStats`` records ``"drizzle-reject"`` (what
+    did), and the header cards are stamped from the second. Both are the same
+    κ·σ clip, so both must answer with κ-σ's bound — otherwise the finished
+    picture and the pre-run warning disagree about the very same pass."""
+    from seestack.stack.stacker import lone_outlier_min_depth
+
+    for kappa in (1.5, 2.0, 3.0, 4.0):
+        assert lone_outlier_min_depth(mode, kappa) == kappa_min_frames(kappa)
+
+
+def test_a_plain_mean_has_no_depth_at_which_it_rejects():
+    from seestack.stack.stacker import lone_outlier_min_depth
+
+    assert lone_outlier_min_depth("mean", 3.0) is None
+    assert lone_outlier_min_depth("", 3.0) is None
+
+
+@pytest.mark.parametrize("kappa", [1.5, 2.0, 3.0, 4.0])
+def test_rejection_reach_reports_exactly_the_shared_bound(kappa):
+    """``rejection_reach`` must not carry a second copy of the number: whatever
+    the helper says is the bound is what the pre-run verdict quotes."""
+    from seestack.stack.stacker import lone_outlier_min_depth
+
+    for opts, mode in (
+        (StackOptions(sigma_kappa=kappa), "sigma-clip"),
+        (StackOptions(sigma_kappa=kappa, min_max_reject=True), "min-max-reject"),
+        (StackOptions(sigma_kappa=kappa, drizzle=True, drizzle_reject=True),
+         "drizzle"),
+    ):
+        reach = rejection_reach(opts, 50)
+        assert reach.method == mode
+        assert reach.lone_outlier_min_frames == lone_outlier_min_depth(mode, kappa)

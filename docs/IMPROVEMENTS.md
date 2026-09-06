@@ -107,75 +107,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   data" TIFF anchors its white point on the single brightest surviving pixel *(traced 2026-09-03 — the
   mechanism is confirmed, but read the note below before "fixing" it)*.
 
-- **🟢 ~~R2 — SPLIT THE BACKLOG INTO A WORKING LIST AND A RECORD.~~ BOTH HALVES ARE NOW DONE — "Bugs"
-  (v0.352.3) and "Ideas" (v0.358.2) (Builder, v0.351.2 + v0.352.3 + v0.358.2, branches
-  `claude/sweet-babbage-73i7y6`, `claude/sweet-babbage-flru3c` and `claude/sweet-babbage-adbaed`).**
-  *(Do not re-derive the rule — it is now
-  in `AGENTS.md` §2 "the three-file rule" and in this file's Conventions block.)*
-
-  **Shipped v0.352.3 (2026-09-05) — the "Bugs" bulk move, all of it.** 227 resolved entries (10,587 lines) went
-  to `SHIPPED.md` and 24 QA sweep/audit records (796 lines) to `PROCESS-NOTES.md`, each cut **verbatim and in
-  order**; "Bugs (fix these first)" went from **12,375 lines / 264 entries to under 1,000 / 13**, and this file
-  from 40,915 lines to 29,533. Nothing was summarised or dropped: the three files together are 17 lines longer
-  than before (the new section headers and one pointer line), which is the check that the move was lossless.
-  **Classification was by shape, not by judgement** — struck through (`- ~~`), or "✅" in the entry's first three
-  lines, or a `⚪ CLOSED AS A NON-BUG` / `DELIBERATELY NOT BUILT` header — plus the three stale entries this
-  entry names below, located by quoting their text: the two `⭐⭐ OWNER-REPORTED` v0.158-era ones (each of which
-  ends by ruling itself out in its own words) and the `skips a bare` scanner entry (settled by the owner's real
-  folder listing). Everything that did **not** match stayed, so the 13 survivors are the open bugs and low-
-  priority leads, `⚪ HARDENING NOTE`s included. The one deliberate deviation from the rule: **one** pointer
-  line under "Shipped" rather than 227 auto-truncated ones — re-adding a summary per entry would put a fifth of
-  the cut straight back, and `SHIPPED.md`/`PROCESS-NOTES.md` are the grep target by their own front matter.
-
-  **Shipped v0.358.2 (2026-09-05) — the "Ideas" bulk move, the second and last half.** The "~65 top-level"
-  estimate this entry carried was low by a factor of seven: **446 resolved entries (16,223 lines)** went to
-  `SHIPPED.md`, cut verbatim and in the order "Ideas" held them, taking this file from **29,432 lines to
-  13,207** — under half, and a third of what it was before R2 started. Same shape rule as the "Bugs" move
-  (struck through, or "✅" in the entry's first three lines) with **one carve-out added**: an entry whose own
-  text names an open follow-up ("still open", "left open", "not built", …) was **kept in the backlog**, so the
-  move cannot hide live work behind a resolved header. That kept **28** entries of otherwise-resolved shape —
-  the ones a future run should split into a shipped half and an open half, each of which is a small, safe,
-  self-contained job. Losslessness was checked, not assumed: every one of the 16,223 removed lines was
-  verified present in the appended block before the cut was written.
-
-  Previously shipped (v0.351.2): **`docs/SHIPPED.md`** and **`docs/PROCESS-NOTES.md`** exist as the
-  two destinations; the standing rule is written into `AGENTS.md` §2 and the Conventions block above, with the
-  "keep the spec indented" convention reconciled to it rather than left contradicting it; and **"In progress"
-  is emptied** — its 420 lines of released claims and collision diaries moved *verbatim* to
-  `PROCESS-NOTES.md`, since every one of its headers said "claim released" or "run finished" (checked, not
-  assumed: 63 blocks read, zero live claims). `AGENTS.md` §8 step 2 also gained the audit's commit-subject
-  rule — **only 4 of 250 subjects contained a code identifier**, which is why "grep the log before you build"
-  keeps missing work that had already shipped. Original entry, for the measurements:
-
-  *(Original.)* **R2 — split the backlog into a working list and a record (one mechanical Scout run, then a standing
-  rule).** *(The audit's highest-value process finding: this file is **3.4 MB / ~840k tokens**, so no agent can
-  read it in a run — every agent is necessarily skimming, which is the common cause behind stale entries
-  surviving, ideas being re-derived, and collisions.)* Growth is ~100 lines per merged PR: 18,757 lines on
-  08-01 → 23,591 on 08-22 → 29,000 on 08-29 → **34,934 on 09-02**. Measured causes, each traceable to a
-  convention: this file's own "Conventions" block says a shipped item **keeps its full spec indented in place**
-  (while `AGENTS.md` §2/§5/§11 say "move it to Shipped") — so "Shipped"'s newest entry is **v0.288.0** while the
-  app is at v0.325.2, with **65** top-level "✅ SHIPPED" entries sitting inside Ideas and **185** struck entries
-  inside "Bugs"; **"Bugs" now holds 222 top-level entries of which ~212 are resolved and ~10 open**; collision
-  diaries (~20 lines each, ten of them) and clean-sweep records are written **into the priority sections** (the
-  top entry of "Bugs (fix these first)" has been a clean-sweep record, not a bug); and **"In progress" is 336
-  lines with zero live claims** — all 20 headers say "claim released", defeating its only purpose.
-  **The standing rule to adopt** (add to `AGENTS.md` §2 "End of run" and to this file's Conventions block):
-  > `docs/IMPROVEMENTS.md` is the **working list only**. "Bugs (fix these first)" contains open bugs and
-  > nothing else. When an item ships or is closed, **cut** the whole entry and append it as one block to
-  > `docs/SHIPPED.md` (newest first, headed by version + date); leave a one-line `✅ v0.xxx.y <what>` under
-  > "Shipped" here. Process notes and audit records go to `docs/PROCESS-NOTES.md`, one dated block each —
-  > **never** into a priority section. Delete an "In progress" claim when you release it. **A run must leave
-  > `docs/IMPROVEMENTS.md` no longer than it found it** unless it is filing a verified bug; the Scout's first
-  > job each run is to move whatever the last Builders left behind.
-  **The one-off cleanup (a single Scout run, mechanical, high leverage):** move the ~212 resolved "Bugs"
-  entries, the 336-line "In progress" diary and the inline "✅ SHIPPED" entries out; and **strike these three
-  stale entries**, located by quoting their text rather than line number (the file shifts constantly):
-  `"auto-stacked FINAL results come out as single-frame colour-speckle"` and
-  `"the final stacked output resolution"` — both v0.158-era, both long fixed, **still unstruck**, and both
-  concluding in their own text that the engine is clean; and `"skips a bare"` — the mosaic bare-output entry,
-  still saying the device naming "could not be confirmed" when the owner's real folder listing settled it
-  (that listing is currently buried inside a `⚪ CLOSED AS A NON-BUG` entry a triaging agent skips by shape).
-
 - **🟡 OPEN, THE OTHER HALF OF THE ENTRY ABOVE — a scan-time skip for another program's temp folder.**
   `batch_stack_tmp` has no `_sub` sibling, so it still *ingests* (as of v0.319.6 it is merely offered for
   cleanup afterwards). *(Severity: low — one junk tile, now self-clearing via the nudge. Confidence: HIGH,
@@ -4749,21 +4680,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   `DRZREJ*` provenance and into `stackhealth`'s `rejection_blind` note, so a drizzled shallow mosaic gets the
   same honest line as a non-drizzled one. No change to any pixel — this is the "say what it did" half.
 
-- **NEW IDEA (Builder 2026-09-04, the half v0.340.0 deliberately left out) — let a finished picture's own FITS
-  header say that its rejection pass reached nothing.** *(Pillar: image quality / trust — PRIORITY 4; size S;
-  **only worth it if a header consumer is named first**.)* v0.340.0 made all four *screens* honest about a
-  rejection pass that ran and could not clip (`rejection_reach`, the Target-page outlook, the Stack-form
-  nudge, the save clause, and `stackhealth`'s `rejection_blind` note). The **file** still self-documents the
-  old way: `REJMODE`/`REJFRAC 0.0` with nothing distinguishing "your data was clean" from "this pass was
-  mathematically blind", which is what a user opening the master in Siril or PixInsight sees, and what the
-  app itself would read back long after the server log has rolled. **Shape:** one card beside the existing
-  `REJ*` block — the per-pixel depth the pass actually had, or a boolean "could not reach" — so the pair is
-  readable without re-deriving it. **Why it was not bundled:** the cards are stamped in a helper with no
-  coverage plane in scope, so it means plumbing the depth (or `coverage_max`) through a hot-path meta builder
-  for a card **no screen currently reads**. Name the consumer first — most likely the History Info panel,
-  which already reads the `REJ*` cards — or leave it: a header field nothing reads is exactly the kind of
-  surface this project is supposed to stop adding.
-
 - **Let a mosaic choose its rejection method *per pixel*, not once for the whole canvas.** *(Pillar: image
   quality — PRIORITY 4; size L; opened by the A6 fix, v0.326.7.)* A6 fixed `auto_reject` reading the target's
   frame count where the honest number is a panel's depth, and it now sizes the method from the **thinnest
@@ -8431,6 +8347,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.365.0** — Image quality/trust (PRIORITY 4): **a finished picture says whether its rejection pass could have clipped anything, and the History Info panel stops calling a blind pass clean.** The stacker stamps `REJDEPTH` (samples on the deepest pixel — the literal peak, so "no pixel could be clipped" is provable), `REJNEED` and `REJREACH` beside the existing `REJ*` block; `lone_outlier_min_depth(mode, sigma_kappa)` is now the one definition of that bound behind `rejection_reach`, `stackhealth`'s `rejection_blind` note and the cards, and takes both the `"drizzle"` and `"drizzle-reject"` spellings. `rejectionSummaryText` claims *"data was already clean"* only when the run's own header says the pass reached — a thin mosaic panel now reads *"not enough subs on a pixel for it to reach"*. Deliberately no second paragraph: `StackHealthCard` already carries the explanation and the cure on that same page. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.364.0** — Friendliness (PRIORITY 3): **the "why were some frames left out?" breakdown gets a home a phone can reach, and its advice gets a button** — `RejectionBreakdownCard` in the Target page's existing Quality insight group (the breakdown had only ever rendered in a `HoverCard.Dropdown`, which has no touch affordance at all), plus `rejectionActions.ts` turning each bucket/verdict into the thing its note names — `settingsLink("plate-solving")` or the page's own Plate Solve — keyed off a new additive `verdict.key` from `webapp/rejection_summary._verdict` rather than matched on the copy. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.363.0** — Autonomy/friendliness (PRIORITY 2/3): **"First look" reaches the Dashboard** — the sharpest accepted sub of the target that has kept subs but no picture yet (`FirstLookStrip` + `pickFirstLookTarget`, inside the existing Recent insight group, self-hiding on a settled library), so the "did tonight work?" glance is answered on the landing page and not only on the Target hub. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.362.0 + v0.362.1** — Friendliness/autonomy (PRIORITY 3): **the "Your first image" checklist carries the whole journey — finish it in the editor, then save that version.** The card walked a beginner to their first stack and stopped, congratulating them on a linear, flat, dark picture and *mentioning* the last two steps in a sentence, because nothing cheap reported them. `_rollup_stacks` now also counts runs carrying a saved editor recipe and runs whose edit was exported (one `project_meta` prefix scan each on a project it already opens), served as additive `n_edited_runs` / `n_finished_pictures` — the second one the **union** of the export marker and the in-place auto-edit's `preview_display_space`, because a hands-off "Process this target" finishes the picture without any export and the first cut of this asked a walk-away owner to go and do it again (caught by booting the app with `scripts/agent-dogfood.sh`, not by reading it). The filed care note was answered with a measurement: **1.11 ms for both scans on a 400-run / 1,400-meta-row target, against 11.15 ms for the run walk already being paid there**, behind the existing 30 s cache — and a target with no stack runs is never asked (test spies on `iter_meta_prefix`). The card's "never show on an established install" guard moved to a new `firstImageHasPicture` (the four first-picture steps only), so adding steps cannot make the owner's box look mid-journey and pop a card onto a Dashboard it has never appeared on. Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +4 `tests/webapp/test_stats.py`, +5 vitest (8 updated).

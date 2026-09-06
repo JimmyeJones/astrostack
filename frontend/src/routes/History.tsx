@@ -243,7 +243,21 @@ export function rejectionSummaryText(
     // Structural, by design — never a caution; just name the method.
     note = label;
   } else if (pct === 0) {
-    note = "data was already clean";
+    // "Clean" is only one of the two ways a κ·σ clip records 0 %, and the other
+    // one is a picture that still has a satellite in it: the test is against
+    // statistics that still contain the outlier, so it is blind to a lone trail
+    // until `kappa_min_frames` samples land on ONE pixel — 11 at the default
+    // κ=3, which a mosaic panel rarely has. The run's own header now records the
+    // depth it had against the depth it needed (`REJDEPTH`/`REJNEED`/
+    // `REJREACH`), so claim the reassurance only when that verdict is positive.
+    // A run stacked before the engine stamped it carries no `reaches` and keeps
+    // the original wording. Deliberately just the qualifier and no more: the
+    // explanation and the cure are `stackhealth`'s `rejection_blind` note, which
+    // `StackHealthCard` already renders for this same run further down this very
+    // page — a second copy here would be the same fact said twice.
+    note = rejection.reaches === false
+      ? "not enough subs on a pixel for it to reach"
+      : "data was already clean";
   } else if (pct < 8) {
     note = "transient outliers";
   } else {

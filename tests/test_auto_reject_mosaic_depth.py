@@ -237,3 +237,77 @@ def test_a_single_field_stack_of_the_same_depth_is_unchanged(tmp_path):
     finally:
         proj.close()
     assert header["REJMODE"] == "sigma-clip"
+
+
+# --- the header cards: "clipped 0%" vs "could not have clipped anything" ------
+
+def test_a_thin_mosaic_records_that_its_rejection_could_not_reach(tmp_path):
+    """The regression this pair of cards exists for.
+
+    A 2×2 mosaic five subs deep, stacked with plain sigma clipping (the engine
+    default, and what an owner who once ticked it gets on every walk-away night).
+    The pass dispatches — 20 frames is well past its 4-frame gate — and records
+    ``REJMODE = sigma-clip`` with ``REJFRAC 0.0``, because a κ·σ clip is blind to
+    a lone trail until ``kappa_min_frames`` samples land on **one pixel**, and
+    each pixel here sees five. Before these cards the master FITS, and the
+    History Info panel that reads it, reported that identically to a genuinely
+    clean sky.
+    """
+    proj = _build(tmp_path / "thin", _panels(2), 5, streak_at=0)
+    try:
+        _img, header = _stack(proj, sigma_clip=True)
+    finally:
+        proj.close()
+    assert header["REJMODE"] == "sigma-clip"
+    assert float(header["REJFRAC"]) == 0.0          # …and it clipped nothing
+    # The deepest pixel on the canvas, not the 20 frames the target holds — that
+    # difference is the whole point on a mosaic. Here the panels overlap (a
+    # 0.667° × 0.444° field stepped 0.5°), so the seam sees two panels' five subs
+    # each: 10. Deliberately the *literal* deepest pixel rather than
+    # ``auto_reject_depth``'s per-panel figure — when even the best-covered pixel
+    # on the canvas is short, no pixel anywhere could be clipped, which makes the
+    # verdict provable instead of merely likely.
+    assert int(header["REJDEPTH"]) == 10
+    assert int(header["REJNEED"]) == kappa_min_frames(StackOptions().sigma_kappa)
+    assert bool(header["REJREACH"]) is False
+
+
+def test_a_deep_enough_single_field_records_that_it_could(tmp_path):
+    """The other side of the same verdict, so the cards can't just always say
+    "blind": twelve subs of one field all land on the same pixel, which clears
+    ``kappa_min_frames`` at the default κ=3."""
+    proj = _build(tmp_path / "deep", [_BASE], 12, streak_at=0)
+    try:
+        _img, header = _stack(proj, sigma_clip=True)
+    finally:
+        proj.close()
+    assert header["REJMODE"] == "sigma-clip"
+    assert int(header["REJDEPTH"]) == 12
+    assert int(header["REJNEED"]) == kappa_min_frames(StackOptions().sigma_kappa)
+    assert bool(header["REJREACH"]) is True
+
+
+def test_the_depth_card_never_exceeds_the_frames_that_contributed(tmp_path):
+    """``REJDEPTH`` is a sample count, so it can never claim more samples than
+    subs went in — overstating it is the one direction that would *hide* a blind
+    pass."""
+    proj = _build(tmp_path / "cap", _panels(2), 3, streak_at=-1)
+    try:
+        _img, header = _stack(proj, auto_reject=True)
+    finally:
+        proj.close()
+    assert 0 < int(header["REJDEPTH"]) <= int(header["NFRAMES"])
+
+
+def test_min_max_reaches_at_the_same_shallow_depth(tmp_path):
+    """The verdict is per *method*, not per stack: the same three-deep mosaic the
+    κ-σ pass is blind on is one the order-statistic drop reaches on, which is
+    exactly why ``auto_reject`` picks it down there."""
+    proj = _build(tmp_path / "mm", _panels(2), 3, streak_at=0)
+    try:
+        _img, header = _stack(proj, auto_reject=True)
+    finally:
+        proj.close()
+    assert header["REJMODE"] == "min-max-reject"
+    assert int(header["REJNEED"]) == MIN_MAX_MIN_FRAMES
+    assert bool(header["REJREACH"]) is True
