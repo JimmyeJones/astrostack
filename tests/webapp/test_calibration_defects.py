@@ -179,7 +179,11 @@ def test_a_master_whose_file_vanished_is_absent_not_a_500(client, data_root):
 
 
 def test_an_empty_library_answers_with_an_empty_list(client, data_root):
-    assert client.get("/api/calibration/defects").json() == {"masters": []}
+    # Still exact, so a stray field can't creep into this response unnoticed —
+    # ``repair`` is the offer beside the census, and with no master at all there
+    # is nothing to repair and nothing to offer.
+    assert client.get("/api/calibration/defects").json() == {
+        "masters": [], "repair": None}
 
 
 def test_the_census_is_computed_once_per_master_file(client, data_root, monkeypatch):
@@ -241,3 +245,248 @@ def test_the_number_shown_is_the_number_a_run_would_repair(client, data_root):
         repair_sensor_defects=True)
 
     assert row["n_defects"] == masters.n_sensor_defects == 2
+
+
+# ---- the one-click repair (the action beside the measurement) --------------
+#
+# The census names the switch; naming is not reaching. ``repair_sensor_defects``
+# is a checkbox in the Stack form's *advanced* group, so acting on the sentence
+# means finding a named setting inside a collapsed disclosure — once per stack,
+# and never at all on the hands-off path, which stacks from
+# ``default_stack_options`` and sees no form. These pin the button that closes
+# that gap, and the silences that keep it honest.
+
+
+def _offer(client):
+    r = client.get("/api/calibration/defects")
+    assert r.status_code == 200
+    return r.json()["repair"]
+
+
+def test_nothing_repairable_offers_no_button():
+    """A clean sensor has nothing to turn on, so the whole control is absent —
+    the same silence ``defect_note`` keeps for the same reason."""
+    assert calibration.defect_repair_offer([], enabled=False) is None
+    assert calibration.defect_repair_offer(
+        [{"measurable": True, "n_defects": 0, "refused": False}],
+        enabled=False) is None
+    # Unmeasurable, and a non-dict from a hand-edited payload, both read as
+    # "nothing to say" rather than raising.
+    assert calibration.defect_repair_offer(
+        [{"measurable": False, "n_defects": 9, "refused": False}],
+        enabled=False) is None
+    assert calibration.defect_repair_offer([None, "junk"], enabled=False) is None  # type: ignore[list-item]
+
+
+def test_a_refused_map_never_offers_the_repair():
+    """The one case where turning the switch on would provably do nothing: the
+    ceiling refused that master's map, so the run repairs no pixel. Offering the
+    button there would be the same untruth the refusal warning exists to
+    prevent."""
+    assert calibration.defect_repair_offer(
+        [{"measurable": True, "n_defects": 50_000, "refused": True}],
+        enabled=False) is None
+    # ...but a repairable master beside a refused one still gets the offer.
+    offer = calibration.defect_repair_offer(
+        [{"measurable": True, "n_defects": 50_000, "refused": True},
+         {"measurable": True, "n_defects": 12, "refused": False}],
+        enabled=False)
+    assert offer is not None and offer["state"] == "off"
+
+
+def test_the_offer_says_it_reaches_the_hands_off_path_and_quotes_no_count():
+    offer = calibration.defect_repair_offer(
+        [{"measurable": True, "n_defects": 1204, "refused": False}],
+        enabled=False)
+
+    assert offer["state"] == "off"
+    assert offer["action"] == "Repair them"
+    # Names the Stack form's own switch, so the two surfaces can't drift.
+    assert "Repair hot/dead pixels from the dark" in offer["detail"]
+    # The whole point of writing a *default* rather than ticking a form.
+    assert "hands-off" in offer["detail"]
+    # No count: which master a run derives its map from depends on what is bound
+    # at stack time, so any single total here would be wrong half the time. The
+    # per-master rows carry the measured numbers.
+    assert "1,204" not in offer["message"] and "1,204" not in offer["detail"]
+
+
+def test_when_it_is_already_on_the_offer_turns_into_the_way_back_off():
+    offer = calibration.defect_repair_offer(
+        [{"measurable": True, "n_defects": 12, "refused": False}], enabled=True)
+
+    assert offer["state"] == "on" and offer["action"] == "Turn off"
+    # It must not claim to have improved a picture that already exists.
+    assert "re-stack" in offer["detail"].lower()
+
+
+def test_the_button_writes_the_switch_into_the_global_stack_defaults(
+        client, data_root):
+    """The click's whole value: the option lands where *both* the Stack form's
+    seed and the unattended auto-stack chain read it, not in a form."""
+    root = _library_root(data_root)
+    dark = _synthetic_dark()
+    dark[10, 20] += 900.0
+    _register(root, "dark", dark)
+
+    assert _offer(client)["state"] == "off"
+
+    r = client.post("/api/calibration/defects/repair", json={"enabled": True})
+    assert r.status_code == 200 and r.json() == {"enabled": True}
+
+    settings = client.get("/api/settings").json()
+    assert settings["default_stack_options"]["repair_sensor_defects"] is True
+    # And the page it was clicked from now shows the on state.
+    assert _offer(client)["state"] == "on"
+
+
+def test_turning_it_off_again_leaves_no_residue(client, data_root):
+    """Exactly reversible (AGENTS.md §9/§10): the key is removed rather than
+    stored as ``False``, so an on-then-off round trip leaves the options blob
+    byte-for-byte as it was — and every other default the user set survives."""
+    root = _library_root(data_root)
+    dark = _synthetic_dark()
+    dark[10, 20] += 900.0
+    _register(root, "dark", dark)
+    client.put("/api/settings", json={"default_stack_options": {"drizzle": True}})
+    before = client.get("/api/settings").json()["default_stack_options"]
+
+    client.post("/api/calibration/defects/repair", json={"enabled": True})
+    mid = client.get("/api/settings").json()["default_stack_options"]
+    assert mid["drizzle"] is True and mid["repair_sensor_defects"] is True
+
+    r = client.post("/api/calibration/defects/repair", json={"enabled": False})
+    assert r.status_code == 200 and r.json() == {"enabled": False}
+    after = client.get("/api/settings").json()["default_stack_options"]
+    assert after == before
+    assert _offer(client)["state"] == "off"
+
+
+def test_an_empty_body_means_turn_it_on(client, data_root):
+    """The button's ordinary call. Posting nothing must not 422 or turn it off."""
+    root = _library_root(data_root)
+    dark = _synthetic_dark()
+    dark[10, 20] += 900.0
+    _register(root, "dark", dark)
+
+    r = client.post("/api/calibration/defects/repair")
+
+    assert r.status_code == 200 and r.json() == {"enabled": True}
+    assert client.get("/api/settings").json()[
+        "default_stack_options"]["repair_sensor_defects"] is True
+
+
+def test_a_library_with_no_repairable_master_offers_nothing(client, data_root):
+    """End to end: a clean sensor's page carries no button at all."""
+    _register(_library_root(data_root), "dark", _synthetic_dark())
+
+    assert _offer(client) is None
+
+
+def test_the_switch_reaches_the_stack_form_a_target_would_be_stacked_with(
+        built_library, client, data_root):
+    """Not "a setting was stored" but "a stack would use it": asserted through
+    ``GET .../stack-defaults``, the endpoint that seeds the Stack form and reads
+    the same global blob the unattended chain merges. A rename on either side
+    would strand the button, and this is what catches it."""
+    root = _library_root(data_root)
+    dark = _synthetic_dark()
+    dark[10, 20] += 900.0
+    _register(root, "dark", dark)
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+
+    before = client.get(f"/api/targets/{safe}/stack-defaults").json()
+    assert before["repair_sensor_defects"] is False
+
+    client.post("/api/calibration/defects/repair", json={"enabled": True})
+
+    after = client.get(f"/api/targets/{safe}/stack-defaults").json()
+    assert after["repair_sensor_defects"] is True
+
+
+def test_a_target_that_saved_its_own_defaults_is_named_not_glossed_over(
+        built_library, client, data_root):
+    """The honesty guard on the on-state's sentence. "Save as defaults" persists
+    the *whole* Stack form, so every target saved before this option was switched
+    on carries an explicit ``false`` — and a target's own blob wins over the
+    global one in both readers. Claiming "every stack" there would be exactly the
+    confident untruth the census's silences exist to avoid."""
+    root = _library_root(data_root)
+    dark = _synthetic_dark()
+    dark[10, 20] += 900.0
+    _register(root, "dark", dark)
+    safes = [t["safe_name"] for t in client.get("/api/targets").json()]
+    assert len(safes) >= 2, "fixture should give more than one target"
+    # One target pins it off (what the form saves today), one pins it on, and
+    # any remaining target saved nothing at all.
+    client.put(f"/api/targets/{safes[0]}/stack-defaults",
+               json={"repair_sensor_defects": False})
+    client.put(f"/api/targets/{safes[1]}/stack-defaults",
+               json={"repair_sensor_defects": True})
+
+    # With the switch off nothing is claimed, so nothing is counted or said.
+    assert "except" not in _offer(client)["message"]
+
+    client.post("/api/calibration/defects/repair", json={"enabled": True})
+    offer = _offer(client)
+
+    assert offer["state"] == "on"
+    # Exactly one: the pinned-on target and the never-saved ones follow the
+    # global switch and are not exceptions to it.
+    assert "except 1 target" in offer["message"]
+    assert "Save as defaults" in offer["detail"]
+    # And it says what to do about it rather than only that it happened.
+    assert "Repair hot/dead pixels from the dark" in offer["detail"]
+
+
+def test_the_override_count_is_only_paid_for_when_it_changes_a_sentence(
+        built_library, client, data_root, monkeypatch):
+    """A per-target walk on a 60 s poll has to earn itself: with the switch off,
+    or with nothing repairable, the count changes no wording, so it is never
+    asked for."""
+    from webapp.routers import calibration as router
+
+    calls = {"n": 0}
+    real = router._targets_overriding_defect_repair
+
+    def counted(request):
+        calls["n"] += 1
+        return real(request)
+
+    monkeypatch.setattr(router, "_targets_overriding_defect_repair", counted)
+
+    # A clean sensor: no offer at all, so no walk even once it is switched on.
+    _register(_library_root(data_root), "dark", _synthetic_dark(), name="clean")
+    client.post("/api/calibration/defects/repair", json={"enabled": True})
+    client.get("/api/calibration/defects")
+    assert calls["n"] == 0
+
+    # Switch it back off with a repairable master present: still nothing to say.
+    dark = _synthetic_dark(seed=11)
+    dark[10, 20] += 900.0
+    _register(_library_root(data_root), "dark", dark, name="broken")
+    client.post("/api/calibration/defects/repair", json={"enabled": False})
+    client.get("/api/calibration/defects")
+    assert calls["n"] == 0
+
+    # Both true: now the sentence depends on it.
+    client.post("/api/calibration/defects/repair", json={"enabled": True})
+    client.get("/api/calibration/defects")
+    assert calls["n"] == 1
+
+
+def test_the_plural_and_the_no_exception_wording_both_hold():
+    rows = [{"measurable": True, "n_defects": 12, "refused": False}]
+
+    assert "except" not in calibration.defect_repair_offer(
+        rows, enabled=True, n_overridden=0)["message"]
+    assert "except 1 target" in calibration.defect_repair_offer(
+        rows, enabled=True, n_overridden=1)["message"]
+    assert "except 4 targets" in calibration.defect_repair_offer(
+        rows, enabled=True, n_overridden=4)["message"]
+    # A nonsense count degrades to "no exceptions" rather than a negative one.
+    assert "except" not in calibration.defect_repair_offer(
+        rows, enabled=True, n_overridden=-3)["message"]
+    # It is only ever an on-state qualifier; the off-state is about turning it on.
+    assert "except" not in calibration.defect_repair_offer(
+        rows, enabled=False, n_overridden=9)["message"]

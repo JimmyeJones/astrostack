@@ -376,7 +376,120 @@ def calibration_defects(request: Request) -> dict[str, Any]:
             continue
         note = calibration.defect_note(census)
         out.append({"id": int(m.get("id", -1)), **census, "note": note})
-    return {"masters": out}
+    # The action beside the measurement: is there anything a repair could fix,
+    # and is it already switched on? Read from the *global* stack defaults
+    # because that is the one place both the Stack form's seed and the
+    # unattended chain read — a per-run form tick reaches neither.
+    enabled = _defect_repair_enabled(settings)
+    offer = calibration.defect_repair_offer(
+        out, enabled=enabled,
+        # Only worth asking when the offer would say "every stack" — a target
+        # walk on a 60 s poll has to earn itself, and with the switch off (or
+        # nothing repairable) the answer changes no sentence.
+        n_overridden=(_targets_overriding_defect_repair(request)
+                      if enabled and _offer_wanted(out) else 0))
+    return {"masters": out, "repair": offer}
+
+
+def _offer_wanted(rows: list[dict[str, Any]]) -> bool:
+    """Would :func:`~webapp.calibration.defect_repair_offer` render anything?
+
+    Asked *before* building the offer so the target walk below is skipped on a
+    library with nothing to repair. Deliberately the same predicate the offer
+    itself applies, not a second one — it delegates rather than restating it.
+    """
+    return calibration.defect_repair_offer(rows, enabled=False) is not None
+
+
+def _targets_overriding_defect_repair(request: Request) -> int:
+    """How many targets' **saved** stack defaults pin the repair off.
+
+    "Save as defaults" on the Stack form persists the whole form, so every target
+    saved before ``repair_sensor_defects`` was switched on carries an explicit
+    ``false`` — and a target's own saved blob wins over the global defaults in
+    both readers. Without this count the on-state would claim "every stack" while
+    those targets quietly opt out.
+
+    One registry read plus one ``get_meta`` per target — cheap beside the master
+    FITS this endpoint loads on a cache miss — and best-effort: a target whose
+    project can't be opened (mid-delete, a locked DB) is skipped rather than
+    500-ing the page.
+    """
+    from webapp.schemas import STACK_DEFAULTS_META_KEY
+    from webapp.walkaway import parse_saved_stack_defaults
+
+    key = calibration.DEFECT_REPAIR_OPTION
+    n = 0
+    lib = deps.open_library(request)
+    try:
+        for entry in lib.list_targets():
+            try:
+                proj = lib.open_target(entry.safe_name)
+            except Exception:  # noqa: BLE001 — one bad target must not sink the page
+                continue
+            try:
+                saved = parse_saved_stack_defaults(proj.get_meta(
+                    STACK_DEFAULTS_META_KEY))
+            except Exception:  # noqa: BLE001 — same
+                saved = {}
+            finally:
+                proj.close()
+            # Only a *pinned off* counts. A target that saved it on, or never
+            # saved this key at all, follows the global switch.
+            if key in saved and not saved[key]:
+                n += 1
+    finally:
+        lib.close()
+    return n
+
+
+def _defect_repair_enabled(settings: Any) -> bool:
+    """Is the sensor-defect repair on in the global stack defaults?
+
+    Tolerant of a hand-edited or legacy ``config.json``: the store persists
+    ``default_stack_options`` as an opaque dict, so a non-dict value (or a
+    missing key, which is every install predating the option) reads as off
+    rather than raising.
+    """
+    dso = getattr(settings, "default_stack_options", None)
+    if not isinstance(dso, dict):
+        return False
+    return bool(dso.get(calibration.DEFECT_REPAIR_OPTION))
+
+
+@router.post("/api/calibration/defects/repair")
+def set_defect_repair(request: Request,
+                      body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Turn the sensor-defect repair on (or off) for **future** stacks.
+
+    The one-click behind :func:`~webapp.calibration.defect_repair_offer`. It
+    writes ``repair_sensor_defects`` into the global ``default_stack_options``,
+    which is what the Stack form seeds from *and* what the hands-off auto-stack
+    chain merges — so the census line the owner is looking at becomes an action
+    that also reaches the path with no form on it.
+
+    Deliberately a *setting*, not a default: the shipped default stays off
+    (AGENTS.md §9), nothing already on disk changes, and no finished picture is
+    touched. It is exactly reversible — ``{"enabled": false}`` removes the key
+    again, leaving the options blob as it was before the first click, so a user
+    who turns it on and off is byte-for-byte back where they started.
+
+    The read-modify-write happens here rather than in the browser so a click
+    can't clobber a concurrent edit to another stack default.
+    """
+    enabled = True if body is None else bool(body.get("enabled", True))
+    store = deps.get_settings_store(request)
+    current = store.get().default_stack_options
+    opts = dict(current) if isinstance(current, dict) else {}
+    if enabled:
+        opts[calibration.DEFECT_REPAIR_OPTION] = True
+    else:
+        # Remove rather than store ``False``: the option's own default is off,
+        # so an absent key and a stored ``False`` mean the same thing to every
+        # reader, and dropping it leaves no residue from a click the user undid.
+        opts.pop(calibration.DEFECT_REPAIR_OPTION, None)
+    store.update({"default_stack_options": opts})
+    return {"enabled": enabled}
 
 
 @router.delete("/api/calibration/masters/{master_id}")
