@@ -18,6 +18,36 @@ is a queue.
 
 ---
 
+## DOGFOOD PASS — clean, and the honest outcome was to stop rather than find something (Builder 2026-09-06, branch `claude/sweet-babbage-t53xni`)
+
+`scripts/agent-dogfood.sh` on a scratch data root, at **v0.365.0**: booted the app, loaded and stacked the
+bundled sample, probed 22 routes at 1440 px and 420 px, and read the Target, editor and Dashboard shots as the
+§1 owner. **Nothing overflowing, no console errors, and no defect worth a fix.** Recorded because a clean pass
+is a result — the alternative is the next run re-running it and reaching the same place.
+
+**Page heights (phone, tallest first): Target 3,040 px · life list 3,008 px · editor 2,815 px · Dashboard
+1,837 px · stack form 1,748 px.** Every one identical **to the pixel** to the v0.362.0 measurement, across
+three more shipped features since (v0.363.0 `FirstLookStrip`, v0.364.0 `RejectionBreakdownCard`, v0.365.0's
+header cards) — the standing IA rule working as intended: each of those went **inside** an existing group
+rather than appending a banner. Desktop, for completeness: Target 2,037 px (2,010 at v0.351.0), editor
+1,841 px and life list 1,453 px, both unchanged. So the worst page reads **14,584 px before the 08-13→16
+slices → 3,014 at v0.338.1 → 3,014 at v0.351.0 → 3,040 at v0.362.0 → 3,040 here**: another measurement
+telling a run not to open a speculative IA slice (AGENTS.md §1), which is what it is recorded for.
+
+**Two things looked at closely and deliberately not filed**, so they are not re-found:
+* The Target page's two columns end at different heights (frames table ~1,290 px, right rail ~1,640 px on
+  desktop), leaving blank space on the left. That is what an unequal two-column grid does; equalising it would
+  mean moving a card for cosmetic reasons, on the page the owner already calls busy.
+* The frames table's `Sky` and `Transp.` columns print raw instrument numbers (1000, 124018) with no units.
+  Already answered in place by the *"What do these numbers mean? →"* link directly above the table — a second
+  explanation would be the "third place asking the same question" mistake.
+
+**Method note worth carrying:** the one real finding this run produced came from **grepping for an existing
+surface before adding a new one**, not from the probe. A prototyped second History line explaining a blind
+rejection pass was written and deleted once `StackHealthCard` turned out to render that exact explanation, with
+a better cure, further down the same page. The probe confirms the app is not visibly broken; the overlap grep
+is what stops it getting noisier.
+
 ## DOGFOOD PASS — it earned its keep this run: one real copy/tick defect, caught by looking rather than reading (Builder 2026-09-05, branch `claude/sweet-babbage-pywfmk`)
 
 `scripts/agent-dogfood.sh` on a scratch data root, at v0.362.0: booted the app, loaded and stacked the
