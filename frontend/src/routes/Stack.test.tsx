@@ -2306,3 +2306,78 @@ describe("StackView — what a saved default will do overnight", () => {
     expect(shown.message).not.toContain("Save failed");
   });
 });
+
+// "Save as defaults" persists the *whole* form, so a target saved months ago
+// pins every option that existed that day — and its blob wins over the global
+// defaults in both readers. A switch flipped in Settings afterwards therefore
+// never reaches that target, silently and for ever. This is the note that says
+// so, and (just as importantly) stays quiet when there is nothing to say.
+describe("StackView — saved settings that ignore the global defaults", () => {
+  function mockPinnedForm(pinned: client.PinnedStackOption[] | null) {
+    mockSchema([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null,
+        depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: false });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    return pinned === null
+      ? vi.spyOn(client.api, "pinnedStackDefaults")
+        .mockRejectedValue(new Error("older backend"))
+      : vi.spyOn(client.api, "pinnedStackDefaults")
+        .mockResolvedValue({ has_saved: pinned.length > 0, pinned });
+  }
+
+  it("names the pinned option and both of its values", async () => {
+    mockPinnedForm([{ key: "sigma_clip", label: "Sigma clipping",
+                      saved: false, global_value: true }]);
+
+    renderStack();
+
+    const note = await screen.findByTestId("pinned-defaults");
+    expect(note).toHaveTextContent("1 saved setting");
+    expect(note).toHaveTextContent("Sigma clipping: off here, on globally");
+    // And it explains *why* that matters, not just that it happened.
+    expect(note).toHaveTextContent(/won't reach this target/);
+  });
+
+  it("puts the global values back in the form in one click, without saving", async () => {
+    // The button only fills the form: the user still has to press Save, which is
+    // what keeps the change reviewable before it reaches the unattended stack.
+    const put = vi.spyOn(client.api, "putStackDefaults").mockResolvedValue({});
+    mockPinnedForm([{ key: "sigma_clip", label: "Sigma clipping",
+                      saved: false, global_value: true }]);
+
+    renderStack();
+    await screen.findByTestId("pinned-defaults");
+    const box = screen.getByRole("switch", { name: /Sigma clipping/ });
+    expect(box).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole("button",
+                                    { name: "Put my global settings back in the form" }));
+
+    await waitFor(() => expect(box).toBeChecked());
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("says nothing for a target whose saved settings still agree", async () => {
+    mockPinnedForm([]);
+
+    renderStack();
+
+    await screen.findByText("Start stacking");
+    expect(screen.queryByTestId("pinned-defaults")).not.toBeInTheDocument();
+  });
+
+  it("says nothing when the backend doesn't answer", async () => {
+    // An older backend has no such endpoint; the form must render exactly as it
+    // does today rather than showing a broken note.
+    mockPinnedForm(null);
+
+    renderStack();
+
+    await screen.findByText("Start stacking");
+    expect(screen.queryByTestId("pinned-defaults")).not.toBeInTheDocument();
+  });
+});

@@ -14,6 +14,95 @@ Newest first.
 
 ---
 
+## v0.372.0 — 2026-09-06 — a target stops silently ignoring your global settings: `walkaway.pinned_stack_options` + `GET /api/targets/{safe}/stack-defaults/pinned`
+
+**(Builder 2026-09-06, branch `claude/sweet-babbage-owcg4d`.) Autonomy + trust —
+PRIORITY 2/3. Shape (a), "say it", of the ⭐ verified lead filed the same day;
+(b) and (c) stay open in [`IMPROVEMENTS.md`](IMPROVEMENTS.md) with their care
+notes intact.**
+
+**The mechanism, end to end.** `get_stack_defaults` fills **every** descriptor key
+before answering; the Stack form seeds its whole state from that
+(`Stack.tsx`, `setValues({...defaults.data, ...reused})`); *Save as defaults*
+posts that whole state; and `put_stack_defaults` persists every non-`None` valid
+key. So a target saved in July carries an explicit value for **every option that
+existed in July** — including a string of `false`s for checkboxes nobody opened
+the advanced group to look at. That blob then wins over the global
+`default_stack_options` in *both* readers (the form seed and
+`pipeline._stack_target(auto=True)`), so a switch the owner later flips globally
+silently does nothing on that target, for ever, with no surface saying so.
+v0.371.0 hit exactly this with `repair_sensor_defects` and had to count the
+affected targets to keep its own sentence true; the walk-away rejection entry hit
+the same shape with `sigma_clip`. It gets **worse with every option this app
+adds**.
+
+**What shipped is the missing sentence, not a behaviour change.** Nothing about
+the merge moved: a saved blob still wins, the form still seeds the same values,
+and the unattended chain is byte-for-byte what it was. What is new is that the
+form now *says* which saved options are holding the target away from the global
+defaults, and what each one would otherwise be.
+
+**The baseline is the thing that made this honest.** The naive comparison — saved
+value vs. `settings.default_stack_options` — is wrong, and measurably so: it
+fired on **every** target that had ever pressed Save, because `get_stack_defaults`
+seeds a never-configured target's form with `auto_reject: True` while the
+descriptor default is `False`. A target that simply saved the form it was handed
+would have been told it was overriding something. So the comparison runs against
+**the seed this very form would have been given had the target never saved** —
+`_merge_stack_defaults(settings, None)`, extracted from `get_stack_defaults` so
+both go through one merge and cannot drift into two ideas of what the form shows.
+The extraction is behaviour-preserving by construction: the "never saved" case is
+`saved is None`, kept distinct from a row that exists but parses to `{}` (a
+legacy/hand-edited blob), exactly as the `if not raw` it replaced did. A test
+saves the form verbatim as the server handed it over and asserts the note stays
+**empty** — the false-positive guard that caught this in the first place.
+
+**Pieces.** `webapp/walkaway.pinned_stack_options(saved, global_opts, fields)`
+(pure, alongside `parse_saved_stack_defaults`, the shared reader of the same meta
+row) returns `PinnedOption(key, label, saved, global_value)` in descriptor order.
+Its one subtlety is `_same_option_value`: `False == 0` in Python, so a bool is
+only ever "the same" as a bool (a key whose *type* changed between app versions
+must not read as a deliberate pin), while `int`/`float` compare across (`3` and
+`3.0` are the same stack, and a JSON round-trip can hand back either).
+`GET /api/targets/{safe}/stack-defaults/pinned` serves it — read-only, asserted
+so by a test that re-reads both the saved blob and the global settings after the
+call. Frontend: `pinnedStackOptions.ts` (`pinnedSummary`, `pinnedLine`,
+`pinnedValueText`, `adoptGlobalsPatch`) prints an enum by its `option_labels`
+caption and a checkbox as on/off, so the note names the control rather than the
+engine key; the note itself is a self-hiding block inside the Stack form's
+existing flow — **no new page, no new nav entry, no always-on banner** (the
+standing IA rule).
+
+**The action deliberately stops one step short.** "Put my global settings back in
+the form" is one `setValues` patch — one update, not one per row, because several
+of these keys are in the estimate query's key — and it **saves nothing**. The
+existing *Save as defaults* button stays the moment the change is made, which
+keeps it reviewable before it reaches the unattended stack; dropping keys out of
+a stored blob (shape (c)) is not reversible from the UI, so it was left filed
+rather than guessed at.
+
+**Upgrade-safe (§9):** one new read-only endpoint, one pure helper, one new
+frontend module and one self-hiding note. No config key, no schema, no on-disk
+change, no default flipped, no existing response field or endpoint touched. The
+note self-hides against a backend that doesn't have the endpoint, so an
+older/newer pairing degrades to today's form.
+
+**Tests (+16 Python, +14 vitest).** `tests/webapp/test_pinned_stack_defaults.py`:
+ten on the pure helper (silence when nothing is saved and when a saved value
+agrees; the reported `false`-vs-global-`true` pin; the app-default fallback for a
+key the globals never mention and for one holding an explicit `None`; a saved
+`None` skipped the way the writer skips it; `3` vs `3.0` the same and `False` vs
+`0` not; descriptor order; a master-id key never reported) and six on the
+endpoint (never-saved silence; **the report equals what `GET .../stack-defaults`
+actually seeds**; a target that saved the form verbatim stays silent; no leak
+between targets; nothing is written; a malformed blob degrades to silence).
+`pinnedStackOptions.test.ts` (+9) and `Stack.test.tsx` (+4 — the note names the
+option and both values, the one-click fills the form *without* calling
+`putStackDefaults`, and it is absent both when nothing is pinned and when the
+endpoint errors).
+
+---
+
 ## v0.371.1 — 2026-09-06 — amp glow stops reading as broken photosites: `defects._local_robust_scale`
 
 **(Builder 2026-09-06, branch `claude/sweet-babbage-f4us4a`.) Image quality /
