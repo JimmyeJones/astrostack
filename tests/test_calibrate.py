@@ -1300,3 +1300,141 @@ def test_build_master_only_counts_frames_that_reach_the_combine(tmp_path):
     _master, meta = build_master(paths, kind="dark", method="median")
     assert meta.n_frames == 3
     assert meta.header_kinds == {"dark": 3}
+
+
+# --- a mixed folder can't contaminate a discover-driven master ---------------
+# `discover.classify_folder` confirms a folder's kind from only SAMPLE_HEADERS
+# sampled headers, so a folder whose samples all read "dark" but which also holds
+# lights used to build a master out of both. A contaminated master dark is then
+# subtracted from every frame it is applied to, so the one-click build asks for
+# `require_declared_kind`. A manual build the user aimed at a folder is unchanged.
+
+def _write_kind(path, data, *, imagetyp=None, bayer="RGGB"):
+    hdu = fits.PrimaryHDU(data=np.asarray(data, dtype=np.float32))
+    if imagetyp is not None:
+        hdu.header["IMAGETYP"] = imagetyp
+    if bayer is not None:
+        hdu.header["BAYERPAT"] = bayer
+    hdu.writeto(path, overwrite=True)
+
+
+def _mixed_folder(tmp_path):
+    """Six frames the same shape: four darks at level 10, two lights at 900."""
+    paths = []
+    for i in range(4):
+        p = tmp_path / f"dark_{i}.fits"
+        _write_kind(p, np.full((4, 4), 10.0), imagetyp="Dark Frame")
+        paths.append(p)
+    for i in range(2):
+        p = tmp_path / f"light_{i}.fits"
+        _write_kind(p, np.full((4, 4), 900.0), imagetyp="Light Frame")
+        paths.append(p)
+    return paths
+
+
+def test_build_master_combines_a_mixed_folder_by_default(tmp_path):
+    """The manual build is unchanged: a folder the user chose is taken as given
+    (the header note is what tells them what went in). This is the *before*."""
+    paths = _mixed_folder(tmp_path)
+    skipped: list[tuple[str, str]] = []
+    master, meta = build_master(paths, kind="dark", method="mean", skipped=skipped)
+    assert meta.n_frames == 6
+    assert skipped == []
+    # The two lights dragged the "master dark" far above the darks' own level.
+    assert float(master.mean()) > 300.0
+    assert meta.header_kinds == {"dark": 4, "light": 2}
+
+
+def test_require_declared_kind_drops_the_frames_that_say_otherwise(tmp_path):
+    """The discover-driven build: the lights are set aside, and the master is the
+    darks' own level — bit-for-bit what a clean folder would have produced."""
+    paths = _mixed_folder(tmp_path)
+    skipped: list[tuple[str, str]] = []
+    master, meta = build_master(paths, kind="dark", method="mean", skipped=skipped,
+                                require_declared_kind=True)
+    assert meta.n_frames == 4
+    assert sorted(skipped) == [("light_0.fits", "wrong kind"),
+                               ("light_1.fits", "wrong kind")]
+    assert np.allclose(master, 10.0)
+    assert meta.header_kinds == {"dark": 4}
+
+
+def test_require_declared_kind_keeps_a_frame_that_declares_nothing(tmp_path):
+    """"Didn't say" is not "said the wrong thing" — plenty of legitimate
+    calibration FITS carry no IMAGETYP, and dropping those would be a real
+    behaviour change on the one-click path."""
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"d{i}.fits"
+        _write_kind(p, np.full((4, 4), 10.0), imagetyp="Dark Frame")
+        paths.append(p)
+    for i in range(2):
+        p = tmp_path / f"q{i}.fits"
+        _write_kind(p, np.full((4, 4), 10.0), imagetyp=None)
+        paths.append(p)
+    skipped: list[tuple[str, str]] = []
+    _master, meta = build_master(paths, kind="dark", method="mean", skipped=skipped,
+                                 require_declared_kind=True)
+    assert meta.n_frames == 5 and skipped == []
+
+
+def test_require_declared_kind_keeps_a_flat_dark_in_the_dark_slot(tmp_path):
+    """A flat-dark is physically a dark, and discover.KIND_TO_MASTER already says
+    so — the filter must agree with the discovery that offered the folder."""
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"fd{i}.fits"
+        _write_kind(p, np.full((4, 4), 10.0), imagetyp="Dark Flat")
+        paths.append(p)
+    _master, meta = build_master(paths, kind="dark", method="mean",
+                                 require_declared_kind=True)
+    assert meta.n_frames == 3
+
+
+def test_require_declared_kind_drops_a_flat_from_a_dark_build(tmp_path):
+    """Not only lights: a flat sitting in a dark folder maps to the other slot."""
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"d{i}.fits"
+        _write_kind(p, np.full((4, 4), 10.0), imagetyp="Dark Frame")
+        paths.append(p)
+    p = tmp_path / "stray_flat.fits"
+    _write_kind(p, np.full((4, 4), 500.0), imagetyp="Flat Field")
+    paths.append(p)
+    skipped: list[tuple[str, str]] = []
+    _master, meta = build_master(paths, kind="dark", method="mean", skipped=skipped,
+                                 require_declared_kind=True)
+    assert meta.n_frames == 3
+    assert skipped == [("stray_flat.fits", "wrong kind")]
+
+
+def test_require_declared_kind_filters_before_the_majority_shape_is_chosen(tmp_path):
+    """The shape rule cannot catch this on its own — lights from the same camera
+    share the darks' shape — and worse, a *majority* of lights would define the
+    reference and skip the real darks. The kind filter must run first."""
+    paths = []
+    for i in range(2):
+        p = tmp_path / f"d{i}.fits"
+        _write_kind(p, np.full((4, 4), 10.0), imagetyp="Dark Frame")
+        paths.append(p)
+    for i in range(5):
+        p = tmp_path / f"l{i}.fits"
+        _write_kind(p, np.full((6, 6), 900.0), imagetyp="Light Frame")
+        paths.append(p)
+    _master, meta = build_master(paths, kind="dark", method="mean",
+                                 require_declared_kind=True)
+    assert meta.n_frames == 2
+    assert meta.height_px == 4 and meta.width_px == 4
+
+
+def test_require_declared_kind_all_wrong_says_why(tmp_path):
+    """A folder that has changed since it was sampled must fail with something the
+    user can act on, not "mismatched"."""
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"l{i}.fits"
+        _write_kind(p, np.full((4, 4), 900.0), imagetyp="Light Frame")
+        paths.append(p)
+    with pytest.raises(ValueError, match="says it is something else"):
+        build_master(paths, kind="dark", method="mean", skipped=[],
+                     require_declared_kind=True)

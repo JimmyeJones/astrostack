@@ -14,6 +14,69 @@ Newest first.
 
 ---
 
+## v0.369.1 — 2026-09-06 — the one-click calibration build stops combining what the sampling missed
+
+**(Scout 2026-09-06, filed as a traced-not-reproduced note; verified by reproduction and
+fixed by the Builder the same day.) The one-click discover→build calibration path could
+build a contaminated master from a *mixed* folder.** *(Branch `claude/sweet-babbage-f1wozl`.
+Pillar: data integrity / calibration trust — treated as a stacking-engine-class bug per
+AGENTS.md §1, because a contaminated master is subtracted from **every** frame it is later
+applied to.)*
+
+**The gap, reproduced.** `discover.classify_folder` confirms a folder is calibration frames
+of one kind by sampling only `SAMPLE_HEADERS` (4) evenly-spaced headers — deliberately
+strict about what it *offers*. But `routers/calibration.build_master_from_incoming` →
+`pipeline.submit_build_master` → `masters.build_master` then combined **every**
+shape-matching FITS in the folder, with no per-frame filter to the requested kind. A folder
+of twelve files whose sampled positions (0/4/7/11) all read "dark" but which also holds two
+lights at 5 and 6 was offered as a dark folder and built a "master dark" out of all twelve.
+Reproduced end-to-end over the real endpoints: 4 darks at level 10 plus 2 lights at 900
+gave a master averaging **>300** where the darks' own level is 10.
+
+**Why the existing mitigations did not close it.** The **shape** rule cannot catch this —
+lights from the same camera share the darks' shape — and worse, a *majority* of lights
+would have defined the reference shape and skipped the real darks. The v0.356.0
+`header_kind_note` does tell the user ("built from 60 dark, 10 light"), but that is a
+caption on a master that has already been written and may already have been bound to a
+target; it explains the contamination rather than preventing it.
+
+**The fix, scoped exactly as the note asked.** `build_master` gained
+`require_declared_kind: bool = False`. When set, a frame whose own header **declares** a
+kind belonging to a different master slot — a light, or a flat in a dark build — is skipped
+with reason `"wrong kind"`, which the Jobs page's existing `skipped_buckets` sentence
+already renders ("· 2 frames set aside (2 wrong kind)"). Three deliberate limits:
+* **A frame that declares nothing is still used.** "Didn't say" is not "said the wrong
+  thing", and plenty of legitimate calibration FITS carry no `IMAGETYP`; dropping those
+  would be a real behaviour change on the one-click path.
+* **A flat-dark still counts as a dark.** The filter reuses `discover.KIND_TO_MASTER` —
+  promoted from `_KIND_TO_MASTER` for exactly this — so the build and the discovery that
+  offered the folder cannot drift apart on what belongs in a slot.
+* **The filter runs before the majority-shape reference is chosen**, so a mixed folder's
+  reference is decided among the frames that will actually be used.
+
+**Default `False` — the manual build is untouched.** Only
+`build_master_from_incoming` sets it, because that is the path where the kind was inferred
+from four sampled headers. A build the user aimed at a folder they chose is *meant* to take
+what is in it, which is what the note warned a blind filter would break. A folder that has
+changed since it was sampled and is now *all* the wrong kind fails with
+`"no dark frames here — every frame says it is something else"` rather than the old
+`"mismatched"`.
+
+**Upgrade-safe (§9):** one new keyword-only parameter defaulting to today's behaviour; no
+config, schema, DB, on-disk layout, API shape or existing default changed. `incoming/` stays
+strictly read-only (§10) — this path only ever reads.
+
+**Tests (+7 in `tests/test_calibrate.py`, +2 in `tests/webapp/test_calibration_incoming.py`;
+the mixed-folder pair fails before and passes after):** the contaminated *before* pinned as
+the manual path's documented behaviour; the filtered *after* landing bit-for-bit on the
+darks' own level; a declaring-nothing frame kept; a flat-dark kept in the dark slot; a stray
+flat dropped from a dark build; the filter running ahead of the majority-shape vote (2 darks
+vs 5 differently-shaped lights → a 4×4 master of 2 frames); the all-wrong-kind error text;
+and end-to-end over the real endpoints, the twelve-file folder whose two lights sit exactly
+where the sampler cannot see them, asserting `n_frames == 10`,
+`skipped_buckets == {"wrong kind": 2}` and a registered master whose mean is the darks'
+level, not a 12-frame mean dragged up by 9000-count lights.
+
 ## v0.369.0 — 2026-09-06 — Adaptive Auto recency decay (slice (b) completed)
 
 **⭐ OWNER-REQUESTED — Adaptive Auto, the last remaining sub-part of slice (b): recency

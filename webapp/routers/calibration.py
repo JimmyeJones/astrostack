@@ -288,6 +288,13 @@ def build_master_from_incoming(folder_id: str, request: Request) -> dict[str, st
     captures are: no filesystem path ever comes from the client, and a folder
     that has stopped looking like calibration frames since the page loaded is a
     404 rather than a build of whatever is there now.
+
+    Discovery confirms the kind from only ``discover.SAMPLE_HEADERS`` sampled
+    headers, so this path also asks the build to **drop a frame that declares a
+    different slot** — a folder whose samples all read "dark" but which also holds
+    lights would otherwise combine them, and a contaminated master dark corrupts
+    every frame it is later applied to. A manual build the user aimed at a folder
+    themselves is unchanged: it still takes what is in it.
     """
     settings = deps.get_settings(request)
     jm = deps.get_job_manager(request)
@@ -301,6 +308,7 @@ def build_master_from_incoming(folder_id: str, request: Request) -> dict[str, st
     job = pipeline.submit_build_master(
         settings, jm, kind=found.kind, source_dir=found.folder,
         name=discover.suggested_master_name(found), method="median",
+        require_declared_kind=True,
     )
     # The offer's "you already have one" flag is registry arithmetic recomputed
     # per request, so it updates as soon as the build lands; the walk cache is

@@ -295,3 +295,68 @@ def test_existing_master_like_is_one_sided_about_unknowns():
     assert calibration.existing_master_like(
         [bare], kind="flat", exposure_s=None, gain=80.0, sensor_temp_c=-5.0,
     ) is None
+
+
+def test_the_one_click_build_leaves_out_lights_the_sampling_missed(
+        client, data_root):
+    """The gap the sampled classification leaves open, end to end.
+
+    ``classify_folder`` confirms a folder's kind from only
+    ``discover.SAMPLE_HEADERS`` (4) evenly-spaced headers, so a folder holding ten
+    darks *and* two lights whose sampled positions all read "dark" is offered as a
+    dark folder. The build must not then combine the lights: a contaminated master
+    dark is subtracted from every frame it is later applied to.
+
+    Twelve files ⇒ the sampler reads indices 0/4/7/11, so the lights at 5 and 6 are
+    exactly the ones it cannot see.
+    """
+    folder = data_root / "incoming" / "Dark"
+    _write_frames(folder, 12, imagetyp="Dark Frame")
+    for i in (5, 6):
+        hdu = fits.PrimaryHDU(data=np.full((8, 8), 9000.0, dtype=np.float32))
+        hdu.header["EXPTIME"] = 30.0
+        hdu.header["GAIN"] = 80.0
+        hdu.header["CCD-TEMP"] = -5.0
+        hdu.header["BAYERPAT"] = "RGGB"
+        hdu.header["IMAGETYP"] = "Light Frame"
+        hdu.writeto(folder / f"f_{i:03d}.fit", overwrite=True)
+
+    offered = client.get("/api/calibration/incoming").json()["folders"]
+    assert len(offered) == 1 and offered[0]["kind"] == "dark"
+
+    r = client.post(f"/api/calibration/incoming/{offered[0]['id']}/build")
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job
+
+    result = job["result"]
+    assert result["n_frames"] == 10                      # not 12
+    assert result["skipped_buckets"] == {"wrong kind": 2}
+    # ...and the master says it is made of darks only, so the header note is silent.
+    assert result["header_kinds"] == {"dark": 10}
+
+    master = client.get("/api/calibration/masters").json()[0]
+    assert master["n_frames"] == 10
+    # The registered master is the darks' own level (100), not a mean dragged up
+    # by two 9000-count lights — which over 12 frames would have landed near 1580.
+    from seestack.calibrate import load_master
+
+    array, _meta = load_master(
+        calibration.master_path(data_root / "library", master["id"]))
+    assert float(np.nanmean(array)) == 100.0
+
+
+def test_a_manual_build_still_takes_the_folder_as_given(client, data_root):
+    """The filter is scoped to the *discovered* offer. ``build_master``'s own
+    default is unchanged, so a build the user aimed at a folder themselves keeps
+    combining what is in it — the behaviour the header note exists to explain."""
+    from seestack.calibrate.masters import build_master
+
+    folder = data_root / "incoming" / "Mixed"
+    _write_frames(folder, 4, imagetyp="Dark Frame")
+    _write_frames(folder / "extra", 2, imagetyp="Light Frame")
+    paths = sorted(folder.glob("*.fit")) + sorted((folder / "extra").glob("*.fit"))
+
+    _master, meta = build_master(paths, kind="dark", method="mean")
+
+    assert meta.n_frames == 6
+    assert meta.header_kinds == {"dark": 4, "light": 2}
