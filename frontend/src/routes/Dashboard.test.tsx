@@ -231,6 +231,28 @@ describe("Dashboard information architecture (IA slice (e))", () => {
     expect(screen.getByText(/Last night/)).not.toBeVisible();
   });
 
+  it("answers \"did tonight work?\" inside the Recent group, not as another stacked card", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(statsWithStack());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "getLastNight").mockResolvedValue(recap());
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([{
+      safe_name: "M_31", name: "M 31", ra_deg: null, dec_deg: null,
+      n_frames: 10, n_frames_accepted: 10, total_exposure_s: 600,
+      last_activity_utc: "2026-07-08T22:00:00+00:00", has_preview: false,
+      notes: null, tags: [],
+    }]);
+    vi.spyOn(client.api, "bestFrame").mockResolvedValue({
+      frame_id: 3, captured_utc: null, fwhm_px: 2.4, star_count: 300, n_accepted: 10,
+    });
+
+    renderDashboard();
+
+    const insights = await screen.findByTestId("dashboard-insights");
+    await waitFor(() => expect(insights).toHaveTextContent("First look"));
+    // The peek is for the target that has subs but no picture, and it links there.
+    expect(screen.getByText("M 31 →")).toHaveAttribute("href", "/targets/M_31");
+  });
+
   it("gives no tab to a group whose cards have nothing to say", async () => {
     vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
     vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
