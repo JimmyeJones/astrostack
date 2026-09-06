@@ -14,6 +14,62 @@ Newest first.
 
 ---
 
+## v0.369.4 — 2026-09-06 — a no-data hole in a master stops inventing sensor defects around itself
+
+**(Builder 2026-09-06, found and reproduced while auditing the brand-new v0.367.0
+`seestack/calibrate/defects.py`, which no run had reviewed. Branch
+`claude/sweet-babbage-v7xsyy`.) Calibration / data integrity — treated as
+stacking-engine-class per AGENTS.md §1, because a false defect overwrites a good
+photosite on *every* sub.** *(Severity: image-quality/correctness, but gated —
+`StackOptions.repair_sensor_defects` is opt-in and defaults `False`, and it needs a
+master carrying non-finite pixels, i.e. an imported/third-party one. Confidence:
+reproduced, then pinned by two fail-before regression tests.)*
+
+**The bug.** `find_sensor_defects` flags a photosite by its deviation from the local
+median of its own CFA phase. Samples the master says nothing about — the caller's
+`exclude` map, which is exactly the set `_sanitize_pedestal` zeroed — have to hold
+*something* before `median_filter` runs, and they were filled with the **whole plane's
+median**. The docstring promised those pixels "are neutralised before measuring and can
+never be flagged". They could, and so could their neighbours:
+
+* in a corner sitting under amp glow or a dark-current gradient — the structure
+  `_LOCAL_WINDOW` exists to *follow* — the plane median is nothing like the local level,
+  so the fill read as a defect at its own sample; and
+* a hole wide enough to cover part of a 5×5 phase window dragged the local median of the
+  **real** photosites beside it, flagging a rosette of perfectly good pixels around it.
+
+Reproduced on a believable master (500 ADU pedestal + corner amp glow + read noise) with
+an 8×8 no-data hole inside the glow: **115 flagged pixels, 48 of them inside the hole
+itself** — every one of which then has the light frame's own good sample overwritten from
+its neighbours, on every sub of every stack. The existing guard test passed because it
+used one lone pixel in a *flat* part of the frame, where the plane median happens to be
+right.
+
+**The fix.** A no-data sample is filled from `_local_fill` — the mean of the valid
+samples within `_FILL_WINDOW` (9 phase samples = 18 raw px, wider than the median window
+so a small hole still reaches real data all round it), falling back to the old plane
+median only where a hole is wider than that. Being locally flat, the fill neither reads as
+a defect nor moves its neighbours' baseline. Two supporting halves: the robust MAD is
+measured over the **valid** samples only (a stand-in is not a measurement, and letting it
+into the scale moves the threshold every real photosite is judged against), and the
+docstring's promise is now *enforced* rather than assumed — `flagged &= valid`. Non-finite
+samples with no `exclude` map take the same path, which is the same set in practice.
+
+After: **0 flagged**, while a genuine hot pixel elsewhere in the frame, and one right
+beside the hole, are both still found.
+
+**Upgrade-safe (§9):** the fill only runs when there is something to fill, so an ordinary
+master — every install's case — takes a bit-identical path (pinned by
+`test_a_master_with_no_data_anywhere_is_measured_exactly_as_before`). No schema, no config
+key, no API shape, no on-disk change, no default flipped; `repair_sensor_defects` stays
+`False`.
+
+**Tests.** +3 in `tests/test_defect_map.py`: the no-data patch inside the glow flagging
+nothing (fails before — 50 spurious defects), the same hole not *blinding* the map to a
+real hot pixel next to it (fails before), and the bit-identical no-hole path.
+
+---
+
 ## v0.369.3 — 2026-09-06 — one tap is one step: Adaptive Auto's first type-scoped nudge no longer jumps across the global taste
 
 **(Builder 2026-09-06, found and reproduced while auditing the brand-new v0.369.x
