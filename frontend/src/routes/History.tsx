@@ -204,6 +204,21 @@ export function darkScalingSummaryText(
   return s;
 }
 
+// One-line provenance for the sensor-defect repair — "Repaired 428 hot/dead
+// pixels found in your master dark". Returns null when the run didn't repair any
+// (the option was off, or the sensor is clean), so the card omits the line
+// rather than reporting a zero that reads like a failure. Pure so it can be
+// unit-tested and mirrors darkScalingSummaryText.
+export function sensorDefectsSummaryText(
+  nDefects: number | null | undefined,
+): string | null {
+  if (typeof nDefects !== "number" || !Number.isFinite(nDefects) || nDefects < 1) {
+    return null;
+  }
+  const n = Math.round(nDefects);
+  return `Repaired ${n.toLocaleString()} hot/dead pixel${n === 1 ? "" : "s"} found in your master dark`;
+}
+
 // One-line provenance for how much the outlier rejection actually removed. A
 // trust signal so the user can see the rejection did its job without being told
 // "trust me". Mode-aware because the two rejection kinds mean different things:
@@ -654,6 +669,11 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
       {darkScalingSummaryText(data.dark_scaling) ? (
         <Text size="xs" c="dimmed">
           {darkScalingSummaryText(data.dark_scaling)}
+        </Text>
+      ) : null}
+      {sensorDefectsSummaryText(data.sensor_defects) ? (
+        <Text size="xs" c="dimmed">
+          {sensorDefectsSummaryText(data.sensor_defects)}
         </Text>
       ) : null}
       {rejectionSummaryText(data.rejection) ? (

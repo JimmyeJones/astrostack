@@ -251,3 +251,138 @@ def test_sharpest_night_only_considers_nights_inside_the_window():
         today=date(2026, 7, 20), months=12,
     )
     assert cal.sharpest is not None and cal.sharpest.date == "2026-07-11"
+
+
+# ---- "was last night off for you?": the newest night vs your own usual ------
+#
+# The sibling of "your best night", and the case the Target page's within-session
+# focus trend is structurally blind to: a night that was soft from the *first*
+# sub reads as perfectly steady there.
+
+
+def test_a_soft_latest_night_is_flagged_against_the_owners_usual():
+    cal = build_activity_calendar(
+        _night(10, [3.0] * 5) + _night(11, [3.1] * 5)
+        + _night(12, [2.9] * 5) + _night(13, [3.0] * 5)
+        + _night(14, [4.5] * 5),   # dew / focus / bad seeing
+        today=date(2026, 7, 20), months=12,
+    )
+    off = cal.off_night
+    assert off is not None
+    assert off.night == "2026-07-14"
+    assert off.level == "fatter"
+    assert off.baseline_nights == 4
+    assert off.baseline_fwhm_px == 3.0
+    assert off.median_fwhm_px == 4.5
+    assert off.ratio == 1.5
+    assert "50% fatter" in off.text
+    # Never a diagnosis — seeing is not a fault, so the copy offers causes and
+    # asks the owner to look.
+    assert "seeing" in off.text
+    assert "check" in off.text.lower() or "look" in off.text.lower()
+
+
+def test_a_much_softer_night_gets_the_stronger_wording():
+    cal = build_activity_calendar(
+        _night(10, [3.0] * 5) + _night(11, [3.0] * 5)
+        + _night(12, [3.0] * 5) + _night(13, [3.0] * 5)
+        + _night(14, [5.4] * 5),
+        today=date(2026, 7, 20), months=12,
+    )
+    assert cal.off_night is not None
+    assert cal.off_night.level == "much_fatter"
+    assert cal.off_night.label == "Much softer than usual"
+
+
+def test_a_normal_latest_night_says_nothing():
+    cal = build_activity_calendar(
+        _night(10, [3.0] * 5) + _night(11, [3.1] * 5)
+        + _night(12, [2.9] * 5) + _night(13, [3.0] * 5)
+        + _night(14, [3.2] * 5),
+        today=date(2026, 7, 20), months=12,
+    )
+    assert cal.off_night is None
+
+
+def test_a_sharper_than_usual_night_is_not_flagged_either():
+    # "Your best night" owns the good end; a second card congratulating the same
+    # night would be noise.
+    cal = build_activity_calendar(
+        _night(10, [3.0] * 5) + _night(11, [3.0] * 5)
+        + _night(12, [3.0] * 5) + _night(13, [3.0] * 5)
+        + _night(14, [1.8] * 5),
+        today=date(2026, 7, 20), months=12,
+    )
+    assert cal.off_night is None
+
+
+def test_too_little_history_means_no_usual_to_compare_against():
+    # Three earlier nights is one short of the baseline floor: silence, not a
+    # verdict built on almost nothing.
+    cal = build_activity_calendar(
+        _night(11, [3.0] * 5) + _night(12, [3.0] * 5) + _night(13, [3.0] * 5)
+        + _night(14, [6.0] * 5),
+        today=date(2026, 7, 20), months=12,
+    )
+    assert cal.off_night is None
+
+
+def test_a_thinly_measured_latest_night_is_not_judged():
+    # Two soft subs are a fact about the subs. The latest *qualifying* night is
+    # the one that gets read — here, a perfectly normal 07-13.
+    cal = build_activity_calendar(
+        _night(10, [3.0] * 5) + _night(11, [3.0] * 5)
+        + _night(12, [3.0] * 5) + _night(13, [3.0] * 5)
+        + _night(14, [7.0, 7.0]),
+        today=date(2026, 7, 20), months=12,
+    )
+    assert cal.off_night is None
+
+
+def test_one_dreadful_night_does_not_become_the_usual():
+    # The baseline is the median of the per-night medians, so a single ruined
+    # night in the history can't raise "usual" enough to hide the next one.
+    cal = build_activity_calendar(
+        _night(9, [9.0] * 5) + _night(10, [3.0] * 5) + _night(11, [3.0] * 5)
+        + _night(12, [3.0] * 5) + _night(13, [3.0] * 5)
+        + _night(14, [4.5] * 5),
+        today=date(2026, 7, 20), months=12,
+    )
+    assert cal.off_night is not None
+    assert cal.off_night.baseline_fwhm_px == 3.0
+
+
+def test_off_night_only_considers_nights_inside_the_window():
+    # "Your usual" means the way the kit behaves now, not two years ago.
+    old = [("2024-01-05T22:00:00Z", 10.0, "A", 1.0) for _ in range(6)]
+    cal = build_activity_calendar(
+        old + _night(10, [3.0] * 5) + _night(11, [3.0] * 5)
+        + _night(12, [3.0] * 5) + _night(13, [3.0] * 5)
+        + _night(14, [4.5] * 5),
+        today=date(2026, 7, 20), months=12,
+    )
+    assert cal.off_night is not None
+    assert cal.off_night.baseline_nights == 4
+    assert cal.off_night.baseline_fwhm_px == 3.0
+
+
+def test_off_night_says_nothing_when_nothing_was_measured():
+    cal = build_activity_calendar(
+        _night(10, [None] * 6) + _night(11, [None] * 6) + _night(12, [None] * 6)
+        + _night(13, [None] * 6) + _night(14, [None] * 6),
+        today=date(2026, 7, 20), months=12,
+    )
+    assert cal.off_night is None
+
+
+def test_off_night_reads_the_latest_night_even_from_an_unordered_list():
+    from seestack.activity_calendar import NightActivity, off_night
+
+    def n(day, fwhm):
+        return NightActivity(date=f"2026-07-{day:02d}", exposure_s=50.0,
+                             n_frames=5, targets=["A"], median_fwhm_px=fwhm,
+                             n_measured=5)
+
+    shuffled = [n(14, 4.5), n(11, 3.0), n(13, 3.0), n(10, 3.0), n(12, 3.0)]
+    read = off_night(shuffled)
+    assert read is not None and read.night == "2026-07-14"

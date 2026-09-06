@@ -984,6 +984,13 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "scale its dark current to match: dark = bias + (dark − bias)×(sub ÷ dark "
              "exposure). Needs a master bias selected too (to hold the readout pedestal "
              "fixed); without one the dark is used unscaled."},
+    {"key": "repair_sensor_defects", "label": "Repair hot/dead pixels from the dark",
+     "type": "bool", "group": "advanced",
+     "help": "Use your master dark to find the photosites that are broken — bright in "
+             "every dark, or stuck dark — and replace just those from their same-colour "
+             "neighbours, before the colours are reconstructed. Every other pixel, "
+             "including every star, is left exactly as it was. Needs a master dark (or "
+             "bias) selected; off by default."},
     {"key": "color_calibration", "label": "Color calibration", "type": "bool", "group": "advanced",
      "help": "Balance the stack's colour so a neutral background reads grey, at stack "
              "time. The editor also offers colour calibration, so you can leave this off "

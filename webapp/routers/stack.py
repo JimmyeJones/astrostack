@@ -3230,6 +3230,15 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 dark_scaling[k] = float(header[hk])
 
+    # Sensor-defect-repair summary (present only when the off-by-default repair
+    # actually fixed something), so the panel can show "Repaired 428 hot/dead
+    # pixels from your master dark" — the same trust line the other opt-in
+    # corrections get. Absent on every run recorded before the feature, which
+    # reads as "no repair", not as a claim that none was needed.
+    sensor_defects: int | None = None
+    with contextlib.suppress(KeyError, TypeError, ValueError):
+        sensor_defects = int(header["DEFECTPX"])
+
     # Rejection summary (present only on κ-σ stacks), parsed the same way so the
     # panel can show a single "Rejection clipped ~0.4% of samples" trust line —
     # the user can see the rejection removed transient outliers without
@@ -3353,6 +3362,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             "n_frames": n_frames, "weighting": weighting,
             "weighting_skipped": weighting_skipped,
             "photometric": photometric, "dark_scaling": dark_scaling,
+            "sensor_defects": sensor_defects,
             "rejection": rejection, "frame_accounting": frame_accounting,
             "drizzle_degraded": drizzle_degraded,
             "auto_edit": auto_edit, "sky_cast": sky_cast,

@@ -25,6 +25,7 @@ import { UnexportedEditsNote } from "../components/dashboard/UnexportedEditsNote
 import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import { ImagingCalendarCard } from "../components/ImagingCalendarCard";
 import { LastNightCard } from "../components/LastNightCard";
+import { OffNightCard } from "../components/OffNightCard";
 import { LibraryProgressCard } from "../components/LibraryProgressCard";
 import { QueryError } from "../components/QueryError";
 import { SampleImageCard } from "../components/SampleImageCard";
@@ -401,6 +402,12 @@ export function Dashboard() {
                   Target hub answered. Self-hides once every target has a
                   picture, so a settled library sees nothing. */}
               <FirstLookStrip />
+              {/* "Was last night off for you?" — the morning-after heads-up when
+                  the newest night's stars came out fatter than this owner's own
+                  usual (dew, focus, or just seeing). Sits beside the recap of
+                  what came in, because that is the same glance; self-hides on a
+                  normal night and on a library with no "usual" yet. */}
+              <OffNightCard />
               <LastNightCard />
               <VideoCapturesCard />
             </>
