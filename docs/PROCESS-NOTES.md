@@ -18,6 +18,74 @@ is a queue.
 
 ---
 
+## 2026-09-06 — Builder run (branch `claude/sweet-babbage-ks0ild`): big-picture dogfood pass **CLEAN**, plus the measured cost of the new defect census
+
+**The run.** Baseline green before any change (**4930 passed / 2 skipped**, full
+suite headless), one task shipped (**v0.370.0**, the master sensor-defect census
+on the Calibration page), suite green after (**4949 passed / 2 skipped**; vitest
+3221 passed, `tsc` and `vite build` clean). Then a §2 big-picture pass on a real
+running app rather than a re-read of route files.
+
+**Dogfood pass (`scripts/agent-dogfood.sh`, full run: sample loaded, stacked,
+Playwright probes at 1440 px and 420 px) — nothing found.** Verbatim: *"nothing
+overflowing, no console errors"*. Tallest pages, full-page scroll height:
+
+| | phone (420 px) | desktop (1440 px) |
+|---|---|---|
+| `/targets/<T>` | **3,040 px** | 2,037 px |
+| `/life-list` | 3,008 px | 1,453 px |
+| `/targets/<T>/edit/1` | 2,815 px | 1,841 px |
+| `/` (Dashboard) | 1,837 px | — |
+| `/targets/<T>/stack` | 1,748 px | — |
+
+**So the standing IA priority still says "do not open a speculative slice."** The
+Target page is the tallest page, at 3,040 px on a phone against the **3,014 px**
+the v0.338.1 probe recorded (`IMPROVEMENTS.md`, search **"DOGFOOD BASELINE"**) —
+26 px over ~30 versions, i.e. flat, and still far from the 14,584 px the worst
+page measured before the 08-13→16 slices. Screenshots were read (Target,
+Dashboard on a phone, Calibration): nothing stacked badly, no banner wall, no
+clipped control. **This is the third measurement in a row saying the same thing.**
+
+**One honest non-finding, recorded so it isn't re-filed as a bug.** On the
+dogfood install the Dashboard's "Your first image" checklist reads *5 of 6 done*
+with step 2 (*"Set up plate solving (ASTAP)"*) unticked while steps 3–6 are
+struck through — a checklist that presents an order but can complete later steps
+first. It is **not a live defect**: it happens only because the scratch container
+has no ASTAP while the bundled sample ships pre-solved. The Docker image bundles
+ASTAP, so on the owner's install step 2 is done before step 3 can be. Do not
+"fix" the ordering from this screenshot.
+
+**Measured: what a defect census costs at the owner's real frame size** (the
+number the v0.370.0 endpoint's caching decision rests on, recorded so nobody
+re-measures or re-litigates it). `webapp.calibration.master_defect_census` on a
+saved master at the **S30 raw mosaic size, 1080×1920 (2.07 Mpx)** with 400
+planted defects: **0.87–1.01 s** per master (three runs; the cost is the four
+per-phase 5×5 median filters, not the FITS read). At 480×320 it is instant.
+
+* So a library with, say, six dark/bias masters pays ~5 s **once**, on the first
+  Calibration page load after a restart, and nothing after that — the answer is
+  cached on the app keyed by each file's own identity (`path`, `mtime_ns`,
+  `size`) with no TTL, because a master FITS is immutable once written.
+* That cost is also exactly why it is **its own query** on the page, like
+  `calibrationCoverage`: the master table renders immediately and the defect
+  lines arrive a moment later, rather than the list waiting on the read.
+* **Considered and deliberately not built:** stamping the census into the
+  registry at `register_master` time (free there — the array is already in
+  memory). It would be a *second* source for a number the file itself answers,
+  and it would say nothing at all about the masters the owner already has, which
+  are the ones that matter on a live install. Revisit only if a real library is
+  ever slow enough to notice.
+
+**End-to-end check of the shipped feature on the running app** (not just in
+tests): eight synthetic 480×320 darks with 37 planted hot photosites were dropped
+into the dogfood `incoming/`, discovered by `GET /api/calibration/incoming`,
+built through `POST /api/calibration/masters`, and `GET /api/calibration/defects`
+answered **exactly 37** with the note *"37 hot or dead pixels (0.024%)"* — which
+rendered as the third dimmed sub-line under the master's name, in the same idiom
+as `header_note` and the coverage line.
+
+---
+
 ## 2026-09-06 — Builder run (branch `claude/sweet-babbage-f1wozl`): the "can a plain run carry a `preview_crop_json`?" sub-question of the full-res-render consolidation lead is a **non-finding**
 
 The open lead *"there are now **two** answers to 'render this run's picture at size N'"*

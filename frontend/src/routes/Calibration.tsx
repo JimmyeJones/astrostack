@@ -102,15 +102,30 @@ export function CalibrationView() {
     refetchInterval: 60_000,
   });
 
+  // "Does my camera have broken pixels?" — a census of each dark/bias master's
+  // hot and stuck-dark photosites. Its own query for the same reason as
+  // coverage: it opens every pedestal master's FITS, so a slow read must not
+  // hold up the list. The server caches per file, so the poll is cheap after the
+  // first answer; a master file never changes once written.
+  const defects = useQuery({
+    queryKey: ["calibration-defects"],
+    queryFn: api.calibrationDefects,
+    refetchInterval: 60_000,
+  });
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["calibration-masters"] });
     qc.invalidateQueries({ queryKey: ["calibration-coverage"] });
+    qc.invalidateQueries({ queryKey: ["calibration-defects"] });
   };
 
   const list = masters.data ?? [];
   const nTargets = coverage.data?.n_targets ?? 0;
   const coverageById = new Map(
     (coverage.data?.masters ?? []).map((m) => [m.id, m]),
+  );
+  const defectsById = new Map(
+    (defects.data?.masters ?? []).map((m) => [m.id, m]),
   );
   const uncovered = coverage.data ? uncoveredTargetsNote(coverage.data) : null;
 
@@ -203,6 +218,24 @@ export function CalibrationView() {
                             {text}
                           </Tooltip>
                         ) : text;
+                      })()}
+                      {/* What this master says about the *sensor*: how many
+                          photosites are hot or stuck dark, and the one switch
+                          that repairs exactly those. Self-hiding three ways —
+                          only pedestal masters (dark/bias) are censused at all,
+                          a master that couldn't be read has no row, and a clean
+                          sensor gets no note (there is nothing to act on). */}
+                      {(() => {
+                        const note = defectsById.get(m.id)?.note;
+                        if (!note) return null;
+                        return (
+                          <Tooltip label={note.detail} multiline w={320}>
+                            <Text size="xs"
+                              c={note.severity === "warn" ? "yellow.7" : "dimmed"}>
+                              {note.message}
+                            </Text>
+                          </Tooltip>
+                        );
                       })()}
                     </Table.Td>
                     <Table.Td>
