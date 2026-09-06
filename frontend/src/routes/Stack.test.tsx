@@ -607,8 +607,48 @@ describe("StackView", () => {
       auto_reject_resolved: null,
       rejection_reach: opts.auto_reject && n >= 3
         ? { method: "min-max-reject" as const, n_frames: n,
-            lone_outlier_min_frames: 3, reaches: true }
-        : reach,
+            lone_outlier_min_frames: 3, reaches: true,
+            best_available: bestAvailable(n) }
+        : { ...reach, best_available: reach.best_available ?? bestAvailable(n) },
+    }));
+  }
+
+  /** What the backend's `best_available` says on the ordinary (non-drizzle)
+   * path: the app choosing for itself lands on min/max, which drops an extreme
+   * from 3 subs up — and below that no setting can take a trail out at all. */
+  function bestAvailable(n: number): NonNullable<
+    NonNullable<client.StackEstimate["rejection_reach"]>["best_available"]> {
+    return n >= 3
+      ? { method: "min-max-reject", lone_outlier_min_frames: 3, reaches: true }
+      : { method: "mean", lone_outlier_min_frames: null, reaches: false };
+  }
+
+  /** The Stack form with rejection deliberately switched **off**, `n` accepted +
+   * solved subs of which `streaked` carry a trail, and the backend's honest
+   * `best_available` verdict for that depth. */
+  function mockStreakedNoRejectionForm(n: number, streaked: number) {
+    mockSchema([
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: false });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: n }, (_, i) => ({ ...mkFrame(i + 1), streak_detected: i < streaked })));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockImplementation(async (_safe, opts) => ({
+      n_frames: n, canvas_w: 480, canvas_h: 320, output_w: 480, output_h: 320,
+      is_mosaic: false, peak_bytes: 7e6, peak_gb: 0.01,
+      budget_bytes: 8e9, budget_gb: 8, would_exceed: false,
+      suggested_drizzle_scale: null, suggested_reference_canvas: false, memory_fix: null,
+      auto_reject_resolved: null,
+      rejection_reach: {
+        method: (opts.auto_reject && n >= 3 ? "min-max-reject" : "mean") as
+          "min-max-reject" | "mean",
+        n_frames: n,
+        lone_outlier_min_frames: opts.auto_reject && n >= 3 ? 3 : null,
+        reaches: !!opts.auto_reject && n >= 3,
+        best_available: bestAvailable(n),
+      },
     }));
   }
 
@@ -763,26 +803,57 @@ describe("StackView", () => {
       expect(screen.queryByText(/tighter sigma-clip/)).not.toBeInTheDocument());
   });
 
-  it("turns on sigma clipping in one click from the streak-no-rejection warning", async () => {
-    mockSchema([
-      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
-        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
-    ]);
-    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: false });
-    // ≥11 frames so the generic "turn on sigma clipping" advice (not the min/max
-    // hint) is the right one, with one streaked frame and no rejection on.
-    const frames = Array.from({ length: 12 }, (_, i) =>
-      ({ ...mkFrame(i + 1), streak_detected: i === 0 }));
-    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
-    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+  it("turns on Auto outlier removal in one click from the streak-no-rejection warning", async () => {
+    // ≥11 frames so the generic advice (not the min/max hint) is the right one,
+    // with one streaked frame and no rejection on. The button used to say "Turn
+    // on sigma clipping" — a method that is blind to a lone trail below ~11 subs
+    // and had to be re-decided by the form's own copy of the dispatch gates.
+    // Auto is honest at every depth, which is why the engine names it.
+    mockStreakedNoRejectionForm(12, 1);
 
     renderStack();
 
-    const btn = await screen.findByRole("button", { name: "Turn on sigma clipping" });
+    const btn = await screen.findByRole("button", { name: "Turn on Auto outlier removal" });
+    expect(screen.queryByRole("button", { name: "Turn on sigma clipping" }))
+      .not.toBeInTheDocument();
     fireEvent.click(btn);
-    // With sigma clipping on the stack now has per-pixel rejection → warning hides.
+    // With Auto on the stack now has per-pixel rejection → warning hides.
     await waitFor(() =>
       expect(screen.queryByText(/detected satellite\/plane streak/)).not.toBeInTheDocument());
+  });
+
+  it("offers no button at all when the stack is too thin for any rejection", async () => {
+    // Two subs: under min/max's own 3-frame floor, so every setting on the form
+    // would swap no rejection for no rejection. The predicate this replaced read
+    // the *dispatch* gates, so it fired here and offered sigma clipping — which
+    // at two subs does not even run.
+    mockStreakedNoRejectionForm(2, 1);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/detected satellite\/plane streak/)).toBeInTheDocument());
+    expect(screen.getByText(/Reject those frames on the Target page/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Turn on Auto outlier removal" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Turn on sigma clipping" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("says nothing about a stack whose rejection the user did ask for", async () => {
+    // The overlap the two halves must not both speak in: with sigma clipping on
+    // at 12 subs the rejection reaches, so neither this caution nor the
+    // blindness nudge has anything to say.
+    mockRejectionForm(12, {
+      method: "sigma-clip", n_frames: 12, lone_outlier_min_frames: 11, reaches: true,
+    });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 12 }, (_, i) => ({ ...mkFrame(i + 1), streak_detected: i === 0 })));
+
+    renderStack();
+
+    await waitFor(() => expect(screen.getByText("Sigma clipping")).toBeInTheDocument());
+    expect(screen.queryByText(/detected satellite\/plane streak/)).not.toBeInTheDocument();
   });
 
   it("turns on drizzle outlier rejection in one click from the drizzle+sigma-clip hint", async () => {
@@ -812,18 +883,10 @@ describe("StackView", () => {
   });
 
   it("warns when accepted streaked frames are stacked without rejection", async () => {
-    mockSchema([
-      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
-        default: true, min: null, max: null, step: null, options: null, help: null, depends_on: null },
-    ]);
     // sigma_clip off → no per-pixel rejection. Use ≥11 frames so the generic
-    // "turn on sigma clipping" advice is the right one (below ~11 the min/max
-    // hint supersedes it — covered separately below).
-    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: false });
-    const frames = Array.from({ length: 12 }, (_, i) =>
-      ({ ...mkFrame(i + 1), streak_detected: i === 0 }));
-    vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
-    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    // advice is the right one (below ~11 the min/max hint supersedes it —
+    // covered separately below).
+    mockStreakedNoRejectionForm(12, 1);
 
     renderStack();
 

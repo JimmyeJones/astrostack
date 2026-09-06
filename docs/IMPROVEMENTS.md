@@ -1120,8 +1120,8 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   the cheap path would not, so a target with a few wild solves would report a slightly higher `n_frames`.
   Pin that difference in a test before swapping, or the "reaches" answer moves for a reason nobody can see.
 
-- **NEW IDEA (Builder 2026-09-02, the half the v0.323.1 rejection-reach fix could not reach) — the same blind
-  κ-σ runs on the *walk-away* path, where there is no form to warn on.** *(Pillar: autonomy + image quality —
+- ~~**NEW IDEA (Builder 2026-09-02, the half the v0.323.1 rejection-reach fix could not reach) — the same blind
+  κ-σ runs on the *walk-away* path, where there is no form to warn on.**~~ — **CLOSED: (a) shipped v0.335.0, (b) v0.337.0/.1, and the surface it needed shipped v0.334.1. Header struck 2026-09-06** because the ✅ blocks that say so sit ~90 lines below it, so every triage pass read this as live work. *(Pillar: autonomy + image quality —
   PRIORITY 2/4; size S for the advisory, **do NOT blind-flip the default**; confidence: traced, mechanism the
   same as the shipped fix's.)* v0.323.1 makes the Stack form say when the configured rejection cannot remove a
   lone satellite trail (κ-σ dispatches from 4 subs but is blind until `kappa_min_frames` = 11 at κ=3). **The
@@ -1265,18 +1265,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   > (+4) the render, the link, and that no request is made with no trail; `Target.test.tsx` (+2) that the note
   > reaches the real page's notes area and stays away without one.
 
-- **NEW IDEA (Builder 2026-09-02, the third consumer of the same fact, left alone by v0.323.1 deliberately) —
-  the Stack form's `rejectionOn` still asks "did a pass dispatch?", not "can it remove anything?"**
-  *(Pillar: friendliness — PRIORITY 3; size XS; **check the overlap before building — it may be already
-  covered**.)* `frontend/src/routes/Stack.tsx`'s `rejectionOn` (feeding the streaked-frames warning) is hand-
-  written as `(auto_reject && n>=3) || (sigma_clip && n>=4) || (min_max_reject && n>=3)` — the *dispatch*
-  gates, so on a 6-sub stack with streaks and sigma clipping on it reports rejection as "on" while κ-σ will
-  clip nothing. It now has `estimate.data.rejection_reach.reaches` available, which is the honest answer from
-  the engine. **Why it was left:** the gap is currently covered by `minMaxRejectHint`, which fires on exactly
-  that band (3–10 subs, streaks present, min/max and auto both off) and already offers min/max — so today the
-  user is told the right thing by a different note, and swapping the definition changes which of two correct
-  alerts they see. Worth doing as *one definition* rather than as a bug fix, and only with a test that pins
-  which note appears in the overlap.
+- ✅ **v0.374.2 — the Stack form's `rejectionOn` is gone; the streaked-frames caution asks the engine
+  "can anything remove this?"** (`streakRejectionAdvice` + `rejection_reach.best_available`). Building it
+  found the hand-written predicate was not merely coarse but *wrong* on a 1–2 sub stack — it read as "no
+  per-pixel rejection enabled" with sigma clipping already ticked, and offered a button to turn on the
+  setting that was on and could not have worked. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **NEW IDEA (Builder 2026-09-02, spotted while building the v0.323.1 print button) — sweep the app for
   sentences that *name* a number the form could just set, and give each one the button.** *(Pillar: autonomy —
   PRIORITY 2; size XS per site once found. Confidence: two live sites already have the button, the rest are
@@ -3215,27 +3208,16 @@ problems. Dogfood it every big-picture run and fix root causes.
   detects ~0 of 25 stars even on bright frames), keep/boost the bin-1 rung (raise `-s`), and the stack-then-solve
   bootstrap (validated). Full numbers: the ⭐⭐ thin-stack entry's ▶ ROOT CAUSE MEASURED block.
 
-- **IMPROVEMENT IDEA (Scout 2026-07-23, spotted while fixing the dead per-target setup banner v0.178.3) — raise a
-  *global, cross-target* "plate-solving isn't set up" readiness banner on the Dashboard when the star **database** is
-  missing, not only the per-target banner.** *(Autonomy + friendliness / "just works" pillar, PRIORITY 2–3; size S;
-  additive, read-only — no new deps.)* **What prompts it:** the Dashboard already fires an `astapReadiness` banner when
-  the ASTAP **binary** is missing/unconfigured, and (as of v0.178.3) each *Target* page can surface a
-  `solve_setup_problem` banner when its frames pile up as `solve_failed:no star database`. But a first-light user whose
-  ASTAP is installed yet whose **star database** (G17/H18) was never downloaded gets **no Dashboard-level signal** —
-  every target silently fails to solve (→ thin/gibberish stacks, the ⭐⭐ family), and they only discover the fix if
-  they happen to open a Target page and read its banner. A brand-new user with no targets open sees nothing at all.
-  **Feature:** on the Dashboard, alongside `astapReadiness`/`folderReadiness`, show one calm actionable banner when
-  *any* target has accepted-but-unsolved frames whose canonical reason is `no star database` — "Plate-solving can't
-  find its star database, so your frames aren't being located in the sky. [Here's how to add it]" — pointing at the
-  same setup guidance the per-target banner links to. **Reuses the fix just shipped:** the classification already
-  exists (`_solve_setup_problem` + the new `Project.solve_failure_reason_counts()`); a cross-target roll-up (a small
-  `GET /api/system`-style aggregate, or reusing the per-target reject-summary across the target list) is all that's
-  new. **Feasibility:** all inputs exist; a pure aggregator `solveSetupAcrossTargets(perTargetProblems) ->
-  {kind, targets, frames} | None` is trivially unit-testable. Additive/opt-safe: read-only, self-hides when solving is
-  healthy, no config/DB-schema/API-shape/default change. **Builder slices:** (a) the cross-target roll-up (server
-  aggregate or client fold over the target list) + tests; (b) the Dashboard banner reusing the existing readiness-banner
-  pattern + dismissal. Serves autonomy (the app tells you *once, up front* why nothing is solving) and directly hardens
-  the ⭐⭐ plate-solve-failure → thin-stack path at its most common root cause (a missing star DB on a fresh install).
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — raise a *global, cross-target* "plate-solving isn't set up"
+  readiness banner on the Dashboard when the star **database** is missing, not only the per-target banner.**~~
+  — **ALREADY SHIPPED; struck 2026-09-06 after a Builder sized it as open work and found it built.** The entry
+  assumed the only cross-target signal available was a roll-up of `solve_failed:no star database` frame reasons.
+  It never needed one: `frontend/src/components/dashboard/astapReadiness.ts` classifies
+  `GET /api/system`'s `astap.star_db_found` directly and returns `{ready: false, kind: "database"}`, which
+  `routes/Dashboard.tsx` renders as its readiness banner (dismissal keyed to `astapReadinessSignature`, so
+  dismissing "ASTAP missing" does not suppress a later "database missing"). That is strictly better than the
+  filed shape — it fires on a brand-new install with **no targets at all**, which a frame-reason roll-up
+  cannot, and it is the case the entry itself called out. Nothing here is open.
 - ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — feed a *sibling sub's* solved centre as the plate-solve hint for the
   target's still-unsolved subs (a cheap, safe attack on the ⭐⭐ thin-stack root cause).**~~ — **SHIPPED v0.180.0
   (slices a+b)** (Builder 2026-07-23, branch `claude/pensive-faraday-5krkz5`). Added the pure helper
@@ -3408,8 +3390,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   top note** — its recency-decay (**SHIPPED v0.369.0**) and "highlights/core clipped"-cue
   (**SHIPPED v0.237.0**) sub-parts are now done too; **(c)**
   *optional later* a light statistical fit (numpy/scikit, no NN). Original spec kept for provenance:
-- **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
-  auto-processed image (no ML runtime, fully offline/private).** The owner wants to
+- ~~**⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
+  auto-processed image (no ML runtime, fully offline/private).**~~ — **THE ASK IS DELIVERED; struck 2026-09-06.** This is the *original spec*, kept for provenance, and it is the third copy of the header in this section — the two above it carry the shipped records. Slice **(a)** shipped v0.159.0, **(b)** v0.169.0 + v0.369.0 (recency decay) + v0.369.3; grep `auto_prefs` / `/api/editor/auto-preferences` before reading a word below as open. Only the spec's own *"optional later"* slice (c) — a statistical image-features→bias fit — was never built, and it was filed as optional. The owner wants to
   give feedback on the Auto result and have it get better at *their* taste over
   time. Key insight: `auto_recipe` (`seestack/edit/presets.py`) is already
   **data-driven** — it computes each parameter from the image (stretch `target_bg`,
@@ -8390,6 +8372,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.374.2** — Friendliness (PRIORITY 3) with a correctness core: **the Stack form's streaked-frames caution stops advising a setting that cannot work.** `Stack.tsx`'s hand-written `rejectionOn` — `(auto_reject && n>=3) || (sigma_clip && n>=4) || (min_max_reject && n>=3)`, a copy of the *dispatch* gates — meant that on a **1–2 sub** stack every term was false whatever was ticked, so the form told a user whose sigma clipping was on by default that *"this stack has no per-pixel rejection enabled"* and offered a button to turn on the setting that was already on and cannot run at two subs, while `rejectionReachNudge` said the opposite two inches away. The predicate is gone: `rejection_reach` gains an additive **`best_available`** (the same engine helper asked with `auto_reject`/`drizzle_reject` set — "could *anything* take a lone trail out at this depth?", sized by a mosaic's `panel_depth`), and the new pure `streakRejectionAdvice` decides the sentence from it. Where a method reaches it names **Auto outlier removal** (honest at every depth, unlike sigma clipping — the same correction v0.323.1 and v0.334.1 made on two other surfaces) with the one-click fix, or drizzle's own rejection on the drizzle path; where nothing reaches it names the sub count needed and offers **no button at all**. The two halves now split one question — `rejectionReachNudge` owns "you asked for rejection, will it reach?", this owns "you asked for none, should you?" — so they cannot contradict each other; `minMaxRejectHint` still supersedes on the 3–10 band, pinned by a test. Additive response key only; no config/schema/on-disk/default change and the peak is provably unmoved. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.373.0** — Friendliness / "enjoy + come back tomorrow" (PRIORITY 3), a **new beginner feature**: **the Dashboard finally says how many of the 110 Messier objects you've photographed, and links to the life list.** `/life-list` has existed since v0.279.0 and nothing on the home screen ever pointed at it, so the number that is its whole hook was one nobody saw. New read-only `GET /api/life-list/counts` serves *just* the tally through the same `life_list_summary` over the same `catalog_capture_status` the full route uses — a test asserts the whole counts block is byte-identical between the two, so the Dashboard sentence and the life-list page's header can never disagree — and it is a separate route because the Dashboard asks on every visit while the full response carries ~160 catalog rows plus a preview stat per captured target (a `Dashboard.test.tsx` case pins that `getLifeList` is never called). **The IA rule decided its shape:** not a seventh stat tile (the grid is `lg: 6`) and not another card, but one quiet line in the same grouping as the sky-coverage read-out, whose own comment already says *"a new fact joins a grouping instead of becoming one more block"*. Pure `components/lifeListLine.ts` owns the words and changes the tail with how far along you are — plain count → "over halfway" → "just N to go" → "the whole list" — and refuses a nonsense tally rather than printing one. **Self-hides at zero captured**, so a fresh install never meets a 0-of-110 scoreboard. Additive/read-only; no schema, config, on-disk or default change, and the line stays absent against a backend without the route. Ships slice (i) of the life-list follow-ups; (iii) share-the-grid stays open.
 - **v0.372.1** — Maintainability in service of correctness (no behaviour change): **one shared *real* display-space fixture, `tests/displayspace.py`, plus the guard-on-the-guard that stops a fixture silently ceasing to test anything.** A1's sting was that the regression test written for that exact defect in v0.210.6 **passed while the bug was live** — its fixture was `clip(sky + noise)`, which has no hard shadow clip, and the shadow clip *is* the bug. `real_stretched_stack` / `sky_truth` / `clipped_fraction` / `assert_shadow_clip` now live in one place; `test_edit_curve.py` reads them instead of its own copy and `test_edit_levels.py` gained the real-fixture pair the entry asked for. **Measured on the way:** `suggest_levels_points` returns **black = 0.0** on genuine `autostretch` output (its 1st percentile lands inside the 1.08 % zero spike) where the synthetic fixtures return 0.05–0.13 — correct, but not what those fixtures describe, so it is now pinned; `measure_sky_cast` was probed on the same fixture (deviation 0.00035, neutral) and cleared rather than migrated. Degenerate/flat fixtures deliberately left alone. Ships the ⭐ maintainability idea filed 2026-09-02; working in [`PROCESS-NOTES.md`](PROCESS-NOTES.md).
 - **v0.372.0** — Autonomy + trust (PRIORITY 2/3): **a target stops silently ignoring your global settings — the Stack form now names every saved option that overrides them.** "Save as defaults" persists the *whole* form, so a target saved months ago carries an explicit value for every option that existed that day (a string of `false`s for checkboxes nobody opened), and its blob wins over `default_stack_options` in **both** readers — the form's seed and `pipeline._stack_target(auto=True)`. A switch flipped globally afterwards therefore never reaches that target, for ever, with nothing saying so; v0.371.0 hit exactly this with `repair_sensor_defects`. New pure `walkaway.pinned_stack_options` + read-only `GET /api/targets/{safe}/stack-defaults/pinned` + a self-hiding note inside the form's existing flow (no new page, no banner) name each pinned option and both its values, with a one-click **"put my global settings back in the form"** that saves nothing — *Save as defaults* stays the reviewable moment. **The baseline is what makes it honest:** comparing against `default_stack_options` alone fired on *every* target that had ever pressed Save (`get_stack_defaults` seeds a never-configured form with `auto_reject: True` while the descriptor default is `False`), so it compares against `_merge_stack_defaults(settings, None)` — the seed this very form would have been given — extracted from `get_stack_defaults` so the two can't drift. `_same_option_value` keeps `False == 0` from glossing a type change as agreement while `3`/`3.0` still compare equal. Shape (a) of the ⭐ lead; (b) save-the-delta and (c) drop-stale-keys stay open with their care notes. No behaviour change to any merge. Entry in [`SHIPPED.md`](SHIPPED.md).
