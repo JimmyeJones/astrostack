@@ -13,6 +13,7 @@ from seestack.calibrate.apply import CalibrationMasters
 from seestack.calibrate.defects import (
     DefectMap,
     build_defect_map,
+    census_sensor_defects,
     find_sensor_defects,
 )
 from seestack.calibrate.masters import MasterMeta, save_master
@@ -252,6 +253,78 @@ def test_build_defect_map_returns_none_when_there_is_nothing_to_do():
     assert build_defect_map(None) is None
     assert build_defect_map(_synthetic_dark()) is None
     assert DefectMap.from_mask(np.zeros((8, 8), dtype=bool)) is None
+
+
+# ---- census_sensor_defects (the reporting answer) -------------------------
+
+
+def test_the_census_counts_exactly_what_the_map_would_repair():
+    dark = _synthetic_dark()
+    for y, x in ((10, 20), (11, 21), (55, 90)):
+        dark[y, x] += 900.0
+    dark[100, 5] = 0.0
+
+    census = census_sensor_defects(dark)
+
+    assert census.measurable and not census.refused
+    assert census.n_defects == int(find_sensor_defects(dark).sum()) == 4
+    assert census.n_pixels == dark.size
+    assert census.fraction == pytest.approx(4 / dark.size)
+
+
+def test_a_clean_sensor_is_measurable_and_empty_not_silent():
+    """"Nothing is broken" and "we couldn't look" are different answers — the
+    whole reason this exists beside ``find_sensor_defects``, which collapses
+    them."""
+    census = census_sensor_defects(_synthetic_dark())
+    assert census.measurable and census.n_defects == 0 and not census.refused
+
+
+def test_a_refused_map_still_reports_how_many_candidates_there_were():
+    """``find_sensor_defects`` returns an empty mask above the ceiling, which
+    reads identically to a healthy sensor. The census keeps them apart, so a
+    screen can say *why* no repair will happen."""
+    rng = np.random.default_rng(3)
+    dark = _synthetic_dark()
+    idx = rng.choice(dark.size, size=int(0.05 * dark.size), replace=False)
+    dark.flat[idx] += 900.0
+
+    census = census_sensor_defects(dark)
+
+    assert census.refused and census.measurable
+    assert census.n_defects > 0.02 * dark.size
+    # Fail-before for the distinction: the repair path still declines.
+    assert not find_sensor_defects(dark).any()
+
+
+def test_degenerate_censuses_say_nothing_was_measured_rather_than_raising():
+    for bad in (None, np.zeros((0, 0), dtype=np.float32),
+                np.zeros((4, 4, 3), dtype=np.float32)):
+        census = census_sensor_defects(bad)
+        assert not census.measurable
+        assert census.n_defects == 0 and census.n_pixels == 0
+        assert census.fraction == 0.0
+
+
+def test_the_census_of_a_raw_master_equals_the_map_the_stack_builds(tmp_path):
+    """One definition, not two. The stack sanitizes the master's non-finite
+    pixels to 0 and passes their positions as ``exclude``; the census is handed
+    the array *as loaded*, NaNs and all, and its own ``isfinite`` test selects
+    the identical set. If those two ever diverge, the number on screen stops
+    being the number a run repairs."""
+    dark = _synthetic_dark()
+    dark[30, 30] += 900.0
+    dark[31, 33] += 900.0
+    # A no-data patch, the case where the two paths could differ.
+    dark[60:66, 60:66] = np.nan
+    dark_path = _write_master(tmp_path, "dark.fits", dark)
+
+    masters = CalibrationMasters.load(dark_path, repair_sensor_defects=True)
+    census = census_sensor_defects(np.asarray(dark, dtype=np.float32))
+
+    assert masters.n_sensor_defects == 2
+    assert census.n_defects == masters.n_sensor_defects
+    assert census.n_pixels == dark.size
 
 
 # ---- CalibrationMasters wiring -------------------------------------------

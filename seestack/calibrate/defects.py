@@ -124,41 +124,19 @@ def _robust_scale(residual: np.ndarray) -> float:
     return float(np.median(np.abs(finite)) * 1.4826)
 
 
-def find_sensor_defects(
-    master: np.ndarray,
-    *,
-    sigma: float = DEFECT_SIGMA,
-    max_fraction: float = MAX_DEFECT_FRACTION,
-    exclude: np.ndarray | None = None,
+def _candidate_mask(
+    arr: np.ndarray,
+    sigma: float,
+    exclude: np.ndarray | None,
 ) -> np.ndarray:
-    """Boolean mask of hot / dead photosites in a master dark (or bias).
+    """The per-phase outlier mask, *before* the ``max_fraction`` ceiling.
 
-    ``master`` is the raw 2-D Bayer mosaic of a master frame. Each of the four
-    CFA phases is measured **separately** against its own local median, so the
-    mosaic's own pattern is never read as structure and the four planes each get
-    a scale matched to their own noise.
-
-    A pixel is a defect when it sits more than ``sigma`` robust sigmas above
-    (hot) or below (dead / stuck-low) the local median of its own phase. The
-    test is two-sided on purpose: dark subtraction already removes a hot pixel's
-    *mean* level but leaves its excess noise, and it does nothing at all for a
-    photosite stuck at a constant — both are pixels whose value carries no sky.
-
-    ``exclude`` marks pixels the master carries **no information** about — the
-    caller's "this master pixel was non-finite before sanitizing" map. A master
-    with no data at a pixel says nothing about whether the *sensor* is broken
-    there, and its sanitized 0 would otherwise read as stuck-low and get the
-    light frame's perfectly good sample overwritten from its neighbours. Those
-    pixels are neutralised before measuring and can never be flagged.
-
-    Returns an all-``False`` mask (never raises) when the master isn't a usable
-    2-D frame, when nothing clears the threshold, or when *too much* does — see
-    ``max_fraction``. Callers can therefore treat "no map" and "an empty map"
-    identically.
+    Split out of :func:`find_sensor_defects` so :func:`census_sensor_defects`
+    can report how many candidates there were on a master the ceiling refuses —
+    the one number that tells a user "this map was declined" apart from "this
+    sensor is clean", which the refusal itself deliberately conflates for a
+    *repair* caller (see :func:`find_sensor_defects`).
     """
-    arr = np.asarray(master)
-    if arr.ndim != 2 or arr.size == 0:
-        return np.zeros(arr.shape, dtype=bool)
     mask = np.zeros(arr.shape, dtype=bool)
     if sigma <= 0:
         return mask
@@ -209,8 +187,53 @@ def find_sensor_defects(
                 flagged &= valid
             mask[py::2, px::2] = flagged
 
+    return mask
+
+
+def _over_ceiling(n: int, n_pixels: int, max_fraction: float) -> bool:
+    """Is a candidate count too large to be credible as sensor defects?"""
+    return bool(n) and n > max_fraction * n_pixels
+
+
+def find_sensor_defects(
+    master: np.ndarray,
+    *,
+    sigma: float = DEFECT_SIGMA,
+    max_fraction: float = MAX_DEFECT_FRACTION,
+    exclude: np.ndarray | None = None,
+) -> np.ndarray:
+    """Boolean mask of hot / dead photosites in a master dark (or bias).
+
+    ``master`` is the raw 2-D Bayer mosaic of a master frame. Each of the four
+    CFA phases is measured **separately** against its own local median, so the
+    mosaic's own pattern is never read as structure and the four planes each get
+    a scale matched to their own noise.
+
+    A pixel is a defect when it sits more than ``sigma`` robust sigmas above
+    (hot) or below (dead / stuck-low) the local median of its own phase. The
+    test is two-sided on purpose: dark subtraction already removes a hot pixel's
+    *mean* level but leaves its excess noise, and it does nothing at all for a
+    photosite stuck at a constant — both are pixels whose value carries no sky.
+
+    ``exclude`` marks pixels the master carries **no information** about — the
+    caller's "this master pixel was non-finite before sanitizing" map. A master
+    with no data at a pixel says nothing about whether the *sensor* is broken
+    there, and its sanitized 0 would otherwise read as stuck-low and get the
+    light frame's perfectly good sample overwritten from its neighbours. Those
+    pixels are neutralised before measuring and can never be flagged.
+
+    Returns an all-``False`` mask (never raises) when the master isn't a usable
+    2-D frame, when nothing clears the threshold, or when *too much* does — see
+    ``max_fraction``. Callers can therefore treat "no map" and "an empty map"
+    identically.
+    """
+    arr = np.asarray(master)
+    if arr.ndim != 2 or arr.size == 0:
+        return np.zeros(arr.shape, dtype=bool)
+
+    mask = _candidate_mask(arr, sigma, exclude)
     n = int(np.count_nonzero(mask))
-    if n and n > max_fraction * arr.size:
+    if _over_ceiling(n, arr.size, max_fraction):
         log.warning(
             "Sensor defect map: %d candidate pixels is %.2f%% of the sensor "
             "(over the %.2f%% ceiling) — refusing the map rather than repairing "
@@ -219,6 +242,62 @@ def find_sensor_defects(
         )
         return np.zeros(arr.shape, dtype=bool)
     return mask
+
+
+@dataclass(frozen=True)
+class DefectCensus:
+    """How many photosites a master says are broken — the *reporting* answer.
+
+    :func:`find_sensor_defects` deliberately collapses "nothing is broken" and
+    "too much read as broken to trust" into the same empty mask, because a
+    *repair* caller does the same thing in both cases: nothing. A person reading
+    the master's row wants them apart — one means a healthy sensor and the other
+    means the repair will not run and why — so this carries the candidate count
+    alongside ``refused``.
+
+    ``measurable`` is false when the master isn't a usable 2-D frame at all
+    (nothing was measured, as opposed to measured and found clean).
+    """
+
+    n_defects: int = 0
+    n_pixels: int = 0
+    refused: bool = False
+    measurable: bool = False
+
+    @property
+    def fraction(self) -> float:
+        """Share of the sensor flagged, in [0, 1]; 0.0 when nothing was measured."""
+        return self.n_defects / self.n_pixels if self.n_pixels else 0.0
+
+
+def census_sensor_defects(
+    master: np.ndarray | None,
+    *,
+    sigma: float = DEFECT_SIGMA,
+    max_fraction: float = MAX_DEFECT_FRACTION,
+    exclude: np.ndarray | None = None,
+) -> DefectCensus:
+    """Count the broken photosites in a master, without building a repair map.
+
+    Same measurement as :func:`find_sensor_defects`, reported rather than
+    applied: this is what a screen shows about a master the user is looking at,
+    so it must never raise and must distinguish a refused map from a clean
+    sensor. Never allocates the neighbour gather — a census is asked for a
+    master that may never be stacked with.
+    """
+    if master is None:
+        return DefectCensus()
+    arr = np.asarray(master)
+    if arr.ndim != 2 or arr.size == 0:
+        return DefectCensus()
+    mask = _candidate_mask(arr, sigma, exclude)
+    n = int(np.count_nonzero(mask))
+    return DefectCensus(
+        n_defects=n,
+        n_pixels=int(arr.size),
+        refused=_over_ceiling(n, arr.size, max_fraction),
+        measurable=True,
+    )
 
 
 # ``eq=False`` because every field is a numpy array: the generated ``__eq__``

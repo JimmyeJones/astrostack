@@ -36,6 +36,10 @@ beforeEach(() => {
   vi.spyOn(client.api, "calibrationIncoming").mockResolvedValue({
     incoming_dir: "/data/incoming", folders: [],
   });
+  // Same reasoning for the sensor-defect census: its own query, its own tests
+  // below. Empty here so the master rows stay about whatever each test is
+  // pinning; a test that wants a census re-mocks it.
+  vi.spyOn(client.api, "calibrationDefects").mockResolvedValue({ masters: [] });
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -137,5 +141,67 @@ describe("CalibrationView", () => {
 
     await waitFor(() => expect(screen.getByText("Dark 30s")).toBeInTheDocument());
     expect(screen.queryByText(/say they are/)).not.toBeInTheDocument();
+  });
+
+  it("says how many photosites this dark shows as broken", async () => {
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({})]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
+    vi.spyOn(client.api, "calibrationDefects").mockResolvedValue({
+      masters: [{
+        id: 1, n_defects: 1204, n_pixels: 2073600, fraction: 1204 / 2073600,
+        refused: false, measurable: true,
+        note: {
+          severity: "ok",
+          message: "1,204 hot or dead pixels (0.058%)",
+          detail: "…Repair hot/dead pixels from the dark…",
+        },
+      }],
+    });
+    renderView();
+
+    await waitFor(() =>
+      expect(screen.getByText("1,204 hot or dead pixels (0.058%)"))
+        .toBeInTheDocument());
+  });
+
+  it("says nothing about defects on a master the server had no note for", async () => {
+    // Two silences share this path and both must hold: a clean sensor (a row
+    // with `note: null`) and a master the census skipped entirely (a flat, or
+    // one that couldn't be read — no row at all).
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      mk({}), mk({ id: 2, name: "Flat", kind: "flat" }),
+    ]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
+    vi.spyOn(client.api, "calibrationDefects").mockResolvedValue({
+      masters: [{
+        id: 1, n_defects: 0, n_pixels: 2073600, fraction: 0,
+        refused: false, measurable: true, note: null,
+      }],
+    });
+    renderView();
+
+    await waitFor(() => expect(screen.getByText("Flat")).toBeInTheDocument());
+    expect(screen.queryByText(/hot or dead pixels/)).not.toBeInTheDocument();
+  });
+
+  it("warns when a master's defect count is too big to repair from", async () => {
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({})]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
+    vi.spyOn(client.api, "calibrationDefects").mockResolvedValue({
+      masters: [{
+        id: 1, n_defects: 960, n_pixels: 19200, fraction: 0.05,
+        refused: true, measurable: true,
+        note: {
+          severity: "warn",
+          message: "Too many pixels read as broken to repair from this one",
+          detail: "960 pixels (5.00% of the sensor) look broken…",
+        },
+      }],
+    });
+    renderView();
+
+    await waitFor(() =>
+      expect(screen.getByText(/Too many pixels read as broken/))
+        .toBeInTheDocument());
   });
 });

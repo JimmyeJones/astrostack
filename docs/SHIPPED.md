@@ -14,6 +14,104 @@ Newest first.
 
 ---
 
+## v0.370.0 — 2026-09-06 — "does my camera have broken pixels?" — the Calibration page says so, and names the one switch that fixes them
+
+**(Builder 2026-09-06, branch `claude/sweet-babbage-ks0ild`.) Autonomy +
+friendliness + image quality — PRIORITY 2/3/4.** *(New user-facing capability,
+read-only. No pixel moves and no default is flipped.)*
+
+**The gap.** `repair_sensor_defects` shipped in **v0.367.0** and is genuinely
+good: it measures the photosites that are broken from the master dark and
+replaces *only* those, in the raw Bayer domain, where a defect is still one
+pixel and a star can never be touched. But it is a checkbox in the Stack form's
+**advanced** group, off by default (correctly — §9), and **nothing anywhere told
+the owner either that their sensor has broken pixels or that a one-switch repair
+exists.** A beginner does not go looking through an advanced group for a setting
+by name, so the feature was, in practice, invisible. The number is also not
+guessable: two Seestars of the same model differ, and "how many?" is the fact
+that makes the switch worth finding.
+
+**What shipped: the count, on the page where masters already live.** A new
+`GET /api/calibration/defects` censuses every *pedestal* master (dark, then
+bias — the two `CalibrationMasters.load` derives a map from; a flat is a
+multiplicative field whose outliers are dust, not broken photosites, so it is
+never censused) and the Calibration page renders one line inside each master's
+existing name cell, beside the `header_note` and coverage lines that already
+live there. **Not a new card, not a new banner, and deliberately not on the
+Stack form**, which the 2026-08-29 reshape of the calibration-confidence idea
+already declined as a sixth piece of calibration copy.
+
+**Silence is the default answer.** The note is `None` — nothing renders — for a
+clean sensor. "0 broken pixels" invites no action and is one more line on a page
+the owner already calls busy; the two cases that *do* say something both give
+the reader somewhere to go:
+
+* **Some broken pixels** → *"1,204 hot or dead pixels (0.058%)"*, with a tooltip
+  that names **“Repair hot/dead pixels from the dark”** in the Stack form's own
+  words, so the switch can actually be found, and repeats the guarantee that
+  every other pixel including every star is left exactly as it was.
+* **Too many to be credible** → a yellow *"Too many pixels read as broken to
+  repair from this one"*, because that master's map is refused and turning the
+  switch on would do nothing. The tooltip gives the measured percentage and the
+  usual cause (built from the wrong frames) without accusing the sensor.
+
+**One measurement, not a second one — which is the part worth carrying
+forward.** `find_sensor_defects` deliberately collapses "nothing is broken" and
+"too much read as broken to trust" into the same empty mask, because a *repair*
+caller does the same thing in both cases: nothing. A *reader* needs them apart.
+So the per-phase measurement was extracted into `_candidate_mask` (behaviour
+unchanged — `find_sensor_defects` is the same function with its body split at
+the ceiling test, and its 20+ existing tests pass untouched), and a new
+`census_sensor_defects` reports `n_defects` / `n_pixels` / `refused` /
+`measurable` over it. There is no second threshold and no restatement of the
+rule anywhere.
+
+**And the number on screen is the number a run repairs.** The stack builds its
+map from the *sanitized* master plus an `exclude` mask of the pixels that were
+non-finite before sanitizing; the census is handed the array **exactly as
+loaded**, NaNs and all, and its own `isfinite` test selects that identical set.
+Two tests pin the equality — one in the engine and one through the endpoint —
+each asserted against `CalibrationMasters.load`'s own `n_sensor_defects` on a
+master carrying a no-data patch, which is the case where the two paths could
+have diverged, rather than against a copy of the threshold.
+
+**Cost, and why the poll is cheap.** A census means loading the master's FITS
+and running four 5×5 local medians, so the answer is cached on the app keyed by
+each file's own identity — `(path, mtime_ns, size)` — with no TTL, because a
+master FITS is immutable once written (a rebuild takes a new id and filename).
+A test pins that two requests cost one census, and another that a file rewritten
+in place is measured again rather than serving the previous sensor's answer.
+It is its own query on the page for the same reason `calibrationCoverage` is:
+a slow read must never hold up the master list.
+
+**Never 500s on a bad master.** An unreadable file, a truncated FITS, a frame
+that is not a usable 2-D mosaic — each is simply absent from the answer, so one
+damaged master cannot take the Calibration page down.
+
+**Upgrade-safe (§9):** one new read-only endpoint, one new pure engine function,
+one new client method, one self-hiding line inside an existing table cell. No
+config key, no schema, no on-disk change, no default flipped, no existing
+response shape touched, and nothing is written anywhere. An older frontend never
+asks; an older backend answers 404 and the line simply never appears.
+
+**Tests (+5 engine, +14 API/webapp, +3 vitest).** `tests/test_defect_map.py`:
+the census equals what the map would repair, a clean sensor is *measurable and
+empty* rather than silent, a refused map still reports its candidate count (with
+the fail-before that `find_sensor_defects` returns nothing there), the
+degenerate inputs, and the raw-master ↔ `CalibrationMasters.load` equality on a
+master with a no-data patch. `tests/webapp/test_calibration_defects.py`: the
+pure note in all four states (clean → nothing, unmeasurable → nothing, the
+count + the switch's exact label, the refused warning that must *not* read as
+"turn the repair on"), the census over a real master file and over an
+unreadable one, then the endpoint — the note on a dark, the listed-but-noteless
+clean dark, a flat never censused while a bias is, a vanished file absent rather
+than a 500, the empty library, the cache paying once, a rewritten file
+re-measured, and the agreement with the engine. `Calibration.test.tsx`: the line
+rendered, both silences (a `note: null` row and a master with no row at all),
+and the refused warning.
+
+---
+
 ## v0.369.4 — 2026-09-06 — a no-data hole in a master stops inventing sensor defects around itself
 
 **(Builder 2026-09-06, found and reproduced while auditing the brand-new v0.367.0
