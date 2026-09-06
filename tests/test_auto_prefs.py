@@ -124,9 +124,12 @@ def test_type_feedback_records_into_that_types_bucket_not_global():
 
 
 def test_type_override_takes_precedence_over_global_per_param():
-    # global says brighter; the galaxy override says darker for that param only
+    # global says brighter; the galaxy override says darker for that param only.
+    # Two taps, because a type-scoped tap starts from the taste *in force* (+1
+    # here) and moves one step: +1 → 0 → −1.
     prof = auto_prefs.record_feedback(None, "too_dark")               # global +1
-    prof = auto_prefs.record_feedback(prof, "too_bright", object_type="galaxy")  # galaxy -1
+    for _ in range(2):
+        prof = auto_prefs.record_feedback(prof, "too_bright", object_type="galaxy")
     eff_gal = auto_prefs.effective_biases(prof, "galaxy")
     eff_neb = auto_prefs.effective_biases(prof, "nebula")
     assert eff_gal["brightness"] == -1   # galaxy override wins
@@ -386,9 +389,10 @@ def test_the_opposite_cue_still_walks_a_faded_bias_all_the_way_back():
 
 
 def test_a_faded_per_type_override_falls_back_to_the_global_taste():
-    prof = auto_prefs.record_feedback(None, "too_dark", now=_T0)          # global
-    prof = auto_prefs.record_feedback(prof, "too_bright", now=_T0,
-                                      object_type="galaxy")               # override
+    prof = auto_prefs.record_feedback(None, "too_dark", now=_T0)          # global +1
+    for _ in range(2):                                                    # override −1
+        prof = auto_prefs.record_feedback(prof, "too_bright", now=_T0,
+                                          object_type="galaxy")
     assert auto_prefs.effective_biases(prof, "galaxy", now=_T0) == {"brightness": -1}
     late = _T0 + 2 * auto_prefs.DECAY_DAYS * _DAY
     # Both have faded away by now, so neither taste applies...
@@ -461,8 +465,11 @@ def test_a_faded_override_unmasking_a_bigger_global_bias_still_counts_as_a_fade(
     prof = None
     for _ in range(3):
         prof = auto_prefs.record_feedback(prof, "too_dark", now=_T0)      # global +3
-    prof = auto_prefs.record_feedback(prof, "too_bright", now=_T0,
-                                      object_type="galaxy")               # override −1
+    for _ in range(4):                                                    # override −1
+        # Four taps: a type-scoped tap starts from the +3 in force and walks it
+        # down one step at a time (+3 → +2 → +1 → 0 → −1).
+        prof = auto_prefs.record_feedback(prof, "too_bright", now=_T0,
+                                          object_type="galaxy")
     assert auto_prefs.effective_biases(prof, "galaxy", now=_T0) == {"brightness": -1}
 
     late = _T0 + auto_prefs.DECAY_DAYS * _DAY
@@ -470,3 +477,81 @@ def test_a_faded_override_unmasking_a_bigger_global_bias_still_counts_as_a_fade(
     assert auto_prefs.effective_biases(prof, "galaxy", now=late) == {"brightness": 2}
     assert auto_prefs.steps_faded(prof, "galaxy", now=late) >= 0
     assert auto_prefs.fade_note(prof, "galaxy", now=late) is not None
+
+
+def test_the_first_type_scoped_tap_moves_one_step_not_across_the_global_bias():
+    """A tap is one gentle step, whichever bucket it lands in.
+
+    Regression: a per-type bucket overrides the global one *per parameter*, and a
+    fresh override used to start at neutral — so the first type-scoped tap
+    replaced the global value with ±1 instead of moving it. With a global "+2
+    brighter" (what the owner gets from two taps on a picture the classifier
+    can't place), one "too bright" on a galaxy landed at −1: a three-step,
+    0.06-in-``target_bg`` jump *past* neutral in the direction they didn't ask
+    for, and the +1 they were asking for was unreachable — tapping back returned
+    to +2, so the taste oscillated between two wrong values forever."""
+    prof = None
+    for _ in range(2):
+        prof = auto_prefs.record_feedback(prof, "too_dark", now=_T0)  # global +2
+    assert auto_prefs.effective_biases(prof, "galaxy", now=_T0) == {"brightness": 2}
+
+    # One tap on a galaxy → one step down, not a jump to the other side of neutral.
+    prof = auto_prefs.record_feedback(prof, "too_bright", now=_T0, object_type="galaxy")
+    assert auto_prefs.effective_biases(prof, "galaxy", now=_T0) == {"brightness": 1}
+    # …and only for galaxies: every other kind of target keeps the global taste.
+    assert auto_prefs.effective_biases(prof, "nebula", now=_T0) == {"brightness": 2}
+    assert auto_prefs.effective_biases(prof, None, now=_T0) == {"brightness": 2}
+
+
+def test_a_type_scoped_taste_walks_one_step_per_tap_in_both_directions():
+    """Every reachable value between the bounds, and no jumps — the property the
+    bug above broke. Includes neutral: "no shift for galaxies" while the global
+    stays "+2 brighter" is a real setting, so a per-type 0 has to stick rather
+    than hand the parameter straight back to the global taste."""
+    prof = None
+    for _ in range(2):
+        prof = auto_prefs.record_feedback(prof, "too_dark", now=_T0)  # global +2
+
+    seen = []
+    for _ in range(5):
+        prof = auto_prefs.record_feedback(prof, "too_bright", now=_T0,
+                                          object_type="galaxy")
+        seen.append(auto_prefs.effective_biases(prof, "galaxy", now=_T0)
+                    .get("brightness", 0))
+    # +2 → +1 → 0 → −1 → −2 → −3 (the floor), one step at a time.
+    assert seen == [1, 0, -1, -2, -3]
+
+    seen = []
+    for _ in range(7):
+        prof = auto_prefs.record_feedback(prof, "too_dark", now=_T0,
+                                          object_type="galaxy")
+        seen.append(auto_prefs.effective_biases(prof, "galaxy", now=_T0)
+                    .get("brightness", 0))
+    assert seen == [-2, -1, 0, 1, 2, 3, 3]
+    # The global taste is untouched throughout — this was all galaxy-scoped.
+    assert auto_prefs.effective_biases(prof, None, now=_T0) == {"brightness": 2}
+
+
+def test_a_type_scoped_neutral_survives_a_json_round_trip():
+    """The sticky 0 is stored, so "no shift for galaxies" survives the webapp's
+    JSON persistence rather than reverting to the global taste on the next read."""
+    prof = None
+    for _ in range(2):
+        prof = auto_prefs.record_feedback(prof, "too_dark", now=_T0)  # global +2
+    for _ in range(2):
+        prof = auto_prefs.record_feedback(prof, "too_bright", now=_T0,
+                                          object_type="galaxy")       # galaxy 0
+    round_tripped = json.loads(json.dumps(prof))
+    assert auto_prefs.effective_biases(round_tripped, "galaxy", now=_T0) == {}
+    assert auto_prefs.is_neutral(round_tripped, "galaxy", now=_T0)
+    assert auto_prefs.effective_biases(round_tripped, "nebula", now=_T0) == {"brightness": 2}
+    # Auto really does run its measured default on a galaxy, and the shifted
+    # value on anything else.
+    gal = auto_prefs.apply_profile(round_tripped, object_type="galaxy",
+                                   now=_T0, **_BASE)
+    neb = auto_prefs.apply_profile(round_tripped, object_type="nebula",
+                                   now=_T0, **_BASE)
+    assert gal["target_bg"] == pytest.approx(_BASE["target_bg"])
+    assert neb["target_bg"] > _BASE["target_bg"]
+    # And a neutral galaxy override doesn't invent a "for your galaxies" note.
+    assert auto_prefs.describe_profile(round_tripped, "galaxy", now=_T0) is None

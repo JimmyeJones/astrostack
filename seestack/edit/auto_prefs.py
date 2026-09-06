@@ -151,10 +151,16 @@ def empty_profile() -> dict[str, Any]:
             "stamps": {}, "by_type": {}}
 
 
-def _coerce_bucket(raw: Any) -> dict[str, Any]:
+def _coerce_bucket(raw: Any, *, keep_zero: bool = False) -> dict[str, Any]:
     """Sanitise one bias/counts/stamps bucket (the global set or a per-type
     override). A bucket with no ``stamps`` — every profile written before recency
-    decay shipped — is kept exactly as it is; it simply never fades."""
+    decay shipped — is kept exactly as it is; it simply never fades.
+
+    ``keep_zero`` keeps a stored bias of **exactly 0**, which only a per-type
+    bucket ever writes and which means something there that it cannot mean
+    globally: "for this kind of target, no shift" — an override that cancels a
+    non-zero global taste rather than deferring to it. See
+    :func:`record_feedback`. A global 0 is still dropped (nothing to override)."""
     biases: dict[str, int] = {}
     counts: dict[str, int] = {}
     stamps: dict[str, float] = {}
@@ -164,7 +170,7 @@ def _coerce_bucket(raw: Any) -> dict[str, Any]:
             for param, val in raw_b.items():
                 if param in _PARAM_STEP and isinstance(val, (int, float)):
                     step = _clamp_step(param, round(val))
-                    if step:
+                    if step or keep_zero:
                         biases[param] = step
         raw_c = raw.get("counts")
         if isinstance(raw_c, dict):
@@ -199,20 +205,27 @@ def _coerce(profile: dict[str, Any] | None) -> dict[str, Any]:
         if isinstance(raw_t, dict):
             for otype, bucket in raw_t.items():
                 if otype in KNOWN_OBJECT_TYPES:
-                    cb = _coerce_bucket(bucket)
+                    cb = _coerce_bucket(bucket, keep_zero=True)
                     if cb["biases"] or cb["counts"]:
                         by_type[otype] = cb
     return {"version": PROFILE_VERSION, "biases": top["biases"],
             "counts": top["counts"], "stamps": top["stamps"], "by_type": by_type}
 
 
-def _bucket_biases(bucket: dict[str, Any], now: float) -> dict[str, int]:
-    """One bucket's biases after recency decay, zeros dropped."""
+def _bucket_biases(bucket: dict[str, Any], now: float, *,
+                   keep_zero: bool = False) -> dict[str, int]:
+    """One bucket's biases after recency decay, zeros dropped.
+
+    ``keep_zero`` keeps a per-type bucket's **stored** 0 so it can *override* a
+    non-zero global bias to neutral (the caller drops it from the merged result);
+    without it the 0 would vanish and the global taste would silently win back.
+    A bias that merely *faded* to 0 is still dropped either way — an override that
+    has expired is meant to hand its parameter back to the global taste."""
     stamps = bucket.get("stamps") or {}
     out = {}
     for param, step in bucket["biases"].items():
         faded = _faded(step, stamps.get(param), now)
-        if faded:
+        if faded or (keep_zero and step == 0):
             out[param] = faded
     return out
 
@@ -233,8 +246,11 @@ def effective_biases(profile: dict[str, Any] | None,
     prof = _coerce(profile)
     biases = _bucket_biases(prof, at)
     if object_type in prof["by_type"]:
-        biases.update(_bucket_biases(prof["by_type"][object_type], at))
-        # A per-type override of 0 (walked back to neutral) drops the bias entirely.
+        biases.update(
+            _bucket_biases(prof["by_type"][object_type], at, keep_zero=True))
+        # A per-type override of 0 (walked back to neutral) drops the bias entirely
+        # — including when it is cancelling a non-zero *global* bias, which is the
+        # whole reason that 0 is stored rather than dropped at write time.
         biases = {p: s for p, s in biases.items() if s}
     return biases
 
@@ -263,18 +279,41 @@ def record_feedback(profile: dict[str, Any] | None, cue: str,
         return prof
     at = _now(now)
     param, delta = step
+    # The global bias for this parameter, aged — i.e. what Auto is doing *right
+    # now* for a target of this type before the tap, whenever the tap is going to
+    # land in a per-type bucket that doesn't yet speak about this parameter.
+    global_step = _faded(
+        prof["biases"].get(param, 0), (prof.get("stamps") or {}).get(param), at)
     if object_type in KNOWN_OBJECT_TYPES:
         bucket = prof["by_type"].setdefault(
             object_type, {"biases": {}, "counts": {}, "stamps": {}})
+        per_type = True
     else:
         bucket = prof
+        per_type = False
+        global_step = 0  # the global set *is* the bucket; there is nothing to seed
     stamps = bucket.setdefault("stamps", {})
-    cur = _faded(bucket["biases"].get(param, 0), stamps.get(param), at)
+    if per_type and param not in bucket["biases"]:
+        # **Seed from the taste in force, not from neutral.** A per-type bucket
+        # overrides the global one per parameter, so starting a fresh override at 0
+        # made the first type-scoped tap *replace* the global value instead of
+        # moving it one step: with a global "+2 brighter", one "too bright" on a
+        # galaxy landed at −1 — a three-step jump in the direction the owner did
+        # not ask for, and +1 was unreachable (tapping back returned to +2, so the
+        # taste oscillated between two wrong values). Seeding makes one tap one
+        # step, whichever bucket it lands in.
+        cur = global_step
+    else:
+        cur = _faded(bucket["biases"].get(param, 0), stamps.get(param), at)
     new = _clamp_step(param, cur + delta)
-    if new == 0:
+    if new == 0 and not (per_type and global_step):
         bucket["biases"].pop(param, None)
         stamps.pop(param, None)
     else:
+        # A per-type 0 is kept when there is a non-zero global bias underneath it:
+        # dropping it would hand the parameter straight back to the global taste,
+        # so "neutral for galaxies" would be the one setting the owner could never
+        # reach — the same off-by-a-bucket jump as above, one step further on.
         bucket["biases"][param] = new
         stamps[param] = at
     bucket["counts"][cue] = bucket["counts"].get(cue, 0) + 1

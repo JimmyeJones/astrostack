@@ -100,6 +100,61 @@ def test_a_no_data_master_pixel_is_never_a_defect():
     assert int(find_sensor_defects(dark, exclude=nodata).sum()) == 0
 
 
+def test_a_patch_of_no_data_inside_the_amp_glow_flags_nothing():
+    """Regression (v0.369.4): the no-data guard held for one lone pixel in a flat
+    part of the frame and leaked everywhere else.
+
+    Every no-data sample used to be filled with the **whole plane's** median
+    before the local median was taken. In the corner the amp glow lives in, that
+    value is nothing like the local level, so the fill (a) read as a defect at
+    its own sample and (b) dragged the 5×5 local median of the *real* photosites
+    beside it, flagging a rosette of perfectly good pixels around the hole. Both
+    halves overwrite the light frame's own good samples on every sub — the exact
+    harm ``exclude`` exists to prevent."""
+    h, w = 120, 160
+    dark = _synthetic_dark(h, w)
+    # A hole sitting in the glow, wide enough to fill part of a 5×5 phase window.
+    nodata = np.zeros(dark.shape, dtype=bool)
+    nodata[h - 12:h - 4, 4:12] = True
+    dark[nodata] = 0.0  # what _sanitize_pedestal leaves behind
+
+    leaked = find_sensor_defects(dark)          # precondition: the hole reads hot/dead
+    assert leaked[nodata].any()
+    mask = find_sensor_defects(dark, exclude=nodata)
+    assert not mask[nodata].any(), "a no-data sample can never be a defect"
+    assert int(mask.sum()) == 0, "and it must not drag its neighbours in either"
+
+
+def test_a_no_data_hole_does_not_hide_a_real_defect_next_to_it():
+    """The other direction: neutralising the hole must not blind the map. A hot
+    pixel elsewhere in the frame is still found, and so is one right beside the
+    hole — the fill is locally flat, so it neither raises nor lowers the bar."""
+    h, w = 120, 160
+    dark = _synthetic_dark(h, w)
+    nodata = np.zeros(dark.shape, dtype=bool)
+    nodata[h - 12:h - 4, 4:12] = True
+    dark[nodata] = 0.0
+    far, near = (30, 100), (h - 14, 6)   # same CFA phase as the hole's corner
+    dark[far] += 900.0
+    dark[near] += 900.0
+
+    mask = find_sensor_defects(dark, exclude=nodata)
+    assert mask[far] and mask[near]
+    assert int(mask.sum()) == 2
+
+
+def test_a_master_with_no_data_anywhere_is_measured_exactly_as_before():
+    """The fill only runs when there is something to fill, so an ordinary master
+    — every install's case — takes a bit-identical path."""
+    dark = _synthetic_dark()
+    dark[10, 20] += 900.0
+    empty = np.zeros(dark.shape, dtype=bool)
+    plain = find_sensor_defects(dark)
+    assert np.array_equal(plain, find_sensor_defects(dark, exclude=empty))
+    assert np.array_equal(plain, find_sensor_defects(dark, exclude=None))
+    assert plain[10, 20] and int(plain.sum()) == 1
+
+
 def test_degenerate_inputs_return_an_empty_mask_rather_than_raising():
     assert find_sensor_defects(np.zeros((0, 0), dtype=np.float32)).size == 0
     assert not find_sensor_defects(np.zeros((4, 4, 3), dtype=np.float32)).any()

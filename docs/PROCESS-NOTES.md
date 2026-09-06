@@ -1562,3 +1562,44 @@ away from ground that has already been swept.
   notes just below (flat Bayer-pattern guard; non-windowed `reproject_rgb` inset) stay open — neither fires on
   the normal Seestar path — plus the still-open mosaic auto-grade / `photometric_normalize` items AGENTS.md §1
   points at.
+
+---
+
+## 2026-09-06 — Builder run (branch `claude/sweet-babbage-v7xsyy`): the bug list is gated, so audit the *newest* code
+
+**Backlog state at the start of the run.** "Bugs (fix these first)" holds nothing
+startable: every open entry is either a recorded stand-down that carries its own
+measurement (the ASTAP ladder budget, the `_scaled_box` mesh floor), gated on data no
+agent has (the sky-atlas `_tan_wcs` rotation sign needs a real solved frame with field
+rotation), or a "fix only if touching this file" cosmetic. The Scout's two items filed
+this morning had both already shipped by the time this run started (`off_night` as
+v0.368.0, the mixed-folder master note as v0.369.1).
+
+**So the productive move was auditing the code that had just landed and that nobody had
+read.** The ~20 recorded clean sweeps all reached ~v0.353–v0.366; v0.367–v0.369 was
+unreviewed. Two verified bugs came out of it, both shipped this run:
+
+* **v0.369.3** — `edit/auto_prefs.record_feedback`: a fresh `by_type` override started at
+  neutral, so the first type-scoped tap replaced the global bias instead of moving it one
+  step (global `+2` → one "too bright" on a galaxy → `−1`, and `+1` unreachable).
+* **v0.369.4** — `calibrate/defects.find_sensor_defects`: no-data samples were filled with
+  the *whole plane's* median, so a hole inside amp glow read as a defect and dragged its
+  real neighbours in with it (115 flagged pixels on a synthetic-but-believable master).
+
+**The transferable lesson: audit new code, not old code.** Both bugs are in code less than
+a day and less than three days old respectively, and both are in files a clean-sweep record
+already covers by *area*. Neither would have been found by re-walking `stack/`. **Suggested
+default for a Builder that finds the bug list gated: diff `main` for what has landed since
+the newest recorded audit and read that, rather than picking a lower-value backlog item.**
+
+**Also: two Ideas entries were struck as already-shipped-under-another-name.** "Reveal"
+(Scout 2026-08-27 #15) shipped as **Zoom clip**, v0.303.0 — grepping for *Reveal* finds
+nothing, which is why it read as open; the module is `seestack/render/zoomclip.py`. The
+Compare-view North-up entry shipped as v0.359.0 (`compareNorthUpOffer`). Both were opened
+this run as candidate work and abandoned once the code turned up. That is the third and
+fourth instance of the §4 warning; **the name in the backlog entry is not the name in the
+code, so grep the *mechanism* (`zoom`, `north_up`), not the feature's title.**
+
+**Ended the run at two tasks rather than manufacturing a third.** The feature backlog is
+genuinely dry (the Scout's own 2026-09-06 note says as much), and AGENTS.md §2 is explicit
+that a short run leaving `main` green beats a marginal third item.
