@@ -1734,6 +1734,29 @@ export interface RejectionOutlook {
   user_chose: boolean;
 }
 
+/** One saved stack option holding a target away from the global defaults.
+ *
+ * "Save as defaults" persists the *whole* Stack form, so a target saved months
+ * ago pins every option that existed that day — and its blob wins over the
+ * global `default_stack_options` in both readers (this form's seed and the
+ * unattended auto-stack). A switch flipped globally afterwards therefore never
+ * reaches that target, silently and for ever, unless something says so.
+ */
+export interface PinnedStackOption {
+  key: string;
+  label: string;
+  /** What this target will actually stack with. */
+  saved: unknown;
+  /** What it would use if it had never pressed "Save as defaults". */
+  global_value: unknown;
+}
+
+export interface PinnedStackDefaults {
+  /** Whether this target has a saved blob at all (it may still pin nothing). */
+  has_saved: boolean;
+  pinned: PinnedStackOption[];
+}
+
 export interface GalleryItem {
   safe: string;
   target_name: string;
@@ -2803,6 +2826,8 @@ export const api = {
   optionsSchema: () => req<StackOptionField[]>("/api/stack/options/schema"),
   getStackDefaults: (safe: string) =>
     req<Record<string, unknown>>(`/api/targets/${safe}/stack-defaults`),
+  pinnedStackDefaults: (safe: string) =>
+    req<PinnedStackDefaults>(`/api/targets/${safe}/stack-defaults/pinned`),
   putStackDefaults: (safe: string, body: Record<string, unknown>) =>
     req<Record<string, unknown>>(`/api/targets/${safe}/stack-defaults`, {
       method: "PUT",

@@ -2,9 +2,24 @@
 
 from __future__ import annotations
 
-import numpy as np
+import sys
+from pathlib import Path
 
-from seestack.edit.levels import suggest_levels_gamma, suggest_levels_points
+import numpy as np
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from displayspace import (  # noqa: E402
+    assert_shadow_clip,
+    real_stretched_stack,
+    sky_truth,
+)
+
+from seestack.edit.levels import (  # noqa: E402
+    GAMMA_TARGET,
+    suggest_levels_gamma,
+    suggest_levels_points,
+)
 
 
 def _scene(black_floor=0.15, bright=0.9, h=120, w=160, seed=0):
@@ -96,3 +111,52 @@ def test_gamma_is_clamped_to_the_op_range():
     if g is not None:
         assert 0.1 <= g <= 5.0
         assert round(g, 3) == g
+
+
+# --------------------------------------------------------------------------- #
+# What the suggestion does on a picture that has really been stretched
+# --------------------------------------------------------------------------- #
+#
+# Every fixture above is `clip(sky + noise)` — a hand-rolled stand-in for a
+# stretched image, with no hard shadow clip. That is the exact shape of fixture
+# that let the A1 sky-lift bug pass its own regression test for four months
+# (see `tests/displayspace.py`), so the low-end behaviour of this module is
+# pinned below against real `autostretch` output as well. No behaviour changed
+# with these tests; they record what the code *does* on the owner's pictures,
+# which is not what the synthetic fixtures show.
+
+def test_the_black_point_is_zero_on_a_genuinely_stretched_picture():
+    """And that is by construction, not by accident — recorded so nobody reads
+    the synthetic fixtures above as a description of the live behaviour.
+
+    `autostretch` clips its darkest ~1 % to exactly zero, so the 1st percentile
+    this module reads *lands inside that spike*: the suggestion comes back with
+    black = 0.0 on any already-stretched image. Which is the honest answer —
+    the shadows are already at black and there is nothing left to clip — but on
+    the synthetic `_scene()` fixture the same call returns a black point around
+    0.05–0.13, so a test written only against that fixture describes a picture
+    the app never produces.
+    """
+    st = real_stretched_stack()
+    assert_shadow_clip(st)
+    pts = suggest_levels_points(st)
+    assert pts is not None
+    black, white = pts
+    assert black == 0.0, f"black point {black} — the clip spike moved"
+    # The white end still does real work: it sits below the star cores and well
+    # above the sky, so the suggestion is a usable auto-levels, not a no-op.
+    assert 0.5 < white < 1.0
+    assert white > sky_truth(st)
+
+
+def test_the_gamma_suggestion_still_aims_at_the_target_grey_after_a_real_stretch():
+    """The midtone half is unaffected by the clip — it reads the *median*, which
+    the spike cannot reach — so the one-click suggestion still lands the typical
+    tone on the target grey."""
+    st = real_stretched_stack()
+    black, white = suggest_levels_points(st)
+    gamma = suggest_levels_gamma(st, black, white)
+    assert gamma is not None and gamma > 1.0
+    med = float(np.median(st[np.isfinite(st)]))
+    x = np.clip((med - black) / (white - black), 0.0, 1.0)
+    assert float(x ** (1.0 / gamma)) == pytest.approx(GAMMA_TARGET, abs=0.01)
