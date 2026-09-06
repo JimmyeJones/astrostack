@@ -24,6 +24,9 @@ import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
 import { rejectionReachNudge } from "../rejectionReachNudge";
 import { savedRejectionClause } from "../savedRejectionClause";
+import {
+  adoptGlobalsPatch, pinnedLine, pinnedSummary,
+} from "../pinnedStackOptions";
 import { memoryFixAction } from "../stackMemoryFix";
 import { printBiggerAction } from "../stackPrintBigger";
 import { minMaxIgnoresWeightingHint as minMaxIgnoresWeighting } from "../weightingHint";
@@ -64,6 +67,19 @@ export function StackView() {
     queryKey: ["stack-defaults", safe],
     queryFn: () => api.getStackDefaults(safe),
   });
+  // Which of this target's *saved* options hold it away from the global
+  // defaults. Read-only, and empty for the overwhelming majority of targets —
+  // the note below self-hides, so this adds no always-on surface.
+  const pinned = useQuery({
+    queryKey: ["stack-defaults-pinned", safe],
+    queryFn: () => api.pinnedStackDefaults(safe),
+  });
+  const pinnedNote = useMemo(() => {
+    const rows = pinned.data?.pinned ?? [];
+    const summary = pinnedSummary(rows);
+    if (!summary) return null;
+    return { summary, lines: rows.map((p) => pinnedLine(p, schema.data)) };
+  }, [pinned.data, schema.data]);
   const frames = useQuery({ queryKey: ["frames", safe], queryFn: () => api.listFrames(safe) });
   // Offline catalog identity for this target. The Target page already fetches it
   // (same query key, so it's usually warm) — here it's read only for its
@@ -282,6 +298,9 @@ export function StackView() {
       });
       // The Target page's standing note reads the same saved blob.
       qc.invalidateQueries({ queryKey: ["rejection-outlook", safe] });
+      // So does the "different from your global defaults" note — the save it
+      // just made is exactly what changes that answer, in both directions.
+      qc.invalidateQueries({ queryKey: ["stack-defaults-pinned", safe] });
     },
     onError: (e: Error) => notifications.show({ message: `Save failed: ${e.message}`, color: "red" }),
   });
@@ -1467,6 +1486,35 @@ export function StackView() {
                 </Button>
               ) : null}
             </Stack>
+          ) : null}
+
+          {pinnedNote ? (
+            <Alert color="gray" variant="light" p="xs" data-testid="pinned-defaults">
+              <Text size="xs" fw={600}>{pinnedNote.summary}</Text>
+              <Text size="xs" c="dimmed" mt={2}>
+                Saved settings win over your global ones here, so a switch you
+                change in Settings later won't reach this target until you save
+                again.
+              </Text>
+              <Stack gap={0} mt={4}>
+                {pinnedNote.lines.map((line) => (
+                  <Text key={line} size="xs" c="dimmed">• {line}</Text>
+                ))}
+              </Stack>
+              <Button
+                mt={6}
+                size="xs"
+                variant="subtle"
+                w="fit-content"
+                // One update, not one per row: several of these keys are in the
+                // estimate query's key, so applying them separately would
+                // re-query through a string of intermediate states. It only
+                // fills the form — nothing is stored until Save as defaults.
+                onClick={() => setValues((p) => ({ ...p, ...adoptGlobalsPatch(pinned.data?.pinned) }))}
+              >
+                Put my global settings back in the form
+              </Button>
+            </Alert>
           ) : null}
 
           <Group justify="flex-end" mt="sm">

@@ -1055,37 +1055,36 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **⭐ VERIFIED LEAD (Builder 2026-09-06, found while shipping the v0.371.0 one-click defect repair; confirmed by
-  test, not traced) — "Save as defaults" persists the WHOLE Stack form, so every stack option added *after* a
-  target was saved is permanently pinned to its old value on that target, and no global switch can ever reach
-  it.** *(Pillar: autonomy + trust — PRIORITY 2/3; size M, and **the fix is a behaviour change on a saved-data
-  path**, so read the care note. Confidence: verified — a fail-before test exists in
-  `tests/webapp/test_calibration_defects.py`.)*
-  **The mechanism, end to end.** `get_stack_defaults` (`webapp/routers/stack.py`) fills **every** descriptor key
-  before answering, the Stack form seeds its whole state from that (`Stack.tsx:176`,
-  `setValues({...defaults.data, ...reused})`), the *Save as defaults* button posts that whole state
-  (`api.putStackDefaults(safe, values)`), and `put_stack_defaults` persists every non-`None` valid key. So a
-  target saved in, say, July carries an explicit value for **every option that existed in July** — including a
-  string of `false`s for checkboxes the user never opened the advanced group to look at. A target's saved blob
+- **🟡 PARTLY SHIPPED — SHAPE (a), "say it", IS v0.372.0 (Builder 2026-09-06, branch
+  `claude/sweet-babbage-owcg4d`); shapes (b) and (c) are still open, and the care note below is why —
+  "Save as defaults" persists the WHOLE Stack form, so an option the owner later flips globally never
+  reaches a target that once pressed Save.** *(Pillar: autonomy + trust — PRIORITY 2/3. Confidence:
+  verified — the mechanism and the fix are both pinned by tests. Full write-up of the shipped half in
+  [`SHIPPED.md`](SHIPPED.md); the mechanism is restated here only as far as (b)/(c) need it.)*
+  **The mechanism.** `get_stack_defaults` (`webapp/routers/stack.py`) fills **every** descriptor key
+  before answering, the Stack form seeds its whole state from that, the *Save as defaults* button posts
+  that whole state, and `put_stack_defaults` persists every non-`None` valid key. So a target saved in,
+  say, July carries an explicit value for **every option that existed in July** — including a string of
+  `false`s for checkboxes the user never opened the advanced group to look at. A target's saved blob
   then wins over the global `default_stack_options` in *both* readers (the form seed and
-  `pipeline._stack_target(auto=True)`'s merge), so a setting the owner later turns on globally silently does
-  nothing there, for ever, with no surface saying so.
-  **This is not hypothetical and it is not one option.** v0.371.0 hit it with `repair_sensor_defects` and had to
-  count and name the affected targets to keep its own sentence true; the walk-away rejection entry hit the same
-  shape with `sigma_clip`. It gets **worse with every option this app adds** — the blob's coverage is frozen at
-  save time, and the app has added dozens of options since the oldest saved blob.
-  **Shapes, in order of safety.** (a) *Say it:* a target whose saved blob pins an option away from the current
-  global value gets one line on the Stack form / Target page naming the option and offering the re-save — no
-  behaviour change, and it generalises the count v0.371.0 already computes. (b) *Save the delta:* have
-  `put_stack_defaults` persist only the keys that differ from the merged seed the form was given, so a saved
-  blob means "what I changed" rather than "a snapshot of the app on the day I pressed the button". **Care —
-  this is why (b) is not a quick fix:** it changes what an existing blob means only for *future* saves (old
-  blobs stay full snapshots and must keep working byte-for-byte), and "differs from the seed" has to be computed
-  against the *global* defaults, not the descriptor defaults, or a user who deliberately set a value equal to
-  the current global would silently start tracking it. Do not migrate or rewrite existing blobs. (c) A one-click
-  "bring this target's saved settings up to date" that drops keys equal to the global. **Do not** simply make
-  the global win — a target's saved defaults beating the global is the contract the Save button's own
-  confirmation promises.
+  `pipeline._stack_target(auto=True)`'s merge).
+  **What v0.372.0 removed: the silence.** `walkaway.pinned_stack_options` +
+  `GET /api/targets/{safe}/stack-defaults/pinned` + the self-hiding note on the Stack form now name
+  every saved option that differs from what the form *would* have seeded had the target never saved,
+  and offer a one-click "put my global settings back in the form". Nothing about the merge changed.
+  **Still open, in order of safety.** (b) *Save the delta:* have `put_stack_defaults` persist only the
+  keys that differ from the merged seed the form was given, so a saved blob means "what I changed"
+  rather than "a snapshot of the app on the day I pressed the button". **Care — this is why (b) is not
+  a quick fix:** it changes what an existing blob means only for *future* saves (old blobs stay full
+  snapshots and must keep working byte-for-byte), and "differs from the seed" has to be computed
+  against the *seed the form was actually given* — which v0.372.0's `_merge_stack_defaults(settings,
+  None)` now names in one place, so (b) has a baseline to build on rather than a second definition to
+  invent. Do not migrate or rewrite existing blobs. (c) A one-click "bring this target's saved settings
+  up to date" that drops the keys the user never deliberately changed — note v0.372.0 deliberately
+  stopped short of this: its button only *fills the form*, leaving the Save button as the reviewable
+  moment, because dropping keys from a stored blob is not reversible from the UI. **Do not** simply
+  make the global win — a target's saved defaults beating the global is the contract the Save button's
+  own confirmation promises.
 
 - **⚪ CHECKED, NOT A GAP — recorded so the next run doesn't "fix" it (Builder 2026-09-04, while shipping
   v0.346.0).** The stationary-streak guard needs its clustered frames to span an hour, which a beginner's
@@ -8374,6 +8373,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.372.0** — Autonomy + trust (PRIORITY 2/3): **a target stops silently ignoring your global settings — the Stack form now names every saved option that overrides them.** "Save as defaults" persists the *whole* form, so a target saved months ago carries an explicit value for every option that existed that day (a string of `false`s for checkboxes nobody opened), and its blob wins over `default_stack_options` in **both** readers — the form's seed and `pipeline._stack_target(auto=True)`. A switch flipped globally afterwards therefore never reaches that target, for ever, with nothing saying so; v0.371.0 hit exactly this with `repair_sensor_defects`. New pure `walkaway.pinned_stack_options` + read-only `GET /api/targets/{safe}/stack-defaults/pinned` + a self-hiding note inside the form's existing flow (no new page, no banner) name each pinned option and both its values, with a one-click **"put my global settings back in the form"** that saves nothing — *Save as defaults* stays the reviewable moment. **The baseline is what makes it honest:** comparing against `default_stack_options` alone fired on *every* target that had ever pressed Save (`get_stack_defaults` seeds a never-configured form with `auto_reject: True` while the descriptor default is `False`), so it compares against `_merge_stack_defaults(settings, None)` — the seed this very form would have been given — extracted from `get_stack_defaults` so the two can't drift. `_same_option_value` keeps `False == 0` from glossing a type change as agreement while `3`/`3.0` still compare equal. Shape (a) of the ⭐ lead; (b) save-the-delta and (c) drop-stale-keys stay open with their care notes. No behaviour change to any merge. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.371.1** — Image quality / data integrity (stacking-engine-class per §1): **amp glow read as broken photosites — `find_sensor_defects` flagged healthy pixels wherever the sensor was legitimately noisier.** The threshold was `DEFECT_SIGMA` × the MAD of the residual over the *whole* CFA plane, but a master dark's noise is not stationary — amp glow is dark *current*, which carries shot noise, and the glow corner is a small fraction of the sensor, so the plane-wide MAD is set by the quiet bulk and the bar sits below the glow's own grain. Measured on a master built the way the camera builds one (mean of 20 Poisson+read-noise frames) with **every photosite healthy**: **133 flagged at 2,000 e⁻ of corner glow, 1,564 at 20,000** — each then overwritten from its neighbours on every sub of every stack, and reported by the v0.370.0 census as broken pixels in the owner's camera. It survived 20+ tests because the existing fixture adds read noise of *one fixed sigma everywhere*, so its glow is a change of level only; the new `_shot_noise_dark` fixture is what catches it. Fixed by `_local_robust_scale` — an upper percentile of |residual| per 16×16 block (a MAD under-reads it nine-fold, because in a steep gradient the local median lands on the centre sample itself) — with the threshold as `sigma × max(plane_wide, local)`, so it can only ever **rise**: the new map is a provable subset of the old, and a clean stationary master's answer does not move. **P80 and not higher is set by the refusal guard** — at P90 a master with a tenth of the sensor spiked stops being refused and starts being repaired. After: 0 false positives at every credible glow with all 12 planted defects still found. Opt-in feature, no default flipped. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.371.0** — Autonomy + friendliness (PRIORITY 2/3): **the v0.370.0 sensor-defect census gets its button — one click repairs the broken photosites on every future stack, including the hands-off ones.** The census named `repair_sensor_defects`, but naming is not reaching: it is a checkbox in the Stack form's *advanced* group, so acting on the line meant opening a collapsed disclosure to find a setting by name — once per stack — and the walk-away chain (`_stack_target(..., auto=True)`) sees no form at all. New pure `calibration.defect_repair_offer` + `POST /api/calibration/defects/repair` write the option into the **global `default_stack_options`**, the one place both `get_stack_defaults` (the Stack form's seed) and the unattended merge read — pinned by a test asserting it through `GET .../stack-defaults`, the reader itself. **Silent unless some master reports defects a repair could actually fix**, so a clean sensor and a *refused* map (where the switch would repair nothing) both offer nothing; and no count is quoted, because which master supplies the map depends on what is bound at stack time. **And the on-state stays honest about the one case that would make it false:** "Save as defaults" persists the *whole* Stack form, so a target saved before this existed pins `repair_sensor_defects: false` in its own blob and wins over the global — the copy counts and names those targets (*"…except 1 target"*) and says how to include one, and the per-target walk is only paid for when the switch is on *and* something is repairable. Exactly reversible from the same control — off *removes* the key, leaving the options blob byte-for-byte as it was. Read-modify-write is server-side, so a click cannot clobber another default. No pixel moves, no shipped default flipped. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.370.0** — Autonomy + friendliness + image quality (PRIORITY 2/3/4): **"does my camera have broken pixels?" — the Calibration page answers it, and names the one switch that fixes them.** `repair_sensor_defects` (v0.367.0) repairs exactly the broken photosites from the master dark, but it is an *advanced* Stack-form checkbox, off by default, and nothing anywhere told the owner either that their sensor has broken pixels or that the repair exists — so in practice it was invisible. New `defects.census_sensor_defects` (the per-phase measurement extracted into `_candidate_mask`, so `find_sensor_defects` is unchanged) reports the count **and** whether the map was refused — the two cases the repair path deliberately collapses — served by a read-only `GET /api/calibration/defects` over every *pedestal* master (dark/bias; a flat is never censused) and rendered as one self-hiding line inside each master's existing name cell: the count plus the switch's exact label, or a yellow "too many pixels read as broken to repair from this one". **A clean sensor says nothing** — no action, no line. The number is pinned equal to `CalibrationMasters.load`'s own `n_sensor_defects` on a master with a no-data patch, so screen and stack can't describe two sensors; cached per file identity (a master FITS is immutable once written). No pixel moves, no default flipped. Entry in [`SHIPPED.md`](SHIPPED.md).

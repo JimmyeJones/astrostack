@@ -192,26 +192,18 @@ def options_schema() -> list[StackOptionField]:
     return stack_option_fields()
 
 
-@router.get("/api/targets/{safe}/stack-defaults")
-def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
-    settings = deps.get_settings(request)
-    lib, proj = deps.open_target_project(request, safe)
-    try:
-        raw = proj.get_meta(STACK_DEFAULTS_META_KEY)
-    finally:
-        proj.close()
-        lib.close()
+def _merge_stack_defaults(settings: Any,
+                          saved: dict[str, Any] | None) -> dict[str, Any]:
+    """The Stack form's seed for a target whose saved blob is *saved*.
+
+    ``saved is None`` means "this target has never pressed Save as defaults" —
+    which is both the real never-saved case and the **baseline** the pinned-
+    options report compares a saved blob against, so the two can't drift into
+    two different ideas of what the form would have shown.
+    """
     merged = dict(settings.default_stack_options)
-    if raw:
-        # A valid-JSON *non-dict* (a legacy/hand-edited/foreign-version meta row —
-        # this endpoint's writer only ever stores a dict) survives json.loads but
-        # would make merged.update() raise TypeError, 500-ing the Stack form load.
-        # Guard it exactly like every sibling meta reader above so a malformed row
-        # degrades to "no saved defaults" rather than breaking the page.
-        with contextlib.suppress(json.JSONDecodeError):
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                merged.update(parsed)
+    if saved:
+        merged.update(saved)
     # For a *never-configured* target (no per-target saved defaults and no
     # global default_stack_options), turn smart auto outlier removal on in the
     # form the beginner sees. auto_reject (v0.143.0) picks min/max vs kappa-sigma
@@ -221,12 +213,33 @@ def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
     # explicitly-saved config are untouched, so a user who ever saved defaults
     # keeps exactly what they saved and the unattended path is byte-for-byte
     # unchanged (§9 upgrade-safe: no stored default flips).
-    if not raw and not settings.default_stack_options:
+    if saved is None and not settings.default_stack_options:
         merged.setdefault("auto_reject", True)
     # Fill any missing keys from the dataclass defaults via the schema.
     for fld in stack_option_fields():
         merged.setdefault(fld.key, fld.default)
     return merged
+
+
+@router.get("/api/targets/{safe}/stack-defaults")
+def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
+    from webapp.walkaway import parse_saved_stack_defaults
+
+    settings = deps.get_settings(request)
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        raw = proj.get_meta(STACK_DEFAULTS_META_KEY)
+    finally:
+        proj.close()
+        lib.close()
+    # A valid-JSON *non-dict* (a legacy/hand-edited/foreign-version meta row —
+    # this endpoint's writer only ever stores a dict) survives json.loads but
+    # would make merged.update() raise TypeError, 500-ing the Stack form load.
+    # The shared reader degrades it to "nothing saved" — but the *row* still
+    # exists, so it stays distinct from ``None`` ("never saved"), exactly as the
+    # ``if not raw`` this replaced did.
+    return _merge_stack_defaults(
+        settings, parse_saved_stack_defaults(raw) if raw else None)
 
 
 #: The calibration-master picks the Stack form posts alongside the engine
@@ -276,6 +289,52 @@ def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dic
         proj.close()
         lib.close()
     return clean
+
+
+@router.get("/api/targets/{safe}/stack-defaults/pinned")
+def get_pinned_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
+    """Which of this target's *saved* stack options hold it away from the global
+    defaults — i.e. what pressing "Save as defaults" once is still deciding.
+
+    The Save button persists the whole form, so a target saved months ago pins
+    every option that existed that day, including checkboxes nobody opened. Its
+    blob then wins over ``default_stack_options`` in both readers (this form's
+    seed and the unattended chain), so a switch flipped globally afterwards never
+    reaches that target and no screen says so. Read-only: nothing is stacked,
+    nothing is saved, no default is changed — this only *reports* the difference
+    the merge already applies, in the descriptors' own order and labels.
+
+    ``pinned`` is empty for a target that never saved defaults **and** for one
+    whose saved values still agree with the global ones, so the surface reading
+    it stays silent until there is a real disagreement to name.
+    """
+    from webapp.walkaway import parse_saved_stack_defaults, pinned_stack_options
+
+    settings = deps.get_settings(request)
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        raw = proj.get_meta(STACK_DEFAULTS_META_KEY)
+    finally:
+        proj.close()
+        lib.close()
+    saved = parse_saved_stack_defaults(raw)
+    # Compare against what this very form would have been seeded with had the
+    # target never saved anything — the same merge, through the same helper, so
+    # "what we report" and "what the merge does" cannot drift. Notably that
+    # includes the beginner ``auto_reject`` seed: a target that simply saved the
+    # form it was handed is not overriding anything and must stay silent.
+    baseline = _merge_stack_defaults(settings, None)
+    pinned = pinned_stack_options(
+        saved, baseline,
+        [(f.key, f.label, f.default) for f in stack_option_fields()])
+    return {
+        "has_saved": bool(saved),
+        "pinned": [
+            {"key": p.key, "label": p.label,
+             "saved": p.saved, "global_value": p.global_value}
+            for p in pinned
+        ],
+    }
 
 
 @router.get("/api/targets/{safe}/rejection-outlook")
