@@ -111,11 +111,11 @@ pinned here, so anything you left alone still follows your global Settings if yo
 change them later."* — and the button tooltip says the same. A beginner who never
 hears that assumes Save freezes everything, which is what it used to do.
 
-**Tests (+12 Python, +1 vitest).** `tests/webapp/test_stack_defaults_delta.py`:
+**Tests (+13 Python, +1 vitest).** `tests/webapp/test_stack_defaults_delta.py`:
 seven on the pure helper (an untouched value is not stored; a changed one is; a
 JSON `3` is not a change from `3.0`; a bool is never the same as a number; an
 unknown key is kept; a presence-is-the-decision key is kept when it matches; the
-delta never invents a value), and five through the endpoint — saving the form
+delta never invents a value), and six through the endpoint — saving the form
 untouched pins only the rejection choice, **a later global change now reaches a
 target that saved defaults** (fail-before: it stayed at the July value), what the
 user did change still wins and is still named by the pinned note with the right
