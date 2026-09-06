@@ -55,6 +55,12 @@ DEFECT_SIGMA = 12.0
 # enough to follow amp glow.
 _LOCAL_WINDOW = 5
 
+# Side (in same-phase samples) of the window a *no-data* sample is filled from
+# before the local median is taken. Wider than ``_LOCAL_WINDOW`` so a small hole
+# still reaches real data all round it, and a mean rather than a median so a
+# partly-filled window degrades smoothly. See ``_local_fill``.
+_FILL_WINDOW = 9
+
 # Refuse the whole map above this fraction of the sensor. Real Seestar sensors
 # carry defects in the 1e-5..1e-3 range; a percent-scale answer means the
 # threshold latched onto structure (a badly-built master, a light frame passed
@@ -69,6 +75,39 @@ _PHASE_NEIGHBOURS = tuple(
     for dx in (-2, 0, 2)
     if not (dy == 0 and dx == 0)
 )
+
+
+def _local_fill(plane: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """A stand-in value for every sample of ``plane`` the master says nothing
+    about: the mean of the *valid* samples around it.
+
+    The no-data samples have to hold *something* before ``median_filter`` runs,
+    and what they hold matters twice over. Filling them with the whole plane's
+    median — which is what this did until v0.369.4 — puts a value from the
+    middle of the frame into a corner that may be sitting under amp glow or a
+    dark-current gradient, i.e. exactly the structure ``_LOCAL_WINDOW`` exists
+    to follow. That spike then (a) reads as a defect at the filled sample itself
+    and (b) drags the local median of the *real* pixels beside it, so a hole big
+    enough to cover part of a 5×5 window flags a rosette of perfectly good
+    photosites around it. A locally-derived fill is flat against its own
+    surroundings, so it does neither.
+
+    Falls back to the plane's own median where a sample has no valid neighbour
+    within the window at all (a hole wider than ``_FILL_WINDOW``), which is the
+    degenerate case the old behaviour was — and those samples still can't be
+    flagged, because the caller masks them out afterwards.
+    """
+    from scipy.ndimage import uniform_filter
+
+    vals = np.where(valid, plane, 0.0).astype(np.float32, copy=False)
+    weight = valid.astype(np.float32)
+    num = uniform_filter(vals, size=_FILL_WINDOW, mode="reflect")
+    den = uniform_filter(weight, size=_FILL_WINDOW, mode="reflect")
+    kept = plane[valid]
+    fallback = float(np.median(kept)) if kept.size else 0.0
+    with np.errstate(invalid="ignore", divide="ignore"):
+        local_mean = num / den
+    return np.where(den > 0, local_mean, fallback).astype(np.float32, copy=False)
 
 
 def _robust_scale(residual: np.ndarray) -> float:
@@ -135,34 +174,40 @@ def find_sensor_defects(
             plane = np.asarray(arr[py::2, px::2], dtype=np.float32)
             if plane.size == 0:
                 continue
-            if exclude is not None:
-                # Neutralised as "no data" so the fill below gives them the
-                # plane's own median — they define nothing and are flagged
-                # nowhere.
-                plane = np.where(exclude[py::2, px::2], np.nan, plane)
             # A plane thinner than the window still works — ``median_filter``
             # reflects at the edge — but a 1-sample plane has no neighbourhood
             # to be an outlier against, so skip it rather than flag everything.
             if min(plane.shape) < 2:
                 continue
-            finite = np.isfinite(plane)
-            # Non-finite samples in a master are "no data", not a level: give
-            # them the plane's median so they neither define nor skew the local
-            # baseline. They fall out as defects below on their own merits only
-            # if the sanitized value the caller holds is genuinely off.
-            if not finite.all():
-                fill = float(np.median(plane[finite])) if finite.any() else 0.0
-                plane = np.where(finite, plane, fill)
+            # "No data" is the union of the caller's ``exclude`` map and any
+            # sample that is non-finite in its own right: a master says nothing
+            # about the sensor at either, so neither may define a baseline, skew
+            # the scale, or be flagged.
+            valid = np.isfinite(plane)
+            if exclude is not None:
+                valid &= ~exclude[py::2, px::2]
+            all_valid = bool(valid.all())
+            if not all_valid:
+                plane = np.where(valid, plane, _local_fill(plane, valid))
             local = median_filter(plane, size=_LOCAL_WINDOW, mode="reflect")
             residual = plane - local
-            scale = _robust_scale(residual)
+            # Measured over the samples the master actually knows about: a fill
+            # is a stand-in, not a measurement, and letting it into the MAD moves
+            # the threshold every real photosite is judged against.
+            scale = _robust_scale(residual if all_valid else residual[valid])
             tol = sigma * scale
             # ``scale == 0`` means the plane is *exactly* its own local median
             # everywhere the noise reaches — a synthetic or heavily quantised
             # master. Then any strict deviation is the outlier, which is the
             # same degradation ``masters._sigma_clip_mean`` makes for the same
             # reason: a zero scale must not be read as "no outliers here".
-            mask[py::2, px::2] = np.abs(residual) > tol
+            flagged = np.abs(residual) > tol
+            if not all_valid:
+                # The docstring's promise, enforced rather than assumed: a
+                # no-data sample can never be flagged, whatever the fill made
+                # its residual look like.
+                flagged &= valid
+            mask[py::2, px::2] = flagged
 
     n = int(np.count_nonzero(mask))
     if n and n > max_fraction * arr.size:

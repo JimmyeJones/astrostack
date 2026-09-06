@@ -1897,7 +1897,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   both pin — so it needs a shape that keeps a single high-count pixel opaque while spreading a count-1
   neighbourhood, not a plain box filter.
 
-- **NEW IDEA (Builder 2026-08-30, the half v0.309.0 checked and deliberately did NOT ship) — the Compare view
+- **✅ SHIPPED — v0.359.0 (`compareNorthUpOffer` + `NorthUpViewToggle` in `frontend/src/routes/Compare.tsx`),
+  which turns **both** pictures at once and offers the control only when the turn would leave both North-up
+  (at least one side has a rotation to apply, and neither is a run with no usable orientation — the
+  `directions`-is-null solved-ness signal point (3) below asked for). Struck 2026-09-06 by a Builder that
+  read this entry as open, opened `Compare.tsx` to start it, and found `CompareSideOrientation` already
+  there. Original entry kept for provenance:** ~~**NEW IDEA (Builder 2026-08-30, the half v0.309.0 checked
+  and deliberately did NOT ship) — the Compare view
   is not a lightbox, and North-up there needs a decision, not a copy-paste.** *(Pillar: enjoy + trust —
   PRIORITY 3; size S; read-only.)* The v0.308.0 follow-on assumed Compare "uses the same lightbox"; it does
   not. `routes/Compare.tsx` draws bare `<img>` elements inside a drag-to-reveal wipe (and a side-by-side grid),
@@ -1931,7 +1937,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   (`directions`/`scale_bar` are null without a WCS) before (a) is honest.
   **Nothing here is blocking** — it is a genuinely shippable S once (3) is wired — it just isn't the
   copy-paste the surrounding entries make it look like, and the next agent should not take the (c) verdict on
-  trust.
+  trust.~~
 
 - **🟡 SWEPT ONCE, ONE UNTRUTH FIXED (Builder, v0.309.1, branch `claude/compassionate-galileo-x2nj2o`); the
   colour-space axis is still open below — QA LEAD (Builder 2026-08-30, generalised from the v0.308.1 copy fix)
@@ -5850,7 +5856,12 @@ problems. Dogfood it every big-picture run and fix root causes.
 
   Original spec, for the record:
 
-  - **NEW BEGINNER FEATURE (Scout 2026-08-27 #15) — "Reveal": a one-tap, share-ready *cinematic zoom* of your
+  - **✅ SHIPPED as the "Zoom clip" — v0.303.0 (`seestack/render/zoomclip.py::build_zoom_clip`, the
+    `…/zoom-clip` endpoints in `webapp/routers/stack.py`), with the "it's building" state in v0.304.3.
+    Struck 2026-09-06 by a Builder that read this entry as open and went looking for it. It shipped under a
+    different name, which is why "grep for Reveal" found nothing — grep `zoomclip` instead. Original spec kept
+    for provenance only:** ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #15) — "Reveal": a one-tap, share-ready
+    *cinematic zoom* of your
     finished picture — a short looping clip that glides from the whole frame into the target and back out, so a
     galaxy or nebula makes a scroll-stopping post instead of a still that's easy to swipe past.** *(Pillar: enjoy +
     share, PRIORITY 3; size M; fully offline, additive, read-only — no new deps, no network, no schema/config
@@ -5889,7 +5900,9 @@ problems. Dogfood it every big-picture run and fix root causes.
     the full 100-MP mosaic. **Builder slices:** (a) pure `build_reveal(...)` + unit tests; (b) wire the cached
     `_reveal.webp` write into the output writer + `RUN_ARTEFACT_SUFFIXES` + a result-menu download button
     (self-hiding until the file exists); (c) optional later — a portrait (9:16) variant for phone-native posting,
-    mirroring the existing wallpaper-aspect crops.
+    mirroring the existing wallpaper-aspect crops.~~ *(Slice (c), the portrait 9:16 variant, is the only part
+    of the spec that is genuinely unbuilt; it is marginal against the shipped clip, so it is not re-filed as an
+    open item.)*
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #12) — "Scale & sky-compass": an optional little scale bar (in
   intuitive units) plus a North/East compass baked into a shared/exported picture, so a beginner's shot reads
@@ -8329,6 +8342,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.369.4** — Calibration / data integrity (stacking-engine-class per §1): **a no-data hole in a master invented sensor defects around itself.** `defects.find_sensor_defects` filled every `exclude`d (sanitized-to-0) sample with the *whole plane's* median before taking the local median, so inside amp glow the fill read as a defect **and** dragged the 5×5 baseline of the real photosites beside it — 115 flagged pixels (48 inside the hole) on a believable master with an 8×8 hole, each overwriting a good sample on every sub. Now filled from `_local_fill` (local mean of valid samples over `_FILL_WINDOW`), the MAD is measured over valid samples only, and `flagged &= valid` enforces the docstring's promise; a genuine hot pixel beside the hole is still found. Gated (opt-in `repair_sensor_defects`, imported masters only) and bit-identical for a master with no non-finite pixels. Entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.369.3** — Editor / one-click Auto (PRIORITY 1): **Adaptive Auto's first type-scoped nudge moved one *bucket*, not one step.** `auto_prefs.record_feedback` started a fresh `by_type` override at neutral, so with a global `brightness=+2` one "too bright" tap on a galaxy landed at **−1** — a three-step jump past neutral — and `+1` was unreachable, the taste oscillating between `+2` and `−1` forever (a per-type 0 was dropped, handing the parameter back to the global set). Now a type-scoped tap seeds from the aged global bias and moves one step, and a per-type 0 is *stored* while a non-zero global sits underneath it (`_coerce_bucket`/`_bucket_biases` `keep_zero`, `by_type` only; a bias that merely *faded* to 0 still falls back as before). Found by auditing the brand-new v0.369.x code. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.369.1** — Data integrity / calibration trust (treated as stacking-engine-class per §1): **the one-click discover→build path stops combining the frames its 4-header sampling missed.** `discover.classify_folder` confirms a folder's kind from `SAMPLE_HEADERS` (4) evenly-spaced headers, but `masters.build_master` then combined *every* shape-matching FITS — so a twelve-file folder whose sampled positions all read "dark" but which also held two lights built a "master dark" out of both (reproduced: 4 darks at 10 + 2 lights at 900 → a master averaging >300), and a contaminated master is subtracted from every frame it is later applied to. The shape rule can't catch it (same camera, same shape) and `header_kind_note` only *captions* it. New `build_master(require_declared_kind=...)` drops a frame declaring a different slot (reason `"wrong kind"`, already rendered by the Jobs page's `skipped_buckets`), **keeps** a frame that declares nothing and a flat-dark in the dark slot (reusing the now-public `discover.KIND_TO_MASTER`), and runs **before** the majority-shape vote. Default `False` ⇒ the manual build a user aimed at a folder is unchanged. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.369.0** — Editor + autonomy (PRIORITY 1/2), the last remaining sub-part of the ⭐ owner-requested **Adaptive Auto** ask: **recency decay — "recent feedback weighs more", which the original spec asked for and no slice had built.** A bias was permanent: three "too dark" taps saturated `brightness` at `+3` for the life of the library unless the owner found the opposite chip three times or reset the whole profile. Now a bias fades **one step per `DECAY_DAYS` (90)** without reinforcement (`auto_prefs._faded`), never crossing zero into the opposite taste, reading a future stamp (clock skew) as "just now"; decay applies at read time *and* before a new tap, so a tap builds on the taste actually in force and restarts that parameter's clock. **The fade is never silent** — new `steps_faded`/`fade_note` and an additive `AutoPreferencesOut.fade_note`, rendered in `AutoFeedback.tsx`, explain both a partial fade and the full one (where the "why Auto shifted" note would otherwise just vanish). **Upgrade-safe by construction:** decay needs a `stamps` entry, and a profile written before this shipped has none — it never fades and reads byte-for-byte as today. Slice **(b) is now complete**; only the spec's *"optional later"* slice (c) remains. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.368.0** — Friendliness + autonomy (PRIORITY 3/2): **"Was last night off for you?" — the newest night's star size against the owner's own usual, so dew / a wrong focus / a bad-seeing night is caught the morning after instead of weeks later in a mushy stack.** The app only ever trended FWHM *within* a session (`session_recap.focus_trend`, early third vs late third), which is structurally blind to a night that was soft from the first sub. New pure `activity_calendar.off_night(nights)` sits beside `sharpest_night` and reads only what `finalize_calendar` already folded — the Dashboard heatmap's cached per-night median FWHM — so it costs no extra library walk and shares one definition of "that night's star size". Silent unless the latest night is ≥1.30× the **median of the per-night medians** of ≥4 *earlier* qualifying nights, and never a diagnosis (seeing is not a fault: it names causes and asks the owner to look). Self-hiding `OffNightCard` in the Dashboard's existing **Recent** group beside `LastNightCard`, on the shared `["activity-calendar"]` key. Slice (b), the season-long sparkline, deliberately not built. Entry in [`SHIPPED.md`](SHIPPED.md).

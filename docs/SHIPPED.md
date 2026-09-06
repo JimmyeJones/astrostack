@@ -14,6 +14,125 @@ Newest first.
 
 ---
 
+## v0.369.4 — 2026-09-06 — a no-data hole in a master stops inventing sensor defects around itself
+
+**(Builder 2026-09-06, found and reproduced while auditing the brand-new v0.367.0
+`seestack/calibrate/defects.py`, which no run had reviewed. Branch
+`claude/sweet-babbage-v7xsyy`.) Calibration / data integrity — treated as
+stacking-engine-class per AGENTS.md §1, because a false defect overwrites a good
+photosite on *every* sub.** *(Severity: image-quality/correctness, but gated —
+`StackOptions.repair_sensor_defects` is opt-in and defaults `False`, and it needs a
+master carrying non-finite pixels, i.e. an imported/third-party one. Confidence:
+reproduced, then pinned by two fail-before regression tests.)*
+
+**The bug.** `find_sensor_defects` flags a photosite by its deviation from the local
+median of its own CFA phase. Samples the master says nothing about — the caller's
+`exclude` map, which is exactly the set `_sanitize_pedestal` zeroed — have to hold
+*something* before `median_filter` runs, and they were filled with the **whole plane's
+median**. The docstring promised those pixels "are neutralised before measuring and can
+never be flagged". They could, and so could their neighbours:
+
+* in a corner sitting under amp glow or a dark-current gradient — the structure
+  `_LOCAL_WINDOW` exists to *follow* — the plane median is nothing like the local level,
+  so the fill read as a defect at its own sample; and
+* a hole wide enough to cover part of a 5×5 phase window dragged the local median of the
+  **real** photosites beside it, flagging a rosette of perfectly good pixels around it.
+
+Reproduced on a believable master (500 ADU pedestal + corner amp glow + read noise) with
+an 8×8 no-data hole inside the glow: **115 flagged pixels, 48 of them inside the hole
+itself** — every one of which then has the light frame's own good sample overwritten from
+its neighbours, on every sub of every stack. The existing guard test passed because it
+used one lone pixel in a *flat* part of the frame, where the plane median happens to be
+right.
+
+**The fix.** A no-data sample is filled from `_local_fill` — the mean of the valid
+samples within `_FILL_WINDOW` (9 phase samples = 18 raw px, wider than the median window
+so a small hole still reaches real data all round it), falling back to the old plane
+median only where a hole is wider than that. Being locally flat, the fill neither reads as
+a defect nor moves its neighbours' baseline. Two supporting halves: the robust MAD is
+measured over the **valid** samples only (a stand-in is not a measurement, and letting it
+into the scale moves the threshold every real photosite is judged against), and the
+docstring's promise is now *enforced* rather than assumed — `flagged &= valid`. Non-finite
+samples with no `exclude` map take the same path, which is the same set in practice.
+
+After: **0 flagged**, while a genuine hot pixel elsewhere in the frame, and one right
+beside the hole, are both still found.
+
+**Upgrade-safe (§9):** the fill only runs when there is something to fill, so an ordinary
+master — every install's case — takes a bit-identical path (pinned by
+`test_a_master_with_no_data_anywhere_is_measured_exactly_as_before`). No schema, no config
+key, no API shape, no on-disk change, no default flipped; `repair_sensor_defects` stays
+`False`.
+
+**Tests.** +3 in `tests/test_defect_map.py`: the no-data patch inside the glow flagging
+nothing (fails before — 50 spurious defects), the same hole not *blinding* the map to a
+real hot pixel next to it (fails before), and the bit-identical no-hole path.
+
+---
+
+## v0.369.3 — 2026-09-06 — one tap is one step: Adaptive Auto's first type-scoped nudge no longer jumps across the global taste
+
+**(Builder 2026-09-06, found and reproduced while auditing the brand-new v0.369.x
+`auto_prefs` code, which no run had reviewed. Branch `claude/sweet-babbage-v7xsyy`.)
+Editor / one-click Auto — PRIORITY 1, because the profile changes the picture Auto
+produces.** *(Severity: broken-UX + image-changing, from a single click. Confidence:
+reproduced, then pinned by three regression tests.)*
+
+**The bug.** `seestack/edit/auto_prefs.py::record_feedback` writes a type-scoped cue
+(the owner tapped "too bright" while looking at a galaxy) into that archetype's
+`by_type` bucket, and `effective_biases` lets a per-type bias **override** the global
+one per parameter. A fresh override started at **neutral**, so the first type-scoped
+tap did not move the taste one step — it *replaced* the value in force with ±1.
+
+With a global `brightness = +2` — what the owner gets from two taps on any picture
+`classify_target` can't place, which is the ordinary way the global bucket ever becomes
+non-zero — one "too bright" on a galaxy landed at **−1**: a three-step swing
+(0.06 in `target_bg`) straight past neutral, in the direction they had not asked for.
+Worse, the value they *were* asking for was unreachable: tapping "too dark" walked the
+override back to 0, which was dropped, which handed the parameter back to the global
+`+2`. So the taste oscillated between `+2` and `−1` forever and could never land on
+`+1`, on `0`, or anywhere else.
+
+Reproduced before the fix (`effective_biases(prof, "galaxy")`):
+
+| taps on a galaxy, global `+2` | before | after |
+|---|---|---|
+| (none) | +2 | +2 |
+| too_bright | **−1** | +1 |
+| too_bright | +2 | 0 |
+| too_bright | −1 | −1 |
+| too_dark | +2 | 0 |
+
+**The fix, in two halves.** (a) A type-scoped tap on a parameter the bucket has never
+spoken about **seeds from the taste in force** — the aged global bias — and then applies
+its one step. (b) A per-type **0 is stored** rather than dropped when there is a non-zero
+global bias underneath it, because "no shift for my galaxies, while everything else stays
++2 brighter" is a real setting and dropping the 0 hands the parameter straight back to the
+global taste — the same off-by-a-bucket jump, one step further on. `_coerce_bucket` /
+`_bucket_biases` grew a `keep_zero` flag used **only** for `by_type` buckets; a bias that
+merely *faded* to 0 is still dropped, so an expired override still hands its parameter back
+to the global set (the behaviour `test_a_faded_override_unmasking_a_bigger_global_bias_
+still_counts_as_a_fade` pins).
+
+**Upgrade-safe (§9):** no schema, no config key, no API shape, no on-disk change, no
+default flipped. Profiles written before this carry no explicit zeros, so they read exactly
+as they did; `effective_biases` still never returns a zero, so the endpoint's `biases` map
+and the frontend are byte-identical. The global-only path (an unclassifiable picture) is
+untouched by construction — `global_step` is forced to 0 there, since the global set *is*
+the bucket.
+
+**Tests.** +3 in `tests/test_auto_prefs.py`: the one-step regression (fails before —
+`{'brightness': -1}` where `+1` is wanted), a full walk of every reachable value in both
+directions including the sticky neutral (`+2 → +1 → 0 → −1 → −2 → −3` and back up to the
+`+3` ceiling), and a JSON round-trip proving the stored neutral survives the webapp's
+persistence and really does give a galaxy Auto's measured `target_bg` while a nebula keeps
+the shifted one. Three existing tests that reached their scenario *through* the defective
+arithmetic now take the extra taps the honest one-step walk needs; each still asserts the
+same property it always did (per-type precedence, a faded override falling back to global,
+and the unmasking fade still counting).
+
+---
+
 ## v0.369.1 — 2026-09-06 — the one-click calibration build stops combining what the sampling missed
 
 **(Scout 2026-09-06, filed as a traced-not-reproduced note; verified by reproduction and
