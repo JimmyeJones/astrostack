@@ -3,6 +3,8 @@ and its effect on the one-click Auto recipe."""
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 
@@ -304,3 +306,167 @@ def test_auto_recipe_carries_the_highlight_bias_into_the_stretch():
     assert biased.params["highlights"] > 0.0
     # The stretch's own measured value is untouched by this cue.
     assert biased.params["target_bg"] == pytest.approx(base.params["target_bg"])
+
+
+# --- recency decay (slice (b)'s remaining half) -----------------------------
+# "Recent feedback weighs more" — a bias fades one step per DECAY_DAYS without
+# reinforcement, so a taste the owner moved on from returns to Auto's measured
+# default on its own. Every test drives the clock explicitly (`now=`), so none of
+# them are wall-clock flaky.
+
+_DAY = 86400.0
+_T0 = 1_700_000_000.0  # an arbitrary fixed epoch
+
+
+def test_an_unreinforced_bias_fades_one_step_per_decay_period():
+    prof = None
+    for _ in range(3):
+        prof = auto_prefs.record_feedback(prof, "too_dark", now=_T0)
+    assert auto_prefs.effective_biases(prof, now=_T0) == {"brightness": 3}
+    # Just short of one period: nothing has moved yet.
+    almost = _T0 + auto_prefs.DECAY_DAYS * _DAY - _DAY
+    assert auto_prefs.effective_biases(prof, now=almost) == {"brightness": 3}
+    for periods, expected in ((1, 2), (2, 1), (3, 0), (9, 0)):
+        at = _T0 + periods * auto_prefs.DECAY_DAYS * _DAY
+        got = auto_prefs.effective_biases(prof, now=at)
+        assert got.get("brightness", 0) == expected, (periods, got)
+    # Fully faded reads as neutral — Auto is back to its data-driven values.
+    far = _T0 + 3 * auto_prefs.DECAY_DAYS * _DAY
+    assert auto_prefs.is_neutral(prof, now=far)
+    assert auto_prefs.apply_profile(prof, now=far, **_BASE)["target_bg"] == pytest.approx(
+        _BASE["target_bg"])
+
+
+def test_a_negative_bias_fades_toward_neutral_not_through_it():
+    prof = None
+    for _ in range(2):
+        prof = auto_prefs.record_feedback(prof, "too_bright", now=_T0)
+    assert auto_prefs.effective_biases(prof, now=_T0) == {"brightness": -2}
+    one = _T0 + auto_prefs.DECAY_DAYS * _DAY
+    assert auto_prefs.effective_biases(prof, now=one) == {"brightness": -1}
+    # Never crosses zero into the opposite taste, however long it is left.
+    for periods in (2, 3, 40):
+        at = _T0 + periods * auto_prefs.DECAY_DAYS * _DAY
+        assert auto_prefs.effective_biases(prof, now=at) == {}
+
+
+def test_a_profile_written_before_decay_shipped_never_fades():
+    """§9 upgrade-safety: an old stored profile carries no stamps, so it behaves
+    byte-for-byte as it does today no matter how much later it is read."""
+    old = {"version": 1, "biases": {"brightness": 3, "sharpen": -2}, "counts": {}}
+    for years in (0, 1, 10):
+        at = _T0 + years * 365 * _DAY
+        assert auto_prefs.effective_biases(old, now=at) == {
+            "brightness": 3, "sharpen": -2}
+        assert auto_prefs.steps_faded(old, now=at) == 0
+        assert auto_prefs.fade_note(old, now=at) is None
+
+
+def test_new_feedback_builds_on_the_faded_value_and_restarts_the_fade():
+    """A tap means "a bit more than it is *now*", not "a bit more than the
+    saturated value I stopped meaning two years ago"."""
+    prof = None
+    for _ in range(3):
+        prof = auto_prefs.record_feedback(prof, "too_dark", now=_T0)
+    late = _T0 + 2 * auto_prefs.DECAY_DAYS * _DAY   # faded 3 → 1
+    prof = auto_prefs.record_feedback(prof, "too_dark", now=late)
+    assert auto_prefs.effective_biases(prof, now=late) == {"brightness": 2}
+    # ...and the clock restarted from the new tap, not from the original one.
+    assert auto_prefs.effective_biases(
+        prof, now=late + auto_prefs.DECAY_DAYS * _DAY) == {"brightness": 1}
+
+
+def test_the_opposite_cue_still_walks_a_faded_bias_all_the_way_back():
+    prof = auto_prefs.record_feedback(None, "too_dark", now=_T0)
+    late = _T0 + 5 * auto_prefs.DECAY_DAYS * _DAY
+    prof = auto_prefs.record_feedback(prof, "too_bright", now=late)
+    # The +1 had already faded to 0, so one "too bright" leaves a real −1 rather
+    # than silently netting out against a stale accumulator.
+    assert auto_prefs.effective_biases(prof, now=late) == {"brightness": -1}
+
+
+def test_a_faded_per_type_override_falls_back_to_the_global_taste():
+    prof = auto_prefs.record_feedback(None, "too_dark", now=_T0)          # global
+    prof = auto_prefs.record_feedback(prof, "too_bright", now=_T0,
+                                      object_type="galaxy")               # override
+    assert auto_prefs.effective_biases(prof, "galaxy", now=_T0) == {"brightness": -1}
+    late = _T0 + 2 * auto_prefs.DECAY_DAYS * _DAY
+    # Both have faded away by now, so neither taste applies...
+    assert auto_prefs.effective_biases(prof, "galaxy", now=late) == {}
+    # ...and the note no longer claims a galaxy-scoped taste that isn't in force.
+    assert auto_prefs.describe_profile(prof, "galaxy", now=late) is None
+
+
+def test_the_fade_is_never_silent():
+    prof = None
+    for _ in range(3):
+        prof = auto_prefs.record_feedback(prof, "too_dark", now=_T0)
+    assert auto_prefs.steps_faded(prof, now=_T0) == 0
+    assert auto_prefs.fade_note(prof, now=_T0) is None      # nothing has moved yet
+
+    part = _T0 + auto_prefs.DECAY_DAYS * _DAY
+    assert auto_prefs.steps_faded(prof, now=part) == 1
+    note = auto_prefs.fade_note(prof, now=part)
+    assert note is not None and "fading" in note
+    # The "why Auto shifted" note is still there, just weaker.
+    assert auto_prefs.describe_profile(prof, now=part) is not None
+
+    gone = _T0 + 3 * auto_prefs.DECAY_DAYS * _DAY
+    assert auto_prefs.steps_faded(prof, now=gone) == 3
+    gone_note = auto_prefs.fade_note(prof, now=gone)
+    # The vanished "why" note is explained rather than just disappearing.
+    assert auto_prefs.describe_profile(prof, now=gone) is None
+    assert gone_note is not None and "measured default" in gone_note
+
+
+def test_a_clock_that_jumps_backwards_does_not_age_a_bias_backwards():
+    """A stamp in the future (NAS/host clock skew, a restored backup) reads as
+    'just now' — it must never resurrect or invert a bias."""
+    prof = auto_prefs.record_feedback(None, "too_dark", now=_T0)
+    earlier = _T0 - 400 * _DAY
+    assert auto_prefs.effective_biases(prof, now=earlier) == {"brightness": 1}
+    assert auto_prefs.fade_note(prof, now=earlier) is None
+
+
+def test_a_garbled_stamp_degrades_to_no_decay_rather_than_raising():
+    """§9 loader tolerance: the stamps map is as untrusted as the rest of the
+    store, and an unusable stamp must fall back to today's no-fade behaviour."""
+    for bad in (None, "yesterday", -1, 0, float("nan"), float("inf"), True, {}):
+        prof = {"version": 1, "biases": {"brightness": 2},
+                "stamps": {"brightness": bad}}
+        assert auto_prefs.effective_biases(prof, now=_T0) == {"brightness": 2}
+    # A stamp for a parameter that carries no bias is simply dropped.
+    prof = {"version": 1, "biases": {}, "stamps": {"brightness": _T0}}
+    assert auto_prefs.effective_biases(prof, now=_T0) == {}
+    # ...and so is a stamp naming a parameter this version doesn't know.
+    prof = {"version": 1, "biases": {"brightness": 1}, "stamps": {"nope": _T0}}
+    assert auto_prefs.effective_biases(prof, now=_T0) == {"brightness": 1}
+
+
+def test_a_recorded_profile_stays_json_safe():
+    """The webapp persists this dict with json.dumps — a stamp must not smuggle
+    in anything that isn't."""
+    prof = auto_prefs.record_feedback(None, "too_dark", now=_T0)
+    prof = auto_prefs.record_feedback(prof, "too_soft", now=_T0,
+                                      object_type="nebula")
+    round_tripped = json.loads(json.dumps(prof))
+    assert auto_prefs.effective_biases(round_tripped, "nebula", now=_T0) == {
+        "brightness": 1, "sharpen": 1}
+
+
+def test_a_faded_override_unmasking_a_bigger_global_bias_still_counts_as_a_fade():
+    """The one case where a parameter's *applied* magnitude goes up as it fades:
+    a per-type override that stops winning hands the parameter back to a stronger
+    global bias. That must not net out against the fade and silence the note."""
+    prof = None
+    for _ in range(3):
+        prof = auto_prefs.record_feedback(prof, "too_dark", now=_T0)      # global +3
+    prof = auto_prefs.record_feedback(prof, "too_bright", now=_T0,
+                                      object_type="galaxy")               # override −1
+    assert auto_prefs.effective_biases(prof, "galaxy", now=_T0) == {"brightness": -1}
+
+    late = _T0 + auto_prefs.DECAY_DAYS * _DAY
+    # The override has faded away; the global (also one step down) now applies.
+    assert auto_prefs.effective_biases(prof, "galaxy", now=late) == {"brightness": 2}
+    assert auto_prefs.steps_faded(prof, "galaxy", now=late) >= 0
+    assert auto_prefs.fade_note(prof, "galaxy", now=late) is not None

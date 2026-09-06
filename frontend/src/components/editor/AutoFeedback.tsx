@@ -96,6 +96,11 @@ export function AutoFeedback(
   });
   const busy = feedback.isPending || reset.isPending;
   const note = prefs.data?.note ?? null;
+  // Recency decay eases an unreinforced taste back toward Auto's measured
+  // default. Say so when it has actually moved something — including when it has
+  // moved *everything*, which is the case that would otherwise look like the
+  // "why Auto shifted" note silently disappearing.
+  const fadeNote = prefs.data?.fade_note ?? null;
 
   return (
     <Stack gap={4} mt={6}>
@@ -124,6 +129,7 @@ export function AutoFeedback(
           </Anchor>
         </Text>
       ) : null}
+      {fadeNote ? <Text size="10px" c="dimmed">{fadeNote}</Text> : null}
     </Stack>
   );
 }

@@ -742,6 +742,37 @@ def test_auto_feedback_records_and_resets(client, built_library):
     assert client.get("/api/editor/auto-preferences").json()["neutral"] is True
 
 
+def test_auto_preferences_report_a_faded_taste(client, built_library):
+    """Recency decay reaches the editor: a taste the owner stopped reinforcing has
+    already eased off by the time the endpoint serves it, and the response says so
+    rather than letting the "why Auto shifted" note quietly vanish."""
+    import json as _json
+
+    from seestack.edit import auto_prefs
+
+    client.post("/api/editor/auto-preferences/feedback", json={"cue": "too_dark"})
+    fresh = client.get("/api/editor/auto-preferences").json()
+    assert fresh["biases"]["brightness"] == 1
+    assert fresh["fade_note"] is None          # nothing has faded yet
+
+    # Age the stored stamp past one decay period, exactly as the clock would.
+    from seestack.io.library import Library
+
+    key = "editor_auto_preferences"
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        stored = _json.loads(lib.get_meta(key))
+        stored["stamps"]["brightness"] -= (auto_prefs.DECAY_DAYS + 1) * 86400.0
+        lib.set_meta(key, _json.dumps(stored))
+    finally:
+        lib.close()
+
+    aged = client.get("/api/editor/auto-preferences").json()
+    assert aged["neutral"] is True and aged["biases"] == {}
+    assert aged["note"] is None
+    assert aged["fade_note"] and "measured default" in aged["fade_note"]
+
+
 def test_auto_feedback_unknown_cue_is_rejected(client, built_library):
     r = client.post("/api/editor/auto-preferences/feedback", json={"cue": "make_it_pop"})
     assert r.status_code == 422

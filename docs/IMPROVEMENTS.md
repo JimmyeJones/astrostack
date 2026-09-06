@@ -254,21 +254,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   - `webapp/watcher.py:81` (`self._stable &= seen`) — a one-poll transient `stat()` failure on an already-stable
     file drops it from `_stable`, re-arms it, and re-fires `on_batch_ready` a poll later. **Benign** — ingest dedup
     (`_dedup_key`) prevents any double DB row; cosmetic/perf only.
-  - **(Scout 2026-09-06, traced not reproduced) the one-click discover→build calibration path can build a
-    contaminated master from a *mixed* folder.** `seestack/calibrate/discover.classify_folder` confirms a folder
-    is calibration frames of one kind by **sampling only `SAMPLE_HEADERS` (4)** evenly-spaced headers, but
-    `webapp/routers/calibration.build_master_from_incoming` → `pipeline.submit_build_master` →
-    `seestack/calibrate/masters.build_master` then combines **every** shape-matching FITS in `source_dir`
-    (`masters.py:245-263`) with **no per-frame filter to the requested kind**. So a folder whose 4 sampled frames
-    are all darks but that also holds lights (or darks of a second exposure) builds a master from the whole mixed
-    set. **Not filed as a live bug:** (1) it needs an unusual folder — MIN_FRAMES=5 and all 4 evenly-spaced
-    samples must read as one kind; (2) there is already a surface — `build_master` tallies each combined frame's
-    own `IMAGETYP` into `header_kinds` → the v0.356.0 `header_kind_note`, so the user is *told* "built from 60
-    dark, 10 light"; and (3) a manual build from a folder the user chose is *meant* to take all frames, so a blind
-    filter would be a behaviour change on that path. **If ever hardened:** filter to the requested kind only on the
-    *discover-driven* build (not the manual one), reusing `frame_kind_from_header`, and skip a frame that declares
-    a different slot — a light in a "dark" build is the one case worth dropping. Low value until the owner reports
-    a mixed capture folder. (S, autonomy/trust.)
+  - ~~**(Scout 2026-09-06) the one-click discover→build calibration path can build a contaminated master
+    from a *mixed* folder.**~~ — **FIXED v0.369.1** (`masters.build_master(require_declared_kind=True)`,
+    set only by `routers/calibration.build_master_from_incoming`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 
 > **SCOUT ADVERSARIAL QA — stacking-engine + adjacent re-audit traced CLEAN; the two bugs above are in ingest /
 > render, not the stacking math (Scout 2026-08-13, branch `claude/focused-keller-zi700s`).** Baseline: the
@@ -3344,8 +3332,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   monkeypatched archetype — bucket not global, run Auto reflects it), `AutoFeedback.test.tsx`
   (+1 scoped + updated global assertion). **Remaining slices for a future run:** the two other
   parts of (b) — ~~a **"highlights/core clipped" cue** (still needs a stretch highlight-knee
-  param)~~ **SHIPPED v0.237.0 (see below)** and **recency decay** — and **(c)** an optional light
-  statistical fit (numpy/scikit, no NN).
+  param)~~ **SHIPPED v0.237.0 (see below)** and ~~**recency decay**~~ **SHIPPED v0.369.0
+  (`auto_prefs.DECAY_DAYS` / `_faded` / `steps_faded` / `fade_note`, entry in
+  [`SHIPPED.md`](SHIPPED.md))** — so **slice (b) is now complete**. The only slice left is
+  **(c)**, an optional light statistical fit (numpy/scikit, no NN) — and that one is *optional
+  later* by the original spec, not queued work.
   Original slice-(a) write-up kept for provenance below.
 - **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
   auto-processed image (no ML runtime, fully offline/private).** — **slice (a) SHIPPED
@@ -3380,7 +3371,8 @@ problems. Dogfood it every big-picture run and fix root causes.
   blob, no schema/config/API-shape/default change; Auto is neutral until the owner gives
   feedback. **Remaining slices for a future run:** **(b)** per-object-type profiles
   (galaxy/nebula/cluster — the classifier already exists) — **SHIPPED v0.169.0, see the
-  top note** — its recency-decay and "highlights/core clipped"-cue sub-parts remain; **(c)**
+  top note** — its recency-decay (**SHIPPED v0.369.0**) and "highlights/core clipped"-cue
+  (**SHIPPED v0.237.0**) sub-parts are now done too; **(c)**
   *optional later* a light statistical fit (numpy/scikit, no NN). Original spec kept for provenance:
 - **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
   auto-processed image (no ML runtime, fully offline/private).** The owner wants to
@@ -7908,6 +7900,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   case explicitly while there: a plain run should never carry a `preview_crop_json` (only the auto-edit writes
   one, and it sets `preview_display_space` too), but nothing asserts that, and if it can happen the full-res
   download is showing a differently-*framed* picture the same way it was showing a differently-rotated one.
+  **↳ THE CROP HALF IS ANSWERED — a non-finding; don't re-trace it (Builder 2026-09-06).** Both writers of
+  `preview_crop_json` set the display-space marker in the same block (`pipeline.py:3199` → `:3208`), and the
+  North-up "Adjust → Save" endpoint refuses a non-display-space run with a 400 *before* it writes either — so
+  the crop is fenced off where it could be created, unlike the rotation, which was simply forgotten in one of
+  the two renderers. The remaining consolidation is a **pure refactor with no known defect behind it**; it was
+  sized and deliberately not taken. Full working in [`PROCESS-NOTES.md`](PROCESS-NOTES.md), 2026-09-06.
 
 - **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by v0.310.0 / v0.311.0) — the wallpaper and the
   share JPEG are now real renders, and nothing caches them.** *(Size S if it ever bites; **do not build it on
@@ -8331,6 +8329,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.369.1** — Data integrity / calibration trust (treated as stacking-engine-class per §1): **the one-click discover→build path stops combining the frames its 4-header sampling missed.** `discover.classify_folder` confirms a folder's kind from `SAMPLE_HEADERS` (4) evenly-spaced headers, but `masters.build_master` then combined *every* shape-matching FITS — so a twelve-file folder whose sampled positions all read "dark" but which also held two lights built a "master dark" out of both (reproduced: 4 darks at 10 + 2 lights at 900 → a master averaging >300), and a contaminated master is subtracted from every frame it is later applied to. The shape rule can't catch it (same camera, same shape) and `header_kind_note` only *captions* it. New `build_master(require_declared_kind=...)` drops a frame declaring a different slot (reason `"wrong kind"`, already rendered by the Jobs page's `skipped_buckets`), **keeps** a frame that declares nothing and a flat-dark in the dark slot (reusing the now-public `discover.KIND_TO_MASTER`), and runs **before** the majority-shape vote. Default `False` ⇒ the manual build a user aimed at a folder is unchanged. Entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.369.0** — Editor + autonomy (PRIORITY 1/2), the last remaining sub-part of the ⭐ owner-requested **Adaptive Auto** ask: **recency decay — "recent feedback weighs more", which the original spec asked for and no slice had built.** A bias was permanent: three "too dark" taps saturated `brightness` at `+3` for the life of the library unless the owner found the opposite chip three times or reset the whole profile. Now a bias fades **one step per `DECAY_DAYS` (90)** without reinforcement (`auto_prefs._faded`), never crossing zero into the opposite taste, reading a future stamp (clock skew) as "just now"; decay applies at read time *and* before a new tap, so a tap builds on the taste actually in force and restarts that parameter's clock. **The fade is never silent** — new `steps_faded`/`fade_note` and an additive `AutoPreferencesOut.fade_note`, rendered in `AutoFeedback.tsx`, explain both a partial fade and the full one (where the "why Auto shifted" note would otherwise just vanish). **Upgrade-safe by construction:** decay needs a `stamps` entry, and a profile written before this shipped has none — it never fades and reads byte-for-byte as today. Slice **(b) is now complete**; only the spec's *"optional later"* slice (c) remains. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.368.0** — Friendliness + autonomy (PRIORITY 3/2): **"Was last night off for you?" — the newest night's star size against the owner's own usual, so dew / a wrong focus / a bad-seeing night is caught the morning after instead of weeks later in a mushy stack.** The app only ever trended FWHM *within* a session (`session_recap.focus_trend`, early third vs late third), which is structurally blind to a night that was soft from the first sub. New pure `activity_calendar.off_night(nights)` sits beside `sharpest_night` and reads only what `finalize_calendar` already folded — the Dashboard heatmap's cached per-night median FWHM — so it costs no extra library walk and shares one definition of "that night's star size". Silent unless the latest night is ≥1.30× the **median of the per-night medians** of ≥4 *earlier* qualifying nights, and never a diagnosis (seeing is not a fault: it names causes and asks the owner to look). Self-hiding `OffNightCard` in the Dashboard's existing **Recent** group beside `LastNightCard`, on the shared `["activity-calendar"]` key. Slice (b), the season-long sparkline, deliberately not built. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.367.1** — Stacking-engine hardening (PRIORITY 1 current focus), the traced-but-unreachable batch under "Bugs" drained in one pass, each with a fail-before regression in the new `tests/test_engine_defensive_guards.py`: `align.py`'s sub-pixel cap rewritten as `not (abs(dy) <= CAP and abs(dx) <= CAP)` at **both** sites, so a NaN shift reads as "too large" instead of slipping through every comparison and letting `nd_shift` wipe the frame; `weighting.py`'s FWHM ratio computed in `np.float64` so a pathological `fwhm_px` saturates to the 1.0 the formula already wants rather than raising `OverflowError` and sinking the run; `reference.py::pick_central_frame` filtering on `math.isfinite` to match `pointings.py`, so a NaN centre can't be picked as the whole stack's reference; `storage.py::prune_stack_runs`'s two closes nested like `get_storage`'s; and `solve/runner.py`'s "so it stops being re-offered" comment corrected to what the branch actually does (`build_solve_arglist` deliberately keeps offering a `solve_failed:` frame, which is right — an unreadable sidecar is usually transient). `align.py::extract_reference_patch`'s all-NaN fallback was found **already fixed** and struck. No behaviour change on any reachable input.
 - **v0.367.0** — Image quality (PRIORITY 4) + calibration autonomy (PRIORITY 2): **repair the sensor's broken photosites from the master dark, in the raw Bayer domain, instead of relying only on the blind post-debayer local-median filter.** New pure `seestack/calibrate/defects.py` — `find_sensor_defects` measures each **CFA phase** against its own local median (so amp glow, a gradient and a per-phase offset all flag zero) and refuses any candidate set past 2 % of the sensor; `DefectMap` precomputes the same-phase neighbour gather once at load so the per-frame cost scales with the *defects*, not the canvas. `CalibrationMasters.apply_raw` repairs after the pedestal subtract and before the flat divide, so a hot site is erased while it is still one pixel and **a star can never be touched** — the map is measured on the dark. `StackOptions.repair_sensor_defects` is **off by default** and off measures nothing (§9); `DEFECTPX` → `sensor_defects` → one History line when it did something. Still open: validate the map's population on a real Seestar dark before anyone proposes defaulting it on. Entry in [`SHIPPED.md`](SHIPPED.md).

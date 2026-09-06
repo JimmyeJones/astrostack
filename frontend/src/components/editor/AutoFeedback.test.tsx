@@ -139,6 +139,29 @@ describe("autoFeedbackGroups", () => {
     }
   });
 
+  it("explains a faded taste, including when it has faded away entirely", async () => {
+    // A fully-faded profile reads as neutral, so the "why Auto shifted" note is
+    // gone — the fade note is what stops that looking like a silent drift.
+    vi.spyOn(client.api, "getAutoPreferences").mockResolvedValue({
+      biases: {}, note: null, neutral: true,
+      fade_note: "Your older feedback has faded, so Auto is back to its measured default — tap again any time to lean it back.",
+    });
+    wrap();
+    await screen.findByText(/back to its measured default/);
+    // Neutral ⇒ still no Reset link; there is nothing left to reset.
+    expect(screen.queryByRole("button", { name: "Reset" })).toBeNull();
+  });
+
+  it("says nothing about fading when nothing has faded", async () => {
+    vi.spyOn(client.api, "getAutoPreferences").mockResolvedValue({
+      biases: { brightness: 1 }, note: "Auto is running a bit brighter for you, based on your recent feedback.",
+      neutral: false, fade_note: null,
+    });
+    wrap();
+    await screen.findByText(/running a bit brighter/);
+    expect(screen.queryByText(/fading|faded/)).toBeNull();
+  });
+
   it("groups a caller's own chip list without touching the shipped one", () => {
     const before = AUTO_FEEDBACK_CHIPS.length;
     const groups = autoFeedbackGroups([

@@ -2072,6 +2072,9 @@ export interface AutoPreferences {
   biases: Record<string, number>;
   note: string | null;
   neutral: boolean;
+  /** Said only when recency decay has actually eased a taste back toward the
+   * measured default (`null` otherwise), so the fade is never silent. */
+  fade_note?: string | null;
 }
 
 /** The measured cues Auto-process read from a run's own data to build its recipe
