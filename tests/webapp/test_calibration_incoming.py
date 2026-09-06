@@ -167,6 +167,113 @@ def test_the_endpoint_never_writes_to_incoming(client, data_root):
     assert snapshot() == before
 
 
+def _folder(**over):
+    """A discovered folder, as :mod:`seestack.calibrate.discover` returns one."""
+    from seestack.calibrate.discover import CalibrationFolder
+
+    base = dict(
+        id="Dark", folder_name="Dark", rel_path="Dark", folder="/i/Dark",
+        kind="dark", declared={"dark": 4}, n_frames=40, n_sampled=4,
+        exposure_s=10.0, gain=80.0, sensor_temp_c=-10.0,
+        width_px=480, height_px=320,
+    )
+    base.update(over)
+    return CalibrationFolder(**base)
+
+
+SUBS = dict(exposure_s=10.0, gain=80.0, sensor_temp_c=-10.0,
+            width_px=480, height_px=320)
+
+
+def test_incoming_advice_names_the_frames_you_already_have():
+    advice = calibration.incoming_calibration_advice([_folder()], [], **SUBS)
+
+    assert advice is not None
+    assert "40 dark frames" in advice
+    assert "“Dark”" in advice
+    assert "Calibration page" in advice
+
+
+def test_incoming_advice_stays_quiet_when_the_folder_would_not_cover_these_subs():
+    """A 30 s dark folder is no use to 10 s subs — the same bar the unattended
+    binder applies, so the advice can't send anyone off on a useless build."""
+    assert calibration.incoming_calibration_advice(
+        [_folder(exposure_s=30.0)], [], **SUBS) is None
+    # ...nor a folder from a different camera.
+    assert calibration.incoming_calibration_advice(
+        [_folder(width_px=1080, height_px=1920)], [], **SUBS) is None
+
+
+def test_incoming_advice_stays_quiet_when_you_already_built_that_master():
+    """Then the stack is uncalibrated for some other reason, and pointing at a
+    build they have already done would be worse than saying nothing."""
+    built = {"id": 1, "name": "Dark 10s", "kind": "dark", "exists": True,
+             "exposure_s": 10.0, "gain": 80.0, "sensor_temp_c": -10.0,
+             "width_px": 480, "height_px": 320}
+
+    assert calibration.incoming_calibration_advice(
+        [_folder()], [built], **SUBS) is None
+
+
+def test_incoming_advice_names_the_dark_first():
+    """A dark is what an uncalibrated Seestar stack is actually short of."""
+    flat = _folder(id="Flat", folder_name="Flat", rel_path="Flat", kind="flat",
+                   declared={"flat": 4}, exposure_s=0.5)
+    advice = calibration.incoming_calibration_advice(
+        [flat, _folder()], [], **SUBS)
+
+    assert advice is not None and "dark frames" in advice
+
+
+def test_incoming_advice_is_empty_with_nothing_found():
+    assert calibration.incoming_calibration_advice([], [], **SUBS) is None
+
+
+def test_the_uncalibrated_stack_says_you_already_have_darks(
+        client, solved_library):
+    """End to end: an uncalibrated run's info payload points at the frames in
+    ``incoming/`` instead of the generic "go build a master" copy."""
+    import numpy as np
+
+    from .conftest import FRAME_H, FRAME_W
+    from .test_stack_render import _make_run_with_fits
+
+    darks = solved_library / "incoming" / "MyDarks"
+    darks.mkdir(parents=True, exist_ok=True)
+    for i in range(6):
+        hdu = fits.PrimaryHDU(
+            data=np.full((FRAME_H, FRAME_W), 100, dtype=np.uint16))
+        hdu.header["IMAGETYP"] = "Dark Frame"
+        hdu.header["EXPTIME"] = 10.0
+        hdu.header["GAIN"] = 80.0
+        hdu.header["CCD-TEMP"] = -10.0
+        hdu.writeto(darks / f"d_{i}.fit", overwrite=True)
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    # Advice is only derived for a run that carries provenance but no CALSTAT —
+    # i.e. one that was stacked and came out uncalibrated.
+    from seestack.io.library import Library
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["STACKER"] = "sigma-clip"
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+
+    assert body["calibration_advice"] is not None
+    assert "6 dark frames" in body["calibration_advice"]
+    assert "MyDarks" in body["calibration_advice"]
+
+
 def test_existing_master_like_is_one_sided_about_unknowns():
     """A master that never recorded its gain/temperature can't be *disproved*,
     so it still counts as covering — the same asymmetry every other gate in this
