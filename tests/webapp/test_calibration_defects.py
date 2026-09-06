@@ -84,6 +84,40 @@ def test_the_note_names_the_count_and_the_switch_that_fixes_it():
     assert "Repair hot/dead pixels from the dark" in note["detail"]
 
 
+def test_a_healthy_sensors_tiny_share_is_never_shown_as_zero_percent():
+    """The band a *good* sensor lands in is below what three decimals can show.
+
+    Ten broken photosites on the Seestar's 2 MP sensor is 0.00048 % — printed
+    with ``:.3f`` that is "0.000%", which reads as a broken readout rather than
+    as "hardly any", and only ever on the masters in the best shape."""
+    def share(n: int, n_pixels: int = 2_073_600) -> str:
+        note = calibration.defect_note(
+            {"n_defects": n, "n_pixels": n_pixels, "fraction": n / n_pixels,
+             "refused": False, "measurable": True})
+        return note["message"]
+
+    # The same words, and the same cut, the sky-coverage line already uses for
+    # this — one voice for "too small to print", not two.
+    assert "(less than 0.001%)" in share(10)
+    assert "0.000%" not in share(10)
+    # The first count three decimals can honestly carry still prints a number.
+    assert "(0.001%)" in share(21)
+    assert "(0.058%)" in share(1204)
+
+
+def test_one_broken_photosite_reads_as_english_not_as_a_template():
+    """A sensor with exactly one bad pixel is a real — and good — outcome."""
+    note = calibration.defect_note(
+        {"n_defects": 1, "n_pixels": 2_073_600, "fraction": 1 / 2_073_600,
+         "refused": False, "measurable": True})
+    assert "1 hot or dead pixel (" in note["message"]
+    assert "pixels" not in note["message"]
+    assert "photosites is broken" in note["detail"]
+    assert "repair it on every stack" in note["detail"]
+    # Still names the switch, which is the note's whole job.
+    assert "Repair hot/dead pixels from the dark" in note["detail"]
+
+
 def test_a_refused_map_warns_and_explains_why_no_repair_will_happen():
     note = calibration.defect_note(
         {"n_defects": 960, "n_pixels": 19_200, "fraction": 0.05,
