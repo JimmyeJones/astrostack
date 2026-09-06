@@ -1055,37 +1055,36 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **⭐ VERIFIED LEAD (Builder 2026-09-06, found while shipping the v0.371.0 one-click defect repair; confirmed by
-  test, not traced) — "Save as defaults" persists the WHOLE Stack form, so every stack option added *after* a
-  target was saved is permanently pinned to its old value on that target, and no global switch can ever reach
-  it.** *(Pillar: autonomy + trust — PRIORITY 2/3; size M, and **the fix is a behaviour change on a saved-data
-  path**, so read the care note. Confidence: verified — a fail-before test exists in
-  `tests/webapp/test_calibration_defects.py`.)*
-  **The mechanism, end to end.** `get_stack_defaults` (`webapp/routers/stack.py`) fills **every** descriptor key
-  before answering, the Stack form seeds its whole state from that (`Stack.tsx:176`,
-  `setValues({...defaults.data, ...reused})`), the *Save as defaults* button posts that whole state
-  (`api.putStackDefaults(safe, values)`), and `put_stack_defaults` persists every non-`None` valid key. So a
-  target saved in, say, July carries an explicit value for **every option that existed in July** — including a
-  string of `false`s for checkboxes the user never opened the advanced group to look at. A target's saved blob
+- **🟡 PARTLY SHIPPED — SHAPE (a), "say it", IS v0.372.0 (Builder 2026-09-06, branch
+  `claude/sweet-babbage-owcg4d`); shapes (b) and (c) are still open, and the care note below is why —
+  "Save as defaults" persists the WHOLE Stack form, so an option the owner later flips globally never
+  reaches a target that once pressed Save.** *(Pillar: autonomy + trust — PRIORITY 2/3. Confidence:
+  verified — the mechanism and the fix are both pinned by tests. Full write-up of the shipped half in
+  [`SHIPPED.md`](SHIPPED.md); the mechanism is restated here only as far as (b)/(c) need it.)*
+  **The mechanism.** `get_stack_defaults` (`webapp/routers/stack.py`) fills **every** descriptor key
+  before answering, the Stack form seeds its whole state from that, the *Save as defaults* button posts
+  that whole state, and `put_stack_defaults` persists every non-`None` valid key. So a target saved in,
+  say, July carries an explicit value for **every option that existed in July** — including a string of
+  `false`s for checkboxes the user never opened the advanced group to look at. A target's saved blob
   then wins over the global `default_stack_options` in *both* readers (the form seed and
-  `pipeline._stack_target(auto=True)`'s merge), so a setting the owner later turns on globally silently does
-  nothing there, for ever, with no surface saying so.
-  **This is not hypothetical and it is not one option.** v0.371.0 hit it with `repair_sensor_defects` and had to
-  count and name the affected targets to keep its own sentence true; the walk-away rejection entry hit the same
-  shape with `sigma_clip`. It gets **worse with every option this app adds** — the blob's coverage is frozen at
-  save time, and the app has added dozens of options since the oldest saved blob.
-  **Shapes, in order of safety.** (a) *Say it:* a target whose saved blob pins an option away from the current
-  global value gets one line on the Stack form / Target page naming the option and offering the re-save — no
-  behaviour change, and it generalises the count v0.371.0 already computes. (b) *Save the delta:* have
-  `put_stack_defaults` persist only the keys that differ from the merged seed the form was given, so a saved
-  blob means "what I changed" rather than "a snapshot of the app on the day I pressed the button". **Care —
-  this is why (b) is not a quick fix:** it changes what an existing blob means only for *future* saves (old
-  blobs stay full snapshots and must keep working byte-for-byte), and "differs from the seed" has to be computed
-  against the *global* defaults, not the descriptor defaults, or a user who deliberately set a value equal to
-  the current global would silently start tracking it. Do not migrate or rewrite existing blobs. (c) A one-click
-  "bring this target's saved settings up to date" that drops keys equal to the global. **Do not** simply make
-  the global win — a target's saved defaults beating the global is the contract the Save button's own
-  confirmation promises.
+  `pipeline._stack_target(auto=True)`'s merge).
+  **What v0.372.0 removed: the silence.** `walkaway.pinned_stack_options` +
+  `GET /api/targets/{safe}/stack-defaults/pinned` + the self-hiding note on the Stack form now name
+  every saved option that differs from what the form *would* have seeded had the target never saved,
+  and offer a one-click "put my global settings back in the form". Nothing about the merge changed.
+  **Still open, in order of safety.** (b) *Save the delta:* have `put_stack_defaults` persist only the
+  keys that differ from the merged seed the form was given, so a saved blob means "what I changed"
+  rather than "a snapshot of the app on the day I pressed the button". **Care — this is why (b) is not
+  a quick fix:** it changes what an existing blob means only for *future* saves (old blobs stay full
+  snapshots and must keep working byte-for-byte), and "differs from the seed" has to be computed
+  against the *seed the form was actually given* — which v0.372.0's `_merge_stack_defaults(settings,
+  None)` now names in one place, so (b) has a baseline to build on rather than a second definition to
+  invent. Do not migrate or rewrite existing blobs. (c) A one-click "bring this target's saved settings
+  up to date" that drops the keys the user never deliberately changed — note v0.372.0 deliberately
+  stopped short of this: its button only *fills the form*, leaving the Save button as the reviewable
+  moment, because dropping keys from a stored blob is not reversible from the UI. **Do not** simply
+  make the global win — a target's saved defaults beating the global is the contract the Save button's
+  own confirmation promises.
 
 - **⚪ CHECKED, NOT A GAP — recorded so the next run doesn't "fix" it (Builder 2026-09-04, while shipping
   v0.346.0).** The stationary-streak guard needs its clustered frames to span an hour, which a beginner's
@@ -1449,9 +1448,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   **Grep before starting:** `make_safe_name`, `open_or_create_target`, and the `(mosaic)` suffix in
   `_apply_seestar_convention`.
 
-- **⭐ QA LEAD (Builder 2026-08-30, the ⭐ "normalises against its own subset" lead's *unswept* axis, now with a
-  named candidate and a mechanism) — the Auto preset picker's four scene fractions are thresholded above a
-  **noise-aware** floor, so they are a monotone function of how deep the stack is.** *(Pillar: image quality +
+- **✅ CLOSED — BOTH HALVES MEASURED AND FIXED (v0.318.1 chroma, v0.318.3 geometry); kept for its method, not
+  as work. Un-starred 2026-09-06** — it still read `⭐ QA LEAD`, which §11 tells every triage pass to take
+  *first*, months after its own text said the last candidate was fixed. **Do not re-run this sweep**; apply its
+  generative test to *new* code instead. ~~The Auto preset picker's four scene fractions are thresholded above a
+  **noise-aware** floor, so they are a monotone function of how deep the stack is.~~** *(Pillar: image quality +
   trust — PRIORITY 2–4; size M — one measurement session, then a fix only if it moves. Confidence: mechanism
   read, **not** measured. Filed as a lead, not a bug.)* The lead's own list named "the auto-grade / auto-edit
   strength pickers that read a fraction of *affected* pixels" as the half a `np.percentile` grep cannot see.
@@ -1529,8 +1530,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   bigger scene gives one answer rather than two), and the no-regression guard that the averaging did not blur a
   cluster into nebulosity.
 
-- **⭐ QA LEAD (Builder 2026-08-30, the axis the v0.319.1 fix generalises to) — sweep every judgement made
-  against a "best so far", because a best-so-far is a record and a record only ever moves one way.** *(Pillar:
+- **✅ CLOSED — ALL FOUR SHAPES SWEPT, ONE LIVE INSTANCE (v0.319.1), NO SECOND SITE; kept for its generative
+  test, not as work. Un-starred 2026-09-06** (see the note on the entry above — a closed ⭐ is a triage trap).
+  ~~Sweep every judgement made against a "best so far", because a best-so-far is a record and a record only ever
+  moves one way.~~** *(Pillar:
   trust + friendliness — PRIORITY 3; size S per candidate — this one is *cheap*, because the arithmetic decides
   it before any measurement. Confidence: the shape is proven, the remaining sites are not yet found.)*
   This is a **sibling of the "normalises against its own subset" lead, along a different axis**: not "how much
@@ -1821,9 +1824,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > task**, not just `git fetch`. This item was an XS follow-on filed the same morning — exactly the shape two
 > Builders pick simultaneously.
 
-- **⭐ QA LEAD (Builder 2026-08-30, generalised from the v0.312.1 tint bug) — sweep every statistic that
+- **✅ CLOSED — SWEPT THREE TIMES; every candidate it listed is measured, and the three confirmed instances
+  are fixed (v0.313.1, v0.318.1, v0.319.1). Kept for its method and its "flat on one scene is not cleared"
+  correction, not as work. Un-starred 2026-09-06** (see the note two entries above). ~~Sweep every statistic that
   normalises against its own *non-empty* or *selected* subset, because that subset stops being the signal as the
-  library grows.** *(Pillar: trust + image quality — PRIORITY 3–4. Size: M per sweep. This is the same bug class
+  library grows.~~** *(Pillar: trust + image quality — PRIORITY 3–4. Size: M per sweep. This is the same bug class
   as the four position-dependent-metric sites (v0.270.2 / v0.271.0 / v0.272.1 / v0.304.1) — a statistic that is
   right on the input the author had and wrong on the owner's — but along a **different axis**: not *where* on the
   canvas, but *how much data went in*.)*
@@ -5247,10 +5252,14 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **✅ SLICES (a)+(c) SHIPPED (Builder, v0.343.0, branch `claude/sweet-babbage-l67sz2`) — ~~"Your year under
-  the stars": a year-bounded recap of a season of imaging.~~** Built as filed, as composition over the night
-  fold the Dashboard heatmap already pays for. Slice (b) — the best-of-year thumbnail and the share/caption
-  reuse — is deliberately still open and filed below.
+- **✅ ALL THREE SLICES SHIPPED — ~~"Your year under the stars": a year-bounded recap of a season of
+  imaging.~~** (a)+(c) in v0.343.0 (Builder, branch `claude/sweet-babbage-l67sz2`), as composition over the
+  night fold the Dashboard heatmap already pays for. **(b) has shipped too** — corrected 2026-09-06 after a
+  Builder sized it as open work and found it done: `yearrecap.year_caption` + `yearrecap.draw_year_poster`
+  (over `recap.draw_poster`, so the year poster and the all-time one can't drift in look),
+  `GET /api/recap/year/{year}.jpg`, `api.yearPosterUrl` and `YearShareCard.tsx` with its own tests. **Nothing
+  here is open;** the whole entry is kept only as the record of how the fold was shared. Grep
+  `draw_year_poster` before reading any "still open" sentence below it.
 
   **What shipped.** `seestack/yearrecap.py` (pure, offline, no `webapp` imports) folds
   `activity_calendar.NightActivity` rows into one calendar year and answers the six questions the entry
@@ -5292,9 +5301,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   bad year, and the heatmap-agreement invariant. Frontend: `yourYear.test.ts` (11) for the pure helpers,
   `YourYear.test.tsx` (10) for the page and `YourYearCard.test.tsx` (5) for the entry card.
 
-  **Slice (b) is still open**, deliberately: the best-of-year thumbnail + `sharecard.py` reuse for a
-  downloadable year poster and copy-paste caption. It is a clean follow-on — the endpoint already returns
-  everything a caption needs — and it wants its own run because the poster render is where the effort is.
+  ~~**Slice (b) is still open**, deliberately: the best-of-year thumbnail + `sharecard.py` reuse for a
+  downloadable year poster and copy-paste caption.~~ — **SHIPPED; struck 2026-09-06** (this sentence outlived
+  its slice and sent a run at work already on `main`). The poster is `yearrecap.draw_year_poster` served by
+  `GET /api/recap/year/{year}.jpg`, the caption is `yearrecap.year_caption` carried on `YearRecapOut.caption`,
+  and both are surfaced by `frontend/src/components/YearShareCard.tsx`.
 
   *(Original entry follows.)*
 
@@ -7496,10 +7507,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   entries), no schema/config/API/default change; upgrade-safe by construction. Tests: `tests/test_framing.py`
   (`test_every_catalog_object_now_carries_a_size` guards the catalog stays fully sized so a future addition
   without a vetted size is caught), and `tests/test_objectinfo.py`'s no-size test rewritten to a synthetic
-  sizeless entry (the real catalog no longer has one). **Follow-up still open:** (b′) on the Target page,
-  prefer a plate-solved frame's *actual* field size when available (a mosaic result is larger than one frame,
-  so the catalog "mosaic" verdict would otherwise mislead a target already shot as a mosaic). _(Original idea
-  kept below.)_
+  sizeless entry (the real catalog no longer has one). ~~**Follow-up still open:** (b′) on the Target page,
+  prefer a plate-solved frame's *actual* field size when available.~~ — **SHIPPED; struck 2026-09-06**, and
+  the reason it mattered was bigger than this entry knew: the constants here are the **S50's** 77′ × 44′,
+  while the owner has an **S30** (~128′ × 72′), so every verdict was a frame 1.66× too small on each edge.
+  `framing.FrameField` + `framing.frame_field_from_solve` + `webapp/frame_field.py` now derive the field from
+  the owner's own solved frames' `pixscale_arcsec` — exactly what AGENTS.md §1 "Owner facts" prescribes — and
+  the Target page's identify route and both Tonight-planner routes pass it. Grep `frame_field_from_solve`
+  before reading any "still open" sentence in this entry. _(Original idea kept below.)_
   <details><summary>Original idea</summary>
   (M, autonomy/friendliness — PRIORITY 2/3; beginner bar ✔.) A very common beginner surprise: the Seestar's
   field of view is only ~1.3° across, but M31 (~3°), the Veil, the North America Nebula, the Pleiades, etc.
@@ -7913,9 +7928,19 @@ problems. Dogfood it every big-picture run and fix root causes.
   a disk symptom until `df` says otherwise. Deletes still succeed when writes don't, so recovery is always
   available; a fresh session is never needed for this.
 
-- **⭐ NEW IDEA (Builder 2026-09-02, the audit's own lesson from A1, made mechanical) — give the display-space
+- **✅ SHIPPED v0.372.1 (Builder 2026-09-06, branch `claude/sweet-babbage-owcg4d`) — ~~give the display-space
   tests one shared fixture that is *real* stretch output, and use it wherever a regression test reasons about
-  post-stretch pixels.** *(Pillar: maintainability in service of correctness — size S; no behaviour change.)*
+  post-stretch pixels.~~** `tests/displayspace.py` now holds `real_stretched_stack`, `sky_truth`,
+  `clipped_fraction` and the guard-on-the-guard `assert_shadow_clip`; `test_edit_curve.py` reads them instead
+  of its own copy, and `test_edit_levels.py` gained the two real-fixture tests the entry's "migrate the tests
+  that hand-roll an approximation" clause asked for. **The migration turned up one measured fact worth
+  knowing, and it is not a bug:** on genuine `autostretch` output `suggest_levels_points` returns **black =
+  0.0**, because the 1st percentile it reads lands inside the stretch's own zero spike — the honest answer (the
+  shadows are already black), but *not* what the synthetic `_scene()` fixtures show (≈0.05–0.13), so anyone
+  reading those as a description of the live behaviour would be wrong. Both facts are now pinned by tests.
+  Sky-cast (`histogram.measure_sky_cast`) was probed on the same fixture and reads neutral to 0.0004 — cleared,
+  not migrated. Working in [`PROCESS-NOTES.md`](PROCESS-NOTES.md), 2026-09-06. *(Original entry follows.)*
+  *(Pillar: maintainability in service of correctness — size S; no behaviour change.)*
   A1's headline was the bug; its sting was that **the regression test written for that exact defect in
   v0.210.6 passed on a fixture that could not exhibit it** — `clip(sky + normal)`, which has no hard shadow
   clip, so it never saw what `autostretch` actually produces. The test confirmed the fix's *model* of the bug
@@ -8374,6 +8399,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.372.1** — Maintainability in service of correctness (no behaviour change): **one shared *real* display-space fixture, `tests/displayspace.py`, plus the guard-on-the-guard that stops a fixture silently ceasing to test anything.** A1's sting was that the regression test written for that exact defect in v0.210.6 **passed while the bug was live** — its fixture was `clip(sky + noise)`, which has no hard shadow clip, and the shadow clip *is* the bug. `real_stretched_stack` / `sky_truth` / `clipped_fraction` / `assert_shadow_clip` now live in one place; `test_edit_curve.py` reads them instead of its own copy and `test_edit_levels.py` gained the real-fixture pair the entry asked for. **Measured on the way:** `suggest_levels_points` returns **black = 0.0** on genuine `autostretch` output (its 1st percentile lands inside the 1.08 % zero spike) where the synthetic fixtures return 0.05–0.13 — correct, but not what those fixtures describe, so it is now pinned; `measure_sky_cast` was probed on the same fixture (deviation 0.00035, neutral) and cleared rather than migrated. Degenerate/flat fixtures deliberately left alone. Ships the ⭐ maintainability idea filed 2026-09-02; working in [`PROCESS-NOTES.md`](PROCESS-NOTES.md).
+- **v0.372.0** — Autonomy + trust (PRIORITY 2/3): **a target stops silently ignoring your global settings — the Stack form now names every saved option that overrides them.** "Save as defaults" persists the *whole* form, so a target saved months ago carries an explicit value for every option that existed that day (a string of `false`s for checkboxes nobody opened), and its blob wins over `default_stack_options` in **both** readers — the form's seed and `pipeline._stack_target(auto=True)`. A switch flipped globally afterwards therefore never reaches that target, for ever, with nothing saying so; v0.371.0 hit exactly this with `repair_sensor_defects`. New pure `walkaway.pinned_stack_options` + read-only `GET /api/targets/{safe}/stack-defaults/pinned` + a self-hiding note inside the form's existing flow (no new page, no banner) name each pinned option and both its values, with a one-click **"put my global settings back in the form"** that saves nothing — *Save as defaults* stays the reviewable moment. **The baseline is what makes it honest:** comparing against `default_stack_options` alone fired on *every* target that had ever pressed Save (`get_stack_defaults` seeds a never-configured form with `auto_reject: True` while the descriptor default is `False`), so it compares against `_merge_stack_defaults(settings, None)` — the seed this very form would have been given — extracted from `get_stack_defaults` so the two can't drift. `_same_option_value` keeps `False == 0` from glossing a type change as agreement while `3`/`3.0` still compare equal. Shape (a) of the ⭐ lead; (b) save-the-delta and (c) drop-stale-keys stay open with their care notes. No behaviour change to any merge. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.371.1** — Image quality / data integrity (stacking-engine-class per §1): **amp glow read as broken photosites — `find_sensor_defects` flagged healthy pixels wherever the sensor was legitimately noisier.** The threshold was `DEFECT_SIGMA` × the MAD of the residual over the *whole* CFA plane, but a master dark's noise is not stationary — amp glow is dark *current*, which carries shot noise, and the glow corner is a small fraction of the sensor, so the plane-wide MAD is set by the quiet bulk and the bar sits below the glow's own grain. Measured on a master built the way the camera builds one (mean of 20 Poisson+read-noise frames) with **every photosite healthy**: **133 flagged at 2,000 e⁻ of corner glow, 1,564 at 20,000** — each then overwritten from its neighbours on every sub of every stack, and reported by the v0.370.0 census as broken pixels in the owner's camera. It survived 20+ tests because the existing fixture adds read noise of *one fixed sigma everywhere*, so its glow is a change of level only; the new `_shot_noise_dark` fixture is what catches it. Fixed by `_local_robust_scale` — an upper percentile of |residual| per 16×16 block (a MAD under-reads it nine-fold, because in a steep gradient the local median lands on the centre sample itself) — with the threshold as `sigma × max(plane_wide, local)`, so it can only ever **rise**: the new map is a provable subset of the old, and a clean stationary master's answer does not move. **P80 and not higher is set by the refusal guard** — at P90 a master with a tenth of the sensor spiked stops being refused and starts being repaired. After: 0 false positives at every credible glow with all 12 planted defects still found. Opt-in feature, no default flipped. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.371.0** — Autonomy + friendliness (PRIORITY 2/3): **the v0.370.0 sensor-defect census gets its button — one click repairs the broken photosites on every future stack, including the hands-off ones.** The census named `repair_sensor_defects`, but naming is not reaching: it is a checkbox in the Stack form's *advanced* group, so acting on the line meant opening a collapsed disclosure to find a setting by name — once per stack — and the walk-away chain (`_stack_target(..., auto=True)`) sees no form at all. New pure `calibration.defect_repair_offer` + `POST /api/calibration/defects/repair` write the option into the **global `default_stack_options`**, the one place both `get_stack_defaults` (the Stack form's seed) and the unattended merge read — pinned by a test asserting it through `GET .../stack-defaults`, the reader itself. **Silent unless some master reports defects a repair could actually fix**, so a clean sensor and a *refused* map (where the switch would repair nothing) both offer nothing; and no count is quoted, because which master supplies the map depends on what is bound at stack time. **And the on-state stays honest about the one case that would make it false:** "Save as defaults" persists the *whole* Stack form, so a target saved before this existed pins `repair_sensor_defects: false` in its own blob and wins over the global — the copy counts and names those targets (*"…except 1 target"*) and says how to include one, and the per-target walk is only paid for when the switch is on *and* something is repairable. Exactly reversible from the same control — off *removes* the key, leaving the options blob byte-for-byte as it was. Read-modify-write is server-side, so a click cannot clobber another default. No pixel moves, no shipped default flipped. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.370.0** — Autonomy + friendliness + image quality (PRIORITY 2/3/4): **"does my camera have broken pixels?" — the Calibration page answers it, and names the one switch that fixes them.** `repair_sensor_defects` (v0.367.0) repairs exactly the broken photosites from the master dark, but it is an *advanced* Stack-form checkbox, off by default, and nothing anywhere told the owner either that their sensor has broken pixels or that the repair exists — so in practice it was invisible. New `defects.census_sensor_defects` (the per-phase measurement extracted into `_candidate_mask`, so `find_sensor_defects` is unchanged) reports the count **and** whether the map was refused — the two cases the repair path deliberately collapses — served by a read-only `GET /api/calibration/defects` over every *pedestal* master (dark/bias; a flat is never censused) and rendered as one self-hiding line inside each master's existing name cell: the count plus the switch's exact label, or a yellow "too many pixels read as broken to repair from this one". **A clean sensor says nothing** — no action, no line. The number is pinned equal to `CalibrationMasters.load`'s own `n_sensor_defects` on a master with a no-data patch, so screen and stack can't describe two sensors; cached per file identity (a master FITS is immutable once written). No pixel moves, no default flipped. Entry in [`SHIPPED.md`](SHIPPED.md).

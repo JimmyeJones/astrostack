@@ -18,7 +18,8 @@ no I/O, no engine import, no webapp state.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 #: The three option keys that express a rejection *choice*. The unattended chain
@@ -44,6 +45,83 @@ def parse_saved_stack_defaults(raw: str | None) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return dict(parsed) if isinstance(parsed, dict) else {}
+
+
+@dataclass(frozen=True)
+class PinnedOption:
+    """One stack option a target's saved blob holds away from the global default.
+
+    ``saved`` is what the target will actually stack with; ``global_value`` is
+    what it would use if it had never pressed *Save as defaults*.
+    """
+
+    key: str
+    label: str
+    saved: Any
+    global_value: Any
+
+
+def _same_option_value(a: Any, b: Any) -> bool:
+    """Would these two option values stack identically?
+
+    ``==`` alone is too loose in one direction and too tight in the other.
+    ``False == 0`` and ``True == 1`` in Python, so a checkbox left off would read
+    as "same" as a numeric field holding 0 — different options, but the same key
+    can change *type* between app versions (an old blob's ``0`` where the field
+    is now a bool), and calling that a deliberate pin would nag about a value the
+    user never chose. So a bool is only ever the same as a bool. Numbers, on the
+    other hand, compare across ``int``/``float`` (``2 == 2.0`` is the same
+    stack), which is exactly what a JSON round-trip of a float-typed field can
+    hand back.
+    """
+    if isinstance(a, bool) or isinstance(b, bool):
+        return isinstance(a, bool) and isinstance(b, bool) and a is b
+    return bool(a == b)
+
+
+def pinned_stack_options(
+    saved: Mapping[str, Any],
+    global_opts: Mapping[str, Any],
+    fields: Sequence[tuple[str, str, Any]],
+) -> list[PinnedOption]:
+    """Which saved per-target options *override* the global default, and to what.
+
+    "Save as defaults" on the Stack form persists the **whole** form, not the
+    handful of things the user changed — so a target saved months ago carries an
+    explicit value for every option that existed on that day, including a string
+    of ``false``\\ s for checkboxes nobody opened the advanced group to look at.
+    A target's blob then wins over ``default_stack_options`` in *both* readers
+    (the Stack form's seed and ``pipeline._stack_target(auto=True)``), so a
+    switch the owner later flips globally silently does nothing on that target,
+    for ever, with nothing on any screen saying so. This is the "say it" half:
+    a read-only list naming exactly which options are held back and at what.
+
+    ``fields`` is ``(key, label, app_default)`` per form descriptor, in the order
+    they should be reported — passed in rather than imported so this module stays
+    pure. A key absent from ``global_opts`` (or present as ``None``, which means
+    "use the default") falls back to ``app_default``, mirroring what
+    ``get_stack_defaults`` fills the form with.
+
+    Only keys the blob actually holds are considered, and a saved ``None`` is
+    skipped for the same reason ``put_stack_defaults`` refuses to persist one.
+    A target saved back when the global agreed with it therefore reports
+    **nothing** — the list is empty until the two genuinely disagree, which is
+    the only moment worth a sentence.
+    """
+    out: list[PinnedOption] = []
+    for key, label, app_default in fields:
+        if key not in saved:
+            continue
+        value = saved[key]
+        if value is None:
+            continue
+        current = global_opts.get(key)
+        if current is None:
+            current = app_default
+        if not _same_option_value(value, current):
+            out.append(PinnedOption(key=key, label=label,
+                                    saved=value, global_value=current))
+    return out
 
 
 def rejection_choice_expressed(opts: Mapping[str, Any]) -> bool:
