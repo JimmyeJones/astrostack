@@ -497,9 +497,16 @@ def submit_build_master(
     settings: Settings, jm: JobManager, *,
     kind: str, source_dir: str, name: str | None = None,
     method: str = "median", sigma: float = 3.0,
+    require_declared_kind: bool = False,
 ) -> Job:
     """Build a master dark/flat/bias from a folder of raw FITS frames and
-    register it in the library-level calibration store."""
+    register it in the library-level calibration store.
+
+    ``require_declared_kind`` drops a frame whose header declares a *different*
+    slot (a light, a flat in a dark build). It is set only by the one-click
+    **discovered-folder** build, which picked the kind from a handful of sampled
+    headers — see :func:`seestack.calibrate.masters.build_master`. A build the user
+    aimed at a folder themselves still takes what is in it, as it always has."""
     def body(job: Job) -> dict[str, Any]:
         from webapp import calibration
         from seestack.calibrate.masters import build_master
@@ -514,6 +521,7 @@ def submit_build_master(
             progress=_progress(jm, job),
             should_stop=job.cancel_requested,
             skipped=skipped,
+            require_declared_kind=require_declared_kind,
         )
         if built is None:
             # Cancelled mid-build (no master was written). Surface a cancellation
