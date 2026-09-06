@@ -1497,9 +1497,14 @@ export function StackView() {
             <Alert color="gray" variant="light" p="xs" data-testid="pinned-defaults">
               <Text size="xs" fw={600}>{pinnedNote.summary}</Text>
               <Text size="xs" c="dimmed" mt={2}>
-                Saved settings win over your global ones here, so a switch you
-                change in Settings later won't reach this target until you save
-                again.
+                {/* Scoped to the listed rows on purpose (v0.374.0): a save now
+                    stores only what you changed, so the rest of Settings *does*
+                    reach this target. Saying "a switch you change in Settings
+                    won't reach this target" would now be the same kind of
+                    overstatement the note exists to clear up. */}
+                These ones win over your global settings here, so changing them
+                in Settings later won't reach this target until you save again.
+                Everything else follows your global settings as usual.
               </Text>
               <Stack gap={0} mt={4}>
                 {pinnedNote.lines.map((line) => (

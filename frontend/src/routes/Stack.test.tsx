@@ -2354,8 +2354,12 @@ describe("StackView — saved settings that ignore the global defaults", () => {
     const note = await screen.findByTestId("pinned-defaults");
     expect(note).toHaveTextContent("1 saved setting");
     expect(note).toHaveTextContent("Sigma clipping: off here, on globally");
-    // And it explains *why* that matters, not just that it happened.
+    // And it explains *why* that matters, not just that it happened...
     expect(note).toHaveTextContent(/won't reach this target/);
+    // ...scoped to the rows it just named. Since v0.374.0 a save stores only
+    // what the user changed, so claiming Settings can't reach this target at all
+    // would be the very overstatement this note exists to clear up.
+    expect(note).toHaveTextContent(/Everything else follows your global settings/);
   });
 
   it("puts the global values back in the form in one click, without saving", async () => {
