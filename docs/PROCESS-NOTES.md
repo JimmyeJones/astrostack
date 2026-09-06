@@ -18,6 +18,52 @@ is a queue.
 
 ---
 
+## 2026-09-06 — Builder run (branch `claude/sweet-babbage-f4us4a`): the backlog is genuinely drained, and probing the newest code is what paid
+
+**The run.** Baseline green before any change (**4949 passed / 2 skipped**, full
+suite headless). Two tasks shipped — **v0.371.0** (the one-click defect repair)
+and **v0.371.1** (the amp-glow false-positive fix). One verified lead filed.
+
+**Triage record: the backlog really is drained, and this is what that looks
+like.** Read "Bugs (fix these first)" end to end and every open-looking entry in
+the Ideas sections. Of the ~30 entries that survive a status grep, essentially
+all are one of three things: **gated** on something no agent has (real
+elongated-target data, a cloudy night's subs, a real solved frame with known
+field rotation), **stood down with numbers already recorded** (the ASTAP ladder
+budget, the "3-frame default stack" entry, the blob-count caption, the drizzle
+rejection skip), or **already shipped and merely unstruck**. Four were checked
+against the code and found done: the `NOISERAT` stamp is
+`stack.py::_cached_noise_ratio` / `stamped_noise_measurement`; the dark↔light
+exposure-mismatch item is closed on all three slices; the "sentence that names a
+number" sweep is closed; the Auto-preset depth-invariance lead is closed on both
+halves. **Do not re-pick any of those** — and do not manufacture work from that
+section either, which is what AGENTS.md §2 is warning about.
+
+**What did pay, and the method is the transferable part: probe the newest code
+empirically instead of re-reading the mature code.** `seestack/calibrate/`
+defects had shipped four days earlier across v0.367–v0.371 and had ~20 tests.
+Rather than reading it adversarially (the ~18 clean stacking re-audits say what
+that yields), I built a master dark **the way the camera builds one** — mean of
+20 frames, each Poisson in the dark current plus read noise — and asked it a
+question the existing fixture cannot express, because that fixture adds read
+noise of *one fixed sigma everywhere*. The very first probe reproduced a real
+image-quality bug (133 healthy photosites flagged as broken at a realistic amp
+glow, 1,564 at an extreme one) that had survived two prior fixes to the same
+file. **That is the third bug in a row this method has found in this area**
+(v0.369.3, v0.369.4, now v0.371.1). The generalisable rule: **when auditing a
+measurement, check whether the test fixture can express the case that would break
+it.** A fixture with stationary noise cannot catch a bug about non-stationary
+noise, however many tests are written against it.
+
+**One design note worth carrying.** The fix's percentile was pinned by an
+*existing* test, not by tuning: P90 read best on the glow but silently defeated
+the `MAX_DEFECT_FRACTION` refusal (a master with a tenth of the sensor spiked
+stopped being refused and started being repaired). P80 keeps the guard and still
+clears every false positive at credible glow. When a threshold has two
+consumers, tune it against the one that is already tested.
+
+---
+
 ## 2026-09-06 — Builder run (branch `claude/sweet-babbage-ks0ild`): big-picture dogfood pass **CLEAN**, plus the measured cost of the new defect census
 
 **The run.** Baseline green before any change (**4930 passed / 2 skipped**, full
