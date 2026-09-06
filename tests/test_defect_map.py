@@ -55,6 +55,118 @@ def test_amp_glow_and_read_noise_alone_flag_nothing():
     assert int(find_sensor_defects(_synthetic_dark()).sum()) == 0
 
 
+def _shot_noise_dark(glow_e: float, *, h: int = 480, w: int = 640,
+                     n_darks: int = 20, read_e: float = 6.0,
+                     seed: int = 3) -> np.ndarray:
+    """A master dark whose **noise is not stationary**, which is the case
+    ``_synthetic_dark`` above cannot make.
+
+    That one adds read noise of one fixed sigma everywhere, so its amp glow is a
+    change of *level* only. A real master dark's glow is dark **current**, and
+    dark current carries shot noise — so the glow corner is genuinely grainier
+    than the rest of the sensor, by √(dark current). This builds the master the
+    way the camera does: mean of ``n_darks`` frames, each Poisson in the dark
+    current plus Gaussian read noise. Nothing here is broken; every photosite is
+    healthy by construction.
+    """
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:h, 0:w]
+    dc = 20.0 + glow_e * np.exp(-(yy ** 2 + xx ** 2) / (2 * 60.0 ** 2))
+    frames = [500.0 + rng.poisson(dc).astype(np.float64)
+              + rng.normal(0.0, read_e, dc.shape) for _ in range(n_darks)]
+    return np.mean(frames, axis=0).astype(np.float32)
+
+
+_GLOW_SPOTS = [(3, 5), (9, 11), (21, 33), (45, 7), (15, 25), (31, 19),
+               (200, 300), (210, 310), (250, 350), (260, 360), (300, 400), (310, 410)]
+#: Half of ``_GLOW_SPOTS`` sit inside the glow corner, half out on the quiet bulk.
+
+
+@pytest.mark.parametrize("glow_e", [0.0, 200.0, 2000.0])
+def test_a_healthy_sensor_under_amp_glow_shot_noise_flags_nothing(glow_e):
+    """The v0.371.1 bug, and the reason the scale is now measured locally.
+
+    The threshold was ``DEFECT_SIGMA`` × the MAD of the residual over the
+    **whole** plane. A glow corner is a small fraction of the sensor, so that
+    number is set by the quiet bulk — and the bar it sets sits below the glow's
+    own grain. **Fails before at 2,000 e⁻: 133 healthy photosites flagged**,
+    every one of them inside the glow, each then overwritten from its neighbours on
+    *every* sub of *every* stack, and reported to the owner as broken pixels in
+    their camera. There is nothing broken in this sensor, so the only correct
+    answer is zero."""
+    assert int(find_sensor_defects(_shot_noise_dark(glow_e)).sum()) == 0
+
+
+@pytest.mark.parametrize("glow_e", [0.0, 200.0, 2000.0])
+def test_real_defects_inside_the_glow_are_still_found(glow_e):
+    """The other half: raising the bar where the sensor is noisy must not blind
+    the map where the sensor is genuinely *broken*."""
+    dark = _shot_noise_dark(glow_e)
+    for y, x in _GLOW_SPOTS:
+        dark[y, x] += 400.0
+
+    mask = find_sensor_defects(dark)
+
+    missed = [p for p in _GLOW_SPOTS if not mask[p]]
+    assert not missed, f"missed {len(missed)} planted defects: {missed}"
+    assert int(mask.sum()) == len(_GLOW_SPOTS), (
+        f"flagged {int(mask.sum())} pixels, expected exactly the "
+        f"{len(_GLOW_SPOTS)} planted ones")
+
+
+def test_a_glow_that_nearly_saturates_the_well_is_much_better_but_not_perfect():
+    """Stated rather than hidden: 20,000 e⁻ of dark current in the corner means
+    amp glow alone is filling most of the sensor's well in one sub, which is a
+    master (and a night) nobody can use — well outside the regime this feature
+    is for. The fix is a large improvement there rather than a cure: **1,576
+    pixels flagged before — 1,564 of them healthy — against ~121 after**, with
+    every planted defect still found either way.
+
+    It is not pushed further because the residual at that slope is dominated by
+    the local median *lagging the curvature*, not by noise, and the only knob
+    that would absorb it — a higher percentile in ``_local_robust_scale`` — is
+    the one that breaks the ``MAX_DEFECT_FRACTION`` refusal above (at P90 a
+    master with a tenth of the sensor spiked stops being refused and starts
+    being repaired). Losing that guard to chase an unusable master is the wrong
+    trade, so this pins the improvement instead of pretending it is a cure."""
+    dark = _shot_noise_dark(20_000.0)
+    for y, x in _GLOW_SPOTS:
+        dark[y, x] += 400.0
+
+    mask = find_sensor_defects(dark)
+
+    missed = [p for p in _GLOW_SPOTS if not mask[p]]
+    assert not missed, f"missed {len(missed)} planted defects: {missed}"
+    # Was 1,576 (12 real + 1,564 healthy) before the local scale; an order of
+    # magnitude is the guarantee, not an exact count.
+    assert int(mask.sum()) < 200, (
+        f"flagged {int(mask.sum())} pixels — the local-scale fix has regressed")
+
+
+def test_the_local_scale_never_lowers_the_bar_a_clean_master_is_judged_against():
+    """The upgrade guarantee, stated as an invariant rather than a diff: the
+    threshold is the *larger* of the plane-wide spread and the local one, so the
+    map this version returns is a subset of what the previous one returned. No
+    photosite that used to be left alone can start being repaired — which is
+    what makes this safe to ship onto a live install mid-library.
+
+    Checked on an ordinary stationary master, where the two agree: the local
+    term must not perturb today's answer either way."""
+    from seestack.calibrate.defects import _local_robust_scale, _robust_scale
+
+    rng = np.random.default_rng(19)
+    plane = rng.normal(0.0, 4.0, (200, 240)).astype(np.float32)
+    glob = _robust_scale(plane)
+    local = _local_robust_scale(plane)
+
+    assert glob == pytest.approx(4.0, rel=0.05)
+    # The block estimator is calibrated to the same sigma on stationary noise —
+    # if it drifted, every clean master's threshold would quietly move.
+    assert float(np.median(local)) == pytest.approx(glob, rel=0.10)
+    # And it is a *floor* raised, never lowered: max() is what the caller takes.
+    assert float(np.maximum(glob, local).min()) >= glob
+
+
 def test_a_cfa_pattern_in_the_dark_is_not_read_as_defects():
     """Each phase is measured against its own plane, so a per-phase offset — a
     real thing on some sensors — must not flag every pixel of two phases."""

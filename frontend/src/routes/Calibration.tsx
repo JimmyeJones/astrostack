@@ -128,6 +128,26 @@ export function CalibrationView() {
     (defects.data?.masters ?? []).map((m) => [m.id, m]),
   );
   const uncovered = coverage.data ? uncoveredTargetsNote(coverage.data) : null;
+  const repair = defects.data?.repair ?? null;
+
+  // The census's own button. It writes the Stack form's "Repair hot/dead pixels
+  // from the dark" switch into the *global* stack defaults, so it reaches the
+  // hands-off chain too — the path that has no form to tick. The server does the
+  // read-modify-write, so this can't clobber another default.
+  const setRepair = useMutation({
+    mutationFn: (enabled: boolean) => api.setDefectRepair(enabled),
+    onSuccess: (r) => {
+      notifications.show({
+        color: r.enabled ? "teal" : "gray",
+        message: r.enabled
+          ? "Broken pixels will be repaired on every stack from now on. "
+            + "Re-stack a target to apply it to a finished picture."
+          : "Broken-pixel repair turned off for future stacks.",
+      });
+      qc.invalidateQueries({ queryKey: ["calibration-defects"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
 
   return (
     <Stack>
@@ -162,7 +182,31 @@ export function CalibrationView() {
             <Text c="dimmed" size="sm">No masters yet — build one above.</Text>
           </Center>
         ) : (
-          <Table.ScrollContainer minWidth={680}>
+          <>
+            {/* The action beside the measurement. The rows below say how many
+                photosites are broken; without this the only way to act on that
+                is to find a named checkbox inside the Stack form's advanced
+                group — once per stack, and never at all on the hands-off path.
+                Self-hiding: absent unless some master reports defects a repair
+                could actually fix, so a clean sensor and a refused map both
+                show nothing. Inside the masters card rather than as another
+                page-level banner (AGENTS.md §1, the standing IA rule). */}
+            {repair ? (
+              <Group justify="space-between" gap="sm" wrap="nowrap" p="sm">
+                <Tooltip label={repair.detail} multiline w={320}>
+                  <Text size="sm" c={repair.state === "on" ? "teal.7" : undefined}>
+                    {repair.message}
+                  </Text>
+                </Tooltip>
+                <Button size="xs" variant={repair.state === "on" ? "subtle" : "light"}
+                  color={repair.state === "on" ? "gray" : "teal"}
+                  loading={setRepair.isPending}
+                  onClick={() => setRepair.mutate(repair.state !== "on")}>
+                  {repair.action}
+                </Button>
+              </Group>
+            ) : null}
+            <Table.ScrollContainer minWidth={680}>
             <Table highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
@@ -261,7 +305,8 @@ export function CalibrationView() {
                 ))}
               </Table.Tbody>
             </Table>
-          </Table.ScrollContainer>
+            </Table.ScrollContainer>
+          </>
         )}
       </Paper>
     </Stack>

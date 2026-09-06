@@ -24,6 +24,7 @@ import json
 import logging
 import threading
 import time
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -270,12 +271,116 @@ def defect_note(census: dict[str, Any] | None) -> dict[str, str] | None:
         "message": f"{_thousands(n)} hot or dead pixels ({pct:.3f}%)",
         "detail": (
             f"This master says {_thousands(n)} of the camera's photosites are "
-            f"broken — bright in every dark, or stuck dark. Switch on "
-            f"“Repair hot/dead pixels from the dark” on the Stack form "
-            f"and AstroStack replaces just those from their same-colour "
-            f"neighbours, before the colours are reconstructed. Every other "
-            f"pixel, including every star, is left exactly as it was."
+            f"broken — bright in every dark, or stuck dark. Use the button "
+            f"above the list to repair them on every stack from now on (it is "
+            f"the “Repair hot/dead pixels from the dark” switch the Stack form "
+            f"carries), and AstroStack replaces just those from their "
+            f"same-colour neighbours, before the colours are reconstructed. "
+            f"Every other pixel, including every star, is left exactly as it "
+            f"was."
         ),
+    }
+
+
+#: The stack option the repair offer turns on. One name, used by the offer's
+#: copy, the endpoint that writes it and the settings merge that reads it, so
+#: the button and the checkbox can never drift apart.
+DEFECT_REPAIR_OPTION = "repair_sensor_defects"
+
+
+def defect_repair_offer(
+    censuses: Iterable[dict[str, Any] | None],
+    *,
+    enabled: bool,
+    n_overridden: int = 0,
+) -> dict[str, Any] | None:
+    """"You have broken pixels — fix them" in one click, or ``None``.
+
+    The census (:func:`defect_note`) tells the owner their sensor has broken
+    photosites and names the switch that repairs them. Naming it is not the same
+    as reaching it: ``repair_sensor_defects`` is a checkbox in the Stack form's
+    **advanced** group, so acting on the sentence means finding a named setting
+    inside a collapsed disclosure — and doing it again for the next stack, since
+    a form choice is not a default. The **hands-off** chain, which is the whole
+    point of a walk-away install, never sees a form at all: it stacks from
+    ``default_stack_options``, which no census line can reach.
+
+    So this is the sentence's button (AGENTS.md §1 priority 2/3): one action that
+    writes the option into the global stack defaults, where *both* the Stack
+    form's seed and the unattended path read it.
+
+    Returns ``None`` — nothing rendered, nothing offered — unless at least one
+    censused master reports defects it could actually repair. A clean sensor has
+    nothing to turn on, and a master whose map was **refused** is precisely the
+    case where turning the switch on would do nothing, so neither may offer it;
+    that keeps the button honest in the same way ``defect_note``'s silence does.
+
+    No count is quoted here on purpose. Which master a run derives its map from
+    depends on what is bound at stack time (dark first, bias as the fallback),
+    so a total across masters would double-count and a single master's number
+    would be the wrong one half the time. The per-master lines already carry the
+    measured counts; this only carries the action.
+
+    ``n_overridden`` is how many targets carry a **saved** stack default that
+    pins the option off, and it exists because without it the on-state's sentence
+    would be false for them. "Save as defaults" on the Stack form persists the
+    *whole* form, not just the fields the user was looking at, so any target
+    saved before this option was switched on has an explicit ``false`` in its own
+    blob — and a target's saved defaults win over the global ones in both readers
+    (``get_stack_defaults`` and the unattended merge). Saying "every stack" while
+    N targets quietly opt out is exactly the kind of confident untruth the
+    census's own silences are designed to avoid, so the count is named and the
+    reader is told what to do about it.
+    """
+    repairable = any(
+        isinstance(c, dict)
+        and c.get("measurable")
+        and not c.get("refused")
+        and int(c.get("n_defects") or 0) > 0
+        for c in censuses
+    )
+    if not repairable:
+        return None
+    if enabled:
+        n = max(0, int(n_overridden))
+        targets = "target" if n == 1 else "targets"
+        return {
+            "state": "on",
+            "message": (
+                "Broken pixels are repaired on every stack"
+                if not n else
+                f"Broken pixels are repaired on every stack except "
+                f"{_thousands(n)} {targets}"
+            ),
+            "detail": (
+                "Every stack from now on — including the hands-off ones — "
+                "replaces the photosites above from their same-colour "
+                "neighbours before the colours are reconstructed. Every other "
+                "pixel, including every star, is left exactly as it was. "
+                "Already-finished pictures are untouched; re-stack a target to "
+                "apply it to one."
+            ) + ("" if not n else (
+                f" {_thousands(n)} {targets} pressed “Save as defaults” on the "
+                f"Stack form before this was switched on, and a target's own "
+                f"saved settings win — so those keep stacking without the "
+                f"repair. To include one, open its Stack form, tick “Repair "
+                f"hot/dead pixels from the dark” and save the defaults again."
+            )),
+            "action": "Turn off",
+        }
+    return {
+        "state": "off",
+        "message": "Repair these on every stack from now on",
+        "detail": (
+            "Turns on “Repair hot/dead pixels from the dark” for every stack, "
+            "including the hands-off ones — so you don't have to find it on the "
+            "Stack form each time. Only the broken photosites change: they are "
+            "replaced from their same-colour neighbours before the colours are "
+            "reconstructed, and every other pixel, including every star, is "
+            "left exactly as it was. Reversible — this button turns it off "
+            "again, and it is also in Settings."
+        ),
+        "action": "Repair them",
     }
 
 
