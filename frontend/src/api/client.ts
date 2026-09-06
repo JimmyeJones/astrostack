@@ -2426,6 +2426,36 @@ export interface VideoList {
   captures: VideoCapture[];
 }
 
+// A folder under `incoming/` whose *frames' own* `IMAGETYP` cards say they are
+// calibration frames. Nothing is inferred from a folder's name: a folder whose
+// frames don't declare a kind is never listed, so on a camera that writes no
+// card this list is simply empty and the card self-hides.
+export interface IncomingCalibrationFolder {
+  /** Path-safe id; the server re-resolves the folder from it (no path from us). */
+  id: string;
+  name: string;
+  rel_path: string;
+  kind: "dark" | "flat" | "bias";
+  /** What the sampled frames said, e.g. `{ dark_flat: 4 }` in the dark slot. */
+  declared: Record<string, number>;
+  n_frames: number;
+  n_sampled: number;
+  exposure_s: number | null;
+  gain: number | null;
+  sensor_temp_c: number | null;
+  width_px: number | null;
+  height_px: number | null;
+  suggested_name: string;
+  /** The master already covering these frames, if any — so we can say "you
+   * already have this one" instead of inviting a duplicate. */
+  have_master: { id: number; name: string } | null;
+}
+
+export interface IncomingCalibration {
+  incoming_dir: string;
+  folders: IncomingCalibrationFolder[];
+}
+
 // "Do my masters actually cover my targets?" — for each master, how many of the
 // library's targets the *unattended* binder would apply it to (so the roll-up
 // promises exactly what the app does on its own), plus the targets no master
@@ -3428,6 +3458,12 @@ export const api = {
   }),
   deleteCalibrationMaster: (id: number) =>
     req<{ deleted: number }>(`/api/calibration/masters/${id}`, { method: "DELETE" }),
+  // "You already have darks" — calibration frames found sitting in incoming/.
+  calibrationIncoming: () => req<IncomingCalibration>("/api/calibration/incoming"),
+  buildMasterFromIncoming: (folderId: string) =>
+    req<{ job_id: string }>(
+      `/api/calibration/incoming/${encodeURIComponent(folderId)}/build`,
+      { method: "POST" }),
 
   // Moon & Sun — lucky-imaging stacks of the Seestar's *_video captures
   listVideoCaptures: () => req<VideoList>("/api/videos"),

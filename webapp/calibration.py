@@ -23,6 +23,7 @@ import contextlib
 import json
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -834,6 +835,179 @@ def _bias_match_confident(
     dist = _match_distance(bias, exposure_s=None, gain=gain,
                            sensor_temp_c=sensor_temp_c, kind="bias")
     return dist <= _AUTO_BIND_BIAS_MAX_DIST
+
+
+def existing_master_like(
+    masters: list[dict[str, Any]], *, kind: str,
+    exposure_s: float | None, gain: float | None, sensor_temp_c: float | None,
+    width_px: int | None = None, height_px: int | None = None,
+) -> dict[str, Any] | None:
+    """A master already in the registry that covers these acquisition params.
+
+    Used by the "we found calibration frames in your incoming folder" offer to
+    say *"you already have one of these"* rather than inviting the owner to build
+    a second copy of a master they built last week. The bar is the same one the
+    **unattended binder** uses (:func:`auto_bind_master_ids`) — same exposure
+    gate for a dark, same gain/temperature distance for all three kinds, same
+    one-sided :func:`dims_conflict` — so a folder is only called "already
+    covered" when the app would genuinely reach for the existing master instead.
+
+    Returns the best such master, or ``None``. Never raises: a registry entry
+    with a junk field is skipped, not described.
+    """
+    kind = str(kind).lower()
+    if kind not in ("dark", "flat", "bias"):
+        return None
+    confident = {
+        "dark": _dark_match_confident, "flat": _flat_match_confident,
+        "bias": _bias_match_confident,
+    }[kind]
+    best: tuple[float, dict[str, Any]] | None = None
+    for m in masters:
+        if not m.get("exists", True) or str(m.get("kind", "")).lower() != kind:
+            continue
+        if dims_conflict(m, width_px, height_px):
+            continue
+        if not confident(m, gain=gain, sensor_temp_c=sensor_temp_c):
+            continue
+        if kind == "dark" and not _exposure_close(m, exposure_s):
+            continue
+        dist = _match_distance(m, exposure_s=exposure_s, gain=gain,
+                               sensor_temp_c=sensor_temp_c, kind=kind)
+        if best is None or dist < best[0]:
+            best = (dist, m)
+    return best[1] if best else None
+
+
+def _exposure_close(master: dict[str, Any], exposure_s: float | None) -> bool:
+    """Whether a dark's exposure is within the unattended binder's tolerance.
+
+    One-sided like every other gate here: an exposure unknown on either side
+    can't be *disproved*, so it doesn't rule the master out.
+    """
+    m_exp = master.get("exposure_s")
+    if not exposure_s or not m_exp:
+        return True
+    try:
+        return abs(float(m_exp) - float(exposure_s)) / float(exposure_s) \
+            <= _AUTO_BIND_EXP_MISMATCH_FRAC
+    except (TypeError, ValueError, ZeroDivisionError):
+        return True
+
+
+#: How long the ``incoming/`` calibration-folder walk is cached on the app. The
+#: walk costs one FITS header read per folder (see
+#: :mod:`seestack.calibrate.discover`), so it is shared by every consumer rather
+#: than repeated per page — but it must still notice frames the owner copied in
+#: a minute ago, hence a short TTL rather than a process-lifetime cache.
+INCOMING_SCAN_TTL_S = 120.0
+
+
+def cached_incoming_folders(app_state: Any, incoming_dir: str | Path) -> list[Any]:
+    """The ``incoming/`` calibration-folder walk, cached on ``app_state``.
+
+    One walk shared by the Calibration page's offer and the "why did this stack
+    come out uncalibrated?" advice, so a page that shows both doesn't pay for it
+    twice and the two can never disagree about what is there. Never raises: a
+    walk that fails yields an empty list, and the feature simply stays silent.
+    """
+    from seestack.calibrate import discover
+
+    root = str(incoming_dir)
+    cache = getattr(app_state, "calibration_incoming_cache", None)
+    now = time.monotonic()
+    if cache and cache.get("root") == root \
+            and (now - cache.get("at", 0.0)) < INCOMING_SCAN_TTL_S:
+        return list(cache["folders"])
+    try:
+        folders = discover.find_calibration_folders(root)
+    except Exception as exc:  # noqa: BLE001 — an offer is a nicety, never a 500
+        log.warning("incoming calibration scan failed (%s)", exc)
+        folders = []
+    with contextlib.suppress(AttributeError):
+        app_state.calibration_incoming_cache = {
+            "root": root, "at": now, "folders": folders}
+    return list(folders)
+
+
+def folder_as_master(folder: Any) -> dict[str, Any]:
+    """A discovered folder shaped like a registry entry, so "would a master built
+    from this cover my subs?" is answered by the *same* function that answers
+    "does a master I already own cover them?" (:func:`existing_master_like`).
+
+    One definition of "covers", rather than a second one that could drift.
+    """
+    return {
+        "id": -1, "name": getattr(folder, "folder_name", ""),
+        "kind": getattr(folder, "kind", ""), "exists": True,
+        "exposure_s": getattr(folder, "exposure_s", None),
+        "gain": getattr(folder, "gain", None),
+        "sensor_temp_c": getattr(folder, "sensor_temp_c", None),
+        "width_px": getattr(folder, "width_px", None),
+        "height_px": getattr(folder, "height_px", None),
+    }
+
+
+#: Which kind of missing master is worth naming first when several folders would
+#: match. A dark is what an uncalibrated Seestar stack is actually short of (heat
+#: speckle and hot pixels in every frame); a flat and a bias matter less to a
+#: beginner's first good picture, in that order.
+_ADVICE_KIND_ORDER = ("dark", "flat", "bias")
+
+
+def incoming_calibration_advice(
+    folders: list[Any], masters: list[dict[str, Any]], *,
+    exposure_s: float | None = None, gain: float | None = None,
+    sensor_temp_c: float | None = None,
+    width_px: int | None = None, height_px: int | None = None,
+) -> str | None:
+    """"You already have darks" — as the reason *this* stack came out uncalibrated.
+
+    :func:`diagnose_uncalibrated` explains a stack the library *nearly* had a
+    master for. This answers the case it can't: the library has no usable master
+    at all, but the frames to build one are sitting in ``incoming/`` — which is
+    the beginner's actual situation, and the one where the generic "go build a
+    master" copy is least helpful.
+
+    Only a folder that a master built from it would genuinely **cover these
+    subs** is named — same bar as :func:`existing_master_like`, so the advice
+    can't send someone off to build a 30 s dark for their 10 s lights. A folder
+    already covered by a master they own is skipped: that stack is uncalibrated
+    for a different reason, and pointing at a build they've already done would be
+    worse than saying nothing. Returns ``None`` when there is nothing honest to
+    say.
+    """
+    by_kind: dict[str, Any] = {}
+    for folder in folders or []:
+        kind = getattr(folder, "kind", "")
+        if kind in by_kind or kind not in _ADVICE_KIND_ORDER:
+            continue
+        pseudo = folder_as_master(folder)
+        would_cover = existing_master_like(
+            [pseudo], kind=kind, exposure_s=exposure_s, gain=gain,
+            sensor_temp_c=sensor_temp_c, width_px=width_px, height_px=height_px)
+        if would_cover is None:
+            continue
+        already = existing_master_like(
+            masters, kind=kind, exposure_s=exposure_s, gain=gain,
+            sensor_temp_c=sensor_temp_c, width_px=width_px, height_px=height_px)
+        if already is not None:
+            continue
+        by_kind[kind] = folder
+
+    for kind in _ADVICE_KIND_ORDER:
+        folder = by_kind.get(kind)
+        if folder is None:
+            continue
+        n = int(getattr(folder, "n_frames", 0) or 0)
+        frames = f"{n} {kind} frame" + ("" if n == 1 else "s")
+        where = getattr(folder, "rel_path", "") or getattr(folder, "folder_name", "")
+        return (
+            f"You already have {frames} in your incoming folder "
+            f"(“{where}”) — build the master on the Calibration page, "
+            f"then pick it on the Stack form."
+        )
+    return None
 
 
 def _wrong_size_advice(

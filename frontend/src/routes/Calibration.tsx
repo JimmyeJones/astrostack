@@ -12,6 +12,7 @@ import { api, type CalibrationMaster } from "../api/client";
 import {
   masterCoverageLine, masterMissesTooltip, uncoveredTargetsNote,
 } from "../components/calibrationCoverage";
+import { IncomingCalibrationCard } from "../components/IncomingCalibrationCard";
 
 const KIND_COLORS: Record<string, string> = { dark: "indigo", flat: "teal", bias: "grape" };
 
@@ -129,6 +130,12 @@ export function CalibrationView() {
           {uncovered}
         </Alert>
       ) : null}
+
+      {/* "You already have darks" — calibration frames the app found in
+          incoming/, offered before the form that asks you to type a path.
+          Self-hiding: renders nothing unless the frames themselves declared a
+          calibration kind and no master covers them yet. */}
+      <IncomingCalibrationCard onBuilt={refresh} />
 
       <BuildForm onDone={refresh} />
 

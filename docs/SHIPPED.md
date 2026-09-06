@@ -14,6 +14,99 @@ Newest first.
 
 ---
 
+## v0.366.1 — 2026-09-06 — The "you already have darks" answer reaches the picture: incoming_calibration_advice + cached_incoming_folders
+
+**Autonomy + friendliness (PRIORITY 2–3) — the follow-on v0.366.0 named but did not build, shipped once its
+consumer turned out to be silent in exactly the case that matters.** v0.366.0 put the offer on the
+Calibration page. The owner has no reason to visit that page; the moment they *do* notice the gap is when
+they look at a finished picture and the History Info panel says the stack came out uncalibrated.
+
+**And that line was silent in the beginner case.** `_uncalibrated_advice` asks
+`calibration.diagnose_uncalibrated`, which only ever explains a **near-miss** master — a wrong-size one, or
+an exposure-mismatched dark with no bias to scale it. With **no** usable master in the library at all — a
+fresh install, which is the situation the whole feature is about — it returns `None` and the panel falls back
+to generic "build or pick a master" copy. So the app could now *know* the frames were sitting in `incoming/`
+and still not say so where it counted.
+
+**One definition of "covers", not a second one.** `folder_as_master` shapes a discovered folder like a
+registry entry, so `incoming_calibration_advice` asks the **same** `existing_master_like` that answers "does a
+master I already own cover these subs?" — the unattended binder's bar. A 30 s dark folder therefore never
+gets recommended for 10 s subs, and a folder from another camera never does either. A folder already built
+into a master is skipped: that stack is uncalibrated for a different reason, and pointing at a build the owner
+has already done would be worse than saying nothing. Darks are named before flats before biases, because a
+dark is what an uncalibrated Seestar stack is actually short of.
+
+**Paid for once.** `cached_incoming_folders` moves v0.366.0's per-router cache into `webapp/calibration.py`,
+so the Calibration page's offer and this advice share one walk (and can never disagree about what is there).
+It runs only when there is no master-derived advice, on a run that already carries provenance and no
+`CALSTAT` — i.e. not on the ordinary path at all.
+
+**Tests (+6):** five over the pure helper (it names the frames; it stays quiet on an exposure or sensor-size
+mismatch, on a folder already built, and on nothing found; darks first) plus an end-to-end one driving
+`/stack-runs/{id}/info` on an uncalibrated run with declared darks in `incoming/` — fail-before, since the
+field was `None`.
+
+---
+
+## v0.366.0 — 2026-09-06 — "You already have darks": seestack/calibrate/discover.py + /api/calibration/incoming + IncomingCalibrationCard
+
+**Autonomy + image quality (PRIORITY 2/4) — built on the half of the gate that turned out to be answerable,
+and deliberately *not* on the half that isn't.** The filed entry refused to be built until somebody confirmed
+"the folder/naming convention the Seestar uses for dark captures", because a name-based glob that
+misclassifies light subs as darks builds a "master dark" out of the owner's subs, which then subtracts a
+picture of the sky out of every stack it touches. That gate is still unanswered and is *not* answered here.
+What shipped instead reads the **frames' own `IMAGETYP` card** (`frame_kind_from_header`, v0.356.0), so the
+naming convention stops mattering: the folder name is never consulted at all.
+
+**The safety property is the asymmetry, and it is what every test is about.** A folder is offered only when
+**every** sampled frame declares a kind we recognise, all of those map to the **same** master slot, and none
+of them says "light". A folder whose frames say nothing is not offered — so on a camera that writes no
+`IMAGETYP` the whole feature is silent and the card renders nothing, which is the honest answer rather than a
+guess. A folder named `darks/` full of lights is refused; a folder named `M 42_sub/` full of declared darks is
+offered. Flat-darks fill the *dark* slot (physically a dark) but the copy echoes what the frames actually
+said — "4 of these frames say they are flat-darks" — rather than relabelling the owner's frames.
+
+**Cheap on the common case, by construction.** The sample's first index is 0 and any non-calibration answer
+returns immediately, so a library of target folders full of light subs costs **exactly one header read per
+folder** — pinned by a test that counts them (6 folders × 30 frames → 6 reads). Depth is capped at 2, the
+folder count at `MAX_FOLDERS_SAMPLED = 200`, and the router caches the walk for 120 s. "Do I already have a
+master for this?" is registry arithmetic recomputed per request, so a build updates the offer immediately
+instead of waiting out the TTL.
+
+**It only ever offers.** No master is built until the button is pressed, and building one still applies
+nothing — calibration stays opt-in (§9). `incoming/` is touched only by a `scandir` and a header read; a test
+snapshots every file's size and mtime under it across a full discover→build round trip and asserts it is
+byte-for-byte unchanged (§10).
+
+**"You already have this one" instead of a duplicate.** `webapp.calibration.existing_master_like` reuses the
+**unattended binder's own** confidence bar (`_dark_match_confident` / `_flat_match_confident` /
+`_bias_match_confident`, the `_AUTO_BIND_EXP_MISMATCH_FRAC` exposure gate, and the one-sided `dims_conflict`),
+so a folder is called "already covered" only when the app would genuinely reach for the existing master
+instead. A 30 s dark therefore does not cover a 10 s dark folder — pinned by a test.
+
+**No path from the client.** Folders are addressed by a sanitised id and re-discovered server-side on the
+build, exactly as the video captures are; a folder that has stopped looking like calibration frames since the
+page loaded is a 404, not a build of whatever is there now.
+
+**Placement, per the standing IA rule:** one self-hiding `Alert` inside the existing Calibration page, above
+the build form it replaces the need for — no new page, no new nav entry, and nothing rendered on an install
+that has no such folders.
+
+**Upgrade-safe (§9):** no config key, no schema, no on-disk layout, no default flipped; two additive
+endpoints an older frontend never calls, and a newer frontend degrades to an empty card against an older
+backend.
+
+**Tests (+30):** `tests/test_calibration_discover.py` (19 — the offer, and the eight ways it refuses: lights,
+silence, a suggestive name, a mixed folder, one undeclared frame in the sample, too few frames, too deep, a
+missing root; plus the flat-dark slot mapping, nested paths, id collisions, the one-read-per-folder budget,
+the suggested name and its fallback, and the sampling spread), `tests/webapp/test_calibration_incoming.py`
+(9 — the fixture library of lights offering nothing, the end-to-end build, the 404, "you already have one",
+the 30 s-vs-10 s non-coverage, flats/biases, the `incoming/` read-only snapshot, and the one-sidedness of
+`existing_master_like`), `IncomingCalibrationCard.test.tsx` (10 — the copy helpers and the card's
+self-hiding, one-click build and no-duplicate-button behaviour).
+
+---
+
 ## v0.365.0 — 2026-09-06 — A 0 % that means "blind", not "clean": REJDEPTH/REJNEED/REJREACH + lone_outlier_min_depth
 
 **Image quality / trust (PRIORITY 4) — built as filed, and the "name the consumer first" gate was met by a
