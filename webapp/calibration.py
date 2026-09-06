@@ -322,15 +322,23 @@ def defect_repair_offer(
     measured counts; this only carries the action.
 
     ``n_overridden`` is how many targets carry a **saved** stack default that
-    pins the option off, and it exists because without it the on-state's sentence
-    would be false for them. "Save as defaults" on the Stack form persists the
-    *whole* form, not just the fields the user was looking at, so any target
-    saved before this option was switched on has an explicit ``false`` in its own
-    blob — and a target's saved defaults win over the global ones in both readers
+    pins the option off, and it exists because without it this sentence would be
+    false for them. "Save as defaults" on the Stack form persists the *whole*
+    form, not just the fields the user was looking at, so any target saved before
+    this option was switched on has an explicit ``false`` in its own blob — and a
+    target's saved defaults win over the global ones in both readers
     (``get_stack_defaults`` and the unattended merge). Saying "every stack" while
     N targets quietly opt out is exactly the kind of confident untruth the
     census's own silences are designed to avoid, so the count is named and the
     reader is told what to do about it.
+
+    **Both states are qualified by it, not just the on-state.** The off-state is
+    the one the reader acts on — it promises the repair "for every stack,
+    including the hands-off ones", and that promise is what makes them press the
+    button. Making it unconditionally, then flipping to an on-state that says
+    "except N targets", tells the user the truth one click *after* the decision
+    it should have informed. So the exception is named in the offer as well as in
+    the confirmation.
     """
     repairable = any(
         isinstance(c, dict)
@@ -341,9 +349,9 @@ def defect_repair_offer(
     )
     if not repairable:
         return None
+    n = max(0, int(n_overridden))
+    targets = "target" if n == 1 else "targets"
     if enabled:
-        n = max(0, int(n_overridden))
-        targets = "target" if n == 1 else "targets"
         return {
             "state": "on",
             "message": (
@@ -370,7 +378,13 @@ def defect_repair_offer(
         }
     return {
         "state": "off",
-        "message": "Repair these on every stack from now on",
+        "message": (
+            "Repair these on every stack from now on"
+            if not n else
+            f"Repair these on every stack from now on — "
+            f"{_thousands(n)} {targets} would keep "
+            f"{'its own setting' if n == 1 else 'their own settings'}"
+        ),
         "detail": (
             "Turns on “Repair hot/dead pixels from the dark” for every stack, "
             "including the hands-off ones — so you don't have to find it on the "
@@ -379,7 +393,14 @@ def defect_repair_offer(
             "reconstructed, and every other pixel, including every star, is "
             "left exactly as it was. Reversible — this button turns it off "
             "again, and it is also in Settings."
-        ),
+        ) + ("" if not n else (
+            f" {_thousands(n)} {targets} pressed “Save as defaults” on the "
+            f"Stack form while this was off, and a target's own saved settings "
+            f"win — so {'it' if n == 1 else 'they'} would keep stacking without "
+            f"the repair. To include {'it' if n == 1 else 'one'}, open its Stack "
+            f"form, tick “Repair hot/dead pixels from the dark” and save the "
+            f"defaults again."
+        )),
         "action": "Repair them",
     }
 

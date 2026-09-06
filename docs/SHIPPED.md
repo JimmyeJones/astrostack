@@ -14,6 +14,57 @@ Newest first.
 
 ---
 
+## v0.374.3 — 2026-09-06 — the broken-pixel offer names its exception *before* the click, not one click after (`calibration.defect_repair_offer` off-state + `_targets_overriding_defect_repair`)
+
+**(Builder 2026-09-06, branch `claude/sweet-babbage-cqqyi1`.) Trust /
+friendliness — PRIORITY 3, honesty core. A verified defect in the v0.371.0 code,
+found by auditing what had landed since the newest recorded sweep (the method
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md) 2026-09-06 recommends).**
+
+**What was wrong.** `defect_repair_offer` has two states. The **on**-state was
+built with a careful honesty guard: "Save as defaults" on the Stack form
+persists the *whole* form, so a target saved before this option existed carries
+an explicit `repair_sensor_defects: false` in its own blob, and a target's blob
+wins over `default_stack_options` in **both** readers — so the copy counts those
+targets and says *"Broken pixels are repaired on every stack except 1 target"*.
+The **off**-state — the one a reader actually acts on — made the *same*
+universal claim with no guard at all: *"Turns on … for every stack, including
+the hands-off ones"*. Press the button and the sentence flips to the honest one.
+So the app told the user the truth **one click after the decision it should have
+informed**, which is the same shape as the v0.374.2 defect: two states of one
+fact, and the one the user reads first is the wrong one.
+
+**Reachable on the live install, not a theoretical state.** It needs a target
+that pressed *Save as defaults* between v0.367.0 (when the checkbox joined the
+form) and v0.374.0 (when the save started storing only what changed) — and
+v0.374.0 deliberately does **not** migrate existing blobs (§9), so those
+snapshots are exactly what an in-place upgrade carries.
+
+**The fix.** `n_overridden` now qualifies both states, in each one's own tense:
+the offer says *"Repair these on every stack from now on — 1 target would keep
+its own setting"* and its tooltip says which targets, why (their own saved
+settings win) and how to include one. The router's gate moves from
+`enabled and _offer_wanted(out)` to `_offer_wanted(out)` alone: the per-target
+walk still has to earn itself — a library with nothing repairable never pays for
+it, which is the case the cost note was really protecting — but "the switch is
+off" is no longer a reason to skip a count that changes the sentence.
+
+**Tests (+ the three that fail before).**
+`tests/webapp/test_calibration_defects.py`:
+`test_a_target_that_saved_its_own_defaults_is_named_not_glossed_over` now
+asserts the exception in the **offer** as well as the confirmation (it used to
+assert the offer stayed silent);
+`test_the_override_count_is_only_paid_for_when_it_changes_a_sentence` keeps the
+"clean sensor ⇒ never walked" guarantee and re-pins the cost contract to both
+states; and `test_the_plural_and_the_no_exception_wording_both_hold` gains the
+off-state's singular/plural wording and its no-op cases (0 and a nonsense
+negative count both leave the plain offer untouched).
+
+**Upgrade-safe (§9):** copy and one router gate. No config, schema, on-disk,
+default or response-*shape* change; nothing is written and no pixel moves.
+
+---
+
 ## v0.374.2 — 2026-09-06 — the streaked-frames caution asks the engine what can actually remove a trail (`streakRejectionAdvice` + `rejection_reach.best_available`)
 
 **(Builder 2026-09-06, branch `claude/sweet-babbage-0pqzni`.) Friendliness —
