@@ -177,7 +177,16 @@ def compute_frame_weights(
         factors: list[float] = []
 
         if f.fwhm_px is not None and f.fwhm_px > 0 and best_fwhm is not None:
-            factors.append(float(np.clip((best_fwhm / f.fwhm_px) ** 2, min_weight, 1.0)))
+            # ``np.float64`` rather than the Python floats: a pathologically tiny
+            # ``fwhm_px`` makes the squared ratio overflow, and a *Python* float
+            # raises ``OverflowError`` before ``np.clip`` can clamp it, sinking
+            # the whole stack. numpy saturates to ``inf`` instead, which clips to
+            # the 1.0 the formula already wants. Unreachable through the app
+            # (``median_fwhm`` only persists values in (0.5, 20)), so this is a
+            # guard against an imported/hand-edited row, not a live fix.
+            ratio = np.float64(best_fwhm) / np.float64(f.fwhm_px)
+            with np.errstate(over="ignore"):
+                factors.append(float(np.clip(ratio * ratio, min_weight, 1.0)))
         median_stars, median_sky, median_transp = panel_medians[f.id]
         if f.star_count is not None and median_stars is not None and median_stars > 0:
             factors.append(float(np.clip(f.star_count / median_stars, min_weight, 1.0)))
