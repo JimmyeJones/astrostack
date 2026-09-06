@@ -3029,29 +3029,11 @@ problems. Dogfood it every big-picture run and fix root causes.
   the badge and one-click landing on the gain-matched dark *with* its bias and the scaling switch, and the
   no-confident-pick case keeping today's recommendation and its warning.
 
-- **NEW IDEA (Scout 2026-08-26 #6) — auto-detect the Seestar's calibration-frame folders sitting in `incoming/`
-  and offer a one-click "Build master darks" instead of making the beginner know what calibration is.**
-  *(Pillar: autonomy + image quality — PRIORITY 2/4. Size: M.)* The editor's "How's my stack?" panel already
-  tells the user *"No darks or flats were applied — adding master darks would cut the background speckle and hot
-  pixels"* and links to the Calibration page — but the beginner then has to know that darks exist, find the
-  folder, and drive a build. Meanwhile the Seestar *does* shoot darks, and if those subs are already in
-  `incoming/`, the app could notice them and offer to build the master with the right frames pre-filled — turning
-  a multi-step expert chore into one button on the target that already flagged the gap. **Sane default:** purely
-  *offer* it (a dismissible "we found ~40 dark frames from your Seestar — build a master dark? [Build]") — never
-  auto-build, never auto-apply (calibration stays opt-in per §9). **Hard gate / why it's an idea not a fix:** it
-  reads `incoming/` only (strictly read-only per §10 — the master build already *copies*, never moves), but it
-  needs the **confirmed folder/naming convention the Seestar uses for dark captures** (mirrors the existing
-  gated `S30/S50` mosaic-naming and `_video/` discovery notes). File it here and confirm the naming from a real
-  Seestar dark folder before building; do **not** blind-guess a glob that could misclassify light subs as darks.
-  **Grep before building:** `seestack/video/discover.py` already does capture-folder discovery under `incoming/`
-  and `calibration.py`/`masters.py` already build masters from a `source_dir` — this is wiring those two together
-  behind a detector, not new engine work.
-  **Half the gate is now answerable without a naming guess (Builder 2026-09-05, v0.356.0).** The `IMAGETYP`
-  lead this entry's blocker pointed at is built: `seestack.io.fits_loader.frame_kind_from_header` reads the
-  frame's own declaration one-sidedly, so a detector could confirm *"this folder holds darks"* from the frames
-  rather than from the folder's name — which is the guess the entry refuses. It is still gated on whether a
-  Seestar writes the card at all, which only a real Seestar dark can settle; but if it does, that is the
-  detector, and the naming convention stops mattering.
+- ~~**NEW IDEA (Scout 2026-08-26 #6) — auto-detect the Seestar's calibration-frame folders sitting in
+  `incoming/` and offer a one-click "Build master darks".**~~ — **SHIPPED v0.366.0** as
+  `seestack/calibrate/discover.py` + `GET /api/calibration/incoming` + `IncomingCalibrationCard`, built on the
+  `IMAGETYP` half of the gate rather than a naming guess. Entry, measurements and the "what happens on a camera
+  that writes no card" answer in [`SHIPPED.md`](SHIPPED.md).
 
 - **IMPROVEMENT IDEA (Scout 2026-07-24) — a WCS-free star-registration *fallback* so a faint field whose subs mostly
   fail to plate-solve can still stack from all its frames, instead of collapsing to a ~1–3-frame gibberish stack.**
@@ -8347,6 +8329,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.366.1** — Autonomy + friendliness (PRIORITY 2–3): **the "you already have darks" answer reaches the screen where the gap is actually noticed.** `_uncalibrated_advice` (the History Info panel's "why did this come out uncalibrated?" line) was silent in exactly the beginner case — no usable master in the library at all — because `diagnose_uncalibrated` only explains a *near-miss* master. It now falls back to `calibration.incoming_calibration_advice`, which names the frames sitting in `incoming/` ("You already have 40 dark frames in your incoming folder (“MyDarks”)"). The folder walk is the shared `cached_incoming_folders`, run only when there is no master-derived advice; `folder_as_master` shapes a discovered folder like a registry entry so "would this cover my subs?" is answered by the same `existing_master_like` that answers "does a master I own cover them?" — one definition, so the advice can't send anyone off to build a 30s dark for 10s subs, and a folder already built into a master says nothing. Entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.366.0** — Autonomy + image quality (PRIORITY 2/4): **"you already have darks" — the app notices calibration frames sitting in `incoming/` and builds the master in one click.** `seestack/calibrate/discover.py` confirms a folder from the **frames' own `IMAGETYP` cards** (`frame_kind_from_header`), never from the folder name — the naming-convention gate the entry refused to guess at simply stops mattering, and a camera that writes no card gets silence rather than a guess. `GET /api/calibration/incoming` + `POST /api/calibration/incoming/{id}/build` (folder re-resolved server-side from a sanitised id), `existing_master_like` reusing the unattended binder's own confidence bar so a covered folder says "you already have this one", and a self-hiding `IncomingCalibrationCard` inside the existing Calibration page. Offers only; builds nothing until asked and applies nothing after. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.365.0** — Image quality/trust (PRIORITY 4): **a finished picture says whether its rejection pass could have clipped anything, and the History Info panel stops calling a blind pass clean.** The stacker stamps `REJDEPTH` (samples on the deepest pixel — the literal peak, so "no pixel could be clipped" is provable), `REJNEED` and `REJREACH` beside the existing `REJ*` block; `lone_outlier_min_depth(mode, sigma_kappa)` is now the one definition of that bound behind `rejection_reach`, `stackhealth`'s `rejection_blind` note and the cards, and takes both the `"drizzle"` and `"drizzle-reject"` spellings. `rejectionSummaryText` claims *"data was already clean"* only when the run's own header says the pass reached — a thin mosaic panel now reads *"not enough subs on a pixel for it to reach"*. Deliberately no second paragraph: `StackHealthCard` already carries the explanation and the cure on that same page. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.364.0** — Friendliness (PRIORITY 3): **the "why were some frames left out?" breakdown gets a home a phone can reach, and its advice gets a button** — `RejectionBreakdownCard` in the Target page's existing Quality insight group (the breakdown had only ever rendered in a `HoverCard.Dropdown`, which has no touch affordance at all), plus `rejectionActions.ts` turning each bucket/verdict into the thing its note names — `settingsLink("plate-solving")` or the page's own Plate Solve — keyed off a new additive `verdict.key` from `webapp/rejection_summary._verdict` rather than matched on the copy. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.363.0** — Autonomy/friendliness (PRIORITY 2/3): **"First look" reaches the Dashboard** — the sharpest accepted sub of the target that has kept subs but no picture yet (`FirstLookStrip` + `pickFirstLookTarget`, inside the existing Recent insight group, self-hiding on a settled library), so the "did tonight work?" glance is answered on the landing page and not only on the Target hub. Entry in [`SHIPPED.md`](SHIPPED.md).
