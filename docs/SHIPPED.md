@@ -14,6 +14,119 @@ Newest first.
 
 ---
 
+## v0.374.1 — 2026-09-06 — the pinned-defaults note stops overstating what a save holds back (`Stack.tsx`)
+
+**(Builder 2026-09-06, branch `claude/sweet-babbage-d5819j`.) Friendliness —
+PRIORITY 3; the copy half of v0.374.0, and the reason it is its own commit is
+that it is a *sentence that became untrue* rather than part of the mechanism.**
+
+The v0.372.0 note said, under the list of options a target is holding away from
+the global defaults: *"Saved settings win over your global ones here, so a switch
+you change in Settings later won't reach this target until you save again."* With
+v0.374.0 that is only true of **the rows it just named** — everything the user
+never changed now follows the global setting like any other target. Left as-is,
+the one surface built to clear up "my Settings don't reach this target" would
+itself be telling a beginner exactly that, about their whole Settings page.
+
+Now: *"These ones win over your global settings here, so changing them in
+Settings later won't reach this target until you save again. Everything else
+follows your global settings as usual."* Pinned by an added assertion in the
+existing `Stack.test.tsx` case, beside the one that already held the first half.
+
+---
+
+## v0.374.0 — 2026-09-06 — "Save as defaults" stores what you changed, not a snapshot of the form: `walkaway.stack_defaults_delta` + `routers/stack._unsaved_stack_options`
+
+**(Builder 2026-09-06, branch `claude/sweet-babbage-d5819j`.) Autonomy + trust —
+PRIORITY 2/3. This closes the entry v0.372.0 opened: shapes (b) *and* (c).**
+
+**The bug it finishes.** `get_stack_defaults` fills **every** descriptor key before
+answering, the Stack form seeds its whole state from that, *Save as defaults*
+posts that whole state back, and `put_stack_defaults` persisted every non-`None`
+valid key. So a target saved in July carried an explicit value for **every option
+that existed in July** — including a string of `false`s for checkboxes nobody
+opened the advanced group to look at — and that blob then beat the global
+`default_stack_options` in *both* readers (the form's own seed and
+`pipeline._stack_target(auto=True)`). A switch the owner flipped globally
+afterwards never reached that target again. v0.372.0 removed the *silence* (the
+pinned-options note). This removes the *cause*: the save is now a **delta**.
+
+**What ships.** `put_stack_defaults` still validates the whole post — a saved
+default that would fail every future stack can only be judged as a whole, and
+must be caught at the door — and only then reduces it, through the new pure
+`walkaway.stack_defaults_delta`, to the keys that would change what this target
+stacks with. Everything the user left alone stays absent and keeps following the
+global setting, exactly as it does for a target that never pressed Save.
+
+**Three design calls, each of which was the difference between a fix and a
+regression:**
+
+* **The baseline is what the target would be *stacked* with, not what the form was
+  *shown*** (`_unsaved_stack_options`: the global blob filled out with each
+  descriptor's own default). `_merge_stack_defaults(settings, None)` — which the
+  pinned note compares against — also turns the beginner `auto_reject` seed on
+  *in the form*, and that seed is never stored and never reaches a stack. Diffing
+  against it would have dropped a key that does change what the target stacks
+  with, which is the one thing this must never do.
+* **A key whose *presence* is the decision is kept even when it matches the
+  default.** `sigma_clip`'s own engine default is `True`, and
+  `rejection_choice_expressed` tests presence, not truthiness — so dropping a
+  saved `sigma_clip: true` would hand the unattended chain a target that "never
+  chose" and let `apply_unattended_rejection` pick the method instead. That is
+  exactly the behaviour `auto_reject_on_unattended` (v0.337.0) was deliberately
+  built to make **opt-in**, and it must not arrive by the side door. So
+  `AUTO_REJECT_OPT_KEYS` + `drizzle_reject` are always persisted, as are the
+  calibration-master ids (no global default to follow).
+* **Sameness is `walkaway._same_option_value`, shared with `pinned_stack_options`**
+  — so what we decline to store and what we report as *pinned* cannot drift. A
+  JSON-round-tripped `3` is not a change from `3.0`; a bool is only ever the same
+  as a bool.
+
+**(c) comes free, and by the route the entry wanted.** The filed (c) was "a
+one-click *bring this target's saved settings up to date* that drops the keys the
+user never deliberately changed", with the caution that dropping keys from a
+stored blob is not reversible from the UI. It is now a **composition of two
+things that already exist**: v0.372.0's *"Put my global settings back in the
+form"* fills the form from the globals, and Save then stores the delta of that —
+i.e. nothing — so the legacy pin is gone. The Save button stays the reviewable
+moment, which is the property (c) was held back for.
+
+**Upgrade-safe (§9), and this is the half worth checking.** **Nothing is migrated
+or rewritten.** An existing full-snapshot blob keeps every key it has and keeps
+winning, until the owner saves that form again — at which point they see the
+values they are looking at, minus the ones they never chose. No config, schema,
+on-disk or API-shape change; no default flipped; the response shape is unchanged
+(it returns what was stored, as it always did).
+
+**One surface got more accurate as a side effect.** The Calibration page's
+"repaired on every stack, except N targets" count reads the same blob for a
+*pinned off* `repair_sensor_defects`. A target that saved defaults while the
+switch was off no longer carries a spurious `false`, so it is no longer counted
+as an exception — it follows the global switch, which is what it should always
+have done. Its test now sets the pin up the way a live install actually carries
+one (an older version's whole-form snapshot).
+
+**Copy.** The save toast gains the honest second half — *"Only what you changed is
+pinned here, so anything you left alone still follows your global Settings if you
+change them later."* — and the button tooltip says the same. A beginner who never
+hears that assumes Save freezes everything, which is what it used to do.
+
+**Tests (+13 Python, +1 vitest).** `tests/webapp/test_stack_defaults_delta.py`:
+seven on the pure helper (an untouched value is not stored; a changed one is; a
+JSON `3` is not a change from `3.0`; a bool is never the same as a number; an
+unknown key is kept; a presence-is-the-decision key is kept when it matches; the
+delta never invents a value), and six through the endpoint — saving the form
+untouched pins only the rejection choice, **a later global change now reaches a
+target that saved defaults** (fail-before: it stayed at the July value), what the
+user did change still wins and is still named by the pinned note with the right
+numbers, an existing full-snapshot blob is left alone byte-for-byte, a saved
+`sigma_clip: true` still reads as the user's own choice through
+`/rejection-outlook`, and the master picks still round-trip. `Stack.test.tsx` +1
+on the new sentence. Both behavioural endpoint tests were verified to fail with
+the delta disabled.
+
+---
+
 ## v0.372.0 — 2026-09-06 — a target stops silently ignoring your global settings: `walkaway.pinned_stack_options` + `GET /api/targets/{safe}/stack-defaults/pinned`
 
 **(Builder 2026-09-06, branch `claude/sweet-babbage-owcg4d`.) Autonomy + trust —

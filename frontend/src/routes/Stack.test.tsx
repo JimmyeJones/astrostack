@@ -2288,6 +2288,22 @@ describe("StackView — what a saved default will do overnight", () => {
     expect(shown.color).toBe("teal");
   });
 
+  it("says that only what you changed is pinned, so Settings still reaches this target", async () => {
+    // The save stores the *difference* from the global defaults (v0.374.0), not
+    // a snapshot of the whole form — a beginner who never hears that assumes
+    // pressing Save freezes everything, which is what it used to do.
+    const show = vi.spyOn(notifications, "show").mockImplementation(() => "");
+    mockSaveForm({ ...blind, reaches: true });
+
+    renderStack();
+    fireEvent.click(await screen.findByRole("button", { name: "Save as defaults" }));
+
+    await waitFor(() => expect(show).toHaveBeenCalled());
+    const shown = show.mock.calls[show.mock.calls.length - 1][0] as { message: string };
+    expect(shown.message).toContain("Only what you changed is pinned");
+    expect(shown.message).toContain("global Settings");
+  });
+
   it("still confirms the save when the outlook can't be had", async () => {
     // An older backend, or nothing solved yet: the save worked, so it must not
     // read as a failure just because the extra question went unanswered.
@@ -2338,8 +2354,12 @@ describe("StackView — saved settings that ignore the global defaults", () => {
     const note = await screen.findByTestId("pinned-defaults");
     expect(note).toHaveTextContent("1 saved setting");
     expect(note).toHaveTextContent("Sigma clipping: off here, on globally");
-    // And it explains *why* that matters, not just that it happened.
+    // And it explains *why* that matters, not just that it happened...
     expect(note).toHaveTextContent(/won't reach this target/);
+    // ...scoped to the rows it just named. Since v0.374.0 a save stores only
+    // what the user changed, so claiming Settings can't reach this target at all
+    // would be the very overstatement this note exists to clear up.
+    expect(note).toHaveTextContent(/Everything else follows your global settings/);
   });
 
   it("puts the global values back in the form in one click, without saving", async () => {
