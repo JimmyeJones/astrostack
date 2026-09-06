@@ -2288,6 +2288,22 @@ describe("StackView — what a saved default will do overnight", () => {
     expect(shown.color).toBe("teal");
   });
 
+  it("says that only what you changed is pinned, so Settings still reaches this target", async () => {
+    // The save stores the *difference* from the global defaults (v0.374.0), not
+    // a snapshot of the whole form — a beginner who never hears that assumes
+    // pressing Save freezes everything, which is what it used to do.
+    const show = vi.spyOn(notifications, "show").mockImplementation(() => "");
+    mockSaveForm({ ...blind, reaches: true });
+
+    renderStack();
+    fireEvent.click(await screen.findByRole("button", { name: "Save as defaults" }));
+
+    await waitFor(() => expect(show).toHaveBeenCalled());
+    const shown = show.mock.calls[show.mock.calls.length - 1][0] as { message: string };
+    expect(shown.message).toContain("Only what you changed is pinned");
+    expect(shown.message).toContain("global Settings");
+  });
+
   it("still confirms the save when the outlook can't be had", async () => {
     // An older backend, or nothing solved yet: the save worked, so it must not
     // read as a failure just because the extra question went unanswered.

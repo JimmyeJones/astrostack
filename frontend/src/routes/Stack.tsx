@@ -289,7 +289,12 @@ export function StackView() {
       const clause = savedRejectionClause(outlook);
       notifications.show({
         title: "Saved as defaults",
+        // The second sentence is the honest half of what the save now does
+        // (v0.374.0): only the options that differ from the global defaults are
+        // stored, so a target no longer freezes a copy of every setting on the
+        // day Save was pressed and then quietly ignores Settings for ever.
         message: "These options — including your calibration picks — will pre-fill this form and drive auto-stacking for this target."
+          + " Only what you changed is pinned here, so anything you left alone still follows your global Settings if you change them later."
           + (clause ? ` ${clause}` : ""),
         color: clause ? "yellow" : "teal",
         // Long enough to read the caution before it goes; the plain
@@ -1518,7 +1523,7 @@ export function StackView() {
           ) : null}
 
           <Group justify="flex-end" mt="sm">
-            <Tooltip label="Remember these options (and your calibration picks) for this target — they pre-fill this form and are used when auto-stacking is on">
+            <Tooltip label="Remember what you changed (and your calibration picks) for this target — it pre-fills this form and is used when auto-stacking is on. Anything left at your global setting keeps following it.">
               <Button variant="default" onClick={() => saveDefaults.mutate()} loading={saveDefaults.isPending}>
                 Save as defaults
               </Button>
