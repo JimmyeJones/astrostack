@@ -360,9 +360,22 @@ def steps_faded(profile: dict[str, Any] | None,
     This is what makes the fade *visible* rather than a silent drift: the caller
     turns a non-zero answer into :func:`fade_note`."""
     at = _now(now)
-    stored = effective_biases(profile, object_type, now=0.0)
-    live = effective_biases(profile, object_type, at)
-    return sum(abs(step) - abs(live.get(param, 0)) for param, step in stored.items())
+    prof = _coerce(profile)
+    # Counted per **bucket**, over the ones that feed this object_type's taste,
+    # rather than by differencing the merged result. A faded per-type override
+    # stops winning and hands its parameter back to the global bias it was
+    # hiding, so the *merged* magnitude for that parameter can go **up** even
+    # though both buckets faded — differencing would net a real fade away to
+    # nothing. ``_faded`` only ever reduces magnitude, so every term is ≥ 0.
+    buckets = [prof]
+    if object_type in prof["by_type"]:
+        buckets.append(prof["by_type"][object_type])
+    total = 0
+    for bucket in buckets:
+        stamps = bucket.get("stamps") or {}
+        for param, step in bucket["biases"].items():
+            total += abs(step) - abs(_faded(step, stamps.get(param), at))
+    return total
 
 
 def fade_note(profile: dict[str, Any] | None,
