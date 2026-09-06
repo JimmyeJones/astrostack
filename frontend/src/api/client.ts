@@ -2529,6 +2529,17 @@ export interface CalibrationDefects {
     // pixels" line would be one more row of copy for no gain.
     note: { severity: "ok" | "warn"; message: string; detail: string } | null;
   }[];
+  // The action beside the measurement: one click that turns the repair on for
+  // every future stack (the Stack form's own switch, written into the global
+  // stack defaults so the hands-off chain gets it too). Null when there is
+  // nothing repairable to offer it for — a clean sensor, or a map the ceiling
+  // refused, where turning it on would do nothing.
+  repair: {
+    state: "on" | "off";
+    message: string;
+    detail: string;
+    action: string;
+  } | null;
 }
 
 export interface CalibrationSuggestions {
@@ -3495,6 +3506,13 @@ export const api = {
   listCalibrationMasters: () => req<CalibrationMaster[]>("/api/calibration/masters"),
   calibrationCoverage: () => req<CalibrationCoverage>("/api/calibration/coverage"),
   calibrationDefects: () => req<CalibrationDefects>("/api/calibration/defects"),
+  // Turn "Repair hot/dead pixels from the dark" on (or off) for future stacks.
+  // The read-modify-write of the stack defaults happens server-side, so this
+  // click can never clobber another setting the user changed elsewhere.
+  setDefectRepair: (enabled: boolean) =>
+    req<{ enabled: boolean }>("/api/calibration/defects/repair", {
+      method: "POST", body: JSON.stringify({ enabled }),
+    }),
   calibrationSuggestions: (safe: string) =>
     req<CalibrationSuggestions>(`/api/targets/${safe}/calibration-suggestions`),
   buildCalibrationMaster: (body: {

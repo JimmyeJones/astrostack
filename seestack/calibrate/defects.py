@@ -55,6 +55,21 @@ DEFECT_SIGMA = 12.0
 # enough to follow amp glow.
 _LOCAL_WINDOW = 5
 
+# Side (in same-phase samples) of the block the *spread* is measured over —
+# deliberately much larger than ``_LOCAL_WINDOW``, which measures the level. See
+# ``_local_robust_scale`` for why the spread needs the extra samples, why a
+# block is enough (the quantity varies on the scale of amp glow, not per pixel)
+# and why a percentile rather than a MAD.
+_SCALE_BLOCK = 16
+
+# The percentile of |residual| that block stands for, and the Gaussian constant
+# that turns it back into a sigma: for x ~ N(0, σ), P80(|x|) = 1.2816 σ. Both
+# live here so the pair can never drift apart — a percentile changed without its
+# constant silently rescales the threshold every master is judged against.
+# ``_local_robust_scale`` explains why it is an upper percentile and why 80.
+_SCALE_PCT = 80.0
+_SCALE_K = 1.2816
+
 # Side (in same-phase samples) of the window a *no-data* sample is filled from
 # before the local median is taken. Wider than ``_LOCAL_WINDOW`` so a small hole
 # still reaches real data all round it, and a mean rather than a median so a
@@ -124,6 +139,65 @@ def _robust_scale(residual: np.ndarray) -> float:
     return float(np.median(np.abs(finite)) * 1.4826)
 
 
+def _local_robust_scale(residual: np.ndarray) -> np.ndarray:
+    """How big the residual runs **around here**, as a Gaussian sigma.
+
+    A master dark's noise is not stationary, and this is the fact
+    :func:`_robust_scale` alone cannot see. Dark-current shot noise scales as
+    √(dark current), so an amp-glow corner is genuinely noisier than the rest of
+    the sensor — and the corner is a small *fraction* of it, so a plane-wide MAD
+    is set by the quiet bulk. A bar of ``sigma`` × that number then sits well
+    below the glow's own grain, and ordinary noise there clears it: healthy
+    photosites are called broken, in a patch, exactly where the sensor is fine.
+    ``_LOCAL_WINDOW`` makes the local median follow the glow's *level*; nothing
+    was following its *spread*.
+
+    **An upper percentile, not the median**, because in a steep gradient the
+    residual is not Gaussian. The local median of 25 samples spanning a strong
+    slope often lands on (or beside) the centre sample itself, so a large share
+    of residuals there are ≈ 0 while the rest carry the full noise — measured on
+    the annulus of a synthetic glow, the residual's std was 5.0 against a median
+    |residual| of 0.70. A median-based scale reads that as a *nine-times-quieter*
+    region and then flags its own tail; a percentile measures the tail that is
+    actually there. Scaled by the Gaussian constant below, so on ordinary
+    stationary noise it agrees with :func:`_robust_scale` rather than shifting
+    the threshold every clean master is judged against.
+
+    **80, and not higher, is set by the refusal guard.** The percentile is also
+    what decides how many broken photosites in one block can lift the bar and
+    hide themselves. At P90 a master with a tenth of the sensor spiked — the
+    "built from the wrong frames" case ``MAX_DEFECT_FRACTION`` exists to refuse
+    wholesale — quietly stopped being refused, because a tenth of the samples is
+    exactly what reaches a 90th percentile: it came back at 0.8 % of the sensor,
+    under the ceiling, and would have been *repaired*. P80 needs more than a
+    fifth of a block (51 of 256 samples) to move, so that master is refused as
+    before, and it still clears every false positive at any credible amp glow
+    (measured: 133 healthy photosites flagged → 0 at a corner glow of 2,000 e⁻,
+    with all twelve planted defects still found).
+
+    **Measured per block, not per pixel**, for cost: the quantity varies on the
+    scale of the glow (tens of pixels), so a per-pixel sliding window buys
+    nothing and costs a hundred times more (measured at the owner's frame size:
+    1,253 ms per phase for a 15×15 ``percentile_filter``, 12 ms for this). The
+    block map is then averaged 3×3 so the field a pixel is judged against doesn't
+    step at a block edge.
+    """
+    from scipy.ndimage import uniform_filter
+
+    absres = np.abs(np.where(np.isfinite(residual), residual, 0.0))
+    h, w = absres.shape
+    blk = _SCALE_BLOCK
+    # ``edge`` padding so a partial block at the right/bottom is completed from
+    # its own neighbourhood rather than from zeros, which would read as a
+    # suspiciously quiet strip and lower the bar exactly at the frame edge.
+    padded = np.pad(absres, ((0, (-h) % blk), (0, (-w) % blk)), mode="edge")
+    bh, bw = padded.shape[0] // blk, padded.shape[1] // blk
+    tiles = padded.reshape(bh, blk, bw, blk).transpose(0, 2, 1, 3).reshape(bh, bw, -1)
+    q = np.percentile(tiles, _SCALE_PCT, axis=-1).astype(np.float32) / _SCALE_K
+    q = uniform_filter(q, size=3, mode="nearest")
+    return np.repeat(np.repeat(q, blk, axis=0), blk, axis=1)[:h, :w]
+
+
 def _candidate_mask(
     arr: np.ndarray,
     sigma: float,
@@ -173,8 +247,17 @@ def _candidate_mask(
             # is a stand-in, not a measurement, and letting it into the MAD moves
             # the threshold every real photosite is judged against.
             scale = _robust_scale(residual if all_valid else residual[valid])
-            tol = sigma * scale
-            # ``scale == 0`` means the plane is *exactly* its own local median
+            # The bar is the *larger* of the plane-wide spread and the spread
+            # right here. The plane-wide one alone under-reads inside amp glow
+            # (see ``_local_robust_scale``); the local one alone would be pulled
+            # *down* by a run of filled no-data samples, whose residual is flat
+            # by construction, and would then flag their neighbours — the very
+            # failure v0.369.4 fixed from the other direction. Taking the max
+            # is immune to both, and can only ever *raise* the threshold, so the
+            # map this returns is a subset of what it used to: no photosite that
+            # was left alone before starts being repaired.
+            tol = sigma * np.maximum(scale, _local_robust_scale(residual))
+            # A zero scale means the plane is *exactly* its own local median
             # everywhere the noise reaches — a synthetic or heavily quantised
             # master. Then any strict deviation is the outlier, which is the
             # same degradation ``masters._sigma_clip_mean`` makes for the same

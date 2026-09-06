@@ -14,6 +14,192 @@ Newest first.
 
 ---
 
+## v0.371.1 — 2026-09-06 — amp glow stops reading as broken photosites: `defects._local_robust_scale`
+
+**(Builder 2026-09-06, branch `claude/sweet-babbage-f4us4a`.) Image quality /
+data integrity — treated as stacking-engine-class per AGENTS.md §1.** *(Found by
+probing the brand-new v0.367–v0.371 code empirically rather than reading it —
+the same method that found v0.369.3 and v0.369.4.)*
+
+**The bug.** `find_sensor_defects` set its threshold at `DEFECT_SIGMA` × the MAD
+of the residual over the **whole** CFA plane. A master dark's noise is not
+stationary: amp glow is dark *current*, dark current carries shot noise, so the
+glow corner is genuinely grainier than the rest of the sensor by √(dark
+current) — and the corner is a small *fraction* of the sensor, so the plane-wide
+MAD is set by the quiet bulk. The bar it sets then sits well below the glow's own
+grain, and ordinary noise there clears it. `_LOCAL_WINDOW` made the local median
+follow the glow's *level*; nothing followed its *spread*.
+
+**Measured on a master built the way the camera builds one** (mean of 20 frames,
+each Poisson in the dark current plus read noise), with **every photosite healthy
+by construction**: at a corner glow of 2,000 e⁻ it flagged **133 pixels, all of
+them inside the glow**; at 20,000 e⁻, **1,564**. Each one is then overwritten
+from its neighbours on *every* sub of *every* stack — real data replaced by an
+interpolation, permanently, on a healthy sensor — and reported to the owner by
+the v0.370.0 census as broken pixels in their camera.
+
+**Why it survived twenty tests and two prior fixes to this file.** The existing
+`_synthetic_dark` fixture adds read noise of **one fixed sigma everywhere**, so
+its amp glow is a change of level only. The non-stationary case it cannot
+express is exactly the failing one, so `test_amp_glow_and_read_noise_alone_flag_nothing`
+passed throughout. The new `_shot_noise_dark` fixture builds the master the way
+the camera does and is the thing that catches it.
+
+**The fix: measure the spread locally too, and take the larger of the two.**
+`_local_robust_scale` returns a per-sample scale from an upper percentile of
+|residual| over a 16×16-sample block, and the threshold is
+`sigma × max(plane_wide, local)`. Three decisions, each measured:
+
+* **An upper percentile, not a MAD.** In a steep gradient the residual is not
+  Gaussian: the local median of 25 samples spanning a strong slope often lands on
+  the centre sample itself, so many residuals there are ≈ 0 while the rest carry
+  the full noise. On the glow annulus the residual's std was **5.0 against a
+  median |residual| of 0.70** — a MAD-based local scale reads that as a
+  nine-times-quieter region and flags its own tail.
+* **P80, and not higher, is set by the refusal guard.** The percentile also
+  decides how many broken photosites in one block can lift the bar and hide
+  themselves. At P90 a master with a tenth of the sensor spiked — the "built from
+  the wrong frames" case `MAX_DEFECT_FRACTION` exists to refuse wholesale —
+  quietly **stopped being refused** (0.8 % of the sensor, under the ceiling, and
+  would have been repaired). P80 needs more than a fifth of a block to move, so
+  that master is refused as before. Caught by the existing refusal test, which was
+  **not** relaxed.
+* **Per block, not per pixel**, for cost: the quantity varies on the scale of the
+  glow, so a sliding window buys nothing and costs a hundred times more —
+  measured at the owner's frame size, **1,253 ms per phase** for a 15×15
+  `percentile_filter` against **12 ms** for the block map. The block map is
+  averaged 3×3 so the field a pixel is judged against doesn't step at a block
+  edge.
+
+**After: 0 false positives at 0, 200 and 2,000 e⁻ of glow, with all twelve
+planted defects still found** (six inside the glow, six on the quiet bulk). At an
+unusable 20,000 e⁻ — amp glow alone filling most of the well in one sub — it is
+1,576 → ~121 rather than a cure, and the test says so rather than hiding it: the
+residual at that slope is dominated by the local median lagging the *curvature*,
+not by noise, and the only knob that would absorb it is the one that breaks the
+refusal guard.
+
+**Upgrade-safe (§9), and provably so.** `max()` means the threshold can only ever
+*rise*, so the map this version returns is a **subset** of what the previous one
+returned: no photosite that was left alone can start being repaired. On an
+ordinary stationary master the two scales agree to within a few percent, so a
+clean master's answer does not move at all (pinned by its own test). The feature
+is opt-in (`repair_sensor_defects`, off by default) and this changes no config,
+schema, on-disk path, default or response shape — the v0.370.0 census reports the
+corrected number automatically, since it shares `_candidate_mask`.
+
+**Tests (+8, 5 of them fail before).** `tests/test_defect_map.py`: the new
+`_shot_noise_dark` fixture; a healthy sensor flagging nothing at three glow
+levels; real defects inside the glow still found at each; the honest
+near-saturation bound; and the never-lowers-the-bar invariant with the
+stationary-noise calibration check that stops the block estimator drifting.
+
+---
+
+## v0.371.0 — 2026-09-06 — the census gets a button: `calibration.defect_repair_offer` + `POST /api/calibration/defects/repair`
+
+**(Builder 2026-09-06, branch `claude/sweet-babbage-f4us4a`.) Autonomy +
+friendliness — PRIORITY 2/3.** *(New user-facing capability. No pixel moves, no
+shipped default is flipped, nothing already on disk changes.)*
+
+**The gap, which is the previous version's own leftover.** v0.370.0 tells the
+owner their sensor has broken photosites and **names** the switch that repairs
+them: *"Switch on “Repair hot/dead pixels from the dark” on the Stack form."*
+Naming is not reaching. `repair_sensor_defects` is a checkbox inside the Stack
+form's **advanced** group, so acting on that sentence means a non-technical owner
+opening a collapsed disclosure and finding a setting by name — and doing it again
+for the next stack, because a form tick is not a default. Worse, the **hands-off
+chain never sees a form at all**: the watcher's auto-stack and "Process this
+target" stack from `default_stack_options` merged with the target's saved blob,
+so on the walk-away path this app is built for, the census line was information
+with no reachable action behind it.
+
+**What shipped: the sentence's button.** One click on the Calibration page —
+where the counts already are — writes `repair_sensor_defects` into the **global
+stack defaults**, which is the one place *both* readers look: `get_stack_defaults`
+(what seeds the Stack form) and `_stack_target(..., auto=True)`'s merge (what the
+unattended chain stacks with). So the census stops being a fact and becomes a
+setting, on every future stack, including the ones nobody is there for.
+
+**Silence is still the default answer, and the refusal is why it has to be.**
+`defect_repair_offer` returns `None` — no control at all — unless some censused
+master reports defects a repair could **actually fix**. A clean sensor has
+nothing to turn on; and a master whose map the 2 % ceiling **refused** is
+precisely the case where turning the switch on would repair no pixel, so
+offering the button there would be the same untruth the refusal warning exists to
+prevent. A repairable master beside a refused one still gets the offer.
+
+**No count in the offer, deliberately.** Which master a run derives its map from
+depends on what is bound at stack time (dark first, bias as the no-dark
+fallback), so a total across masters would double-count and any single master's
+number would be the wrong one half the time. The per-master rows already carry
+the measured counts; the offer carries only the action. One number, one place.
+
+**And the "on" sentence is kept honest about the one case that would make it
+false.** "Save as defaults" on the Stack form persists the **whole** form, not
+just the fields the user was looking at — so every target saved before this
+option existed carries an explicit `repair_sensor_defects: false` in its own
+blob, and a target's saved defaults win over the global ones in *both* readers.
+Claiming "every stack" there would be precisely the confident untruth the
+census's own silences are designed to avoid. So the endpoint counts the targets
+that pin it off and the copy names them — *"…except 1 target"* — with the
+detail explaining why and how to include one (open its Stack form, tick the
+switch, save the defaults again). A target that saved it **on**, or never saved
+that key, follows the global switch and is not an exception to it. The
+per-target walk is asked for **only when the switch is on and something is
+repairable**, i.e. only when the count can change a sentence — the same offer
+predicate decides, delegated rather than restated, so a clean library and an
+off switch both pay nothing on the 60 s poll (pinned by a test that counts the
+calls).
+
+**Exactly reversible, from where it was clicked.** Once on, the same control
+becomes *"Turn off"* — a user must never have to go hunting in Settings to undo a
+click they made here. Turning it off **removes** the key rather than storing
+`False`: the option's own default is off, so absent and `False` mean the same
+thing to every reader, and an on-then-off round trip leaves the options blob
+byte-for-byte as it was, with every other default the user set untouched (pinned
+by a test).
+
+**Server-side read-modify-write.** The endpoint reads the store, merges the one
+key and writes it back, rather than having the browser send a whole
+`default_stack_options`. A click can therefore never clobber a stack default the
+user changed on another screen, and no client-supplied option value is ever
+persisted — the body is one boolean.
+
+**Copy fixed with it.** `defect_note`'s tooltip now points at the button above
+the list *and* still names the Stack form's exact label (so the two surfaces
+can't drift, and someone who prefers the form can still find it).
+
+**Placement.** Inside the existing masters card, above the table — not another
+page-level banner, per the standing "extremely busy" IA rule (AGENTS.md §1).
+
+**Upgrade-safe (§9):** one additive, defaulted response field (`repair`, `null`
+on an old-shaped answer), one new endpoint, one new client method, one
+self-hiding row. No config *key*, no schema, no on-disk change, no default
+flipped, no existing response shape touched. An install with no
+`default_stack_options` at all reads as off (`_defect_repair_enabled` tolerates
+an absent or non-dict value); an older frontend never asks and never renders it.
+
+**Tests (+13 Python, +3 vitest; 1 existing test extended, not loosened).**
+`tests/webapp/test_calibration_defects.py`: the four silences (nothing censused,
+a clean sensor, an unmeasurable master, a non-dict row), the refused map never
+offering the button *and* still offering it when a repairable master sits beside
+it, the off-state copy naming the Stack form's switch and the hands-off path
+while quoting no count, the on-state carrying the way back off and never claiming
+to have improved a finished picture, the click landing the option in the global
+defaults, the off click leaving no residue beside an unrelated saved default, an
+empty body meaning "on", a clean library offering nothing end to end, and — the
+one that matters — the switch arriving in `GET .../stack-defaults`, the reader
+itself, so a rename on either side can't silently strand the button. The
+exact-shape assertion on the empty-library response was **extended** to pin
+`repair: null` rather than relaxed. Then the override half: a target pinning it
+off named in the copy while a target pinning it *on* and one that saved nothing
+are not counted, the singular/plural/negative-count wording, and the walk being
+skipped entirely with the switch off or nothing repairable. `Calibration.test.tsx`: the offer clicked,
+the on-state's turn-off clicked, and the whole control absent on `repair: null`.
+
+---
+
 ## v0.370.0 — 2026-09-06 — "does my camera have broken pixels?" — the Calibration page says so, and names the one switch that fixes them
 
 **(Builder 2026-09-06, branch `claude/sweet-babbage-ks0ild`.) Autonomy +
