@@ -5033,31 +5033,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   reverts on a truly pathological skew. If it does over-revert on real nebula, raise the site-specific threshold
   (or gate it on `sc_std` magnitude). No change unless (a) fails on real data — same real-data-gating as the
   SCNR / `sky_sigma` items below.
-- **IMPROVEMENT IDEA (Scout 2026-07-21) — derive hot/dead-pixel correction from a persistent defect map (the
-  master dark/bias) instead of relying only on the blind per-frame local-median filter.** *(Image quality /
-  autonomy, PRIORITY 4 + 2; size M; needs real-data validation.)* **Why:** the always-on per-frame
-  `suppress_hot_cold_pixels` is a blunt instrument — a 3×3 local-median outlier filter can't distinguish a real
-  star peak from a hot pixel/cosmic ray, which is the root of the ⭐ star-core-clipping bug filed above. The
-  *principled* long-term route is what mature stackers do: build a **defect map** of the pixels that are hot
-  (bright in every dark) or dead (stuck low) from the **master dark/bias** the calibrate path already builds
-  (`seestack/calibrate/masters.py`) — those pixels are deterministic sensor defects, independent of the sky — and
-  correct **only those** (from their neighbours), leaving every real star untouched. Cosmic-ray / one-frame
-  transients then fall to the existing **multi-frame κ-σ** rejection (which *can* tell a persistent star from a
-  single-frame spike). This is distinct from the ⭐ bug's shipped in-place fix (cross-channel / all-channel
-  star-safety gate, v0.158.9, dark-free): it needs darks and a new map, but it's strictly more correct and more
-  autonomous ("it knew which pixels were broken"). **Extra motivation confirmed while shipping the ⭐ fix:** the
-  per-frame pass runs *after* `bilinear_debayer`, so a single hot CFA site has already smeared into a 3×3 halo by
-  the time it's seen — the star-safe fix can therefore only knock it down to *halo* level (~0.5× peak for an
-  R/B site, ~0.25× for a G site), not erase it (this is exactly what `test_drizzle_suppresses_hot_pixels` and
-  `test_debayered_single_cfa_hot_pixel_is_suppressed` assert). A raw-Bayer-domain defect map (applied in
-  `apply_raw`, *before* debayer) would remove the defect while it's still a single pixel — fully erasing it AND
-  never risking a star — so it dominates the post-debayer pass on both axes. **Shape:** (a) a pure `hot_pixel_map(master_dark, master_bias, sigma)` → boolean defect mask
-  (unit-testable on a synthetic dark with injected hot/dead pixels); (b) apply it in `apply_raw` (raw-Bayer
-  domain, before debayer) by replacing masked pixels with a same-Bayer-phase neighbour median; (c) when no dark
-  is present, fall back to the (fixed, star-aware) per-frame filter. **Guardrails:** additive, default-safe (a
-  user with no darks keeps today's behaviour), no schema/config/API change beyond an optional map cache; validate
-  on a real Seestar stack that stars are preserved and true hot pixels still vanish. Pillar: image quality + a
-  step toward "just works" calibration autonomy.
 - **NEW (Builder audit 2026-07-16) — engine-audit residue: two low-confidence, NOT-currently-reachable
   notes to keep a future audit from re-flagging them.** (XS each, image-quality/correctness — PRIORITY 4.)
   *(From two independent adversarial stacking-engine audits this run — both otherwise verified the core
@@ -8329,6 +8304,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.367.0** — Image quality (PRIORITY 4) + calibration autonomy (PRIORITY 2): **repair the sensor's broken photosites from the master dark, in the raw Bayer domain, instead of relying only on the blind post-debayer local-median filter.** New pure `seestack/calibrate/defects.py` — `find_sensor_defects` measures each **CFA phase** against its own local median (so amp glow, a gradient and a per-phase offset all flag zero) and refuses any candidate set past 2 % of the sensor; `DefectMap` precomputes the same-phase neighbour gather once at load so the per-frame cost scales with the *defects*, not the canvas. `CalibrationMasters.apply_raw` repairs after the pedestal subtract and before the flat divide, so a hot site is erased while it is still one pixel and **a star can never be touched** — the map is measured on the dark. `StackOptions.repair_sensor_defects` is **off by default** and off measures nothing (§9); `DEFECTPX` → `sensor_defects` → one History line when it did something. Still open: validate the map's population on a real Seestar dark before anyone proposes defaulting it on. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.366.1** — Autonomy + friendliness (PRIORITY 2–3): **the "you already have darks" answer reaches the screen where the gap is actually noticed.** `_uncalibrated_advice` (the History Info panel's "why did this come out uncalibrated?" line) was silent in exactly the beginner case — no usable master in the library at all — because `diagnose_uncalibrated` only explains a *near-miss* master. It now falls back to `calibration.incoming_calibration_advice`, which names the frames sitting in `incoming/` ("You already have 40 dark frames in your incoming folder (“MyDarks”)"). The folder walk is the shared `cached_incoming_folders`, run only when there is no master-derived advice; `folder_as_master` shapes a discovered folder like a registry entry so "would this cover my subs?" is answered by the same `existing_master_like` that answers "does a master I own cover them?" — one definition, so the advice can't send anyone off to build a 30s dark for 10s subs, and a folder already built into a master says nothing. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.366.0** — Autonomy + image quality (PRIORITY 2/4): **"you already have darks" — the app notices calibration frames sitting in `incoming/` and builds the master in one click.** `seestack/calibrate/discover.py` confirms a folder from the **frames' own `IMAGETYP` cards** (`frame_kind_from_header`), never from the folder name — the naming-convention gate the entry refused to guess at simply stops mattering, and a camera that writes no card gets silence rather than a guess. `GET /api/calibration/incoming` + `POST /api/calibration/incoming/{id}/build` (folder re-resolved server-side from a sanitised id), `existing_master_like` reusing the unattended binder's own confidence bar so a covered folder says "you already have this one", and a self-hiding `IncomingCalibrationCard` inside the existing Calibration page. Offers only; builds nothing until asked and applies nothing after. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.365.0** — Image quality/trust (PRIORITY 4): **a finished picture says whether its rejection pass could have clipped anything, and the History Info panel stops calling a blind pass clean.** The stacker stamps `REJDEPTH` (samples on the deepest pixel — the literal peak, so "no pixel could be clipped" is provable), `REJNEED` and `REJREACH` beside the existing `REJ*` block; `lone_outlier_min_depth(mode, sigma_kappa)` is now the one definition of that bound behind `rejection_reach`, `stackhealth`'s `rejection_blind` note and the cards, and takes both the `"drizzle"` and `"drizzle-reject"` spellings. `rejectionSummaryText` claims *"data was already clean"* only when the run's own header says the pass reached — a thin mosaic panel now reads *"not enough subs on a pixel for it to reach"*. Deliberately no second paragraph: `StackHealthCard` already carries the explanation and the cure on that same page. Entry in [`SHIPPED.md`](SHIPPED.md).

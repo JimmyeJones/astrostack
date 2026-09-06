@@ -11,8 +11,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from seestack.calibrate.defects import DefectMap
 
 log = logging.getLogger(__name__)
 
@@ -140,6 +144,14 @@ class CalibrationMasters:
     # different exposure than the light is scaled to the light's integration
     # time before subtraction (see :meth:`_effective_dark`). Off by default.
     scale_dark_to_light: bool = False
+    # Sensor defect map derived from the master dark (or, with no dark, the
+    # master bias) when ``repair_sensor_defects`` was requested at load time —
+    # ``None`` whenever the option is off, no pedestal master is loaded, or the
+    # master carries no credible defects. Applied per frame in :meth:`apply_raw`
+    # (raw-Bayer domain, before the flat divide and long before debayer), so a
+    # broken photosite is replaced while it is still one pixel. See
+    # :mod:`seestack.calibrate.defects`.
+    defects: "DefectMap | None" = None
 
     @classmethod
     def load(
@@ -150,6 +162,7 @@ class CalibrationMasters:
         bias_path: str | None = None,
         *,
         scale_dark_to_light: bool = False,
+        repair_sensor_defects: bool = False,
     ) -> "CalibrationMasters":
         """Load masters from disk. Any path may be ``None``.
 
@@ -175,6 +188,13 @@ class CalibrationMasters:
         library shot at one exposure can still calibrate subs at another. It
         needs the bias to hold the exposure-independent readout pedestal fixed;
         without a bias (or an unknown exposure) the dark is used unscaled.
+
+        ``repair_sensor_defects`` opts into deriving a **sensor defect map**
+        from the master dark (or, with no dark, the master bias) and repairing
+        those photosites in every light — see
+        :mod:`seestack.calibrate.defects`. Off by default; with it off nothing
+        is measured and no frame is touched, so a run is byte-for-byte what it
+        is today.
         """
         from seestack.calibrate.masters import load_master
 
@@ -267,7 +287,24 @@ class CalibrationMasters:
                 # Floor tiny / non-finite values to 1.0 (= no correction there).
                 flat_norm = np.where(np.isfinite(fn) & (fn > _FLAT_FLOOR), fn, 1.0
                                      ).astype(np.float32, copy=False)
-        return cls(dark=dark, flat_norm=flat_norm, bias=bias,
+        # Sensor defect map — measured once, here, off the per-frame hot path.
+        # The *dark* is the better source (it carries dark current as well as
+        # the readout pedestal, so a merely-warm pixel shows up); the bias is
+        # the fallback for the no-dark workflow. The no-data mask is excluded
+        # because a master with no data at a pixel says nothing about the
+        # sensor there — see ``find_sensor_defects``.
+        defects = None
+        if repair_sensor_defects:
+            from seestack.calibrate.defects import build_defect_map
+
+            if dark is not None:
+                defects = build_defect_map(dark, exclude=dark_nodata_mask)
+            elif bias is not None:
+                defects = build_defect_map(bias, exclude=bias_nodata_mask)
+            if defects is not None:
+                log.info("Sensor defect map: %d photosite(s) will be repaired "
+                         "from their same-colour neighbours", defects.n_defects)
+        return cls(dark=dark, flat_norm=flat_norm, bias=bias, defects=defects,
                    dark_nodata_mask=dark_nodata_mask,
                    bias_nodata_mask=bias_nodata_mask,
                    dark_path=dark_path, flat_path=flat_path, bias_path=bias_path,
@@ -305,6 +342,14 @@ class CalibrationMasters:
         return (self.scale_dark_to_light and self.dark is not None
                 and self.bias is not None
                 and self.bias.shape == self.dark.shape)
+
+    @property
+    def n_sensor_defects(self) -> int:
+        """How many photosites the defect map repairs per frame (0 = none).
+
+        Provenance only — the run stamps it so a user who turned the
+        (off-by-default) repair on can see it did something, and how much."""
+        return self.defects.n_defects if self.defects is not None else 0
 
     def describe(self) -> str:
         parts = []
@@ -585,6 +630,18 @@ class CalibrationMasters:
             out = out - dark
         elif self._bias_applies and self.bias.shape == out.shape:
             out = out - self.bias
+        # Repair broken photosites *after* the pedestal subtraction (so the
+        # neighbours we median are themselves dark-corrected) and *before* the
+        # flat divide (so a defect can't be handed to the flat's own floor as if
+        # it were signal). Still the raw Bayer mosaic, so the replacement comes
+        # from same-colour neighbours and the defect never reaches the debayer
+        # that would smear it into a 3×3 halo. ``None`` (the default) is a
+        # no-op; a shape mismatch is a no-op too, matching the per-frame guards
+        # above.
+        if self.defects is not None:
+            if out is raw:
+                out = out.copy()
+            self.defects.repair(out)
         if self.flat_norm is not None and self.flat_norm.shape == out.shape:
             out = out / self.flat_norm
         result = out.astype(np.float32, copy=False)
