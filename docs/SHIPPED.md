@@ -14,6 +14,69 @@ Newest first.
 
 ---
 
+## v0.369.3 — 2026-09-06 — one tap is one step: Adaptive Auto's first type-scoped nudge no longer jumps across the global taste
+
+**(Builder 2026-09-06, found and reproduced while auditing the brand-new v0.369.x
+`auto_prefs` code, which no run had reviewed. Branch `claude/sweet-babbage-v7xsyy`.)
+Editor / one-click Auto — PRIORITY 1, because the profile changes the picture Auto
+produces.** *(Severity: broken-UX + image-changing, from a single click. Confidence:
+reproduced, then pinned by three regression tests.)*
+
+**The bug.** `seestack/edit/auto_prefs.py::record_feedback` writes a type-scoped cue
+(the owner tapped "too bright" while looking at a galaxy) into that archetype's
+`by_type` bucket, and `effective_biases` lets a per-type bias **override** the global
+one per parameter. A fresh override started at **neutral**, so the first type-scoped
+tap did not move the taste one step — it *replaced* the value in force with ±1.
+
+With a global `brightness = +2` — what the owner gets from two taps on any picture
+`classify_target` can't place, which is the ordinary way the global bucket ever becomes
+non-zero — one "too bright" on a galaxy landed at **−1**: a three-step swing
+(0.06 in `target_bg`) straight past neutral, in the direction they had not asked for.
+Worse, the value they *were* asking for was unreachable: tapping "too dark" walked the
+override back to 0, which was dropped, which handed the parameter back to the global
+`+2`. So the taste oscillated between `+2` and `−1` forever and could never land on
+`+1`, on `0`, or anywhere else.
+
+Reproduced before the fix (`effective_biases(prof, "galaxy")`):
+
+| taps on a galaxy, global `+2` | before | after |
+|---|---|---|
+| (none) | +2 | +2 |
+| too_bright | **−1** | +1 |
+| too_bright | +2 | 0 |
+| too_bright | −1 | −1 |
+| too_dark | +2 | 0 |
+
+**The fix, in two halves.** (a) A type-scoped tap on a parameter the bucket has never
+spoken about **seeds from the taste in force** — the aged global bias — and then applies
+its one step. (b) A per-type **0 is stored** rather than dropped when there is a non-zero
+global bias underneath it, because "no shift for my galaxies, while everything else stays
++2 brighter" is a real setting and dropping the 0 hands the parameter straight back to the
+global taste — the same off-by-a-bucket jump, one step further on. `_coerce_bucket` /
+`_bucket_biases` grew a `keep_zero` flag used **only** for `by_type` buckets; a bias that
+merely *faded* to 0 is still dropped, so an expired override still hands its parameter back
+to the global set (the behaviour `test_a_faded_override_unmasking_a_bigger_global_bias_
+still_counts_as_a_fade` pins).
+
+**Upgrade-safe (§9):** no schema, no config key, no API shape, no on-disk change, no
+default flipped. Profiles written before this carry no explicit zeros, so they read exactly
+as they did; `effective_biases` still never returns a zero, so the endpoint's `biases` map
+and the frontend are byte-identical. The global-only path (an unclassifiable picture) is
+untouched by construction — `global_step` is forced to 0 there, since the global set *is*
+the bucket.
+
+**Tests.** +3 in `tests/test_auto_prefs.py`: the one-step regression (fails before —
+`{'brightness': -1}` where `+1` is wanted), a full walk of every reachable value in both
+directions including the sticky neutral (`+2 → +1 → 0 → −1 → −2 → −3` and back up to the
+`+3` ceiling), and a JSON round-trip proving the stored neutral survives the webapp's
+persistence and really does give a galaxy Auto's measured `target_bg` while a nebula keeps
+the shifted one. Three existing tests that reached their scenario *through* the defective
+arithmetic now take the extra taps the honest one-step walk needs; each still asserts the
+same property it always did (per-type precedence, a faded override falling back to global,
+and the unmasking fade still counting).
+
+---
+
 ## v0.369.1 — 2026-09-06 — the one-click calibration build stops combining what the sampling missed
 
 **(Scout 2026-09-06, filed as a traced-not-reproduced note; verified by reproduction and
