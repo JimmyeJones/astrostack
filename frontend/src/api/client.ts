@@ -2510,6 +2510,27 @@ export interface CalibrationCoverage {
   auto_apply?: boolean;
 }
 
+// "Does my camera have broken pixels?" — a census of the photosites each
+// *pedestal* master (dark/bias) says are hot or stuck dark, plus the server's
+// one-line verdict. Only masters that could be read appear, so a row with no
+// entry simply shows nothing.
+export interface CalibrationDefects {
+  masters: {
+    id: number;
+    n_defects: number;
+    n_pixels: number;
+    fraction: number;
+    // True when the count is too large to be credible as sensor defects, so no
+    // repair map would be built from this master — a different thing from a
+    // clean sensor, and the note says which.
+    refused: boolean;
+    measurable: boolean;
+    // Null on a clean sensor: there is nothing to act on, and a "0 broken
+    // pixels" line would be one more row of copy for no gain.
+    note: { severity: "ok" | "warn"; message: string; detail: string } | null;
+  }[];
+}
+
 export interface CalibrationSuggestions {
   params: {
     exposure_s: number | null; gain: number | null; sensor_temp_c: number | null;
@@ -3473,6 +3494,7 @@ export const api = {
   // calibration masters (library-level dark/flat frames)
   listCalibrationMasters: () => req<CalibrationMaster[]>("/api/calibration/masters"),
   calibrationCoverage: () => req<CalibrationCoverage>("/api/calibration/coverage"),
+  calibrationDefects: () => req<CalibrationDefects>("/api/calibration/defects"),
   calibrationSuggestions: (safe: string) =>
     req<CalibrationSuggestions>(`/api/targets/${safe}/calibration-suggestions`),
   buildCalibrationMaster: (body: {

@@ -316,6 +316,69 @@ def build_master_from_incoming(folder_id: str, request: Request) -> dict[str, st
     return {"job_id": job.id}
 
 
+#: How many master censuses to keep. A master FITS never changes once written
+#: (a rebuild takes a *new* id and filename), so the cache is keyed on the file's
+#: own identity and needs no TTL — the cap exists only so a library that has been
+#: rebuilt hundreds of times can't grow the map without bound.
+_DEFECT_CACHE_MAX = 128
+
+
+@router.get("/api/calibration/defects")
+def calibration_defects(request: Request) -> dict[str, Any]:
+    """"Does my camera have broken pixels, and can AstroStack fix them?"
+
+    A read-only census of every *pedestal* master (dark, then bias — the two a
+    defect map can be derived from): how many photosites it says are hot or
+    stuck dark, and one plain-language line about it. The engine has been able
+    to repair exactly those pixels since ``repair_sensor_defects`` shipped, but
+    the setting lives in the Stack form's **advanced** group, so a beginner has
+    no way to learn either that their sensor has broken pixels or that there is
+    a one-switch fix. This is the surface that tells them, on the page where
+    masters already live — not a new banner on the Stack form, which already
+    carries enough calibration copy.
+
+    Reading a master means loading its FITS and running the same per-phase local
+    median the map is built from, so the answer is cached on the app keyed by
+    each file's own identity (path + mtime + size). A master file is immutable
+    once written, so a hit is always correct; a rebuilt master gets a new id and
+    filename and so a new entry.
+
+    Never raises on a bad master: one that can't be read is simply absent from
+    the answer.
+    """
+    settings = deps.get_settings(request)
+    root = settings.resolved_library_root
+    cache = getattr(request.app.state, "calibration_defect_cache", None)
+    if cache is None:
+        cache = request.app.state.calibration_defect_cache = {}
+    out: list[dict[str, Any]] = []
+    for m in calibration.list_masters(root):
+        if str(m.get("kind", "")).lower() not in calibration.DEFECT_CENSUS_KINDS:
+            continue
+        if not m.get("exists"):
+            continue
+        fp = calibration.calibration_dir(root) / str(m.get("filename", ""))
+        try:
+            st = fp.stat()
+            key = (str(fp), st.st_mtime_ns, st.st_size)
+        except OSError:
+            continue
+        if key in cache:
+            census = cache[key]
+        else:
+            census = calibration.master_defect_census(fp)
+            if len(cache) >= _DEFECT_CACHE_MAX:
+                # Oldest-first: dicts preserve insertion order, and the oldest
+                # entry is the master least likely to be on screen.
+                cache.pop(next(iter(cache)))
+            cache[key] = census
+        if census is None:
+            continue
+        note = calibration.defect_note(census)
+        out.append({"id": int(m.get("id", -1)), **census, "note": note})
+    return {"masters": out}
+
+
 @router.delete("/api/calibration/masters/{master_id}")
 def delete_master(master_id: int, request: Request) -> dict[str, Any]:
     settings = deps.get_settings(request)

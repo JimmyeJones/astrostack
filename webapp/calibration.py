@@ -217,6 +217,105 @@ def header_kind_note(
                         f"folder of {want}.")}
 
 
+#: The master kinds a sensor-defect census means anything for. A defect map is
+#: derived from the *pedestal* masters — the dark first, the bias as the no-dark
+#: fallback — exactly as :meth:`seestack.calibrate.apply.CalibrationMasters.load`
+#: chooses them. A flat is a multiplicative field, not a picture of the sensor's
+#: dark behaviour, so counting "outliers" in one would describe dust, not broken
+#: photosites.
+DEFECT_CENSUS_KINDS = ("dark", "bias")
+
+
+def _thousands(n: int) -> str:
+    return f"{n:,}"
+
+
+def defect_note(census: dict[str, Any] | None) -> dict[str, str] | None:
+    """"Does this master say the sensor has broken pixels?" — one plain line.
+
+    Returns ``{'severity': 'ok'|'warn', 'message': …, 'detail': …}`` where
+    ``detail`` is the longer explanation a tooltip carries, or **``None`` when
+    there is nothing worth saying**: a master that couldn't be measured, and —
+    deliberately — a sensor that came back clean. A row that says "0 broken
+    pixels" is one more line on a page the owner already calls busy, and it
+    invites no action; the two cases below both do.
+
+    Pure over the census dict :func:`master_defect_census` produces, so the same
+    sentence can be shown anywhere without the wording drifting.
+    """
+    if not isinstance(census, dict) or not census.get("measurable"):
+        return None
+    n = int(census.get("n_defects") or 0)
+    if n <= 0:
+        return None
+    pct = 100.0 * float(census.get("fraction") or 0.0)
+    if census.get("refused"):
+        # The repair will not run, and the honest reason is that the map isn't
+        # credible — say so here rather than let a user turn the option on and
+        # wonder why nothing happened. Not an accusation: a warm sensor, a
+        # half-built master and a folder of subs all land here.
+        return {
+            "severity": "warn",
+            "message": "Too many pixels read as broken to repair from this one",
+            "detail": (
+                f"{_thousands(n)} pixels ({pct:.2f}% of the sensor) look broken "
+                f"in this master — far more than a real sensor has. AstroStack "
+                f"won't repair from it, because a map that big would be "
+                f"describing the picture rather than the photosites. It usually "
+                f"means the master was built from the wrong frames."
+            ),
+        }
+    return {
+        "severity": "ok",
+        "message": f"{_thousands(n)} hot or dead pixels ({pct:.3f}%)",
+        "detail": (
+            f"This master says {_thousands(n)} of the camera's photosites are "
+            f"broken — bright in every dark, or stuck dark. Switch on "
+            f"“Repair hot/dead pixels from the dark” on the Stack form "
+            f"and AstroStack replaces just those from their same-colour "
+            f"neighbours, before the colours are reconstructed. Every other "
+            f"pixel, including every star, is left exactly as it was."
+        ),
+    }
+
+
+def master_defect_census(path: str | Path) -> dict[str, Any] | None:
+    """Count the broken photosites a master FITS reports, or ``None``.
+
+    ``None`` means "nothing to say": an unreadable file, or a frame that isn't a
+    usable 2-D mosaic. One damaged master must never take the Calibration page
+    down, so every failure is swallowed into that answer.
+
+    The array is handed to :func:`~seestack.calibrate.defects.census_sensor_defects`
+    **exactly as loaded**, non-finite pixels and all. That is not a shortcut: the
+    stack's own map is built from the sanitized master plus a ``exclude`` mask of
+    the pixels that were non-finite before sanitizing, and the census's own
+    ``isfinite`` test selects that identical set — so the number shown here is
+    the number a run would repair, not an approximation of it. Pinned by a test
+    against :meth:`seestack.calibrate.apply.CalibrationMasters.load`.
+    """
+    try:
+        import numpy as np
+
+        from seestack.calibrate.defects import census_sensor_defects
+        from seestack.calibrate.masters import load_master
+
+        arr, _meta = load_master(str(path))
+        census = census_sensor_defects(np.asarray(arr, dtype=np.float32))
+    except Exception:  # noqa: BLE001 — one bad master must not sink the page
+        log.debug("could not census sensor defects in %s", path, exc_info=True)
+        return None
+    if not census.measurable:
+        return None
+    return {
+        "n_defects": census.n_defects,
+        "n_pixels": census.n_pixels,
+        "fraction": census.fraction,
+        "refused": census.refused,
+        "measurable": True,
+    }
+
+
 def list_masters(library_root: str | Path) -> list[dict[str, Any]]:
     """Return all registered masters (newest first), dropping any whose file
     has since been deleted from disk."""
