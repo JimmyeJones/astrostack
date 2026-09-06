@@ -18,6 +18,46 @@ is a queue.
 
 ---
 
+## 2026-09-06 — Builder run (branch `claude/sweet-babbage-f1wozl`): the "can a plain run carry a `preview_crop_json`?" sub-question of the full-res-render consolidation lead is a **non-finding**
+
+The open lead *"there are now **two** answers to 'render this run's picture at size N'"*
+(`docs/IMPROVEMENTS.md` → Infra / maintainability, Builder 2026-08-30) closes with a
+concrete worry worth more than the refactor around it:
+
+> a plain run should never carry a `preview_crop_json` (only the auto-edit writes one, and
+> it sets `preview_display_space` too), but **nothing asserts that**, and if it can happen
+> the full-res download is showing a differently-*framed* picture the same way it was
+> showing a differently-rotated one.
+
+**Checked in the code this run; the invariant holds by construction at both writer sites,
+so there is no second v0.311.1 hiding here.** `preview_crop_json` is written in exactly two
+places, and both set the display-space marker in the same block:
+
+* `webapp/pipeline._auto_edit_process_run` — `set_stack_preview_crop(...)` at
+  `pipeline.py:3199` is followed by `set_run_preview_display_space(run_id)` at `:3208`,
+  with no early return between them.
+* the North-up "Adjust → Save" endpoint in `webapp/routers/stack.py` — it **refuses a
+  non-display-space run up front** (`if not _preview_is_display_space(run.options_json):`
+  → 400 *"This run's picture isn't a processed one — save a stretch instead"*, with the
+  comment already explaining that doing it would be "a different feature … reached by a
+  path nothing offers"), and only then writes `set_stack_preview_crop` +
+  `set_run_preview_display_space` together.
+
+The only other mutation is `set_stack_preview_crop(run_id, None)` — a clear, which cannot
+create the shape.
+
+**So the crop case is *not* the rotation case.** The rotation went missing from one of the
+two renderers because it was written in one and forgotten in the other; the crop is fenced
+off at the point where it could be created. **Do not spend a run re-tracing this.** The
+rest of the lead — consolidating `stack._native_picture_source` and
+`download_full_res_png` onto one `run_picture_png(...)` — is still open on its own
+maintainability merits, but it is a pure refactor with no known defect behind it, and
+AGENTS.md §10 ("refactor only in service of a concrete improvement") applies: it was
+deliberately **not** picked up this run. If a future run does take it, this note is the
+answer to the crop question it will otherwise ask first.
+
+---
+
 ## SCOUT QA SWEEP — the newest post-audit code (v0.354→v0.366) read adversarially; CLEAN; one new beginner feature + one hardening note filed (Scout 2026-09-06, branch `claude/admiring-brahmagupta-mmvfsy`)
 
 Recorded so the next Scout doesn't re-read these modules. The ~20 recorded stacking-engine audits (see the

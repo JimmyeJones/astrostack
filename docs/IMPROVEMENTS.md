@@ -7900,6 +7900,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   case explicitly while there: a plain run should never carry a `preview_crop_json` (only the auto-edit writes
   one, and it sets `preview_display_space` too), but nothing asserts that, and if it can happen the full-res
   download is showing a differently-*framed* picture the same way it was showing a differently-rotated one.
+  **↳ THE CROP HALF IS ANSWERED — a non-finding; don't re-trace it (Builder 2026-09-06).** Both writers of
+  `preview_crop_json` set the display-space marker in the same block (`pipeline.py:3199` → `:3208`), and the
+  North-up "Adjust → Save" endpoint refuses a non-display-space run with a 400 *before* it writes either — so
+  the crop is fenced off where it could be created, unlike the rotation, which was simply forgotten in one of
+  the two renderers. The remaining consolidation is a **pure refactor with no known defect behind it**; it was
+  sized and deliberately not taken. Full working in [`PROCESS-NOTES.md`](PROCESS-NOTES.md), 2026-09-06.
 
 - **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by v0.310.0 / v0.311.0) — the wallpaper and the
   share JPEG are now real renders, and nothing caches them.** *(Size S if it ever bites; **do not build it on
