@@ -546,6 +546,8 @@ def stack_estimate(
     ``record_rejection_map`` is set and this dry run never sets it. Returns 422
     (not 500) when there's nothing solved to size yet, with the same guidance
     ``run_stack`` gives."""
+    from dataclasses import replace
+
     from seestack.stack.stacker import (
         StackOptions,
         auto_reject_method,
@@ -580,6 +582,16 @@ def stack_estimate(
     # trail?" line answers for the pixels the picture will actually have. On a
     # single field ``panel_depth`` is None and this is the frame count, as before.
     reach = rejection_reach(options, est.n_frames, depth=est.panel_depth)
+    # And the sibling question the form has to answer when the user has turned
+    # rejection *off*: "would any setting take this trail out?" Asked of the same
+    # helper with the app let loose — ``auto_reject`` so it picks min/max below
+    # the κ-σ floor, ``drizzle_reject`` so the drizzle path is answered by its own
+    # pass rather than by a toggle the user hasn't ticked. Below every method's
+    # floor the honest answer is "nothing here can help", and only the engine
+    # knows where that floor is.
+    best = rejection_reach(
+        replace(options, auto_reject=True, drizzle_reject=True),
+        est.n_frames, depth=est.panel_depth)
     return {
         "n_frames": est.n_frames,
         "canvas_w": est.canvas_w,
@@ -652,6 +664,16 @@ def stack_estimate(
             "n_frames": reach.n_frames,
             "lone_outlier_min_frames": reach.lone_outlier_min_frames,
             "reaches": reach.reaches,
+            # What the *best available* rejection could do here, so a form that
+            # has to advise someone with rejection switched off never offers a
+            # setting that cannot work at this depth. ``reaches`` false with a
+            # ``lone_outlier_min_frames`` names the count they need; false with
+            # None means no pass runs at any count on this path.
+            "best_available": {
+                "method": best.method,
+                "lone_outlier_min_frames": best.lone_outlier_min_frames,
+                "reaches": best.reaches,
+            },
         },
     }
 

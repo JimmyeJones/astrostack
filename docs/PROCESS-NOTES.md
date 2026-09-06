@@ -18,6 +18,81 @@ is a queue.
 
 ---
 
+## 2026-09-06 — Builder run (branch `claude/sweet-babbage-0pqzni`): a clean dogfood, a wrong-advice bug found by reading the *pair* of notes rather than either one, and three stale headers struck
+
+**The run.** Baseline green before any change (**5,004 passed / 2 skipped**, full
+suite headless, 20:06). Shipped **v0.374.2** — the streaked-frames caution now
+asks the engine what can actually remove a trail; write-up in
+[`SHIPPED.md`](SHIPPED.md).
+
+**How the bug was found, because the method generalises.** The backlog entry
+that led here (*"`rejectionOn` still asks did a pass dispatch?"*) was filed as a
+**consistency** item — two definitions of one fact, worth unifying, no known
+defect — and its own note said the gap was already covered by
+`minMaxRejectHint`, so it might be a no-op. It was not. Enumerating the
+**joint** state of the three notes that can fire on the same stack (the caution,
+`minMaxRejectHint`, `rejectionReachNudge`) rather than checking each one alone
+turned up a band, **1–2 accepted+solved subs**, where two of them fire together
+and say opposite things — and the one reading the hand-written predicate was the
+wrong one. Neither note is wrong in isolation; the defect only exists in the
+pair. **Worth repeating on any surface where two advisory notes share a
+trigger:** tabulate the frame counts / toggle combinations both can reach, not
+each note's own logic.
+
+**Dogfood pass — CLEAN (`scripts/agent-dogfood.sh` at v0.374.2: real app,
+bundled M42 sample ingested + stacked + auto-edited, Playwright at 1440 px and
+420 px).** Probe: *nothing overflowing, no console errors.* Screenshots of the
+editor and the Stack form read coherently — the Stack form's own advisory stack
+(the Auto-method note, the luminance-flatten nudge with its button, the sizing
+line) is three blocks and does not pile up.
+
+**Page-height baseline, sixth measurement — the standing IA rule still says do
+not open a speculative slice.** Tallest on a phone is still the Target page at
+**3,040 px**, against 3,014 px measured at v0.338.1 — **+26 px across ~36
+versions**, i.e. flat. The one number worth carrying forward is that
+**`/life-list` is now second at 3,008 px on a phone**, within 32 px of the
+Target page and ahead of the editor (2,815 px); it was not in the top three at
+the last measurement. That is not a finding — nothing overflows and nothing is
+stacked badly — but it is the page to measure first if a *measured* slice is
+ever wanted, rather than the Target page the banner still names.
+
+**Backlog curation (three headers, no content deleted).** Each of these read as
+live work at the top of a priority section while its own body recorded it
+shipped, which is the failure mode the three-file rule exists to prevent:
+- the walk-away blind κ-σ entry — closed by v0.334.1 / v0.335.0 / v0.337.0–.1,
+  whose ✅ blocks sit ~90 lines *below* the header;
+- the cross-target *"plate-solving isn't set up"* Dashboard banner — **already
+  built**, and better than the filed shape: `dashboard/astapReadiness.ts` reads
+  `GET /api/system`'s `astap.star_db_found` directly, so it fires on a
+  brand-new install with **no targets at all**, which the proposed
+  frame-reason roll-up could not;
+- the third copy of the ⭐ Adaptive Auto spec (slices (a)/(b) shipped v0.159.0,
+  v0.169.0, v0.369.0, v0.369.3; only the spec's own *"optional later"* (c) is
+  unbuilt).
+
+**Sized and deliberately NOT picked up, with the reason, so the next run need not
+re-derive it.** *Slice (c) of the sibling plate-solve hint* — a second solve pass
+retrying first-round failures with the sibling centre at
+`SIBLING_HINT_RADIUS_DEG`. Its premise is that a tighter radius turns a timeout
+into a solve, and the **2026-07-24 measurement already in this backlog** (under
+the relaxed-ASTAP-parameters entry) says the opposite: a failed search costs
+~4 s at the 30° default and 0.2 s at 5°, so radius is a *speed* lever, not a
+detection one, and a Seestar sub already carries a header hint. Building it
+would re-litigate a stand-down that carries numbers. It is a wall-clock
+optimisation at best, and should be filed as one if anyone wants it.
+
+**Backlog state, honestly.** "Bugs (fix these first)" holds no open, actionable,
+un-gated bug: what remains is gated on data no agent has (real elongated-target
+frames, a legacy library shape, a cloudy night's subs) or is a recorded
+stand-down with measurements. The Ideas sections are in the same state — of the
+top-level entries that still *look* open in the two highest-priority sections,
+every one checked this run was either shipped, measured-and-declined, or
+explicitly blocked. That is the backlog working as intended, not a gap; the
+right response is a dogfood pass and a small number of deep tasks, which is what
+this run did.
+
+---
+
 ## 2026-09-06 — Builder run (branch `claude/sweet-babbage-d5819j`): a clean dogfood, and the one detail op with no proxy term turns out not to need one
 
 **The run.** Baseline green before any change (**4,991 passed / 2 skipped**, full
