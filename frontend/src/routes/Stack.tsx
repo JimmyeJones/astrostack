@@ -23,6 +23,7 @@ import {
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
 import { rejectionReachNudge } from "../rejectionReachNudge";
+import { streakRejectionAdvice } from "../streakRejectionAdvice";
 import { savedRejectionClause } from "../savedRejectionClause";
 import {
   adoptGlobalsPatch, pinnedLine, pinnedSummary,
@@ -578,14 +579,6 @@ export function StackView() {
   // aren't a silent footgun. Advisory only.
   const streakedAccepted = (frames.data ?? [])
     .filter((f) => f.accept && f.solved && f.streak_detected).length;
-  // Per-pixel rejection is "on" for streak removal when drizzle rejection is
-  // enabled, sigma-clip is on with enough frames to estimate a spread, or
-  // min/max reject is on with enough frames to drop an extreme (count ≥ 3).
-  const rejectionOn = values.drizzle
-    ? !!values.drizzle_reject
-    : ((!!values.auto_reject && solvedAccepted >= 3)
-       || (!!values.sigma_clip && solvedAccepted >= 4)
-       || (!!values.min_max_reject && solvedAccepted >= 3));
 
   // Min/max-reject nudge: below ~11 frames, κ-σ mathematically can't reject a
   // lone satellite/plane trail — a single outlier's deviation stays within κ·σ
@@ -646,10 +639,18 @@ export function StackView() {
     frames: solvedAccepted,
   });
 
-  const streakNoRejectionWarning =
-    streakedAccepted > 0 && !rejectionOn && !minMaxRejectHint
-      ? `${streakedAccepted} accepted frame${streakedAccepted === 1 ? " has" : "s have"} a detected satellite/plane streak, but this stack has no per-pixel rejection enabled — the trail${streakedAccepted === 1 ? "" : "s"} will show in the result. Turn on ${values.drizzle ? "“Drizzle outlier rejection”" : "sigma clipping"} (or reject those frames) to remove ${streakedAccepted === 1 ? "it" : "them"}.`
-      : null;
+  // "You kept the streaked frames and turned outlier removal off." The advice is
+  // the engine's (`rejection_reach.best_available`), not a hand-written copy of
+  // the dispatcher's gates: below every method's floor there is nothing to offer,
+  // and the old predicate offered sigma clipping there — on a 1–2 sub stack that
+  // named a setting that was already on and could not have worked. Still
+  // suppressed while `minMaxRejectHint` is up, which names min/max on exactly the
+  // band where it is the better answer; a test pins which of the two speaks.
+  const streakNoRejectionAdvice = minMaxRejectHint ? null : streakRejectionAdvice({
+    streaked: streakedAccepted,
+    reach: estimate.data?.rejection_reach,
+    values,
+  });
 
   // "Auto outlier removal" decides the method for you, which is the right
   // default — but until now the form still showed the sigma-clip and min/max
@@ -1218,13 +1219,15 @@ export function StackView() {
             </Alert>
           ) : null}
 
-          {streakNoRejectionWarning ? (
+          {streakNoRejectionAdvice ? (
             <Alert color="yellow" variant="light" py={6} px="sm">
-              <Text size="xs">{streakNoRejectionWarning}</Text>
-              <Button size="compact-xs" variant="light" color="yellow" mt={6}
-                onClick={() => set(values.drizzle ? "drizzle_reject" : "sigma_clip", true)}>
-                {values.drizzle ? "Turn on drizzle outlier rejection" : "Turn on sigma clipping"}
-              </Button>
+              <Text size="xs">{streakNoRejectionAdvice.text}</Text>
+              {streakNoRejectionAdvice.fix ? (
+                <Button size="compact-xs" variant="light" color="yellow" mt={6}
+                  onClick={() => set(streakNoRejectionAdvice.fix!.key, true)}>
+                  {streakNoRejectionAdvice.fix.label}
+                </Button>
+              ) : null}
             </Alert>
           ) : null}
 

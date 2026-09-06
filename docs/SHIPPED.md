@@ -14,6 +14,69 @@ Newest first.
 
 ---
 
+## v0.374.2 — 2026-09-06 — the streaked-frames caution asks the engine what can actually remove a trail (`streakRejectionAdvice` + `rejection_reach.best_available`)
+
+**(Builder 2026-09-06, branch `claude/sweet-babbage-0pqzni`.) Friendliness —
+PRIORITY 3, with a correctness core. Closes the filed "the Stack form's
+`rejectionOn` still asks *did a pass dispatch?*, not *can it remove anything?*"
+item — and building it found the predicate was not merely coarse but wrong.**
+
+**What was actually wrong.** `frontend/src/routes/Stack.tsx` decided whether to
+warn about kept streaked frames from a hand-written copy of the dispatcher's
+gates — `(auto_reject && n>=3) || (sigma_clip && n>=4) || (min_max_reject && n>=3)`
+— and, when it fired, offered *"Turn on sigma clipping"*. On a **1–2 sub** stack
+every term is false whatever is ticked, so the form said *"this stack has no
+per-pixel rejection enabled"* to a user whose sigma clipping was on by default,
+and offered a button to turn on the setting that was already on and that cannot
+run at two subs. Beside it, `rejectionReachNudge` — reading the engine — said the
+opposite (*"With only 2 subs, no outlier removal can run at all"*). Two yellow
+alerts on one stack, one of them advising a fix that does not exist. Above 11
+subs it named sigma clipping, the method the same class of fix had already been
+removed from twice (v0.323.1 on this form, v0.334.1 on the Target page's badge).
+
+**One engine answer behind both halves.** `GET …/stack-estimate`'s
+`rejection_reach` gains an additive `best_available`: the *same*
+`rejection_reach` helper asked again with `auto_reject` and `drizzle_reject` set,
+i.e. "if the app chose for itself, could it take a lone trail out at this depth?"
+— sized by the mosaic's `panel_depth` like its sibling, so a four-panel mosaic is
+answered for the pixels it has. `streakRejectionAdvice` then decides the sentence
+from it, and the two halves split the question cleanly: `rejectionReachNudge`
+owns *"you asked for rejection — will it reach?"*, this owns *"you asked for
+none — should you?"*. Neither can speak on the other's stack, so the
+contradiction is now unrepresentable rather than merely absent.
+
+**The copy says what will happen and offers only what exists.** Where some
+method reaches, it names **Auto outlier removal** (honest at every depth, because
+`_resolve_auto_reject` picks min/max below the κ-σ floor) with the one-click
+fix — drizzle's own two-pass rejection on the drizzle path, where the three
+toggles below it are overridden. Where nothing reaches, it names the sub count
+the engine says is needed and offers **no button at all**: *"Reject those frames
+on the Target page, or stack again once you have more subs."*
+
+**The overlap is pinned, not left to luck.** `minMaxRejectHint` still supersedes
+this note on the 3–10 band where it names min/max — that was the filed entry's
+one caution, and a rendered test asserts which of the two speaks.
+
+**Upgrade-safe (§9):** one additive response key inside an existing object, one
+optional client field, no config, schema, on-disk, default or existing-shape
+change. The second `rejection_reach` call is asked of the already-computed
+estimate, so it cannot move `peak_bytes` (pinned by a test). A frontend that
+predates the key stays silent rather than guessing at the floor.
+
+**Tests (+3 Python, +7 unit, +3 rendered; two of the rendered ones fail before).**
+`tests/webapp/test_stack_estimate.py`: `best_available` agrees with the engine's
+own answer for `auto_reject` rather than restating the rule, reports "nothing can
+help" at two subs, gives drizzle's κ-σ floor on the drizzle path, and costs no
+sizing work. `streakRejectionAdvice.test.ts` (7): the reachable and unreachable
+shapes, the drizzle pairing, silence on every "the user did ask" toggle, and
+silence with no answer to go on. `Stack.test.tsx`: the button is now *"Turn on
+Auto outlier removal"* and sigma clipping is absent (fails before), a two-sub
+stack gets the sentence and **no** button (fails before), and a reaching stack
+says nothing at all. The two existing tests that pinned the old advice were
+rewritten to pin the corrected advice on the same paths.
+
+---
+
 ## v0.374.1 — 2026-09-06 — the pinned-defaults note stops overstating what a save holds back (`Stack.tsx`)
 
 **(Builder 2026-09-06, branch `claude/sweet-babbage-d5819j`.) Friendliness —
