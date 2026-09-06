@@ -1711,6 +1711,17 @@ export interface StackEstimate {
     // when no rejection pass runs at any count.
     lone_outlier_min_frames: number | null;
     reaches: boolean;
+    // The same answer for the *best available* rejection — the app choosing the
+    // method (and, on the drizzle path, its own two-pass rejection) instead of
+    // the toggles as they stand. What a form needs to know before advising
+    // someone with rejection switched off: `reaches` false means no setting on
+    // the form can take a lone trail out at this depth. Optional so an older
+    // backend simply stays quiet.
+    best_available?: {
+      method: "drizzle" | "min-max-reject" | "sigma-clip" | "mean";
+      lone_outlier_min_frames: number | null;
+      reaches: boolean;
+    } | null;
   } | null;
 }
 

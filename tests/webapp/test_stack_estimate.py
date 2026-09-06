@@ -300,3 +300,82 @@ def test_estimate_reach_follows_the_sigma_clip_toggle(client, solved_library):
     assert client.get(url).json()["rejection_reach"] == on["rejection_reach"]
     # Sizing is untouched by the new parameter.
     assert off["peak_bytes"] == on["peak_bytes"] == client.get(url).json()["peak_bytes"]
+
+
+def _reject_one_frame(client, safe: str) -> None:
+    """Drop a single accepted frame through the API, so the estimate sees one
+    fewer accepted+solved sub."""
+    fid = client.get(f"/api/targets/{safe}/frames").json()[0]["id"]
+    r = client.patch(f"/api/targets/{safe}/frames/{fid}", json={"accept": False})
+    assert r.status_code == 200, r.text
+
+
+def test_estimate_says_whether_ANY_rejection_setting_could_reach(
+    client, solved_library):
+    """``best_available`` answers the question a form has to answer for someone
+    who turned rejection *off*: is there a setting here that would take a lone
+    satellite trail out at all?
+
+    Without it the form has to re-derive the dispatcher's gates by hand, and the
+    predicate it used to carry named sigma clipping on a stack too thin for any
+    method to run — advice that could not be followed."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    url = f"/api/targets/{safe}/stack-estimate"
+
+    # 3 subs, rejection off: nothing runs *as configured*…
+    off = client.get(url, params={"sigma_clip": "false"}).json()["rejection_reach"]
+    assert off["method"] == "mean"
+    assert off["reaches"] is False
+    # …but letting the app choose lands on min/max, which drops an extreme from
+    # 3 subs up — so there is something honest to offer here.
+    assert off["best_available"] == {
+        "method": "min-max-reject",
+        "lone_outlier_min_frames": 3,
+        "reaches": True,
+    }
+    # It is the engine's own answer, not a second copy of it: turning auto on
+    # explicitly gives exactly the same verdict.
+    auto = client.get(url, params={"auto_reject": "true"}).json()["rejection_reach"]
+    assert auto["method"] == off["best_available"]["method"]
+    assert auto["reaches"] == off["best_available"]["reaches"]
+    assert auto["lone_outlier_min_frames"] == off["best_available"]["lone_outlier_min_frames"]
+
+    # Two subs is under every method's floor, and that is the case the old
+    # hand-written predicate got wrong: no setting can help, so the answer must
+    # say so rather than name one.
+    _reject_one_frame(client, safe)
+    thin = client.get(url, params={"sigma_clip": "false"}).json()["rejection_reach"]
+    assert thin["n_frames"] == 2
+    assert thin["best_available"]["reaches"] is False
+    assert thin["best_available"]["lone_outlier_min_frames"] is None
+
+
+def test_estimate_best_available_answers_for_the_drizzle_path_too(
+    client, solved_library):
+    """With drizzle on, the three toggles below it are overridden and only
+    drizzle's own two-pass rejection can run — so ``best_available`` must be
+    drizzle's answer, not the min/max one the normal path would give."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    from seestack.stack.stacker import kappa_min_frames
+
+    best = client.get(
+        f"/api/targets/{safe}/stack-estimate",
+        params={"drizzle": "true", "drizzle_reject": "false"},
+    ).json()["rejection_reach"]["best_available"]
+    assert best["method"] == "drizzle"
+    # Drizzle clips with the same κ against statistics that still hold the
+    # outlier, so its floor is κ-σ's, not min/max's 3.
+    assert best["lone_outlier_min_frames"] == kappa_min_frames(3.0)
+    assert best["reaches"] is False
+
+
+def test_estimate_best_available_costs_no_extra_sizing_work(
+    client, solved_library):
+    """The second reach question is asked of the same already-computed estimate,
+    so it can never move the peak the memory guard is checked against."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    url = f"/api/targets/{safe}/stack-estimate"
+    data = client.get(url).json()
+    assert data["rejection_reach"]["best_available"] is not None
+    assert data["peak_bytes"] == client.get(
+        url, params={"auto_reject": "true"}).json()["peak_bytes"]
