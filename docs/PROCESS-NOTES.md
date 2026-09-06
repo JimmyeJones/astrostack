@@ -52,6 +52,25 @@ block:** a "slice (b) is still open" line written *inside* a Shipped entry is
 invisible to every status grep, because the entry's own header says ✅. When you
 leave a slice open, leave it as its own entry.
 
+**A third stale claim of the same shape, and the systemic point.** The framing
+entry's *"Follow-up still open: (b′) prefer a plate-solved frame's actual field
+size"* is also done — and it turned out to matter more than that sentence knew:
+`seestack/framing.py` shipped with the **S50's** 77′ × 44′ while the owner has an
+**S30** (~128′ × 72′), so `framing.FrameField` / `frame_field_from_solve` /
+`webapp/frame_field.py` (v0.352.0) derive the field from the owner's own solved
+frames' `pixscale_arcsec`. Struck.
+
+**So: `docs/IMPROVEMENTS.md` carries ~44 sentences of the form "still open" /
+"remainder still open" / "left open", and three of the four this run happened to
+read were already shipped.** Each is invisible to a status grep because it lives
+*inside* an entry whose header says ✅, which is precisely the shape that
+survives triage and gets re-picked. This run verified and struck the three it
+touched; **a full verification pass over the other ~40 is a good Scout task** and
+is deliberately not attempted here — spot-checking each one means reading the
+code it names, and doing forty of those is a run on its own. The generalisable
+rule is the one above: **when you leave a slice open, leave it as its own
+entry**, never as a sentence inside a Shipped one.
+
 **Measured while migrating the display-space tests (v0.372.1) — recorded so
 nobody re-investigates.**
 
