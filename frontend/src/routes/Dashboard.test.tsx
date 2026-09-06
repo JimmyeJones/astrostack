@@ -7,6 +7,7 @@ import { Dashboard } from "./Dashboard";
 import * as client from "../api/client";
 import type { DashboardStats, SystemInfo } from "../api/client";
 import { formatStampDate } from "../format";
+import { lifeListLine } from "../components/lifeListLine";
 import { describeSkyCoverage } from "../components/skyCoverage";
 
 function mkStats(): DashboardStats {
@@ -493,5 +494,72 @@ describe("Dashboard sky-coverage line", () => {
     await waitFor(() => expect(client.api.skyCoverage).toHaveBeenCalled());
     expect(screen.queryByTestId("sky-coverage-line")).toBeNull();
     expect(screen.queryByText(/See it on My map/)).toBeNull();
+  });
+});
+
+// The life list already existed as a page; nothing on the home screen ever
+// pointed at it, so the number that is its whole hook was one nobody saw.
+describe("Dashboard life-list line", () => {
+  it("says how many of the famous objects are in the bag, and links to the list", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "lifeListCounts").mockResolvedValue({
+      messier_captured: 42, messier_total: 110,
+      other_captured: 5, other_total: 47,
+    });
+
+    renderDashboard();
+    // Asserted against the shared helper, not a copy of its wording, so this
+    // sentence and the life-list page's own header cannot drift apart.
+    const expected = lifeListLine({
+      messier_captured: 42, messier_total: 110,
+      other_captured: 5, other_total: 47,
+    });
+    await waitFor(() => expect(
+      screen.getByTestId("life-list-line").textContent).toContain(expected));
+    expect(screen.getByRole("link", { name: /See your life list/ }))
+      .toHaveAttribute("href", "/life-list");
+  });
+
+  it("stays quiet until at least one famous object is captured", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "lifeListCounts").mockResolvedValue({
+      messier_captured: 0, messier_total: 110,
+      other_captured: 0, other_total: 47,
+    });
+
+    renderDashboard();
+    await waitFor(() => expect(client.api.lifeListCounts).toHaveBeenCalled());
+    expect(screen.queryByTestId("life-list-line")).toBeNull();
+  });
+
+  it("asks for the counts only — not the whole catalog with its thumbnails", async () => {
+    // The tally is one sentence; the full response is ~160 rows plus a preview
+    // stat per captured target. Pinned because the cheap route is the whole
+    // reason this line can sit on the page a beginner opens every session.
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    const full = vi.spyOn(client.api, "getLifeList");
+    vi.spyOn(client.api, "lifeListCounts").mockResolvedValue({
+      messier_captured: 3, messier_total: 110,
+      other_captured: 0, other_total: 47,
+    });
+
+    renderDashboard();
+    await waitFor(() => expect(screen.getByTestId("life-list-line")).toBeInTheDocument());
+    expect(full).not.toHaveBeenCalled();
+  });
+
+  it("renders the rest of the Dashboard when the counts can't be had", async () => {
+    // An older backend has no such route; the home screen must not lose its
+    // stats over an advisory sentence.
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "lifeListCounts").mockRejectedValue(new Error("404"));
+
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+    expect(screen.queryByTestId("life-list-line")).toBeNull();
   });
 });

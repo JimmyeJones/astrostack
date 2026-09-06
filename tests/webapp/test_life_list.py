@@ -180,3 +180,52 @@ def test_the_life_list_is_read_only(client, data_root):
     client.get("/api/life-list")
 
     assert client.get("/api/targets").json() == before
+
+
+# ---------------------------------------------------------------------------
+# The counts-only route behind the Dashboard's one-line nudge
+# ---------------------------------------------------------------------------
+
+def test_the_counts_route_agrees_with_the_full_list_exactly(client, data_root):
+    """The property that matters: two routes, one tally. The Dashboard's
+    sentence and the life-list page's own header must never quote different
+    numbers, so this asserts the *whole* counts block, not a field of it."""
+    _register(data_root, "M 31", 10.685, 41.269)
+    _register(data_root, "North America Nebula", 314.75, 44.367)
+
+    counts = client.get("/api/life-list/counts")
+    full = client.get("/api/life-list")
+
+    assert counts.status_code == 200
+    assert counts.json() == full.json()["counts"]
+    # …and it really did see the captures, rather than agreeing on zeroes.
+    assert counts.json()["messier_captured"] == 1
+    assert counts.json()["other_captured"] == 1
+
+
+def test_an_empty_library_counts_nothing_but_still_knows_the_totals(client, data_root):
+    body = client.get("/api/life-list/counts").json()
+
+    assert body["messier_captured"] == 0
+    assert body["messier_total"] == 110
+    assert body["other_total"] > 0
+
+
+def test_the_counts_route_carries_no_catalog_rows(client, data_root):
+    """The whole reason it exists: the Dashboard asks on every visit and only
+    wants the tally. If this ever starts serving the rows too, the cheap route
+    is no longer cheap and the caller should go back to the full one."""
+    body = client.get("/api/life-list/counts").json()
+
+    assert set(body) == {"messier_captured", "messier_total",
+                         "other_captured", "other_total"}
+
+
+def test_the_counts_route_is_read_only(client, data_root):
+    _register(data_root, "M 31", 10.685, 41.269)
+    before = client.get("/api/targets").json()
+
+    client.get("/api/life-list/counts")
+    client.get("/api/life-list/counts")
+
+    assert client.get("/api/targets").json() == before
