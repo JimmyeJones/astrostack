@@ -3207,6 +3207,10 @@ export const api = {
   // offline: the catalog ships with the app and the match reads only the target
   // registry, so it is cheap enough to ask on every visit.
   getLifeList: () => req<LifeList>("/api/life-list"),
+  // Just the tally, for the Dashboard's one-line nudge: the same counts block
+  // `getLifeList` carries, without the ~160 catalog rows and the per-target
+  // preview stat that decides their thumbnail URLs.
+  lifeListCounts: () => req<LifeListCounts>("/api/life-list/counts"),
   nearlyThere: () => req<NearlyThere | null>("/api/life-list/nearly-there"),
 
   // gallery

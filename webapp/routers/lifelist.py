@@ -233,6 +233,32 @@ def get_nearly_there(
     )
 
 
+@router.get("/api/life-list/counts", response_model=LifeListCounts)
+def get_life_list_counts(request: Request) -> LifeListCounts:
+    """Just the tally — "42 of the 110 Messier objects" — with no catalog rows.
+
+    Exactly the ``counts`` block of ``GET /api/life-list``, from the same
+    :func:`~seestack.lifelist.life_list_summary` over the same
+    :func:`~seestack.lifelist.catalog_capture_status`, so the Dashboard's line
+    and the life-list page can never quote two different numbers.
+
+    It exists as its own route because the Dashboard asks on every visit and
+    only wants the tally: the full response carries ~160 catalog rows with
+    blurbs and thumbnail URLs, and it also has to stat every captured target's
+    preview file to decide those URLs — work worth doing for the page that draws
+    the tiles and worth skipping for one sentence. The library read itself is the
+    same registry walk (no project DB, no network), which is why the module
+    docstring can call it cheap enough for a page load.
+    """
+    lib = deps.open_library(request)
+    try:
+        targets = lib.list_targets()
+    finally:
+        lib.close()
+    entries = catalog_capture_status(load_catalog(), targets)
+    return LifeListCounts(**life_list_summary(entries))
+
+
 @router.get("/api/life-list", response_model=LifeListResponse)
 def get_life_list(request: Request) -> LifeListResponse:
     lib = deps.open_library(request)
