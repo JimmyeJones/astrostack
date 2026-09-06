@@ -1584,6 +1584,25 @@ describe("rejectionSummaryText", () => {
       rejectionSummaryText({ mode: "sigma-clip", fraction: 0, n_rejected: 0, n_contributed: 500 }),
     ).toBe("Rejection clipped ~0% of samples (data was already clean)");
   });
+  it("does NOT call a 0% pass clean when the run says it could not reach", () => {
+    // The regression: a thin mosaic panel records REJFRAC 0.0 because a κ·σ clip
+    // is blind to a lone trail at that depth, not because the sky was clean —
+    // and the picture can still have a satellite in it.
+    expect(
+      rejectionSummaryText({
+        mode: "sigma-clip", fraction: 0, n_rejected: 0, n_contributed: 500,
+        reaches: false, peak_depth: 5, min_depth: 11,
+      }),
+    ).toBe("Rejection clipped ~0% of samples (not enough subs on a pixel for it to reach)");
+  });
+  it("keeps the clean wording when the run says the pass did reach", () => {
+    expect(
+      rejectionSummaryText({
+        mode: "sigma-clip", fraction: 0, n_rejected: 0, n_contributed: 500,
+        reaches: true, peak_depth: 40, min_depth: 11,
+      }),
+    ).toBe("Rejection clipped ~0% of samples (data was already clean)");
+  });
   it("uses <0.1% for a tiny but nonzero fraction", () => {
     expect(
       rejectionSummaryText({ mode: "sigma-clip", fraction: 0.0003 }),

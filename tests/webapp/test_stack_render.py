@@ -971,6 +971,63 @@ def test_stack_info_surfaces_rejection_summary(client, solved_library):
     assert rej["n_contributed"] == 10000
 
 
+def test_stack_info_surfaces_the_rejection_reach_verdict(client, solved_library):
+    """The other half of the trust line: a pass that ran and clipped 0 % because
+    the sky was clean, versus one that clipped 0 % because it was too shallow to
+    clip anything. The stacker stamps REJDEPTH/REJNEED/REJREACH; the panel needs
+    all three to tell those apart."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["REJMODE"] = "sigma-clip"
+                hdul[0].header["REJFRAC"] = 0.0
+                hdul[0].header["REJDEPTH"] = 5
+                hdul[0].header["REJNEED"] = 11
+                hdul[0].header["REJREACH"] = False
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    rej = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["rejection"]
+    assert rej["reaches"] is False
+    assert rej["peak_depth"] == 5
+    assert rej["min_depth"] == 11
+
+
+def test_stack_info_omits_the_reach_verdict_on_a_run_that_predates_it(
+        client, solved_library):
+    """Upgrade safety, at the response shape: a run stacked before the engine
+    stamped the cards carries no verdict at all — which every consumer reads as
+    "nothing to say", never as a reassurance that the pass reached."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["REJMODE"] = "sigma-clip"
+                hdul[0].header["REJFRAC"] = 0.0
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    rej = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["rejection"]
+    assert rej["mode"] == "sigma-clip"
+    for key in ("reaches", "peak_depth", "min_depth"):
+        assert key not in rej
+
+
 def test_stack_info_rejection_absent_for_unclipped_stack(client, solved_library):
     """A plain stack has no REJMODE cards, so rejection is None."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
