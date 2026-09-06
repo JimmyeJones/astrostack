@@ -1897,7 +1897,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   both pin — so it needs a shape that keeps a single high-count pixel opaque while spreading a count-1
   neighbourhood, not a plain box filter.
 
-- **NEW IDEA (Builder 2026-08-30, the half v0.309.0 checked and deliberately did NOT ship) — the Compare view
+- **✅ SHIPPED — v0.359.0 (`compareNorthUpOffer` + `NorthUpViewToggle` in `frontend/src/routes/Compare.tsx`),
+  which turns **both** pictures at once and offers the control only when the turn would leave both North-up
+  (at least one side has a rotation to apply, and neither is a run with no usable orientation — the
+  `directions`-is-null solved-ness signal point (3) below asked for). Struck 2026-09-06 by a Builder that
+  read this entry as open, opened `Compare.tsx` to start it, and found `CompareSideOrientation` already
+  there. Original entry kept for provenance:** ~~**NEW IDEA (Builder 2026-08-30, the half v0.309.0 checked
+  and deliberately did NOT ship) — the Compare view
   is not a lightbox, and North-up there needs a decision, not a copy-paste.** *(Pillar: enjoy + trust —
   PRIORITY 3; size S; read-only.)* The v0.308.0 follow-on assumed Compare "uses the same lightbox"; it does
   not. `routes/Compare.tsx` draws bare `<img>` elements inside a drag-to-reveal wipe (and a side-by-side grid),
@@ -1931,7 +1937,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   (`directions`/`scale_bar` are null without a WCS) before (a) is honest.
   **Nothing here is blocking** — it is a genuinely shippable S once (3) is wired — it just isn't the
   copy-paste the surrounding entries make it look like, and the next agent should not take the (c) verdict on
-  trust.
+  trust.~~
 
 - **🟡 SWEPT ONCE, ONE UNTRUTH FIXED (Builder, v0.309.1, branch `claude/compassionate-galileo-x2nj2o`); the
   colour-space axis is still open below — QA LEAD (Builder 2026-08-30, generalised from the v0.308.1 copy fix)
@@ -5850,7 +5856,12 @@ problems. Dogfood it every big-picture run and fix root causes.
 
   Original spec, for the record:
 
-  - **NEW BEGINNER FEATURE (Scout 2026-08-27 #15) — "Reveal": a one-tap, share-ready *cinematic zoom* of your
+  - **✅ SHIPPED as the "Zoom clip" — v0.303.0 (`seestack/render/zoomclip.py::build_zoom_clip`, the
+    `…/zoom-clip` endpoints in `webapp/routers/stack.py`), with the "it's building" state in v0.304.3.
+    Struck 2026-09-06 by a Builder that read this entry as open and went looking for it. It shipped under a
+    different name, which is why "grep for Reveal" found nothing — grep `zoomclip` instead. Original spec kept
+    for provenance only:** ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #15) — "Reveal": a one-tap, share-ready
+    *cinematic zoom* of your
     finished picture — a short looping clip that glides from the whole frame into the target and back out, so a
     galaxy or nebula makes a scroll-stopping post instead of a still that's easy to swipe past.** *(Pillar: enjoy +
     share, PRIORITY 3; size M; fully offline, additive, read-only — no new deps, no network, no schema/config
@@ -5889,7 +5900,9 @@ problems. Dogfood it every big-picture run and fix root causes.
     the full 100-MP mosaic. **Builder slices:** (a) pure `build_reveal(...)` + unit tests; (b) wire the cached
     `_reveal.webp` write into the output writer + `RUN_ARTEFACT_SUFFIXES` + a result-menu download button
     (self-hiding until the file exists); (c) optional later — a portrait (9:16) variant for phone-native posting,
-    mirroring the existing wallpaper-aspect crops.
+    mirroring the existing wallpaper-aspect crops.~~ *(Slice (c), the portrait 9:16 variant, is the only part
+    of the spec that is genuinely unbuilt; it is marginal against the shipped clip, so it is not re-filed as an
+    open item.)*
 
 - ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #12) — "Scale & sky-compass": an optional little scale bar (in
   intuitive units) plus a North/East compass baked into a shared/exported picture, so a beginner's shot reads
