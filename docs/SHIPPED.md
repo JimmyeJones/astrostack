@@ -14,6 +14,49 @@ Newest first.
 
 ---
 
+## v0.374.4 — 2026-09-06 — one broken photosite reads as English, and a healthy sensor's share stops printing as "0.000%" (`calibration._defect_share` + `defect_note`)
+
+**(Builder 2026-09-06, branch `claude/sweet-babbage-cqqyi1`.) Friendliness /
+trust — PRIORITY 3. Two display defects in the v0.370.0 census line, found in
+the same newest-code audit as v0.374.3, and both land on the sensors that are in
+the *best* shape.**
+
+**(a) The share was rounded to zero on exactly the masters worth reassuring
+about.** `defect_note` printed `f"{pct:.3f}%"`. The band a healthy sensor lands
+in is *below* what three decimals can show: `seestack.calibrate.defects`'s own
+module docstring puts real sensors at **1e-5..1e-3** of the sensor, i.e.
+0.001 %–0.1 %, so the bottom half of the honest range printed as **"0.000%"** —
+ten broken photosites on the Seestar's 2 MP sensor is 0.00048 %. A count beside
+a "0.000%" reads as a broken readout, not as "hardly any". New `_defect_share`
+says **"less than 0.001%"** below the cut — the same words, and the same cut,
+`frontend/src/components/skyCoverage.ts::formatSkyFraction` already uses for the
+identical problem (its own test comment: *"something genuinely below the last
+digit says that, not `0.000%`"*), so the app has one voice for "too small to
+print" rather than two.
+
+**(b) "1 hot or dead pixels".** The count went into a fixed plural, and the
+tooltip into *"1 of the camera's photosites are broken"* / *"repair them"*. A
+sensor with exactly one bad photosite is a real — and good — outcome, and the
+line has to read as English there rather than as a template with a number pasted
+in: it is now *"1 hot or dead pixel"*, *"one of the camera's photosites is
+broken"*, *"repair it"*, *"replaces just that one from its same-colour
+neighbours"*.
+
+Neither touches the measurement, the refused-map warning (whose ≥2 % share never
+reaches either case), or the census's silence on a clean sensor.
+
+**Tests (+2, both fail before):**
+`test_a_healthy_sensors_tiny_share_is_never_shown_as_zero_percent` (10 defects
+on a 2 MP sensor says "less than 0.001%" and never "0.000%"; the first count
+three decimals can carry still prints a number) and
+`test_one_broken_photosite_reads_as_english_not_as_a_template` (singular
+throughout, and the switch is still named — the note's whole job).
+
+**Upgrade-safe (§9):** copy only. No config, schema, on-disk, default or
+response-shape change.
+
+---
+
 ## v0.374.3 — 2026-09-06 — the broken-pixel offer names its exception *before* the click, not one click after (`calibration.defect_repair_offer` off-state + `_targets_overriding_defect_repair`)
 
 **(Builder 2026-09-06, branch `claude/sweet-babbage-cqqyi1`.) Trust /
