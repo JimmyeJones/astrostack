@@ -337,3 +337,43 @@ def test_a_rejected_timed_out_frame_buckets_as_a_timeout_too():
                               "solve_failed:no catalog match": 2},
                              n_accepted=50)
     assert _keys(s) == {"solve_failed": 2, "solve_timeout": 3}
+
+
+# ---------------------------------------------------------------------------
+# The verdict's key: which case fired, so a client can act on the advice
+# without matching on its wording (the copy is reworded regularly).
+# ---------------------------------------------------------------------------
+
+
+def test_every_verdict_names_which_case_fired():
+    # Healthy / minor / mixed — the three fraction-driven ones.
+    assert summarize_rejections({"user": 1}, n_accepted=100)["verdict"]["key"] == "healthy"
+    assert summarize_rejections({"user": 20}, n_accepted=100)["verdict"]["key"] == "minor"
+    # A genuinely mixed high-drop night: no bucket is a strict majority.
+    mixed = summarize_rejections(
+        {"auto:grade:fwhm_px": 30, "auto:streak": 30}, n_accepted=100)
+    assert mixed["verdict"]["key"] == "mixed"
+
+
+def test_a_dominant_bucket_verdict_names_the_bucket_it_is_about():
+    s = summarize_rejections({"auto:grade:fwhm_px": 60}, n_accepted=100)
+    assert s["verdict"]["key"] == "dominant:soft"
+    # The key names the same bucket the text is about, so a client can resolve
+    # the two through one map rather than two.
+    assert "soft" in {b["key"] for b in s["buckets"]}
+
+
+def test_the_two_solve_verdicts_are_keyed_by_their_own_cause():
+    unsolved = summarize_rejections({}, n_accepted=20, n_unsolved=18)
+    assert unsolved["verdict"]["key"] == "unsolved"
+    timed_out = summarize_rejections(
+        {}, n_accepted=20, n_unsolved=18, n_solve_timeout=18)
+    assert timed_out["verdict"]["key"] == "solve_timeout"
+
+
+def test_the_key_is_additive_and_the_wording_is_unchanged():
+    # The key is a new field beside the existing two; nothing else moved.
+    s = summarize_rejections({"user": 1}, n_accepted=100)
+    assert set(s["verdict"]) == {"tone", "text", "key"}
+    assert s["verdict"]["tone"] == "good"
+    assert s["verdict"]["text"] == "This is normal — a healthy night."

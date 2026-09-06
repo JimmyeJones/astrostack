@@ -139,6 +139,14 @@ def _verdict(dropped: int, used: int, unsolved: int = 0,
              solve_timeout: int = 0) -> dict[str, str]:
     """A single reassuring headline from the dropped fraction.
 
+    Each verdict also carries a stable ``key`` naming *which* case fired
+    (``"unsolved"``, ``"solve_timeout"``, ``"healthy"``, ``"minor"``,
+    ``"dominant:<bucket>"``, ``"mixed"``). The text is written for a beginner to
+    read; the key is for a client that wants to *act* on it — the frontend hangs
+    the "take me there" link off the key rather than matching on the wording,
+    which would break the moment the copy is improved. Additive: an older client
+    reads ``tone``/``text`` exactly as before.
+
     ``unsolved`` (accepted-but-not-plate-solved frames) is the beginner's one
     *actionable* case — the frames aren't bad, they just haven't been located in
     the sky yet — so when they outnumber what actually stacked, lead with a
@@ -155,22 +163,22 @@ def _verdict(dropped: int, used: int, unsolved: int = 0,
     generic — the specific cause is the thing the beginner can act on. A genuinely
     mixed night (no single dominant bucket) keeps the generic reassurance."""
     if unsolved > 0 and unsolved > used:
-        return {"tone": "warn",
+        return {"tone": "warn", "key": "unsolved",
                 "text": "Most of your subs haven't been located in the sky yet, "
                         "so only a few made the stack — it will look noisy. Run "
                         "Plate Solve so the rest can be added."}
     if solve_timeout > 0 and solve_timeout > used:
-        return {"tone": "warn",
+        return {"tone": "warn", "key": "solve_timeout",
                 "text": "Most of your subs ran out of time being located in the "
                         "sky, so only a few made the stack. Raise the ASTAP "
                         "timeout in Settings and run Plate Solve again."}
     total = dropped + used
     frac = dropped / total if total > 0 else 0.0
     if frac < 0.10:
-        return {"tone": "good",
+        return {"tone": "good", "key": "healthy",
                 "text": "This is normal — a healthy night."}
     if frac < 0.30:
-        return {"tone": "ok",
+        return {"tone": "ok", "key": "minor",
                 "text": "A few frames didn't make the cut — still a solid stack."}
     # High-drop: if one actionable cause is strictly the majority of the dropped
     # frames, name it. `top * 2 > dropped` guarantees a single dominant bucket (a
@@ -178,8 +186,9 @@ def _verdict(dropped: int, used: int, unsolved: int = 0,
     if grouped and dropped > 0:
         top_key, top_n = max(grouped.items(), key=lambda kv: kv[1])
         if top_key in _DOMINANT_VERDICTS and top_n * 2 > dropped:
-            return {"tone": "warn", "text": _DOMINANT_VERDICTS[top_key]}
-    return {"tone": "warn",
+            return {"tone": "warn", "key": f"dominant:{top_key}",
+                    "text": _DOMINANT_VERDICTS[top_key]}
+    return {"tone": "warn", "key": "mixed",
             "text": "A lot of frames were left out — usually cloud or wind. "
                     "The stack still used all the good ones."}
 
