@@ -14,6 +14,102 @@ Newest first.
 
 ---
 
+## v0.367.0 — 2026-09-06 — Repair the sensor's broken photosites from the master dark: seestack/calibrate/defects.py + repair_sensor_defects
+
+**Image quality (PRIORITY 4) + a step toward calibration autonomy (PRIORITY 2), built from the filed shape
+in three parts: the pure map, the raw-Bayer apply, and the provenance that lets the owner see it worked.**
+
+**The gap the entry named.** The always-on per-frame `suppress_hot_cold_pixels` is a blind 3×3 local-median
+outlier test on the **debayered** frame. It cannot tell a star peak from a hot pixel — that is the root of the
+star-core-clipping family — and by the time it runs, one hot CFA site has already been smeared into a 3×3 halo
+by `bilinear_debayer`, so at best it knocks the defect down to halo level (~0.5× peak for an R/B site, ~0.25×
+for a G site) rather than erasing it. A **master dark** knows which photosites are actually broken: hot in
+every dark, or stuck low in every dark, independent of where the scope pointed.
+
+**(a) The pure map — `seestack/calibrate/defects.py`.** `find_sensor_defects(master)` measures each of the four
+**CFA phases separately** against its own local median (a 5×5 phase window = 10×10 raw px) and flags anything
+past `DEFECT_SIGMA = 12` robust sigmas either way. Per-phase is what makes it blind to the mosaic's own
+pattern; local is what makes it blind to amp glow and dark-current gradients — both pinned by tests that plant
+a per-phase offset and a linear gradient and assert **zero** flags. Two-sided on purpose: dark subtraction
+already removes a hot pixel's *mean* level but leaves its excess noise, and does nothing at all for a
+photosite stuck at a constant.
+
+**The two refusals are the whole safety of it.** A candidate set past `MAX_DEFECT_FRACTION = 2 %` of the
+sensor is **dropped wholesale** — that is a threshold that has latched onto structure (a light frame in the
+dark slot, a broken build), and repairing that many pixels would do more harm than the defects ever did. And
+the caller's no-data mask is **excluded**: a master with no data at a pixel says nothing about whether the
+*sensor* is broken there, and its `_sanitize_pedestal` 0 would otherwise read as stuck-low and overwrite the
+light's own perfectly good sample. Both have their own test.
+
+**(b) The apply — raw Bayer, before debayer.** `DefectMap` precomputes the same-phase neighbour gather
+**once**, at master-load time, so the per-frame cost is proportional to the number of *defects* (a few
+thousand floats) rather than to the frame — no canvas copy on the hot path, which is what a shifted-plane
+`nanmedian` would have cost per worker thread. `CalibrationMasters.apply_raw` repairs **after** the pedestal
+subtraction (so the neighbours medianed are themselves dark-corrected) and **before** the flat divide. A
+neighbour that is itself broken doesn't count; a defect with no usable neighbour at all is **left alone**
+rather than filled with a guess.
+
+**Off by default (§9), and off means nothing is even measured.** `StackOptions.repair_sensor_defects` and
+`CalibrationMasters.load(repair_sensor_defects=...)` both default `False`; with it off no map is built, no
+frame is touched and no card is stamped — a run is byte-for-byte what it is today, pinned by a test that
+asserts the unrepaired pixel keeps its spike. One additive form descriptor in the `advanced` group; no config
+key, no schema, no on-disk change, no existing response shape touched.
+
+**(c) The provenance.** `DEFECTPX` is stamped only when the map found something (like `DARKSCAL`/`PHOTNORM`) —
+a run that asked for the repair on a spotless sensor says nothing rather than claiming "0 repaired", which
+reads as a failure instead of as good news. Served as an additive `sensor_defects` on the run-info endpoint;
+`sensorDefectsSummaryText` renders it as one dimmed line in the History Info panel — *"Repaired 428 hot/dead
+pixels found in your master dark"*.
+
+**What is deliberately NOT done.** The filed shape's part (c) — "when no dark is present, fall back to the
+per-frame filter" — needs no code: the per-frame filter is already always-on and untouched, so a user with no
+darks keeps exactly today's behaviour. And the entry's own guardrail wanted the repair *default-safe*, which
+it reads as "on when a dark exists"; AGENTS.md §9/§10 outrank that, so it ships opt-in. **The remaining
+follow-up is the one the entry flagged: validate on a real Seestar dark that the map's population is credible
+(1e-5..1e-3 of the sensor) before anyone proposes turning it on by default** — every measurement here is
+synthetic, and a fixture not shaped like the owner's sensor manufactures answers as readily as it hides them.
+
+**Tests (+19 Python, +4 vitest).** `tests/test_defect_map.py` (+19): the map (hot + dead found and *nothing
+else*; amp glow, read noise, a per-phase CFA offset and a gradient each flag zero; the 2 % refusal and that
+raising the ceiling is what changes it; the no-data exclusion; four degenerate inputs); the repair (same-CFA
+median on a light whose phases sit far apart, so a cross-colour median would land visibly wrong; **a 60,000
+ADU star core untouched at every pixel**; a broken neighbour ignored; no usable neighbour left alone; a shape
+mismatch a no-op); the wiring (off by default measures nothing and moves no pixel, opted-in erases an 8,500
+ADU spike, the caller's array never mutated, a bias-only workflow still maps, a flat alone doesn't); and
+end-to-end through `run_stack` that `DEFECTPX` is 3 with the option on and **absent** without it.
+`tests/webapp/test_stack_render.py` (+2): the endpoint serves the count, and `None` for a run with no card.
+`History.test.tsx` (+4): the copy, the singular, the thousands separator, and all five silences.
+
+**The entry as filed (cut verbatim from `IMPROVEMENTS.md`):**
+
+- **IMPROVEMENT IDEA (Scout 2026-07-21) — derive hot/dead-pixel correction from a persistent defect map (the
+  master dark/bias) instead of relying only on the blind per-frame local-median filter.** *(Image quality /
+  autonomy, PRIORITY 4 + 2; size M; needs real-data validation.)* **Why:** the always-on per-frame
+  `suppress_hot_cold_pixels` is a blunt instrument — a 3×3 local-median outlier filter can't distinguish a real
+  star peak from a hot pixel/cosmic ray, which is the root of the ⭐ star-core-clipping bug filed above. The
+  *principled* long-term route is what mature stackers do: build a **defect map** of the pixels that are hot
+  (bright in every dark) or dead (stuck low) from the **master dark/bias** the calibrate path already builds
+  (`seestack/calibrate/masters.py`) — those pixels are deterministic sensor defects, independent of the sky — and
+  correct **only those** (from their neighbours), leaving every real star untouched. Cosmic-ray / one-frame
+  transients then fall to the existing **multi-frame κ-σ** rejection (which *can* tell a persistent star from a
+  single-frame spike). This is distinct from the ⭐ bug's shipped in-place fix (cross-channel / all-channel
+  star-safety gate, v0.158.9, dark-free): it needs darks and a new map, but it's strictly more correct and more
+  autonomous ("it knew which pixels were broken"). **Extra motivation confirmed while shipping the ⭐ fix:** the
+  per-frame pass runs *after* `bilinear_debayer`, so a single hot CFA site has already smeared into a 3×3 halo by
+  the time it's seen — the star-safe fix can therefore only knock it down to *halo* level (~0.5× peak for an
+  R/B site, ~0.25× for a G site), not erase it (this is exactly what `test_drizzle_suppresses_hot_pixels` and
+  `test_debayered_single_cfa_hot_pixel_is_suppressed` assert). A raw-Bayer-domain defect map (applied in
+  `apply_raw`, *before* debayer) would remove the defect while it's still a single pixel — fully erasing it AND
+  never risking a star — so it dominates the post-debayer pass on both axes. **Shape:** (a) a pure `hot_pixel_map(master_dark, master_bias, sigma)` → boolean defect mask
+  (unit-testable on a synthetic dark with injected hot/dead pixels); (b) apply it in `apply_raw` (raw-Bayer
+  domain, before debayer) by replacing masked pixels with a same-Bayer-phase neighbour median; (c) when no dark
+  is present, fall back to the (fixed, star-aware) per-frame filter. **Guardrails:** additive, default-safe (a
+  user with no darks keeps today's behaviour), no schema/config/API change beyond an optional map cache; validate
+  on a real Seestar stack that stars are preserved and true hot pixels still vanish. Pillar: image quality + a
+  step toward "just works" calibration autonomy.
+
+---
+
 ## v0.366.1 — 2026-09-06 — The "you already have darks" answer reaches the picture: incoming_calibration_advice + cached_incoming_folders
 
 **Autonomy + friendliness (PRIORITY 2–3) — the follow-on v0.366.0 named but did not build, shipped once its

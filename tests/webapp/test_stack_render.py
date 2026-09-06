@@ -942,6 +942,37 @@ def test_stack_info_dark_scaling_absent_for_unscaled_stack(client, solved_librar
     assert body["dark_scaling"] is None
 
 
+def test_stack_info_surfaces_the_sensor_defect_repair_count(client, solved_library):
+    """A run that repaired hot/dead photosites stamps DEFECTPX; the info endpoint
+    serves it so the panel can say the off-by-default repair did something."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["DEFECTPX"] = 428
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["sensor_defects"] == 428
+
+
+def test_stack_info_sensor_defects_absent_for_a_run_that_did_not_repair(
+        client, solved_library):
+    """Every run made before the feature (and every clean sensor) has no card, and
+    reads as None — never as "0 repaired", which would look like a failure."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["sensor_defects"] is None
+
+
 def test_stack_info_surfaces_rejection_summary(client, solved_library):
     """A κ-σ stack stamps REJMODE/REJFRAC/REJN* cards; the info endpoint parses
     them into a friendly summary the History panel shows as a trust line."""

@@ -1577,6 +1577,11 @@ export interface StackRunInfo {
   weighting_skipped?: StackWeightingSkipped | null;
   photometric?: StackPhotometricSummary | null;
   dark_scaling?: StackDarkScalingSummary | null;
+  // How many broken photosites the (off-by-default) "repair hot/dead pixels
+  // from the dark" option fixed in every sub. Present only when the repair ran
+  // *and* found something; absent on every run before the feature and on a
+  // spotless sensor, both of which read as "no repair to report".
+  sensor_defects?: number | null;
   rejection?: StackRejectionSummary | null;
   // Honest per-run frame accounting — how many subs the stacker attempted to
   // combine and how many couldn't be aligned. Absent on older masters.

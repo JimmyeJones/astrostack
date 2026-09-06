@@ -556,6 +556,16 @@ class StackOptions:
     # unscaled dark otherwise. Off by default. Lets a dark library shot at one
     # exposure still calibrate subs at another.
     scale_dark_to_light: bool = False
+    # Derive a **sensor defect map** from the master dark (or, with no dark, the
+    # master bias) and repair those photosites in every sub, in the raw Bayer
+    # domain before debayer — see :mod:`seestack.calibrate.defects`. A hot or
+    # dead pixel is bright/stuck in every dark regardless of where the scope
+    # pointed, so this fixes exactly the broken pixels and can never touch a
+    # star, unlike the always-on blind per-frame local-median filter that runs
+    # after debayer. Needs a master dark or bias; off by default, so an existing
+    # run record and every run that doesn't ask for it are byte-for-byte
+    # unchanged.
+    repair_sensor_defects: bool = False
     # **Posture, not a knob:** True when *nobody is watching this run* — the
     # walk-away chains (watcher auto-stack, "Process target") set it; the manual
     # Stack form, the desktop app and reprocess-all never do. It is not a user
@@ -1770,6 +1780,16 @@ def _build_output_header_meta(
         applied = calibration.describe()
         if applied and applied != "none":
             meta["CALSTAT"] = (applied, "calibration masters applied")
+    # Sensor-defect-repair provenance: how many broken photosites the
+    # (off-by-default) repair actually fixed in every sub. Stamped only when the
+    # map found something, like DARKSCAL/PHOTNORM — a run that asked for the
+    # repair on a spotless sensor says nothing rather than claiming "0 repaired",
+    # which reads as a failure instead of as good news.
+    if calibration is not None:
+        n_defects = getattr(calibration, "n_sensor_defects", 0)
+        if n_defects:
+            meta["DEFECTPX"] = (int(n_defects),
+                                "hot/dead photosites repaired per sub")
     # Dark exposure-scaling provenance: when the (off-by-default) scale_dark_to_light
     # option actually scaled a master dark to the subs' integration time — i.e. the
     # option was on, a master bias was present to hold the pedestal fixed, a dark
@@ -2168,6 +2188,7 @@ def run_stack(
             options.dark_path, options.flat_path, options.flat_dark_path,
             options.bias_path,
             scale_dark_to_light=options.scale_dark_to_light,
+            repair_sensor_defects=options.repair_sensor_defects,
         )
         if calibration.is_empty:
             calibration = None
