@@ -34,6 +34,7 @@ import { VideoCapturesCard } from "../components/VideoCapturesCard";
 import { BestPicturesStrip } from "../components/BestPicturesStrip";
 import { ImagingLogButton } from "../components/ImagingLogButton";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
+import { lifeListLine } from "../components/lifeListLine";
 import { describeSkyCoverage } from "../components/skyCoverage";
 import { InsightTabs } from "../components/InsightTabs";
 
@@ -113,6 +114,16 @@ export function Dashboard() {
   const coverage = useQuery({
     queryKey: ["sky-coverage"], queryFn: () => api.skyCoverage(), staleTime: 60_000,
   });
+  // "42 of the 110 Messier objects" — the counts half of the life list, which
+  // already exists as a page nothing on the home screen ever points at. The
+  // counts-only route so the Dashboard doesn't pull ~160 catalog rows (and the
+  // per-target preview stat behind their thumbnails) for one sentence; its own
+  // query key for the same reason — sharing the page's would make the page's
+  // full fetch the thing that fills this cache.
+  const lifeList = useQuery({
+    queryKey: ["life-list-counts"], queryFn: () => api.lifeListCounts(),
+    staleTime: 60_000,
+  });
   const [astapDismissedSig, setAstapDismissedSig] = useState(() => loadDismissedSig(ASTAP_DISMISS_KEY));
   const [folderDismissedSig, setFolderDismissedSig] = useState(() => loadDismissedSig(FOLDER_DISMISS_KEY));
 
@@ -143,6 +154,7 @@ export function Dashboard() {
     ? describeSkyCoverage(coverage.data.deg2, coverage.data.sky_fraction,
                           coverage.data.n_pictures, coverage.data.summed_deg2)
     : "";
+  const lifeLine = lifeListLine(lifeList.data);
 
   return (
     <Stack>
@@ -273,6 +285,21 @@ export function Dashboard() {
           {coverageLine}{" "}
           <Text component={Link} to="/sky?view=mine" size="sm" c="violet" span>
             See it on My map →
+          </Text>
+        </Text>
+      ) : null}
+
+      {/* The life list's own number, in the same quiet-line grouping as the
+          coverage read-out above rather than a seventh stat tile or an eighth
+          card — the busy-page rule again. Self-hides until at least one famous
+          object is captured, so a fresh install sees nothing and nobody meets a
+          0-of-110 scoreboard before they have made a picture. */}
+      {lifeLine ? (
+        <Text size="sm" c="dimmed" mt={coverageLine ? -8 : -4}
+          data-testid="life-list-line">
+          {lifeLine}{" "}
+          <Text component={Link} to="/life-list" size="sm" c="violet" span>
+            See your life list →
           </Text>
         </Text>
       ) : null}
