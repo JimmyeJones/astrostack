@@ -452,3 +452,21 @@ def test_a_recorded_profile_stays_json_safe():
     round_tripped = json.loads(json.dumps(prof))
     assert auto_prefs.effective_biases(round_tripped, "nebula", now=_T0) == {
         "brightness": 1, "sharpen": 1}
+
+
+def test_a_faded_override_unmasking_a_bigger_global_bias_still_counts_as_a_fade():
+    """The one case where a parameter's *applied* magnitude goes up as it fades:
+    a per-type override that stops winning hands the parameter back to a stronger
+    global bias. That must not net out against the fade and silence the note."""
+    prof = None
+    for _ in range(3):
+        prof = auto_prefs.record_feedback(prof, "too_dark", now=_T0)      # global +3
+    prof = auto_prefs.record_feedback(prof, "too_bright", now=_T0,
+                                      object_type="galaxy")               # override −1
+    assert auto_prefs.effective_biases(prof, "galaxy", now=_T0) == {"brightness": -1}
+
+    late = _T0 + auto_prefs.DECAY_DAYS * _DAY
+    # The override has faded away; the global (also one step down) now applies.
+    assert auto_prefs.effective_biases(prof, "galaxy", now=late) == {"brightness": 2}
+    assert auto_prefs.steps_faded(prof, "galaxy", now=late) >= 0
+    assert auto_prefs.fade_note(prof, "galaxy", now=late) is not None
