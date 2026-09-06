@@ -10,6 +10,7 @@ strip does open each project, exactly like the Gallery endpoint does.
 from __future__ import annotations
 
 import time
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -933,6 +934,20 @@ class NightActivityOut(BaseModel):
     n_measured: int = 0
 
 
+class OffNightOut(BaseModel):
+    """"Was last night off for you?" — the wire shape of
+    :class:`seestack.activity_calendar.OffNightRead`."""
+
+    level: str               # 'fatter' | 'much_fatter'
+    label: str
+    text: str
+    night: str               # ISO date of the night being reported
+    baseline_nights: int     # earlier qualifying nights behind "your usual"
+    ratio: float
+    median_fwhm_px: float
+    baseline_fwhm_px: float
+
+
 class ActivityCalendarOut(BaseModel):
     """The library's imaging activity over a trailing window of nights, one cell
     per observing night — the Dashboard "your imaging calendar" heatmap."""
@@ -948,6 +963,11 @@ class ActivityCalendarOut(BaseModel):
     # "Your best night" — the window's sharpest night, or null when too little
     # was measured to name one honestly. Additive.
     sharpest_night: NightActivityOut | None = None
+    # "Was last night off for you?" — present only when the most recent measured
+    # night's stars came out materially fatter than the owner's own usual, so a
+    # normal night (and a library with too little history) serves null and the
+    # card says nothing. Additive.
+    off_night: OffNightOut | None = None
 
 
 def _collect_night_acc(lib, targets, *, lon_deg):
@@ -1083,6 +1103,10 @@ def get_activity_calendar(request: Request, months: int = 12) -> ActivityCalenda
         best_streak_nights=cal.best_streak_nights,
         sharpest_night=(
             _night_out(cal.sharpest) if cal.sharpest is not None else None
+        ),
+        off_night=(
+            OffNightOut(**asdict(cal.off_night))
+            if cal.off_night is not None else None
         ),
     )
 
