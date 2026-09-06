@@ -231,6 +231,23 @@ def _thousands(n: int) -> str:
     return f"{n:,}"
 
 
+def _defect_share(pct: float) -> str:
+    """The share of the sensor a defect count is, never rounded to "0.000%".
+
+    A healthy sensor's defects live in the 1e-5..1e-3 *fraction* band (the range
+    :mod:`seestack.calibrate.defects` refuses a map above), so three decimals of
+    a percentage is the bottom of the range this line has to print, not the
+    middle of it: ten broken photosites on the Seestar's 2 MP sensor is
+    0.00048 %, which ``:.3f`` renders as **"0.000%"** — a number that reads as a
+    bug in the app rather than as "hardly any", on exactly the sensors that are
+    in the best shape. Below what three decimals can show, say so instead —
+    in the words ``skyCoverage.formatSkyFraction`` already uses for the same
+    problem, and at the same cut, so the app has one voice for "too small to
+    print" rather than two.
+    """
+    return f"{pct:.3f}%" if pct >= 0.001 else "less than 0.001%"
+
+
 def defect_note(census: dict[str, Any] | None) -> dict[str, str] | None:
     """"Does this master say the sensor has broken pixels?" — one plain line.
 
@@ -266,18 +283,27 @@ def defect_note(census: dict[str, Any] | None) -> dict[str, str] | None:
                 f"means the master was built from the wrong frames."
             ),
         }
+    # A sensor with exactly one broken photosite is a real and *good* outcome,
+    # so the line has to read as English there too rather than as a template
+    # with a number pasted in.
+    one = n == 1
     return {
         "severity": "ok",
-        "message": f"{_thousands(n)} hot or dead pixels ({pct:.3f}%)",
+        "message": (f"{_thousands(n)} hot or dead "
+                    f"{'pixel' if one else 'pixels'} ({_defect_share(pct)})"),
         "detail": (
-            f"This master says {_thousands(n)} of the camera's photosites are "
-            f"broken — bright in every dark, or stuck dark. Use the button "
-            f"above the list to repair them on every stack from now on (it is "
-            f"the “Repair hot/dead pixels from the dark” switch the Stack form "
-            f"carries), and AstroStack replaces just those from their "
-            f"same-colour neighbours, before the colours are reconstructed. "
-            f"Every other pixel, including every star, is left exactly as it "
-            f"was."
+            (f"This master says one of the camera's photosites is broken"
+             if one else
+             f"This master says {_thousands(n)} of the camera's photosites are "
+             f"broken")
+            + f" — bright in every dark, or stuck dark. Use the button "
+            f"above the list to repair {'it' if one else 'them'} on every stack "
+            f"from now on (it is the “Repair hot/dead pixels from the dark” "
+            f"switch the Stack form carries), and AstroStack replaces just "
+            f"{'that one' if one else 'those'} from "
+            f"{'its' if one else 'their'} same-colour neighbours, before the "
+            f"colours are reconstructed. Every other pixel, including every "
+            f"star, is left exactly as it was."
         ),
     }
 
@@ -322,15 +348,23 @@ def defect_repair_offer(
     measured counts; this only carries the action.
 
     ``n_overridden`` is how many targets carry a **saved** stack default that
-    pins the option off, and it exists because without it the on-state's sentence
-    would be false for them. "Save as defaults" on the Stack form persists the
-    *whole* form, not just the fields the user was looking at, so any target
-    saved before this option was switched on has an explicit ``false`` in its own
-    blob — and a target's saved defaults win over the global ones in both readers
+    pins the option off, and it exists because without it this sentence would be
+    false for them. "Save as defaults" on the Stack form persists the *whole*
+    form, not just the fields the user was looking at, so any target saved before
+    this option was switched on has an explicit ``false`` in its own blob — and a
+    target's saved defaults win over the global ones in both readers
     (``get_stack_defaults`` and the unattended merge). Saying "every stack" while
     N targets quietly opt out is exactly the kind of confident untruth the
     census's own silences are designed to avoid, so the count is named and the
     reader is told what to do about it.
+
+    **Both states are qualified by it, not just the on-state.** The off-state is
+    the one the reader acts on — it promises the repair "for every stack,
+    including the hands-off ones", and that promise is what makes them press the
+    button. Making it unconditionally, then flipping to an on-state that says
+    "except N targets", tells the user the truth one click *after* the decision
+    it should have informed. So the exception is named in the offer as well as in
+    the confirmation.
     """
     repairable = any(
         isinstance(c, dict)
@@ -341,9 +375,9 @@ def defect_repair_offer(
     )
     if not repairable:
         return None
+    n = max(0, int(n_overridden))
+    targets = "target" if n == 1 else "targets"
     if enabled:
-        n = max(0, int(n_overridden))
-        targets = "target" if n == 1 else "targets"
         return {
             "state": "on",
             "message": (
@@ -370,7 +404,13 @@ def defect_repair_offer(
         }
     return {
         "state": "off",
-        "message": "Repair these on every stack from now on",
+        "message": (
+            "Repair these on every stack from now on"
+            if not n else
+            f"Repair these on every stack from now on — "
+            f"{_thousands(n)} {targets} would keep "
+            f"{'its own setting' if n == 1 else 'their own settings'}"
+        ),
         "detail": (
             "Turns on “Repair hot/dead pixels from the dark” for every stack, "
             "including the hands-off ones — so you don't have to find it on the "
@@ -379,7 +419,14 @@ def defect_repair_offer(
             "reconstructed, and every other pixel, including every star, is "
             "left exactly as it was. Reversible — this button turns it off "
             "again, and it is also in Settings."
-        ),
+        ) + ("" if not n else (
+            f" {_thousands(n)} {targets} pressed “Save as defaults” on the "
+            f"Stack form while this was off, and a target's own saved settings "
+            f"win — so {'it' if n == 1 else 'they'} would keep stacking without "
+            f"the repair. To include {'it' if n == 1 else 'one'}, open its Stack "
+            f"form, tick “Repair hot/dead pixels from the dark” and save the "
+            f"defaults again."
+        )),
         "action": "Repair them",
     }
 

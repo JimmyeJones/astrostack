@@ -18,6 +18,100 @@ is a queue.
 
 ---
 
+## 2026-09-06 (later) — Builder run (branch `claude/sweet-babbage-cqqyi1`): the newest-code audit again — a promise qualified only *after* the click, an engine probe that cleared `defects.py`, and a clean dogfood
+
+**The run.** Baseline green before any change (**5,007 passed / 2 skipped**, full
+suite headless, 22:32). Shipped **v0.374.3** and **v0.374.4**; both write-ups in
+[`SHIPPED.md`](SHIPPED.md).
+
+**Backlog state.** "Bugs (fix these first)" is in the same gated state the run
+below records. What is new is that the **feature** list is now in it too. Four
+candidates were opened and put back *before a line was written*:
+
+* *"let the cover also be an edited export"* — its own 2026-08-05 note already
+  says the case is served (`_apply_editor_to_run` records a real `stack_runs`
+  row, so the existing "Set as cover" works on an edit); only a loose
+  download/share export is left, and it is marginal.
+* *"a 3-frame default stack gets no rejection"* — overtaken; the advisory half
+  shipped v0.323.1.
+* *the "is this date when you shot it or when the app did something" sweep* —
+  finished at v0.321.3 (Gallery card, History row, sky footprint).
+* *"the pinned-options note needs a button"* — **already shipped** as
+  `adoptGlobalsPatch` + *"Use my global settings"*, v0.372.0. Found by grepping
+  the *mechanism* rather than the feature's title, which is the fifth instance
+  of that §4 warning.
+
+**So: audit the newest code, per the run below.** v0.370–v0.374.2 — the
+sensor-defect census, its one-click button, the pinned-options report, the
+save-the-delta — is what landed after the newest recorded sweep. Two verified
+defects came out of it, both in the census/offer *copy*.
+
+**The transferable method, because it is a variation on the last two runs'.**
+v0.374.2 found two advisory notes that contradicted **each other** on a shared
+trigger. This run found one control that contradicts **itself across time**:
+`defect_repair_offer`'s on-state was carefully qualified (*"except 1 target"*,
+built deliberately, with its own test), and its off-state — the same fact, the
+same targets, read one click *earlier* — made the unqualified promise. So: **for
+any button whose copy makes a promise, ask whether the promise is qualified in
+the state that persuades, or only in the state that confirms.** The qualified
+state is the easy one to get right, because you write it while thinking about
+the exception; the offer is written while thinking about the feature.
+
+**Engine half: probed by running it, and `seestack/calibrate/defects.py` traces
+CLEAN.** The census/repair code is the newest engine code in the tree and has
+already yielded two bugs (v0.369.4, v0.371.1), so it was probed rather than
+re-read, on a Seestar-S30-shaped master (1920×1080, bias pedestal + readout ramp
++ dark-current tilt + corner amp glow + per-sub shot/read noise averaged over
+*N* subs):
+
+* **False positives: 0**, at every combination of glow peak (0 / 500 / 2,000 /
+  8,000 e⁻) and master depth (10 / 30 / 100 subs). This is the v0.371.1 fix
+  holding at depths that fix never tested.
+* **False negatives: 0** with 400 hot pixels (200–4,000 ADU above local), 40
+  stuck-low, and two warm *columns* planted — 2,599 flagged, 2,599 correct. The
+  column case matters and had not been probed: within a phase a bad column is
+  one of five columns in the 5×5 window, so the median is unmoved, and
+  `DefectMap.repair` then medians the six same-phase neighbours that are *not*
+  in the column.
+* **Census == what a run repairs**, on that master: 2,599 both ways.
+* **Repair on a light frame**: only genuinely-defective pixels changed (57 of
+  them inside a star's core, all planted); residual at repaired non-star
+  defects — median **5.8 ADU** against a sky σ of 8, p99 22.7. The worst
+  residual over the *whole* frame is 33 ADU, and every large one sits in a
+  star's wing, where a ±2 px same-phase neighbour genuinely carries different
+  flux. That is the method's inherent limit, not a defect.
+
+**Cost measured rather than asserted.** v0.374.3 makes the offer's per-target
+walk happen with the switch **off** as well as on, so the walk was benchmarked
+rather than argued about: **0.65 ms per target** (200 targets → ~130 ms), once
+per 60 s poll, and only while the Calibration page is open *and* some master
+reports repairable defects. The "clean library never pays for it" guarantee is
+unchanged and still tested.
+
+**Dogfood pass — CLEAN** (`scripts/agent-dogfood.sh` at v0.374.2: real app,
+bundled M42 sample ingested + stacked + auto-edited, Playwright at 1440 px and
+420 px). Probe: *nothing overflowing, no console errors.* **Page-height
+baseline, seventh measurement:** tallest on a phone is the Target page at
+**3,040 px** — identical to the sixth measurement — with `/life-list` second at
+**3,008 px** and the editor third at 2,815 px, i.e. the same three pages in the
+same order at the same heights. The standing IA rule still says do not open a
+speculative slice.
+
+**One traced non-finding, recorded so it isn't re-investigated.**
+`routers/calibration.py`'s census cache evicts with
+`cache.pop(next(iter(cache)))`. Two overlapping threadpool requests could in
+principle both name the same oldest key, and the second `pop` would raise
+`KeyError` → a 500. **Unreachable in practice:** it needs the cache at its
+128-entry cap (128+ dark/bias masters in one library) *and* two simultaneous
+cache misses. Give the `pop` a `None` default if that file is ever touched for
+another reason; not worth a commit of its own.
+
+**Ended the run at two tasks.** Both are small by design — the audit found what
+it found — and AGENTS.md §2 is explicit that a short run leaving `main` green
+beats a manufactured third item.
+
+---
+
 ## 2026-09-06 — Builder run (branch `claude/sweet-babbage-0pqzni`): a clean dogfood, a wrong-advice bug found by reading the *pair* of notes rather than either one, and three stale headers struck
 
 **The run.** Baseline green before any change (**5,004 passed / 2 skipped**, full
