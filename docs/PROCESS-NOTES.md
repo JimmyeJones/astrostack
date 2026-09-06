@@ -18,6 +18,61 @@ is a queue.
 
 ---
 
+## SCOUT QA SWEEP — the newest post-audit code (v0.354→v0.366) read adversarially; CLEAN; one new beginner feature + one hardening note filed (Scout 2026-09-06, branch `claude/admiring-brahmagupta-mmvfsy`)
+
+Recorded so the next Scout doesn't re-read these modules. The ~20 recorded stacking-engine audits (see the
+blocks below and the ones cut to this file on 2026-09-05) covered the engine up to ~v0.353–0.355. This run
+deliberately targeted the code that **post-dates** all of them — the v0.354–v0.366 changes — since that is
+the only stacking/calibration surface no prior audit has seen. Baseline before the sweep: the stacking +
+calibrate subset is green (**1578 passed / 2 skipped / 3289 deselected**, `-k "stack or accumul or align or
+mosaic or drizzle or calibrat or reject or weight"`, on a fresh `source scripts/agent-setup.sh`).
+
+**Traced CLEAN (read end to end for NaN/coverage semantics, rejection/weighting math, preview↔export parity,
+and — for the new calibration surface — the `incoming/` read-only guarantee):**
+- `seestack/stack/output.py` **`pack_unit`** (v0.354.1/.2) — `np.rint(arr * info.max)` at all six export
+  sites; the linear TIFF's own reversibility description is now honest to ±½ DN; `rint(1.0*MAX)==MAX` so no
+  overflow; callers all clip (or `nan_to_num`) first. `_to_uint16_linear` routes through it. Correct.
+- `seestack/stack/stacker.py` **rejection-reach math** (v0.365.0) — `kappa_min_frames`,
+  `lone_outlier_min_depth`, `auto_reject_depth` (grid-snap + `cluster_pointings` + the "≥2 substantial
+  panels or None" gate, returning the thinnest panel), `_resolve_auto_reject`'s `n = min(n, depth)` clamp,
+  and the `REJDEPTH/REJNEED/REJREACH` stamping in `_build_output_header_meta`. `peak_depth = min(n_used,
+  int(nanmax(cov)))` — `int()` truncates toward zero, the conservative direction (understates depth → errs
+  toward "blind", never toward "clean"), matching the docstring's stated caution. Consistent with
+  `stackhealth`'s `rejection_blind` via the shared `kappa_min_frames`.
+- `seestack/stack/accumulator.py` **`MinMaxRejectAccumulator`** — re-verified the k-set ±inf-identity
+  insertion sort, the `count≥2k+1 / 3≤count<2k+1 / 1–2 / 0` bands (no inf−inf on the full band because
+  ≥2k+1 real contributions fill both k-sets), tie-safety on a shared saturated core, and `rejection_counts`
+  matching the drop schedule. Correct.
+- `seestack/io/fits_loader.py` **`frame_kind_from_header`** (v0.356.0) — exact-table (not substring) match
+  after punctuation-normalisation; one-sided (unknown/missing → `None`, never inferred "light"). The whole
+  safety property holds. `_coord_to_deg` sexagesimal sign handling also spot-checked, correct.
+- `seestack/calibrate/discover.py` + `webapp/calibration.py` `cached_incoming_folders` /
+  `incoming_calibration_advice` + `webapp/routers/calibration.py` (v0.366.0/.1) — **read-only w.r.t.
+  `incoming/`** (only `os.scandir` + `load_header`; nothing opens for write/rename/unlink; AGENTS.md §10
+  honoured). Confident-offer logic is strict and one-sided (every sampled frame must declare a recognised
+  kind mapping to one master slot; a light or a "didn't say" rules the folder out at index 0). Build is
+  re-discovered server-side by id; no client path. Correct.
+
+**One hardening note filed to IMPROVEMENTS.md → Bugs** (a landmine to know about, **not** a verified live bug,
+so recorded as a note rather than manufactured as a bug per AGENTS.md §2): the one-click discover→build path
+classifies a folder by **sampling 4 headers** (`discover.SAMPLE_HEADERS`) but `masters.build_master` then
+combines **every** shape-matching FITS in the folder without filtering to the requested kind — so a genuinely
+*mixed* folder (its 4 evenly-spaced samples all darks, but other files lights or a second exposure) would
+build a contaminated master. Mitigated already: `build_master` tallies each combined frame's own `IMAGETYP`
+into `header_kinds` and surfaces it as the v0.356.0 `header_kind_note`, so the user is *told* what went in.
+Low severity (needs an unusual folder), low confidence (traced, not reproduced). Details + the "if ever built"
+direction in the note.
+
+**Also this run:** filed one genuinely-new beginner feature ("Was last night off for you?" — a whole-history
+star-size baseline; grep-confirmed absent, `sky_quality.py` has only a *cloud* baseline). Confirmed by
+grepping that essentially every other beginner-feature idea I could generate is **already built** (deepening
+reel, montage, wallpaper crop, reveal zoom, year recap, A/B compare, life list, object info, moon-aware
+tonight + multi-night `next_observing_windows`, `ShowRemovedToggle` for the rejection map, `stack_health`'s
+prioritised next-steps) — a direct confirmation of §4's "idea supply is not the constraint". So no more ideas
+were piled on.
+
+---
+
 ## DOGFOOD PASS — clean, and the honest outcome was to stop rather than find something (Builder 2026-09-06, branch `claude/sweet-babbage-t53xni`)
 
 `scripts/agent-dogfood.sh` on a scratch data root, at **v0.365.0**: booted the app, loaded and stacked the
