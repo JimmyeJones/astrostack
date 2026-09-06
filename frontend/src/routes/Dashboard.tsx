@@ -17,6 +17,7 @@ import { astapReadiness, astapReadinessSignature } from "../components/dashboard
 import { folderReadiness, folderReadinessSignature } from "../components/dashboard/folderReadiness";
 import { ContinueTonightCard } from "../components/ContinueTonightCard";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
+import { FirstLookStrip } from "../components/dashboard/FirstLookStrip";
 import { MissingFilesNote } from "../components/dashboard/MissingFilesNote";
 import { StackFailuresNote } from "../components/dashboard/StackFailuresNote";
 import { PointHereTonightCard } from "../components/dashboard/PointHereTonightCard";
@@ -394,6 +395,12 @@ export function Dashboard() {
           ) },
           { key: "recent", label: "Recent", node: (
             <>
+              {/* Before the recap of what came in: what it *looks* like. The
+                  sharpest sub of the target that has subs but no picture yet —
+                  the "did tonight work?" glance, which until now only the
+                  Target hub answered. Self-hides once every target has a
+                  picture, so a settled library sees nothing. */}
+              <FirstLookStrip />
               <LastNightCard />
               <VideoCapturesCard />
             </>

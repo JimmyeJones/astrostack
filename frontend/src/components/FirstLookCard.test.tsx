@@ -1,6 +1,7 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FirstLookCard, firstLookCaption, firstLookMetrics } from "./FirstLookCard";
 import type { BestFrame } from "../api/client";
@@ -70,6 +71,30 @@ describe("FirstLookCard", () => {
     expect(screen.getByText("FWHM 2.1 px · 480 stars")).toBeInTheDocument();
     const img = screen.getByRole("img", { name: /sharpest sub/i });
     expect(img).toHaveAttribute("src", expect.stringContaining("/frames/7/preview"));
+  });
+
+  it("names and links the target when it isn't the page's own", async () => {
+    vi.spyOn(client.api, "bestFrame").mockResolvedValue(best());
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <QueryClientProvider client={new QueryClient()}>
+            <FirstLookCard safe="M_42" target={{ name: "M 42", to: "/targets/M_42" }} />
+          </QueryClientProvider>
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByText("First look")).toBeInTheDocument());
+    expect(screen.getByText("M 42 →")).toHaveAttribute("href", "/targets/M_42");
+  });
+
+  it("names no target on the target's own page", async () => {
+    vi.spyOn(client.api, "bestFrame").mockResolvedValue(best());
+    renderCard();
+    await waitFor(() =>
+      expect(screen.getByText("First look")).toBeInTheDocument());
+    expect(screen.queryByRole("link")).toBeNull();
   });
 
   it("renders nothing before anything is QC'd (no best frame)", async () => {

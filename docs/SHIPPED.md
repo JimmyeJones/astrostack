@@ -14,6 +14,47 @@ Newest first.
 
 ---
 
+## v0.363.0 — 2026-09-06 — "First look" on the Dashboard: FirstLookStrip + pickFirstLookTarget
+
+**Autonomy / friendliness (PRIORITY 2/3), the filed idea built at the filed size (frontend-only, existing
+endpoint).** v0.139.0 put the pre-stack sharpest-sub peek on the *Target* hub. But the beginner who has just
+dropped a night in lands on the **Dashboard**, and a target still being QC'd has nothing to show there at all:
+the "Recent stacks" grid only knows about *finished pictures*, so between "the subs are in" and "the stack
+finished" the landing page says nothing about whether the night worked.
+
+**What shipped.** `FirstLookStrip` (`components/dashboard/`) picks the one target the user is most likely
+waiting on and renders the existing `FirstLookCard` for it. The pick is a pure, exported
+`pickFirstLookTarget(targets)`: kept subs (`n_frames_accepted > 0`) and **no picture yet** (`!has_preview` —
+the same fact the Library tile draws its placeholder from), ranked newest-active first, ties broken by depth
+then name so the card cannot swap between two targets on successive refreshes. A target with no (or an
+unparseable) `last_activity_utc` sorts last rather than being dropped — it is still a real target with kept
+subs and no picture.
+
+**Deliberately one target, not a grid**, and deliberately **inside the existing "Recent" insight group**
+rather than as another stacked card — §1's standing IA priority says a new fact joins a grouping instead of
+becoming one more always-on block. It sits above the "Last night" recap: what the night *looks* like, then
+the recap of what came in.
+
+`FirstLookCard` gained one optional prop (`target: {name, to}`) so the Dashboard's copy can name and link the
+target it is showing; on the Target page, where "which target?" is never in question, it is omitted and the
+card renders exactly as before.
+
+**Costs nothing on a settled library:** every target having a picture is the common case, and there the strip
+renders nothing and never asks for a frame (pinned by a test). It reuses the Library page's own
+`["targets"]` query key, so the two share one cached list.
+
+**Upgrade-safe (§9):** frontend-only. No config, schema, on-disk, API or default change; no new endpoint —
+`GET /api/targets` and `…/best-frame` are both already served.
+
+**Tests (+14):** `FirstLookStrip.test.tsx` (11 — the pick's seven cases including the undated and unparseable
+stamps, the deterministic tie-break, and that it does not reorder the caller's list; then the rendered strip
+naming and linking the waiting target, rendering nothing *and asking for no frame* once every target has a
+picture, and degrading silently when the target list can't be read), `FirstLookCard.test.tsx` (+2 — the named
+and linked form, and no link on the target's own page), and `Dashboard.test.tsx` (+1 — the card really is
+inside the grouped Recent area on the real page, linking to the right target).
+
+---
+
 ## v0.362.0 + v0.362.1 — 2026-09-05 — The first-image checklist carries the whole journey: n_edited_runs / n_finished_pictures
 
 **Friendliness / autonomy (PRIORITY 3), the filed idea built as filed.** The Dashboard's "Your first
