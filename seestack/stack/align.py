@@ -468,8 +468,13 @@ def _apply_subpixel_shift(
     dy, dx = float(shift[0]), float(shift[1])
     # Sanity check: > SUBPIXEL_SHIFT_CAP_PX pixels of "sub-pixel" shift means
     # alignment was already off — apply nothing and let sigma-clipping pick up
-    # the slack.
-    if abs(dy) > SUBPIXEL_SHIFT_CAP_PX or abs(dx) > SUBPIXEL_SHIFT_CAP_PX:
+    # the slack. Written as "not (both within the cap)" rather than "either over
+    # it" so a **NaN** shift is refused too: NaN fails every comparison, so the
+    # `>` spelling let it through and `nd_shift` then smeared NaN across the
+    # whole frame. Unreachable on real data (the patches are NaN-filled to finite
+    # before correlating, and finite inputs never return a NaN shift), so this is
+    # belt-and-braces on the path that decides what the final image is made of.
+    if not (abs(dy) <= SUBPIXEL_SHIFT_CAP_PX and abs(dx) <= SUBPIXEL_SHIFT_CAP_PX):
         if stats is not None:
             stats["over_cap"] = True
         return aligned
@@ -575,7 +580,9 @@ def _apply_subpixel_shift_windowed(
         return win_rgb
 
     dy, dx = float(shift[0]), float(shift[1])
-    if abs(dy) > SUBPIXEL_SHIFT_CAP_PX or abs(dx) > SUBPIXEL_SHIFT_CAP_PX:
+    # Same "not (both within the cap)" spelling as ``_apply_subpixel_shift``, and
+    # for the same reason: a NaN shift must read as "too large", not slip through.
+    if not (abs(dy) <= SUBPIXEL_SHIFT_CAP_PX and abs(dx) <= SUBPIXEL_SHIFT_CAP_PX):
         if stats is not None:
             stats["over_cap"] = True
         return win_rgb
