@@ -1338,6 +1338,18 @@ export interface StackRejectionSummary {
   // can offer "show me what was removed". Absent on every run recorded before
   // the option existed, which reads the same as false — no overlay to offer.
   has_map?: boolean;
+  // Whether the pass could have dropped a *lone* satellite/plane at all, and the
+  // two numbers behind that verdict: the samples on the deepest pixel of the
+  // canvas (`peak_depth`) against the samples that method needs (`min_depth`).
+  // `fraction` alone can't tell "your sky was clean" from "this pass was
+  // mathematically blind" — a κ·σ clip tests each sample against statistics that
+  // still contain it, so it reaches nothing until ~11 samples land on one pixel
+  // (at the default κ=3), which a thin mosaic panel rarely has. All three are
+  // absent on runs stacked before the engine stamped them, which reads as "no
+  // verdict" rather than as a reassurance.
+  reaches?: boolean;
+  peak_depth?: number;
+  min_depth?: number;
 }
 
 export interface PrintSize {

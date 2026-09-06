@@ -1015,10 +1015,10 @@ def rejection_reach(options: "StackOptions", n: int,
     # blind to a lone trail however many frames the target holds in total.
     reach_n = n if depth is None else min(n, max(0, int(depth)))
     if method == "min-max-reject":
-        return RejectionReach(method, n, MIN_MAX_MIN_FRAMES,
-                              reach_n >= MIN_MAX_MIN_FRAMES)
+        need = lone_outlier_min_depth(method, eff.sigma_kappa)
+        return RejectionReach(method, n, need, reach_n >= need)
     if method == "sigma-clip":
-        need = kappa_min_frames(eff.sigma_kappa)
+        need = lone_outlier_min_depth(method, eff.sigma_kappa)
         return RejectionReach(method, n, need, reach_n >= need)
     if method == "drizzle":
         # Two-pass drizzle rejection needs ≥4 frames to *dispatch* and the memory
@@ -1037,10 +1037,33 @@ def rejection_reach(options: "StackOptions", n: int,
         # this helper existed, one method along.
         if not eff.drizzle_reject:
             return RejectionReach(method, n, None, False)
-        need = kappa_min_frames(eff.sigma_kappa)
+        need = lone_outlier_min_depth(method, eff.sigma_kappa)
         return RejectionReach(method, n, need,
                               n >= DRIZZLE_REJECT_MIN_FRAMES and reach_n >= need)
     return RejectionReach(method, n, None, False)
+
+
+def lone_outlier_min_depth(mode: str, sigma_kappa: float) -> int | None:
+    """Smallest **per-pixel sample depth** at which ``mode`` can drop a *lone*
+    satellite/plane/cosmic-ray hit — ``None`` when no rejection pass runs at any
+    depth (``"mean"``).
+
+    The one definition of the bound behind three answers that must never
+    disagree: :func:`rejection_reach`'s pre-run verdict, ``seestack.stackhealth``'s
+    ``rejection_blind`` note on the finished picture, and the ``REJNEED`` /
+    ``REJREACH`` cards :func:`_build_output_header_meta` stamps beside
+    ``REJFRAC`` so the master FITS says for itself whether its 0 % was a clean
+    sky or a blind pass.
+
+    Accepts both spellings a run can be labelled with: :func:`combine_method`'s
+    ``"drizzle"`` (what will run) and :class:`RejectionStats`' ``"drizzle-reject"``
+    (what did) are the same κ·σ clip and share κ-σ's bound — see the drizzle
+    branch of :func:`rejection_reach` for the measurement."""
+    if mode == "min-max-reject":
+        return MIN_MAX_MIN_FRAMES
+    if mode in ("sigma-clip", "drizzle", "drizzle-reject"):
+        return kappa_min_frames(sigma_kappa)
+    return None
 
 
 def _resolve_auto_reject(options: StackOptions, n: int,
@@ -1676,6 +1699,7 @@ def _build_output_header_meta(
     drizzle_scale_requested: float | None = None,
     min_max_reject_count_requested: int | None = None,
     rejection_map_written: bool | None = None,
+    peak_depth: int | None = None,
 ) -> dict[str, Any]:
     """Collect provenance for the output FITS header.
 
@@ -1836,6 +1860,25 @@ def _build_output_header_meta(
         if rejection_map_written is not None:
             meta["REJMAP"] = (bool(rejection_map_written),
                               "per-pixel rejection map written")
+        # …and whether the pass could have clipped anything at all, which
+        # ``REJFRAC 0.0`` alone cannot say. A κ·σ clip tests each sample against
+        # statistics that still contain it, so it is blind to a lone trail until
+        # :func:`kappa_min_frames` samples land on **one pixel** — 11 at the
+        # default κ=3, and a mosaic panel rarely has them. Without these cards the
+        # file (and every consumer of them — the History Info panel reads this
+        # block) reports the blind pass and a genuinely clean sky identically, and
+        # a satellite sits in the picture with nothing anywhere saying so. Depth
+        # is the *deepest* pixel on the canvas: when even that is short, no pixel
+        # anywhere could be clipped, so "could not reach" is provable rather than
+        # likely — the same quantity and the same direction of caution as
+        # ``stackhealth``'s ``rejection_blind`` note. Omitted when the caller has
+        # no coverage to hand, which is what every run before this looks like.
+        need = lone_outlier_min_depth(rstats.mode, options.sigma_kappa)
+        if need is not None and peak_depth is not None and peak_depth > 0:
+            meta["REJDEPTH"] = (int(peak_depth), "samples on the deepest pixel")
+            meta["REJNEED"] = (int(need), "samples needed to clip a lone outlier")
+            meta["REJREACH"] = (bool(int(peak_depth) >= int(need)),
+                                "rejection could clip a lone outlier")
     # …and the other half of that story: an auto-enabled drizzle rejection the
     # memory budget couldn't afford, which the run deliberately skipped rather
     # than refusing outright (see :func:`_afford_drizzle_reject`). Stamped so the
@@ -3058,6 +3101,21 @@ def run_stack(
     # which is what every run before this feature looks like.
     rejection_map_written = (
         bool(np.any(rejection_map)) if rejection_map is not None else None)
+    # The deepest pixel on the canvas, for the REJDEPTH/REJNEED/REJREACH cards.
+    # Same quantity the run record persists as ``coverage_max`` a few lines down
+    # (``frame_cov`` when we have the honest per-pixel frame count, else the
+    # coverage map, which *is* a count on the paths that don't), so the header and
+    # the DB can never disagree about how deep this stack got. Capped at the
+    # frames that actually contributed for the same reason ``stackhealth`` caps
+    # it: a weighted coverage can round above the sub count, and overstating the
+    # depth is the direction that would *hide* a blind pass.
+    _peak_cov = frame_cov if frame_cov is not None else (
+        coverage[..., 0] if coverage.ndim == 3 else coverage)
+    peak_depth: int | None = None
+    if _peak_cov is not None and _peak_cov.size:
+        _cov_hi = float(np.nanmax(_peak_cov))
+        if np.isfinite(_cov_hi):
+            peak_depth = min(int(n_used), int(_cov_hi))
     header_meta = _build_output_header_meta(project, frames, eff, n_used, wstats,
                                             calibration=calibration, pstats=pstats,
                                             photometric_auto=photometric_auto,
@@ -3078,7 +3136,8 @@ def run_stack(
                                             min_max_reject_count_requested=(
                                                 min_max_reject_count_requested),
                                             rejection_map_written=(
-                                                rejection_map_written))
+                                                rejection_map_written),
+                                            peak_depth=peak_depth)
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     if stack_fwhm is not None:
