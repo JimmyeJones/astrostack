@@ -14,6 +14,27 @@ Newest first.
 
 ---
 
+## v0.374.1 — 2026-09-06 — the pinned-defaults note stops overstating what a save holds back (`Stack.tsx`)
+
+**(Builder 2026-09-06, branch `claude/sweet-babbage-d5819j`.) Friendliness —
+PRIORITY 3; the copy half of v0.374.0, and the reason it is its own commit is
+that it is a *sentence that became untrue* rather than part of the mechanism.**
+
+The v0.372.0 note said, under the list of options a target is holding away from
+the global defaults: *"Saved settings win over your global ones here, so a switch
+you change in Settings later won't reach this target until you save again."* With
+v0.374.0 that is only true of **the rows it just named** — everything the user
+never changed now follows the global setting like any other target. Left as-is,
+the one surface built to clear up "my Settings don't reach this target" would
+itself be telling a beginner exactly that, about their whole Settings page.
+
+Now: *"These ones win over your global settings here, so changing them in
+Settings later won't reach this target until you save again. Everything else
+follows your global settings as usual."* Pinned by an added assertion in the
+existing `Stack.test.tsx` case, beside the one that already held the first half.
+
+---
+
 ## v0.374.0 — 2026-09-06 — "Save as defaults" stores what you changed, not a snapshot of the form: `walkaway.stack_defaults_delta` + `routers/stack._unsaved_stack_options`
 
 **(Builder 2026-09-06, branch `claude/sweet-babbage-d5819j`.) Autonomy + trust —

@@ -1061,6 +1061,8 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   Save, existing full-snapshot blobs are left alone, and the rejection keys stay pinned by *presence*
   so `auto_reject_on_unattended` remains the only way the chain overrules a saved method. Full entry in
   [`SHIPPED.md`](SHIPPED.md).
+  ✅ **v0.374.1** — and the note's own sentence, which v0.374.0 had just made an overstatement, is scoped
+  to the rows it names (`Stack.tsx`).
 
 - **⚪ CHECKED, NOT A GAP — recorded so the next run doesn't "fix" it (Builder 2026-09-04, while shipping
   v0.346.0).** The stationary-streak guard needs its clustered frames to span an hour, which a beginner's
