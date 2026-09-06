@@ -46,9 +46,16 @@ def pick_central_frame(candidates: list[FrameRow]) -> FrameRow | None:
     reference. Callers pass frames they have already filtered (solved, with a
     pointing); a frame without a pointing is skipped here rather than scored.
     """
+    # ``isfinite``, not just ``is not None``, matching ``pointings.py``'s own
+    # filter: a NaN centre passes every comparison and would propagate through
+    # the RA unwrap, the median and the score, picking an arbitrary reference for
+    # the whole stack. Effectively unreachable (a successful solve writes finite
+    # centres and a failed one writes none), so this is consistency with the
+    # sibling module rather than a live fix.
     solved = [
         f for f in candidates
         if f.ra_center_deg is not None and f.dec_center_deg is not None
+        and math.isfinite(f.ra_center_deg) and math.isfinite(f.dec_center_deg)
     ]
     if not solved:
         return None

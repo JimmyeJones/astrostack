@@ -919,14 +919,19 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
     **Unreachable on real data** — every writer of `fwhm_px` traces to `median_fwhm`, which persists only values in
     (0.5, 20) or None, and overflow needs `fwhm_px < ~1.5e-154` (a crash reproduces only at ~1e-300). Defensive-only:
     cast to `np.float64`/guard the ratio if the file is touched. (Cosmetic — unreachable; confidence: traced + repro'd
-    at the unreachable boundary.) _(Found by the 2026-07-24 weighting audit.)_
+    at the unreachable boundary.) — **FIXED v0.367.1**: the ratio is computed in `np.float64` under
+    `errstate(over="ignore")`, so it saturates to `inf` and clips to the 1.0 the formula already wants.
+    Regression `tests/test_engine_defensive_guards.py::test_a_pathologically_tiny_fwhm_saturates_instead_of_crashing_the_stack`. _(Found by the 2026-07-24 weighting audit.)_
   - `seestack/stack/align.py` (subpixel-refine cap, ~line 400/490) the guard `|dy| > CAP or |dx| > CAP` does **not**
     reject a NaN shift (NaN fails both comparisons → the shift is applied). **Unreachable** — the correlation patches
     are NaN-filled to finite before `phase_cross_correlation`, and finite inputs never return a NaN shift (a featureless
     overlap returns a finite spurious `(-0.7,-0.7)` whose ≤5px NaN edge-ring is exactly consumed by the
     `pad=SUBPIXEL_SHIFT_CAP_PX=5` window). Defensive-only: rewrite as `not (abs(dy) <= CAP and abs(dx) <= CAP)` so a NaN
     is treated as "too large" and skipped, belt-and-suspenders, if the file is touched. (Cosmetic — unreachable;
-    confidence: traced.) _(Found by the 2026-07-24 align audit.)_
+    confidence: traced.) — **FIXED v0.367.1**, at *both* sites (`_apply_subpixel_shift` and the windowed one).
+    Regression `tests/test_engine_defensive_guards.py::test_a_nan_subpixel_shift_is_refused_rather_than_smeared_over_the_frame`
+    (patches `skimage.registration.phase_cross_correlation` to return a NaN shift; fails before — `nd_shift`
+    wiped the whole frame to NaN). _(Found by the 2026-07-24 align audit.)_
   - `seestack/stack/align.py::extract_reference_patch` fills NaNs with `np.nanmedian(luma)`, which on an **all-NaN**
     patch emits a RuntimeWarning and returns NaN — so the shared reference patch would be entirely NaN and every
     frame's sub-pixel refine would silently correlate against nothing (each `phase_cross_correlation` returning a
@@ -934,6 +939,8 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
     patch is the *centre* of the reference frame's own aligned array, which is finite by construction; a fully
     uncovered centre would mean the reference didn't land on its own canvas. Defensive-only: fall back to `0.0`
     when the median isn't finite, if the file is touched. (Cosmetic — unreachable; confidence: traced.)
+    — **ALREADY FIXED** (found done while sweeping this batch, v0.367.1): `extract_reference_patch` computes
+    `fill = float(np.median(luma[finite])) if finite.any() else 0.0`. Struck so nobody re-picks it.
     _(Found by the 2026-08-07 align/accumulator audit, which otherwise traced clean: the windowed and full-canvas
     accumulator adds, the min/max k-set insertion and its ±inf identities, the mosaic canvas RA-unwrap and outlier
     passes, the photometric scale/weight composition, and the reproject inset/pad arithmetic all held.)_
@@ -941,20 +948,25 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
     nested like `gallery.py`/`storage.py::get_storage`), so if `proj.close()` itself raised, `lib.close()` would
     be skipped and the Library handle would leak. Trigger is essentially unreachable (`sqlite3.Connection.close()`
     does not raise in practice), so this is a consistency nit, not a live leak — nest the two closes if the file is
-    touched. (Cosmetic; confidence: traced.)
+    touched. (Cosmetic; confidence: traced.) — **FIXED v0.367.1**: nested, matching `get_storage`/`gallery.py`.
   - `seestack/solve/runner.py:204-218` the "unreadable plate solution" self-heal branch's comment claims recording a
     `reject_reason` makes the frame "stop being re-offered," but `build_solve_arglist` (`runner.py:166`) skips frames
     only on truthy `wcs_json` — nothing gates on `reject_reason`, so a consistently-unparseable `.wcs` sidecar is
     re-solved every scan (identical to the ordinary transient-failure branch it says it "mirrors"). The re-offer
     behaviour is itself harmless/safe (a transient corruption recovers on retry); only the comment over-promises. Fix
     the comment (or, if genuinely un-recoverable, gate the skip on the stored reason) if the file is touched.
-    (Cosmetic — comment vs behaviour; confidence: traced.)
+    (Cosmetic — comment vs behaviour; confidence: traced.) — **FIXED v0.367.1** the comment, not the behaviour:
+    re-offering is deliberate and correct here (an unreadable sidecar is usually transient), and
+    `build_solve_arglist` says so explicitly — so the comment now states what the branch actually buys (the frame
+    is no longer stored as *solved-yet-unusable*) instead of promising a skip nothing implements.
   - `seestack/stack/reference.py:42-44` `pick_reference_frame` filters candidates on `ra_center_deg is not None` but,
     unlike `pointings.py:78-80`, does not also require `math.isfinite` — so a hypothetical NaN centre would propagate
     into the unwrap/median/score and pick an arbitrary reference. Effectively unreachable (a successful solve writes a
     finite `wcs_json` + centre; a failure leaves `wcs_json` NULL and is filtered by the `f.wcs_json` clause), so this
     is a defensive consistency nit, not a live bug — add the `isfinite` guard to match `pointings.py` if the file is
-    touched. (Cosmetic; confidence: traced.)
+    touched. (Cosmetic; confidence: traced.) — **FIXED v0.367.1**. Regression
+    `tests/test_engine_defensive_guards.py::test_a_nan_pointing_never_becomes_the_reference_frame` (fails before:
+    the NaN frame was picked, and a NaN-only list returned a frame instead of `None`).
   - `seestack/post/skymap.py:266` the **offline** galactic-plane fallback (astropy absent) draws the Milky Way
     curve with a linear-in-sin approximation that is up to ~29° off in declination. In this deployment astropy is
     a hard dependency, so the exact `except` branch is dead code and never renders — noted only so a future
@@ -5048,31 +5060,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   reverts on a truly pathological skew. If it does over-revert on real nebula, raise the site-specific threshold
   (or gate it on `sc_std` magnitude). No change unless (a) fails on real data — same real-data-gating as the
   SCNR / `sky_sigma` items below.
-- **IMPROVEMENT IDEA (Scout 2026-07-21) — derive hot/dead-pixel correction from a persistent defect map (the
-  master dark/bias) instead of relying only on the blind per-frame local-median filter.** *(Image quality /
-  autonomy, PRIORITY 4 + 2; size M; needs real-data validation.)* **Why:** the always-on per-frame
-  `suppress_hot_cold_pixels` is a blunt instrument — a 3×3 local-median outlier filter can't distinguish a real
-  star peak from a hot pixel/cosmic ray, which is the root of the ⭐ star-core-clipping bug filed above. The
-  *principled* long-term route is what mature stackers do: build a **defect map** of the pixels that are hot
-  (bright in every dark) or dead (stuck low) from the **master dark/bias** the calibrate path already builds
-  (`seestack/calibrate/masters.py`) — those pixels are deterministic sensor defects, independent of the sky — and
-  correct **only those** (from their neighbours), leaving every real star untouched. Cosmic-ray / one-frame
-  transients then fall to the existing **multi-frame κ-σ** rejection (which *can* tell a persistent star from a
-  single-frame spike). This is distinct from the ⭐ bug's shipped in-place fix (cross-channel / all-channel
-  star-safety gate, v0.158.9, dark-free): it needs darks and a new map, but it's strictly more correct and more
-  autonomous ("it knew which pixels were broken"). **Extra motivation confirmed while shipping the ⭐ fix:** the
-  per-frame pass runs *after* `bilinear_debayer`, so a single hot CFA site has already smeared into a 3×3 halo by
-  the time it's seen — the star-safe fix can therefore only knock it down to *halo* level (~0.5× peak for an
-  R/B site, ~0.25× for a G site), not erase it (this is exactly what `test_drizzle_suppresses_hot_pixels` and
-  `test_debayered_single_cfa_hot_pixel_is_suppressed` assert). A raw-Bayer-domain defect map (applied in
-  `apply_raw`, *before* debayer) would remove the defect while it's still a single pixel — fully erasing it AND
-  never risking a star — so it dominates the post-debayer pass on both axes. **Shape:** (a) a pure `hot_pixel_map(master_dark, master_bias, sigma)` → boolean defect mask
-  (unit-testable on a synthetic dark with injected hot/dead pixels); (b) apply it in `apply_raw` (raw-Bayer
-  domain, before debayer) by replacing masked pixels with a same-Bayer-phase neighbour median; (c) when no dark
-  is present, fall back to the (fixed, star-aware) per-frame filter. **Guardrails:** additive, default-safe (a
-  user with no darks keeps today's behaviour), no schema/config/API change beyond an optional map cache; validate
-  on a real Seestar stack that stars are preserved and true hot pixels still vanish. Pillar: image quality + a
-  step toward "just works" calibration autonomy.
 - **NEW (Builder audit 2026-07-16) — engine-audit residue: two low-confidence, NOT-currently-reachable
   notes to keep a future audit from re-flagging them.** (XS each, image-quality/correctness — PRIORITY 4.)
   *(From two independent adversarial stacking-engine audits this run — both otherwise verified the core
@@ -5229,54 +5216,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   even after the detector improves.
 
 ### Features that serve real workflows
-
-- **⭐ NEW BEGINNER FEATURE (Scout 2026-09-06) — "Was last night off for you?": a whole-history star-size
-  baseline that catches a dew / focus / bad-seeing night while you can still do something about it.**
-  *(Pillar: friendliness + trust / autonomy — PRIORITY 3/2. Size: M. Clears the beginner bar: computed
-  automatically from data the app already measures, one plain-language sentence, no pro/niche knobs.)*
-
-  **The gap, grep-checked before filing.** The app measures each accepted sub's star size (`fwhm_px`,
-  `seestack/io/project.py:110`, and the per-target `median_fwhm()` at `:1168`) and compares subs *within* a
-  target for grading (`qc/grading.py`), but there is **no cross-target, whole-history baseline of the owner's
-  own typical star size**, and nothing that says "this night was worse than your usual". Grepped
-  `seestack/`, `webapp/`, `frontend/src/` and both `docs/*.md` for `focus|dew|your usual|typical fwhm|
-  baseline.*fwhm|anomal|check.*focus` — the only baseline that exists is `qc/sky_quality.py`'s **cloud /
-  transparency** rate-vs-nights trend (`baseline = _median([rates[n] for n in nights])`, `:177`), which is
-  about *sky*, not *equipment*. So a beginner whose Seestar dewed up, drifted out of focus, or shot through
-  poor seeing has no signal until they later notice a target's stack is soft — by which time the night is
-  gone. Catching it *the morning after* (or mid-run) is exactly the "help me on my next clear night"
-  proposition.
-
-  **What it is (one read-only helper + one card).** A pure engine helper (mirror `sky_quality.py`'s shape:
-  fold every accepted frame's `fwhm_px` grouped by night across **all** targets via `library.iter_targets()`
-  into a robust whole-history baseline — median of per-night medians, plus a spread) and a comparison of the
-  **most recent night** against it. When the latest night's median FWHM is materially fatter than the
-  owner's usual (e.g. ≥ ~30–40 %, or > ~2 robust deviations — pick the threshold from real spread, ship it as
-  a named constant), surface one plain sentence on the Dashboard / "Last night" surface: *"Last night's stars
-  were about 45 % fatter than your usual — often dew on the lens, focus drift, or just poor seeing. Worth a
-  quick check before your next session."* Silent when the latest night is normal, and silent until there is
-  enough history to have a "usual" (reuse a `MIN_NIGHTS`-style floor, same reasoning as `sharpest_night`).
-
-  **Why it clears the bar and serves §1.** Adds no expert surface — it is pure recall of what the app already
-  measured, framed as a friendly heads-up (priority 3) that removes a decision the beginner didn't know they
-  had (priority 2: the app noticed the off night for you). Sane default: computed from stored data, no
-  setting. Honest empty/early state: says nothing until it has a baseline, and never scolds a normal night.
-
-  **Slicing for one Builder run.** Slice (a): the engine helper + baseline + latest-night verdict + a bare
-  sentence on the existing "Last night" card (no new nav, no new always-on banner — fold it into the card
-  that already reports the last session, per the standing IA rule). Slice (b, optional follow-on): a tiny
-  sparkline of per-night median FWHM so a *trend* (slow focus creep across a season) is visible, not just the
-  last night. Ship (a) first; it stands alone.
-
-  **Care / don't-overreach.** Seeing varies night to night for reasons the owner can't fix, so the copy must
-  say "often … or just poor seeing" and never assert a fault — it's a nudge to *check*, not a diagnosis. Use
-  a robust baseline (median of per-night medians, not a mean) so one great or one terrible night doesn't move
-  "usual". Compare like with like where cheap — the S30's own frames only (the baseline is per-install, so
-  this is automatic on the owner's box). **Upgrade-safe by construction:** one new pure engine helper, one
-  new read-only field on an existing endpoint (or a small new read endpoint), one card sentence; no schema,
-  no config key, no on-disk change, no default flipped. A test builds a synthetic multi-night library with
-  one deliberately-soft night and pins that it is flagged, that a normal latest night is silent, and that a
-  library with too little history says nothing.
 
 - **✅ SLICES (a)+(c) SHIPPED (Builder, v0.343.0, branch `claude/sweet-babbage-l67sz2`) — ~~"Your year under
   the stars": a year-bounded recap of a season of imaging.~~** Built as filed, as composition over the night
@@ -8392,6 +8331,9 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.368.0** — Friendliness + autonomy (PRIORITY 3/2): **"Was last night off for you?" — the newest night's star size against the owner's own usual, so dew / a wrong focus / a bad-seeing night is caught the morning after instead of weeks later in a mushy stack.** The app only ever trended FWHM *within* a session (`session_recap.focus_trend`, early third vs late third), which is structurally blind to a night that was soft from the first sub. New pure `activity_calendar.off_night(nights)` sits beside `sharpest_night` and reads only what `finalize_calendar` already folded — the Dashboard heatmap's cached per-night median FWHM — so it costs no extra library walk and shares one definition of "that night's star size". Silent unless the latest night is ≥1.30× the **median of the per-night medians** of ≥4 *earlier* qualifying nights, and never a diagnosis (seeing is not a fault: it names causes and asks the owner to look). Self-hiding `OffNightCard` in the Dashboard's existing **Recent** group beside `LastNightCard`, on the shared `["activity-calendar"]` key. Slice (b), the season-long sparkline, deliberately not built. Entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.367.1** — Stacking-engine hardening (PRIORITY 1 current focus), the traced-but-unreachable batch under "Bugs" drained in one pass, each with a fail-before regression in the new `tests/test_engine_defensive_guards.py`: `align.py`'s sub-pixel cap rewritten as `not (abs(dy) <= CAP and abs(dx) <= CAP)` at **both** sites, so a NaN shift reads as "too large" instead of slipping through every comparison and letting `nd_shift` wipe the frame; `weighting.py`'s FWHM ratio computed in `np.float64` so a pathological `fwhm_px` saturates to the 1.0 the formula already wants rather than raising `OverflowError` and sinking the run; `reference.py::pick_central_frame` filtering on `math.isfinite` to match `pointings.py`, so a NaN centre can't be picked as the whole stack's reference; `storage.py::prune_stack_runs`'s two closes nested like `get_storage`'s; and `solve/runner.py`'s "so it stops being re-offered" comment corrected to what the branch actually does (`build_solve_arglist` deliberately keeps offering a `solve_failed:` frame, which is right — an unreadable sidecar is usually transient). `align.py::extract_reference_patch`'s all-NaN fallback was found **already fixed** and struck. No behaviour change on any reachable input.
+- **v0.367.0** — Image quality (PRIORITY 4) + calibration autonomy (PRIORITY 2): **repair the sensor's broken photosites from the master dark, in the raw Bayer domain, instead of relying only on the blind post-debayer local-median filter.** New pure `seestack/calibrate/defects.py` — `find_sensor_defects` measures each **CFA phase** against its own local median (so amp glow, a gradient and a per-phase offset all flag zero) and refuses any candidate set past 2 % of the sensor; `DefectMap` precomputes the same-phase neighbour gather once at load so the per-frame cost scales with the *defects*, not the canvas. `CalibrationMasters.apply_raw` repairs after the pedestal subtract and before the flat divide, so a hot site is erased while it is still one pixel and **a star can never be touched** — the map is measured on the dark. `StackOptions.repair_sensor_defects` is **off by default** and off measures nothing (§9); `DEFECTPX` → `sensor_defects` → one History line when it did something. Still open: validate the map's population on a real Seestar dark before anyone proposes defaulting it on. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.366.1** — Autonomy + friendliness (PRIORITY 2–3): **the "you already have darks" answer reaches the screen where the gap is actually noticed.** `_uncalibrated_advice` (the History Info panel's "why did this come out uncalibrated?" line) was silent in exactly the beginner case — no usable master in the library at all — because `diagnose_uncalibrated` only explains a *near-miss* master. It now falls back to `calibration.incoming_calibration_advice`, which names the frames sitting in `incoming/` ("You already have 40 dark frames in your incoming folder (“MyDarks”)"). The folder walk is the shared `cached_incoming_folders`, run only when there is no master-derived advice; `folder_as_master` shapes a discovered folder like a registry entry so "would this cover my subs?" is answered by the same `existing_master_like` that answers "does a master I own cover them?" — one definition, so the advice can't send anyone off to build a 30s dark for 10s subs, and a folder already built into a master says nothing. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.366.0** — Autonomy + image quality (PRIORITY 2/4): **"you already have darks" — the app notices calibration frames sitting in `incoming/` and builds the master in one click.** `seestack/calibrate/discover.py` confirms a folder from the **frames' own `IMAGETYP` cards** (`frame_kind_from_header`), never from the folder name — the naming-convention gate the entry refused to guess at simply stops mattering, and a camera that writes no card gets silence rather than a guess. `GET /api/calibration/incoming` + `POST /api/calibration/incoming/{id}/build` (folder re-resolved server-side from a sanitised id), `existing_master_like` reusing the unattended binder's own confidence bar so a covered folder says "you already have this one", and a self-hiding `IncomingCalibrationCard` inside the existing Calibration page. Offers only; builds nothing until asked and applies nothing after. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.365.0** — Image quality/trust (PRIORITY 4): **a finished picture says whether its rejection pass could have clipped anything, and the History Info panel stops calling a blind pass clean.** The stacker stamps `REJDEPTH` (samples on the deepest pixel — the literal peak, so "no pixel could be clipped" is provable), `REJNEED` and `REJREACH` beside the existing `REJ*` block; `lone_outlier_min_depth(mode, sigma_kappa)` is now the one definition of that bound behind `rejection_reach`, `stackhealth`'s `rejection_blind` note and the cards, and takes both the `"drizzle"` and `"drizzle-reject"` spellings. `rejectionSummaryText` claims *"data was already clean"* only when the run's own header says the pass reached — a thin mosaic panel now reads *"not enough subs on a pixel for it to reach"*. Deliberately no second paragraph: `StackHealthCard` already carries the explanation and the cure on that same page. Entry in [`SHIPPED.md`](SHIPPED.md).

@@ -319,9 +319,16 @@ def apply_solve_result_to_db(project, result: SolveResult) -> None:
         # ``build_solve_arglist`` skips only frames with a *truthy* ``wcs_json``,
         # so the frame is re-offered and re-solved on every scan forever — wasted
         # ASTAP time on a frame that can never contribute. Record an explicit,
-        # honest failure so it stops being re-offered and the reject-summary can
-        # surface it, mirroring the failure branch above (``accept`` untouched —
-        # the pixels may be fine, they just couldn't be located). Use the shared
+        # honest failure so the reject-summary can surface it, mirroring the
+        # failure branch above (``accept`` untouched — the pixels may be fine,
+        # they just couldn't be located). Note this does **not** stop the frame
+        # being offered again: ``build_solve_arglist`` skips on a truthy
+        # ``wcs_json``, and deliberately *keeps* offering a frame whose only mark
+        # is a ``solve_failed:`` reason — which is the right behaviour here too,
+        # because an unreadable sidecar is usually transient (a write interrupted,
+        # a disk-full zero-byte file) and recovers on the next scan. What the
+        # branch actually buys is that the frame is no longer stored as
+        # *solved-yet-unusable*. Use the shared
         # preserve-guard so this branch, like the ``not result.solved`` one, never
         # clobbers a ``qc_error`` / concrete prior reason (a qc_error frame stays
         # ``accept=True`` and is re-offered to solve; a "solved-but-unreadable"

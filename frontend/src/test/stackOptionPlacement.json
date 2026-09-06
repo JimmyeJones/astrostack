@@ -129,6 +129,11 @@
     "group": "advanced",
     "type": "bool"
   },
+  "repair_sensor_defects": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  },
   "save_progress": {
     "depends_on": null,
     "group": "advanced",

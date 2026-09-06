@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote, removedOverlayCaption, derivedFromNote } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote, removedOverlayCaption, derivedFromNote } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import { FULL_RES_PNG_MAX_LONG_EDGE } from "../fullres";
@@ -1440,6 +1440,29 @@ describe("darkScalingSummaryText", () => {
   });
   it("tolerates missing exposures (mode only)", () => {
     expect(darkScalingSummaryText({ mode: "exposure" })).toBe("Dark scaled to sub exposure");
+  });
+});
+
+describe("sensorDefectsSummaryText", () => {
+  it("says nothing when the run repaired nothing", () => {
+    // Off (the default), an older run, a clean sensor — all silence, never a
+    // "0 repaired" line that reads as a failure.
+    expect(sensorDefectsSummaryText(null)).toBeNull();
+    expect(sensorDefectsSummaryText(undefined)).toBeNull();
+    expect(sensorDefectsSummaryText(0)).toBeNull();
+    expect(sensorDefectsSummaryText(-3)).toBeNull();
+    expect(sensorDefectsSummaryText(Number.NaN)).toBeNull();
+  });
+  it("names how many broken photosites it fixed", () => {
+    expect(sensorDefectsSummaryText(428)).toBe(
+      "Repaired 428 hot/dead pixels found in your master dark");
+  });
+  it("stays singular for one", () => {
+    expect(sensorDefectsSummaryText(1)).toBe(
+      "Repaired 1 hot/dead pixel found in your master dark");
+  });
+  it("groups a big count so it can be read at a glance", () => {
+    expect(sensorDefectsSummaryText(12345)).toContain("12,345");
   });
 });
 

@@ -97,6 +97,22 @@ SHARPEST_MIN_MEASURED = 5
 # night" wearing a rosette.
 SHARPEST_MIN_NIGHTS = 2
 
+# --- "Was last night off for you?" -----------------------------------------
+#
+# How many *earlier* qualifying nights are needed before there is a "usual" to
+# measure the latest night against. Higher than SHARPEST_MIN_NIGHTS on purpose:
+# naming the better of two nights is harmless, but telling someone a night went
+# wrong on the strength of two prior nights is how a feature earns a reputation
+# for crying wolf.
+OFF_NIGHT_MIN_BASELINE_NIGHTS = 4
+
+# Latest night's median star size ÷ the baseline. Seeing genuinely varies night
+# to night for reasons nobody can fix, so the bar is set well past ordinary
+# variation — this is a nudge to go and look at the lens, and it is only worth
+# making when the answer is probably yes.
+OFF_NIGHT_FATTER_ABOVE = 1.30
+OFF_NIGHT_MUCH_FATTER_ABOVE = 1.60
+
 
 def _median(values: list[float]) -> float | None:
     """Median of a non-empty list, or ``None``. Sorts a copy, so the input is
@@ -138,6 +154,20 @@ class NightActivity:
 
 
 @dataclass
+class OffNightRead:
+    """A plain-language read on whether the most recent night went wrong."""
+
+    level: str               # 'fatter' | 'much_fatter'
+    label: str               # short chip text
+    text: str                # one sentence: what was measured + what to check
+    night: str               # ISO date of the night being reported
+    baseline_nights: int     # earlier qualifying nights behind "your usual"
+    ratio: float             # latest night's median FWHM ÷ the baseline's
+    median_fwhm_px: float    # that night's median star size
+    baseline_fwhm_px: float  # the owner's usual, over the earlier nights
+
+
+@dataclass
 class ActivityCalendar:
     """The whole-hobby activity heatmap over a trailing window of nights."""
 
@@ -154,6 +184,12 @@ class ActivityCalendar:
     # :func:`sharpest_night`). Additive and defaulted, so an older consumer of
     # this dataclass is unaffected.
     sharpest: NightActivity | None = None
+    # "Was last night off for you?" — the most recent night's star size against
+    # the earlier nights *in this window*, or None when there is nothing worth
+    # saying (see :func:`off_night`). The window is the right baseline rather
+    # than a limitation: "your usual" should mean the way the kit behaves now,
+    # not two years ago on a different focuser. Additive and defaulted.
+    off_night: OffNightRead | None = None
 
 
 def accumulate_nights(
@@ -279,6 +315,7 @@ def finalize_calendar(
         nights_this_month=this_month,
         best_streak_nights=_best_streak(ordered),
         sharpest=sharpest_night(nights),
+        off_night=off_night(nights),
     )
 
 
@@ -311,6 +348,85 @@ def sharpest_night(nights: list[NightActivity]) -> NightActivity | None:
     if len(ranked) < SHARPEST_MIN_NIGHTS:
         return None
     return min(ranked, key=lambda n: (n.median_fwhm_px, n.date))
+
+
+def off_night(nights: list[NightActivity]) -> OffNightRead | None:
+    """"Was last night off for you?" — the latest night's star size against the
+    owner's own whole-history usual, or ``None`` when there is nothing to say.
+
+    The app already measures every accepted sub's star size and already trends it
+    *within* one session (``session_recap.focus_trend``, early third vs late
+    third) — which catches focus drifting away over a night but is blind to a
+    night that was simply soft from the first frame: dew that formed before the
+    first sub, a focus left wrong from last time, or a night of poor seeing. That
+    night looks perfectly "steady" to the session trend, and the owner finds out
+    weeks later when a stack comes out mushy.
+
+    So this compares the whole night against *the observer's own history across
+    every target*, which is the only yardstick that exists offline: star size in
+    pixels is a property of the optics, the focus and the air, not of the object,
+    so nights of different targets are comparable on one install. It reads only
+    what :func:`finalize_calendar` already folded, so it costs nothing beyond the
+    library walk the heatmap pays for anyway.
+
+    Silent rather than wrong, in four ways:
+
+    * a night must carry :data:`SHARPEST_MIN_MEASURED` measured subs to count at
+      all — on either side of the comparison;
+    * there must be :data:`OFF_NIGHT_MIN_BASELINE_NIGHTS` *earlier* qualifying
+      nights, so the latest night is never its own yardstick;
+    * the baseline is the **median of the per-night medians**, so one glorious or
+      one dreadful night doesn't move "usual";
+    * and it speaks only when the latest night is materially *fatter*. A normal
+      night says nothing (praising one would make the card noise), and a sharp
+      night is "your best night"'s job, not this one's.
+
+    Deliberately never a diagnosis: seeing is not a fault, so the copy offers the
+    likely causes and asks the owner to *check*, in that order.
+    """
+    qualifying = [
+        n for n in nights
+        if n.median_fwhm_px is not None
+        and n.median_fwhm_px > 0
+        and n.n_measured >= SHARPEST_MIN_MEASURED
+    ]
+    if len(qualifying) < OFF_NIGHT_MIN_BASELINE_NIGHTS + 1:
+        return None
+    # ``nights`` is date-ascending out of ``nights_from``; sort defensively so a
+    # caller handing over a re-ordered list still gets the genuinely latest one.
+    qualifying.sort(key=lambda n: n.date)
+    latest = qualifying[-1]
+    earlier = qualifying[:-1]
+    baseline = _median([n.median_fwhm_px for n in earlier])  # type: ignore[misc]
+    if baseline is None or not (baseline > 0):
+        return None
+    ratio = float(latest.median_fwhm_px) / float(baseline)  # type: ignore[arg-type]
+    if ratio <= OFF_NIGHT_FATTER_ABOVE:
+        return None
+    level = "much_fatter" if ratio > OFF_NIGHT_MUCH_FATTER_ABOVE else "fatter"
+    percent = abs(round((ratio - 1.0) * 100))
+    if level == "much_fatter":
+        label = "Much softer than usual"
+        text = (
+            f"On {latest.date} your stars came out about {percent}% fatter than "
+            f"your usual night — a big change. Dew on the lens, focus left wrong, "
+            f"or simply a night of poor seeing are the usual reasons. Worth "
+            f"checking the lens and re-running autofocus before your next session."
+        )
+    else:
+        label = "Softer than usual"
+        text = (
+            f"On {latest.date} your stars came out about {percent}% fatter than "
+            f"your usual night. That is often dew on the lens or a little focus "
+            f"drift, though it can just be poor seeing. Worth a quick look before "
+            f"your next session."
+        )
+    return OffNightRead(
+        level=level, label=label, text=text, night=latest.date,
+        baseline_nights=len(earlier), ratio=round(ratio, 3),
+        median_fwhm_px=float(latest.median_fwhm_px),  # type: ignore[arg-type]
+        baseline_fwhm_px=round(float(baseline), 3),
+    )
 
 
 def build_activity_calendar(

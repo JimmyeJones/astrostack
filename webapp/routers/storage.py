@@ -285,15 +285,21 @@ def prune_stack_runs(safe: str, body: PruneRequest, request: Request) -> dict:
         raise HTTPException(status_code=400, detail="'keep' must be >= 0")
 
     lib, proj = deps.open_target_project(request, safe)
+    # Nested, not two statements in one ``finally`` — if ``proj.close()`` ever
+    # raised, the flat form would skip ``lib.close()`` and leak the Library
+    # handle. Matches ``get_storage`` above and ``gallery.py``; the trigger is
+    # essentially unreachable, so this is consistency, not a live leak.
     try:
-        runs = list(proj.iter_stack_runs())  # newest first
-        if body.ids is not None:
-            to_delete = [r for r in runs if r.id in set(body.ids)]
-        else:
-            to_delete = runs[body.keep:]
-        for run in to_delete:
-            purge_stack_run(proj, run)
+        try:
+            runs = list(proj.iter_stack_runs())  # newest first
+            if body.ids is not None:
+                to_delete = [r for r in runs if r.id in set(body.ids)]
+            else:
+                to_delete = runs[body.keep:]
+            for run in to_delete:
+                purge_stack_run(proj, run)
+        finally:
+            proj.close()
     finally:
-        proj.close()
         lib.close()
     return {"safe": safe, "deleted": [r.id for r in to_delete]}
