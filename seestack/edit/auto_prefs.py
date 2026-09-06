@@ -19,12 +19,17 @@ Design guarantees (see AGENTS.md §9 upgrade-safety):
 * **Reversible + transparent.** The profile is a plain dict the caller stores as
   JSON; :func:`describe_profile` turns it into a one-line "why" note and the caller
   can reset it to empty at any time.
+* **Recent feedback weighs more.** A bias that stops being reinforced fades one
+  step per :data:`DECAY_DAYS`, so a taste the owner has moved on from returns to
+  the measured default on its own instead of skewing Auto forever. The fade is
+  never silent — :func:`fade_note` says it is happening.
 
 No webapp/DB imports — this is pure engine logic the webapp layer persists.
 """
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 # --- the feedback vocabulary -------------------------------------------------
@@ -80,10 +85,46 @@ MAX_STEPS = 3
 # the walk-back would need three taps to undo one.
 _PARAM_MIN_STEP: dict[str, int] = {"highlights": 0}
 
+# --- recency decay -----------------------------------------------------------
+# "Recent feedback weighs more" (the original ask), done the simplest way that a
+# beginner can be told in one sentence: a bias loses **one step** for every
+# ``DECAY_DAYS`` that pass without being reinforced, so a saturated ±3 taste takes
+# three quiet spells to return to neutral and a single stray tap is gone in one.
+# The owner shoots across seasons, so this is deliberately slow — a taste survives
+# a cloudy month untouched, but doesn't outlive a change of screen or of mind.
+#
+# **Upgrade-safe by construction (§9):** decay is driven by a per-parameter
+# ``stamps`` entry written when a cue is recorded. A profile from before this
+# shipped has no stamps, so **it never decays** and reads byte-for-byte as it does
+# today; its parameters start ageing only from the next tap that touches them.
+DECAY_DAYS = 90.0
+_DECAY_SECONDS = DECAY_DAYS * 86400.0
+
 
 def _clamp_step(param: str, value: int) -> int:
     """Clamp an accumulated bias to this parameter's step range."""
     return max(_PARAM_MIN_STEP.get(param, -MAX_STEPS), min(MAX_STEPS, int(value)))
+
+
+def _now(now: float | None) -> float:
+    """Wall clock, injectable so tests (and the decay maths) stay deterministic."""
+    return time.time() if now is None else float(now)
+
+
+def _faded(step: int, stamp: float | None, now: float) -> int:
+    """``step`` after recency decay: one step of magnitude dropped per
+    ``DECAY_DAYS`` elapsed since ``stamp``, never crossing zero. No stamp (an
+    older profile) ⇒ unchanged. A stamp in the future (clock skew) reads as
+    "just now" rather than ageing backwards."""
+    if not step or stamp is None:
+        return step
+    elapsed = max(0.0, now - stamp)
+    lost = int(elapsed // _DECAY_SECONDS)
+    if lost <= 0:
+        return step
+    magnitude = max(0, abs(step) - lost)
+    return magnitude if step > 0 else -magnitude
+
 
 PROFILE_VERSION = 1
 
@@ -106,13 +147,17 @@ def known_cues() -> tuple[str, ...]:
 
 def empty_profile() -> dict[str, Any]:
     """A neutral profile — equivalent to no profile at all (today's Auto)."""
-    return {"version": PROFILE_VERSION, "biases": {}, "counts": {}, "by_type": {}}
+    return {"version": PROFILE_VERSION, "biases": {}, "counts": {},
+            "stamps": {}, "by_type": {}}
 
 
 def _coerce_bucket(raw: Any) -> dict[str, Any]:
-    """Sanitise one bias/counts bucket (the global set or a per-type override)."""
+    """Sanitise one bias/counts/stamps bucket (the global set or a per-type
+    override). A bucket with no ``stamps`` — every profile written before recency
+    decay shipped — is kept exactly as it is; it simply never fades."""
     biases: dict[str, int] = {}
     counts: dict[str, int] = {}
+    stamps: dict[str, float] = {}
     if isinstance(raw, dict):
         raw_b = raw.get("biases")
         if isinstance(raw_b, dict):
@@ -126,7 +171,16 @@ def _coerce_bucket(raw: Any) -> dict[str, Any]:
             for cue, val in raw_c.items():
                 if cue in _CUE_STEP and isinstance(val, (int, float)) and val > 0:
                     counts[cue] = int(round(val))
-    return {"biases": biases, "counts": counts}
+        raw_s = raw.get("stamps")
+        if isinstance(raw_s, dict):
+            for param, val in raw_s.items():
+                # A stamp only means anything alongside a live bias, and a
+                # non-finite/negative epoch is garbage from a broken store.
+                if (param in biases and isinstance(val, (int, float))
+                        and not isinstance(val, bool) and val > 0
+                        and val == val and val != float("inf")):
+                    stamps[param] = float(val)
+    return {"biases": biases, "counts": counts, "stamps": stamps}
 
 
 def _coerce(profile: dict[str, Any] | None) -> dict[str, Any]:
@@ -149,26 +203,45 @@ def _coerce(profile: dict[str, Any] | None) -> dict[str, Any]:
                     if cb["biases"] or cb["counts"]:
                         by_type[otype] = cb
     return {"version": PROFILE_VERSION, "biases": top["biases"],
-            "counts": top["counts"], "by_type": by_type}
+            "counts": top["counts"], "stamps": top["stamps"], "by_type": by_type}
+
+
+def _bucket_biases(bucket: dict[str, Any], now: float) -> dict[str, int]:
+    """One bucket's biases after recency decay, zeros dropped."""
+    stamps = bucket.get("stamps") or {}
+    out = {}
+    for param, step in bucket["biases"].items():
+        faded = _faded(step, stamps.get(param), now)
+        if faded:
+            out[param] = faded
+    return out
 
 
 def effective_biases(profile: dict[str, Any] | None,
-                     object_type: str | None = None) -> dict[str, int]:
+                     object_type: str | None = None,
+                     now: float | None = None) -> dict[str, int]:
     """The biases that actually apply for an image of ``object_type``: the global
     set, with the per-type override taking precedence per-parameter. With no
     ``object_type`` (or an unknown one) this is just the global set — so an
-    unclassified image is never shifted by a galaxy-only taste."""
+    unclassified image is never shifted by a galaxy-only taste.
+
+    Each bias is returned **after recency decay** (see :data:`DECAY_DAYS`), so a
+    taste that stopped being reinforced has already faded by the time Auto reads
+    it. A stored bias whose per-type override has faded to nothing falls back to
+    the global set, which is the same rule a walked-back override follows."""
+    at = _now(now)
     prof = _coerce(profile)
-    biases = dict(prof["biases"])
+    biases = _bucket_biases(prof, at)
     if object_type in prof["by_type"]:
-        biases.update(prof["by_type"][object_type]["biases"])
+        biases.update(_bucket_biases(prof["by_type"][object_type], at))
         # A per-type override of 0 (walked back to neutral) drops the bias entirely.
         biases = {p: s for p, s in biases.items() if s}
     return biases
 
 
 def record_feedback(profile: dict[str, Any] | None, cue: str,
-                    object_type: str | None = None) -> dict[str, Any]:
+                    object_type: str | None = None,
+                    now: float | None = None) -> dict[str, Any]:
     """Fold one feedback cue into the profile and return the updated copy.
 
     A bounded signed accumulator: pressing the same cue repeatedly saturates at
@@ -178,22 +251,32 @@ def record_feedback(profile: dict[str, Any] | None, cue: str,
 
     When ``object_type`` is a known archetype the cue is recorded into that type's
     override bucket (so taste learned on galaxies doesn't move clusters); otherwise
-    it updates the global set, exactly as before."""
+    it updates the global set, exactly as before.
+
+    The parameter being touched is **aged first** (:data:`DECAY_DAYS`), so a tap
+    builds on the taste that is actually in force rather than on a stale saturated
+    value the owner stopped meaning years ago; it is then re-stamped, which restarts
+    that parameter's fade."""
     prof = _coerce(profile)
     step = _CUE_STEP.get(cue)
     if step is None:
         return prof
+    at = _now(now)
     param, delta = step
     if object_type in KNOWN_OBJECT_TYPES:
-        bucket = prof["by_type"].setdefault(object_type, {"biases": {}, "counts": {}})
+        bucket = prof["by_type"].setdefault(
+            object_type, {"biases": {}, "counts": {}, "stamps": {}})
     else:
         bucket = prof
-    cur = bucket["biases"].get(param, 0)
+    stamps = bucket.setdefault("stamps", {})
+    cur = _faded(bucket["biases"].get(param, 0), stamps.get(param), at)
     new = _clamp_step(param, cur + delta)
     if new == 0:
         bucket["biases"].pop(param, None)
+        stamps.pop(param, None)
     else:
         bucket["biases"][param] = new
+        stamps[param] = at
     bucket["counts"][cue] = bucket["counts"].get(cue, 0) + 1
     return prof
 
@@ -216,6 +299,7 @@ def apply_profile(
     scnr_amount: float,
     highlight_protect: float = 0.0,
     object_type: str | None = None,
+    now: float | None = None,
 ) -> dict[str, float]:
     """Shift the data-driven Auto parameters toward the stored taste, each
     re-clamped to its safe range. An empty/None profile returns them unchanged
@@ -226,8 +310,9 @@ def apply_profile(
     doesn't pass it — and any profile with no ``highlights`` bias — is unaffected.
 
     ``object_type`` (galaxy/nebula/cluster) selects the per-type override on top of
-    the global set; ``None``/unknown uses the global set only."""
-    biases = effective_biases(profile, object_type)
+    the global set; ``None``/unknown uses the global set only. ``now`` is the clock
+    the recency decay is measured against (defaults to wall time)."""
+    biases = effective_biases(profile, object_type, now)
     return {
         "target_bg": _nudge(target_bg, "brightness", biases),
         "saturation": _nudge(saturation, "saturation", biases),
@@ -258,14 +343,48 @@ _BIAS_PHRASE: dict[tuple[str, bool], str] = {
 
 
 def is_neutral(profile: dict[str, Any] | None,
-               object_type: str | None = None) -> bool:
+               object_type: str | None = None,
+               now: float | None = None) -> bool:
     """True when the profile has no active biases for ``object_type`` (Auto behaves
-    as its data-driven default)."""
-    return not effective_biases(profile, object_type)
+    as its data-driven default) — including when the last of them has faded away."""
+    return not effective_biases(profile, object_type, now)
+
+
+def steps_faded(profile: dict[str, Any] | None,
+                object_type: str | None = None,
+                now: float | None = None) -> int:
+    """How many bias steps recency decay has dropped from the taste that applies to
+    ``object_type`` — 0 when nothing has faded (which includes every profile written
+    before decay shipped, since those carry no stamps).
+
+    This is what makes the fade *visible* rather than a silent drift: the caller
+    turns a non-zero answer into :func:`fade_note`."""
+    at = _now(now)
+    stored = effective_biases(profile, object_type, now=0.0)
+    live = effective_biases(profile, object_type, at)
+    return sum(abs(step) - abs(live.get(param, 0)) for param, step in stored.items())
+
+
+def fade_note(profile: dict[str, Any] | None,
+              object_type: str | None = None,
+              now: float | None = None) -> str | None:
+    """A plain-language line for the UI when recency decay has actually moved
+    something, or ``None``. Two shapes, because the case that most needs explaining
+    is the one where the "why Auto shifted" note has vanished entirely: a taste
+    still partly in force says it is easing off; a fully faded one says Auto is back
+    to its measured default and why."""
+    if not steps_faded(profile, object_type, now):
+        return None
+    if is_neutral(profile, object_type, now):
+        return ("Your older feedback has faded, so Auto is back to its measured "
+                "default — tap again any time to lean it back.")
+    return ("Older feedback is gently fading, so Auto drifts back toward its "
+            "measured default unless you keep nudging it.")
 
 
 def describe_profile(profile: dict[str, Any] | None,
-                     object_type: str | None = None) -> str | None:
+                     object_type: str | None = None,
+                     now: float | None = None) -> str | None:
     """A one-line, plain-language "why" note for the UI, or ``None`` when the
     profile is neutral for ``object_type``. e.g. "Auto is running a bit brighter
     and softer for you, based on your recent feedback." — so the owner always sees
@@ -273,8 +392,9 @@ def describe_profile(profile: dict[str, Any] | None,
 
     When ``object_type`` is given and it carries its own per-type override, the note
     names the archetype ("… for your galaxies …") so the owner understands the
-    taste is scoped to that kind of target."""
-    biases = effective_biases(profile, object_type)
+    taste is scoped to that kind of target. A bias that recency decay has faded
+    away is already gone from the note — see :func:`fade_note`, which says so."""
+    biases = effective_biases(profile, object_type, now)
     if not biases:
         return None
     parts = [
@@ -294,7 +414,9 @@ def describe_profile(profile: dict[str, Any] | None,
     # (otherwise it's the global taste, which applies to every kind of target — a
     # bucket that walked back to neutral keeps only its counts, not a bias).
     for_whom = "for you"
-    bucket = _coerce(profile)["by_type"].get(object_type or "", {})
-    if bucket.get("biases"):
+    bucket = _coerce(profile)["by_type"].get(object_type or "")
+    # ...and only while that override is still *in force*: one faded to nothing
+    # falls back to the global taste, so naming the archetype would be a lie.
+    if bucket and _bucket_biases(bucket, _now(now)):
         for_whom = f"for your {_TYPE_PLURAL.get(object_type, object_type)}"
     return f"Auto is running {shifted} {for_whom}, based on your recent feedback."

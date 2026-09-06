@@ -14,6 +14,72 @@ Newest first.
 
 ---
 
+## v0.369.0 — 2026-09-06 — Adaptive Auto recency decay (slice (b) completed)
+
+**⭐ OWNER-REQUESTED — Adaptive Auto, the last remaining sub-part of slice (b): recency
+decay, so recent feedback weighs more and a taste the owner has moved on from stops
+skewing Auto forever.** *(Builder 2026-09-06, branch `claude/sweet-babbage-f1wozl`.
+Pillars: editor + autonomy — PRIORITY 1/2.)*
+
+**The gap.** The original ask (§ "Adaptive Auto") specified an *"EMA / clamped
+accumulator **so recent feedback weighs more** and nothing can runaway"*. Slices (a)
+(v0.159.0) and (b)'s per-object-type profiles (v0.169.0) and highlight cue (v0.237.0)
+shipped the clamped accumulator, but the **recency** half never did: a bias was
+permanent. Three "too dark" taps in one week saturated `brightness` at `+3` and it sat
+there for the life of the library — through a new screen, a new pair of eyes, or simply
+a change of mind — unless the owner happened to find and tap the opposite chip three
+times, or reset the whole profile (losing their *other* tastes with it). The one thing a
+"learns your taste" feature must not do is keep applying a taste nobody holds any more.
+
+**What shipped (engine, `seestack/edit/auto_prefs.py`).** A bias loses **one step per
+`DECAY_DAYS` (90)** without reinforcement — the simplest rule that can be said to a
+beginner in one sentence, and deliberately slow: a taste survives a cloudy month
+untouched, but a saturated ±3 is gone after three quiet spells. New per-bucket `stamps`
+map (`{param: unix seconds}`, written when a cue is recorded); `_faded(step, stamp, now)`
+drops `int(elapsed // DECAY_DAYS)` of *magnitude*, **never crossing zero** into the
+opposite taste, and reads a future stamp (host/NAS clock skew, a restored backup) as
+"just now" rather than ageing backwards. `effective_biases` / `apply_profile` /
+`is_neutral` / `describe_profile` all gained an injectable `now`, so the whole module
+stays a pure function of (profile, clock) and every test drives the clock explicitly —
+no wall-clock flakiness. Decay is applied **at read time** (the store is never mutated by
+a GET) *and* at record time: a tap ages the parameter first, so it builds on the taste
+actually in force rather than on a stale saturated value, then re-stamps it, restarting
+that parameter's fade. A per-type override that has faded away falls back to the global
+taste, exactly as a walked-back override already did.
+
+**The fade is never silent** — the §1 trust value the feature was built on. New pure
+`steps_faded()` and `fade_note()`; the latter has two shapes, because the case that most
+needs explaining is the one where the "why Auto shifted" note has *vanished*: a taste
+still partly in force says it is easing off, a fully faded one says *"Your older feedback
+has faded, so Auto is back to its measured default — tap again any time to lean it back."*
+Surfaced as an additive `fade_note` field on `AutoPreferencesOut` (both GETs and the
+feedback POST) and rendered under the why-note in `AutoFeedback.tsx`.
+
+**Upgrade-safe by construction (§9).** Decay is driven *only* by a stamp, and **a profile
+written before this shipped carries none — so it never fades** and reads byte-for-byte as
+it does today; its parameters begin ageing only from the next tap that touches them. No
+config key, no schema change, no DB migration, no on-disk change, no default flipped, no
+API shape broken (one added nullable field). The stamps map is as untrusted as the rest of
+the store: a non-finite / negative / non-numeric / bool stamp, or one naming an unknown
+parameter or a parameter carrying no bias, is dropped and the bias simply doesn't fade.
+
+**Tests (+10 in `tests/test_auto_prefs.py`, +1 in `tests/webapp/test_editor.py`, +2 in
+`AutoFeedback.test.tsx`):** the one-step-per-period ladder including the "just short of a
+period" boundary; a negative bias fading *to* neutral and never through it; the old-profile
+no-stamp invariance read 10 years later; a tap building on the faded value and restarting
+the clock; the opposite cue leaving a real −1 rather than netting against a stale
+accumulator; a faded per-type override falling back to global and dropping the archetype
+from the note; the fade note at all three stages (nothing/partly/fully faded); a backwards
+clock jump; the garbled-stamp table; and JSON round-trip safety for the persisted dict.
+End-to-end through the API: the endpoint serves the faded profile and its `fade_note`.
+
+**Deliberately not built.** Slice **(c)** — an optional light statistical fit (numpy/scikit,
+no NN) — remains the only piece of the original ask outstanding, and its own spec marks it
+*"optional later"*. `DECAY_DAYS` is a named constant precisely so the owner can ask for a
+different pace without a code archaeology dig.
+
+---
+
 ## v0.368.0 — 2026-09-06 — "Was last night off for you?": activity_calendar.off_night + OffNightCard
 
 **Friendliness + autonomy (PRIORITY 3/2) — slice (a) of the Scout's filed entry, built the same day it was
