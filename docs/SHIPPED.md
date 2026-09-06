@@ -14,6 +14,88 @@ Newest first.
 
 ---
 
+## v0.371.1 — 2026-09-06 — amp glow stops reading as broken photosites: `defects._local_robust_scale`
+
+**(Builder 2026-09-06, branch `claude/sweet-babbage-f4us4a`.) Image quality /
+data integrity — treated as stacking-engine-class per AGENTS.md §1.** *(Found by
+probing the brand-new v0.367–v0.371 code empirically rather than reading it —
+the same method that found v0.369.3 and v0.369.4.)*
+
+**The bug.** `find_sensor_defects` set its threshold at `DEFECT_SIGMA` × the MAD
+of the residual over the **whole** CFA plane. A master dark's noise is not
+stationary: amp glow is dark *current*, dark current carries shot noise, so the
+glow corner is genuinely grainier than the rest of the sensor by √(dark
+current) — and the corner is a small *fraction* of the sensor, so the plane-wide
+MAD is set by the quiet bulk. The bar it sets then sits well below the glow's own
+grain, and ordinary noise there clears it. `_LOCAL_WINDOW` made the local median
+follow the glow's *level*; nothing followed its *spread*.
+
+**Measured on a master built the way the camera builds one** (mean of 20 frames,
+each Poisson in the dark current plus read noise), with **every photosite healthy
+by construction**: at a corner glow of 2,000 e⁻ it flagged **133 pixels, all of
+them inside the glow**; at 20,000 e⁻, **1,564**. Each one is then overwritten
+from its neighbours on *every* sub of *every* stack — real data replaced by an
+interpolation, permanently, on a healthy sensor — and reported to the owner by
+the v0.370.0 census as broken pixels in their camera.
+
+**Why it survived twenty tests and two prior fixes to this file.** The existing
+`_synthetic_dark` fixture adds read noise of **one fixed sigma everywhere**, so
+its amp glow is a change of level only. The non-stationary case it cannot
+express is exactly the failing one, so `test_amp_glow_and_read_noise_alone_flag_nothing`
+passed throughout. The new `_shot_noise_dark` fixture builds the master the way
+the camera does and is the thing that catches it.
+
+**The fix: measure the spread locally too, and take the larger of the two.**
+`_local_robust_scale` returns a per-sample scale from an upper percentile of
+|residual| over a 16×16-sample block, and the threshold is
+`sigma × max(plane_wide, local)`. Three decisions, each measured:
+
+* **An upper percentile, not a MAD.** In a steep gradient the residual is not
+  Gaussian: the local median of 25 samples spanning a strong slope often lands on
+  the centre sample itself, so many residuals there are ≈ 0 while the rest carry
+  the full noise. On the glow annulus the residual's std was **5.0 against a
+  median |residual| of 0.70** — a MAD-based local scale reads that as a
+  nine-times-quieter region and flags its own tail.
+* **P80, and not higher, is set by the refusal guard.** The percentile also
+  decides how many broken photosites in one block can lift the bar and hide
+  themselves. At P90 a master with a tenth of the sensor spiked — the "built from
+  the wrong frames" case `MAX_DEFECT_FRACTION` exists to refuse wholesale —
+  quietly **stopped being refused** (0.8 % of the sensor, under the ceiling, and
+  would have been repaired). P80 needs more than a fifth of a block to move, so
+  that master is refused as before. Caught by the existing refusal test, which was
+  **not** relaxed.
+* **Per block, not per pixel**, for cost: the quantity varies on the scale of the
+  glow, so a sliding window buys nothing and costs a hundred times more —
+  measured at the owner's frame size, **1,253 ms per phase** for a 15×15
+  `percentile_filter` against **12 ms** for the block map. The block map is
+  averaged 3×3 so the field a pixel is judged against doesn't step at a block
+  edge.
+
+**After: 0 false positives at 0, 200 and 2,000 e⁻ of glow, with all twelve
+planted defects still found** (six inside the glow, six on the quiet bulk). At an
+unusable 20,000 e⁻ — amp glow alone filling most of the well in one sub — it is
+1,576 → ~121 rather than a cure, and the test says so rather than hiding it: the
+residual at that slope is dominated by the local median lagging the *curvature*,
+not by noise, and the only knob that would absorb it is the one that breaks the
+refusal guard.
+
+**Upgrade-safe (§9), and provably so.** `max()` means the threshold can only ever
+*rise*, so the map this version returns is a **subset** of what the previous one
+returned: no photosite that was left alone can start being repaired. On an
+ordinary stationary master the two scales agree to within a few percent, so a
+clean master's answer does not move at all (pinned by its own test). The feature
+is opt-in (`repair_sensor_defects`, off by default) and this changes no config,
+schema, on-disk path, default or response shape — the v0.370.0 census reports the
+corrected number automatically, since it shares `_candidate_mask`.
+
+**Tests (+8, 5 of them fail before).** `tests/test_defect_map.py`: the new
+`_shot_noise_dark` fixture; a healthy sensor flagging nothing at three glow
+levels; real defects inside the glow still found at each; the honest
+near-saturation bound; and the never-lowers-the-bar invariant with the
+stationary-noise calibration check that stops the block estimator drifting.
+
+---
+
 ## v0.371.0 — 2026-09-06 — the census gets a button: `calibration.defect_repair_offer` + `POST /api/calibration/defects/repair`
 
 **(Builder 2026-09-06, branch `claude/sweet-babbage-f4us4a`.) Autonomy +
