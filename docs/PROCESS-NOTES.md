@@ -18,6 +18,72 @@ is a queue.
 
 ---
 
+## 2026-09-06 — Builder run (branch `claude/sweet-babbage-owcg4d`): three closed ⭐ leads were still starred, and what the real-stretch fixture measured
+
+**The run.** Baseline green before any change (full suite headless, plus 234
+frontend files / 3,237 vitest tests). Shipped **v0.372.0** (the Stack form now
+names the saved options a target is holding away from the global defaults) and
+**v0.372.1** (the shared display-space test fixture). Two curation passes below.
+
+**Curation: three ⭐ QA LEADs at the top of the highest-priority Ideas section
+were fully closed and still starred.** §11 tells every triage pass to take a ⭐
+entry *first*, so a closed ⭐ is not merely clutter — it is the entry a run is
+told to pick before anything else. All three said, in their own later text, that
+every candidate they listed had been measured and fixed:
+
+- the Auto preset picker's depth-dependent cues (both halves fixed, v0.318.1 +
+  v0.318.3);
+- "sweep every judgement made against a best-so-far" (all four shapes swept, one
+  live instance, v0.319.1, no second site);
+- "sweep every statistic that normalises against its own non-empty subset"
+  (swept three times; v0.313.1, v0.318.1, v0.319.1).
+
+Each is now `✅ CLOSED`, kept for its **method** — the generative test each one
+carries is still the right thing to apply to new code — with an explicit "do not
+re-run this sweep". Nothing was deleted.
+
+**Curation: the year-recap "slice (b) is still open" sentence had outlived its
+slice by weeks.** `yearrecap.draw_year_poster`, `yearrecap.year_caption`,
+`GET /api/recap/year/{year}.jpg`, `api.yearPosterUrl` and
+`components/YearShareCard.tsx` all exist on `main` with their own tests — this
+run sized slice (b) as open work and found it done. Both sentences that claimed
+otherwise are struck. **The general lesson, and the reason this is worth a
+block:** a "slice (b) is still open" line written *inside* a Shipped entry is
+invisible to every status grep, because the entry's own header says ✅. When you
+leave a slice open, leave it as its own entry.
+
+**Measured while migrating the display-space tests (v0.372.1) — recorded so
+nobody re-investigates.**
+
+- **`levels.suggest_levels_points` returns black = 0.0 on any genuinely stretched
+  picture, and that is correct.** Its `lo_pct=1.0` percentile lands *inside*
+  `autostretch`'s own zero spike (measured: 1.08 % of samples at exactly zero,
+  p0.1 = p0.5 = p1.0 = 0.0, p2.0 = 0.022, sky at 0.177). So the black half of the
+  "From your image" auto-levels is a no-op on the pictures the owner actually
+  has — the honest answer, since the shadows are already at black, but **not**
+  what the module's synthetic `_scene()` fixtures show, which return 0.05–0.13.
+  Not filed as a bug: raising the black point to the sky's lower tail would crush
+  real background, and the white point (0.892) and gamma (1.079) halves still do
+  real work. Pinned by
+  `test_the_black_point_is_zero_on_a_genuinely_stretched_picture` so the fact is
+  documented rather than discovered again.
+- **`histogram.measure_sky_cast` — cleared, not migrated.** On the same real
+  fixture it reads R/G/B 0.15305/0.15318/0.15259, deviation 0.00035, verdict
+  neutral. Its sky population is "finite pixels at or below the luminance
+  median", which a 1 % zero spike cannot move; there is nothing for the shared
+  fixture to add.
+
+**Why the false-positive guard on the v0.372.0 comparison is the interesting
+part.** The obvious implementation — compare a target's saved blob against
+`settings.default_stack_options` — fired on **every** target that had ever
+pressed Save, because `get_stack_defaults` seeds a never-configured form with
+`auto_reject: True` while the descriptor default is `False`. The test that caught
+it saves the form *verbatim as the server handed it over* and asserts the note
+stays empty; it is worth copying whenever a new surface says "you are overriding
+something", because the seed and the stored default are not the same thing.
+
+---
+
 ## 2026-09-06 — Builder run (branch `claude/sweet-babbage-f4us4a`): the backlog is genuinely drained, and probing the newest code is what paid
 
 **The run.** Baseline green before any change (**4949 passed / 2 skipped**, full

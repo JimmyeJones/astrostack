@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from seestack.edit.curve import CURVE_TARGET_BG, suggest_tone_curve
-from seestack.edit.registry import EditContext
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from displayspace import (  # noqa: E402
+    SKY_PATCH_PX,
+    assert_shadow_clip,
+    clipped_fraction,
+    sky_truth,
+)
+from displayspace import real_stretched_stack as _real_stretched_stack  # noqa: E402
+
+from seestack.edit.curve import CURVE_TARGET_BG, suggest_tone_curve  # noqa: E402
+from seestack.edit.registry import EditContext  # noqa: E402
 
 
 def _scene(black_floor=0.10, h=120, w=160, seed=0):
@@ -175,38 +187,12 @@ def test_the_curve_applied_by_the_op_preserves_nan_and_stays_in_range():
 # a frame that could not exhibit it, while every real Auto picture had its sky
 # lifted by around a tenth.
 
-def _real_stretched_stack(seed: int = 7, h: int = 300, w: int = 420,
-                          noise: float = 0.002, target_bg: float = 0.20) -> np.ndarray:
-    """A linear OSC-like stack put through the app's own ``autostretch``.
-
-    Faint sky + read noise, a small extended object, a scatter of stars — then the
-    real display-space transform the Curves op actually receives, hard shadow clip
-    and all. The top-left 60×60 corner is pure background by construction, so a
-    test can measure the sky without asking the code under test where it is.
-    """
-    from seestack.render.thumbnail import autostretch
-
-    rng = np.random.default_rng(seed)
-    img = np.full((h, w, 3), 0.02, dtype=np.float32)
-    img += rng.normal(0.0, noise, img.shape).astype(np.float32)
-    yy, xx = np.mgrid[0:h, 0:w]
-    blob = np.exp(-(((yy - h // 2) ** 2 + (xx - w // 2) ** 2) / (2 * 35.0 ** 2)))
-    img += (0.03 * blob)[..., None].astype(np.float32)
-    for _ in range(50):
-        cy, cx = int(rng.integers(0, h)), int(rng.integers(0, w))
-        if abs(cy - h // 2) < 80 and abs(cx - w // 2) < 80:
-            continue                      # keep the stars out of the object core
-        img[max(0, cy - 1):cy + 2, max(0, cx - 1):cx + 2] += 0.5
-    return np.asarray(autostretch(np.clip(img, 0.0, None), target_bg=target_bg),
-                      dtype=np.float32)
-
-
 def test_the_stretched_fixture_really_does_clip_shadows_to_zero():
     """Guard on the guard: if this stops being true the tests below stop testing
-    anything, exactly as the previous fixture silently did."""
-    st = _real_stretched_stack()
-    assert float(np.mean(st <= 0.0)) > 0.005, "no shadow clip → the bug can't appear"
-    assert float(np.percentile(st, 0.5)) == 0.0
+    anything, exactly as the previous fixture silently did. The fixture and this
+    assertion now live in ``tests/displayspace.py`` so every display-space test
+    can lead with the same one."""
+    assert_shadow_clip(_real_stretched_stack())
 
 
 def test_sky_mode_reads_the_sky_not_the_stretchs_clipped_shadows():
@@ -215,11 +201,12 @@ def test_sky_mode_reads_the_sky_not_the_stretchs_clipped_shadows():
     from seestack.edit.curve import _sky_mode
 
     st = _real_stretched_stack()
+    assert_shadow_clip(st)
     finite = st[np.isfinite(st)]
-    sky_truth = float(np.median(st[:60, :60]))
+    truth = sky_truth(st)
     measured = _sky_mode(finite)
-    assert measured == pytest.approx(sky_truth, rel=0.05), (
-        f"sky measured {measured:.4f}, background patch is {sky_truth:.4f}")
+    assert measured == pytest.approx(truth, rel=0.05), (
+        f"sky measured {measured:.4f}, background patch is {truth:.4f}")
 
 
 def test_a_frame_with_no_clipped_shadows_measures_exactly_as_before():
@@ -245,8 +232,8 @@ def test_auto_contrast_leaves_the_sky_of_a_real_stretched_stack_alone():
     st = _real_stretched_stack()
     out = _curves(st.copy(), {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
 
-    sky_in = float(np.median(st[:60, :60]))
-    sky_out = float(np.median(out[:60, :60]))
+    sky_in = sky_truth(st)
+    sky_out = float(np.median(out[:SKY_PATCH_PX, :SKY_PATCH_PX]))
     assert abs(sky_out - sky_in) / sky_in < 0.01, (
         f"sky moved {sky_in:.4f} → {sky_out:.4f}")
     # …and the object it *should* be shaping really does gain contrast.
@@ -269,11 +256,12 @@ def test_the_fallback_pins_the_sky_rather_than_darkening_it():
     assert _is_strictly_monotone(pts)
     assert pts[0] == [0.0, 0.0] and pts[-1] == [1.0, 1.0]
 
-    sky_in = float(np.median(st[:60, :60]))
+    sky_in = sky_truth(st)
     xs = np.array([p[0] for p in pts])
     ys = np.array([p[1] for p in pts])
     grid = np.linspace(0.0, 1.0, 256)
-    after = np.interp(np.clip(st[:60, :60], 0.0, 1.0), grid, np.interp(grid, xs, ys))
+    after = np.interp(np.clip(st[:SKY_PATCH_PX, :SKY_PATCH_PX], 0.0, 1.0),
+                      grid, np.interp(grid, xs, ys))
     assert abs(float(np.median(after)) - sky_in) / sky_in < 0.01
     # The sky itself is a control point on the identity — not merely close to one.
     sky_pt = next(p for p in pts if abs(p[0] - sky_in) < 0.02)
@@ -329,8 +317,8 @@ def test_auto_contrast_leaves_the_sky_alone_at_every_stretch_target(target_bg):
 
     st = _real_stretched_stack(target_bg=target_bg)
     out = _curves(st.copy(), {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
-    sky_in = float(np.median(st[:60, :60]))
-    sky_out = float(np.median(out[:60, :60]))
+    sky_in = sky_truth(st)
+    sky_out = float(np.median(out[:SKY_PATCH_PX, :SKY_PATCH_PX]))
     assert abs(sky_out - sky_in) / sky_in < 0.02, (
         f"target_bg={target_bg}: sky moved {sky_in:.4f} → {sky_out:.4f} "
         f"({100 * (sky_out - sky_in) / sky_in:+.1f}%)")
@@ -350,8 +338,8 @@ def test_the_sky_stays_put_at_every_stack_depth(noise):
     from seestack.edit.ops.tone import _curves
 
     st = _real_stretched_stack(noise=noise)
-    assert float(np.mean(st <= 0.0)) > 0.005, "the clip spike survives at this depth"
+    assert clipped_fraction(st) > 0.005, "the clip spike survives at this depth"
     out = _curves(st.copy(), {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
-    sky_in = float(np.median(st[:60, :60]))
-    sky_out = float(np.median(out[:60, :60]))
+    sky_in = sky_truth(st)
+    sky_out = float(np.median(out[:SKY_PATCH_PX, :SKY_PATCH_PX]))
     assert abs(sky_out - sky_in) / sky_in < 0.02
