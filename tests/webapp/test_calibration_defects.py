@@ -445,8 +445,15 @@ def test_a_target_that_saved_its_own_defaults_is_named_not_glossed_over(
     client.put(f"/api/targets/{safes[1]}/stack-defaults",
                json={"repair_sensor_defects": True})
 
-    # With the switch off nothing is claimed, so nothing is counted or said.
-    assert "except" not in _offer(client)["message"]
+    # The *offer* carries the same exception, because the off-state is the one
+    # the reader acts on: it promises "every stack, including the hands-off
+    # ones", and that promise is what makes them press the button. Telling them
+    # one click later would be informing the decision after it was made.
+    before = _offer(client)
+    assert before["state"] == "off"
+    assert "1 target would keep its own setting" in before["message"]
+    assert "Save as defaults" in before["detail"]
+    assert "Repair hot/dead pixels from the dark" in before["detail"]
 
     client.post("/api/calibration/defects/repair", json={"enabled": True})
     offer = _offer(client)
@@ -462,9 +469,12 @@ def test_a_target_that_saved_its_own_defaults_is_named_not_glossed_over(
 
 def test_the_override_count_is_only_paid_for_when_it_changes_a_sentence(
         built_library, client, data_root, monkeypatch):
-    """A per-target walk on a 60 s poll has to earn itself: with the switch off,
-    or with nothing repairable, the count changes no wording, so it is never
-    asked for."""
+    """A per-target walk on a 60 s poll has to earn itself: with nothing
+    repairable there is no offer to qualify, so the count is never asked for.
+
+    It *is* asked for with the switch off, though — that state promises "every
+    stack, including the hands-off ones", so it needs the same exception the
+    on-state does."""
     from webapp.routers import calibration as router
 
     calls = {"n": 0}
@@ -482,18 +492,20 @@ def test_the_override_count_is_only_paid_for_when_it_changes_a_sentence(
     client.get("/api/calibration/defects")
     assert calls["n"] == 0
 
-    # Switch it back off with a repairable master present: still nothing to say.
+    # Switch it back off with a repairable master present: there is an offer
+    # now, and its promise is the one the reader acts on, so the count is paid
+    # for in this state too.
     dark = _synthetic_dark(seed=11)
     dark[10, 20] += 900.0
     _register(_library_root(data_root), "dark", dark, name="broken")
     client.post("/api/calibration/defects/repair", json={"enabled": False})
     client.get("/api/calibration/defects")
-    assert calls["n"] == 0
+    assert calls["n"] == 1
 
-    # Both true: now the sentence depends on it.
+    # And on, where it always was.
     client.post("/api/calibration/defects/repair", json={"enabled": True})
     client.get("/api/calibration/defects")
-    assert calls["n"] == 1
+    assert calls["n"] == 2
 
 
 def test_the_plural_and_the_no_exception_wording_both_hold():
@@ -508,6 +520,18 @@ def test_the_plural_and_the_no_exception_wording_both_hold():
     # A nonsense count degrades to "no exceptions" rather than a negative one.
     assert "except" not in calibration.defect_repair_offer(
         rows, enabled=True, n_overridden=-3)["message"]
-    # It is only ever an on-state qualifier; the off-state is about turning it on.
-    assert "except" not in calibration.defect_repair_offer(
-        rows, enabled=False, n_overridden=9)["message"]
+    # The off-state carries the same fact in its own tense — it is an offer, not
+    # a report, so the targets "would keep" their settings rather than being an
+    # exception to something already in force.
+    one = calibration.defect_repair_offer(rows, enabled=False, n_overridden=1)
+    assert "1 target would keep its own setting" in one["message"]
+    assert " it would keep stacking without the repair" in one["detail"]
+    many = calibration.defect_repair_offer(rows, enabled=False, n_overridden=4)
+    assert "4 targets would keep their own settings" in many["message"]
+    assert " they would keep stacking without the repair" in many["detail"]
+    # Nothing pinned, and a nonsense count, both leave the plain offer alone.
+    for bad in (0, -3):
+        plain = calibration.defect_repair_offer(
+            rows, enabled=False, n_overridden=bad)
+        assert plain["message"] == "Repair these on every stack from now on"
+        assert "would keep" not in plain["detail"]

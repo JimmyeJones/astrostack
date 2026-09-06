@@ -383,11 +383,14 @@ def calibration_defects(request: Request) -> dict[str, Any]:
     enabled = _defect_repair_enabled(settings)
     offer = calibration.defect_repair_offer(
         out, enabled=enabled,
-        # Only worth asking when the offer would say "every stack" — a target
-        # walk on a 60 s poll has to earn itself, and with the switch off (or
-        # nothing repairable) the answer changes no sentence.
+        # A target walk on a 60 s poll has to earn itself, so it is gated on the
+        # offer rendering at all — with nothing repairable there is no sentence
+        # to qualify. It is *not* gated on the switch being on: the off-state is
+        # the one that promises "every stack, including the hands-off ones", and
+        # that promise is the thing the reader acts on, so it has to carry the
+        # same exception the on-state does rather than reveal it one click later.
         n_overridden=(_targets_overriding_defect_repair(request)
-                      if enabled and _offer_wanted(out) else 0))
+                      if _offer_wanted(out) else 0))
     return {"masters": out, "repair": offer}
 
 
