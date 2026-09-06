@@ -577,6 +577,11 @@ class AutoPreferencesOut(BaseModel):
     biases: dict[str, int] = {}
     note: str | None = None
     neutral: bool = True
+    # Recency decay (``auto_prefs.DECAY_DAYS``) quietly walks an unreinforced taste
+    # back toward neutral; this says so when it has actually moved something, so the
+    # profile never drifts silently. ``None`` whenever nothing has faded — which is
+    # every profile written before decay shipped.
+    fade_note: str | None = None
 
 
 def _read_auto_preferences(lib) -> dict:
@@ -605,6 +610,7 @@ def _auto_preferences_out(profile: dict,
         biases=auto_prefs_mod.effective_biases(profile, object_type),
         note=auto_prefs_mod.describe_profile(profile, object_type),
         neutral=auto_prefs_mod.is_neutral(profile, object_type),
+        fade_note=auto_prefs_mod.fade_note(profile, object_type),
     )
 
 

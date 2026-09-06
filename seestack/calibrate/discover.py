@@ -69,7 +69,10 @@ MAX_FOLDERS_SAMPLED = 200
 #: slot — the same mapping ``webapp.calibration._KIND_ACCEPTS`` already applies
 #: when it checks a built master's frames against its slot. ``light`` is
 #: deliberately absent: a folder of subs is never a calibration folder.
-_KIND_TO_MASTER: dict[str, str] = {
+#: Public because :func:`seestack.calibrate.masters.build_master` reuses it to
+#: decide, under ``require_declared_kind``, which frames belong in a slot — the
+#: discover-driven build and the discovery itself must agree on that.
+KIND_TO_MASTER: dict[str, str] = {
     "dark": "dark",
     "dark_flat": "dark",
     "flat": "flat",
@@ -225,7 +228,7 @@ def classify_folder(
             log.debug("calibration scan: unreadable header %s (%s)", path, exc)
             return None
         kind = frame_kind_from_header(getattr(info, "raw_header", None) or {})
-        slot = _KIND_TO_MASTER.get(kind or "")
+        slot = KIND_TO_MASTER.get(kind or "")
         if slot is None:
             # A light, or a frame that didn't say. Either way we stop here — and
             # because index 0 is read first, an ordinary folder of subs costs

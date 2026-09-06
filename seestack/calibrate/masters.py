@@ -133,6 +133,7 @@ def build_master(
     progress: ProgressFn | None = None,
     should_stop: Callable[[], bool] | None = None,
     skipped: list[tuple[str, str]] | None = None,
+    require_declared_kind: bool = False,
 ) -> tuple[np.ndarray, MasterMeta] | None:
     """Combine raw FITS frames into a master.
 
@@ -166,11 +167,31 @@ def build_master(
         actually used vs. silently set aside, instead of a bare success. Frames
         dropped by ``max_frames`` sampling are **not** recorded here — that's an
         intentional memory bound, not a skip. Default ``None`` = don't collect.
+    require_declared_kind
+        When ``True``, a frame whose own header **declares** a kind belonging to a
+        different master slot — a light, or a flat in a dark build — is skipped
+        (reason ``"wrong kind"``) instead of being combined. A frame that declares
+        *nothing* is still used: "didn't say" is not "said the wrong thing", and
+        plenty of legitimate calibration FITS carry no ``IMAGETYP``.
+
+        Default ``False``, which is exactly today's behaviour, because a build the
+        user aimed at a folder they chose is *meant* to take what is in it. It is
+        set by the **discover-driven** one-click build, where the folder was
+        classified from only ``discover.SAMPLE_HEADERS`` sampled headers: a mixed
+        folder whose samples all happened to read "dark" would otherwise build a
+        master out of the lights sitting beside them, and a contaminated master
+        dark corrupts every frame it is later applied to.
+
+        The filter runs **before** the majority-shape reference is chosen, so a
+        mixed folder's reference is decided among the frames that will actually be
+        used (lights from the same camera share the darks' shape, so the shape rule
+        cannot catch this on its own).
 
     Returns
     -------
     (master_2d_float32, MasterMeta), or ``None`` if cancelled via ``should_stop``.
     """
+    from seestack.calibrate.discover import KIND_TO_MASTER
     from seestack.io.fits_loader import frame_kind_from_header, load_seestar_raw
 
     if kind not in VALID_KINDS:
@@ -215,9 +236,25 @@ def build_master(
             if skipped is not None:
                 skipped.append((p.name, "wrong size"))
             continue
+        if require_declared_kind:
+            declared = frame_kind_from_header(getattr(info, "raw_header", None) or {})
+            # Only a frame that *declares* a different slot is dropped; one that
+            # declares nothing, or declares a kind that maps to this slot (a
+            # flat-dark in a dark build), is kept exactly as before.
+            if declared and KIND_TO_MASTER.get(declared) != kind:
+                log.warning("master %s: skipping %s (declares %s)", kind, p.name, declared)
+                if skipped is not None:
+                    skipped.append((p.name, "wrong kind"))
+                continue
         loaded.append((p.name, raw, info))
 
     if not loaded:
+        if require_declared_kind and skipped is not None and any(
+                reason == "wrong kind" for _n, reason in skipped):
+            # Say *why* rather than "mismatched": the folder looked like this kind
+            # when it was sampled, and every frame in it turned out to say otherwise.
+            raise ValueError(
+                f"no {kind} frames here — every frame says it is something else")
         raise ValueError("no usable calibration frames (all failed to load or mismatched)")
 
     # The reference shape is the **majority** one, not whichever frame happened to
