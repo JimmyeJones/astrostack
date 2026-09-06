@@ -224,14 +224,6 @@ def _target_acquisition(lib: Any, entry: Any) -> dict[str, Any] | None:
     }
 
 
-# Discovery walks ``incoming/`` and reads a FITS header per folder, so — unlike
-# the registry-only master list — it costs NAS round-trips. Cache the *walk* (the
-# expensive half) on the app; "do I already have a master for this?" is registry
-# arithmetic and is recomputed fresh on every request, so building a master
-# updates the offer immediately without waiting for the TTL.
-_INCOMING_CACHE_TTL_S = 120.0
-
-
 @router.get("/api/calibration/incoming")
 def calibration_incoming(request: Request) -> dict[str, Any]:
     """"You already have darks — shall I build the master?"
@@ -246,19 +238,16 @@ def calibration_incoming(request: Request) -> dict[str, Any]:
     :mod:`seestack.calibrate.discover`). ``incoming/`` is read-only here — a
     directory listing and a header read, nothing else — and this endpoint only
     ever *offers*; no master is built and none is applied until the owner asks.
+
+    The folder walk (the expensive half — one header read per folder) is cached
+    on the app and shared with the "why did this stack come out uncalibrated?"
+    advice; "do I already have a master for this?" is registry arithmetic and is
+    recomputed fresh on every request, so building a master updates the offer
+    immediately without waiting for the TTL.
     """
     settings = deps.get_settings(request)
     root = str(settings.resolved_incoming_dir)
-
-    cache = getattr(request.app.state, "calibration_incoming_cache", None)
-    now = time.monotonic()
-    if cache and cache["root"] == root and (now - cache["at"]) < _INCOMING_CACHE_TTL_S:
-        folders = cache["folders"]
-    else:
-        folders = discover.find_calibration_folders(root)
-        request.app.state.calibration_incoming_cache = {
-            "root": root, "at": now, "folders": folders}
-
+    folders = calibration.cached_incoming_folders(request.app.state, root)
     masters = calibration.list_masters(settings.resolved_library_root)
     out = []
     for f in folders:

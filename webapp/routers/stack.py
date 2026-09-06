@@ -3370,6 +3370,14 @@ def _uncalibrated_advice(request: Request, safe: str) -> str | None:
     (the same signals the Stack form's calibration suggestions use) and asks
     :func:`calibration.diagnose_uncalibrated` for a specific fix. Never raises — a
     diagnosis is a nicety, so any failure just yields the generic copy.
+
+    When the library holds nothing usable — the beginner's actual situation, and
+    the one case ``diagnose_uncalibrated`` is silent about — fall back to
+    :func:`calibration.incoming_calibration_advice`, which can say *"you already
+    have 40 dark frames in your incoming folder"*. That closes the loop where the
+    gap is actually noticed (looking at the picture), instead of only on the
+    Calibration page the owner has no reason to visit. The folder walk is the
+    shared, cached one, and only runs when there is no master-derived advice.
     """
     from webapp import calibration
 
@@ -3385,11 +3393,19 @@ def _uncalibrated_advice(request: Request, safe: str) -> str | None:
         gain = _median([f.gain for f in frames if f.gain is not None])
         sensor_temp_c = _median(
             [f.sensor_temp_c for f in frames if f.sensor_temp_c is not None])
+        width_px = calibration.modal_dim([f.width_px for f in frames])
+        height_px = calibration.modal_dim([f.height_px for f in frames])
         masters = calibration.list_masters(settings.resolved_library_root)
-        return calibration.diagnose_uncalibrated(
+        advice = calibration.diagnose_uncalibrated(
             masters, exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c,
-            width_px=calibration.modal_dim([f.width_px for f in frames]),
-            height_px=calibration.modal_dim([f.height_px for f in frames]))
+            width_px=width_px, height_px=height_px)
+        if advice:
+            return advice
+        folders = calibration.cached_incoming_folders(
+            request.app.state, settings.resolved_incoming_dir)
+        return calibration.incoming_calibration_advice(
+            folders, masters, exposure_s=exposure_s, gain=gain,
+            sensor_temp_c=sensor_temp_c, width_px=width_px, height_px=height_px)
     except Exception:  # noqa: BLE001 — advice is optional; never fail the info read
         return None
 

@@ -14,6 +14,40 @@ Newest first.
 
 ---
 
+## v0.366.1 — 2026-09-06 — The "you already have darks" answer reaches the picture: incoming_calibration_advice + cached_incoming_folders
+
+**Autonomy + friendliness (PRIORITY 2–3) — the follow-on v0.366.0 named but did not build, shipped once its
+consumer turned out to be silent in exactly the case that matters.** v0.366.0 put the offer on the
+Calibration page. The owner has no reason to visit that page; the moment they *do* notice the gap is when
+they look at a finished picture and the History Info panel says the stack came out uncalibrated.
+
+**And that line was silent in the beginner case.** `_uncalibrated_advice` asks
+`calibration.diagnose_uncalibrated`, which only ever explains a **near-miss** master — a wrong-size one, or
+an exposure-mismatched dark with no bias to scale it. With **no** usable master in the library at all — a
+fresh install, which is the situation the whole feature is about — it returns `None` and the panel falls back
+to generic "build or pick a master" copy. So the app could now *know* the frames were sitting in `incoming/`
+and still not say so where it counted.
+
+**One definition of "covers", not a second one.** `folder_as_master` shapes a discovered folder like a
+registry entry, so `incoming_calibration_advice` asks the **same** `existing_master_like` that answers "does a
+master I already own cover these subs?" — the unattended binder's bar. A 30 s dark folder therefore never
+gets recommended for 10 s subs, and a folder from another camera never does either. A folder already built
+into a master is skipped: that stack is uncalibrated for a different reason, and pointing at a build the owner
+has already done would be worse than saying nothing. Darks are named before flats before biases, because a
+dark is what an uncalibrated Seestar stack is actually short of.
+
+**Paid for once.** `cached_incoming_folders` moves v0.366.0's per-router cache into `webapp/calibration.py`,
+so the Calibration page's offer and this advice share one walk (and can never disagree about what is there).
+It runs only when there is no master-derived advice, on a run that already carries provenance and no
+`CALSTAT` — i.e. not on the ordinary path at all.
+
+**Tests (+6):** five over the pure helper (it names the frames; it stays quiet on an exposure or sensor-size
+mismatch, on a folder already built, and on nothing found; darks first) plus an end-to-end one driving
+`/stack-runs/{id}/info` on an uncalibrated run with declared darks in `incoming/` — fail-before, since the
+field was `None`.
+
+---
+
 ## v0.366.0 — 2026-09-06 — "You already have darks": seestack/calibrate/discover.py + /api/calibration/incoming + IncomingCalibrationCard
 
 **Autonomy + image quality (PRIORITY 2/4) — built on the half of the gate that turned out to be answerable,
