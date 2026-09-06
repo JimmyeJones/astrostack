@@ -354,7 +354,11 @@ export interface RejectionSummary {
   used: number;
   dropped: number;
   dropped_fraction: number;
-  verdict: { tone: "good" | "ok" | "warn"; text: string };
+  // `key` names *which* verdict fired ("unsolved", "solve_timeout", "healthy",
+  // "minor", "dominant:<bucket>", "mixed"), so a client can act on the advice
+  // without matching on its wording. Optional: an older backend omits it, which
+  // reads as "no action to offer".
+  verdict: { tone: "good" | "ok" | "warn"; text: string; key?: string };
   buckets: RejectionBucket[];
 }
 

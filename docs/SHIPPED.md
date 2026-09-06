@@ -14,6 +14,94 @@ Newest first.
 
 ---
 
+## v0.364.0 — 2026-09-06 — Left-out advice you can reach and act on: RejectionBreakdownCard + rejectionActions + verdict.key
+
+**Friendliness (PRIORITY 3), built as the entry's own Builder note demanded — the reachability half first,
+then the links.** The "why were some frames left out?" breakdown gives real advice (*"raise the ASTAP timeout
+in Settings and run Plate Solve again"*, *"Run Plate Solve to include them"*) and then left the beginner to
+find the thing it named. Worse, the whole breakdown rendered **only** inside a `HoverCard.Dropdown` on the
+Target page's rejected-count badge, and a Mantine `HoverCard` has no touch affordance at all — so on the
+phone the owner actually checks a night on, the explanation *and* its advice were unreachable. Adding links
+alone would have handed a phone user buttons they still could not see.
+
+**Both halves shipped together.**
+* **A home a finger can reach.** `RejectionBreakdownCard` renders the same breakdown in the Target page's
+  grouped analysis area (the Quality tab of `InsightTabs`), self-hiding when nothing was left out so its tab
+  never appears on a target that kept every sub. **Nothing was removed:** the hover card is untouched for the
+  pointer user who already knows to hover the badge.
+* **Advice that goes somewhere.** `components/target/rejectionActions.ts` maps a bucket key to what its note
+  names, in the two shapes the advice actually has: a **route** (`solve_timeout` → `settingsLink(
+  "plate-solving")`, typed, so a renamed Settings section is a compile error rather than a link landing on
+  the wrong tab) and an **on-page control** (`unsolved` → the page's own Plate Solve, supplied by the caller
+  as `onRunPlateSolve`; a surface without one renders no button rather than a dead one).
+
+**The verdict is keyed, not matched on its wording.** `webapp/rejection_summary._verdict` now returns an
+additive `key` naming which case fired — `"unsolved"`, `"solve_timeout"`, `"healthy"`, `"minor"`,
+`"dominant:<bucket>"`, `"mixed"`. A `dominant:` verdict resolves through the **same** bucket map, so a
+headline can never point somewhere different from the bucket it is about. Keying rather than string-matching
+is the point: this copy is reworded regularly, and a link that silently vanishes when a sentence is improved
+is worse than no link.
+
+**One control, not two.** The headline verdict is usually *about* one of the buckets below it, so the same
+action is offered once — at the top, where the advice that earned it is — and suppressed on the bucket that
+repeats it (`actionId`).
+
+**Upgrade-safe (§9):** one additive field inside an existing response object (`verdict.key`), typed optional
+on the client so an older backend reads as "no action to offer" — i.e. exactly today's behaviour. No config,
+schema, on-disk, endpoint or default change, and not one word of the existing copy changed.
+
+**Tests (+7 Python, +12 frontend).** `tests/webapp/test_rejection_summary.py`: every verdict names its case
+(healthy / minor / mixed), a dominant verdict names the bucket it is about *and* that bucket is present, the
+two solve verdicts are keyed by their own cause, and the key is additive with the wording unchanged.
+Frontend: `RejectionBreakdown.test.tsx` (+7 — the route link, the Plate Solve button firing the handler, no
+button where there is no handler, the verdict acting through its key, a `dominant:` verdict resolving through
+the bucket map, one control rather than two, and nothing at all on advice with no destination or against an
+older backend), `RejectionBreakdownCard.test.tsx` (3), and `Target.test.tsx` (+2 — the breakdown and its
+link really are in the page's grouped area, and silent when every sub made the picture).
+
+---
+
+## v0.363.0 — 2026-09-06 — "First look" on the Dashboard: FirstLookStrip + pickFirstLookTarget
+
+**Autonomy / friendliness (PRIORITY 2/3), the filed idea built at the filed size (frontend-only, existing
+endpoint).** v0.139.0 put the pre-stack sharpest-sub peek on the *Target* hub. But the beginner who has just
+dropped a night in lands on the **Dashboard**, and a target still being QC'd has nothing to show there at all:
+the "Recent stacks" grid only knows about *finished pictures*, so between "the subs are in" and "the stack
+finished" the landing page says nothing about whether the night worked.
+
+**What shipped.** `FirstLookStrip` (`components/dashboard/`) picks the one target the user is most likely
+waiting on and renders the existing `FirstLookCard` for it. The pick is a pure, exported
+`pickFirstLookTarget(targets)`: kept subs (`n_frames_accepted > 0`) and **no picture yet** (`!has_preview` —
+the same fact the Library tile draws its placeholder from), ranked newest-active first, ties broken by depth
+then name so the card cannot swap between two targets on successive refreshes. A target with no (or an
+unparseable) `last_activity_utc` sorts last rather than being dropped — it is still a real target with kept
+subs and no picture.
+
+**Deliberately one target, not a grid**, and deliberately **inside the existing "Recent" insight group**
+rather than as another stacked card — §1's standing IA priority says a new fact joins a grouping instead of
+becoming one more always-on block. It sits above the "Last night" recap: what the night *looks* like, then
+the recap of what came in.
+
+`FirstLookCard` gained one optional prop (`target: {name, to}`) so the Dashboard's copy can name and link the
+target it is showing; on the Target page, where "which target?" is never in question, it is omitted and the
+card renders exactly as before.
+
+**Costs nothing on a settled library:** every target having a picture is the common case, and there the strip
+renders nothing and never asks for a frame (pinned by a test). It reuses the Library page's own
+`["targets"]` query key, so the two share one cached list.
+
+**Upgrade-safe (§9):** frontend-only. No config, schema, on-disk, API or default change; no new endpoint —
+`GET /api/targets` and `…/best-frame` are both already served.
+
+**Tests (+14):** `FirstLookStrip.test.tsx` (11 — the pick's seven cases including the undated and unparseable
+stamps, the deterministic tie-break, and that it does not reorder the caller's list; then the rendered strip
+naming and linking the waiting target, rendering nothing *and asking for no frame* once every target has a
+picture, and degrading silently when the target list can't be read), `FirstLookCard.test.tsx` (+2 — the named
+and linked form, and no link on the target's own page), and `Dashboard.test.tsx` (+1 — the card really is
+inside the grouped Recent area on the real page, linking to the right target).
+
+---
+
 ## v0.362.0 + v0.362.1 — 2026-09-05 — The first-image checklist carries the whole journey: n_edited_runs / n_finished_pictures
 
 **Friendliness / autonomy (PRIORITY 3), the filed idea built as filed.** The Dashboard's "Your first

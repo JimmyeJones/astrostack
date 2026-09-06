@@ -2444,35 +2444,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   **Beginner-bar:** instantly understood, sane default (only *suggests*, ≈0.4° radius so a nearby-but-different
   object isn't falsely claimed), plain-language, and not a pro knob.
 
-- **NEW IDEA (Builder 2026-08-26, spotted while adding the "ran out of time being located" bucket v0.276.4) —
-  the "why were some frames left out?" buckets give advice in prose but can't link to the thing they name, so
-  every piece of advice ends in a hunt.** *(Pillar: friendliness — PRIORITY 3. Size: S.)* The buckets now say
-  things like *"raise the ASTAP timeout in Settings and run Plate Solve again"* and *"Run Plate Solve to include
-  them"* — correct, plain-language, and entirely un-clickable: `RejectionBreakdown.tsx` renders label + count +
-  note as text. A beginner then has to find which of the Settings pages holds "ASTAP timeout". **Shape:** let a
-  bucket carry an optional `action: {label, to}` (a route, e.g. `/settings/solving`, or a same-page anchor)
-  built server-side beside the note, and have `RejectionBreakdown` render it as one small `Anchor`/`Button`
-  under the note when present. Purely additive to an existing response field, generic (every future bucket gets
-  it for free), and self-hiding on older backends that omit it. **Beginner bar:** it removes a navigation step
-  from advice the app already decided to give — no new concept, no new knob. Pairs with the existing
-  `solve_setup_problem` banner, which *does* already link, so the two would finally behave the same way.
-  **Builder 2026-08-27, sized it and found the constraint the entry doesn't mention — read this first.**
-  `RejectionBreakdown` renders **only** inside a `HoverCard.Dropdown` on the Target page
-  (`routes/Target.tsx` ~1044, on the "N rejected · N not located yet" badge). A hover card is fine for
-  *reading* advice and awkward for *clicking* it: it works with a desktop pointer (Mantine keeps the dropdown
-  open while it is hovered), but a Mantine `HoverCard` has no touch affordance at all, so on the phone the
-  owner actually uses, the whole breakdown — link and all — is unreachable today. Adding the link is still a
-  strict improvement (desktop gains a click; nothing regresses), but shipping it *alone* leaves a phone user
-  with advice they can neither see nor act on. **So do the two together, or the second one first:** give the
-  breakdown a non-hover home as well (a disclosure/section on the Target page, which the IA work is already
-  grouping), then hang the actions off it. Worth doing in the same change: the **verdict** line has the
-  identical problem — `_DOMINANT_VERDICTS["solve_timeout"]` and the "Most of your subs ran out of time…"
-  headline both say "raise the ASTAP timeout in Settings" with nothing to click — so the optional `action`
-  belongs on the verdict as well as on each bucket. Only one piece of bucket copy names a reachable
-  destination today (`solve_timeout` → `/settings/plate-solving`, via the existing `settingsLink` helper);
-  `unsolved` says "Run Plate Solve", whose control sits on the very page the breakdown renders on, so it
-  wants a scroll/focus affordance rather than a route.
-
 - **NEW IDEA (Builder 2026-08-17, the one thing deliberately left out of "Finish them all" v0.265.0) — put a real
   byte figure in the batch-export confirmation, without making the Dashboard's note expensive.** *(Pillar:
   friendliness / trust — PRIORITY 3; size S; **only worth doing if someone actually wants the number**.)* The
@@ -7613,12 +7584,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   vetted before the hint graduates from "for known-size targets only". Serves the north-star "it just
   works" by catching a mistake *before* a wasted session.
   </details>
-- **NEW (Builder 2026-07-21) — extend "First look" to the Dashboard's per-target tiles.** v0.139.0 shipped the
-  pre-stack sharpest-sub card on the *Target* hub; the Dashboard tile for a target still being ingested/QC'd
-  shows nothing reassuring. Reuse the same `GET …/best-frame` + `/preview` thumbnail as a tiny inline preview on
-  a Dashboard tile that has QC'd subs but no finished stack yet, so the "did tonight work?" glance is answered on
-  the landing page too. Frontend-only, additive; the endpoint already exists. *(S, autonomy/friendliness —
-  PRIORITY 2/3.)*
 - **NEW (Builder 2026-07-21, follow-up to "Your sky, so far" v0.142.0) — add the "clearest night" stat + a
   compose-to-one-image share button.** The v0.142.0 first slice is registry-only, so it omits two nice-to-haves from
   the original idea: **(a)** a "your clearest night" tally (best median FWHM / lowest sky background) — needs a
@@ -8466,6 +8431,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.364.0** — Friendliness (PRIORITY 3): **the "why were some frames left out?" breakdown gets a home a phone can reach, and its advice gets a button** — `RejectionBreakdownCard` in the Target page's existing Quality insight group (the breakdown had only ever rendered in a `HoverCard.Dropdown`, which has no touch affordance at all), plus `rejectionActions.ts` turning each bucket/verdict into the thing its note names — `settingsLink("plate-solving")` or the page's own Plate Solve — keyed off a new additive `verdict.key` from `webapp/rejection_summary._verdict` rather than matched on the copy. Entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.363.0** — Autonomy/friendliness (PRIORITY 2/3): **"First look" reaches the Dashboard** — the sharpest accepted sub of the target that has kept subs but no picture yet (`FirstLookStrip` + `pickFirstLookTarget`, inside the existing Recent insight group, self-hiding on a settled library), so the "did tonight work?" glance is answered on the landing page and not only on the Target hub. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.362.0 + v0.362.1** — Friendliness/autonomy (PRIORITY 3): **the "Your first image" checklist carries the whole journey — finish it in the editor, then save that version.** The card walked a beginner to their first stack and stopped, congratulating them on a linear, flat, dark picture and *mentioning* the last two steps in a sentence, because nothing cheap reported them. `_rollup_stacks` now also counts runs carrying a saved editor recipe and runs whose edit was exported (one `project_meta` prefix scan each on a project it already opens), served as additive `n_edited_runs` / `n_finished_pictures` — the second one the **union** of the export marker and the in-place auto-edit's `preview_display_space`, because a hands-off "Process this target" finishes the picture without any export and the first cut of this asked a walk-away owner to go and do it again (caught by booting the app with `scripts/agent-dogfood.sh`, not by reading it). The filed care note was answered with a measurement: **1.11 ms for both scans on a 400-run / 1,400-meta-row target, against 11.15 ms for the run walk already being paid there**, behind the existing 30 s cache — and a target with no stack runs is never asked (test spies on `iter_meta_prefix`). The card's "never show on an established install" guard moved to a new `firstImageHasPicture` (the four first-picture steps only), so adding steps cannot make the owner's box look mid-journey and pop a card onto a Dashboard it has never appeared on. Full write-up in [`SHIPPED.md`](SHIPPED.md). Tests: +4 `tests/webapp/test_stats.py`, +5 vitest (8 updated).
 - **v0.361.1** — The other half of v0.361.0, and the surface its follow-on actually named: **the Tonight page's "Worth more time" list carries the same mosaic aim clause.** "Plan a night" is where a beginner decides where to point, and it renders its own `WorthMoreTimeList` off the same `/best-tonight` answer the Dashboard card uses — so shipping only the Dashboard left the where-to-point hint off the where-to-point page. The pure helper and the query moved into one `hooks/useMosaicAim.ts` that owns the three decisions both surfaces must agree on: the shared `["mosaic-map", safe]` cache key (no second request, and no way to name a different panel), the **lead pick only** (this list runs to eight rows), and `retry: false`. The map fixture moved out of `useMosaicAim.test.ts` into `test/mosaicMapFixture.ts` — importing a test file was registering its suites in the importing file and running those assertions twice. Frontend-only; no engine, API, schema, config, on-disk or default change. Tests: +4 `WorthMoreTimeList.test.tsx`, 2 moved.
 - **v0.361.0** — Autonomy/friendliness on the owner's dominant workflow, and the follow-on v0.355.0 deliberately left open: **"Point here right now" now also says *which corner* of the mosaic.** The Dashboard's one recommendation answers *which target*; for a heavy mosaic user that is half the question, because a 3×3 whose total looks healthy can still have one corner at a fifth of the others, and pointing at the mosaic again spreads the night evenly over panels that don't need it equally. New `seestack.mosaicmap.aim_hint` says the map's own fact in one clause — same `panel_position_words` and `sharecard.format_duration` the long card sentence uses, so the app keeps one vocabulary for where a panel sits and how long an integration is rather than growing a second spelling per surface. Served as an additive, defaulted `aim_hint` on `MosaicDepthMapOut`; `PointHereTonightCard` reads it for the **lead pick only** (three project reads to annotate rows nobody is being told to shoot is a cost with no reader) through the Target page's own `["mosaic-map", safe]` cache key, so the two surfaces share one entry and can never name different panels. Silent on a single field, on an even mosaic, on a failed request and against a backend too old to send the clause — the frontend never rebuilds the sentence locally. No config, schema, on-disk, default or existing-field change. Tests: +4 `tests/test_mosaic_map.py`, +2 `tests/webapp/test_mosaic_map.py`, +7 `PointHereTonightCard.test.tsx`.

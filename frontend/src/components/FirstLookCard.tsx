@@ -1,6 +1,7 @@
 import { Group, Image, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconSparkles } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { api, type BestFrame } from "../api/client";
 
 /**
@@ -41,8 +42,16 @@ export function firstLookMetrics(best: BestFrame): string | null {
  * Renders nothing until an accepted sub has been QC'd (`frame_id` present). The
  * parent hides it once a finished stack exists, so the real picture supersedes
  * this pre-stack peek.
+ *
+ * `target` is for the surfaces that show *someone else's* target — the Dashboard
+ * strip, which picks the target the user is most likely waiting on rather than
+ * being on that target's own page. It names it and links to it; on the Target
+ * page itself (where "which target?" is never in question) it is left out and
+ * the card is byte-for-byte what it was.
  */
-export function FirstLookCard({ safe }: { safe: string }) {
+export function FirstLookCard(
+  { safe, target }: { safe: string; target?: { name: string; to: string } | null },
+) {
   const best = useQuery({
     queryKey: ["best-frame", safe],
     queryFn: () => api.bestFrame(safe),
@@ -59,7 +68,14 @@ export function FirstLookCard({ safe }: { safe: string }) {
           <IconSparkles size={14} />
         </ThemeIcon>
         <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
-          <Text size="sm" fw={500}>First look</Text>
+          <Group gap="xs" justify="space-between" wrap="nowrap">
+            <Text size="sm" fw={500}>First look</Text>
+            {target ? (
+              <Text component={Link} to={target.to} size="sm" c="violet" lineClamp={1}>
+                {target.name} →
+              </Text>
+            ) : null}
+          </Group>
           <Image
             src={api.framePreviewUrl(safe, data.frame_id, 640)}
             radius="sm"

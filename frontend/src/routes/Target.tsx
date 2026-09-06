@@ -51,6 +51,7 @@ import { ScanToPhoneModal } from "../components/ScanToPhoneButton";
 import { keepsakeFilename, sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
+import { RejectionBreakdownCard } from "../components/target/RejectionBreakdownCard";
 import { UnsolvedHelp } from "../components/target/UnsolvedHelp";
 import { SkyBrightnessNote } from "../components/target/SkyBrightnessNote";
 import { RejectionOutlookNote } from "../components/target/RejectionOutlookNote";
@@ -1206,7 +1207,9 @@ export function TargetView() {
               <HoverCard.Dropdown>
                 {rejectSummary.data?.summary?.buckets.length ? (
                   // Plain-language grouped breakdown + verdict (v0.159.2+).
-                  <RejectionBreakdown summary={rejectSummary.data.summary} />
+                  <RejectionBreakdown
+                    summary={rejectSummary.data.summary}
+                    onRunPlateSolve={() => qcSolve.mutate()} />
                 ) : rejectSummary.data && Object.keys(rejectSummary.data.counts).length ? (
                   // Fallback for an older backend without the friendly summary.
                   <>
@@ -1823,6 +1826,13 @@ export function TargetView() {
           ) },
           { key: "quality", label: "Quality", node: (
             <>
+              {/* The same "why were some frames left out?" breakdown the badge
+                  above shows on hover — here in a form a phone can reach, and
+                  with the one-tap fixes its advice names. Self-hides when
+                  nothing was left out. */}
+              <RejectionBreakdownCard
+                summary={rejectSummary.data?.summary}
+                onRunPlateSolve={() => qcSolve.mutate()} />
               <FocusTrendCard safe={safe} />
               <TransparencyTrendCard safe={safe} />
               <StackHealthCard safe={safe} />
