@@ -5217,54 +5217,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ NEW BEGINNER FEATURE (Scout 2026-09-06) — "Was last night off for you?": a whole-history star-size
-  baseline that catches a dew / focus / bad-seeing night while you can still do something about it.**
-  *(Pillar: friendliness + trust / autonomy — PRIORITY 3/2. Size: M. Clears the beginner bar: computed
-  automatically from data the app already measures, one plain-language sentence, no pro/niche knobs.)*
-
-  **The gap, grep-checked before filing.** The app measures each accepted sub's star size (`fwhm_px`,
-  `seestack/io/project.py:110`, and the per-target `median_fwhm()` at `:1168`) and compares subs *within* a
-  target for grading (`qc/grading.py`), but there is **no cross-target, whole-history baseline of the owner's
-  own typical star size**, and nothing that says "this night was worse than your usual". Grepped
-  `seestack/`, `webapp/`, `frontend/src/` and both `docs/*.md` for `focus|dew|your usual|typical fwhm|
-  baseline.*fwhm|anomal|check.*focus` — the only baseline that exists is `qc/sky_quality.py`'s **cloud /
-  transparency** rate-vs-nights trend (`baseline = _median([rates[n] for n in nights])`, `:177`), which is
-  about *sky*, not *equipment*. So a beginner whose Seestar dewed up, drifted out of focus, or shot through
-  poor seeing has no signal until they later notice a target's stack is soft — by which time the night is
-  gone. Catching it *the morning after* (or mid-run) is exactly the "help me on my next clear night"
-  proposition.
-
-  **What it is (one read-only helper + one card).** A pure engine helper (mirror `sky_quality.py`'s shape:
-  fold every accepted frame's `fwhm_px` grouped by night across **all** targets via `library.iter_targets()`
-  into a robust whole-history baseline — median of per-night medians, plus a spread) and a comparison of the
-  **most recent night** against it. When the latest night's median FWHM is materially fatter than the
-  owner's usual (e.g. ≥ ~30–40 %, or > ~2 robust deviations — pick the threshold from real spread, ship it as
-  a named constant), surface one plain sentence on the Dashboard / "Last night" surface: *"Last night's stars
-  were about 45 % fatter than your usual — often dew on the lens, focus drift, or just poor seeing. Worth a
-  quick check before your next session."* Silent when the latest night is normal, and silent until there is
-  enough history to have a "usual" (reuse a `MIN_NIGHTS`-style floor, same reasoning as `sharpest_night`).
-
-  **Why it clears the bar and serves §1.** Adds no expert surface — it is pure recall of what the app already
-  measured, framed as a friendly heads-up (priority 3) that removes a decision the beginner didn't know they
-  had (priority 2: the app noticed the off night for you). Sane default: computed from stored data, no
-  setting. Honest empty/early state: says nothing until it has a baseline, and never scolds a normal night.
-
-  **Slicing for one Builder run.** Slice (a): the engine helper + baseline + latest-night verdict + a bare
-  sentence on the existing "Last night" card (no new nav, no new always-on banner — fold it into the card
-  that already reports the last session, per the standing IA rule). Slice (b, optional follow-on): a tiny
-  sparkline of per-night median FWHM so a *trend* (slow focus creep across a season) is visible, not just the
-  last night. Ship (a) first; it stands alone.
-
-  **Care / don't-overreach.** Seeing varies night to night for reasons the owner can't fix, so the copy must
-  say "often … or just poor seeing" and never assert a fault — it's a nudge to *check*, not a diagnosis. Use
-  a robust baseline (median of per-night medians, not a mean) so one great or one terrible night doesn't move
-  "usual". Compare like with like where cheap — the S30's own frames only (the baseline is per-install, so
-  this is automatic on the owner's box). **Upgrade-safe by construction:** one new pure engine helper, one
-  new read-only field on an existing endpoint (or a small new read endpoint), one card sentence; no schema,
-  no config key, no on-disk change, no default flipped. A test builds a synthetic multi-night library with
-  one deliberately-soft night and pins that it is flagged, that a normal latest night is silent, and that a
-  library with too little history says nothing.
-
 - **✅ SLICES (a)+(c) SHIPPED (Builder, v0.343.0, branch `claude/sweet-babbage-l67sz2`) — ~~"Your year under
   the stars": a year-bounded recap of a season of imaging.~~** Built as filed, as composition over the night
   fold the Dashboard heatmap already pays for. Slice (b) — the best-of-year thumbnail and the share/caption
@@ -8379,6 +8331,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.368.0** — Friendliness + autonomy (PRIORITY 3/2): **"Was last night off for you?" — the newest night's star size against the owner's own usual, so dew / a wrong focus / a bad-seeing night is caught the morning after instead of weeks later in a mushy stack.** The app only ever trended FWHM *within* a session (`session_recap.focus_trend`, early third vs late third), which is structurally blind to a night that was soft from the first sub. New pure `activity_calendar.off_night(nights)` sits beside `sharpest_night` and reads only what `finalize_calendar` already folded — the Dashboard heatmap's cached per-night median FWHM — so it costs no extra library walk and shares one definition of "that night's star size". Silent unless the latest night is ≥1.30× the **median of the per-night medians** of ≥4 *earlier* qualifying nights, and never a diagnosis (seeing is not a fault: it names causes and asks the owner to look). Self-hiding `OffNightCard` in the Dashboard's existing **Recent** group beside `LastNightCard`, on the shared `["activity-calendar"]` key. Slice (b), the season-long sparkline, deliberately not built. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.367.1** — Stacking-engine hardening (PRIORITY 1 current focus), the traced-but-unreachable batch under "Bugs" drained in one pass, each with a fail-before regression in the new `tests/test_engine_defensive_guards.py`: `align.py`'s sub-pixel cap rewritten as `not (abs(dy) <= CAP and abs(dx) <= CAP)` at **both** sites, so a NaN shift reads as "too large" instead of slipping through every comparison and letting `nd_shift` wipe the frame; `weighting.py`'s FWHM ratio computed in `np.float64` so a pathological `fwhm_px` saturates to the 1.0 the formula already wants rather than raising `OverflowError` and sinking the run; `reference.py::pick_central_frame` filtering on `math.isfinite` to match `pointings.py`, so a NaN centre can't be picked as the whole stack's reference; `storage.py::prune_stack_runs`'s two closes nested like `get_storage`'s; and `solve/runner.py`'s "so it stops being re-offered" comment corrected to what the branch actually does (`build_solve_arglist` deliberately keeps offering a `solve_failed:` frame, which is right — an unreadable sidecar is usually transient). `align.py::extract_reference_patch`'s all-NaN fallback was found **already fixed** and struck. No behaviour change on any reachable input.
 - **v0.367.0** — Image quality (PRIORITY 4) + calibration autonomy (PRIORITY 2): **repair the sensor's broken photosites from the master dark, in the raw Bayer domain, instead of relying only on the blind post-debayer local-median filter.** New pure `seestack/calibrate/defects.py` — `find_sensor_defects` measures each **CFA phase** against its own local median (so amp glow, a gradient and a per-phase offset all flag zero) and refuses any candidate set past 2 % of the sensor; `DefectMap` precomputes the same-phase neighbour gather once at load so the per-frame cost scales with the *defects*, not the canvas. `CalibrationMasters.apply_raw` repairs after the pedestal subtract and before the flat divide, so a hot site is erased while it is still one pixel and **a star can never be touched** — the map is measured on the dark. `StackOptions.repair_sensor_defects` is **off by default** and off measures nothing (§9); `DEFECTPX` → `sensor_defects` → one History line when it did something. Still open: validate the map's population on a real Seestar dark before anyone proposes defaulting it on. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.366.1** — Autonomy + friendliness (PRIORITY 2–3): **the "you already have darks" answer reaches the screen where the gap is actually noticed.** `_uncalibrated_advice` (the History Info panel's "why did this come out uncalibrated?" line) was silent in exactly the beginner case — no usable master in the library at all — because `diagnose_uncalibrated` only explains a *near-miss* master. It now falls back to `calibration.incoming_calibration_advice`, which names the frames sitting in `incoming/` ("You already have 40 dark frames in your incoming folder (“MyDarks”)"). The folder walk is the shared `cached_incoming_folders`, run only when there is no master-derived advice; `folder_as_master` shapes a discovered folder like a registry entry so "would this cover my subs?" is answered by the same `existing_master_like` that answers "does a master I own cover them?" — one definition, so the advice can't send anyone off to build a 30s dark for 10s subs, and a folder already built into a master says nothing. Entry in [`SHIPPED.md`](SHIPPED.md).

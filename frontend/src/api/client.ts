@@ -892,6 +892,22 @@ export interface ActivityCalendar {
   // "Your best night" — the window's sharpest night, or null/absent when too
   // little was measured to name one honestly (or on an older backend).
   sharpest_night?: NightActivity | null;
+  // "Was last night off for you?" — present only when the most recent measured
+  // night's stars came out materially fatter than the owner's own usual. Null on
+  // a normal night, on a library with too little history, and on an older
+  // backend — all of which read the same way: the card says nothing.
+  off_night?: OffNight | null;
+}
+
+export interface OffNight {
+  level: "fatter" | "much_fatter";
+  label: string;
+  text: string;
+  night: string; // ISO date of the night being reported
+  baseline_nights: number;
+  ratio: number;
+  median_fwhm_px: number;
+  baseline_fwhm_px: number;
 }
 
 export interface SummaryTarget {

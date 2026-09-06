@@ -14,6 +14,119 @@ Newest first.
 
 ---
 
+## v0.368.0 — 2026-09-06 — "Was last night off for you?": activity_calendar.off_night + OffNightCard
+
+**Friendliness + autonomy (PRIORITY 3/2) — slice (a) of the Scout's filed entry, built the same day it was
+filed, with one change of shape that made it free.**
+
+**The gap, and why the app was blind to it.** Star size is already trended *within* one session —
+`session_recap.focus_trend`, early third vs late third, rendered as the Target page's "Focus & sharpness"
+card. That catches focus **drifting away** over a night, and is structurally blind to a night that was soft
+from the very first sub: dew that formed before the first frame, a focus left wrong from last time, or simply
+a night of poor seeing. Such a night reads as perfectly `steady` there, and the owner finds out weeks later
+when a stack comes out mushy. Nothing compared a night against the owner's *own* history — the only
+cross-target baseline that existed was `qc/sky_quality.py`'s cloud/transparency trend, which is about sky, not
+about the kit.
+
+**Built on the fold that already exists, not on a second library walk.** The entry proposed a new engine
+helper folding every accepted frame's `fwhm_px` by night across `library.iter_targets()`. That walk is already
+paid for: `_collect_night_acc` opens every project and reads every accepted frame row for the Dashboard
+heatmap, and since "your best night" it already carries each night's **median FWHM** and measured count —
+cached at the accumulator level. So `off_night(nights)` sits beside `sharpest_night` in
+`seestack/activity_calendar.py` and reads only what `finalize_calendar` already computed: no extra open, no
+extra query, and one definition of "that night's star size" shared with the heatmap and the best-night card.
+
+**Silent rather than wrong, in five ways** — the whole risk of a feature like this is crying wolf:
+a night needs `SHARPEST_MIN_MEASURED` measured subs to count on *either* side; there must be
+`OFF_NIGHT_MIN_BASELINE_NIGHTS` (4) **earlier** qualifying nights, so the latest night is never its own
+yardstick; the baseline is the **median of the per-night medians**, so one glorious or one dreadful night
+can't move "usual" (pinned by a test that plants a 9 px night in the history); the bar is 1.30× (1.60× for the
+stronger wording), well past ordinary night-to-night seeing variation; and it speaks **only** when the latest
+night is materially *fatter* — a normal night says nothing, and the sharp end is "your best night"'s job.
+
+**Never a diagnosis.** Seeing is not a fault, so the copy names the causes in likelihood order and asks the
+owner to look: *"That is often dew on the lens or a little focus drift, though it can just be poor seeing.
+Worth a quick look before your next session."* A test pins that "poor seeing" and a check-don't-blame verb
+survive any future copy edit.
+
+**The window is the baseline, deliberately.** `finalize_calendar` is trailing-window (12 months on the
+Dashboard), so "your usual" means the way the kit behaves *now* rather than two years ago on a different
+focuser — the same reasoning that already scopes "your best night", and pinned by its own test.
+
+**Where it renders.** A self-hiding `OffNightCard` inside the Dashboard's existing **Recent** insight group,
+beside `LastNightCard` — the same glance, and no new always-on banner (§1's standing IA rule). It shares the
+`["activity-calendar"]` query key with the heatmap and `BestNightCard`, so no second request. The card carries
+the sentence *and* the two numbers behind it (`4.3 px that night vs 3.0 px across your previous 9 measured
+nights`), so the claim is checkable rather than asserted.
+
+**Upgrade-safe (§9):** one additive defaulted field on an engine dataclass, one additive nullable response key
+(`off_night`), one new component. No config key, no schema, no on-disk change, no default flipped, no existing
+response shape touched. An older frontend ignores the field; an older backend omitting it renders nothing,
+which is the same as a normal night.
+
+**Slice (b) — a per-night median-FWHM sparkline for slow focus creep across a season — is deliberately not
+built.** The entry says ship (a) first because it stands alone, and a trend chart is a different card.
+
+**Tests (+11 Python, +6 vitest).** `tests/test_activity_calendar.py` (+9): the soft night flagged with its
+numbers and its copy, the stronger wording above 1.60×, a normal night silent, a *sharper* night silent, three
+earlier nights (one short) silent, a thinly-measured latest night not judged, one dreadful night not becoming
+the usual, the window bound, an all-unmeasured library silent, and the latest night found from an unordered
+list. `tests/webapp/test_activity_calendar.py` (+2): the endpoint serving the whole read, and `null` on a
+library without enough history. `OffNightCard.test.tsx` (+6): the sentence, the checkable numbers, the
+singular baseline, "poor seeing" present, and all three silences (normal night, older backend, failed fetch).
+
+**The entry as filed (cut verbatim from `IMPROVEMENTS.md`):**
+
+- **⭐ NEW BEGINNER FEATURE (Scout 2026-09-06) — "Was last night off for you?": a whole-history star-size
+  baseline that catches a dew / focus / bad-seeing night while you can still do something about it.**
+  *(Pillar: friendliness + trust / autonomy — PRIORITY 3/2. Size: M. Clears the beginner bar: computed
+  automatically from data the app already measures, one plain-language sentence, no pro/niche knobs.)*
+
+  **The gap, grep-checked before filing.** The app measures each accepted sub's star size (`fwhm_px`,
+  `seestack/io/project.py:110`, and the per-target `median_fwhm()` at `:1168`) and compares subs *within* a
+  target for grading (`qc/grading.py`), but there is **no cross-target, whole-history baseline of the owner's
+  own typical star size**, and nothing that says "this night was worse than your usual". Grepped
+  `seestack/`, `webapp/`, `frontend/src/` and both `docs/*.md` for `focus|dew|your usual|typical fwhm|
+  baseline.*fwhm|anomal|check.*focus` — the only baseline that exists is `qc/sky_quality.py`'s **cloud /
+  transparency** rate-vs-nights trend (`baseline = _median([rates[n] for n in nights])`, `:177`), which is
+  about *sky*, not *equipment*. So a beginner whose Seestar dewed up, drifted out of focus, or shot through
+  poor seeing has no signal until they later notice a target's stack is soft — by which time the night is
+  gone. Catching it *the morning after* (or mid-run) is exactly the "help me on my next clear night"
+  proposition.
+
+  **What it is (one read-only helper + one card).** A pure engine helper (mirror `sky_quality.py`'s shape:
+  fold every accepted frame's `fwhm_px` grouped by night across **all** targets via `library.iter_targets()`
+  into a robust whole-history baseline — median of per-night medians, plus a spread) and a comparison of the
+  **most recent night** against it. When the latest night's median FWHM is materially fatter than the
+  owner's usual (e.g. ≥ ~30–40 %, or > ~2 robust deviations — pick the threshold from real spread, ship it as
+  a named constant), surface one plain sentence on the Dashboard / "Last night" surface: *"Last night's stars
+  were about 45 % fatter than your usual — often dew on the lens, focus drift, or just poor seeing. Worth a
+  quick check before your next session."* Silent when the latest night is normal, and silent until there is
+  enough history to have a "usual" (reuse a `MIN_NIGHTS`-style floor, same reasoning as `sharpest_night`).
+
+  **Why it clears the bar and serves §1.** Adds no expert surface — it is pure recall of what the app already
+  measured, framed as a friendly heads-up (priority 3) that removes a decision the beginner didn't know they
+  had (priority 2: the app noticed the off night for you). Sane default: computed from stored data, no
+  setting. Honest empty/early state: says nothing until it has a baseline, and never scolds a normal night.
+
+  **Slicing for one Builder run.** Slice (a): the engine helper + baseline + latest-night verdict + a bare
+  sentence on the existing "Last night" card (no new nav, no new always-on banner — fold it into the card
+  that already reports the last session, per the standing IA rule). Slice (b, optional follow-on): a tiny
+  sparkline of per-night median FWHM so a *trend* (slow focus creep across a season) is visible, not just the
+  last night. Ship (a) first; it stands alone.
+
+  **Care / don't-overreach.** Seeing varies night to night for reasons the owner can't fix, so the copy must
+  say "often … or just poor seeing" and never assert a fault — it's a nudge to *check*, not a diagnosis. Use
+  a robust baseline (median of per-night medians, not a mean) so one great or one terrible night doesn't move
+  "usual". Compare like with like where cheap — the S30's own frames only (the baseline is per-install, so
+  this is automatic on the owner's box). **Upgrade-safe by construction:** one new pure engine helper, one
+  new read-only field on an existing endpoint (or a small new read endpoint), one card sentence; no schema,
+  no config key, no on-disk change, no default flipped. A test builds a synthetic multi-night library with
+  one deliberately-soft night and pins that it is flagged, that a normal latest night is silent, and that a
+  library with too little history says nothing.
+
+---
+
 ## v0.367.0 — 2026-09-06 — Repair the sensor's broken photosites from the master dark: seestack/calibrate/defects.py + repair_sensor_defects
 
 **Image quality (PRIORITY 4) + a step toward calibration autonomy (PRIORITY 2), built from the filed shape

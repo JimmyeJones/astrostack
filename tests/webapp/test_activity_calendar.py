@@ -268,3 +268,59 @@ def test_activity_calendar_serialises_the_sharpest_night_it_finds(
     assert best["n_frames"] == 3
     assert best["targets"] == ["NGC_7000"]
     assert best["exposure_s"] == 90.0
+
+
+def test_activity_calendar_serves_the_off_night_read(
+    client, built_library, monkeypatch,
+):
+    """"Was last night off for you?" reaches the wire on the same cached walk.
+
+    The fixture library has three subs per target and only two nights to give, so
+    the qualifying floors are lowered here to exercise the serialisation; the
+    thresholds themselves are covered directly in ``tests/test_activity_calendar.py``.
+    """
+    import seestack.activity_calendar as ac
+    from seestack.io.library import Library
+
+    monkeypatch.setattr(ac, "SHARPEST_MIN_MEASURED", 3)
+    monkeypatch.setattr(ac, "OFF_NIGHT_MIN_BASELINE_NIGHTS", 1)
+
+    now = datetime.now(timezone.utc)
+    day_a = (now - timedelta(days=9)).date()
+    day_b = (now - timedelta(days=6)).date()
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _set_night_with_fwhm(lib, "M_42", day_a, 22, 60.0, fwhm_px=3.0)
+        _set_night_with_fwhm(lib, "NGC_7000", day_b, 21, 30.0, fwhm_px=5.1)
+    finally:
+        lib.close()
+
+    off = client.get("/api/activity-calendar").json()["off_night"]
+    assert off is not None
+    assert off["night"] == day_b.isoformat()
+    assert off["level"] == "much_fatter"
+    assert off["baseline_nights"] == 1
+    assert off["median_fwhm_px"] == 5.1
+    assert off["baseline_fwhm_px"] == 3.0
+    assert off["ratio"] == 1.7
+    assert "fatter" in off["text"]
+
+
+def test_activity_calendar_off_night_is_null_without_enough_history(
+    client, built_library,
+):
+    """The ordinary case, and the one that matters most: a library that can't
+    support the claim says nothing rather than guessing."""
+    from seestack.io.library import Library
+
+    now = datetime.now(timezone.utc)
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _set_night_with_fwhm(lib, "M_42", (now - timedelta(days=9)).date(),
+                             22, 60.0, fwhm_px=3.0)
+        _set_night_with_fwhm(lib, "NGC_7000", (now - timedelta(days=6)).date(),
+                             21, 30.0, fwhm_px=9.0)
+    finally:
+        lib.close()
+
+    assert client.get("/api/activity-calendar").json()["off_night"] is None
