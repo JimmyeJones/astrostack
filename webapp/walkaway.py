@@ -124,6 +124,56 @@ def pinned_stack_options(
     return out
 
 
+def stack_defaults_delta(
+    posted: Mapping[str, Any],
+    unsaved: Mapping[str, Any],
+    always_persist: Sequence[str] = (),
+) -> dict[str, Any]:
+    """The part of a *Save as defaults* post worth storing: what the user
+    actually **changed**, rather than a snapshot of the whole form.
+
+    The Stack form seeds itself from every descriptor key and posts all of them
+    back, so the blob a target saved in July pins every option that existed in
+    July — including a string of ``false``\\ s for checkboxes nobody opened. Since
+    the blob wins over ``default_stack_options`` in both readers, a switch the
+    owner later flips *globally* never reaches that target again. Persisting only
+    the differences fixes that at the source: an option the user never touched
+    stays absent, so it keeps following the global setting the way an unsaved
+    target does. :func:`pinned_stack_options` is the read-only half of the same
+    fact and shares :func:`_same_option_value` with this, so what we decline to
+    store and what we report as *pinned* cannot drift.
+
+    ``unsaved`` is what the target would be **stacked** with if it had never
+    pressed Save — the global blob filled out with each descriptor's own default.
+    Deliberately *not* the value the form was seeded with: the Stack form seeds a
+    never-configured target's ``auto_reject`` **on** without that being stored
+    anywhere, and dropping a key on the strength of a form-only seed would change
+    what the target stacks with, which is the one thing this must never do.
+
+    ``always_persist`` names keys whose mere **presence** is the decision, so
+    matching the default is not the same as saying nothing:
+    :data:`AUTO_REJECT_OPT_KEYS` and ``drizzle_reject`` gate
+    :func:`apply_unattended_rejection`, and ``sigma_clip``'s own engine default
+    is ``True`` — so dropping a saved ``sigma_clip: true`` would hand the
+    unattended chain a target that "never chose", letting it pick the method
+    instead. That is exactly the behaviour ``auto_reject_on_unattended``
+    (v0.337.0) exists to make **opt-in**, and it must not arrive by the side door.
+
+    Keys absent from ``unsaved`` (a calibration-master pick, an option from a
+    newer version) are always kept: with nothing to compare against, the only
+    safe answer is to remember what the user posted.
+    """
+    keep = set(always_persist)
+    out: dict[str, Any] = {}
+    for key, value in posted.items():
+        if key in keep or key not in unsaved:
+            out[key] = value
+            continue
+        if not _same_option_value(value, unsaved[key]):
+            out[key] = value
+    return out
+
+
 def rejection_choice_expressed(opts: Mapping[str, Any]) -> bool:
     """Did the user pick a rejection method for this stack?
 

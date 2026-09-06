@@ -406,21 +406,42 @@ def test_the_switch_reaches_the_stack_form_a_target_would_be_stacked_with(
 
 def test_a_target_that_saved_its_own_defaults_is_named_not_glossed_over(
         built_library, client, data_root):
-    """The honesty guard on the on-state's sentence. "Save as defaults" persists
-    the *whole* Stack form, so every target saved before this option was switched
-    on carries an explicit ``false`` — and a target's own blob wins over the
-    global one in both readers. Claiming "every stack" there would be exactly the
-    confident untruth the census's silences exist to avoid."""
+    """The honesty guard on the on-state's sentence. A target saved before this
+    option was switched on carries an explicit ``false`` in its blob — and a
+    target's own blob wins over the global one in both readers. Claiming "every
+    stack" there would be exactly the confident untruth the census's silences
+    exist to avoid.
+
+    The pinned-off blob is written the way an *older version* wrote it — a full
+    snapshot of the Stack form (v0.374.0 stores only what the user changed, so
+    saving a ``false`` that already matches the global switch pins nothing, and
+    the target correctly follows a later flip). That is the shape a live install
+    upgraded in place actually carries, which is the case this sentence has to
+    stay honest about."""
+    import json as _json
+
+    from seestack.io.library import Library
+    from webapp.schemas import STACK_DEFAULTS_META_KEY
+
     root = _library_root(data_root)
     dark = _synthetic_dark()
     dark[10, 20] += 900.0
     _register(root, "dark", dark)
     safes = [t["safe_name"] for t in client.get("/api/targets").json()]
     assert len(safes) >= 2, "fixture should give more than one target"
-    # One target pins it off (what the form saves today), one pins it on, and
-    # any remaining target saved nothing at all.
-    client.put(f"/api/targets/{safes[0]}/stack-defaults",
-               json={"repair_sensor_defects": False})
+    # One target pins it off (an older version's whole-form snapshot), one pins
+    # it on, and any remaining target saved nothing at all.
+    lib = Library.open_or_create(_library_root(Path(data_root)))
+    try:
+        proj = lib.open_target(safes[0])
+        try:
+            proj.set_meta(STACK_DEFAULTS_META_KEY,
+                          _json.dumps({"repair_sensor_defects": False,
+                                       "sigma_kappa": 3.0}))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
     client.put(f"/api/targets/{safes[1]}/stack-defaults",
                json={"repair_sensor_defects": True})
 

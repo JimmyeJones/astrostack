@@ -221,6 +221,24 @@ def _merge_stack_defaults(settings: Any,
     return merged
 
 
+def _unsaved_stack_options(settings: Any) -> dict[str, Any]:
+    """What a target with **no** saved blob is actually *stacked* with: the
+    global ``default_stack_options``, filled out with each descriptor's own
+    default for everything it doesn't name.
+
+    Deliberately **not** :func:`_merge_stack_defaults`'s never-saved seed, which
+    also turns the beginner ``auto_reject`` on *in the form*: that seed is never
+    stored and never reaches a stack, so treating it as already-in-force would
+    let :func:`~webapp.walkaway.stack_defaults_delta` drop a key that does change
+    what the target stacks with. This is the honest baseline for the one question
+    the delta asks — "would leaving this out change anything?"
+    """
+    merged = dict(settings.default_stack_options)
+    for fld in stack_option_fields():
+        merged.setdefault(fld.key, fld.default)
+    return merged
+
+
 @router.get("/api/targets/{safe}/stack-defaults")
 def get_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
     from webapp.walkaway import parse_saved_stack_defaults
@@ -264,6 +282,31 @@ def _coerce_master_id(value: Any) -> int | None:
 
 @router.put("/api/targets/{safe}/stack-defaults")
 def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
+    """Remember this target's stack options — **what the user changed**, not a
+    snapshot of the whole form.
+
+    The form posts every descriptor key it was seeded with, so storing the post
+    verbatim pinned a value for every option that existed on the day Save was
+    pressed; the blob then beat ``default_stack_options`` in both readers, and a
+    switch flipped globally afterwards never reached that target again (the
+    ``/stack-defaults/pinned`` note, v0.372.0, is the surface that *says* so).
+    So the post is still validated in full — a saved default that would fail
+    every future stack must be caught here, and it can only be judged as a whole
+    — and only then reduced to the keys that would change what this target
+    stacks with. Everything the user left alone stays absent and keeps following
+    the global setting, exactly as it does for a target that never pressed Save.
+
+    **Existing blobs are not touched or migrated** (§9): a full snapshot saved by
+    an older version keeps every key it has, and keeps winning, until the owner
+    saves that form again — at which point they see the same values they are
+    looking at, minus the ones they never chose.
+    """
+    from webapp.walkaway import (
+        AUTO_REJECT_OPT_KEYS,
+        stack_defaults_delta,
+    )
+
+    settings = deps.get_settings(request)
     valid = {fld.key for fld in stack_option_fields()}
     # A cleared numeric field posts ``null`` ("use the default"); never persist it
     # as a saved default, or it would flow back into every future stack (including
@@ -275,10 +318,19 @@ def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dic
     except ValueError as exc:
         raise HTTPException(status_code=400,
                             detail=f"invalid stack option: {exc}") from exc
+    # Validated as a whole above; stored as the difference from what this target
+    # would stack with anyway, so an option the user never touched keeps
+    # following the global default instead of being frozen at today's value.
+    # The rejection keys are kept whatever they hold: the unattended chain reads
+    # their *presence*, not their value (see ``stack_defaults_delta``).
+    clean = stack_defaults_delta(
+        clean, _unsaved_stack_options(settings),
+        always_persist=(*AUTO_REJECT_OPT_KEYS, "drizzle_reject"))
     # Also remember the calibration-master picks so the form pre-fills them next
     # time (they used to be silently dropped, leaving the selects empty). Only
     # persist a key the user actually posted, coerced to a clean int id (or
-    # ``None`` to clear a previously-saved pick).
+    # ``None`` to clear a previously-saved pick). They have no global default to
+    # follow, so they are stored as posted rather than diffed.
     for key in _MASTER_ID_KEYS:
         if key in body:
             clean[key] = _coerce_master_id(body[key])

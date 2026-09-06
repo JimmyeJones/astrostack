@@ -1055,36 +1055,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **🟡 PARTLY SHIPPED — SHAPE (a), "say it", IS v0.372.0 (Builder 2026-09-06, branch
-  `claude/sweet-babbage-owcg4d`); shapes (b) and (c) are still open, and the care note below is why —
-  "Save as defaults" persists the WHOLE Stack form, so an option the owner later flips globally never
-  reaches a target that once pressed Save.** *(Pillar: autonomy + trust — PRIORITY 2/3. Confidence:
-  verified — the mechanism and the fix are both pinned by tests. Full write-up of the shipped half in
-  [`SHIPPED.md`](SHIPPED.md); the mechanism is restated here only as far as (b)/(c) need it.)*
-  **The mechanism.** `get_stack_defaults` (`webapp/routers/stack.py`) fills **every** descriptor key
-  before answering, the Stack form seeds its whole state from that, the *Save as defaults* button posts
-  that whole state, and `put_stack_defaults` persists every non-`None` valid key. So a target saved in,
-  say, July carries an explicit value for **every option that existed in July** — including a string of
-  `false`s for checkboxes the user never opened the advanced group to look at. A target's saved blob
-  then wins over the global `default_stack_options` in *both* readers (the form seed and
-  `pipeline._stack_target(auto=True)`'s merge).
-  **What v0.372.0 removed: the silence.** `walkaway.pinned_stack_options` +
-  `GET /api/targets/{safe}/stack-defaults/pinned` + the self-hiding note on the Stack form now name
-  every saved option that differs from what the form *would* have seeded had the target never saved,
-  and offer a one-click "put my global settings back in the form". Nothing about the merge changed.
-  **Still open, in order of safety.** (b) *Save the delta:* have `put_stack_defaults` persist only the
-  keys that differ from the merged seed the form was given, so a saved blob means "what I changed"
-  rather than "a snapshot of the app on the day I pressed the button". **Care — this is why (b) is not
-  a quick fix:** it changes what an existing blob means only for *future* saves (old blobs stay full
-  snapshots and must keep working byte-for-byte), and "differs from the seed" has to be computed
-  against the *seed the form was actually given* — which v0.372.0's `_merge_stack_defaults(settings,
-  None)` now names in one place, so (b) has a baseline to build on rather than a second definition to
-  invent. Do not migrate or rewrite existing blobs. (c) A one-click "bring this target's saved settings
-  up to date" that drops the keys the user never deliberately changed — note v0.372.0 deliberately
-  stopped short of this: its button only *fills the form*, leaving the Save button as the reviewable
-  moment, because dropping keys from a stored blob is not reversible from the UI. **Do not** simply
-  make the global win — a target's saved defaults beating the global is the contract the Save button's
-  own confirmation promises.
+- ✅ **v0.374.0 — "Save as defaults" stores what you changed, not a snapshot of the form**
+  (`walkaway.stack_defaults_delta` + `routers/stack._unsaved_stack_options`). Closes shapes (b) *and*
+  (c) of the v0.372.0 entry — a switch the owner flips globally now reaches a target that once pressed
+  Save, existing full-snapshot blobs are left alone, and the rejection keys stay pinned by *presence*
+  so `auto_reject_on_unattended` remains the only way the chain overrules a saved method. Full entry in
+  [`SHIPPED.md`](SHIPPED.md).
+  ✅ **v0.374.1** — and the note's own sentence, which v0.374.0 had just made an overstatement, is scoped
+  to the rows it names (`Stack.tsx`).
 
 - **⚪ CHECKED, NOT A GAP — recorded so the next run doesn't "fix" it (Builder 2026-09-04, while shipping
   v0.346.0).** The stationary-streak guard needs its clustered frames to span an hour, which a beginner's
