@@ -254,6 +254,21 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   - `webapp/watcher.py:81` (`self._stable &= seen`) — a one-poll transient `stat()` failure on an already-stable
     file drops it from `_stable`, re-arms it, and re-fires `on_batch_ready` a poll later. **Benign** — ingest dedup
     (`_dedup_key`) prevents any double DB row; cosmetic/perf only.
+  - **(Scout 2026-09-06, traced not reproduced) the one-click discover→build calibration path can build a
+    contaminated master from a *mixed* folder.** `seestack/calibrate/discover.classify_folder` confirms a folder
+    is calibration frames of one kind by **sampling only `SAMPLE_HEADERS` (4)** evenly-spaced headers, but
+    `webapp/routers/calibration.build_master_from_incoming` → `pipeline.submit_build_master` →
+    `seestack/calibrate/masters.build_master` then combines **every** shape-matching FITS in `source_dir`
+    (`masters.py:245-263`) with **no per-frame filter to the requested kind**. So a folder whose 4 sampled frames
+    are all darks but that also holds lights (or darks of a second exposure) builds a master from the whole mixed
+    set. **Not filed as a live bug:** (1) it needs an unusual folder — MIN_FRAMES=5 and all 4 evenly-spaced
+    samples must read as one kind; (2) there is already a surface — `build_master` tallies each combined frame's
+    own `IMAGETYP` into `header_kinds` → the v0.356.0 `header_kind_note`, so the user is *told* "built from 60
+    dark, 10 light"; and (3) a manual build from a folder the user chose is *meant* to take all frames, so a blind
+    filter would be a behaviour change on that path. **If ever hardened:** filter to the requested kind only on the
+    *discover-driven* build (not the manual one), reusing `frame_kind_from_header`, and skip a frame that declares
+    a different slot — a light in a "dark" build is the one case worth dropping. Low value until the owner reports
+    a mixed capture folder. (S, autonomy/trust.)
 
 > **SCOUT ADVERSARIAL QA — stacking-engine + adjacent re-audit traced CLEAN; the two bugs above are in ingest /
 > render, not the stacking math (Scout 2026-08-13, branch `claude/focused-keller-zi700s`).** Baseline: the
@@ -5201,6 +5216,54 @@ problems. Dogfood it every big-picture run and fix root causes.
   even after the detector improves.
 
 ### Features that serve real workflows
+
+- **⭐ NEW BEGINNER FEATURE (Scout 2026-09-06) — "Was last night off for you?": a whole-history star-size
+  baseline that catches a dew / focus / bad-seeing night while you can still do something about it.**
+  *(Pillar: friendliness + trust / autonomy — PRIORITY 3/2. Size: M. Clears the beginner bar: computed
+  automatically from data the app already measures, one plain-language sentence, no pro/niche knobs.)*
+
+  **The gap, grep-checked before filing.** The app measures each accepted sub's star size (`fwhm_px`,
+  `seestack/io/project.py:110`, and the per-target `median_fwhm()` at `:1168`) and compares subs *within* a
+  target for grading (`qc/grading.py`), but there is **no cross-target, whole-history baseline of the owner's
+  own typical star size**, and nothing that says "this night was worse than your usual". Grepped
+  `seestack/`, `webapp/`, `frontend/src/` and both `docs/*.md` for `focus|dew|your usual|typical fwhm|
+  baseline.*fwhm|anomal|check.*focus` — the only baseline that exists is `qc/sky_quality.py`'s **cloud /
+  transparency** rate-vs-nights trend (`baseline = _median([rates[n] for n in nights])`, `:177`), which is
+  about *sky*, not *equipment*. So a beginner whose Seestar dewed up, drifted out of focus, or shot through
+  poor seeing has no signal until they later notice a target's stack is soft — by which time the night is
+  gone. Catching it *the morning after* (or mid-run) is exactly the "help me on my next clear night"
+  proposition.
+
+  **What it is (one read-only helper + one card).** A pure engine helper (mirror `sky_quality.py`'s shape:
+  fold every accepted frame's `fwhm_px` grouped by night across **all** targets via `library.iter_targets()`
+  into a robust whole-history baseline — median of per-night medians, plus a spread) and a comparison of the
+  **most recent night** against it. When the latest night's median FWHM is materially fatter than the
+  owner's usual (e.g. ≥ ~30–40 %, or > ~2 robust deviations — pick the threshold from real spread, ship it as
+  a named constant), surface one plain sentence on the Dashboard / "Last night" surface: *"Last night's stars
+  were about 45 % fatter than your usual — often dew on the lens, focus drift, or just poor seeing. Worth a
+  quick check before your next session."* Silent when the latest night is normal, and silent until there is
+  enough history to have a "usual" (reuse a `MIN_NIGHTS`-style floor, same reasoning as `sharpest_night`).
+
+  **Why it clears the bar and serves §1.** Adds no expert surface — it is pure recall of what the app already
+  measured, framed as a friendly heads-up (priority 3) that removes a decision the beginner didn't know they
+  had (priority 2: the app noticed the off night for you). Sane default: computed from stored data, no
+  setting. Honest empty/early state: says nothing until it has a baseline, and never scolds a normal night.
+
+  **Slicing for one Builder run.** Slice (a): the engine helper + baseline + latest-night verdict + a bare
+  sentence on the existing "Last night" card (no new nav, no new always-on banner — fold it into the card
+  that already reports the last session, per the standing IA rule). Slice (b, optional follow-on): a tiny
+  sparkline of per-night median FWHM so a *trend* (slow focus creep across a season) is visible, not just the
+  last night. Ship (a) first; it stands alone.
+
+  **Care / don't-overreach.** Seeing varies night to night for reasons the owner can't fix, so the copy must
+  say "often … or just poor seeing" and never assert a fault — it's a nudge to *check*, not a diagnosis. Use
+  a robust baseline (median of per-night medians, not a mean) so one great or one terrible night doesn't move
+  "usual". Compare like with like where cheap — the S30's own frames only (the baseline is per-install, so
+  this is automatic on the owner's box). **Upgrade-safe by construction:** one new pure engine helper, one
+  new read-only field on an existing endpoint (or a small new read endpoint), one card sentence; no schema,
+  no config key, no on-disk change, no default flipped. A test builds a synthetic multi-night library with
+  one deliberately-soft night and pins that it is flagged, that a normal latest night is silent, and that a
+  library with too little history says nothing.
 
 - **✅ SLICES (a)+(c) SHIPPED (Builder, v0.343.0, branch `claude/sweet-babbage-l67sz2`) — ~~"Your year under
   the stars": a year-bounded recap of a season of imaging.~~** Built as filed, as composition over the night
