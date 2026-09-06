@@ -836,6 +836,64 @@ def _bias_match_confident(
     return dist <= _AUTO_BIND_BIAS_MAX_DIST
 
 
+def existing_master_like(
+    masters: list[dict[str, Any]], *, kind: str,
+    exposure_s: float | None, gain: float | None, sensor_temp_c: float | None,
+    width_px: int | None = None, height_px: int | None = None,
+) -> dict[str, Any] | None:
+    """A master already in the registry that covers these acquisition params.
+
+    Used by the "we found calibration frames in your incoming folder" offer to
+    say *"you already have one of these"* rather than inviting the owner to build
+    a second copy of a master they built last week. The bar is the same one the
+    **unattended binder** uses (:func:`auto_bind_master_ids`) — same exposure
+    gate for a dark, same gain/temperature distance for all three kinds, same
+    one-sided :func:`dims_conflict` — so a folder is only called "already
+    covered" when the app would genuinely reach for the existing master instead.
+
+    Returns the best such master, or ``None``. Never raises: a registry entry
+    with a junk field is skipped, not described.
+    """
+    kind = str(kind).lower()
+    if kind not in ("dark", "flat", "bias"):
+        return None
+    confident = {
+        "dark": _dark_match_confident, "flat": _flat_match_confident,
+        "bias": _bias_match_confident,
+    }[kind]
+    best: tuple[float, dict[str, Any]] | None = None
+    for m in masters:
+        if not m.get("exists", True) or str(m.get("kind", "")).lower() != kind:
+            continue
+        if dims_conflict(m, width_px, height_px):
+            continue
+        if not confident(m, gain=gain, sensor_temp_c=sensor_temp_c):
+            continue
+        if kind == "dark" and not _exposure_close(m, exposure_s):
+            continue
+        dist = _match_distance(m, exposure_s=exposure_s, gain=gain,
+                               sensor_temp_c=sensor_temp_c, kind=kind)
+        if best is None or dist < best[0]:
+            best = (dist, m)
+    return best[1] if best else None
+
+
+def _exposure_close(master: dict[str, Any], exposure_s: float | None) -> bool:
+    """Whether a dark's exposure is within the unattended binder's tolerance.
+
+    One-sided like every other gate here: an exposure unknown on either side
+    can't be *disproved*, so it doesn't rule the master out.
+    """
+    m_exp = master.get("exposure_s")
+    if not exposure_s or not m_exp:
+        return True
+    try:
+        return abs(float(m_exp) - float(exposure_s)) / float(exposure_s) \
+            <= _AUTO_BIND_EXP_MISMATCH_FRAC
+    except (TypeError, ValueError, ZeroDivisionError):
+        return True
+
+
 def _wrong_size_advice(
     masters: list[dict[str, Any]], *, width_px: int | None, height_px: int | None,
 ) -> str | None:

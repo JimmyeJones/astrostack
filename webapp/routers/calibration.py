@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from webapp import calibration, deps, pipeline
+from seestack.calibrate import discover
 from seestack.calibrate.masters import VALID_KINDS, VALID_METHODS
 
 router = APIRouter(tags=["calibration"])
@@ -221,6 +222,101 @@ def _target_acquisition(lib: Any, entry: Any) -> dict[str, Any] | None:
         "bayer_pattern": calibration.modal_bayer(
             [f.bayer_pattern for f in frames]),
     }
+
+
+# Discovery walks ``incoming/`` and reads a FITS header per folder, so — unlike
+# the registry-only master list — it costs NAS round-trips. Cache the *walk* (the
+# expensive half) on the app; "do I already have a master for this?" is registry
+# arithmetic and is recomputed fresh on every request, so building a master
+# updates the offer immediately without waiting for the TTL.
+_INCOMING_CACHE_TTL_S = 120.0
+
+
+@router.get("/api/calibration/incoming")
+def calibration_incoming(request: Request) -> dict[str, Any]:
+    """"You already have darks — shall I build the master?"
+
+    Lists the folders under ``incoming/`` whose **frames' own ``IMAGETYP`` cards**
+    say they are darks, flats or biases, so a beginner who has never heard of a
+    master dark can build one in a click instead of learning what calibration is
+    and finding the folder themselves.
+
+    Nothing is inferred from a folder's *name*: a folder whose frames don't
+    declare a kind is not offered at all (see
+    :mod:`seestack.calibrate.discover`). ``incoming/`` is read-only here — a
+    directory listing and a header read, nothing else — and this endpoint only
+    ever *offers*; no master is built and none is applied until the owner asks.
+    """
+    settings = deps.get_settings(request)
+    root = str(settings.resolved_incoming_dir)
+
+    cache = getattr(request.app.state, "calibration_incoming_cache", None)
+    now = time.monotonic()
+    if cache and cache["root"] == root and (now - cache["at"]) < _INCOMING_CACHE_TTL_S:
+        folders = cache["folders"]
+    else:
+        folders = discover.find_calibration_folders(root)
+        request.app.state.calibration_incoming_cache = {
+            "root": root, "at": now, "folders": folders}
+
+    masters = calibration.list_masters(settings.resolved_library_root)
+    out = []
+    for f in folders:
+        have = calibration.existing_master_like(
+            masters, kind=f.kind, exposure_s=f.exposure_s, gain=f.gain,
+            sensor_temp_c=f.sensor_temp_c,
+            width_px=f.width_px, height_px=f.height_px,
+        )
+        out.append({
+            "id": f.id,
+            "name": f.folder_name,
+            "rel_path": f.rel_path,
+            "kind": f.kind,
+            "declared": dict(f.declared),
+            "n_frames": f.n_frames,
+            "n_sampled": f.n_sampled,
+            "exposure_s": f.exposure_s,
+            "gain": f.gain,
+            "sensor_temp_c": f.sensor_temp_c,
+            "width_px": f.width_px,
+            "height_px": f.height_px,
+            "suggested_name": discover.suggested_master_name(f),
+            # The master that already covers these frames, if any — so the offer
+            # says "you already have this one" instead of inviting a duplicate.
+            "have_master": (
+                {"id": int(have["id"]), "name": str(have.get("name", ""))}
+                if have else None
+            ),
+        })
+    return {"incoming_dir": root, "folders": out}
+
+
+@router.post("/api/calibration/incoming/{folder_id}/build")
+def build_master_from_incoming(folder_id: str, request: Request) -> dict[str, str]:
+    """Build a master from one discovered folder — the offer's one click.
+
+    The folder is re-discovered **server-side** from its id, exactly as the video
+    captures are: no filesystem path ever comes from the client, and a folder
+    that has stopped looking like calibration frames since the page loaded is a
+    404 rather than a build of whatever is there now.
+    """
+    settings = deps.get_settings(request)
+    jm = deps.get_job_manager(request)
+    found = discover.find_calibration_folder(
+        str(settings.resolved_incoming_dir), folder_id)
+    if found is None:
+        raise HTTPException(
+            status_code=404,
+            detail="That folder is no longer there, or its frames no longer "
+                   "say they are calibration frames.")
+    job = pipeline.submit_build_master(
+        settings, jm, kind=found.kind, source_dir=found.folder,
+        name=discover.suggested_master_name(found), method="median",
+    )
+    # The offer's "you already have one" flag is registry arithmetic recomputed
+    # per request, so it updates as soon as the build lands; the walk cache is
+    # left alone (the folder itself hasn't changed).
+    return {"job_id": job.id}
 
 
 @router.delete("/api/calibration/masters/{master_id}")

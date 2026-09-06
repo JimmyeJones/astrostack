@@ -2,7 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CalibrationView } from "./Calibration";
 import * as client from "../api/client";
 import type { CalibrationCoverage, CalibrationMaster } from "../api/client";
@@ -28,6 +28,15 @@ function renderView() {
     </MantineProvider>,
   );
 }
+
+// The "you already have darks" offer lives on this page but is its own query and
+// its own test file; stub it empty everywhere here so it self-hides and these
+// tests stay about the master list.
+beforeEach(() => {
+  vi.spyOn(client.api, "calibrationIncoming").mockResolvedValue({
+    incoming_dir: "/data/incoming", folders: [],
+  });
+});
 
 afterEach(() => vi.restoreAllMocks());
 
