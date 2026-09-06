@@ -18,6 +18,61 @@ is a queue.
 
 ---
 
+## 2026-09-06 — Builder run (branch `claude/sweet-babbage-d5819j`): a clean dogfood, and the one detail op with no proxy term turns out not to need one
+
+**The run.** Baseline green before any change (**4,991 passed / 2 skipped**, full
+suite headless, 18:31). Shipped **v0.374.0** (*Save as defaults* stores the delta,
+closing shapes (b) and (c) of the v0.372.0 entry) and **v0.374.1** (the note's own
+sentence, scoped). Both write-ups are in [`SHIPPED.md`](SHIPPED.md).
+
+**Dogfood pass — CLEAN (`scripts/agent-dogfood.sh` at v0.374.0: real app, bundled
+M42 sample ingested + stacked + auto-edited, Playwright at 1440 px and 420 px).**
+Probe: *nothing overflowing, no console errors.* Tallest page on a phone is still
+the Target page at **3,040 px** (the sixth measurement in this series; 3,014 px at
+v0.338.1, 14,584 px before the IA slices), with `/life-list` a close second at
+3,008 px — so the standing "measure before opening an IA slice" advice in
+AGENTS.md §1 still says **don't**. Read the Dashboard, Target and Editor
+screenshots rather than only the numbers: the Target page's one `NoticeBoard`, the
+hero, the frames table and the object-info card all render as designed, and the
+editor's seven-op Auto pipeline, its measured-cues note and its export panel are
+all coherent. Nothing filed.
+
+**MEASURED NON-FINDING — `detail.denoise`'s *wavelet* path has no `proxy_scale`
+term, and that is correct. Recorded so nobody "fixes" it.** It is the one detail
+op with no proxy scaling: sharpen shrinks its radius, chroma smoothing its kernel,
+deconvolution its PSF, and even the *bilateral* branch of this same op scales
+`sigma_spatial` — while the wavelet branch (the default, and the one Auto emits)
+denoises whatever grid it is handed. Since the proxy is decimated by **striding**
+(`seestack/edit/proxy.py`), per-pixel noise is preserved, so the obvious worry is
+that the preview removes grain at proxy scale while the export removes it at
+full-res scale — the preview↔export mismatch the editor works hard to avoid, and
+in the *overstating* direction the sharpen floor's own comment calls the worse one.
+
+**It doesn't happen.** Probe: 1200×1600 synthetic S30-ish stack (sky 0.10, σ 0.004,
+a broad faint object, a light-pollution ramp, 400 stars kept out of a 480 px
+star-free measurement corner), grain read as the MAD of adjacent-pixel differences
+in that corner, comparing the *export strided down* against the *preview* at the
+same physical patch. Share of grain removed, export vs preview:
+
+| strength | full res | step 2 | step 4 | step 6 | step 8 |
+|---|---|---|---|---|---|
+| 0.3 | 29 % | 28 / 28 % | 27 / 26 % | 27 / 26 % | 28 / 24 % |
+| 0.6 | 58 % | 55 / 55 % | 53 / 52 % | 53 / 50 % | 53 / 50 % |
+| 1.0 | 100 % | 85 / 93 % | 78 / 83 % | 77 / 81 % | 78 / 79 % |
+
+Across the whole range Auto can reach (`_AUTO_DENOISE_MAX` = 0.6) the two agree to
+within **3 percentage points at every stride**, and what disagreement there is has
+the preview removing *less*, not more. **Why:** BayesShrink sets its threshold from
+the noise it actually sees in each subband, and striding preserves per-pixel noise
+— so unlike a fixed-radius kernel, the op re-derives the right threshold on
+whichever grid it is given. A `proxy_scale` term would be a correction for an error
+that isn't there. (At strength 1.0 the ordering flips and the preview removes a few
+points *more*, but Auto is capped below that and the absolute residuals are ~0.0005
+of a 0.10 sky.) Probe kept in the session scratchpad (`denoise_probe2.py`); it is a
+measurement, not a fixture worth adding to the suite.
+
+---
+
 ## 2026-09-06 — Builder run (branch `claude/sweet-babbage-owcg4d`): three closed ⭐ leads were still starred, and what the real-stretch fixture measured
 
 **The run.** Baseline green before any change (full suite headless, plus 234
