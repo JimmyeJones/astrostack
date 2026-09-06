@@ -2413,3 +2413,65 @@ describe("TargetView frames table dates", () => {
     expect(await screen.findByText("2024-09-12 03:14:55")).toBeInTheDocument();
   });
 });
+
+describe("TargetView left-out breakdown has a home a phone can reach", () => {
+  // Found by taking the filed constraint seriously: the breakdown has only ever
+  // rendered inside a `HoverCard.Dropdown`, and a Mantine HoverCard has no touch
+  // affordance — so on the phone the owner checks a night on, the explanation
+  // (and now the one-tap fixes in it) was unreachable. It is also in the page's
+  // grouped analysis area now; the hover card is untouched.
+  function mockPage() {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1), mkFrame(2, { accept: false, reject_reason: "solve_failed:solve timed out" }),
+    ]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: { "solve_failed:solve timed out": 12 },
+      total: 52,
+      n_accepted: 40,
+      summary: {
+        used: 40, dropped: 12, dropped_fraction: 0.23,
+        verdict: { tone: "ok", key: "minor", text: "A few frames didn't make the cut." },
+        buckets: [{
+          key: "solve_timeout",
+          label: "Ran out of time being located",
+          count: 12,
+          note: "…raise the ASTAP timeout in Settings and run Plate Solve again.",
+        }],
+      },
+    } as Awaited<ReturnType<typeof client.api.rejectSummary>>);
+  }
+
+  it("shows the breakdown, and its advice as a link, in the grouped analysis area", async () => {
+    mockPage();
+    renderTarget();
+
+    const insights = await screen.findByTestId("target-insights");
+    await waitFor(() =>
+      expect(insights).toHaveTextContent("Why some frames were left out"));
+    expect(insights).toHaveTextContent("Ran out of time being located");
+    const link = screen.getByText("Open plate-solving settings →");
+    expect(link).toHaveAttribute("href", "/settings/plate-solving");
+  });
+
+  it("says nothing there when every sub made the picture", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ id: 9 })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: {}, total: 40, n_accepted: 40,
+      summary: {
+        used: 40, dropped: 0, dropped_fraction: 0,
+        verdict: { tone: "good", key: "healthy", text: "This is normal — a healthy night." },
+        buckets: [],
+      },
+    } as Awaited<ReturnType<typeof client.api.rejectSummary>>);
+
+    renderTarget();
+
+    const insights = await screen.findByTestId("target-insights");
+    await waitFor(() => expect(client.api.rejectSummary).toHaveBeenCalled());
+    expect(insights).not.toHaveTextContent("Why some frames were left out");
+  });
+});
