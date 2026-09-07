@@ -53,6 +53,13 @@ the 99.5th-percentile ceiling the frame is normalised against, so the same grain
 is a slightly smaller fraction of the span. No denoise op is added at any step,
 and the sharpen amount is identical throughout.
 
+**And the pin is not vacuous.** Re-measured on these very scenes, the old
+level-MAD estimator gives **0.0078→0.0722→0.1121→0.1610** — `_noise_fraction`
+saturates at **1.0 from a gradient of 0.05**, reproducing the entry's reported
+shape — so the new test fails on the *first* step of the ladder against the
+estimator the entry was filed about. That is what makes it a guard rather than a
+restatement of today's numbers.
+
 **What ships is the pin, not a fix.** A sibling test already held the σ property
 at one gradient (`test_a_residual_light_pollution_gradient_is_not_counted_as_noise`,
 0.08); the new `test_a_strong_gradient_never_costs_a_clean_stack_its_sharpening`
