@@ -364,3 +364,65 @@ def test_north_up_preview_wcs_still_returns_none_without_a_master(tmp_path):
     assert wcs_dict_rescaled_to_preview(
         tmp_path / "nope.fits", 100, 100, north_up_deg=90.0) is None
     assert canvas_extent_from_fits(tmp_path / "nope.fits", north_up_deg=90.0) is None
+
+
+# --- footprint_radec_deg's vectorised path ---------------------------------
+#
+# The four corners go through one ``all_pix2world`` call instead of four
+# ``pixel_to_world`` calls (each of which builds a whole SkyCoord), because
+# ``compute_mosaic_canvas`` calls this once per *sub* — 5,477 of them on the
+# owner's largest target. These pin that the shortcut is exact, and that it is
+# only taken for the equatorial WCSs it is valid for.
+
+
+def test_the_vectorised_footprint_is_identical_to_the_per_corner_transform():
+    """The fast path must agree with ``pixel_to_world`` to the last bit — it is
+    the same transform, with the SkyCoord wrapping left off."""
+    from seestack.io.wcs_io import _is_plain_radec
+
+    w = _make_simple_wcs(ra_deg=205.5, dec_deg=28.4, pix_scale_arcsec=2.9,
+                         width=1080, height=1920)
+    assert _is_plain_radec(w)                       # the fast path is in play
+    got = footprint_radec_deg(w, 1080, 1920)
+    expect = [
+        (float(s.ra.deg), float(s.dec.deg))
+        for s in (w.pixel_to_world(x, y)
+                  for x, y in [(0, 0), (1079, 0), (1079, 1919), (0, 1919)])
+    ]
+    assert got == expect
+
+
+def test_a_non_equatorial_wcs_is_not_read_as_ra_dec():
+    """``all_pix2world`` hands back longitude/latitude in the same two slots, so
+    a galactic WCS must keep the original path — which has always declined it
+    (``SkyCoord.ra`` does not exist there) rather than mislabelling the axes."""
+    from astropy.wcs import WCS
+
+    from seestack.io.wcs_io import _is_plain_radec
+
+    g = WCS(naxis=2)
+    g.wcs.ctype = ["GLON-TAN", "GLAT-TAN"]
+    g.wcs.crval = [120.0, 30.0]
+    g.wcs.crpix = [50.0, 50.0]
+    g.wcs.cdelt = [-1e-3, 1e-3]
+    assert not _is_plain_radec(g)
+    assert footprint_radec_deg(g, 100, 100) is None
+
+
+def test_the_footprint_of_a_frame_across_ra_zero_still_wraps_the_short_way():
+    """A frame straddling the seam has corners on both sides — the transform
+    reports them as it always did, and the callers unwrap."""
+    w = _make_simple_wcs(ra_deg=0.0, dec_deg=10.0, pix_scale_arcsec=5.0,
+                         width=400, height=400)
+    corners = footprint_radec_deg(w, 400, 400)
+    assert corners is not None and len(corners) == 4
+    assert any(ra > 359.0 for ra, _ in corners)
+    assert any(ra < 1.0 for ra, _ in corners)
+
+
+def test_a_frame_with_no_recorded_size_still_answers_none():
+    """``mosaic`` guards this, the desktop footprint view does not — and the
+    vectorised path must not turn "no dimensions" into a raised TypeError."""
+    w = _make_simple_wcs()
+    assert footprint_radec_deg(w, None, None) is None
+    assert footprint_radec_deg(w, 100, None) is None
