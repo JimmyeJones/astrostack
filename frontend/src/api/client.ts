@@ -1723,6 +1723,18 @@ export interface StackEstimate {
       reaches: boolean;
     } | null;
   } | null;
+  // "Would turning Drizzle on fit the memory budget?" — sized off the same canvas
+  // as the numbers above, at a fixed modest scale, so the proactive drizzle nudge
+  // costs no extra request. It used to be a second `stackEstimate` call, which
+  // re-read every sub's WCS to rebuild the identical canvas. `is_mosaic` is a
+  // property of that shared canvas, so read it off the estimate itself. Optional
+  // so an older backend simply withholds the nudge.
+  drizzle_probe?: {
+    drizzle_scale: number;
+    peak_bytes: number;
+    peak_gb: number;
+    would_exceed: boolean;
+  } | null;
 }
 
 /** What the *unattended* chain's outlier rejection will be able to do.

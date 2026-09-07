@@ -379,3 +379,78 @@ def test_estimate_best_available_costs_no_extra_sizing_work(
     assert data["rejection_reach"]["best_available"] is not None
     assert data["peak_bytes"] == client.get(
         url, params={"auto_reject": "true"}).json()["peak_bytes"]
+
+
+def test_estimate_carries_the_drizzle_feasibility_probe(client, solved_library):
+    """The Stack form's proactive drizzle nudge needs one number — "would a
+    drizzled run fit?" — and used to spend a *second* request on it, which re-read
+    every sub's WCS to rebuild the identical canvas. It now rides along."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    data = client.get(f"/api/targets/{safe}/stack-estimate").json()
+    probe = data["drizzle_probe"]
+    assert probe["drizzle_scale"] == 1.5
+    assert probe["would_exceed"] is False
+    # Drizzle is off in this request, so the probe must not be echoing the main
+    # sizing: a ×1.5 drizzled canvas costs more than the plain one.
+    assert probe["peak_bytes"] > data["peak_bytes"]
+    assert probe["peak_gb"] == round(probe["peak_bytes"] / 1e9, 2)
+
+
+def test_drizzle_probe_agrees_with_a_real_drizzle_request(client, solved_library):
+    """Agreement by construction: the folded-in answer must be exactly what the
+    second request it replaces would have returned."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    url = f"/api/targets/{safe}/stack-estimate"
+    probe = client.get(url).json()["drizzle_probe"]
+    separate = client.get(url, params={
+        "drizzle": "true", "drizzle_scale": 1.5, "drizzle_reject": "false",
+    }).json()
+    assert probe["peak_bytes"] == separate["peak_bytes"]
+    assert probe["would_exceed"] == separate["would_exceed"]
+
+
+def test_drizzle_probe_is_unmoved_by_the_rejection_knobs(client, solved_library):
+    """It answers "does drizzle fit?", not "does drizzle plus whatever the form
+    currently holds fit?" — the old second request sent no rejection knobs, and
+    the nudge would flicker with the κ slider if this one did."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    url = f"/api/targets/{safe}/stack-estimate"
+    base = client.get(url).json()["drizzle_probe"]
+    loaded = client.get(url, params={
+        "min_max_reject": "true", "min_max_reject_count": "3",
+        "auto_reject": "true", "sigma_kappa": "1.5", "sigma_clip": "false",
+    }).json()["drizzle_probe"]
+    assert loaded == base
+
+
+def test_drizzle_probe_flags_a_drizzled_run_that_busts_the_budget(
+    client, solved_library, monkeypatch):
+    """The gate the nudge exists for: never suggest a run that would be refused."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # ~7.4 MB for the plain 480×320 canvas, ~17 MB at ×1.5 drizzle. A 10 MB
+    # budget fits the first and refuses the second.
+    monkeypatch.setenv("ASTROSTACK_MAX_STACK_GB", str(10e-3))
+    data = client.get(f"/api/targets/{safe}/stack-estimate").json()
+    assert data["would_exceed"] is False
+    assert data["drizzle_probe"]["would_exceed"] is True
+
+
+def test_estimate_builds_the_canvas_once_per_request(
+    client, solved_library, monkeypatch):
+    """Both sizings in the response come off one canvas computation — the whole
+    point of folding the probe in. Fails before: two requests, two canvases."""
+    from seestack.stack import mosaic as mosaic_mod
+
+    calls = {"n": 0}
+    real = mosaic_mod.compute_mosaic_canvas
+
+    def counted(*a, **kw):
+        calls["n"] += 1
+        return real(*a, **kw)
+
+    monkeypatch.setattr(mosaic_mod, "compute_mosaic_canvas", counted)
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    r = client.get(f"/api/targets/{safe}/stack-estimate")
+    assert r.status_code == 200
+    assert r.json()["drizzle_probe"] is not None
+    assert calls["n"] == 1

@@ -47,6 +47,11 @@ _STRETCH_MIN, _STRETCH_MAX = 0.0, 1.0
 _BLACK_MIN, _BLACK_MAX = 0.0, 1.0
 _STRETCH_DEFAULT, _BLACK_DEFAULT = 0.5, 0.35
 
+#: Drizzle scale the ``/stack-estimate`` feasibility probe sizes at — the modest
+#: scale the Stack form's proactive nudge suggests, so the answer is "would
+#: drizzle fit at all?" rather than "would it fit at whatever the form holds?".
+DRIZZLE_PROBE_SCALE = 1.5
+
 
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
@@ -545,14 +550,20 @@ def stack_estimate(
     here, since the rejection-map plane it gates is only allocated when
     ``record_rejection_map`` is set and this dry run never sets it. Returns 422
     (not 500) when there's nothing solved to size yet, with the same guidance
-    ``run_stack`` gives."""
+    ``run_stack`` gives.
+
+    Also answers the Stack form's *drizzle feasibility* question
+    (``drizzle_probe``) from the same canvas. That used to be a second request to
+    this endpoint, and the canvas — one WCS read per sub — is the whole cost of a
+    sizing, so the form paid for it twice on every load."""
     from dataclasses import replace
 
     from seestack.stack.stacker import (
         StackOptions,
         auto_reject_method,
         auto_reject_switch_frames,
-        estimate_stack,
+        estimate_stack_basis,
+        estimate_stack_from_basis,
         rejection_reach,
     )
 
@@ -571,13 +582,27 @@ def stack_estimate(
             sigma_clip=bool(sigma_clip),
         )
         try:
-            est = estimate_stack(proj, options,
-                                 memory_budget_gb=settings.max_stack_memory_gb)
+            # The canvas is the whole cost of a sizing (one WCS per sub), and it
+            # depends on ``mosaic_canvas`` alone — so it is computed once and the
+            # two sizings this response carries are priced off it.
+            basis = estimate_stack_basis(proj, options.mosaic_canvas)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:
         proj.close()
         lib.close()
+    est = estimate_stack_from_basis(basis, options,
+                                    memory_budget_gb=settings.max_stack_memory_gb)
+    # "Would turning Drizzle on fit?" — the feasibility question behind the Stack
+    # form's proactive drizzle nudge. It used to be a *second* request to this
+    # endpoint, which re-read every sub's WCS to re-derive the same canvas; from
+    # the shared basis it is arithmetic. Asked at a fixed scale so the answer is
+    # about drizzle itself, not about whatever scale the form happens to hold.
+    probe = estimate_stack_from_basis(
+        basis,
+        StackOptions(drizzle=True, drizzle_scale=DRIZZLE_PROBE_SCALE,
+                     drizzle_reject=False, mosaic_canvas=str(mosaic_canvas)),
+        memory_budget_gb=settings.max_stack_memory_gb)
     # Pass the mosaic's per-pixel depth so the form's "can this remove a satellite
     # trail?" line answers for the pixels the picture will actually have. On a
     # single field ``panel_depth`` is None and this is the frame count, as before.
@@ -636,6 +661,18 @@ def stack_estimate(
             if est.print_plan is not None
             else None
         ),
+        # "Would turning Drizzle on fit?", sized off the *same* canvas as the
+        # numbers above rather than by a second request that re-read every sub's
+        # WCS to rebuild it. The Stack form's proactive drizzle nudge is the only
+        # consumer; it also needs ``is_mosaic``, which is a property of the shared
+        # canvas and so is already reported above. Always present — it costs
+        # arithmetic — and an older frontend simply ignores it.
+        "drizzle_probe": {
+            "drizzle_scale": DRIZZLE_PROBE_SCALE,
+            "peak_bytes": probe.peak_bytes,
+            "peak_gb": round(probe.peak_bytes / 1e9, 2),
+            "would_exceed": probe.would_exceed,
+        },
         # What "Auto outlier removal" actually resolves to for this many frames.
         # With it on, the engine *overrides* the sigma-clip / min-max toggles, so
         # a form that still shows them as live tells the beginner the opposite of
