@@ -10,7 +10,7 @@ import {
   jobKindLabel,
   calibrationMismatchNote, missingSubsNote, readErrorsNote, storageTroubleAlert,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
-  skippedFolders, videoFoldersNote,
+  skippedFolders, videoFoldersNote, broughtFolderInNote,
 } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
@@ -1317,8 +1317,22 @@ describe("storageTroubleAlert", () => {
 describe("skippedFolders", () => {
   it("lists a folder holding files the device's naming can't vouch for", () => {
     expect(skippedFolders({
+      skipped_folders: [{
+        name: "NGC 6888", n_files: 4815, n_unrecognised: 4815,
+        path: "/incoming/NGC 6888",
+      }],
+    })).toEqual([{
+      name: "NGC 6888", nFiles: 4815, nUnrecognised: 4815,
+      path: "/incoming/NGC 6888",
+    }]);
+  });
+
+  it("still reports a folder from a backend that sends no path", () => {
+    // The path is what makes the folder *actionable*; without one it is still
+    // worth saying that thousands of files were passed over.
+    expect(skippedFolders({
       skipped_folders: [{ name: "NGC 6888", n_files: 4815, n_unrecognised: 4815 }],
-    })).toEqual([{ name: "NGC 6888", nFiles: 4815, nUnrecognised: 4815 }]);
+    })).toEqual([{ name: "NGC 6888", nFiles: 4815, nUnrecognised: 4815, path: "" }]);
   });
 
   it("drops a folder the device's naming fully explains", () => {
@@ -1338,8 +1352,31 @@ describe("skippedFolders", () => {
     expect(skippedFolders({ skipped_folders: "nope" })).toEqual([]);
     expect(skippedFolders({ skipped_folders: [null, 7, { n_files: 3 }] })).toEqual([]);
     expect(skippedFolders({
-      skipped_folders: [{ name: "M 13", n_files: "lots", n_unrecognised: 2 }],
-    })).toEqual([{ name: "M 13", nFiles: 0, nUnrecognised: 2 }]);
+      skipped_folders: [{ name: "M 13", n_files: "lots", n_unrecognised: 2, path: 7 }],
+    })).toEqual([{ name: "M 13", nFiles: 0, nUnrecognised: 2, path: "" }]);
+  });
+});
+
+// The scoped "bring this one folder in" scan — silent on every scan the Scan
+// button starts, because the user never pointed at a folder.
+describe("broughtFolderInNote", () => {
+  it("says nothing about an ordinary whole-incoming scan", () => {
+    expect(broughtFolderInNote({ scanned: 40 })).toBeNull();
+    expect(broughtFolderInNote({ folder: "" })).toBeNull();
+    expect(broughtFolderInNote({ folder: 7 })).toBeNull();
+  });
+
+  it("names the folder the user asked for", () => {
+    expect(broughtFolderInNote({ folder: "NGC 6888", scanned: 2 }))
+      .toBe('Scanned just "NGC 6888".');
+  });
+
+  it("accounts for the device's own pictures it left out", () => {
+    expect(broughtFolderInNote({ folder: "NGC 6888", device_pictures_skipped: 1 }))
+      .toBe('Scanned just "NGC 6888". Left out 1 file named like your '
+        + "Seestar's own finished picture — those aren't subs to stack.");
+    expect(broughtFolderInNote({ folder: "NGC 6888", device_pictures_skipped: 9 }))
+      .toContain("Left out 9 files named like");
   });
 });
 
@@ -1362,6 +1399,64 @@ describe("the scan's skipped-folder note", () => {
     expect(screen.getByText(/nothing was deleted, moved or renamed/))
       .toBeInTheDocument();
   });
+
+  it("offers to bring the folder in, and scans exactly that folder", async () => {
+    // The recovery used to be "rename the folder" — a rename inside
+    // `incoming/`, where the owner's only copy of their raws lives.
+    const scan = vi.spyOn(client.api, "scan").mockResolvedValue({ job_id: "j1" });
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-skip-act", kind: "pipeline", target: null, state: "done",
+        result: {
+          scanned: 3110,
+          skipped_folders: [{
+            name: "NGC 6888", n_files: 4815, n_unrecognised: 4815,
+            path: "/data/incoming/NGC 6888",
+          }],
+        },
+      }),
+    ]);
+    renderJobs();
+    const button = await screen.findByRole(
+      "button", { name: 'Bring "NGC 6888" in anyway' });
+    fireEvent.click(button);
+    await waitFor(() => expect(scan).toHaveBeenCalledWith("/data/incoming/NGC 6888"));
+  });
+
+  it("does not offer the button when the backend sent no path", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-skip-nopath", kind: "pipeline", target: null, state: "done",
+        result: {
+          scanned: 3110,
+          skipped_folders: [{ name: "NGC 6888", n_files: 4815, n_unrecognised: 4815 }],
+        },
+      }),
+    ]);
+    renderJobs();
+    expect(await screen.findByText(/NGC 6888: 4,815 files skipped/))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Bring "NGC 6888" in anyway/ }))
+      .not.toBeInTheDocument();
+  });
+
+  it("says which folder a scoped scan brought in, and stays quiet otherwise",
+    async () => {
+      vi.spyOn(client.api, "listJobs").mockResolvedValue([
+        mkJob({
+          id: "pl-scoped", kind: "pipeline", target: null, state: "done",
+          result: { scanned: 2, folder: "NGC 6888", device_pictures_skipped: 1 },
+        }),
+        mkJob({
+          id: "pl-plain", kind: "pipeline", target: null, state: "done",
+          result: { scanned: 40 },
+        }),
+      ]);
+      renderJobs();
+      expect(await screen.findByText(/Scanned just "NGC 6888"/))
+        .toBeInTheDocument();
+      expect(screen.getAllByText(/Scanned just/)).toHaveLength(1);
+    });
 
   it("stays out of the way on an ordinary scan", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([

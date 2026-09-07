@@ -94,6 +94,32 @@ def is_mosaic_target_name(target_name: str) -> bool:
     proposing a combination the ingest side deliberately refused to make."""
     return target_name.strip().lower().endswith(_MOSAIC_TARGET_SUFFIX)
 
+
+def target_name_for_folder(folder_name: str) -> str:
+    """The target a folder of raw subs belongs to, by the Seestar convention.
+
+    The *naming* half of :func:`_apply_seestar_convention`, without its sibling
+    skip: ``<T>_sub`` → ``"<T>"``, ``<T>_mosaic_sub`` → ``"<T> (mosaic)"``, and
+    any other folder keeps its own name. A folder named only of the suffix
+    (``_sub``) keeps its name too — there is no base to fall back to.
+
+    Public because a **scoped** scan (``scan_and_organize(single_target=True)``)
+    names its one target from the folder it was pointed at, and a second
+    spelling of "which target does this folder belong to" is exactly the drift
+    this module's shared constants exist to prevent: a scoped re-scan of
+    ``incoming/M 42_sub`` must land in the same target the whole-incoming scan
+    would have put it in, or it silently forks the object into two.
+    """
+    low = folder_name.lower()
+    if low.endswith(_MOSAIC_SUB_SUFFIX):
+        base = folder_name[: -len(_MOSAIC_SUB_SUFFIX)].rstrip()
+        return mosaic_target_name(base) if base else folder_name
+    if low.endswith(_SUB_SUFFIX):
+        base = folder_name[: -len(_SUB_SUFFIX)].rstrip()
+        return base if base else folder_name
+    return folder_name
+
+
 # The capture-mode folders that never hold stackable deep-sky sub-frames, so the
 # scanner skips them and the cleanup nudge offers to remove any a pre-convention
 # scan already ingested. One tuple so the two can never disagree about the family.
@@ -187,13 +213,8 @@ def _apply_seestar_convention(
         low = name.lower()
         if low.endswith(_CAPTURE_SUFFIXES):
             continue
-        if low.endswith(_MOSAIC_SUB_SUFFIX):
-            base = name[: -len(_MOSAIC_SUB_SUFFIX)].rstrip()
-            units.append((mosaic_target_name(base) if base else name, files))
-            continue
-        if low.endswith(_SUB_SUFFIX):
-            base = name[: -len(_SUB_SUFFIX)].rstrip()
-            units.append((base if base else name, files))
+        if low.endswith((_MOSAIC_SUB_SUFFIX, _SUB_SUFFIX)):
+            units.append((target_name_for_folder(name), files))
             continue
         # A bare folder: skip it only when its raw-sub sibling (same parent) is
         # present (then it's the Seestar's own output). Otherwise ingest it.
@@ -709,6 +730,11 @@ class ScanResult:
     # user's own subs, and nothing downstream could previously tell the user
     # which one just happened. See :class:`SkippedOutputFolder`.
     skipped_output_folders: list[SkippedOutputFolder] = field(default_factory=list)
+    # Files a **scoped** scan (``single_target=True``) left out because their
+    # name is the Seestar's own on-device picture. Always 0 on the ordinary
+    # whole-incoming scan, which has the folder convention to decide with and
+    # does not filter by filename. See :func:`_scan_one_folder`.
+    n_device_output_skipped: int = 0
 
     @property
     def n_targets(self) -> int:
@@ -740,6 +766,7 @@ def scan_and_organize(
     *,
     copy_to_cache: bool = False,
     progress: ProgressFn | None = None,
+    single_target: bool = False,
 ) -> ScanResult:
     """
     Walk ``root`` and organise every FITS file into a library target.
@@ -759,6 +786,11 @@ def scan_and_organize(
         duplication.
     progress
         Optional ``progress(phase, done, total)`` callback.
+    single_target
+        Scan ``root`` as **one target folder** rather than as a folder *of*
+        target folders — the scoped "bring this one folder in" pass. Off by
+        default, so the ordinary whole-incoming scan is untouched. See
+        :func:`_scan_one_folder` for what it does and why it exists.
 
     Re-running a scan is safe — frames already registered (matched by their
     absolute source path) are skipped, so you can scan again after adding
@@ -767,6 +799,16 @@ def scan_and_organize(
     root = Path(root)
     if not root.exists() or not root.is_dir():
         raise NotADirectoryError(f"scan root is not a directory: {root}")
+
+    # A *container* is the one folder a scoped scan must not take literally: a
+    # whole-device drop (``incoming/MyWorks/{M 31_sub, NGC 7000_mosaic_sub, …}``)
+    # read as one unit would lump every object, output and video into a single
+    # giant target — the exact legacy shape ``_flag_legacy_container_drop`` exists
+    # to heal. Pointed at one of those, fall through to the ordinary reading,
+    # which already expands it into one target per child.
+    if single_target and not _looks_like_seestar_container(root):
+        return _scan_one_folder(
+            library, root, copy_to_cache=copy_to_cache, progress=progress)
 
     result = ScanResult(root=str(root))
 
@@ -844,6 +886,54 @@ def scan_and_organize(
     if progress is not None:
         progress("Organizing", total, total)
 
+    return result
+
+
+def _scan_one_folder(
+    library: Library,
+    root: Path,
+    *,
+    copy_to_cache: bool,
+    progress: ProgressFn | None,
+) -> ScanResult:
+    """Ingest ``root`` **itself** as one target — the scoped scan.
+
+    The ordinary scan reads a folder *of* target folders, so pointing it at a
+    single target's folder filed every frame in it under ``Unsorted``: the
+    target name is derived from each file's path *relative to the scan root*,
+    and relative to ``incoming/M 42_sub`` there is no folder left to name. That
+    made ``root`` a "re-scan just this folder" shortcut that wasn't one.
+
+    Here ``root`` is the unit: every FITS under it (recursively, like an
+    ordinary target folder) goes into the one target
+    :func:`target_name_for_folder` names it, so a scoped scan lands in exactly
+    the target the whole-incoming scan would have used.
+
+    **Why this path filters by filename and the ordinary scan does not.** The
+    only reason to point a scan at one folder is that the convention did not
+    bring it in by itself — the caller is overriding a skip, so the folder's
+    *name* has already stopped meaning what it means everywhere else. What can
+    still be said with certainty is per-file: a ``Stacked*.fit`` is the device's
+    own finished picture (:func:`~seestack.io.project.is_seestar_output_filename`),
+    and stacking one in with raw subs is the exact nonsense the convention
+    exists to prevent. Those are left out and counted in
+    :attr:`ScanResult.n_device_output_skipped`, so the caller can say how many.
+
+    Nothing here writes to the scanned folder: like every other scan path it
+    only reads (AGENTS.md §10).
+    """
+    result = ScanResult(root=str(root))
+    found = find_fits_files(root, recursive=True)
+    files = [p for p in found if not is_seestar_output_filename(str(p))]
+    result.n_device_output_skipped = len(found) - len(files)
+    if progress is not None:
+        progress("Organizing", 0, 1)
+    if files:
+        result.targets.append(_ingest_into_target(
+            library, target_name_for_folder(root.name), files,
+            copy_to_cache=copy_to_cache))
+    if progress is not None:
+        progress("Organizing", 1, 1)
     return result
 
 

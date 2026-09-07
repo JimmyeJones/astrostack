@@ -30,6 +30,7 @@ from seestack.io.scanner import (
     mosaic_target_name,
     run_qc_and_solve,
     scan_and_organize,
+    target_name_for_folder,
 )
 from tests.synth import write_seestar_fits
 
@@ -1453,5 +1454,171 @@ def test_a_healthy_seestar_library_reports_no_skips_worth_saying(tmp_path):
         assert result.unvouched_skips == []
         assert [(s.name, s.n_unvouched) for s in result.skipped_output_folders] \
             == [("M 42", 0)]
+    finally:
+        lib.close()
+
+
+# ---------------------------------------------------------------------------
+# The scoped scan: point at ONE folder and bring it in as its own target.
+# ---------------------------------------------------------------------------
+
+
+def test_target_name_for_folder_matches_what_a_whole_library_scan_would_use():
+    """The naming half of the convention, shared so a scoped scan can't fork a
+    target: the same folder must resolve to the same name either way."""
+    assert target_name_for_folder("M 42_sub") == "M 42"
+    assert target_name_for_folder("M 42_SUB") == "M 42"
+    assert target_name_for_folder("M 3_mosaic_sub") == "M 3 (mosaic)"
+    assert target_name_for_folder("NGC 6888") == "NGC 6888"
+    # A folder that is only the suffix has no base to fall back to.
+    assert target_name_for_folder("_sub") == "_sub"
+    assert target_name_for_folder("_mosaic_sub") == "_mosaic_sub"
+    # And it agrees with the classifier that does the real scan's naming.
+    units = _apply_seestar_convention(_fake("M 42_sub", "M 3_mosaic_sub", "Odd"))
+    assert [n for n, _ in units] == [
+        target_name_for_folder(f) for f in ("M 42_sub", "M 3_mosaic_sub", "Odd")
+    ]
+
+
+def test_scanning_one_folder_files_its_frames_under_that_folder_not_unsorted(tmp_path):
+    """The bug this path exists for: pointing a scan at a target's own folder
+    filed every frame in it as ``Unsorted``, because the target name is derived
+    relative to the scan root and there was nothing left to derive from."""
+    root = tmp_path / "incoming"
+    folder = root / "NGC 6888"
+    folder.mkdir(parents=True)
+    for i in range(3):
+        write_seestar_fits(folder / f"Light_{i:04d}.fit", n_stars=5, seed=i)
+
+    lib = Library.open_or_create(tmp_path / "library")
+    try:
+        # Today's whole-folder-of-folders reading: everything lands in Unsorted.
+        loose = scan_and_organize(lib, folder)
+        assert [t.safe_name for t in loose.targets] == ["Unsorted"]
+    finally:
+        lib.close()
+
+    lib = Library.open_or_create(tmp_path / "library2")
+    try:
+        result = scan_and_organize(lib, folder, single_target=True)
+        assert [t.target_name for t in result.targets] == ["NGC 6888"]
+        assert result.total_added == 3
+        assert result.n_device_output_skipped == 0
+    finally:
+        lib.close()
+
+
+def test_a_scoped_scan_lands_in_the_same_target_a_full_scan_would(tmp_path):
+    """A scoped re-scan of ``<T>_sub`` must join the target the ordinary scan
+    made, not fork the object into a second one named after the folder."""
+    root = tmp_path / "incoming"
+    subs = root / "M 42_sub"
+    subs.mkdir(parents=True)
+    write_seestar_fits(subs / "Light_0001.fit", n_stars=5, seed=1)
+
+    lib = Library.open_or_create(tmp_path / "library")
+    try:
+        scan_and_organize(lib, root)
+        assert {t.safe_name for t in lib.list_targets()} == {"M_42"}
+        # A second night arrives in the same folder; re-scan just that folder.
+        write_seestar_fits(subs / "Light_0002.fit", n_stars=5, seed=2)
+        result = scan_and_organize(lib, subs, single_target=True)
+        assert [t.target_name for t in result.targets] == ["M 42"]
+        assert result.total_added == 1
+        # Still one target, now holding both nights — and re-running adds nothing.
+        assert {t.safe_name for t in lib.list_targets()} == {"M_42"}
+        again = scan_and_organize(lib, subs, single_target=True)
+        assert again.total_added == 0
+        m42 = lib.find_target("M_42")
+        assert m42 is not None and m42.n_frames == 2
+    finally:
+        lib.close()
+
+
+def test_a_scoped_scan_leaves_out_the_devices_own_finished_picture(tmp_path):
+    """The one thing still knowable per-file once the folder's *name* has been
+    overridden: a ``Stacked*.fit`` is the device's own picture, and stacking it
+    with raw subs is the nonsense the convention exists to prevent."""
+    root = tmp_path / "incoming"
+    folder = root / "NGC 6888"
+    (root / "NGC 6888_sub").mkdir(parents=True)
+    write_seestar_fits(root / "NGC 6888_sub" / "Light_0001.fit", n_stars=5, seed=9)
+    folder.mkdir(parents=True)
+    for i in range(2):
+        write_seestar_fits(folder / f"Light_{i:04d}.fit", n_stars=5, seed=i)
+    write_seestar_fits(folder / "Stacked.fit", n_stars=5, seed=7)
+    write_seestar_fits(folder / "Stacked_60s.fit", n_stars=5, seed=8)
+    # Not device output despite the prefix — the strict rule keeps real subs in.
+    write_seestar_fits(folder / "StackedByMe.fit", n_stars=5, seed=6)
+
+    lib = Library.open_or_create(tmp_path / "library")
+    try:
+        # The ordinary scan skips the bare folder and says so.
+        full = scan_and_organize(lib, root)
+        assert [(s.name, s.n_unvouched) for s in full.unvouched_skips] \
+            == [("NGC 6888", 3)]
+        # Bringing it in anyway takes the three subs and leaves the two pictures.
+        result = scan_and_organize(lib, folder, single_target=True)
+        assert result.n_device_output_skipped == 2
+        assert result.total_added == 3
+        proj = lib.open_target("NGC 6888")
+        try:
+            names = sorted(Path(f.source_path).name for f in proj.iter_frames())
+        finally:
+            proj.close()
+        assert "Stacked.fit" not in names and "Stacked_60s.fit" not in names
+        assert "StackedByMe.fit" in names
+    finally:
+        lib.close()
+
+
+def test_a_scoped_scan_never_writes_to_the_folder_it_reads(tmp_path):
+    """AGENTS.md §10: the only permitted operations under ``incoming/`` are read
+    and create-new. A scoped scan is a read, so the folder is byte-identical."""
+    import hashlib
+
+    root = tmp_path / "incoming"
+    folder = root / "NGC 6888"
+    folder.mkdir(parents=True)
+    for i in range(2):
+        write_seestar_fits(folder / f"Light_{i:04d}.fit", n_stars=5, seed=i)
+    write_seestar_fits(folder / "Stacked.fit", n_stars=5, seed=7)
+    before = {
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(folder.iterdir())
+    }
+
+    lib = Library.open_or_create(tmp_path / "library")
+    try:
+        scan_and_organize(lib, folder, single_target=True)
+    finally:
+        lib.close()
+    after = {
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(folder.iterdir())
+    }
+    assert after == before
+
+
+def test_a_scoped_scan_of_a_whole_device_container_is_not_taken_literally(tmp_path):
+    """The one folder a scoped scan must not read as a single target: a container
+    of ``<T>_sub`` folders. Taken literally it would rebuild the legacy giant
+    target — every object, output and video in one — that
+    ``_flag_legacy_container_drop`` exists to heal."""
+    root = tmp_path / "incoming"
+    container = root / "MyWorks"
+    for folder in ("M 31_sub", "NGC 7000_mosaic_sub"):
+        (container / folder).mkdir(parents=True)
+        write_seestar_fits(container / folder / "Light_0001.fit", n_stars=5, seed=1)
+    (container / "Lunar_video").mkdir()
+    write_seestar_fits(container / "Lunar_video" / "clip_0001.fit", n_stars=5, seed=2)
+
+    lib = Library.open_or_create(tmp_path / "library")
+    try:
+        result = scan_and_organize(lib, container, single_target=True)
+        assert sorted(t.target_name for t in result.targets) == [
+            "M 31", "NGC 7000 (mosaic)",
+        ]
+        assert "MyWorks" not in {t.name for t in lib.list_targets()}
     finally:
         lib.close()
