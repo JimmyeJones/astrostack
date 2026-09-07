@@ -87,6 +87,73 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > the target of any "see above" / "see below" in the entries below that no longer resolves
 > here.
 
+- **🔴🔴 D1 — AUTO'S BORDER TRIM CROPS A MOSAIC DOWN TO ITS PANEL OVERLAPS, THROWING AWAY THE PANEL INTERIORS.
+  Default Auto output, mosaics only, and it has been there the whole time.** *(Third external audit, 2026-09-07,
+  baselined `a301b75` / v0.382.1. Severity: **wrong result on the owner's primary workflow** — he is a heavy
+  mosaic user. Confidence: **reproduced end-to-end AND independently re-reproduced here as a pure function**
+  before filing. **This predates v0.322 and survived all three audits** — it is the single most valuable find
+  of the three.)*
+
+  **The rule.** `well_covered_mask` (`seestack/edit/coverage_trim.py`) defines "well covered" as *at or above
+  `DEFAULT_MIN_FRAC = 0.5` of the map's own **peak** coverage*. On a single field the peak **is** the interior,
+  so half of it correctly trims the dithered fringe. **On a tiled mosaic the peak is where panels overlap** —
+  two overlapping panels give 2× a panel's depth, four give 4× — so "half the peak" sits **above every panel
+  interior**, and the only "well covered" region is the overlap band.
+
+  **Re-reproduced here with the real functions** (2×2 mosaic, 4 panels × 30 subs, 15 % overlap):
+  | | |
+  |---|---|
+  | `coverage_is_mosaic` | `True` |
+  | coverage levels | 30 (panel) · 60 (2-panel) · **120 (4-way peak)** |
+  | threshold = 50 % of peak | **60** — a panel interior at 30 is *below* it |
+  | `well_covered_mask` keeps | 26.9 % of pixels |
+  | `largest_covered_rect` | `(0.0, 0.4275, 1.0, 0.5725)` |
+  | **canvas kept** | **14.5 %** — a horizontal strip |
+  | **control: single field + fringe** | `is_mosaic False`, crop `(0.02,0.02,0.98,0.98)` ✅ correct |
+
+  **The audit's own end-to-end run** (real watcher, auto-stack + auto-edit on, 2×2 S30-shaped mosaic, 4 panels ×
+  30 subs over three nights, canvas 2045×3577, coverage ≈28/56/113): the recorded Auto recipe ends with
+  `geometry.crop {x0 0.4608, y0 0.4638, x1 0.9829, y1 0.5382}` — 52 % of width, **7.4 % of height, under 4 % of
+  the canvas**. The Target page hero shows a thin strip in a black card, the "What Auto did" note calls it
+  "ragged mosaic edge to trim", and stack health on the same run cheerfully says *"The panels of this mosaic
+  evened out"*. Their other measured shapes: 3×3 @20 % overlap → **7.7 %** kept; 3×3 @5 % → **1.7 %**; 1×2 with
+  no overlap and 400 vs 150 subs → **the thin panel is dropped whole**; 12×8 raster → 19.9 %.
+
+  **Why three audits and twenty clean sweeps missed it.** Every dogfood baseline and the editor drive run on the
+  bundled **6-frame single field**, where the rule is correct; the unit tests cover a ragged fringe around **one**
+  plateau, never two. **The owner did report the symptom** — the v0.226.0 entry records Auto "silently reframed
+  the owner's picture", and the response was an off switch that **defaults to on**. `AGENTS.md` §1 has been
+  re-cut (2026-09-07) so mosaic-shaped data is now the standard for any Auto/editor claim.
+
+  **Fix direction.** Measure "well covered" against a **robust panel statistic, not the peak**: the median of
+  covered pixels, or the thinnest panel's depth via the existing `pointing_groups`, and treat ≥ roughly half of
+  *that* as covered. Alternative: trim only pixels below a small **absolute** floor (2–3 frames). **Keep
+  `coverage_is_mosaic` and the single-field path byte-identical.** **Fix both consumers together** — the same
+  mask drives `stack_detail_mask` (`seestack/render/thumbnail.py`) for the all-sky "My map" fade. **Regression
+  tests: the seven shapes in the table above**, including the single-field control that must not move.
+
+- **🟡 D2 — "Only N of M subs could be located … installing ASTAP's star database helps" fires while the night
+  is still being solved.** *(Third audit; severity: misleading copy, transient; confidence: traced and observed
+  on their rig.)* The scan **ingests every new sub before any is solved**, and the health note in
+  `seestack/stackhealth.py` guards only on "at least one located sub" — so mid-pipeline it counted 84 of 120 as
+  failures and pointed at a setup problem that does not exist. On the owner's install a night of several hundred
+  new subs keeps that note up **for the whole length of the solve**. **Fix:** exclude frames never attempted
+  (`wcs_json IS NULL` and no `solve_failed:` reason) from the count, or suppress the note while a pipeline job
+  is running for that target.
+
+- **⚪ D4 — the working list still hides shipped work in plain sight** *(third audit, counted)*. Across the
+  priority sections: **36 shipped-but-unstruck entries and 63 closed records**; sweep blockquotes still inside
+  "Bugs" despite the three-file rule; and **"Features that serve real workflows" has zero ready entries against
+  17 shipped ones**, with four bullets describing one readiness card. Of **178 open-shaped entries only 18 are
+  genuinely ready to build** — one in five is already shipped, one in three is a closed record. Builders now
+  catch the duplicates at triage (five recorded catches since the split), which costs each run its opening
+  minutes. **One Scout run of mechanical work**: cut the 36 shipped and 63 closed entries to `SHIPPED.md`, move
+  the sweep blockquotes to `PROCESS-NOTES.md`, and leave "Bugs" holding only D1, D2 and the sky-atlas rotation
+  bug. That roughly halves the working list again.
+  *(D3 — the re-aimed Scout rotation living only in the hand-pasted prompt, so all four subsequent runs swept
+  the area it marks closed — is **already fixed**: the rotation was moved into the `AGENTS.md` Scout bullet on
+  2026-09-07, which is a file the Scout actually reads.)*
+
 - **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** ~~No validator
   stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
   resolves inside the raw tree — *not* the owner's current state, but one settings edit away)~~ *(shipped
@@ -8556,8 +8623,33 @@ outright bug in existing behaviour, never to add capability.
   point — an opt-in seed helps no beginner), so it changes the editor's default
   first-open behaviour on the live install and replaces the current empty-pipeline
   "nudge toward Auto-process" first view. Rollback is trivial and total (UI-only, no
-  data/config/schema touched — revert the frontend change). **Owner: OK to turn this
-  on by default?** A Builder has a clean prototype ready to finish + test.
+  data/config/schema touched — revert the frontend change). ~~**Owner: OK to turn this
+  on by default?**~~ A Builder has a clean prototype ready to finish + test.
+
+  > ### ✅ OWNER SAID YES — 2026-09-07. **BUT IT IS GATED ON D1; DO NOT SHIP IT FIRST.**
+  > The owner approved auto-seeding on by default. **Ship D1 (Auto's border trim cropping a
+  > mosaic to its panel overlaps — top of "Bugs (fix these first)") BEFORE this**, because
+  > this feature's whole purpose is that a beginner's *first* view of a picture is a good
+  > one — and today, on any mosaic, the Auto recipe it would seed with ends in a
+  > `geometry.crop` keeping as little as **4 % of the canvas**. Seeding first would put a
+  > cropped sliver in front of the owner automatically, on the page he lands on, with no
+  > click — turning a bug he currently has to opt into hitting into the default experience.
+  > Once D1 is fixed: finish the prototype, keep it a single undoable step, never overwrite
+  > a saved recipe, and verify the seeded first view **on a mosaic**, not on the 6-frame
+  > sample (AGENTS.md §1 now requires this for any Auto/editor claim).
+
+- **✅ OWNER SAID YES — 2026-09-07 — turn `auto_stack` back ON by default, AFTER D1 ships.**
+  *(Owner decision recorded in answer to the third audit's open question. Was off on the live
+  install; the audit verified the walk-away path end-to-end through the real watcher —
+  three nights, two targets, 160 solves, no re-solves, `incoming/` bit-identical afterwards.)*
+  **The same D1 gate applies, and harder:** with `auto_stack` on, the walk-away chain also
+  runs the auto-edit, so every mosaic would be *automatically* stacked and then
+  *automatically* cropped to its overlap band with nobody watching. **Order is therefore
+  fixed: D1 → auto-seed → auto-stack.** When enabling, change the shipped default in
+  `webapp/config.py` (an existing install keeps whatever it has stored, so this reaches the
+  owner only if he clears it or sets it — say so plainly in the release note rather than
+  implying it flips for him), and confirm the readability preflight and degraded-recheck
+  guards from v0.270.1/v0.273.0 are still in the path.
 
 _(Normal, tested changes merge to the default branch automatically — see
 AGENTS.md §8. Only the items above need a human's OK first.)_
