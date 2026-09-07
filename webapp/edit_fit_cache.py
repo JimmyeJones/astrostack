@@ -119,7 +119,9 @@ def _prefix_uid_map(
     which is otherwise a permanent miss.
     """
     out: dict[str, str] = {}
-    for a, b in zip(stored, current):
+    # Not strict: the two recipes legitimately differ in length (an op added or
+    # removed), and the shorter one simply ends the prefix.
+    for a, b in zip(stored, current, strict=False):
         if a[1:] != b[1:]:
             break
         out[a[0]] = b[0]
