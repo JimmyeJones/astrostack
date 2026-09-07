@@ -1088,6 +1088,72 @@ def auto_cast_summary(lib: Library) -> dict[str, Any]:
     }
 
 
+def auto_highlight_summary(lib: Library) -> dict[str, Any]:
+    """Aggregate every auto-edited run's highlight measurement into one
+    library-wide "how often does Auto leave a blown-out core?" read-out.
+
+    The sibling of :func:`auto_cast_summary`, and it exists for the same reason:
+    the *automatic* highlight-clip cue is deliberately real-data-gated — a
+    threshold picked from a synthetic scene would silently change everyone's
+    picture — and nothing on disk said how often a genuinely blown core actually
+    occurs on the owner's stacks, or how severe it is when it does. Each
+    unattended auto-edit now stamps what the editor's "Hold back highlights"
+    solver would offer on the picture it just made
+    (``editor_auto_highlight:{run_id}`` project meta, see
+    ``AUTO_EDIT_HIGHLIGHT_PREFIX``), and this turns those per-run readings into
+    the distribution that decision needs.
+
+    Pure read-only aggregation over data already on disk. A run whose
+    measurement could not be taken has no meta at all and is simply not counted,
+    so "measured and clean" and "not measured" never blur together.
+
+    Returns ``{measured, blown, median_strength, median_flat_fraction,
+    max_flat_fraction}`` — ``measured`` is the number of auto-edited runs with a
+    reading, ``blown`` how many of those had a recoverable blown core, and the
+    three statistics describe the blown ones only (``None`` when there are none).
+    """
+    import numpy as np
+
+    from webapp.routers.editor import AUTO_EDIT_HIGHLIGHT_PREFIX
+
+    measured = 0
+    strengths: list[float] = []
+    fractions: list[float] = []
+    for entry in lib.list_targets():
+        proj = lib.open_target(entry.safe_name)
+        try:
+            for run in proj.iter_stack_runs():
+                raw = proj.get_meta(f"{AUTO_EDIT_HIGHLIGHT_PREFIX}{run.id}")
+                if not raw:
+                    continue
+                try:
+                    parsed = json.loads(raw)
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(parsed, dict):
+                    continue
+                measured += 1
+                strength = parsed.get("strength")
+                if not isinstance(strength, (int, float)):
+                    continue  # measured, nothing to suggest — a clean core
+                strengths.append(float(strength))
+                frac = parsed.get("flat_fraction")
+                if isinstance(frac, (int, float)):
+                    fractions.append(float(frac))
+        finally:
+            proj.close()
+    return {
+        "measured": measured,
+        "blown": len(strengths),
+        "median_strength": (round(float(np.median(strengths)), 3)
+                            if strengths else None),
+        "median_flat_fraction": (round(float(np.median(fractions)), 4)
+                                 if fractions else None),
+        "max_flat_fraction": (round(float(max(fractions)), 4)
+                              if fractions else None),
+    }
+
+
 def _refresh_target(settings: Settings, jm: JobManager, job: Job,
                     lib: Library, safe: str) -> None:
     """Deep-rescan one target before it's restacked: re-run QC + plate-solve over
@@ -3218,6 +3284,7 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
     from webapp.routers.editor import (
         AUTO_EDIT_BAKED_LOOK_PREFIX,
         AUTO_EDIT_COLORCAL_PREFIX,
+        AUTO_EDIT_HIGHLIGHT_PREFIX,
         AUTO_EDIT_NOTE_PREFIX,
         AUTO_EDIT_SKYCAST_PREFIX,
         RECIPE_META_PREFIX,
@@ -3225,6 +3292,7 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
         build_auto_analysis_for_run,
         build_auto_recipe_for_run,
         render_run_display_array,
+        solve_highlight_protect,
     )
     from seestack.edit import presets as presets_mod
     from seestack.edit.histogram import measure_sky_cast
@@ -3322,6 +3390,26 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
                     proj.set_meta(f"{AUTO_EDIT_SKYCAST_PREFIX}{run_id}",
                                   json.dumps(sky_cast))
                 except Exception:  # noqa: BLE001 — the sky-cast read is a nicety
+                    pass
+                # And the same passive read for the *highlights*: ask the editor's
+                # own "Hold back highlights" solver what it would offer on this
+                # picture, and stamp the answer (or an explicit "nothing to
+                # suggest") beside the cast. Changes no pixel and is never shown on
+                # the image — it exists so the real-data-gated automatic
+                # highlight-clip cue can eventually be decided from the owner's own
+                # stacks rather than from a synthetic scene. Best-effort: it
+                # measures on the run's cached proxy, so a failure here is a missed
+                # data point, never a failed job.
+                try:
+                    blown = solve_highlight_protect(proj.project_dir, run, recipe)
+                    proj.set_meta(
+                        f"{AUTO_EDIT_HIGHLIGHT_PREFIX}{run_id}",
+                        json.dumps({
+                            "strength": (blown.strength if blown else None),
+                            "flat_fraction": (blown.flat_fraction if blown else None),
+                            "core_px": (blown.core_px if blown else None),
+                        }))
+                except Exception:  # noqa: BLE001 — the highlight read is a nicety
                     pass
         finally:
             proj.close()

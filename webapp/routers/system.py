@@ -280,6 +280,31 @@ def auto_cast_summary(request: Request) -> dict[str, Any]:
         lib.close()
 
 
+@router.get("/api/auto-highlight-summary")
+def auto_highlight_summary(request: Request) -> dict[str, Any]:
+    """Library-wide "how often does Auto leave a blown-out core?" read-out.
+
+    The sibling of ``/api/auto-cast-summary``, over the highlight measurement
+    every unattended auto-edit stamps into its run's provenance
+    (``editor_auto_highlight:{run_id}``): of the auto-edited runs, how many came
+    out with a bright core the "Hold back highlights" knob could reopen, at what
+    strength, and how washed-out the worst one was. Read-only, and empty (zeros)
+    until auto-edited runs accrue. FastAPI runs this sync endpoint in a
+    threadpool, so the per-target SQLite reads don't block the event loop.
+
+    Returns ``{measured, blown, median_strength, median_flat_fraction,
+    max_flat_fraction}``.
+    """
+    from seestack.io.library import Library
+
+    settings = deps.get_settings(request)
+    lib = Library.open_or_create(settings.resolved_library_root)
+    try:
+        return pipeline.auto_highlight_summary(lib)
+    finally:
+        lib.close()
+
+
 @router.get("/api/health")
 async def health() -> dict:
     """Liveness probe. Deliberately trivial — no subprocess, no disk, no locks.
