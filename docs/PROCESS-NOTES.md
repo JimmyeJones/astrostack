@@ -72,6 +72,96 @@ No code changed in this sweep — Scout leaves building to the Builder.
 
 ---
 
+## 2026-09-07 (Builder, branch `claude/sweet-babbage-dyd578`) — a fifth dry-backlog triage that shipped a feature anyway: the editor control with no direct manipulation, and four traps from driving it in a real browser
+
+**Baseline.** `source scripts/agent-setup.sh`; full suite headless green before any
+edit — **5,116 passed, 2 skipped** (30:06). *(Note the setup script's environment
+does not survive between tool calls: `source .venv/bin/activate` belongs in every
+shell, and without it the first "baseline" run exits instantly with `No module
+named pytest` from the **system** python — a different failure from the one
+v0.378.1 documents, and it reads the same.)*
+
+**Backlog state — the same gated state four prior runs describe, re-confirmed
+mechanically** (walk the section bounds, treat every `- **` as an entry, drop any
+whose **whole** body matches SHIPPED/CLOSED/DECLINED/BLOCKED/MOOT/RECORDED). Nothing
+in "Bugs (fix these first)" is actionable without real data, an external binary or
+an owner decision. **So this run took the standing "grow the app on a cadence"
+allocation instead of reporting dry a fifth time**, and looked for the gap by
+listing the editor's ops and asking which had no direct manipulation.
+
+**The gap, and the stand-down that had to be read first.** `geometry.crop` has been
+in the registry for a long time and could only be aimed through the descriptor
+form's **Left/Top/Right/Bottom fractions** — arithmetic against a canvas over
+10,000 px wide, done while looking at a decimated proxy. The 2026-08-06 entry
+"a beginner can crop the Moon, but there is no way to crop anything else" declines
+building *a manual crop tool*, and it is right to. **What shipped is not that**: no
+op was added, no new expert surface — an existing, already-exposed control got a
+rectangle you can drag. The entry now carries a note saying so, because the next
+triage pass would otherwise read v0.379.0 as contradicting it, or as licence to
+build the disk-shaped deep-sky crop it actually declines.
+
+**Four traps, all found by running it rather than reading it.**
+
+1. **`page.mouse` coordinates are the *viewport*, not the page.** The first browser
+   probe drove a drag on the `se` handle and nothing happened: the caption stayed
+   "Keeping the whole picture" through the whole gesture. It looked exactly like a
+   dead event handler. The handle was at **y = 1098 in a 1000 px viewport** — below
+   the fold — so the `pointerdown` landed on `HTML`. `scrollIntoViewIfNeeded()`
+   first, and do not aim at the *exact* centre of a control whose edge touches the
+   viewport boundary: the second attempt still missed by ~1 px until the target was
+   nudged 3 px inward. Instrument by adding a capture-phase document listener that
+   logs `e.target`'s `aria-label` — the answer arrived in one run once it printed
+   `target=HTML`.
+2. **jsdom has no `PointerEvent`, so `fireEvent.pointerDown` silently drops
+   `clientX`/`clientY`.** `@testing-library`'s event map falls back to bare `Event`,
+   which ignores those init keys — so a drag test passes `NaN` through the whole
+   pipeline and fails on the *caption*, several steps from the cause. Dispatch a
+   `MouseEvent` under the pointer event's name instead
+   (`fireEvent(el, new MouseEvent("pointerdown", { clientX, clientY, bubbles: true }))`);
+   React reads the coordinates off the native event either way.
+3. **A fractional overlay needs the *underlying* picture's aspect, and no endpoint
+   reports it here.** A crop's fractions are relative to the image **entering** it,
+   so the rectangle is drawn over the recipe rendered with that op bypassed — and
+   the histogram's `render_width/height` are the *recipe's* dims, with the crop
+   applied. Measuring `naturalWidth`/`naturalHeight` off the loaded `<img>` (and
+   holding the rectangle back until the measurement belongs to the image on screen)
+   is right whatever earlier ops did to the frame. Verified: the rectangle's
+   `boundingBox()` is byte-identical to the image's.
+4. **A header button whose label equals an op's label breaks every
+   `getByText(<label>)` in the suite.** Adding a "Crop" button made *one* existing
+   test fail with "Found multiple elements with the text: Crop" — and only one, which
+   is the misleading part; the other nine queries happened to run before it rendered
+   or after it unmounted. The pipeline rows already carry
+   `aria-label="Select <label>"` (`OpList.tsx`), which is the precise handle; all
+   eleven now use it. **Before adding a button, grep the tests for its label.**
+
+**QA records from this run, both clean.**
+* **`scripts/agent-dogfood.sh --editor`** on the sample-loaded app: **21/21 ops
+  previewed** with no console error and no failed request, undo + redo applied,
+  nothing overflowing. Page heights: phone Target **3,040 px**, `/life-list`
+  3,008 px, phone editor **2,887 px**, desktop editor 1,841 px — *identical* before
+  and after both features, i.e. the new header button costs **zero** page height (on
+  a 420 px phone it shares the Auto-process row rather than starting a new one).
+  The eighth height baseline, and it says what the last three said: **do not open a
+  speculative IA slice.**
+* **Drag-to-crop end to end against the running app** (custom probe, kept in the
+  session scratchpad): rectangle box identical to the picture's, a `se` drag updates
+  the caption live and commits to the op (`x1` 0.62, `y1` 0.55 in the sliders), and
+  "Done cropping" reshapes the preview to the cropped aspect. No console errors.
+
+**One aborted-request observation, recorded as a non-finding.** A probe run that
+navigated straight into the editor logged two `requestfailed`s for
+`editor/preview` and `editor/histogram` carrying `recipe=…{"ops":[],…}` — React
+Query cancelling the pre-seed empty recipe when the saved one arrives. It does not
+reproduce once the page settles, and the dogfood editor drive is clean. Not a bug.
+
+**Collisions: none, but one merge landed mid-run.** `origin/main` moved
+`4b61646 → 8dacbc7` (a Scout run: a clean stacking-engine + calibration QA sweep,
+plus a filed mosaic panel-balance feature). Docs only; merged cleanly, and it is
+also why this run did not spend its second half on its own engine audit.
+
+---
+
 ## 2026-09-07 (Builder, branch `claude/sweet-babbage-7wv8l8`) — a fourth dry-backlog run that found one real task in it after all: the greps that turned it up, and the two candidates measured and declined
 
 **Baseline.** `source scripts/agent-setup.sh` — note that its `pip install -q -e
