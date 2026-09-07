@@ -1106,6 +1106,53 @@ async def download_full_res_png(
     )
 
 
+def _file_stamp(path: str | None) -> str:
+    """``mtime:size`` for a file, or ``-`` when it is missing/unreadable.
+
+    The cheap identity of a file's *content* for validator purposes: two stats,
+    no read. Absence is a stamp of its own, so a master that disappears (or
+    reappears) changes the answer rather than looking unchanged."""
+    if not path:
+        return "-"
+    try:
+        st = Path(path).stat()
+    except OSError:
+        return "-"
+    return f"{st.st_mtime_ns}:{st.st_size}"
+
+
+def _derived_image_etag(*parts: object) -> str:
+    """A strong `ETag` for an image derived from files plus a few parameters.
+
+    ``webapp.__version__`` is folded in so an upgrade that changes how the image
+    is composed can never be masked by a browser holding the old one."""
+    import hashlib
+
+    from webapp import __version__
+
+    raw = "|".join([__version__, *(str(p) for p in parts)])
+    return '"' + hashlib.sha256(raw.encode()).hexdigest()[:32] + '"'
+
+
+def _etag_matches(request: Request, etag: str) -> bool:
+    """Does the client's ``If-None-Match`` already hold exactly this entity?
+
+    Handles the list form and the ``W/`` weak prefix a proxy may add; ``*``
+    matches any current entity, per RFC 9110."""
+    header = request.headers.get("if-none-match")
+    if not header:
+        return False
+    for candidate in header.split(","):
+        candidate = candidate.strip()
+        if candidate == "*":
+            return True
+        if candidate.startswith("W/"):
+            candidate = candidate[2:]
+        if candidate == etag:
+            return True
+    return False
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/sky-overlay")
 async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
     """The run's preview as an RGBA PNG with uncovered (NaN / no-coverage) pixels
@@ -1122,7 +1169,19 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
     When the stored preview was saved **North-up** (History's "Adjust"), the
     coverage mask is taken through the same rotation before compositing — the mask
     comes off the un-rotated FITS, so without that its transparent regions land
-    where the picture no longer is."""
+    where the picture no longer is.
+
+    **Revalidated, not recomputed.** The Sky map asks for one of these per target
+    with a stack, and each answer costs a full read of that target's master FITS
+    (``stack_coverage_mask`` reduces ``isfinite`` over the whole cube). The bytes
+    are fully determined by the two files' stamps plus the orientation and crop
+    the preview was saved with, so the response carries a strong ``ETag`` and a
+    matching ``If-None-Match`` is answered **304** without touching either file —
+    on a NAS-backed library that is the difference between re-reading hundreds of
+    megabytes on every visit and two ``stat`` calls. ``Cache-Control`` moves from
+    ``no-store`` to ``private, no-cache``: still revalidated on every request, so
+    a re-edited run can never be served stale, but now revalidation is *possible*
+    at all (``no-store`` forbids keeping the copy that a 304 refers to)."""
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
@@ -1137,6 +1196,17 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
     fits_path = run.fits_path
     north_up_deg = baked_north_up_deg(run)
     crop = parse_preview_crop(run.preview_crop_json)
+
+    # Every input that can move a pixel of the answer: the two files' identities
+    # and the geometry the preview was saved with. Cheap enough (two stats) to
+    # compute before deciding whether any work is needed at all.
+    etag = _derived_image_etag(
+        "sky-overlay", _file_stamp(preview_path), _file_stamp(fits_path),
+        north_up_deg, run.preview_crop_json,
+    )
+    cache_headers = {"Cache-Control": "private, no-cache", "ETag": etag}
+    if _etag_matches(request, etag):
+        return Response(status_code=304, headers=cache_headers)
 
     from seestack.render.orient import rotate_mask_north_up
     from seestack.render.thumbnail import overlay_rgba_png, stack_coverage_mask
@@ -1167,8 +1237,7 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
         return preview
 
     png = await run_in_threadpool(work)
-    return Response(content=png, media_type="image/png",
-                    headers={"Cache-Control": "no-store"})
+    return Response(content=png, media_type="image/png", headers=cache_headers)
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/rejection-overlay")

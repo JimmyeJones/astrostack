@@ -1629,6 +1629,71 @@ def test_sky_overlay_404_without_preview(client, solved_library):
     assert resp.status_code == 404
 
 
+def test_sky_overlay_revalidates_instead_of_recomputing(client, solved_library):
+    """The Sky map asks for one overlay per target and each answer costs a full
+    read of that target's master FITS. The bytes are fully determined by the two
+    files, so a client that already holds them gets a 304 — and on a NAS-backed
+    library that is the difference between re-reading hundreds of megabytes on
+    every visit and two stat calls."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _make_run_with_mosaic_preview(solved_library, safe)
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/sky-overlay"
+
+    first = client.get(url)
+    assert first.status_code == 200
+    etag = first.headers["etag"]
+    assert etag.startswith('"') and etag.endswith('"')   # strong, not W/
+    # `no-store` would forbid keeping the very copy a 304 refers to.
+    assert "no-store" not in first.headers["cache-control"]
+    assert "no-cache" in first.headers["cache-control"]
+
+    again = client.get(url, headers={"If-None-Match": etag})
+    assert again.status_code == 304
+    assert again.headers["etag"] == etag
+    assert not again.content
+
+    # A weak validator (a proxy may add the prefix) and the wildcard match too;
+    # somebody else's tag does not.
+    assert client.get(url, headers={"If-None-Match": f"W/{etag}"}).status_code == 304
+    assert client.get(url, headers={"If-None-Match": "*"}).status_code == 304
+    assert client.get(
+        url, headers={"If-None-Match": '"nope", "also-nope"'}).status_code == 200
+
+
+def test_sky_overlay_etag_changes_when_the_picture_does(client, solved_library):
+    """The validator has to track the *inputs*, or a re-edited run is served
+    stale forever. Both files are stamped, and so is the app version."""
+    from io import BytesIO
+    from pathlib import Path
+
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _make_run_with_mosaic_preview(solved_library, safe)
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/sky-overlay"
+    etag = client.get(url).headers["etag"]
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    # Rewrite the preview with different pixels (and a different size, so the
+    # stamp moves even on a coarse-mtime filesystem).
+    buf = BytesIO()
+    Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8) + 7, mode="RGB").save(
+        buf, format="PNG")
+    Path(run.preview_path).write_bytes(buf.getvalue() + b"\x00" * 16)
+    assert client.get(url).headers["etag"] != etag
+    # And the stale tag is no longer honoured.
+    assert client.get(url, headers={"If-None-Match": etag}).status_code == 200
+
+
 def test_progress_reel_serves_the_animation(client, solved_library):
     """The reel endpoint streams the WEBP animation with the right media type."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
