@@ -96,11 +96,17 @@ same trick for a *spatial* model — `frozen_deltas` / `replay_field`, for the t
 additive `background.*` ops, whose mesh fit is the other big cost. Replaying the
 captured field takes the same recipe from **2.39 s to 1.28 s** (another 1.8×), and
 the output differs from a re-fit by at most **4.2e-7** — below a 16-bit LSB, so it
-is almost certainly fine. It is not taken here because "almost certainly" is the
-wrong standard for the one number this change can currently promise exactly
-(bit-identical), and because capturing a field costs a copy of the array per
-additive op. A future run wanting it should ship it as its own change with that
-4.2e-7 re-measured on a mosaic proxy, not fold it into this one.
+is almost certainly fine. It is not taken here for two reasons, and the second is the
+stronger one. First, "almost certainly" is the wrong standard for the one thing
+this change can currently promise exactly (bit-identical), on the one surface
+whose parity honesty is PRIORITY 1. Second, **the memory shape is completely
+different**: a fit is a handful of scalars, a field is a full `(H, W, 3)`
+float32 — ~18 MB per additive op on a 1500 px proxy, up to three per recipe,
+against a store this one bounds at eight slots of kilobytes, and capturing one
+costs an array copy per additive op on *every* render. A future run wanting it
+should ship it as its own change, with the 4.2e-7 re-measured on a mosaic proxy
+(NaN gaps are exactly where `replay_field`'s nearest-fill differs from a re-fit)
+and its own much tighter slot budget — not fold it into this one.
 
 ---
 
