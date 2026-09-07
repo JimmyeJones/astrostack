@@ -47,7 +47,7 @@ import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBox
   from "../components/editor/mosaicTrim";
 import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps, reshapesFrame }
   from "../components/editor/splitCompare";
-import { applyCropDrag, bigCropNote, cropDragBlockedReason, cropFromParams, cropHandlePositions,
+import { applyCropDrag, bigCropNote, cropDragBlockedReason, cropFromParams, cropHandlePositions, existingCropUid,
   cropKeptLabel, cropToParams, isFullFrame, pointerFraction, FULL_CROP,
   type CropDragStart, type CropHandle }
   from "../components/editor/cropDrag";
@@ -960,6 +960,20 @@ export function EditorView() {
       coalesceKey ? `${u}:${coalesceKey}` : undefined,
     );
   const fixStage = (u: string) => setOps((p) => moveToCorrectSide(p, u, specs));
+  // "Crop" in the header: open the recipe's crop op if it has one (enabling a
+  // disabled leftover, since the click *is* the ask to crop), otherwise add one.
+  // Either way it ends selected, which is what opens the drag rectangle.
+  const cropByHand = () => {
+    const existing = existingCropUid(ops);
+    if (existing === null) {
+      const spec = specs["geometry.crop"];
+      if (spec) addOp(spec);
+      return;
+    }
+    setOps((p) => p.map((o) => (o.uid === existing ? { ...o, enabled: true } : o)));
+    setSelected(existing);
+    setCropDragOn(true);
+  };
 
   const selectedOp = ops.find((o) => o.uid === selected) ?? null;
   // Auto-contrast on the Curves op derives its curve at *render* time from the
@@ -1438,6 +1452,21 @@ export function EditorView() {
                   label={`Your target landed off to one side of this picture. Preview the crop that puts it back in the middle (${recentreKeptLabel(recentreCrop)}) as a dashed outline, then apply it as a Crop op you can fine-tune or remove.`}>
                   <Button variant="default" color="grape" leftSection={<IconCrop size={16} />}
                     onClick={() => enterCropPreview("recentre")}>Re-centre</Button>
+                </Tooltip>
+              ) : null}
+              {/* "Crop by hand", beside the app's two *automatic* crop offers,
+                  because they all end in the same place — one adjustable Crop op.
+                  Cropping is the edit a beginner is most likely to want and know
+                  the name of, and until now the only route to it was Add operation
+                  → More operations → Crop, then four typed fractions. One button,
+                  in a group that already exists (no new row, no new banner), and
+                  it re-opens the recipe's crop rather than stacking a second one
+                  whose fractions would be relative to the first's output. */}
+              {specs["geometry.crop"] ? (
+                <Tooltip multiline w={250} withArrow
+                  label="Crop this picture by hand: drag a rectangle on the preview to choose what to keep. It becomes a Crop step you can fine-tune, turn off or remove like any other.">
+                  <Button variant="default" color="grape" leftSection={<IconCrop size={16} />}
+                    onClick={cropByHand}>Crop</Button>
                 </Tooltip>
               ) : null}
             </>
