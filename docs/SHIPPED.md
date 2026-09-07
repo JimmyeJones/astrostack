@@ -14,6 +14,50 @@ Newest first.
 
 ---
 
+## v0.374.5 — 2026-09-07 — every read-only endpoint is pinned to answer on a first-run install, and on a target that has never been stacked (`tests/webapp/test_first_run_endpoints.py`)
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-55nznt`.) Coverage gap —
+test-only, no behaviour change.**
+
+**The gap.** The two states a beginner is actually in first — *nothing in the
+library at all*, and *frames ingested but no picture yet* — are the two the suite
+tests least, because nearly every `tests/webapp/` test builds a library, solves it
+and stacks it before it asks a question: that is what the interesting assertions
+need. So an endpoint that divides by a zero frame count, indexes `[0]` into an
+empty run list, or stats a preview file that does not exist yet would be caught by
+nobody until it 500-ed on somebody's first evening — the one session where a stack
+trace is least recoverable, because there is nothing on screen to go back to.
+Grepped first: no test enumerated the route table, and the closest existing
+guards are per-feature (`test_life_list.py`'s empty-library case,
+`test_calibration.py`'s "masters and no targets" roll-up).
+
+**What shipped.** `tests/webapp/test_first_run_endpoints.py`, two sweeps plus a
+guard on the sweep itself:
+
+* **90 endpoints, enumerated from the app's own OpenAPI schema**, not from a
+  hand-written list — 52 parameterless `/api` GETs against a data root with
+  *nothing* in it (not even `incoming/`, which the shared `data_root` fixture
+  writes two folders of subs into), and 38 per-target GETs against a target the
+  `built_library` fixture ingested and never stacked. An endpoint added next
+  month is covered the day it is added, and nobody has to remember this file
+  exists.
+* **It asserts only the weak thing — no 5xx.** 404 ("no picture yet") and 422
+  ("that needs a query parameter") are honest answers to these questions, and each
+  endpoint's own tests pin what it should actually *say*. What this pins is that
+  the answer is never a crash.
+* **Two guards against a sweep that silently stops sweeping**, which is the way a
+  test shaped `assert failures == []` rots: each sweep asserts a floor on the
+  number of paths it enumerated (so a FastAPI upgrade that changes the schema walk
+  fails loudly instead of passing vacuously), and a third test points the helper at
+  a throwaway app with one deliberately-raising route and asserts it reports
+  exactly that one.
+
+**Result on `main` as it stands: all 90 answer.** No bug found — this is a net,
+not a fix. Runs in ~5 s. No engine, webapp, frontend, config, schema, on-disk or
+default change.
+
+---
+
 ## v0.374.4 — 2026-09-06 — one broken photosite reads as English, and a healthy sensor's share stops printing as "0.000%" (`calibration._defect_share` + `defect_note`)
 
 **(Builder 2026-09-06, branch `claude/sweet-babbage-cqqyi1`.) Friendliness /
