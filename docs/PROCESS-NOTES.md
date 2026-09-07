@@ -18,6 +18,69 @@ is a queue.
 
 ---
 
+## 2026-09-07 (Builder, branch `claude/sweet-babbage-8hitfe`) — a fourth clean dogfood, and what to do when the *bugs* are drained but a priority still has an open sentence
+
+**Baseline.** `source scripts/agent-setup.sh` green. Full suite headless started
+before any edit; this container ran it markedly slower than the recent runs
+report (~80 % in the time the last few took to finish), which is worth knowing
+before planning a run around three full passes — the pre-merge run is the gate
+that counts, so budget for two.
+
+**Dogfood — clean on both halves again, recorded because a clean sweep is a
+record.** `scripts/agent-dogfood.sh --editor`, sample loaded and stacked:
+- *Page probe:* nothing overflowing, no console errors. Tallest page still the
+  Target page at **3,040 px on a phone** — the ninth baseline, and **identical**
+  to the seventh and eighth. `/life-list` 3,008 px, the editor 2,887 px. The
+  standing *"do not open a speculative IA slice"* reading now holds for a fourth
+  consecutive measurement.
+- *Editor drive:* the Add menu offered **21 ops**, all 21 previewed with no
+  console error and no failed request, undo+redo applied. Clean.
+
+**Triage — the backlog is drained, and this run re-established that by opening
+entries rather than by trusting the last three runs that said so.** Worth
+recording is that a *header-only* scan of `IMPROVEMENTS.md` badly overstates how
+much is open: several entries carry their `✅ SHIPPED` verdict ten or twenty
+lines into the block, so the first pass here produced ~50 "open" candidates and a
+whole-block scan reduced it to the real set. Two of those looked open and were
+not — the reshaped calibration match-confidence slice is `calibrationFit.ts::
+masterRecommendation` (v0.321.0), and the streak root-cause entry's own strongest
+candidate signal, cross-frame persistence, is `qc/runner.stationary_streak_frames`.
+**If you scan this file programmatically, scan blocks, not bullets.**
+
+**The move that made the run: a priority whose *bug* list is drained can still
+have an open sentence.** With every candidate bug gated or closed, the highest
+open thing left was one clause inside the "Live preview" entry — *"what remains
+here is **responsiveness** (heavy ops on the proxy can lag)"* — which had sat
+unquantified since v0.57.0. Timing the 21 ops on a real-sized proxy took ten
+minutes and turned a vague clause into a number: the one-click Auto recipe costs
+**4.2 s a render**, and the editor fires two such renders per change. That is the
+whole of v0.382.2.
+
+**And the fix was already in the codebase, unused.** `EditContext.fit` was built
+for the loupe and its docstring already says it is "the place to keep an
+expensive measurement (a star solve, a mesh fit)" — nothing was carrying fits
+between two renders of the *same* picture. **Look for the existing channel before
+designing a new one** is now the second run in a row to record that lesson (the
+last one found the Auto colour self-check the same way). No engine file changed.
+
+**The bug that unit tests could not see, kept for the pattern.** The first
+implementation keyed the reuse on the op's `uid`. Every pure test passed and
+every endpoint test failed at "measured once", because a recipe posted without
+uids gets fresh ones per request (`recipe_from_dict` mints them) — so the cache
+was a permanent miss through the actual API while looking perfect in isolation.
+A cache whose whole value is *hit rate* needs at least one test that measures the
+hit through the real entry point; a unit test can only prove it is correct when
+it hits.
+
+**One idea closed with a number instead of an argument.** *"Make the difficulty
+split data-driven"* wanted magnitudes added to the bundled catalogs because
+curation "doesn't scale". Running the real resolver over the real catalog:
+**157 of 157 objects already get a verdict**, so the gap was zero — and the
+alternative meant writing astronomy data from recall. The measurement is now
+`test_the_bundled_catalog_is_covered_end_to_end_today`, so it can't rot.
+
+---
+
 ## 2026-09-07 (Builder, branch `claude/sweet-babbage-izlzeq`) — a clean dogfood (pages **and** the editor drive), and two gates approached from opposite ends
 
 **Baseline.** `source scripts/agent-setup.sh` green. Full suite headless started
