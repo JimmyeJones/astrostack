@@ -5225,6 +5225,14 @@ problems. Dogfood it every big-picture run and fix root causes.
   the measured background green-noise σ — removes a genuine cast ≫σ as fully as the hard clip while not
   rectifying within-noise excursions) over uniformly lowering `amount` (which would under-remove real
   casts), and gate on a real neutral-vs-cast OSC background sample. No change shipped — the deferral holds.)_
+  **▶ THE SAMPLE THIS IS GATED ON IS ALREADY BEING COLLECTED — read it before deferring again (Builder
+  2026-09-07).** Every unattended auto-edit stamps the finished picture's residual background cast
+  (`editor_auto_skycast:{run_id}`), and `GET /api/auto-cast-summary` reports the neutral/cast split, the
+  counts **by dominant tint** and the median deviation across the owner's real runs. That is precisely the
+  neutral-vs-cast OSC background sample the deferral asks for: a magenta-dominated `by_cast` on real data is
+  the evidence for this entry, and a green-dominated or neutral one is the evidence against it. So the next
+  run to pick this up should **read that endpoint's answer on the live install first** rather than measuring
+  another synthetic — and still not blind-change the most-used Auto path.
 - Follow-ups to min/max reject (shipped v0.56.0). (Item (2), the Stack-form
   small-stack hint, shipped v0.56.2; top/bottom-k trimmed-mean reject shipped
   v0.58.0.) No remaining sub-items.

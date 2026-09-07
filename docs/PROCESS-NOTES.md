@@ -18,6 +18,77 @@ is a queue.
 
 ---
 
+## 2026-09-07 (Builder, branch `claude/sweet-babbage-izlzeq`) — a clean dogfood (pages **and** the editor drive), and two gates approached from opposite ends
+
+**Baseline.** `source scripts/agent-setup.sh` green. Full suite headless started
+before any edit and run to **80 % with zero failures** before it was stopped to
+free the box for the pre-merge run — enough to say `main` was green on arrival,
+and the pre-merge full run is the gate that actually counts (§11).
+
+**Dogfood — clean on both halves, recorded because a clean sweep is a record.**
+`scripts/agent-dogfood.sh --editor`, sample loaded and stacked:
+- *Page probe:* nothing overflowing, no console errors. Tallest page still the
+  Target page at **3,040 px on a phone** — the eighth baseline, and identical to
+  the seventh (3,040 px at v0.374.x). `/life-list` 3,008 px, the editor 2,887 px
+  (unchanged since v0.377.2 measured it). **The standing "do not open a
+  speculative IA slice" reading holds for a third consecutive measurement.**
+- *Editor drive:* the Add menu offered **21 ops**, all 21 previewed with no
+  console error and no failed request, and undo+redo applied. Clean.
+
+**Backlog state — dry, and confirmed by opening entries rather than skimming.**
+"Bugs (fix these first)" is in the gated/stood-down state the recent runs
+describe. Every top-level candidate opened in "Features that serve real
+workflows" was already shipped or already declined with numbers (*Night by
+night*, *Does my colour look right?* — blocked on a catalog field that does not
+exist, *N spots instead of a percentage* — measured and closed, *crop anything* —
+declined once, the *edited cover* — mostly moot since an Apply-&-save records a
+real `stack_runs` row). The two ⭐ Adaptive-Auto entries are complete but for the
+optional slice (c). Nothing was invented to fill the gap.
+
+**What shipped, and the shape worth carrying forward.** Both tasks are about the
+same structural problem: **this backlog's remaining image-quality work is mostly
+gated on data no agent has**, and runs keep meeting a gate, standing down
+correctly, and leaving the gate exactly where they found it. There are two honest
+moves against that, and this run made one of each.
+
+1. **v0.382.0 — make the app collect the evidence.** The automatic
+   highlight-clip cue is real-data-gated; nothing was accruing the distribution
+   it needs. Every unattended auto-edit now asks the editor's own solver what
+   *"Hold back highlights"* would offer on the picture it just made and stamps
+   the answer, aggregated by `/api/auto-highlight-summary` into one Settings
+   line. Built as a deliberate sibling of the shipped Auto **colour** self-check
+   (`auto_cast_summary`), which is the precedent that made it an S rather than an
+   M — **look for an existing self-check before designing a new one.**
+   Two details worth reusing: stamping an explicit `{"strength": null}` so
+   *measured-and-clean* is distinguishable from *never measured* (an absent key
+   would have made the aggregate unreadable), and lifting the endpoint's body
+   into `solve_highlight_protect` so the button and the passive record are one
+   answer that cannot drift.
+
+2. **v0.382.1 — check whether the gate is still there before deferring again.**
+   The *"does the denoise↔sharpen crossfade over-read a sky gradient as noise?"*
+   item had been deferred three times. It was filed 2026-07-08 against the
+   **level**-MAD `sky_sigma`; **v0.225.0 replaced that with the local
+   adjacent-pixel-difference MAD** — for the mosaic "multicolour grid"
+   regression, not for this entry — and the local estimator is blind to any
+   structure slower than a pixel *by construction*. Running the entry's own
+   ladder took ten minutes and produced the opposite of its recorded numbers
+   (0.0042→0.0039→0.0035→0.0030 as the gradient goes 0.00→0.20, against the
+   pre-fix 0.015→0.028→0.054→0.098).
+   **The general lesson: a deferral records the state of the code on the day it
+   was written.** An entry gated on behaviour that a *later, unrelated* fix
+   changed will never notice — nobody re-reads a stand-down they agree with. So
+   before re-deferring a gated item, spend the ten minutes to re-run its own
+   measurement against today's code; the entry names it precisely enough to be
+   cheap, and the answer is either a confirmation worth dating or a close.
+
+**One backlog pointer, no new ideas.** The SCNR-magenta entry defers on wanting
+"a real neutral-vs-cast OSC background sample" — which `/api/auto-cast-summary`
+has been collecting all along, by dominant tint. The entry now says so, so the
+next run reads the live install's answer instead of measuring another synthetic.
+
+---
+
 ## 2026-09-07 (Builder, branch `claude/sweet-babbage-wza0iq`) — the freshest backlog entry was the stalest one, and two closes that were re-traces rather than fixes
 
 **Baseline.** `source scripts/agent-setup.sh` green; full suite headless before any
