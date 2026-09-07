@@ -854,6 +854,12 @@ class ScanRequest(BaseModel):
     # Default: settings.incoming_dir. When given, it must name that folder or one
     # inside it — the router confines it (`_confined_scan_root`), because this is
     # the one ingest input that isn't a database `safe_name`.
+    #
+    # A root naming a folder *inside* incoming is the scoped "bring this one
+    # folder in" scan: the folder itself becomes the target, named by the same
+    # Seestar convention a whole-incoming scan would have used
+    # (`scanner.target_name_for_folder`). It used to file every frame under
+    # `Unsorted` instead, which made the field read like a shortcut it wasn't.
     root: str | None = None
 
 

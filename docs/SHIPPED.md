@@ -14,6 +14,109 @@ Newest first.
 
 ---
 
+## v0.378.0 — 2026-09-07 — a skipped folder can be brought in with one click: `scanner.target_name_for_folder` + `scan_and_organize(single_target=…)`, and `POST /api/scan`'s `root` finally means what it says
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-7wv8l8`.)** Answer **(a)** to the
+2026-08-30 entry, which asked a run to pick one of two and said why (a) was the one
+worth having.
+
+**The defect.** `POST /api/scan` takes a `root`. It reads like a "re-scan just this
+folder" shortcut, and it was not one: `scan_and_organize` walks a folder *of* target
+folders and derives each target's name from the file's path **relative to the scan
+root** — so a root pointed **at** a target's own folder leaves nothing to derive
+from, and every frame in it lands in `Unsorted`. Nothing in the app passed a
+sub-folder root, so it had never fired; the field was a promise with no
+implementation behind it.
+
+**Why it was worth fixing rather than deleting** (the entry's other honest answer
+was to drop the field). The Seestar convention skips a bare `<T>/` folder sitting
+beside `<T>_sub/` as the device's own finished picture — right for a finished
+picture, and wrong for a plainly-named folder of the user's own subs. Since
+v0.329.2 the scan *reports* such a folder when its files are not all named like
+device output, and the owner's library has one of exactly that shape (`NGC 6888`,
+4,815 files, beside `NGC 6888_SUB`'s 3,110). **The only recovery the report could
+offer was: rename the folder.** That rename happens inside `incoming/`, where the
+owner's raws exist in one copy and nowhere else — the app may never make it
+(AGENTS.md §10), and asking a non-technical owner to make it by hand on their NAS
+is not much better. A scan that can be pointed at one folder is the recovery that
+touches nothing.
+
+**What shipped.**
+
+* **`seestack/io/scanner.py::target_name_for_folder(folder_name)`** — the *naming*
+  half of `_apply_seestar_convention`, extracted and made public: `<T>_sub` → `"<T>"`,
+  `<T>_mosaic_sub` → `"<T> (mosaic)"`, anything else keeps its name (and a folder
+  that is only the suffix keeps its name, there being no base to fall back to). The
+  classifier now calls it rather than re-spelling the same two `rstrip`s, so a scoped
+  scan of `incoming/M 42_sub` lands in exactly the target the whole-incoming scan
+  built — a second spelling here would silently fork the object into two targets.
+* **`scan_and_organize(..., single_target=False)` → `_scan_one_folder`** — when set,
+  `root` *is* the unit: every FITS under it (recursively, like any target folder)
+  goes into the one target `target_name_for_folder` names, with no container
+  expansion, no sibling skip and no `Unsorted` bucket. **It filters by filename, and
+  the ordinary scan deliberately does not:** the only reason to point a scan at one
+  folder is that the convention did not bring it in by itself, so the folder's *name*
+  has stopped meaning what it means everywhere else — but a `Stacked*.fit` is still
+  the device's own picture by the same strict rule the ingest-side reject uses
+  (`project.is_seestar_output_filename`), and stacking one in with raw subs is the
+  exact nonsense the convention exists to prevent. Those are left out and counted in
+  the new additive `ScanResult.n_device_output_skipped`. **The one folder it refuses
+  to take literally is a Seestar *container*** (`incoming/MyWorks/{M 31_sub, …}`):
+  read as one unit that would rebuild the legacy giant target — every object, output
+  and video in one — that `_flag_legacy_container_drop` exists to heal, so a container
+  falls through to the ordinary reading, which already expands it into one target per
+  child.
+* **`webapp/pipeline.py`** — `_pipeline_body` resolves the mode itself, so any caller
+  (including a user's own script) gets the sane reading: a `root` that is set and is
+  not the incoming folder is scoped. The comparison is `_is_same_dir`, lexical then
+  resolved, for the same reason `routers/pipeline._confined_scan_root` is written that
+  way — on this box `incoming/` is routinely a symlinked NAS share, and the two
+  spellings of it must not read as two different folders. Summary gains `folder` and
+  `device_pictures_skipped` (both only on a scoped scan), and each reported skipped
+  folder gains `path`.
+* **`frontend/src/routes/Jobs.tsx`** — the skipped-folder alert gains a
+  **"Bring \"X\" in anyway"** button per folder (its own `BringFolderInButton`
+  component, so each folder's pending state is its own — a drop can skip several and
+  they are separate decisions), and its closing paragraph no longer advises a rename.
+  New pure `broughtFolderInNote` says which folder a scoped scan ran on and how many
+  device pictures it left out — one dimmed line, not another alert, because the
+  standing "the UI is extremely busy" priority means a signpost must not look like a
+  warning. `api.scan(root?)` takes the folder; the header Scan button passes nothing
+  and is unchanged.
+
+**Upgrade-safe (§9).** No config, DB schema, on-disk layout or default change. The
+API gains fields and never loses one; the frontend degrades honestly on an older
+backend (no `path` → the folder is still *reported*, just without the button, pinned
+by its own test). `incoming/` is read-only throughout — a scan reads, and two tests
+sha256 the folder before and after to say so. The whole-incoming scan, which is every
+scan the Scan button starts, is byte-for-byte unchanged; `root` = the incoming folder
+itself is explicitly still the whole scan, pinned so it can never become a scoped scan
+that files the library under one target named `incoming`.
+
+**Tests (+14).** Engine `tests/test_scanner.py` (+6): the shared naming agrees with the
+classifier at every shape; a scoped scan files under the folder, not `Unsorted` (with
+today's reading asserted alongside it, so the change is visible); a scoped re-scan
+joins the full scan's target and is idempotent; the device's own picture is left out
+while `StackedByMe.fit` — which the strict rule deliberately does not match — comes in;
+the folder is byte-identical afterwards; and a scoped scan of a whole-device
+container expands into its children rather than one giant target. New `tests/webapp/test_scoped_scan.py` (+5,
+2 of them fail-before): end to end through the endpoint, including the whole walk the
+Jobs page makes — scan, read the reported `path`, post it back, get the two subs and
+not the `Stacked.fit`. Frontend (+3 unit, +3 rendered): `broughtFolderInNote`'s three
+shapes, the `path` passthrough and its absence, the button calling `scan` with exactly
+that folder, no button without a path, and the scoped note appearing on one job and not
+the other. The stale comment in `test_scan_root_confined.py` that said a sub-folder root
+"loses the folder-name target … filed rather than changed here" is corrected — it was
+the description of this bug, sitting in a passing test.
+
+**Left open, deliberately.** The original entry's stated prize was a *"Re-scan just
+this target"* button on the Target page. The endpoint now supports it; the page does
+not know which folder a target's subs came from, and deriving it server-side from the
+frames' own `source_path` needs a decision about a target whose frames span two
+folders — a real case on this library. Filed in `IMPROVEMENTS.md` rather than guessed.
+
+---
+
 ## v0.377.1 — 2026-09-07 — the dogfood pass can *drive* the editor, not just photograph it: `scripts/dogfood_editor.mjs` + `agent-dogfood.sh --editor`
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-9wdpb4`.)** Tooling. No engine,

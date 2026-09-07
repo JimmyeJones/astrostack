@@ -105,7 +105,10 @@ export function App() {
   const [navOpened, { toggle: toggleNav, close: closeNav }] = useDisclosure(false);
 
   const scan = useMutation({
-    mutationFn: api.scan,
+    // No argument: the header button always scans the whole incoming folder.
+    // (`api.scan` takes an optional folder for the scoped "bring this one
+    // folder in" scan on the Jobs page.)
+    mutationFn: () => api.scan(),
     onSuccess: () => {
       notifications.show({ message: "Scan started — watching for new frames", color: "violet" });
       qc.invalidateQueries({ queryKey: ["jobs"] });
