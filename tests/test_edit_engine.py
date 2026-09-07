@@ -1487,6 +1487,62 @@ def test_load_coverage_reads_sibling_and_strides_for_proxy(tmp_path):
     assert np.array_equal(proxied, cov[::4, ::4])
 
 
+def test_load_coverage_reads_only_the_rows_the_proxy_samples(tmp_path, monkeypatch):
+    """The map is the run's *full-resolution* canvas — hundreds of MB on a mosaic
+    — and the live preview asks for two of them per render, twice per edit. So it
+    must be read strided through a memmap, never materialised whole and strided
+    afterwards (2.65 s cold / 0.21 s warm vs 0.01 s, measured on a 480 MB map).
+
+    Pinned as the two observable halves of that contract: the read asks for a
+    memmap, and the whole-array reader is not used at all."""
+    from astropy.io import fits as _fits
+
+    cov = np.arange(64 * 48, dtype=np.float32).reshape(64, 48)
+    fits_path = tmp_path / "stack_M42.fits"
+    _fits.PrimaryHDU(data=cov).writeto(coverage_path_for(fits_path))
+
+    seen: list[object] = []
+    real_open = _fits.open
+
+    def watched_open(*args, **kwargs):
+        seen.append(kwargs.get("memmap"))
+        return real_open(*args, **kwargs)
+
+    def forbidden(*_a, **_k):  # pragma: no cover - only runs on a regression
+        raise AssertionError("_load_map must not read the whole map into memory")
+
+    monkeypatch.setattr(_fits, "open", watched_open)
+    monkeypatch.setattr(_fits, "getdata", forbidden)
+
+    out = load_coverage(fits_path, step=8)
+    assert seen == [True]
+    # …and it is still exactly the strided map, which is what actually matters.
+    assert np.array_equal(out, cov[::8, ::8])
+
+
+def test_load_coverage_strides_a_float64_and_a_stray_3d_map_the_same_way(tmp_path):
+    """Striding before the float32 cast (and before the defensive 3-D collapse)
+    is what keeps the read small; it must not change a single value."""
+    from astropy.io import fits as _fits
+
+    wide = (np.arange(40 * 30, dtype=np.float64).reshape(40, 30) / 7.0)
+    p64 = tmp_path / "wide.fits"
+    _fits.PrimaryHDU(data=wide).writeto(coverage_path_for(p64))
+    assert np.array_equal(load_coverage(p64, step=5),
+                          wide.astype(np.float32)[::5, ::5])
+
+    # A stray per-channel map: <=3 channels takes the first, more averages them.
+    rgb = np.arange(24 * 18 * 3, dtype=np.float32).reshape(24, 18, 3)
+    p3 = tmp_path / "three.fits"
+    _fits.PrimaryHDU(data=rgb).writeto(coverage_path_for(p3))
+    assert np.array_equal(load_coverage(p3, step=3), rgb[..., 0][::3, ::3])
+
+    many = np.arange(24 * 18 * 5, dtype=np.float32).reshape(24, 18, 5)
+    p5 = tmp_path / "five.fits"
+    _fits.PrimaryHDU(data=many).writeto(coverage_path_for(p5))
+    assert np.allclose(load_coverage(p5, step=3), many.mean(axis=-1)[::3, ::3])
+
+
 def test_load_coverage_returns_none_for_single_field_image(tmp_path):
     # No coverage sibling → the op has nothing to level against, so None (the op's
     # None-guard then makes it a clean no-op rather than a dead control).
