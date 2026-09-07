@@ -3,11 +3,12 @@ import {
   Anchor, Badge, Card, Center, Group, Image, Loader, Progress, SegmentedControl,
   SimpleGrid, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconChecklist, IconCircleCheck } from "@tabler/icons-react";
+import { IconChecklist, IconCircleCheck, IconStarFilled } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api, type LifeListItem } from "../api/client";
+import { api, type LifeListItem, type WishlistItem } from "../api/client";
 import { QueryError } from "../components/QueryError";
+import { WishlistStar } from "../components/WishlistStar";
 
 // "My life list" — the collection view.
 //
@@ -41,6 +42,21 @@ function ObjectTile({ item }: { item: LifeListItem }) {
   // The catalog id is the stable label ("M31"); the popular name is a bonus that
   // many entries simply don't have, so it never carries the tile on its own.
   const title = item.name ? `${item.catalog_id} · ${item.name}` : item.catalog_id;
+  return (
+    // The star is a *sibling* of the tile, not a child: a captured tile is a
+    // <Link>, and a <button> inside an <a> is invalid HTML that swallows one of
+    // the two clicks. Positioned top-left so it never lands on the "Got it"
+    // badge at top-right.
+    <div style={{ position: "relative" }}>
+      <TileBody item={item} title={title} />
+      <div style={{ position: "absolute", top: 6, left: 6, zIndex: 3 }}>
+        <WishlistStar catalogId={item.catalog_id} label={title} size="xs" />
+      </div>
+    </div>
+  );
+}
+
+function TileBody({ item, title }: { item: LifeListItem; title: string }) {
   const body = (
     <Card
       withBorder padding="xs" radius="md" h="100%"
@@ -159,6 +175,70 @@ function Section({ title, note, items, filter }: {
   );
 }
 
+/**
+ * "My wishlist" — the objects the owner picked out for themselves.
+ *
+ * The list below it is a *fixed* catalogue: you can tick things off it but you
+ * can't tell it what you actually want next. This is that half, and it sits at
+ * the top because your own shortlist beats a hundred greyed-out tiles.
+ *
+ * Self-hiding: nothing renders until something is starred, so a fresh install
+ * and an older backend both see exactly today's page (the standing rule that a
+ * new feature must not become one more always-on banner).
+ */
+function WishlistSection() {
+  const list = useQuery({
+    queryKey: ["wishlist"],
+    queryFn: () => api.getWishlist().catch(() => null),
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  const items = list.data?.items ?? [];
+  if (items.length === 0) return null;
+  const captured = list.data?.counts.captured ?? 0;
+
+  return (
+    <Card withBorder radius="md" padding="md">
+      <Group gap="xs" mb={4}>
+        <IconStarFilled size={16} color="var(--mantine-color-yellow-5)" />
+        <Title order={4}>My wishlist</Title>
+      </Group>
+      <Text size="sm" c="dimmed" mb="sm">
+        {captured === 0
+          ? `${items.length === 1 ? "One object" : `${items.length} objects`} you said you want to shoot. `
+            + "The Tonight page will tell you when one of them is well placed."
+          : `You've captured ${captured} of the ${items.length} you saved. `
+            + "The Tonight page tells you when the rest are well placed."}
+      </Text>
+      <SimpleGrid cols={{ base: 2, xs: 3, sm: 4, md: 5, lg: 6 }} spacing="sm">
+        {items.map((i) => <WishlistTile key={i.catalog_id} item={i} />)}
+      </SimpleGrid>
+    </Card>
+  );
+}
+
+/** A wishlist row reuses the life-list tile — same shape, same "Got it" badge,
+ *  same star (which un-saves it here). The two lists are the same objects seen
+ *  two ways, so they should not look like two different things. */
+function WishlistTile({ item }: { item: WishlistItem }) {
+  return (
+    <ObjectTile item={{
+      catalog_id: item.catalog_id,
+      name: item.name,
+      type: item.type,
+      con: item.con,
+      blurb: item.blurb,
+      size_arcmin: item.size_arcmin,
+      captured: item.captured,
+      safe_name: item.safe_name,
+      target_name: item.target_name,
+      sep_deg: null,
+      thumbnail_url: item.thumbnail_url,
+    }} />
+  );
+}
+
 export function LifeListView() {
   const list = useQuery({ queryKey: ["lifeList"], queryFn: () => api.getLifeList() });
   const [filter, setFilter] = useState<Filter>("all");
@@ -203,9 +283,11 @@ export function LifeListView() {
           An object counts as captured once you have frames of it and the app has
           worked out where they point — so a target still waiting to be located
           stays greyed out until it's solved. Tap anything you've got to jump
-          straight to its picture.
+          straight to its picture, or tap its ☆ to put it on your wishlist.
         </Text>
       </Card>
+
+      <WishlistSection />
 
       <SegmentedControl
         value={filter}
