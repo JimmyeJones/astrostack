@@ -5255,6 +5255,39 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ NEW BEGINNER FEATURE (Scout 2026-09-07) — "My wishlist": a personal, saved list of objects you
+  want to shoot, that then drives the Tonight planner.** *(Pillar: friendliness + autonomy / plan —
+  PRIORITY 2–3. Size: M. Clears the beginner bar: sane default is an empty list; "☆ Add to wishlist" is
+  one tap; the payoff is plain-language — "Your wishlist target **M45** is up and high by 11 pm tonight";
+  nothing pro/niche.)*
+  **The gap (verified this run — the pieces exist but nothing joins them):** the app already has a
+  fixed **famous-objects life-list** (v0.279.0 — the classic showpieces, with the ones you've captured
+  ticked off and the rest shown as a bucket list) and a **Tonight planner** (`nightplan.py` /
+  `routers/plan.py`) that ranks targets by altitude / season / Moon, plus a "Try something new tonight"
+  card (`SuggestTargetsCard`) of generic beginner showpieces. What a beginner *cannot* do is say **"I
+  want to shoot the Andromeda Galaxy next"** and have the app remember it and tell them, on the right
+  night, that it's up and well-placed. The life-list is a *fixed* catalogue you can't add to, and the
+  planner ranks *generically*, so the beginner's own intent — the single most natural planning act —
+  goes nowhere.
+  **The feature:** a small, additive "wishlist" the user builds from any object they can already see in
+  the app (a life-list row, a Sky Map object, a search result), persisted in the **library DB** (a new
+  additive table + `SCHEMA_VERSION` bump + `_migrate_schema`, §9 — never a reset), surfaced two ways:
+  (1) a **"Wishlist tonight"** slice on the Tonight page that runs the *existing* `nightplan` scoring
+  over just the user's saved objects and shows the ones that are up and well-placed, with the same
+  Moon-wash verdict the planner already computes; (2) a plain "☆ On my wishlist / captured" state on the
+  object so the loop closes when they finally shoot it (reuse the life-list's own "have I captured this?"
+  match against the library target list). **Sane default:** empty list → the card self-hides, so a
+  first-run app and an older/newer frontend both degrade to today's page (the standing IA rule — no new
+  always-on banner). **Deliberately NOT** a full observing-planner with constraints/notifications/weather
+  (weather needs a networked API → owner sign-off); it is one saved list plus the scoring that already
+  exists. **Builder slicing:** ship (1) the DB table + add/remove/list endpoints + the star toggle first
+  (a usable wishlist with no planner tie-in is already worth having), then (2) the "Wishlist tonight"
+  planner slice as its own commit. Tests: an old library DB migrates cleanly (upgrade test); add/remove/
+  list round-trips; the planner slice scores only wishlisted objects and reuses the shared Moon verdict;
+  the card self-hides on an empty list. **Grep before building:** `wishlist`, `life-list`, `nightplan`,
+  `SuggestTargetsCard` — the *bucket* life-list (fixed famous objects) is v0.279.0 and is **not** this;
+  this is the user-curated, planner-driving list that does not exist yet.
+
 - **✅ ALL THREE SLICES SHIPPED — ~~"Your year under the stars": a year-bounded recap of a season of
   imaging.~~** (a)+(c) in v0.343.0 (Builder, branch `claude/sweet-babbage-l67sz2`), as composition over the
   night fold the Dashboard heatmap already pays for. **(b) has shipped too** — corrected 2026-09-06 after a

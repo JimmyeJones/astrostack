@@ -18,6 +18,67 @@ is a queue.
 
 ---
 
+## 2026-09-07 (Scout, branch `agent/scout-qa-mosaic-fold`) — stacking-engine re-audit CLEAN (with empirical probes of the newest code); dogfood CLEAN; one beginner feature filed
+
+**Baseline.** Fresh `source scripts/agent-setup.sh`; the stacking + calibrate
+subset green — **1653 passed / 2 skipped / 3392 deselected** (`-k "stack or
+accumul or align or mosaic or drizzle or calibrat or reject or weight"`,
+`-p no:pytest-qt` fallback), 8m41s. So a real bug was distinguishable from a
+pre-existing failure. No new verified bug filed — nothing rose above the noise
+floor, so per AGENTS.md §2 nothing was manufactured.
+
+**Lead: the newest stacking-engine code, read adversarially *and* probed.** The
+engine has ~18 prior clean audits, so this run led with the code changed since
+the last one rather than re-treading the repeatedly-clean math:
+
+- **`stack/pointings.py` — the v0.374.7 fold optimisation** (`fold_pointings`,
+  `_cluster_distinct`, `pointing_groups`, `detect_mixed_pointings`). Traced the
+  wrap-safety argument (a cell key never straddles the 0°/360° seam; the seam is
+  handled by the unit-vector clustering, not the fold) and the soundness gate,
+  then **drove it empirically**: (a) a 3-panel mosaic of 900 dithered subs folded
+  to distinct cells gives a grouping **bit-identical** to the exact O(n²)
+  clustering, with each panel's 300 subs correctly its own; (b) a dithered panel
+  straddling RA≈0 folds into two cells but `pointing_groups` still returns one
+  panel (`None` — no split), because the clustering links them on the sphere;
+  (c) two panels 5° apart split into two labels as intended. Correct — the fold
+  cannot move the answer that matters. **CLEAN.**
+- **`calibrate/defects.py` — the v0.367–v0.371 sensor-defect repair** (the newest
+  code that *writes* image pixels, so the highest corruption risk).
+  `find_sensor_defects` (per-phase local-median outlier + the `max(global,
+  local)` scale + the `max_fraction` refusal), `_local_fill`, `_local_robust_scale`,
+  and `DefectMap.repair`. **Probed:** a defect surrounded on all 8 same-phase
+  neighbours by *other* defects is left untouched (all-NaN column → the documented
+  "leave it alone" case), while the surrounding defects that still have working
+  neighbours repair; a lone defect is replaced by the exact median of its 8
+  same-phase neighbours (44.0 vs the hand-computed 44.0). The repair is applied
+  after the pedestal subtract and before the flat divide (`apply.py::apply_raw`),
+  in the raw Bayer domain, with a shape-mismatch/`None` no-op. **CLEAN.**
+- **`stack/output.py` parity** (`pack_unit` rounding shared by all six export
+  paths; `_to_uint16_linear` / `linear_scale_anchors` — the "full data" TIFF).
+  The min→max white-point anchor is the already-traced, deliberately-left item
+  under Bugs (severity: not a new find), not a regression. **CLEAN.**
+- **`stack/align.py`** (the v0.367.1 `not (both within cap)` NaN-safe subpixel
+  guard at both sites) and **`webapp/watcher.py`** (`StabilityTracker`
+  in-place-rewrite re-arm, stranded-batch re-offer, the mtime clock-skew note
+  already filed under Bugs). Read; **CLEAN**.
+
+**Dogfood (`scripts/agent-dogfood.sh`, sample-loaded).** Boot → sample → stack →
+probe all succeeded; **no element overflowing, no console errors**, page heights
+in line with the recorded baseline (tallest **3,040 px**, phone Target page;
+desktop Target 2,037 px). Eyeballed the stack→result path the run was told to
+weight: the Stack page's Auto defaults + plain-language method/luminance notes,
+the Target page's guidance banners / "Is it enough yet?" / frames table, all
+read clean and beginner-safe. Nothing to fix.
+
+**Backlog.** Idea supply is not the constraint here — nearly every beginner
+feature I generated while looking for a gap (moon-aware planning, "try something
+new tonight", mosaic panel-balance guidance, a night-after-night deepening reel,
+before/after, A/B compare, a famous-objects bucket life-list) is **already built**
+— so I filed exactly one that I verified is genuinely absent (a *personal*,
+user-curated wishlist that drives the Tonight planner, as opposed to the fixed
+famous-objects life-list) rather than pad the ~49 open ideas. No pruning needed:
+the Bugs section is already open-bugs-only and the last three runs found it clean.
+
 ## 2026-09-07 (later still) — Builder run (branch `claude/sweet-babbage-mg8isx`): three shipped, and two traps worth carrying forward
 
 **The run.** Baseline green before any change (**5,023 passed / 2 skipped**, full
