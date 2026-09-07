@@ -14,6 +14,96 @@ Newest first.
 
 ---
 
+## v0.382.1 — 2026-09-07 — the deferred "does a sky gradient cost Auto its sharpening?" question, answered with numbers
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-izlzeq`.)** Closes a
+real-data-gated item that had been deferred **three times** — filed 2026-07-08,
+re-measured the same day, and left standing since — by running its own
+experiment against the current code rather than re-arguing it.
+
+**What it feared.** `presets.auto_recipe` picks its denoise strength and whether
+to sharpen from `analyze_proxy`'s `sky_sigma`, measured on the raw linear proxy
+*before* Auto's own `background.final_gradient` removes the gradient. On the old
+level-MAD estimator that was demonstrably wrong: the entry's own measurement, at
+a fixed low noise, recorded gradient 0.00→0.05→0.10→0.20 of range moving
+`sky_sigma` **0.015→0.028→0.054→0.098** — past `_NOISE_HI` (0.028) by a gradient
+of only ~0.05, flipping Auto from `sharpen≈0.40` to **sharpen 0.0 / full
+denoise** on exactly the light-polluted-but-deeply-stacked frame the owner
+shoots.
+
+**Why it is closed.** **v0.225.0 already fixed the cause**, for the *mosaic*
+"multicolour grid" regression rather than for this entry: `sky_sigma` is now the
+MAD of **adjacent-pixel differences** (`edit.noise.estimate_noise_sigma`), which
+is blind to any structure slower than a pixel — a smooth gradient included. The
+entry was filed against the estimator that no longer exists, and nobody had gone
+back to it.
+
+**The measurement, on the entry's own ladder** (the file's realistic proxy — sky
++ extended object + 150 stars — at σ=0.003, mean of four seeds):
+
+| gradient (of range) | `sky_sigma` | `_noise_fraction` | Auto's sharpen |
+|---|---|---|---|
+| 0.00 | 0.00418 | 0.000 | on, amount 0.5 |
+| 0.05 | 0.00386 | 0.000 | on, amount 0.5 |
+| 0.10 | 0.00353 | 0.000 | on, amount 0.5 |
+| 0.20 | 0.00300 | 0.000 | on, amount 0.5 |
+
+It does not rise with the gradient — it drifts **down**, because the tilt lifts
+the 99.5th-percentile ceiling the frame is normalised against, so the same grain
+is a slightly smaller fraction of the span. No denoise op is added at any step,
+and the sharpen amount is identical throughout.
+
+**What ships is the pin, not a fix.** A sibling test already held the σ property
+at one gradient (`test_a_residual_light_pollution_gradient_is_not_counted_as_noise`,
+0.08); the new `test_a_strong_gradient_never_costs_a_clean_stack_its_sharpening`
+holds the *decision* across the entry's whole feared range — noise fraction 0,
+sharpening kept at a constant amount, no denoise pass — so a future change to the
+estimator cannot quietly reopen this without a red test. No product code changed;
+Auto's output is byte-for-byte what it was.
+
+**Original entry, for its trace and its pre-fix numbers:**
+
+    - **Scout to vet on REAL data: does the Auto denoise↔sharpen crossfade over-read a *sky
+      gradient* as noise?** (M, image-quality/autonomy) `presets.auto_recipe` picks its denoise
+      strength and whether to sharpen from `analyze_proxy`'s `sky_sigma`, measured on the **raw**
+      linear proxy — *before* Auto's own first op (`background.final_gradient`) removes the gradient.
+      A Builder dogfood (2026-07-08) found `sky_sigma` is materially sensitive to a smooth background
+      gradient and to dynamic range: on synthetic proxies, gradient 0.0→0.10 moved `sky_sigma`
+      0.071→0.184 at *fixed* noise (crossfade band is 0.012–0.028, so it saturates to "very noisy" →
+      full denoise, **no sharpen**). This is very likely just an unrepresentative synthetic (the Scout's
+      real-data dogfoods *do* get sharpen chosen, so real proxies read < 0.012), **not** a confirmed
+      bug — hence a Scout item, not a Builder change to the most-used one-click path. Worth checking on
+      a real light-polluted / strong-gradient Seestar stack whether Auto ever *wrongly* drops sharpen and
+      over-denoises. If real: measure the crossfade `sky_sigma` on a **coarsely background-subtracted**
+      proxy (a cheap large-box detrend, matching what `final_gradient` will remove anyway) so it reflects
+      true pixel noise, not the gradient. Additive, testable on `analyze_proxy`/`auto_recipe` in isolation;
+      changing Auto's output needs the usual real-data validation.
+      _(Builder measurement 2026-07-08, v0.94.5 baseline — sharpens the case but did **not** ship a change,
+      deferring to the two prior deferrals + the real-data requirement. Three findings: **(1) The mechanism
+      is real, not merely a low-dynamic-range synthetic artifact.** My earlier same-day probe used a synthetic
+      whose 99.5th percentile landed *in the sky* (too little bright signal), which by itself blows up
+      `sky_sigma`. With a **realistic** proxy (extended nebula + 400 varied stars → proper normalization span)
+      and **low** noise (σ≈0.003), a modest left→right gradient still pushes `sky_sigma` well over `_NOISE_HI`
+      (0.028): gradient 0.00→0.05→0.10→0.20 of range → `sky_sigma` 0.015→0.028→0.054→0.098, i.e. Auto flips
+      from `sharpen≈0.40` to **sharpen 0.0 / full denoise** by a gradient of only ~0.05. This is exactly the
+      light-polluted-but-well-stacked case (gradient present, pixel noise driven low by thousands of subs) —
+      arguably *common* for the target user, not an edge. **(2) Op-order proof it's measuring the wrong signal
+      by construction:** in `auto_recipe` `background.final_gradient` is the **first** tone/detail op, *before*
+      `detail.denoise` — so the noise the denoise op actually sees is the post-gradient-removal noise, yet
+      `analyze_proxy` measures `sky_sigma` on the raw (gradient-laden) proxy. **(3) A naïve detrend backfires
+      — the fix is non-trivial.** A quick block-median + nearest-neighbour-upsample detrend *increased*
+      `sky_sigma` on a flat proxy (0.015→0.058) via block-edge steps, i.e. a poorly-tuned detrend adds
+      structure that reads as noise. So the eventual fix must use a genuinely smooth background estimate
+      (photutils `Background2D`-style interpolation, or a true low-pass) that removes only the large-scale
+      gradient while leaving pixel noise intact — and be validated on a **real** light-polluted Seestar stack
+      that it (a) leaves a flat clean stack's `sky_sigma` ≈ unchanged (so clean stacks still sharpen) and
+      (b) reads a gradient-heavy-but-low-noise stack as *not* very noisy. Safety of the eventual change:
+      flat images ≈ byte-for-byte (detrend ≈ no-op), genuinely-noisy images unchanged (high-freq noise
+      survives a coarse detrend), only gradient-heavy-low-noise images shift toward sharpen — but it still
+      touches the most-used one-click path, so it stays a Scout/real-data item.)_
+
+---
+
 ## v0.382.0 — 2026-09-07 — the app starts collecting the real-data evidence its own gated highlight cue needs
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-izlzeq`.)** Ships the
