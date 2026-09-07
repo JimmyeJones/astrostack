@@ -221,4 +221,37 @@ describe("LifeListView", () => {
 
     await waitFor(() => expect(screen.getByText("boom")).toBeInTheDocument());
   });
+
+  it("says nothing about a wishlist until something is on it", async () => {
+    // The standing IA rule: a new feature must not become one more always-on
+    // block. A fresh install (and an older backend, which 404s) sees exactly
+    // today's page.
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list());
+    vi.spyOn(client.api, "getWishlist")
+      .mockResolvedValue({ items: [], counts: { saved: 0, captured: 0 } });
+    renderList();
+
+    await waitFor(() => expect(screen.getByText(/M31 · Andromeda Galaxy/))
+      .toBeInTheDocument());
+    expect(screen.queryByText("My wishlist")).not.toBeInTheDocument();
+  });
+
+  it("leads with your own shortlist once you've starred something", async () => {
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list());
+    vi.spyOn(client.api, "getWishlist").mockResolvedValue({
+      items: [{
+        catalog_id: "M42", name: "Orion Nebula", type: "nebula", con: "Ori",
+        blurb: "", size_arcmin: null, added_utc: "2026-09-07T00:00:00Z",
+        captured: false, safe_name: null, target_name: null, thumbnail_url: null,
+      }],
+      counts: { saved: 1, captured: 0 },
+    });
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("My wishlist")).toBeInTheDocument());
+    expect(screen.getByText(/One object you said you want to shoot/))
+      .toBeInTheDocument();
+    // And every tile carries the toggle that put it there.
+    expect(screen.getAllByTestId("wishlist-star-M42").length).toBeGreaterThan(0);
+  });
 });

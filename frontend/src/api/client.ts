@@ -1918,6 +1918,65 @@ export interface NearlyThere {
   location_source: string;
 }
 
+// "My wishlist" — an object the owner explicitly saved as "I want to shoot this".
+// Distinct from the life list (a *fixed* catalogue of famous objects) and from
+// the planner's generic suggestions: this is the list they built themselves.
+export interface WishlistItem {
+  catalog_id: string;
+  /** Popular name, or "" for the many catalog entries without one. */
+  name: string;
+  type: string;
+  con: string;
+  blurb: string;
+  size_arcmin: number | null;
+  added_utc: string;
+  /** Same match as the life list, so the two screens can never disagree. */
+  captured: boolean;
+  safe_name: string | null;
+  target_name: string | null;
+  /** null for an object not captured, and for one captured but not yet stacked. */
+  thumbnail_url: string | null;
+}
+
+export interface WishlistCounts {
+  saved: number;
+  captured: number;
+}
+
+export interface Wishlist {
+  items: WishlistItem[];
+  counts: WishlistCounts;
+}
+
+/** One wishlisted object genuinely usable in tonight's dark window
+ *  (`GET /api/wishlist/tonight`). Scored by the same altitude/window/Moon blend
+ *  every other planning card uses. */
+export interface WishlistTonightObject {
+  catalog_id: string;
+  name: string;
+  type: string;
+  con: string;
+  blurb: string;
+  captured: boolean;
+  safe_name: string | null;
+  max_altitude_deg: number;
+  minutes_above_min_alt: number;
+  moon_separation_deg: number;
+  moon_up_fraction: number | null;
+  usable_start_utc: string | null;
+  usable_end_utc: string | null;
+  transit_utc: string | null;
+  score: number;
+}
+
+/** `up` is empty — and the card self-hides — when nothing saved is up, the list
+ *  is empty, or no location is known; `saved`/`location_source` say which. */
+export interface WishlistTonight {
+  saved: number;
+  up: WishlistTonightObject[];
+  location_source: string;
+}
+
 export interface BestPicture {
   safe: string;
   target_name: string;
@@ -3223,6 +3282,21 @@ export const api = {
   // preview stat that decides their thumbnail URLs.
   lifeListCounts: () => req<LifeListCounts>("/api/life-list/counts"),
   nearlyThere: () => req<NearlyThere | null>("/api/life-list/nearly-there"),
+
+  // wishlist — the objects the owner saved for themselves. Each toggle returns
+  // the whole new list, so the star's answer *is* the refreshed state.
+  getWishlist: () => req<Wishlist>("/api/wishlist"),
+  addToWishlist: (catalogId: string) =>
+    req<Wishlist>(`/api/wishlist/${encodeURIComponent(catalogId)}`, { method: "POST" }),
+  removeFromWishlist: (catalogId: string) =>
+    req<Wishlist>(`/api/wishlist/${encodeURIComponent(catalogId)}`, { method: "DELETE" }),
+  wishlistTonight: (params?: { when?: string; minAlt?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.when) q.set("when", params.when);
+    if (params?.minAlt !== undefined) q.set("min_alt", String(params.minAlt));
+    const qs = q.toString();
+    return req<WishlistTonight>(`/api/wishlist/tonight${qs ? `?${qs}` : ""}`);
+  },
 
   // gallery
   // `videos` is additive — an older backend doesn't send it, so read it as `?? []`.

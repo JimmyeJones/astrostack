@@ -87,6 +87,27 @@ CREATE TABLE IF NOT EXISTS targets (
 CREATE INDEX IF NOT EXISTS idx_targets_radec ON targets(ra_deg, dec_deg);
 """
 
+#: Registry tables added *after* the base schema above was version-stamped.
+#:
+#: Kept out of ``_REGISTRY_SCHEMA_SQL`` and re-run (idempotently) on every open so
+#: that adding one never needs a :data:`LIBRARY_SCHEMA_VERSION` bump. A bump makes
+#: an **older** build refuse to open the registry ("newer than this build"), which
+#: would turn a rollback to the previous Docker image into a bricked install — and
+#: this box is upgraded in place with no backup. A bare
+#: ``CREATE TABLE IF NOT EXISTS`` is additive in *both* directions instead: a new
+#: build adds the table to an old registry on first open, and an old build simply
+#: ignores a table it has never heard of, exactly as ``_check_schema`` already
+#: promises ("the schema only ever *adds*").
+_AUX_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS wishlist (
+    catalog_id  TEXT PRIMARY KEY,        -- bundled-catalog id ("M31", "NGC 7000")
+    name        TEXT NOT NULL DEFAULT '',-- popular name at the time it was saved
+    ra_deg      REAL,                    -- snapshot, so an entry survives a catalog edit
+    dec_deg     REAL,
+    added_utc   TEXT NOT NULL
+);
+"""
+
 # The ``targets`` registry is the one evolving table (``library_meta`` is a
 # static key/value store), so it's the only one whose columns are reconciled
 # additively on open — see ``Library._ensure_columns``.
@@ -145,6 +166,24 @@ class TargetEntry:
     # detectors, so it's flagged here for the Library's one-click cleanup. ``None``
     # (the default) means a normal, real target.
     legacy_mixed_drop: int | None = None
+
+
+@dataclass(frozen=True)
+class WishlistEntry:
+    """One object the owner has saved as "I want to shoot this".
+
+    Deliberately thin: the id is the bundled catalog's, so everything else about
+    the object (type, constellation, size, blurb) is looked up live from the
+    catalog rather than frozen here. ``name``/``ra_deg``/``dec_deg`` are a
+    *snapshot* kept only so a saved entry still reads as something recognisable
+    if a future catalog revision ever renames or drops the id.
+    """
+
+    catalog_id: str
+    name: str
+    ra_deg: float | None
+    dec_deg: float | None
+    added_utc: str
 
 
 def make_safe_name(name: str) -> str:
@@ -243,6 +282,18 @@ class Library:
         self._conn.executescript(_REGISTRY_SCHEMA_SQL)
         self._set_meta("schema_version", str(LIBRARY_SCHEMA_VERSION))
         self._ensure_columns()
+        self._ensure_aux_tables()
+
+    def _ensure_aux_tables(self) -> None:
+        """Create any post-freeze registry table this build knows about.
+
+        Runs on *every* open, at any stamped version, so a table added after the
+        base schema was frozen reaches an existing library without a version bump
+        (see :data:`_AUX_TABLES_SQL` for why that matters on an in-place upgrade).
+        Pure ``CREATE TABLE IF NOT EXISTS``, so a registry that already has them
+        is untouched."""
+        assert self._conn is not None
+        self._conn.executescript(_AUX_TABLES_SQL)
 
     def _ensure_columns(self) -> None:
         """Additively add any column the authoritative registry schema defines
@@ -284,6 +335,7 @@ class Library:
         v = self._conn.execute("PRAGMA user_version").fetchone()[0]
         if v == LIBRARY_SCHEMA_VERSION:
             self._ensure_columns()
+            self._ensure_aux_tables()
             return
         if v < LIBRARY_SCHEMA_VERSION:
             # Older library (possibly created by a pre-scan build that still
@@ -537,6 +589,61 @@ class Library:
             shutil.rmtree(self.targets_dir / entry.safe_name, ignore_errors=True)
         return True
 
+    # ---- wishlist ------------------------------------------------------
+
+    def list_wishlist(self) -> list[WishlistEntry]:
+        """Everything the owner has saved to shoot, oldest first.
+
+        Oldest-first is the order they built the list in, which reads as a queue
+        ("this is what I said I wanted, in the order I wanted it") rather than a
+        feed. ``rowid`` breaks the tie because ``added_utc`` has one-second
+        resolution and starring three objects in one burst is a normal thing to
+        do — without it those three would come back alphabetically, which is not
+        an order the owner chose. Empty on a library that has never had one — the
+        callers' cards self-hide on that, so a first-run install shows nothing
+        new."""
+        assert self._conn is not None
+        rows = self._conn.execute(
+            "SELECT * FROM wishlist ORDER BY added_utc, rowid"
+        ).fetchall()
+        return [_row_to_wishlist(r) for r in rows]
+
+    def add_to_wishlist(self, catalog_id: str, *, name: str = "",
+                        ra_deg: float | None = None,
+                        dec_deg: float | None = None) -> WishlistEntry:
+        """Save one catalog object. Idempotent — re-adding keeps the original
+        ``added_utc`` (and so the list's order) rather than jumping the entry to
+        the end, which is what a double-tap on the star would otherwise do.
+
+        The snapshot fields are refreshed on a re-add, so a saved entry tracks a
+        corrected catalog position instead of keeping a stale one."""
+        assert self._conn is not None
+        cid = catalog_id.strip()
+        if not cid:
+            raise ValueError("catalog_id must not be empty")
+        self._conn.execute(
+            "INSERT INTO wishlist(catalog_id, name, ra_deg, dec_deg, added_utc) "
+            "VALUES(?, ?, ?, ?, ?) "
+            "ON CONFLICT(catalog_id) DO UPDATE SET "
+            "  name = excluded.name, ra_deg = excluded.ra_deg, "
+            "  dec_deg = excluded.dec_deg",
+            (cid, name or "", ra_deg, dec_deg, _utc_iso()),
+        )
+        row = self._conn.execute(
+            "SELECT * FROM wishlist WHERE catalog_id = ?", (cid,)
+        ).fetchone()
+        return _row_to_wishlist(row)
+
+    def remove_from_wishlist(self, catalog_id: str) -> bool:
+        """Drop one saved object. True if it was there, False if it wasn't —
+        removing something already gone is not an error (the star is a toggle,
+        and two tabs can both untick it)."""
+        assert self._conn is not None
+        cur = self._conn.execute(
+            "DELETE FROM wishlist WHERE catalog_id = ?", (catalog_id.strip(),)
+        )
+        return cur.rowcount > 0
+
     def find_target_within(self, ra_deg: float, dec_deg: float,
                            radius_deg: float) -> TargetEntry | None:
         """
@@ -734,6 +841,16 @@ def _row_to_target(row: sqlite3.Row) -> TargetEntry:
             row["legacy_mixed_drop"]
             if "legacy_mixed_drop" in row.keys() else None
         ),
+    )
+
+
+def _row_to_wishlist(row: sqlite3.Row) -> WishlistEntry:
+    return WishlistEntry(
+        catalog_id=row["catalog_id"],
+        name=row["name"] or "",
+        ra_deg=row["ra_deg"],
+        dec_deg=row["dec_deg"],
+        added_utc=row["added_utc"],
     )
 
 
