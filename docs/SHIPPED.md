@@ -159,6 +159,377 @@ costs an array copy per additive op on *every* render. A future run wanting it
 should ship it as its own change, with the 4.2e-7 re-measured on a mosaic proxy
 (NaN gaps are exactly where `replay_field`'s nearest-fill differs from a re-fit)
 and its own much tighter slot budget — not fold it into this one.
+## Cut from the working list on 2026-09-07 (backlog-readiness run) — five resolved records, verbatim, each under its own version
+
+These were sitting inside priority sections of `IMPROVEMENTS.md` as shipped or closed records (the
+three-file rule, AGENTS.md §2). Nothing below is open work. Where a version already has its own heading
+further down (v0.376.2), the block here is the *original backlog entry* as it was struck, kept for the
+trace; the shipped write-up is under that heading.
+
+### v0.270.2 — 2026-08-26 — auto-grade compares a mosaic's panels against themselves (`_MetricSpec.per_pointing`, `cluster_pointings`, `PANEL_LINK_DIST_DEG`) — cut from "Bugs" 2026-09-07, verbatim
+
+  - ~~**🟠 LATENT (found incidentally by the same 2026-08-17 audit, repro-verified, NOT the owner's current
+    regression) — auto-grade compares quality metrics across a mosaic TARGET-WIDE, when its panels are
+    different patches of sky. A legitimately star-poor panel can have its entire sub population rejected as
+    "cloud".**~~ — **FIXED v0.270.2** (Builder 2026-08-26, branch `agent/mosaic-grade-per-panel`).
+    **Measured before/after on the audit's own repro** (6 panels × 40 subs, one panel at 25% star density,
+    identical seeing/sky/transparency throughout): **before — 40 of 40 of that panel's subs recommended for
+    rejection**, worst z = 31.6, *"far fewer stars than typical (95 vs 395) — likely cloud"*; **after — 0
+    recommendations**, because each panel is now graded against itself. A genuinely clouded sub *inside* a
+    panel is still caught (it is an outlier against its own panel, which is the right comparison) — pinned by
+    its own test.
+    **What shipped:** `_MetricSpec` gains `per_pointing`, set on exactly the three position-dependent
+    (flux-like) metrics — star count, sky level, transparency; FWHM and eccentricity stay target-wide, since
+    seeing and tracking are properties of the *night*, not of where you point. `_pointing_groups` clusters the
+    accepted frames with a new `cluster_pointings` (extracted from `detect_mixed_pointings`, which now reuses
+    it) at a new `PANEL_LINK_DIST_DEG = 0.25°` — a dither is ≲0.1°, the tightest mosaic step ~0.5°, so there
+    is a ~2× margin either side. **The split only applies when it is sound** (≥2 clusters each carrying a full
+    `min_frames` population); a single-pointing target, an unsolved target, and a mosaic too tightly packed to
+    separate all fall through to today's exact behaviour, and a panel too thin or too flat to grade falls back
+    to the target-wide yardstick rather than being left ungraded.
+    **The 25% rail now applies per panel too**, as the entry asked: the target-wide cap is measured against
+    the *whole* target, so 40 of one panel's 40 subs is only 17% of a six-panel target and never reached it.
+    Both rails are deterministic over the same invariant combined set the `reconsider` fixed point relies on.
+    **Surfaced:** `GradeReport.pointing_groups` / `metrics_per_pointing`, carried through `GradeReportOut` as
+    an additive field, and the Auto-grade dialog now says *"This looks like a 6-panel mosaic, so each panel is
+    compared against itself — a panel pointed at emptier sky genuinely has fewer stars, and that isn't
+    cloud."* (nothing at all on a single-pointing target).
+    **Upgrade-safe (§9):** no config, schema, on-disk or default change; one additive API field an older
+    frontend ignores; behaviour identical for every non-mosaic target.
+    **Tests (+7, all fail-before):** `tests/test_qc_grading.py` (star-poor panel not called cloud; real cloud
+    inside a panel still caught; single-pointing/unsolved unchanged; the per-panel rail; the thin-panel
+    fallback), `tests/webapp/test_auto_grade.py` (the same through the endpoint, plus `pointing_groups == 0`
+    on an ordinary target), `frontend/src/routes/Target.test.tsx` (+2 for the dialog copy).
+
+    **Note for future agents:** the entry pointed at the `mosaic_panel_id` column as the grouping key —
+    it is in the schema and indexed, but **nothing ever populates it** (only `io/merge.py` copies it
+    through), so it is `None` on every real frame. The panels are derived from the frames' own solved
+    pointings instead.
+
+    Original spec, for the record:
+
+    *(Severity high for any mosaic owner with grading on — real, permanent data loss, not a false
+    alarm the user can waved away, since `auto_grade_frames` acts automatically. Gated behind
+    `auto_grade_frames`, which defaults OFF, and bounded by the existing 25% rejection rail — so it did not
+    cause the regression above, which fires regardless of this setting. Same class of bug as the v0.221.0
+    time-population fix (`846eb74`), just across sky position instead of time.)*
+
+    `grade_frames` (`seestack/qc/grading.py` ~304–356) builds its metric population from every accepted frame
+    of the *whole target* (`pop = [... for f in accepted if ...]`), with no split by pointing. **Repro:**
+    synthetic 6-panel mosaic, one deliberately star-poor panel → **all 40/40 of that panel's subs** flagged for
+    rejection (z≈26.8, "far fewer stars than typical — likely cloud"). The schema already carries
+    `mosaic_panel_id` (`seestack/io/project.py:112`, indexed) but nothing in grading groups by it —
+    `seestack/stack/pointings.py` exists and is the natural place to derive the clustering.
+
+    **Fix direction:** grade star-count/sky/transparency-family metrics **per pointing cluster**
+    (`mosaic_panel_id`) rather than target-wide, so a panel's own population is judged against itself. Keep
+    the existing 25%-per-population rail; verify it now applies per cluster too, not just globally, or a small
+    cluster could still lose disproportionately.
+
+### v0.310.0 + v0.311.0 — 2026-08-30 — the share JPEG, keepsake, scale-&-compass and wallpaper come off the master for linear runs (`stack._native_picture_source`, `SHARE_JPEG_MAX_LONG_EDGE`) — cut 2026-09-07, verbatim; its open half (display-space runs + the render cache) is now the READY entry under "Features that serve real workflows"
+
+- **✅ MOSTLY SHIPPED (Builder, v0.310.0 + v0.311.0, branch `claude/compassionate-galileo-e1p1x8`) — ~~the
+  picture a beginner actually *shares* is 1024 px wide, because every share export is built from the stored
+  preview PNG rather than the master.~~ The wallpaper and the share JPEG (with its keepsake and
+  scale-&-compass variants) now come off the master; the zoom clip is the one consumer still left on the
+  preview.** *(The original spec is kept below, indented — it is what the two commits were built from.)*
+
+    **What shipped.** One shared `stack._native_picture_source(run, preview, baked_north_up, needed_long_edge)`
+    re-renders the same picture from the run's own FITS at the size each caller needs, and returns `None` —
+    "use the stored bytes, exactly as before" — wherever the render could show a *different* picture: a baked
+    North-up preview, a "Process target" display-space run, an auto-crop-trimmed preview, a missing FITS, or a
+    canvas no bigger than the preview (read from `canvas_w/h` *before* any render). **v0.310.0** used it for the
+    wallpaper (see the entry under "Image quality"); **v0.311.0** used it for `kind="jpeg"` at a
+    `SHARE_JPEG_MAX_LONG_EDGE = 2560` cap.
+
+    **The entry's claim that the marks scale was checked, not assumed, and it is right — with one wrinkle that
+    would have been a bug if the swap had gone in one line later.** The nameplate's font, the keepsake's matte
+    and the rose are all fractions of the picture's own size, so they scale for free. The **scale bar is not**:
+    `SkyMarks.bar_px` is `bar.fraction × preview_width`, a length in pixels *of the image it will be drawn on*,
+    computed by the caller. So the source swap has to happen **before** `preview_width` is measured — a bar
+    measured against the 400 px preview and drawn on a 1600 px picture would claim a length four times what it
+    marks. A test spies on `_sky_marks_for_run`'s width argument rather than eyeballing the picture, because
+    this is exactly the kind of thing that reads fine and is silently wrong.
+
+    **The 2026-08-29 stand-down note below sized this as an **L** and was right about every part of it — what
+    made it shippable is that the hard parts are *declined* rather than solved.** Its point 1 (the plain path
+    is easy) is exactly what shipped. Its point 2 (the recipe path needs a render cache, and that cache is the
+    bulk of the work) stands untouched: `_native_picture_source` returns `None` for a display-space run, so
+    nothing renders and nothing needs caching — the cost is that the owner's `auto_edit_on_autostack` runs keep
+    the 1024 px share, and that half is still open. Its point 3 (test blast radius) did not materialise, for
+    the same reason: the **canvas ≤ preview** gate means the old fixtures — `test_wallpaper.py`'s zero-valued
+    FITS beside a solid-colour preview, and `test_share_north_up_double_rotation.py`'s three byte-identity
+    assertions — all take the stored-preview path exactly as before. Not one assertion was rewritten or
+    loosened. **The lesson worth carrying: a source swap that can decline cheaply is a different size from one
+    that must always succeed.**
+
+    **Not done: the zoom clip.** It reads `run.preview_path` bytes directly and caches the result under a
+    signature *of those bytes* (`_zoom_clip_signature`), so feeding it a bigger source means re-keying the cache
+    as well as swapping the bytes — a separate, self-contained slice. The gain the entry measured still stands
+    (569 px → 640).
+
+    **Upgrade-safe (§9):** no config/schema/on-disk/API-shape change; the endpoints, their query parameters and
+    their media types are untouched. Stated plainly rather than hidden: the *bytes* of a plain share JPEG do
+    change on a run whose master is bigger than its preview — that is the fix, not a side effect. Nothing is
+    written to disk, and the gallery/History **thumbnail** deliberately stays on the cheap stored preview, as
+    the spec's caution asked.
+
+    **Tests (+8 in `tests/webapp/test_share_native_resolution.py`, 6 fail before / pass after):** the share
+    JPEG off a 1600 px master with a 400 px preview; the cap (monkeypatched small, so no 100 MP fixture); the
+    "same picture, only bigger" comparison against the display-space twin; the scale-bar width spy above; the
+    keepsake matting the big picture; North-up on the bigger source; and the processed-run / missing-FITS
+    fallbacks.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-08-27, traced while fixing the full-res-PNG stretch bug) — the picture a beginner
+    actually *shares* is 1024 px wide, because every share export is built from the stored preview PNG rather
+    than the master.** *(Pillar: enjoy + share + trust, PRIORITY 3; size S–M; additive, no new deps. Confidence:
+    traced against the code.)* `_write_preview_png` caps the stored preview at **1024 px** wide
+    (`seestack/stack/output.py:366`), and the share JPEG (`stack.py`, `kind == "jpeg"`), the wallpaper
+    (`stack.py:1988`) and the sub-reveal all start from `run.preview_path` bytes. So the file a beginner posts,
+    sets as a phone background, or sends to family is 1024 px — soft on any modern phone, let alone a 1440p
+    screen — even though the master holds the full canvas and the "Download full-res PNG" button beside it
+    serves it. *(Note for whoever picks this up: an old Builder investigation elsewhere in this file describes
+    the share JPEG as having a "2048px cap". That is stale — it is the 1024 px preview, re-encoded.)*
+    **Builder 2026-08-30 — one more consumer, and the first that *measurably* pays for the cap.** The **Zoom
+    clip** (v0.303.0) is built from the same stored preview, and because it must not upscale, the cap sets its
+    resolution directly: `zoom_clip_size` yields **569 px** from a 1024-wide preview (1024 ÷ the 1.8× zoom)
+    where the same clip off a native-res source would be the full 640. So fixing this makes the shared *clip*
+    visibly sharper too, not just the shared still — worth weighing against the **L** sizing below. Nothing
+    about the clip needs changing when it lands: it takes whatever pixels it is handed.
+    **Why it is newly cheap:** the parity problem that made this awkward is gone. As of v0.287.4
+    `render_preview_png_full_res` takes the run's saved `stretch`/`black`, so a share render can reproduce the
+    *exact* look of the stored preview at any size — the share and the thumbnail can't drift.
+    **Shape:** render the share/wallpaper source at a share-sized cap (~2048–2560 px, and the actual screen size
+    for a wallpaper) through that same call, keeping every existing mark (nameplate, scale bar, North rose) —
+    they are all fractions of the picture width, so they scale with it. **Cautions:** this turns a byte-copy
+    into a real render on a RAM-capped NAS, so cap it, do it in the threadpool as the full-res download already
+    does, and leave the *gallery/History thumbnail* on the cheap stored preview — only the export grows. Keep
+    the un-rotated/no-marks path byte-identical where it can be, or state plainly that it changed.
+
+  **⚠️ Builder note (2026-08-29, branch `claude/compassionate-galileo-eypoyg`) — I claimed this, sized it
+  against the real code, and STOOD DOWN before writing any of it. It is not S–M; read this before picking it
+  up, because two of the three pieces are cheap and the third is what makes it an L.**
+  1. **The plain (non-recipe) path is genuinely easy, and the note below is right about why.** Render un-rotated
+     through `render_preview_png_full_res(fits, max_long_edge=~2560, stretch=run.preview_stretch,
+     black=run.preview_black)`, then apply the *existing* `orient_preview_north_up(..., already_deg=0.0)` — a
+     fresh render is on the canvas grid by construction, so `baked_north_up` is 0 for it,
+     `_unrotated_preview_width` collapses to the PNG's own width, and the marks/nameplate machinery is already
+     fraction-of-width so it scales for free. Memory is bounded: `load_stack_rgb(max_width=cap)` decimates
+     *during* load, so the peak is the output size, not the master's.
+  2. **The recipe path is not.** A "Process target" auto-edit — the owner's *main* workflow — leaves the run
+     display-space with its look in a saved recipe, and the only honest render for it is
+     `pipeline.render_run_recipe_fullres_png`, which goes through `_render_recipe_fullres` →
+     `_load_full_rgb_wcs` at **native** resolution and only decimates afterwards. That is fine behind the
+     deliberate "Download full-res PNG" button; behind a casual *share* tap on a NAS it is a multi-second,
+     full-canvas render every time. So the real shape is **render once and cache it** (keyed on the run's
+     preview mtime, with the cache living in the target tree beside the other derived files) — that cache, its
+     invalidation and its cleanup are the bulk of the work, and without it the feature is either slow or only
+     helps the runs that need it least.
+  3. **Test blast radius, stated so nobody is surprised.** `tests/webapp/test_share_north_up_double_rotation.py`
+     asserts **byte identity** with `png_bytes_to_jpeg(stored_preview)` in three places; those encode the
+     double-rotation invariants and would need rewriting against the new source (legitimately — the fresh
+     render *removes* that whole bug class for this path — but carefully, not casually).
+     `tests/webapp/test_wallpaper.py` is worse: its fixtures register a **zero-valued** FITS beside a
+     solid-colour preview, so any switch to a FITS-derived source turns its pictures black and its
+     colour/mean assertions meaningless. The **wallpaper** half therefore needs its own slice and its own
+     fixture rework — it is not a free rider on the share JPEG.
+  **Suggested slicing:** (i) the cache + the plain path behind it; (ii) the recipe path onto the same cache;
+  (iii) the wallpaper, with new fixtures. Re-size this entry as **L**.
+
+  **Builder note (2026-08-27, after the v0.290.1 North-up sweep):** this got *simpler*, not just more
+  worthwhile. A full-res render from the FITS is on the canvas grid by construction, so it takes
+  `north_up=True` directly and the whole "how much has this preview already been turned?" bookkeeping
+  (`preview_north_up_deg`, the `already_deg=` keyword) drops out of the export path entirely — the
+  share stops being a *consumer of the stored preview*, which is the single class of bug that has now bitten
+  four surfaces (Sky-map alpha and tile, History pins, the share double-rotation, the rose and scale bar; and
+  the open crop entry in "Bugs" is a fifth). The marks get easier too: measured against the canvas and drawn on
+  a canvas-grid render, so `_unrotated_preview_width` and the whole `already_deg` bookkeeping fall away. Worth
+  doing partly *for* that simplification.
+
+### v0.376.2 — 2026-09-07 — the Sky map's coverage-mask re-read: the original struck backlog entry (`sky_overlay`, `stack_coverage_mask`, `_derived_image_etag`) — cut 2026-09-07, verbatim; the shipped write-up is above under its own heading
+
+- ~~**NEW IDEA (Builder 2026-08-27, traced while fixing the Sky-map north-up overlay; TRACED, NOT MEASURED —
+  measure before building, per this section's own rule) — every visit to the Sky map re-derives each target's
+  coverage mask by reading its whole master FITS, and the response forbids caching, so the work repeats on
+  every visit and every reload.**~~ — **SHAPE (a) SHIPPED v0.376.2; (b) DECLINED ON THE MEASUREMENT.**
+  The gate was met before a line was written: on a **3494×2470×3 float32 (104 MB)** master — the owner's mosaic
+  canvas shape — `stack_coverage_mask` costs **14–23 ms** warm, i.e. a whole-cube `isfinite` runs at memory
+  bandwidth and a *page-cached* master is cheap. That is what closes (b): a composed-RGBA cache beside the
+  preview would buy tens of milliseconds and own an invalidation bug. What it does **not** close is the cold
+  case the entry was really about — those 104 MB are read **off the NAS**, per target, on every visit and every
+  reload, and `no-store` forbade even keeping the copy a revalidation would refer to. So (a) shipped:
+  `_derived_image_etag` over `_file_stamp(preview)` + `_file_stamp(fits)` + `preview_north_up_deg` +
+  `preview_crop_json` + `webapp.__version__`, `private, no-cache`, and a matching `If-None-Match` answered
+  **304** from two `stat` calls. Still revalidated on every request, so an "Adjust" re-save can never serve
+  stale — the entry's own caution, met by stamping the preview *and* the orientation. Entry in
+  [`SHIPPED.md`](SHIPPED.md). **Sibling left open deliberately:** the four other `no-store` image endpoints in
+  `routers/stack.py` / `routers/editor.py` are the same shape, but each has its own invalidation inputs and
+  none was measured — do them one at a time, with the inputs enumerated, not as a sweep. *(Original entry
+  follows, struck.)* *(Pillar: friendliness / performance — PRIORITY 3. Size: S–M. Confidence for
+  the mechanism: traced end to end; the cost is unmeasured and that is the first task.)*
+  `sky_overlay` (`webapp/routers/stack.py`) calls `stack_coverage_mask(fits_path)`, which opens the master and
+  runs `np.isfinite` over **every plane of the full canvas** to build the alpha — memory-frugal (it reduces
+  straight off the memmap, deliberately), but it still touches the whole cube. The response then ships
+  `Cache-Control: no-store`, so a library of N targets does that N times per Sky-map visit, again on every
+  reload. On the owner's box the masters are on a NAS and a mosaic canvas can be nine figures of pixels, so this
+  is the kind of thing that makes a page feel slow for reasons a user can't see.
+  **Shape (additive, reversible):** the answer is fully determined by two files' mtimes (the preview PNG and the
+  master FITS), so either (a) serve a strong `ETag` built from those two stats and honour `If-None-Match` — tiny
+  change, still re-reads on a cold request but makes reloads free — or (b) cache the composed RGBA beside the
+  preview in the target's own cache area, keyed by the same pair, and rebuild on mismatch. (a) first; (b) only
+  if the cold cost measures badly. **Do not** widen this into a general artefact cache.
+  **Measure first (the gate):** time `sky_overlay` on a realistic mosaic master (and a single-field one) and
+  report the per-tile cost and the N-target total before writing either. If a 1080p single-field tile costs a
+  couple of milliseconds, close this rather than build it. **Caution:** `no-store` is presumably there because
+  a History "Adjust" save rewrites the preview in place — whatever replaces it must invalidate on that write,
+  which the preview's mtime does; the run's `preview_north_up_deg` is part of the answer too, so fold the run
+  row's identity into the key or a North-up re-save could serve a stale overlay.
+
+### (closed, not built) 2026-08-08 — `MinMaxRejectAccumulator._add_into`'s write-back is a NumPy self-assignment that costs 0.001 ms — cut 2026-09-07, verbatim
+
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while adversarially reading `accumulator.py`; TRACED, NOT MEASURED) —
+  `MinMaxRejectAccumulator._add_into` writes its whole k-plane extremes buffer back over itself once per frame,
+  for nothing.**~~ — **CLOSED, NOT BUILT: measured, and the memcpy this is premised on does not happen**
+  (Builder 2026-08-08, branch `claude/elegant-bohr-cdbcoy`). The entry's own closing sentence — *"measure the
+  actual saving on a realistic canvas before claiming one"* — is what closed it. **NumPy elides a self-assignment
+  entirely** when the source and destination are the same memory with the same layout, which is exactly what
+  `self._mins[:, ys, xs] = mins` is: timed directly on a 1920×1080 RGB canvas, the write-back costs **0.001 ms**
+  for three k-planes, against **14.4 ms** for a genuine copy of the identical region — on the windowed
+  (`add_window`-shaped, offset-slice) path as well as the full-frame one. So there is no ~50 MB memcpy per frame
+  to remove; the claim was traced correctly but never timed.
+  **Built the entry's preferred "clearer" form anyway and A/B-timed it** (`self._mins[j, ys, xs] = slot` inside
+  the loop, write-backs dropped), same process, best-of-3, 8 frames of a 1080×1920×3 float32 canvas:
+  **k=1 70.9 → 71.8 ms/frame, k=3 165.0 → 166.9 ms/frame** — i.e. ~1 % *slower*, because the per-plane indexing
+  costs `2k` extra NumPy calls per frame and buys nothing back. Results were byte-for-byte identical either way
+  (checked at k=1 and k=3, `equal_nan=True`), as the entry predicted. Per AGENTS.md §2/§3 a refactor that is
+  neither a correctness fix nor a measured win is churn on the stack hot path, so **the change was reverted and
+  nothing shipped**. Recorded here so the next reader of this file doesn't re-derive it — and as a general note
+  worth keeping: `a[basic_slices] = a[same_basic_slices]` is free in NumPy, so "redundant write-back" findings in
+  this codebase need a timing before they're worth acting on. *(Performance / clarity — PRIORITY 4; size XS;
+  **not a correctness bug** — the result is identical either way.)*
+
+  *(Original spec kept below for provenance.)* `mins = self._mins[:, ys, xs]` is *basic* indexing (two slices), so it returns a
+  **view**, and the `mins[j] = slot` loop already mutates `self._mins` in place. The trailing
+  `self._mins[:, ys, xs] = mins` (and its `_maxs` twin) is therefore a self-assignment that copies `2k`
+  canvas-sized float32 planes per frame per side — at the default `k=1` on a 1920×1080 RGB canvas that is ~50 MB
+  of pointless memcpy **per frame**, and it scales with `reject_count`. **Shape:** drop the two write-backs, or
+  (clearer, and immune to someone later changing the slicing to fancy indexing, which *would* copy) index the
+  planes as `self._mins[j, ys, xs]` inside the loop so the in-place intent is on the face of it. **Care:** pin it
+  with a before/after byte-for-byte equality test on a small stack including the windowed (`add_window`) path and
+  a `reject_count > 1` case, because the whole point is that nothing about the output may change. Worth doing
+  next time someone is in this file; measure the actual saving on a realistic canvas before claiming one.
+
+### v0.345.4 — 2026-09-04 — the `astropy.stats` NaN warning is no longer emitted per frame (`bg/per_frame.py`, `bg/final_gradient.py`, `qc/metrics.py::estimate_sky`) — cut 2026-09-07, verbatim
+
+- **✅ SHIPPED (Builder, v0.345.4, branch `claude/sweet-babbage-k0vyac`) — ~~the `astropy.stats` "Input data
+  contains invalid values (NaNs or infs)…" warning is emitted dozens of times per stack, burying any *real*
+  warning in the Logs a beginner reads.~~** Built as filed, with the sites re-derived by **probing a running
+  pass** rather than trusting the filed line numbers — three of the four the entry names had moved or were
+  already masked, and two it did not name were the actual emitters.
+
+  **Which sites really fire, measured.** A NaN-cornered 240² frame through each pass, counting both
+  `AstropyUserWarning`s and the records astropy pushes into the `astropy` logger (which is how they reach the
+  Logs page): `seestack/bg/per_frame.py` (the block-averaged faint-extended pass — **once per frame**),
+  `seestack/bg/final_gradient.py` (**twice per canvas**, the object mask and its extended pass), and
+  `seestack/qc/metrics.py::estimate_sky`.
+
+  **⚠️ One correction to the entry's own framing, measured after the fix went in and worth carrying:
+  "per stack" is really "per stack *that has NaNs*".** A full `scripts/agent-dogfood.sh` run — boot, ingest,
+  stack, probe every page — was taken against `origin/main` (pre-fix) **and** against this branch, and the
+  server log contains **0** of these warnings in *both*. The bundled sample is a 6-frame single field whose
+  canvas has no uncovered pixel anywhere, so none of the three sites has a NaN to clip. The emitters need a
+  **NaN-bearing canvas**: a mosaic union, a reprojected edge, a masked region — i.e. the owner's actual
+  shooting style, and the shape the pre-fix suite's own warnings summary confirms: **17 test files emitted
+  99 of them** in the baseline run (76 through `sigma_clipped_stats`, 23 through a second astropy entry point
+  — see the open half below), led by `webapp/test_preview_crop_geometry` (20), `test_photometric_mosaic_auto`
+  (16), `test_subpixel_mosaic_reference` (10) and `test_stack_pipeline` (7) — mosaic and reprojection
+  fixtures, to a file. **So the bundled sample is the wrong instrument for this one**, and a future run should
+  not read "dogfood shows zero" as "already fixed".
+
+  **What this shipped, exactly, counted the same way: all 76 of the `sigma_clipped_stats` warnings are gone**
+  (post-fix suite: **0** at `astropy/stats/sigma_clipping.py:395`, down from 76 across 12 files). **~30
+  remain from a different site**, filed as the open half directly below rather than swept into this claim. `post/color_cal.py:194` and
+  `per_frame.py`'s two other calls **already passed `mask=`** — the entry's line numbers were stale — and
+  `coverage_leveling`'s `_robust_stats` / `_sky_mode` never warn on the live path, because every caller hands
+  them an already-finite selection. Those two were converted anyway (defensively, and pinned as such), so a
+  future caller that does pass an uncovered sample can't reopen the noise.
+
+  **One shared helper, not six copies of `mask=~np.isfinite(x)`.** `seestack/core/skystats.py`
+  (`sigma_clipped_stats_finite`) is a drop-in for the unmasked call. It matters for the case a bare `mask=`
+  gets wrong: an array with **no** finite pixel comes back as `np.ma.masked`, and `float(np.ma.masked)` emits
+  a warning of its own — trading one noisy warning for another — so that case short-circuits to NaN **of the
+  input's own dtype**, exactly what the unmasked call used to return. Keeping the dtype is not cosmetic: every
+  consumer builds a detection threshold (`med + k*std`) out of these, and a float32→float64 promotion would
+  round the threshold differently and could move a pixel in or out of an object mask.
+
+  **The pixels do not move.** The masked call returns bit-identical `(mean, median, std)` to letting astropy
+  clip — pinned over NaNs, ±inf, 1-D samples, int arrays and the all-finite fast path — so this is silence,
+  not a new number. Upgrade-safe (§9): one new engine-free module, no option, default, config key, schema,
+  on-disk path or API shape touched; an all-finite single-field stack takes the same code path it always did.
+
+  **Tests (+12, `tests/test_skystats.py`; 4 fail before).** The helper's equivalence to the legacy call and
+  its dtype/all-NaN/int/1-D edges, plus a call-site test per pass — QC sky estimate, final-gradient removal,
+  per-frame flatten, and the coverage-leveling helpers — each asserting **no `AstropyUserWarning`** on
+  NaN-bearing input, with the raw astropy call kept beside them as the control so a future astropy that stops
+  warning cannot quietly turn the test green.
+
+  ---
+
+  **🟡 THE OPEN HALF, WITH THE HOUR OF TRACING ALREADY SPENT ON IT (Builder 2026-09-04, same run) — ~30 of
+  these warnings survive, from a *different* astropy entry point inside `Background2D`, and the obvious fix
+  measurably does not work.** *(Same pillar and size. Read all four bullets before touching it.)*
+  - **Where.** `astropy/stats/sigma_clipping.py:**315**` — the **axis-based** clip (`_sigmaclip_withaxis`),
+    not the `:395` one this entry fixed — reached from `photutils/background/background_2d.py`
+    `_sigmaclip_boxes` ← `_compute_box_statistics` ← `_calculate_stats` ← `Background2D.__init__` ←
+    `seestack/bg/per_frame.py::_fit_bg2d_ladder` ← `_subtract_background_cpu`. That chain is a **captured
+    traceback**, not a reading. Post-fix suite: 30 across `test_stack_pipeline` (11), `webapp/test_pipeline`
+    (11), `test_photometric_mosaic`, `test_photometric_stack`, `test_progress_reel`,
+    `webapp/test_reprocess_all` (2 each).
+  - **The obvious fix does not fix it — measured, so nobody re-spends the hour.** Mirroring
+    `final_gradient._fit_background_2d` (zero-fill the non-finite pixels, OR them into the mask, hand
+    `Background2D` a finite array) leaves the count at **27 on those six files, before and after**, while
+    being bit-for-bit identical on the pixels (checked on two NaN-bearing fixtures). So the NaN is reaching
+    photutils' box statistics by another route — most likely the **low-resolution mesh photutils builds
+    itself**, where a fully-masked box becomes NaN and is then clipped again. The change was reverted rather
+    than shipped: a silent no-op on the on-by-default hot path is worse than the warning it doesn't remove.
+  - **So the next step is photutils' own knobs, measured** (`fill_value`, the mesh-interpolation options, or
+    masking at the mesh level), **not another zero-fill in our caller.**
+  - **How to trace it, because the obvious way silently fails.** pytest's warnings plugin installs its own
+    `showwarning`, so an in-process hook records **nothing** unless you disable it: run
+    `pytest <file> -q -p no:warnings` with a `warnings.showwarning` hook that walks `sys._getframe()` back to
+    the frame you care about. `-W error::astropy.utils.exceptions.AstropyUserWarning` also does **not** work
+    here (it comes back green while the summary still counts the warnings). The reliable counter is pytest's
+    own warnings summary — which is where both the 99 and the 30 in this entry come from.
+
+  *(Original entry follows.)*
+
+  *(Pillar: friendliness / trust — PRIORITY 3. Size: S.
+  Confidence: reproduced in the dogfood run; verified NOT a wrong-result — see below. Not filed as a bug: the
+  result is bit-for-bit correct.)*
+
+  **What happens.** A live stack of the bundled sample logged the astropy `AstropyUserWarning` **~20 times**
+  (`/tmp` server log, timestamps clustered at each stack/edit phase). Every no-coverage NaN region (mosaic
+  edges, uncovered sky, masked pixels — pervasive in this engine, where *NaN = no coverage* by design) reaches
+  `astropy.stats.sigma_clipped_stats` unmasked, so astropy clips the NaN itself and warns each time. Call
+  sites that pass NaN-bearing arrays without a `mask=`: `seestack/qc/metrics.py:88`,
+  `seestack/post/color_cal.py:194`, `seestack/bg/coverage_leveling.py:131` and `:203` (`_sky_mode` — on the
+  owner's mosaic sky-leveling path). `coverage_leveling.py:324` already passes `mask=~finite` and is the
+  template to copy.
+
+  **Verified it is only noise, not a wrong result.** `sigma_clipped_stats(data_with_nan)` returns *identical*
+  `(mean, median, std)` to `sigma_clipped_stats(data, mask=~isfinite(data))` and to pre-filtering to finite
+  values (checked directly: all three agree to full float32 precision on a 200×200 array with a NaN quadrant).
+  So the maths is correct today; the cost is purely a wall of benign warnings that makes a *genuine* NaN/inf
+  problem invisible on the Logs page.
+
+  **Fix (S, Builder).** Pass an explicit `mask=~np.isfinite(x)` at each of the four unmasked call sites (makes
+  intent explicit and silences the warning), or — if a site legitimately expects finite input — assert/pre-
+  filter there. Regression test: call each helper on a NaN-bearing array inside
+  `warnings.catch_warnings(); simplefilter("error")` and assert no `AstropyUserWarning`, plus assert the
+  returned stats equal the masked-input stats (pins that the silence didn't change the number). Behaviour-
+  preserving on all-finite inputs (the common single-field case), so upgrade-safe.
 
 ---
 
