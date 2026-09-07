@@ -14,6 +14,89 @@ Newest first.
 
 ---
 
+## v0.379.0 — 2026-09-07 — ⭐ PRIORITY 1 (editor): you can finally aim a crop by dragging it on the picture
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-dyd578`.)** Frontend only — no
+engine, webapp, schema, config, on-disk or default change. New
+`frontend/src/components/editor/cropDrag.ts` + wiring in `routes/Editor.tsx`.
+
+**What was wrong.** `geometry.crop` has existed for a long time, and the only way
+to aim it was the four sliders the descriptor-driven form renders from its spec:
+**Left / Top / Right / Bottom, as fractions of the frame** (`0.0`–`1.0`, step
+`0.01`). That is an honest way to *store* a crop and a hostile way to *choose*
+one — a beginner who wants to cut in on the galaxy, or cut off a ragged edge, had
+to do arithmetic against a canvas that on this owner's mosaics is over 10,000 px
+wide while looking at a decimated proxy of it. "Crop this picture" is the single
+most universally understood photo edit there is, and it was the one control in
+the editor with no direct manipulation at all. AGENTS.md §1 names *"clunky and
+confusing controls"* as one of the editor's three recurring problems; this was it,
+on the op where it costs a beginner the most.
+
+**What shipped.** Selecting an enabled **Crop** op now opens a draggable rectangle
+straight on the live preview: the body slides it, eight edge/corner handles resize
+it, everything outside is dimmed, and a caption reads *"Keeping 60% × 80% of the
+picture"* live as it moves. The four sliders are untouched and still follow along
+(nothing removed — AGENTS.md §1's IA constraint). A **"Back to the whole picture"**
+button undoes a crop in one click, and a crop that keeps under a quarter of the
+frame says so in plain language before it costs pixels rather than after.
+
+**The load-bearing decision: the rectangle is drawn over the *bypassed* render.**
+A crop's fractional bounds are relative to the image **entering** it; the ordinary
+preview shows the image **leaving** it. Dragging on the ordinary preview would be
+dragging in the wrong coordinate space, and every drag would compound against the
+last. While the mode is on, the picture under the rectangle is the recipe with
+*just this op disabled* — the per-op "show without this op" render that already
+existed — so the fractions map 1:1. **That equivalence only holds while nothing
+after this crop reshapes the frame**, so `cropDragBlockedReason` **declines** —
+with a sentence saying why, leaving the sliders — when any enabled geometry op
+(a Rotate, a Resize, *or a second Crop*, whose bypassed render would show that
+crop's output rather than this one's input) sits later in the recipe. A rectangle
+confidently in the wrong place is worse than no rectangle.
+
+**Two things that had to be measured rather than assumed.**
+* **The box's aspect ratio.** The rectangle is a percentage overlay, so the box it
+  sits in must have the underlying picture's exact aspect or it lands offset. The
+  histogram reports the *recipe's* rendered dimensions — which have this crop
+  applied — and the bypassed render's are not among the numbers any endpoint
+  returns. So they are measured off the loaded `<img>` (`naturalWidth`/`Height`),
+  which is right whatever earlier ops did to the frame, and the rectangle is held
+  back until the measurement belongs to the image actually on screen.
+* **The drag costs zero renders.** The rectangle is held in local state while the
+  pointer is down and written to the op only on release: one undo step per drag,
+  and no debounced re-render of a mosaic-sized preview per pixel of pointer
+  travel. Alongside it, the bypassed render is now keyed on the **other** ops only
+  (`withoutOpKey`) — a disabled op contributes nothing to a render, so its own
+  params cannot change that image, and keying on the whole recipe re-fetched an
+  identical picture every time the user nudged the very op being bypassed. That
+  also makes the existing per-op Compare/Split cheaper while an op is tuned.
+
+**Mode exclusivity** follows the existing convention exactly: drag-to-crop owns the
+preview box only when no overlay (Coverage / Star mask / Compare / per-op solo),
+no split, and no crop *proposal* (Trim border / Re-centre) has it, and steps aside
+the moment one does. It opens by itself when the Crop op is selected — that is what
+makes it discoverable, and it changes no pixels — and **"Done cropping"** puts it
+away.
+
+**Tests +39** (31 in `cropDrag.test.ts`, 8 in `Editor.test.tsx`): the params round
+trip through the engine's own clamp-then-sort semantics; a handle stops at the
+minimum size instead of flipping the rectangle inside out; `move` parks against
+the border with its size preserved rather than squashing; the eight handles land
+on the rectangle's own edges and corners; the drag rewrites the op on release and
+survives the commit; reset returns to the whole frame and dims its own button; the
+big-crop note fires only past a quarter of the area; the Rotate-after-crop case
+declines *and* keeps the sliders; and the rectangle steps aside when Split takes
+the box. Full frontend suite **3,339 passed**, `tsc --noEmit` and `vite build`
+clean; Python suite unchanged and green (**5,116 passed, 2 skipped**).
+
+*(A jsdom trap worth recording: `fireEvent.pointerDown` has no `PointerEvent` to
+build, falls back to a bare `Event`, and silently drops `clientX`/`clientY` — the
+two things a drag is made of, so the drag tests passed a `NaN` through the whole
+pipeline and failed on the caption. Dispatch a `MouseEvent` under the pointer
+event's name instead; React reads the coordinates off the native event either
+way.)*
+
+---
+
 ## v0.378.1 — 2026-09-07 — `scripts/agent-setup.sh` stops saying "agent env ready" over a `.venv` that holds nothing but pip
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-7wv8l8`.)** Tooling. No engine,
