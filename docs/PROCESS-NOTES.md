@@ -18,6 +18,66 @@ is a queue.
 
 ---
 
+## 2026-09-07 (later still) — Builder run (branch `claude/sweet-babbage-mg8isx`): three shipped, and two traps worth carrying forward
+
+**The run.** Baseline green before any change (**5,023 passed / 2 skipped**, full
+suite headless, 21:40). Shipped **v0.374.9** (the `wcs_from_text` fast path — the
+residue the previous run filed with its number), **v0.374.10** (the
+grainier-restack note's runaway percentage) and **v0.374.11** (`HintLabel`'s
+info icon, which turned out to be a bug). Write-ups in
+[`SHIPPED.md`](SHIPPED.md) and the entries themselves.
+
+**Backlog state, checked the same way the last three runs checked it.** "Bugs
+(fix these first)" still holds only gated entries and stand-downs that carry
+numbers. The Performance section's own top lead was the best available work and
+its shape (a) was taken; (b)–(d) were **left open with a note that the problem
+they were sized against is now ~1 s rather than ~4.7 s**, because a lead that
+keeps its old numbers after the fix gets re-picked at the wrong priority.
+Task 2 and task 3 came off the Autonomy/Friendliness lists. Nothing was invented.
+
+**Trap 1 — an `astropy.io.fits.Header` is expensive to *read*, not just to
+build.** The v0.374.8 lead correctly identified `astropy.wcs.WCS()` construction
+as the cost and `Header.fromstring` (0.047 ms) as cheap. Both true, and a
+prototype built on exactly that — keep the `Header`, replace only the `WCS`
+construction — measured **0.47 ms** against the full path's 0.85 ms, i.e. it
+left most of the win on the table. The missing term is `Card._verify`, which is
+re-run on **every `key in header` lookup**: ten membership tests cost about as
+much as the parse. Scanning the 80-column records directly measures **0.07 ms**.
+If you are optimising anything that reads a FITS header a few keys at a time,
+count the lookups, not just the parse.
+
+**Trap 2 — an interactive element inside a Mantine control's `<label>` is
+labelled by that label.** Making `HintLabel`'s info icon a `<button>` broke
+seven `Settings.test.tsx` queries at once (`getByLabelText(/ASTAP path/)` →
+"found multiple elements"), and changing the `aria-label` did **not** fix it:
+testing-library matches a wrapping `<label>` independently of `aria-label`,
+because a `<button>` is a *labelable* element per HTML — so the field's own name
+genuinely named two controls, for a screen reader as much as for the test. The
+fix is `component="span" role="button" tabIndex={0}` (plus Enter/Space
+handling): a span is not labelable, so the label keeps naming exactly one
+control. Worth knowing before adding any control inside a Mantine `label` prop.
+
+**Method note — the "does it change anything?" bar for a speed-only change.**
+v0.374.9 claims to be a pure optimisation, so the tests assert the fast WCS
+re-serialises **byte-identically** through `to_header(relax=True)` and
+transforms a pixel grid **bit-identically**, across ten header shapes, and
+`test_mosaic.py` pins the union canvas identical with the fast path disabled.
+That is the same standard the 09-07 (earlier) run set for its two changes (664
+clustering configurations; 0.0 deviation over 200 WCSs) and it is the right one:
+none of these would have been safe to ship on the argument alone. The one place
+the fast path is *deliberately* wrong is by refusing — it declines anything
+outside a plain equatorial TAN header rather than approximating it.
+
+**And one micro-optimisation deliberately not taken**, so nobody re-finds it:
+assigning `wcs.cunit` parses `"deg"` into an `astropy.units.Unit` and costs
+~0.09 s of the remaining 1.06 s on 5,477 subs. Setting it only when the header
+carries `CUNIT1` passes every byte-identity test and buys ~8 % — and was
+reverted, because it makes the object's construction depend on a keyword's
+presence for no gain on the owner's own data (both our serialisation and an
+ASTAP sidecar carry `CUNIT`).
+
+---
+
 ## 2026-09-07 (later) — Builder run (branch `claude/sweet-babbage-retf5t`): the backlog was dry, so the app was **timed at the owner's scale** — and two 14-second endpoints fell out
 
 **The run.** Baseline green before any change (**5,012 passed / 2 skipped**, full
