@@ -18,6 +18,60 @@ is a queue.
 
 ---
 
+## 2026-09-07 (Scout, branch `claude/admiring-brahmagupta-8g9218`) — stacking-engine + calibration adversarial QA sweep: CLEAN (no wrong-result bugs); two by-design fail-closed notes in `discover.py` recorded, not filed
+
+**Baseline.** `source scripts/agent-setup.sh` green; stacking subset
+(`-k "accumul or stacker or reject or align"`) **534 passed, 2 skipped** before any
+edit, so a real engine bug would be distinguishable from a pre-existing failure.
+
+**Scope.** Read adversarially, in full, hunting NaN/coverage-semantics violations,
+rejection/weighting/normalisation math errors, memory-bound breaks on the hot path,
+dtype/overflow, and error paths that silently ship a wrong-but-plausible image:
+- `seestack/stack/`: `accumulator.py`, `weighting.py`, `photometric.py`, `align.py`,
+  the κ-σ two-pass + min/max + single-pass dispatch in `stacker.py`
+  (`_kappa_sigma_keep_mask`, `combine_method`, `_pass`, `auto_reject_depth`, the
+  final result assembly), and `bg/coverage_leveling.py` (runs on *every* stack).
+- `seestack/stack/` (via subagent trace): `drizzle_path.py`, `mosaic.py`,
+  `pointings.py`, `reference.py`.
+- `seestack/calibrate/` (via subagent trace): `apply.py` (read directly too),
+  `defects.py`, `discover.py`, `masters.py`.
+
+**Result: clean.** Every candidate hazard is already defended and, in most cases, a
+nearby comment names the exact failure mode. Specifically re-confirmed sound: the
+NaN="no coverage" invariant across all accumulators + drizzle `result()`; the two
+keep-all widenings in `_kappa_sigma_keep_mask` (σ-unknown → +inf tol, mean-unknown →
+keep) that stop the clip turning real pass-2 data into a hole; photometric scaling
+applied identically in pass-1 stats and pass-2 combine (so the clip reference and the
+clip agree); `combine_weights_with_photometric`'s `1/s²` variance correction kept off
+the rejection-reference paths on purpose; per-panel (not target-wide) medians in
+`weighting`/`photometric` on a mosaic; `level_by_coverage`'s per-level detrended
+threshold, envelope-clamped quadratic fill, and NaN-excluding `valid_pix`; the memory
+frees before pass 2 (`del wel`) and the bounded `_imap_bounded` in-flight cap;
+`calibrate/apply` never double-subtracting bias-with-dark and the no-data
+dark/bias/flat sanitisation (0 for pedestals, 1.0 floor for flats); `build_master`'s
+NaN-emitting no-data + NaN-aware sigma-clip; and defect detection pulling only
+same-CFA-phase, in-bounds neighbours.
+
+**Two `discover.py` notes — recorded here, deliberately NOT filed as bugs:**
+1. `calibration_folder_id` (`discover.py:116`) maps every char outside
+   `[A-Za-z0-9._-]` to `_`, so two *distinct* real folders that differ only in a
+   sanitised char (e.g. `Darks/30s` → `Darks_30s` vs a literal `Darks_30s`) collapse
+   to one id and `seen_ids` drops the second — a legitimate cal folder silently not
+   *offered*. Fail-closed (never builds/applies a wrong master), needs two
+   near-identically-named sibling folders, and the app already lets the user pick a
+   folder by hand. Low-value broken-UX; the collision is real but the subagent's
+   `Dark-30s`/`Dark_30s` example is wrong (`-` is preserved, so those don't collide).
+2. One unreadable sampled header makes `classify_folder` return `None` for the whole
+   folder (`discover.py:227`), so a 100-frame dark folder with one corrupt file isn't
+   offered. This is **by design** and documented ("an unreadable file is 'didn't
+   say'", and "don't know is not an offer" — the strict rule that stops a master dark
+   being built out of somebody's subs), so it is not a bug; the per-frame build path
+   tolerates the same file if the user picks the folder anyway.
+
+No code changed in this sweep — Scout leaves building to the Builder.
+
+---
+
 ## 2026-09-07 (Builder, branch `claude/sweet-babbage-7wv8l8`) — a fourth dry-backlog run that found one real task in it after all: the greps that turned it up, and the two candidates measured and declined
 
 **Baseline.** `source scripts/agent-setup.sh` — note that its `pip install -q -e
