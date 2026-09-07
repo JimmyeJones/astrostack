@@ -6698,6 +6698,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   neither SB nor a curated tag exists. **Feasibility:** static data-file addition + a pure function; no network, no
   schema/config/API/default change (the `DifficultyHint` shape is unchanged). Validate the SB→bucket thresholds against
   the existing curated table (they should broadly agree) before trusting them over curation. (S–M.)
+  **⚪ CLOSED — THE GAP IT EXISTS TO FILL IS MEASURED AT ZERO (Builder 2026-09-07). Do not build it.** The entry's
+  premise is that curation "doesn't scale to a growing catalog", i.e. that objects are going unbadged. Ran the real
+  resolver over the real bundled catalog: **157 of 157 objects get a verdict** — the ~90-entry `_CURATED` table plus
+  the "clusters and star fields are uniformly easy" type rule cover `messier.json` and `deepsky_popular.json`
+  completely, and `target_difficulty` returns `None` for nothing. So the proposal would replace a hand-vetted answer
+  that is 100 % covered with a derived one, on data (`mag` / surface brightness) that is **not in the catalog** and
+  would have to be written from memory by an agent — a real chance of putting a wrong number in front of the owner
+  for no coverage gain. The one thing worth keeping was the measurement, so it is now a test rather than a sentence:
+  `tests/test_target_difficulty.py::test_the_bundled_catalog_is_covered_end_to_end_today` names any object that would
+  show no badge, so the gap can't re-open unnoticed if the catalog grows. If it ever *does* re-open, curating the new
+  entries is still the cheaper and more honest answer; reopen this only with a real magnitude source, not from
+  recall.
 - **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Did it get better?": A/B compare two finished stacks of the same
   target, side by side with a split slider.** **▶ SPLIT-SLIDER SLICE SHIPPED v0.164.0** (Builder 2026-07-22, branch
   `claude/pensive-faraday-vsepvf`). The two-stack Compare view (`/compare?a=…&b=…`, reachable from the History run
