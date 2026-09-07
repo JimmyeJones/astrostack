@@ -40,6 +40,7 @@ from seestack.stack.output import pack_unit
 from seestack.edit import auto_prefs as auto_prefs_mod
 from seestack.edit import presets as presets_mod
 from webapp import deps
+from webapp import edit_fit_cache
 from webapp.schemas import EditOpOut, editor_ops_schema
 
 router = APIRouter(tags=["editor"])
@@ -312,14 +313,46 @@ def render_run_display_array(
     colour-calibration path ran); the default returns just the array so existing
     callers are unchanged."""
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
-    ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
-                      coverage=_proxy_coverage(run.fits_path, scale),
-                      frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
-                      already_display=_run_display_space(run))
+    ctx = _preview_context(project_dir, run, recipe, rgb, scale)
     out = apply_recipe(rgb, recipe, ctx, for_preview=True)
+    _remember_preview_fits(project_dir, run, recipe, rgb, scale, ctx)
     if return_ctx:
         return out, ctx
     return out
+
+
+def _preview_context(project_dir: Path, run, recipe: Recipe,
+                     rgb, scale: float) -> EditContext:
+    """The whole-proxy live-preview ``EditContext``, with any measurements the
+    previous render of this same picture already made carried forward.
+
+    The carry is :mod:`webapp.edit_fit_cache`, which only ever offers the fits of
+    ops the two renders agree on from the top — so an op either receives the
+    number it would have measured anyway, or measures it. Output is unchanged
+    either way; what changes is that dragging a slider stops re-solving the star
+    field above it. See that module for the measurement and the safety rule."""
+    already = _run_display_space(run)
+    key = edit_fit_cache.render_key(
+        project_dir, run.id, proxy_scale=scale, proxy_shape=rgb.shape,
+        already_display=already)
+    return EditContext(
+        proxy_scale=scale, is_proxy=True, wcs=None,
+        coverage=_proxy_coverage(run.fits_path, scale),
+        frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
+        already_display=already,
+        frozen_fits=edit_fit_cache.frozen_fits_for(
+            key, edit_fit_cache.op_fingerprints(recipe)),
+    )
+
+
+def _remember_preview_fits(project_dir: Path, run, recipe: Recipe,
+                           rgb, scale: float, ctx: EditContext) -> None:
+    """Store what this render measured, for the next render of the same picture."""
+    edit_fit_cache.remember(
+        edit_fit_cache.render_key(
+            project_dir, run.id, proxy_scale=scale, proxy_shape=rgb.shape,
+            already_display=ctx.already_display),
+        edit_fit_cache.op_fingerprints(recipe), ctx.fitted)
 
 
 def render_sub_display_array(fits_path: str | Path, recipe: Recipe, *,
@@ -1577,12 +1610,14 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         # Flag a stack whose proxy has no finite pixels (failed solve/stack), so
         # the UI can say "no image data" instead of showing a mystery black frame.
         empty = not bool(np.isfinite(rgb).any())
-        ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
-                          coverage=_proxy_coverage(run.fits_path, scale),
-                          frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
-                          already_display=_run_display_space(run))
+        # Same context — and the same carried-forward measurements — as the PNG
+        # preview beside it: the two endpoints fire together on every change and
+        # run the identical recipe over the identical proxy, so whichever lands
+        # second re-uses what the first measured instead of re-solving it.
+        ctx = _preview_context(project_dir, run, rec, rgb, scale)
         errors: list[str] = []
         out = apply_recipe(rgb, rec, ctx, for_preview=True, errors=errors)
+        _remember_preview_fits(project_dir, run, rec, rgb, scale, ctx)
         hist = compute_histogram(out)
         hist["empty"] = empty
         hist["errors"] = errors  # ops that failed (surfaced near the preview)
