@@ -145,6 +145,9 @@ this target"* button on the Target page. The endpoint now supports it; the page 
 not know which folder a target's subs came from, and deriving it server-side from the
 frames' own `source_path` needs a decision about a target whose frames span two
 folders — a real case on this library. Filed in `IMPROVEMENTS.md` rather than guessed.
+
+---
+
 ## v0.377.2 — 2026-09-07 — a quarter of the live preview stops being hidden behind its own toolbar on a phone: the `Editor.tsx` preview controls move out of the stage
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-9wdpb4`.)** PRIORITY 1
