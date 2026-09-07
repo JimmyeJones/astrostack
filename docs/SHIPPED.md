@@ -14,6 +14,102 @@ Newest first.
 
 ---
 
+## v0.377.0 — 2026-09-07 — "How's my stack?" can finally say what the black around a mosaic is: `stacker.uncovered_fraction` + `stack_runs.uncovered_frac` + the `uncovered` health note
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-0dli9u`.)** The measured
+quantity two earlier runs said this needed before a single word could honestly be
+written about it.
+
+**The gap, and why it survived two attempts at it.** A beginner meeting a wide
+black band around an unedited mosaic has nothing telling them whether the picture
+is broken. Two runs tried to close that with copy and both were right to stop:
+2026-09-04 declined a new caption because `stackhealth`'s coverage note already
+lives on the same page, and 2026-09-07 declined *"four words inside the existing
+sentence"* after going to the statistic behind it — `stacker.coverage_thin_fraction`
+is `count((cov > 0) & (cov < 0.25·peak)) / count(cov > 0)`, so the uncovered
+pixels are in **neither** of its terms and the sentence would have been false.
+That declination ended: *"If the black is ever worth a sentence it needs its own
+measured quantity (an uncovered share, which nothing records today)."* This is
+that quantity, and then the sentence.
+
+**What shipped.**
+- **Engine** — `stacker.uncovered_fraction(cov_2d)`: the share of **every** canvas
+  pixel no frame reached, `None` when nothing is covered at all (an empty canvas is
+  not "a picture that is 100 % black"). NaN counts as uncovered — a coverage map
+  holds counts, so a NaN is an absence, and the naive `cov <= 0` would have called
+  it covered. Counted, never masked-and-copied, for the same memory reason the thin
+  share documents: on a 100 MP mosaic canvas that is a ~100 MB boolean rather than
+  an ~800 MB fancy-index copy, on a path that is already memory-bounded.
+- **Persistence** — `stack_runs.uncovered_frac`, stamped by `run_stack` beside
+  `coverage_thin_frac`. **No `SCHEMA_VERSION` bump, deliberately**, the same
+  rollback reasoning the v0.375.0 wishlist table used: `Project._check_schema`
+  *raises* on a DB stamped newer than the build, so a bump would mean the previous
+  Docker image could no longer open the owner's projects — it would convert "pull
+  the old image back" into a bricked app. The column goes into `SCHEMA_SQL`
+  instead and arrives through `_reconcile_table_columns`, which already runs on
+  every open and already promises exactly this ("any additive column (past or
+  future)"). Additive in **both** directions: a new build adds it to an old
+  project, and an old build ignores a column it has never heard of.
+- **Heal** — `coverage_backfill.backfill_coverage_shares` fills whichever of the
+  two shares is missing from **one** read of the coverage map they are both pure
+  functions of, so a library stacked before either column existed answers like a
+  freshly-stacked one without waiting to be re-stacked, and pays that read once.
+  `backfill_coverage_thin_frac` is now a thin wrapper over it, so every existing
+  caller keeps working; `/stack-health` calls the new one.
+- **The note** — `stackhealth` gains `kind="uncovered"` (severity `info`, action
+  `trim_border`, ranked just behind the thin-border note): *"About 37 % of this
+  canvas is empty — black sky none of your subs reached. That's normal when the
+  subs don't all cover the same patch (a mosaic, or a night that drifted), and
+  nothing is wrong with the picture itself. Trim border crops to the well-covered
+  part if you want a clean rectangle."* It **explains before it offers**: on a
+  diagonal mosaic the largest well-covered rectangle is genuinely small, so the
+  trim is a choice, not "the fix". No frontend change — `HealthNote.kind` is a
+  plain string and the card keys its one-click link off `action`.
+
+**The threshold is measured, not chosen.** `_UNCOVERED_SHARE = 0.12`, set the way
+`_COVERAGE_THIN_SHARE` was, from real `run_stack` output on eight geometries:
+
+| scene | uncovered | thin |
+|---|---|---|
+| single field, no dither, reference canvas | 3.10 % | 0.00 % |
+| single field, ±6 px dither, reference canvas | 1.05 % | 0.00 % |
+| single field, ±6 px dither, union canvas | 5.05 % | 0.00 % |
+| 1×2 mosaic | 4.28 % | 0.00 % |
+| 1×3 strip mosaic | 4.05 % | 0.00 % |
+| 2×2 grid mosaic | 3.06 % | 0.00 % |
+| L-shaped 3-panel mosaic | 19.84 % | 0.00 % |
+| diagonal 2-panel mosaic | 36.62 % | 0.00 % |
+
+Two things fall out of that table. First, an unragged canvas is never *quite* 0 %:
+reprojection leaves a NaN margin a couple of pixels wide, which is already a few
+percent of a 480×320 synthetic canvas (and a fraction of one percent of the
+owner's multi-thousand-pixel ones) — so a floor of "any black at all" would have
+fired on every stack ever made, which is the exact mistake the `coverage_min` test
+made before v0.320.2. Second, the **thin share is 0.00 % on every row**, including
+the two that are a fifth and a third empty: the existing note is not merely quiet
+about the black, it is structurally incapable of mentioning it. 12 % sits ~2.4×
+above the worst honest case and well under the ragged ones.
+
+**Tests (+21):** `tests/test_uncovered_fraction.py` (10 — the blind-spot pair on
+one canvas, NaN as absence, nothing-covered → `None` not 1.0, the two
+denominators, a one-frame fringe counting as thin and not empty, the round-trip
+through the row, the reconciliation of a project missing the column, an old build
+still reading a project this build wrote, and a real two-pointing mosaic stack
+whose recorded share is > 0.2 while its thin share is smaller);
+`tests/test_stackhealth.py` (+5 — fires at the diagonal-mosaic number and quotes
+it, stays silent at each measured honest number, silent on `None`, silent below
+the peak floor, and thin-then-empty ordering when both fire);
+`tests/test_coverage_backfill.py` (+4, and the "already has a share" test
+strengthened to assert *no map is opened* by monkeypatching both loaders to
+raise); `tests/webapp/test_target_stack_health.py` (+2 — an old ragged run learns
+what its black is on the request that grades it, and an ordinary one is told
+nothing but still records the number so it is measured once).
+
+Upgrade-safe: additive column with no version bump, one new note kind on an
+existing endpoint, no config/API-shape/default/on-disk change, no pixel changed.
+
+---
+
 ## v0.376.2 — 2026-09-07 — The Sky map stops re-reading every target's master FITS on every visit: `sky_overlay`'s `ETag` + `_derived_image_etag` / `_file_stamp` / `_etag_matches`
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-25fa4c`.)** Shape **(a)** of the

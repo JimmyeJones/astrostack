@@ -366,3 +366,69 @@ def test_a_single_field_run_gains_no_seam_note_from_the_heal(
     kinds = [n["kind"] for n in body["notes"]]
     assert "seams" not in kinds and "seams_flat" not in kinds
     assert _stored_seam(data_root, "M_42", rid) is None
+
+
+def _stored_uncovered_frac(data_root: Path, safe: str, run_id: int) -> float | None:
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            return next(r.uncovered_frac for r in proj.iter_stack_runs()
+                        if r.id == run_id)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_an_older_run_learns_what_its_black_bands_are_from_the_map_on_disk(
+        client, solved_library, data_root):
+    """The empty-canvas share heals off the same coverage map as the thin share,
+    on the same request — so a mosaic the owner stacked long ago can say what
+    its black corners are without being re-stacked. The thin share is 0.00 on
+    this canvas, which is exactly why the older note could never say it."""
+    import numpy as np
+
+    fits_path = data_root / "out" / "ragged.fits"
+    cov = np.full((300, 300), 12.0, dtype=np.float32)
+    cov[:, :100] = 0.0            # a third of the canvas: no frame reached it
+    _write_coverage_map(fits_path, cov)
+    rid = _add_run(data_root, "M_42", fits_path=str(fits_path),
+                   coverage_thin_frac=None, uncovered_frac=None,
+                   coverage_min=0, coverage_max=12)
+
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
+    kinds = [n["kind"] for n in body["notes"]]
+    assert "coverage" not in kinds            # nothing thin-but-covered here
+    note = next(n for n in body["notes"] if n["kind"] == "uncovered")
+    assert "33%" in note["message"]
+    assert note["action"] == "trim_border"
+
+    # …and it is remembered, so the next read costs no canvas-sized map read.
+    assert _stored_uncovered_frac(data_root, "M_42", rid) == pytest.approx(
+        1 / 3, abs=0.01)
+
+
+def test_an_ordinary_older_run_is_told_nothing_about_black_bands(
+        client, solved_library, data_root):
+    """The heal must not hand every stack in the library a new note: a canvas
+    with only the couple-of-pixels reprojection margin measures a few percent
+    empty, which is under the floor, so it stays silent — and the number is
+    still recorded, so it is measured once and not on every request."""
+    import numpy as np
+
+    fits_path = data_root / "out" / "tidy.fits"
+    cov = np.full((300, 300), 12.0, dtype=np.float32)
+    cov[:3, :] = 0.0
+    cov[-3:, :] = 0.0
+    cov[:, :3] = 0.0
+    cov[:, -3:] = 0.0             # ~4% of the canvas, the honest border case
+    _write_coverage_map(fits_path, cov)
+    rid = _add_run(data_root, "M_42", fits_path=str(fits_path),
+                   coverage_thin_frac=None, uncovered_frac=None,
+                   coverage_min=0, coverage_max=12)
+
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
+    assert "uncovered" not in [n["kind"] for n in body["notes"]]
+    assert _stored_uncovered_frac(data_root, "M_42", rid) == pytest.approx(
+        0.0396, abs=0.002)
