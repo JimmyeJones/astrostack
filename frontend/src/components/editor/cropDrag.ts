@@ -186,6 +186,19 @@ export function bigCropNote(crop: TrimCrop): string | null {
     + "and enlarging it later can't put the detail back.";
 }
 
+/** The uid of the recipe's crop op, or `null` when it hasn't got one.
+ *
+ * The "Crop" header button is *one* button whichever is true — a recipe already
+ * carrying a crop (Auto's mosaic border trim, an applied Trim/Re-centre offer, or
+ * one the user added) must be re-opened rather than joined by a second one, since
+ * two crops compound and the second one's fractions are relative to the first's
+ * output. Prefers an enabled crop, so a recipe with a disabled leftover and a live
+ * one re-opens the live one. Pure. */
+export function existingCropUid(ops: OpInstance[]): string | null {
+  const crops = ops.filter((o) => o.id === "geometry.crop");
+  return (crops.find((o) => o.enabled) ?? crops[0])?.uid ?? null;
+}
+
 /** Why dragging can't be offered for this crop op, or `null` when it can.
  *
  * The rectangle is drawn over the render of the recipe with *this* op bypassed,

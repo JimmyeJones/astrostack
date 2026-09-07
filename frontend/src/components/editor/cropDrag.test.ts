@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   MIN_CROP_FRAC, FULL_CROP, applyCropDrag, bigCropNote, cropDragBlockedReason,
-  cropFromParams, cropHandlePositions, cropKeptLabel, cropToParams, isFullFrame,
+  cropFromParams, cropHandlePositions, cropKeptLabel, cropToParams, existingCropUid, isFullFrame,
   pointerFraction, type CropDragStart, type CropHandle,
 } from "./cropDrag";
 import type { OpInstance } from "../../api/client";
@@ -182,6 +182,26 @@ describe("bigCropNote", () => {
 
   it("says nothing about a degenerate rectangle", () => {
     expect(bigCropNote({ x0: 0.5, y0: 0.5, x1: 0.5, y1: 0.5 })).toBeNull();
+  });
+});
+
+describe("existingCropUid", () => {
+  it("answers null for a recipe with no crop", () => {
+    expect(existingCropUid([op("s", "tone.stretch")])).toBeNull();
+    expect(existingCropUid([])).toBeNull();
+  });
+
+  it("finds the recipe's crop so a second one is never stacked on it", () => {
+    expect(existingCropUid([op("s", "tone.stretch"), op("c", "geometry.crop")])).toBe("c");
+  });
+
+  it("prefers an enabled crop over a disabled leftover", () => {
+    expect(existingCropUid([op("off", "geometry.crop", false),
+                            op("on", "geometry.crop", true)])).toBe("on");
+  });
+
+  it("still finds a crop that is only disabled", () => {
+    expect(existingCropUid([op("off", "geometry.crop", false)])).toBe("off");
   });
 });
 
