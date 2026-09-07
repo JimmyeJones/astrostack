@@ -7554,7 +7554,29 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **LEAD, MEASURED (Builder 2026-09-07, the residue v0.374.8 deliberately left) — `/stack-estimate` and
   `/rejection-outlook` are still **~4.7 s** on the owner's 5,477-sub target, and it is now *all*
   `wcs_from_text`.** *(Pillar: friendliness / performance — PRIORITY 3; size M; **do not blind-pick either
-  option below**.)* v0.374.8 took `mosaic.compute_mosaic_canvas` from 13.87 s to 4.75 s by vectorising the
+  option below**.)*
+
+  **▶ SHAPE (a) IS SHIPPED — v0.374.9, `wcs_io._wcs_from_plain_tan_text`. Shapes (b), (c) and (d) are still
+  open; read their care notes below before picking one.** Measured on this entry's own shape (a 9-panel
+  mosaic of **5,477** synthetic solved subs, this box): `compute_mosaic_canvas` **6.02 s → 0.89 s** (6.8×) and
+  `estimate_stack` — what `/stack-estimate` spends its time in — **6.04 s → 1.06 s** (5.7×), i.e.
+  **0.94 ms a sub** removed, the whole `wcs_from_text` share this entry identified. The fast path is
+  a hand-rolled 80-column card scan plus assignment onto a bare `WCS(naxis=2)`: **0.85 ms → 0.07 ms** a
+  header, 12×. Both halves of the entry's diagnosis were confirmed on the way — `Header.fromstring` is
+  **0.047 ms**, and the expensive half is `astropy.wcs.WCS()` *plus* every subsequent `key in header` lookup
+  (a `Header` re-verifies cards on each one, which is why an "astropy `Header` + fast assignment" hybrid
+  measured 0.47 ms and the raw card scan measures 0.07 ms). **It is a pure optimisation, and the tests are
+  what say so:** the fast WCS must re-serialise **byte-identically** through `to_header(relax=True)`, record
+  the same `pixel_shape` and transform a pixel grid to **bit-identical** RA/Dec, across ten header shapes
+  (our own CDELT and CD serialisations, an ASTAP sidecar carrying CD *beside* CDELT+CROTA, the legacy
+  CDELT+CROTA2 convention, half-written CD/PC matrices, a seam frame, a near-pole frame); and
+  `test_mosaic.py` pins that the union canvas is identical with the fast path disabled. `CROTA` is **not**
+  re-implemented — it is handed to wcslib via `wcs.crota`, exactly as the header path does. Anything the
+  scan does not fully understand (SIP, `PV`, a non-TAN or galactic projection, a third axis, non-degree
+  units, a duplicated keyword, a length that is not a whole number of cards) returns `None` and falls
+  through to astropy's own read, so an unrecognised keyword can never be silently dropped.
+
+  v0.374.8 took `mosaic.compute_mosaic_canvas` from 13.87 s to 4.75 s by vectorising the
   footprint transform. What is left is measured and is one thing: `wcs_from_text` costs **0.755 ms** a frame
   and is called once per sub, so **5,477 × 0.755 ms ≈ 4.1 s** of the remaining 4.75 s. It is not the parsing
   — `Header.fromstring` alone is **0.042 ms** — it is `astropy.wcs.WCS()` construction, which re-serialises
@@ -7564,12 +7586,20 @@ problems. Dogfood it every big-picture run and fix root causes.
   carry the drizzle and canvas-mode options in their query key, so every toggle of those controls re-pays it,
   and `/rejection-outlook` runs on every Target-page load.
   **Four shapes — (a) and (b) touch the engine and need care; (c) and (d) are frontend-side and smaller:**
-  (a) *Fast construction.* Build the WCS by assigning `ctype`/`crval`/`crpix`/`cd` onto a bare `WCS(naxis=2)`
+  ~~(a) *Fast construction.* Build the WCS by assigning `ctype`/`crval`/`crpix`/`cd` onto a bare `WCS(naxis=2)`
   — which is exactly what `mosaic.compute_mosaic_canvas` already does for the output canvas — for the headers
   **we ourselves wrote** (`wcs_to_text`), falling back to the full parse for anything carrying SIP, `PV`
   distortion, a non-TAN projection or extra axes. Needs the fallback to be conservative and a test that both
   paths agree on a real ASTAP sidecar, not only on a synthetic. Measure it before committing: if a bare
-  `WCS(naxis=2)` plus assignment is not markedly cheaper than `WCS(header)`, this shape is worthless.
+  `WCS(naxis=2)` plus assignment is not markedly cheaper than `WCS(header)`, this shape is worthless.~~ —
+  **SHIPPED v0.374.9; the numbers are in the ▶ block above. One correction for the record: the entry framed
+  it as "for the headers we ourselves wrote", but the gate that matters is the header's *shape*, not its
+  author — an ASTAP sidecar is a plain TAN header too, and it is the one the owner's 5,477 subs actually
+  carry, so gating on provenance would have bought nothing on real data.**
+  **Read (b)–(d) with the new number, not the old one: the problem they were sized against is now ~1 s, not
+  ~4.7 s.** A Stack-page load costs ~2.1 s of canvas work rather than ~9.3 s, and a κ-slider nudge ~1 s rather
+  than ~4.7 s. None of them is wrong, but none is worth the staleness or API risk it carries at that size —
+  **profile before picking one**, and expect to conclude that (b) in particular is no longer worth its trade.
   (b) *Memoise the canvas per target*, keyed on a frame-set fingerprint (count + max rowid + accept/solve
   state). Cheapest by far, but it is the staleness trade **v0.374.6 explicitly warned about** for the Library
   page — a stale canvas estimate after a scan is its own bug — so it needs the fingerprint to be genuinely
@@ -8397,6 +8427,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.374.9** — Performance, the residue v0.374.8 filed with its number (no behaviour change): **reading a sub's stored solution stops re-verifying a FITS header card by card.** `wcs_io.wcs_from_text` went through `astropy.wcs.WCS(Header.fromstring(text))` at **0.85–1.05 ms** a frame, and `mosaic.compute_mosaic_canvas` reads one per **sub** — the last ~4 s of the ~4.7 s `/stack-estimate` (fired **twice** per Stack-page load, and again on every drizzle/canvas toggle) and `/rejection-outlook` (every Target-page load). The cost is not the projection maths: it is `Card._verify`, paid building the `Header` *and* again on every `key in header` lookup. New `_wcs_from_plain_tan_text` scans the fixed-format 80-column cards itself and assigns onto a bare `WCS(naxis=2)`: **0.85 ms → 0.07 ms** a header (12×), `compute_mosaic_canvas` on a 9-panel **5,477**-sub mosaic **6.02 s → 0.89 s** (6.8×), `estimate_stack` on a real 5,477-row `project.sqlite` **6.04 s → 1.06 s** (5.7×), and every real stack and plate-solve read benefits too. **A pure optimisation, pinned as one:** across ten header shapes (our own CDELT and CD serialisations, an ASTAP sidecar carrying CD beside CDELT+CROTA, the legacy CDELT+CROTA2 convention, half-written CD/PC matrices, a seam frame, a near-pole frame) the fast WCS re-serialises **byte-identically** through `to_header(relax=True)`, records the same `pixel_shape`, and transforms a pixel grid to **bit-identical** RA/Dec; `test_mosaic.py` pins the union canvas identical with the fast path disabled. `CROTA` is handed to wcslib via `wcs.crota` rather than re-implemented. Anything the scan doesn't fully understand — SIP, `PV`, a non-TAN or galactic projection, a third axis, non-degree units, a duplicated keyword, a length that isn't a whole number of cards — returns `None` and falls through to astropy's own read, so no keyword can be silently dropped and a bare `END` sidecar still reads as an unsolved frame. Shape (a) of the four filed; (b)–(d) stay open with their care notes. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.374.8** — Performance, found by running the app at the owner's scale (no behaviour change): **two endpoints took ~14 seconds each on a 5,477-sub target.** Sweeping all 36 per-target read-only GETs (enumerated from the app's own OpenAPI schema) against a 9-panel, 5,477-sub mosaic found the distribution sane except for `/stack-estimate` (**13.8 s** — the Stack page fires it *twice* and refetches on every drizzle/canvas toggle) and `/rejection-outlook` (**13.3 s** — the Target page NoticeBoard, every load). Both run `mosaic.compute_mosaic_canvas`, which calls `wcs_io.footprint_radec_deg` once per **sub**, and that transformed the four corners with four separate `pixel_to_world` calls — each building a whole `SkyCoord`. One vectorised `all_pix2world` instead: **1.299 ms → 0.011 ms** a frame (118×), `compute_mosaic_canvas` **13.87 s → 4.75 s** for the identical `3494×2470` canvas, the two endpoints **→ 4.66 s / 4.77 s**, the whole 36-endpoint sweep **28.3 s → 10.6 s**. Deviation from the old path over 200 WCSs: **0.0**. Gated on a new `_is_plain_radec` so a galactic WCS is never read as RA/Dec (it keeps the old path, which declines it), and fast-path failures fall through so a frame with no size still answers `None`. Every real stack benefits too. Entry in [`SHIPPED.md`](SHIPPED.md); the residual `wcs_from_text` cost is filed below with its number.
 - **v0.374.7** — Performance, measured on the owner's own shape (no behaviour change): **the shared mosaic-panel gate stopped clustering one row per sub.** `seestack/stack/pointings.py::cluster_pointings` is single-linkage union-find, **O(n²) in pure Python**, and `pointing_groups` — the one gate QC grading, quality weighting, photometric normalization, the transparency baseline, the session recap and bulk-select all delegate to — was handed a whole target's frame list, as was `detect_mixed_pointings` (the pre-flight of every unattended stack once `mixed_pointing_guard` is on). `mosaicmap` had already solved this for itself in v0.352.x by folding onto a 0.01° grid; the fold now lives in the engine as `fold_pointings` + `_cluster_distinct`, so all seven paths get it. On a 9-panel, **5,477-sub** mosaic (441 distinct cells): `pointing_groups` **1.152 s → 0.012 s** (96×), `detect_mixed_pointings` **2.650 s → 0.021 s** (126×) — ~3.5 s off a stack (three calls), and one call off every scan and two Target-page endpoints. **Nothing moves:** 0.01° is 25× below `PANEL_LINK_DIST_DEG` and 300× below `LINK_DIST_DEG`, every input index gets its own cell's label, `eligible`/`weights` are summed per cell, and the mixed-pointing verdict carries each cell's true sub count and true summed unit vector so `majority`/`others`/`separation_deg` stay the unfolded numbers. Verified by sweep — **664 configurations** with panel separations straddling both link distances exactly, zero mismatches against the rule spelled out on `cluster_pointings`. Two rails (a link distance near the grid, and an already-distinct set) fall back to the exact clustering. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.374.6** — Backlog curation, measured not guessed (no code change): **the standing "the Library page walks the library twice per refresh" perf watch item is closed — it costs ~196 ms, so caching it would buy nothing and risk a stale cleanup list.** The entry (filed with v0.319.3–4) asked for exactly this before anyone added a `registry_cache` layer. Built the owner's own shape — 6 targets / ~25k frame rows, the confirmed `M 3` + `M 3_SUB` duplicate pair at 5,477 + 5,455, the genuine `NGC 6888` two-folder pair at 4,815 + 3,110, and a mosaic pair, all plate-solved so both endpoints actually do their confirmation work — and timed the two endpoints the page polls together: **cleanup-suggestions ~106 ms, merge-suggestions ~105 ms, one refresh ~196 ms**, against `/api/targets` at 2 ms. Half of that is the duplicated walk, so the whole prize is ~100 ms on a page that is not polled in a loop — well under the staleness bug the entry itself warns the cache would introduce. Entry cut to [`SHIPPED.md`](SHIPPED.md) with the method, so nobody re-measures it.
