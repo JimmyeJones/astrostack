@@ -2027,17 +2027,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   unprompted — so the button saves a tree walk rather than enabling anything. A power-user shortcut, not a
   beginner capability: do not rate it above a genuine friendliness item. (S, autonomy — PRIORITY 2–3.)
 
-- **LEAD, NOT FINISHED (Builder 2026-09-07, filed while shipping v0.378.0) — the skipped-folder finding lives
-  only in a scan job's summary, which scrolls away.** *(Trust / autonomy — PRIORITY 2–3; size M; **the cost is
-  the whole question**.)* A bare `<T>/` folder holding files the Seestar's naming can't vouch for is now
-  *reported* (v0.329.2) and *actionable* (v0.378.0) — but both live on the **Jobs page**, attached to one scan's
-  result, and on this install the scan is usually the watcher's, so nobody is looking when it lands. It renews
-  itself every scan, so nothing is lost permanently; what is missing is a **standing** home next to
-  `cleanup-suggestions` on the Library page. **Why it wasn't built in the same run:** re-deriving the skips at
-  poll time means walking `incoming/` on every poll — the exact trade `unexported-edits` was designed *not* to
-  make. The cheap shape is probably to **persist** what the scan already computed and have the poll read that,
-  which is a schema decision, not a patch. **Grep first:** `library_hygiene` / `cleanup-suggestions`,
-  `ScanResult.unvouched_skips`.
+- ~~**LEAD, NOT FINISHED (Builder 2026-09-07, filed while shipping v0.378.0) — the skipped-folder finding lives
+  only in a scan job's summary, which scrolls away.**~~ — **SHIPPED v0.381.0** as
+  `webapp/skipped_folders.py` + `GET /api/targets/skipped-folders` + `SkippedFoldersCard`, and the "schema
+  decision" turned out not to need one (the registry's existing `library_meta` key/value table). Entry, and
+  the answer to "what stops a standing card nagging after the owner acts", in [`SHIPPED.md`](SHIPPED.md).
 
 - **✅ SHIPPED (Builder, v0.304.4, branch `claude/compassionate-galileo-ezix3s`) — ~~the *first* zoom clip on a
   target is a silent wait.~~** Fixed as filed, but with the **fetch-to-blob** half rather than the
@@ -5286,8 +5280,23 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **NEW BEGINNER FEATURE (Scout 2026-09-07) — "Is my mosaic evenly filled?": a per-panel depth /
-  gap readout that tells a mosaic shooter where to point next.** *(Pillar: 2 autonomy + 3 friendliness,
+- ~~**NEW BEGINNER FEATURE (Scout 2026-09-07) — "Is my mosaic evenly filled?": a per-panel depth /
+  gap readout that tells a mosaic shooter where to point next.**~~ — **ALREADY SHIPPED, TWO DAYS BEFORE IT WAS
+  FILED; struck 2026-09-07 by the next Builder run so nobody builds it a second time.** The whole feature is
+  `seestack/mosaicmap.py` (**v0.355.0**, "Your mosaic, panel by panel") — `mosaic_depth_map` clusters the
+  target's accepted+solved subs with the very `pointings.pointing_groups` the entry says to reuse, lays the
+  panels out North-up/East-left, names the thin one, and returns the plain sentence; it is served by
+  `GET /api/targets/{safe}/mosaic-depth-map` (`MosaicDepthMapOut`) and drawn by
+  `frontend/src/components/target/mosaicMap.ts`. The "aim there next session" half is **v0.361.0**
+  (`mosaicmap.aim_hint` + `useMosaicAim`), already on the Dashboard's "point here tonight" card and Tonight's
+  worth-more-time list. The entry's own instruction — *"verify non-overlap first … grep before building"* — is
+  what catches this: `grep -rn mosaicmap` finds all of it in one call. **The lesson, not the item:** the idea
+  was filed by a Scout run on the same day, and the freshest entry in a section is the one a Builder trusts
+  most, so a stale *new* item costs more than a stale old one. Grep `docs/SHIPPED.md` for the key nouns before
+  filing, as the conventions at the top of this file already require.
+  Original spec, for the record:
+
+  *(Pillar: 2 autonomy + 3 friendliness,
   with a 4 image-quality edge; size M.)* The owner is a **heavy mosaic user** (`<T>_mosaic_sub/`, AGENTS.md
   §1) shooting big canvases over many nights — but nothing tells them, in plain language, whether the tiles
   came out *even*. A mosaic whose corner panel is 12 subs deep while its body panels are 80 has one visibly
@@ -8547,6 +8556,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.381.0** — PRIORITY 2–3 (trust / autonomy), closing the "LEAD, NOT FINISHED" filed the same day: **the folder your scan walked past now waits for you on the Library page.** A bare `<T>/` beside `<T>_sub/` holding files the Seestar's naming can't vouch for — the owner's `NGC 6888`, 4,815 files — has been *reported* since v0.329.2 and *actionable* since v0.378.0, but only on the **Jobs page**, attached to one scan's result, and the scan that finds it is the watcher's, fired while nobody is looking. New `webapp/skipped_folders.py` has the scan **write the finding down** (one JSON value in the registry's existing `library_meta` table — the lead's feared "schema decision" was not needed), `GET /api/targets/skipped-folders` serves it, and `SkippedFoldersCard` shows it on the Library page with the same one-click "bring it in" (`BringFolderInButton`, now shared with Jobs so the two can't drift). **The part a standing card needs and a per-scan alert never did:** the convention keeps skipping the folder, so a card mirroring the newest scan would still be shouting after the owner acted — a remembered folder is therefore dropped as soon as its target owns *any* frame from inside it, and one that has left `incoming/` is forgotten. Polling never walks `incoming/` (pinned by a test that makes a walk fatal); nothing writes to it. Upgrade-safe: one additive meta row, one additive endpoint. Tests +23. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.380.0** — PRIORITY 1 + 3 (editor / friendliness), the completion of v0.379.0's beginner path: **a "Crop" button in the editor header, beside the app's two automatic crop offers.** Cropping is the edit a beginner is most likely to want *and* know the name of, and the only route to it was **Add operation → More operations → Crop** — the op is not in the Add menu's Common group — followed by four typed fractions. One click now adds the op (or **re-opens the recipe's existing crop**, via the new pure `cropDrag.ts::existingCropUid`, rather than stacking a second one whose fractions would be relative to the first's output; a crop the user had switched off comes back on, since pressing Crop *is* the ask), selects it, and opens the drag rectangle. **Placed in a group that already exists** — "Trim border" and "Re-centre" both end in the same adjustable Crop op — so it is not one more always-on banner, and it is hidden while a crop *proposal* owns the preview. **Measured, as the IA rule requires:** page heights byte-identical on the running app (phone editor **2,887 px**, desktop **1,841 px**, both unchanged; on a 420 px phone it shares the Auto-process row rather than starting a new one), nothing overflowing, no console errors. Nine existing `Editor.test.tsx` queries that reached the pipeline's Crop row by its bare text are now addressed by its own `aria-label` ("Select Crop") — more precise, not looser, and the reason one of them failed first. Frontend only. Tests +7.
 - **v0.379.1** — PRIORITY 1 (editor), two refinements the browser probe of v0.379.0 asked for (no logic change): the crop **handles' grab area is 22 px around a 12 px marker**, so a handle is hittable with a finger on the 374 px-wide phone preview without eight chunky squares sitting on the picture; and the *"Keeping 62% × 55%"* caption takes `pointerEvents: "none"`, because it is drawn over the **top-left corner handle** — the one control on that screen you must be able to grab. Verified end-to-end against a running app (`Editor.tsx`).
 - **v0.379.0** — ⭐ PRIORITY 1 (editor), a new beginner-facing capability on an op that already existed: **you can aim a crop by dragging it on the picture instead of typing four fractions.** `geometry.crop` was only ever reachable through the descriptor form's Left/Top/Right/Bottom sliders — fractions of a canvas that is 10,000 px wide on this owner's mosaics, chosen while looking at a decimated proxy. Selecting an enabled Crop op now opens a draggable rectangle on the live preview (body slides, eight handles resize, outside dimmed, *"Keeping 60% × 80% of the picture"* live), plus one-click **"Back to the whole picture"** and a plain-language note before a crop under a quarter of the frame costs real pixels. The sliders stay and follow along. **The rectangle is drawn over the recipe with *this op bypassed*** — a crop's fractions are relative to the image entering it, so dragging on the ordinary (already-cropped) preview would compound against itself; new `cropDrag.ts::cropDragBlockedReason` therefore **declines, and says why**, when any enabled geometry op sits after this crop (a Rotate, a Resize, or a second Crop, whose bypassed render would show *its* output). The overlay box's aspect is measured off the loaded image, since no endpoint reports the bypassed render's dimensions, and the rectangle waits for that measurement rather than risking an offset. The drag is local until release: one undo step, no per-pixel re-render, and the bypassed render is now keyed on the *other* ops only (`withoutOpKey`), which also makes the existing per-op Compare/Split cheaper. Frontend only; no engine, schema, config, on-disk or default change. Tests +39. Full entry in [`SHIPPED.md`](SHIPPED.md).

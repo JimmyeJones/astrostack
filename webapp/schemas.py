@@ -850,6 +850,25 @@ class CleanupSuggestionOut(BaseModel):
     detail: str
 
 
+class SkippedFolderOut(BaseModel):
+    """A folder in ``incoming/`` a scan walked past and could not fully account
+    for: it is named like the Seestar's own finished picture (a bare ``<T>/``
+    beside a ``<T>_sub/``), but some of the files inside it are *not* named like
+    the device's output — so they may be raw subs that aren't reaching a stack.
+
+    Read-only and remembered from the last scan rather than re-derived, so the
+    Library page can show it without walking ``incoming/`` on every poll
+    (``webapp/skipped_folders.py``). ``path`` is the folder on disk, posted back
+    verbatim as ``POST /api/scan``'s ``root`` to bring exactly that folder in —
+    and re-confined server-side on the way, like any other scan root. Nothing
+    here changes anything on disk: the app never writes to ``incoming/``."""
+
+    name: str
+    path: str
+    n_files: int
+    n_unrecognised: int
+
+
 class ScanRequest(BaseModel):
     # Default: settings.incoming_dir. When given, it must name that folder or one
     # inside it — the router confines it (`_confined_scan_root`), because this is
