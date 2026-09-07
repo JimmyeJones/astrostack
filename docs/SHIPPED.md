@@ -14,6 +14,64 @@ Newest first.
 
 ---
 
+## v0.376.2 — 2026-09-07 — The Sky map stops re-reading every target's master FITS on every visit: `sky_overlay`'s `ETag` + `_derived_image_etag` / `_file_stamp` / `_etag_matches`
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-25fa4c`.)** Shape **(a)** of the
+filed "every visit to the Sky map re-derives each target's coverage mask" idea.
+No pixel of any overlay changes; this is purely about not recomputing one.
+
+**Measured first, because the entry made that the gate.** On a
+**3494×2470×3 float32 (104 MB)** master — the owner's mosaic canvas shape —
+`stack_coverage_mask` costs **14–23 ms** warm. A whole-cube `isfinite` runs at
+memory bandwidth, so a *page-cached* master is genuinely cheap, and that is what
+**declines shape (b)**: caching the composed RGBA beside the preview would buy
+tens of milliseconds and own an invalidation bug in exchange.
+
+**What the measurement does not cover is the case the entry was about.** The
+Sky map requests one overlay **per target with a stack** (`routers/sky.py` sets
+`preview_url` on every tile), and on the owner's box those masters live on a NAS.
+Cold, that is ~104 MB pulled over the network per target, on every visit and every
+reload — and `Cache-Control: no-store` forbade the browser from even *keeping* the
+copy a revalidation would refer to, so a reload could never be cheap.
+
+**So the response is now revalidated rather than recomputed.** Three small helpers
+in `routers/stack.py`:
+
+- `_file_stamp(path)` — `mtime_ns:size`, or `-` when the file is missing or
+  unreadable, so a master that disappears (or comes back) changes the answer
+  rather than looking unchanged.
+- `_derived_image_etag(*parts)` — a strong ETag (SHA-256, 32 hex chars) over
+  those stamps plus whatever else determines the bytes, with `webapp.__version__`
+  folded in so an upgrade that changes how the image is composed cannot be masked
+  by a browser holding the old one.
+- `_etag_matches(request, etag)` — `If-None-Match` handling that copes with the
+  list form, the `W/` weak prefix a proxy may add, and `*` (RFC 9110).
+
+`sky_overlay` builds its tag from the preview stamp, the FITS stamp,
+`preview_north_up_deg` and `preview_crop_json` — the entry's own caution was that
+a History **"Adjust"** re-save rewrites the preview in place *and* changes the
+orientation, and both are stamped. A match returns **304** having done two `stat`
+calls and no read at all. `Cache-Control` moves `no-store` → `private, no-cache`:
+still revalidated on **every** request, so a re-edited run can never be served
+stale, but revalidation is now possible at all.
+
+**Upgrade-safe (§9):** response headers only — no config, schema, on-disk,
+default, endpoint or response-*body* change, and the 200 path returns byte-identical
+PNGs. A 304 is what `<img>` and every HTTP client already do with a validator.
+
+**Tests (+2, both fail before).** `tests/webapp/test_stack_render.py`: the first
+response carries a strong (not `W/`) ETag and a `no-cache`, not-`no-store`
+`Cache-Control`; the same tag comes back **304** with an empty body; the weak-prefixed
+and `*` forms match while somebody else's tag does not; and rewriting the preview
+in place moves the tag and stops the stale one being honoured.
+
+**Left open deliberately:** four other `no-store` image endpoints in
+`routers/stack.py` and `routers/editor.py` are the same shape, but each has its
+own invalidation inputs and none was measured. Do them one at a time, with the
+inputs enumerated — not as a sweep.
+
+---
+
 ## v0.376.1 — 2026-09-07 — The Stack page stops building the same mosaic canvas twice per load: `stacker.StackCanvasBasis` + `estimate_stack_basis` / `estimate_stack_from_basis`, and `/stack-estimate`'s `drizzle_probe`
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-25fa4c`.)** Shape **(c)** of the
