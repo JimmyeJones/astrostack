@@ -14,6 +14,88 @@ Newest first.
 
 ---
 
+## v0.381.0 — 2026-09-07 — the folder your scan walked past now waits for you on the Library page
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-wza0iq`.)** Closes the
+"LEAD, NOT FINISHED" filed the same day while shipping v0.378.0. New
+`webapp/skipped_folders.py`, `GET /api/targets/skipped-folders`
+(`SkippedFolderOut`), `frontend/src/components/SkippedFoldersCard.tsx`, and the
+Jobs page's `BringFolderInButton` lifted into
+`frontend/src/components/BringFolderInButton.tsx` so both surfaces ask for a
+folder the same way.
+
+**What was wrong.** A bare `<T>/` folder sitting beside `<T>_sub/` is skipped by
+the Seestar convention, because on a Seestar it is the finished picture the scope
+made for itself. That skip is right and it stays — but it does not look inside,
+so a plainly-named folder of the owner's *own* raw subs is passed over the same
+way. The owner's library has exactly that shape: an `NGC 6888` of 4,815 files
+beside an `NGC 6888_SUB` of 3,110 **different** ones. Since v0.329.2 the scan
+*reports* such a folder; since v0.378.0 the report carries a button that brings it
+in. Both live on the **Jobs page**, attached to one scan's result — and on this
+install the scan that finds it is the watcher's, fired while nobody is at the
+screen. So the finding was true, actionable, and unseen: it renewed itself on the
+next scan and scrolled away again.
+
+**The scan writes it down; the poll reads it.** The lead called the cheap shape "a
+schema decision, not a patch". It needed no schema decision: the registry already
+has a `library_meta` key/value table, so the finding is one JSON value under
+`unvouched_skipped_folders` — additive by construction, and a build that predates
+the key simply never asks for it. Deriving the answer at poll time was the thing
+to avoid, because that means walking `incoming/` on every poll, on the one tree
+this app may never write to (AGENTS.md §10). A test pins that: it makes
+`scanner.find_fits_files` and `scan_and_organize` raise, then asserts the endpoint
+still answers.
+
+**What stops a standing card being a nag — the question the Jobs-page version
+never had to answer.** The convention keeps skipping the folder, so the *scan*
+keeps reporting it: a card that simply mirrored the newest scan would still be
+shouting after the owner pressed the button. So a remembered folder is dropped as
+soon as the target it belongs to owns **any** frame from inside it. Any, not all:
+the question the card asks is "is this folder missing from my pictures?", and the
+moment the owner acted the answer became no; a few files that failed to read are
+the scan job's business to report, not a reason to keep an alert up for ever. The
+folder is mapped to its target through the scanner's own
+`target_name_for_folder` — the same function the scoped scan names its target
+with — so this cannot disagree with where those frames actually landed, and the
+inside-this-folder test goes through `os.path.realpath` on both sides for the
+reason ingest's own dedup key does. A folder that has since left `incoming/`
+drops out too, and the card is dismissible **per folder path**, so declining one
+never blinds the owner to a different folder that goes missing next month.
+
+**The two scan shapes remember different things,** and conflating them loses a
+finding. A **whole-incoming** scan has just looked at every folder, so its answer
+replaces what was remembered — including with an empty list, which is how a
+folder that has been renamed or removed stops being mentioned. A **scoped** scan
+looked at exactly one folder (it is what the card's own button fires), so it may
+not overwrite the list; it re-filters it instead, which is what drops the folder
+it just brought in.
+
+**Upgrade-safe (§9):** one new `library_meta` row, no schema bump, no config,
+on-disk, default or existing-response-shape change; one new additive endpoint and
+one new client method. Remembering is best-effort and wrapped — a registry that
+cannot be written must never turn red a scan that has just ingested the owner's
+frames — and that is pinned by a test too. Nothing in the change writes to,
+renames or removes anything under `incoming/`.
+
+**Tests (+13 python in `tests/webapp/test_skipped_folders.py`, +10 frontend in
+`SkippedFoldersCard.test.tsx`).** Python: the remembered form round-trips
+biggest-shortfall-first and caps; an unreadable value degrades to silence rather
+than 500ing the Library page; a scan remembers what it walked past and the
+endpoint serves it; an ordinary Seestar library is told nothing; a library that
+never scanned answers normally (the upgrade case); **bringing the folder in stops
+the card nagging, and a later whole scan that still reports it in its own job
+summary does not bring it back** (verified fail-before by removing the
+brought-in filter); a folder that left `incoming/` is forgotten; a later clean
+scan clears an earlier finding; a scoped scan of *another* folder leaves the
+report alone; remembering never fails a scan; the poll does not walk `incoming/`;
+and the key is additive with the rest of the registry untouched. Frontend: the
+lead sentence's two independent plurals, the per-folder dismissal (including that
+it does not silence a folder found later), nothing rendered on a healthy library,
+the scan scoped to the folder's own path, the "nothing on your disk is touched"
+line, and a broken `localStorage` leaving the card working.
+
+---
+
 ## v0.379.0 — 2026-09-07 — ⭐ PRIORITY 1 (editor): you can finally aim a crop by dragging it on the picture
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-dyd578`.)** Frontend only — no
