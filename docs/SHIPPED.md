@@ -14,6 +14,37 @@ Newest first.
 
 ---
 
+## v0.378.1 — 2026-09-07 — `scripts/agent-setup.sh` stops saying "agent env ready" over a `.venv` that holds nothing but pip
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-7wv8l8`.)** Tooling. No engine,
+webapp or frontend code changed.
+
+**What happened.** `source scripts/agent-setup.sh` printed **`agent env ready:
+Python 3.12.3`** and returned 0 over an environment with no pytest, no fastapi and
+no numpy: a `ReadTimeoutError` from `files.pythonhosted.org` had killed
+`pip install -q -e ".[dev,web]"` mid-resolve. The script sets `set -euo pipefail`,
+but it is `source`d, and that did not stop it here. The next thing the run saw was
+`No module named pytest` from `.venv/bin/python` — which reads exactly like a
+broken checkout, and is not one.
+
+**Three changes, all in the failure path.**
+* **Retry once.** A PyPI read over the agent proxy times out often enough to be
+  worth a second attempt at `--timeout 120 --retries 5`. `-q` is dropped on the
+  retry: if the second one fails the run needs to see why.
+* **Verify instead of assuming.** `python -c 'import pytest, fastapi, numpy,
+  astropy'` decides whether the environment is ready, rather than the exit status
+  of an install that has demonstrably not been trusted to stop the script.
+* **Fail loudly and name the diagnosis.** On failure it prints the retry command
+  and the sentence that would have saved this run five minutes — *this is an
+  install failure, the checkout is fine* — and returns 1 instead of printing the
+  ready banner.
+
+The success path is unchanged: same commands, same output, verified by running it
+on an already-good tree. `AGENTS.md` §7 carries the same tell, because that is what
+a run reads before it reaches the script.
+
+---
+
 ## v0.378.0 — 2026-09-07 — a skipped folder can be brought in with one click: `scanner.target_name_for_folder` + `scan_and_organize(single_target=…)`, and `POST /api/scan`'s `root` finally means what it says
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-7wv8l8`.)** Answer **(a)** to the
