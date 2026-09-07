@@ -501,7 +501,12 @@ def test_the_scan_reports_a_skipped_folder_it_cannot_account_for(client, data_ro
     body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
     assert body["state"] == "done", body
     [skip] = body["result"]["skipped_folders"]
-    assert skip == {"name": "NGC 6888", "n_files": 4, "n_unrecognised": 4}
+    # `path` (v0.378.0) is what makes the report actionable — posted back as a
+    # scan root it brings the folder in. The three counts it joined are unchanged.
+    assert skip == {
+        "name": "NGC 6888", "n_files": 4, "n_unrecognised": 4,
+        "path": str(data_root / "incoming" / "NGC 6888"),
+    }
     # Reported, not acted on: the folder is still skipped and still on disk.
     safes = {t["safe_name"] for t in client.get("/api/targets").json()}
     assert "NGC_6888" in safes

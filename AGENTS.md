@@ -582,6 +582,15 @@ the repo.
 > the start of every run (`source scripts/agent-setup.sh`) instead of hand-typing
 > the steps. Wiring it into a `SessionStart` hook makes every run start green with
 > no setup tax.
+>
+> **If it prints `ERROR: the Python environment is NOT ready`, that is an install
+> failure, not a broken checkout.** A PyPI read over the agent proxy can time out
+> mid-resolve and leave a `.venv` holding nothing but `pip`; the tell is
+> `No module named pytest` from `.venv/bin/python`. Just retry the install
+> (`pip install --timeout 120 --retries 5 -e ".[dev,web]"`) and carry on. *(The
+> script used to print a cheerful "agent env ready" over exactly that state — it
+> is `source`d, and its `set -e` did not stop the failed install; it now verifies
+> the toolchain imports before saying it is ready, v0.378.1.)*
 
 > Tip: **`scripts/agent-dogfood.sh` boots a real app with real data** for the §2
 > big-picture pass — scratch data root, the bundled sample loaded and stacked,

@@ -3126,7 +3126,14 @@ export const api = {
     }),
 
   // pipeline
-  scan: () => req<{ job_id: string }>("/api/scan", { method: "POST", body: "{}" }),
+  // `root` scans just that one folder, as its own target — the "bring this
+  // skipped folder in anyway" path. Omitted (the Scan button) means the whole
+  // incoming folder, exactly as before. The server confines the path to
+  // incoming either way; it is never a way to name an arbitrary directory.
+  scan: (root?: string) => req<{ job_id: string }>("/api/scan", {
+    method: "POST",
+    body: JSON.stringify(root ? { root } : {}),
+  }),
   uploadFits: (
     fileList: File[],
     target: string,
