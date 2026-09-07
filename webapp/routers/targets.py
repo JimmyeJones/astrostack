@@ -46,6 +46,7 @@ from webapp.schemas import (
     SessionQualityDriftOut,
     SessionRecapOut,
     SetCoverRequest,
+    SkippedFolderOut,
     StackHealthOut,
     TargetCreate,
     TargetOut,
@@ -223,6 +224,40 @@ def merge_suggestions(request: Request) -> list[MergeSuggestionOut]:
             ],
         ))
     return out
+
+
+@router.get("/skipped-folders", response_model=list[SkippedFolderOut])
+def skipped_folders(request: Request) -> list[SkippedFolderOut]:
+    """Folders the last scan walked past that it could not fully account for — a
+    bare ``<T>/`` beside a ``<T>_sub/`` holding files that are *not* named like
+    the Seestar's own finished picture, i.e. possibly raw subs that aren't
+    reaching a stack. Empty on a healthy Seestar library, which is the point: the
+    Library's card renders nothing at all until a scan has genuinely passed over
+    frames it can't explain.
+
+    The finding is **remembered** by the scan that made it rather than re-derived
+    here (``webapp/skipped_folders.py``), because deriving it means walking
+    ``incoming/`` — thousands of files on the one tree this app may never write
+    to — and this is polled. Reading it back costs one registry lookup plus, per
+    remembered folder, one ``isdir`` and at most one project read; the realistic
+    count is zero.
+
+    Read-only. It never scans, ingests or deletes; bringing a folder in is the
+    user's own ``POST /api/scan``."""
+    from webapp.skipped_folders import recall_skipped_folders
+
+    lib = deps.open_library(request)
+    try:
+        records = recall_skipped_folders(lib)
+    finally:
+        lib.close()
+    return [
+        SkippedFolderOut(
+            name=r.name, path=r.path,
+            n_files=r.n_files, n_unrecognised=r.n_unvouched,
+        )
+        for r in records
+    ]
 
 
 @router.get("/cleanup-suggestions", response_model=list[CleanupSuggestionOut])

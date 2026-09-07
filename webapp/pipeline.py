@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from seestack.io.library import Library
 from seestack.io.project import count_unreadable_frames
-from seestack.io.scanner import run_qc_and_solve, scan_and_organize
+from seestack.io.scanner import ScanResult, run_qc_and_solve, scan_and_organize
 from seestack.render.thumbnail import invalidate_frame_thumbs
 from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
 from webapp import __version__ as APP_VERSION
@@ -159,6 +159,54 @@ def _is_same_dir(a: Path, b: Path) -> bool:
         return False
 
 
+def _remember_scan_skips(
+    lib: Library, scan: ScanResult, *, single_target: bool
+) -> None:
+    """Write this scan's unexplained folder skips into the registry, so the
+    Library page can show them as a standing nudge (``webapp/skipped_folders.py``).
+
+    The two scan shapes remember different things, and conflating them would lose
+    a finding:
+
+    * A **whole-incoming** scan has just looked at every folder, so its answer is
+      the whole answer and *replaces* what was remembered — including with an
+      empty list, which is how a folder that has since been renamed or removed
+      stops being mentioned.
+    * A **scoped** scan looked at exactly one folder (it is what the card's own
+      "bring it in" button fires), so it may not overwrite the list. It re-filters
+      it instead, which is what drops the folder it just brought in.
+
+    Best-effort by construction: remembering this is a convenience, and a scan
+    that ingested the owner's frames must not be reported as failed because a
+    note about it could not be written."""
+    from webapp.skipped_folders import (
+        SKIPPED_FOLDERS_META_KEY,
+        SkippedFolder,
+        decode_skipped_folders,
+        remember_skipped_folders,
+        still_missing,
+    )
+
+    try:
+        if single_target:
+            remembered = decode_skipped_folders(
+                lib.get_meta(SKIPPED_FOLDERS_META_KEY))
+            if remembered:
+                remember_skipped_folders(lib, still_missing(lib, remembered))
+            return
+        remember_skipped_folders(lib, still_missing(lib, [
+            SkippedFolder(
+                name=s.name,
+                path=str(Path(s.parent) / s.name),
+                n_files=s.n_files,
+                n_unvouched=s.n_unvouched,
+            )
+            for s in scan.unvouched_skips
+        ]))
+    except Exception:  # noqa: BLE001 — never fail a scan over a side note
+        log.warning("could not remember this scan's skipped folders", exc_info=True)
+
+
 def submit_pipeline(settings: Settings, jm: JobManager, *, root: str | None = None) -> Job:
     def body(job: Job) -> dict[str, Any]:
         return _pipeline_body(settings, jm, job, root=root)
@@ -229,6 +277,14 @@ def _pipeline_body(
             ]
             if unvouched:
                 summary["skipped_folders"] = unvouched
+            # …and remember them, because this summary lives on the Jobs page
+            # attached to one scan's result, and on a walk-away install the scan
+            # that finds them is the watcher's — fired while nobody is looking.
+            # The finding then renews itself on the next scan and scrolls away
+            # again. Written down here, where the scan has already computed it,
+            # the Library page can offer it as a standing nudge without walking
+            # ``incoming/`` on every poll. See ``webapp/skipped_folders.py``.
+            _remember_scan_skips(lib, scan, single_target=single_target)
             # The *other* silent skip, and the one that has somewhere to go.
             # ``_apply_seestar_convention`` walks past "<T>_video/" folders with
             # the same wordless ``continue``, and that skip is right — they hold

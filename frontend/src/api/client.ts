@@ -416,6 +416,19 @@ export interface CleanupSuggestion {
   detail: string;
 }
 
+/** A folder in `incoming/` the last scan walked past and could not fully account
+ *  for — named like your Seestar's own finished picture, but holding files that
+ *  aren't. Remembered by the scan (`webapp/skipped_folders.py`), so the Library
+ *  can show it as a standing nudge; empty on a healthy library. Distinct from
+ *  the Jobs page's own per-scan `SkippedFolder`, which is parsed out of one job's
+ *  result rather than fetched. */
+export interface SkippedIncomingFolder {
+  name: string;
+  path: string;
+  n_files: number;
+  n_unrecognised: number;
+}
+
 export interface FramingHint {
   level: "fits" | "tight" | "mosaic";
   text: string;
@@ -2746,6 +2759,8 @@ export const api = {
     req<MergeSuggestion[]>("/api/targets/merge-suggestions"),
   cleanupSuggestions: () =>
     req<CleanupSuggestion[]>("/api/targets/cleanup-suggestions"),
+  skippedFolders: () =>
+    req<SkippedIncomingFolder[]>("/api/targets/skipped-folders"),
   targetThumbnailUrl: (safe: string) => `/api/targets/${safe}/thumbnail`,
   identifyTarget: (safe: string) =>
     req<ObjectInfo | null>(`/api/targets/${safe}/identify`),
