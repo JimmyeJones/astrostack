@@ -572,6 +572,42 @@ describe("EditorView", () => {
     expect(screen.getByAltText("preview")).toBeInTheDocument();
   });
 
+  // The preview's controls (mask / compare / split / refresh / zoom) used to be
+  // absolutely positioned over the picture, which on a 420 px phone wrapped them
+  // to two rows covering a measured 25.9 % of the live preview (6.2 % in one row
+  // at 1440 px; a mosaic adds a seventh button). jsdom does no layout, so the
+  // structural fact is what can be pinned: the toolbar must not live inside the
+  // black stage that holds the image. Fails before the move.
+  it("keeps the preview controls out of the picture, not floating over it", async () => {
+    mockEditorQueries();
+    // The preview <img> only exists once a render has come back, so stub the
+    // blob fetch the same way the overlay tests do.
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+    renderEditor();
+
+    // The black "stage" that clips everything drawn over the picture — found by
+    // its own `overflow: hidden`, not by `position: relative` (the image's own
+    // aspect-ratio box carries that too, so `closest` would stop one level too
+    // early and the containment check below would pass either way).
+    const img = await screen.findByAltText("preview");
+    let stage: HTMLElement | null = img.parentElement;
+    while (stage && stage.style.overflow !== "hidden") stage = stage.parentElement;
+    expect(stage).not.toBeNull();
+
+    for (const name of ["Star mask", "Compare", "Split", "Refresh", "Zoom"]) {
+      const button = screen.getByRole("button", { name });
+      // Still there — nothing was removed, only moved (AGENTS.md §1).
+      expect(button).toBeInTheDocument();
+      expect(stage!.contains(button)).toBe(false);
+    }
+
+    // ...and the row itself is in the normal flow, not absolutely positioned.
+    const row = screen.getByRole("button", { name: "Refresh" }).parentElement!;
+    expect(row.style.position).not.toBe("absolute");
+  });
+
   it("toggles the star-mask overlay and fetches the mask", async () => {
     mockEditorQueries();
     vi.stubGlobal("fetch", vi.fn(async () => ({

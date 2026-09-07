@@ -145,6 +145,65 @@ this target"* button on the Target page. The endpoint now supports it; the page 
 not know which folder a target's subs came from, and deriving it server-side from the
 frames' own `source_path` needs a decision about a target whose frames span two
 folders — a real case on this library. Filed in `IMPROVEMENTS.md` rather than guessed.
+## v0.377.2 — 2026-09-07 — a quarter of the live preview stops being hidden behind its own toolbar on a phone: the `Editor.tsx` preview controls move out of the stage
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-9wdpb4`.)** PRIORITY 1
+(editor), found by the `--editor` drive shipped an hour earlier in v0.377.1 —
+or rather by *looking at the phone screenshot it took*, which is the half of
+dogfooding no probe automates.
+
+**The defect, measured before it was touched.** The editor's preview controls —
+**Star mask / Compare / Split / Compare a look / Refresh / Zoom** — were a
+`<Group>` at `position: absolute; right: 8; top: 8` inside the black stage that
+holds the picture. On a wide screen that is tidy: one row, 588×30 over a 653×435
+image, **6.2 %** of the picture. On a phone the same six buttons wrap to **two
+rows**, 366×66 over a 374×249 image:
+
+| width | toolbar | live preview | rows | picture covered |
+|---|---|---|---|---|
+| 1440 px (desktop) | 588 × 30 | 653 × 435 | 1 | **6.2 %** |
+| 420 px (phone) | 366 × 66 | 374 × 249 | 2 | **25.9 %** |
+
+**A quarter of the one thing the editor exists to show, hidden behind its own
+controls, at the width the owner reads this app at** — and that is with six
+buttons. A **mosaic** run renders a seventh (`Coverage`), and the owner is a
+heavy mosaic user (§1).
+
+**The fix is a move, not a removal**, which is the owner's own standing
+constraint (*"don't get rid of features, just move them to a more organized
+layout"*): the `<Group>` leaves the stage and sits under the picture in the
+normal flow, `justify="flex-end"` so it stays where the eye already looked for
+it, at **every** width rather than behind a breakpoint. No button changes, no
+handler changes, no new mechanism (the codebase has no `useMediaQuery`, and a
+`visibleFrom`/`hiddenFrom` pair would have put two copies of six buttons in the
+DOM for tests and screen readers to trip over).
+
+**What deliberately stayed on the picture:** the transient overlays that *label*
+what is being shown — the "Star mask" / "Original" / "Proposed crop" captions,
+the coverage-map legend, the "Updating…" badge. Those are about the image, not
+controls to aim at, and they are already positioned relative to the stage.
+
+**After, on the same running app:** the toolbar has no absolutely-positioned
+ancestor at all, and **the picture did not shrink** — 652.7×435.1 desktop and
+374×249.3 phone, the same numbers as before. The cost is vertical space, stated
+honestly per the §1 IA rule: the editor page is **1,841 px on desktop —
+unchanged** — and **2,815 → 2,887 px on a phone, +72 px (+2.6 %)**, which buys
+back 25.9 % of the preview.
+
+**The test fails before and passes after, and its first draft did not.** Written
+as "the toolbar is not inside the element the image's `closest('div[style*=
+"position: relative"]')` finds", it passed *both* ways — the image's own
+aspect-ratio box carries `position: relative` too, so `closest` stopped one level
+early and the containment check was vacuous. It now walks up to the stage by its
+own `overflow: hidden`, and fails before with `expected true to be false`.
+
+**Upgrade-safe (§9):** frontend layout only. No engine, endpoint, response shape,
+config key, schema, on-disk path or default touched.
+
+**Tests: +1** (`Editor.test.tsx`), asserting all five named controls are still
+present — nothing removed — *and* that none of them is inside the stage, *and*
+that the row is not absolutely positioned. `tsc` clean, `vitest` **3,294 across
+238 files**, `vite build` clean, Python suite green.
 
 ---
 

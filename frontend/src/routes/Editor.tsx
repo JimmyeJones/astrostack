@@ -1555,71 +1555,85 @@ export function EditorView() {
                   <Text size="xs" c="white">Updating…</Text>
                 </Group>
               ) : null}
-              <Group gap={6} style={{ position: "absolute", right: 8, top: 8 }}>
-                {hist.data?.is_mosaic ? (
-                  <Tooltip multiline w={230} withArrow
-                    label="Show this mosaic's frame-coverage map as a colour heatmap: yellow where the most frames overlap, dark blue at the ragged, uncovered edges. This is what 'Trim border' and 'Coverage leveling' act on.">
-                    <Button size="xs" variant={showCoverage ? "filled" : "default"}
-                      color="grape"
-                      disabled={!preview.data || cropPreview}
-                      loading={showCoverage && coveragePreview.isLoading}
-                      onClick={() => setShowCoverage((s) => {
-                        if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); setSoloSplit(false); setSplitCompare(false); setLookSplit(false); }
-                        return !s;
-                      })}>
-                      {showCoverage ? "Hide coverage" : "Coverage"}
-                    </Button>
-                  </Tooltip>
-                ) : null}
-                <Tooltip label="Show the soft mask that gates star ops (white = treated as a star)">
-                  <Button size="xs" variant={showMask ? "filled" : "default"}
+            </div>
+            {/* The preview's own controls — mask/compare/split/refresh/zoom.
+                They used to float *over* the picture (`position: absolute;
+                right: 8; top: 8`), which is tidy on a wide screen and wrong on a
+                phone: measured on the sample at 420 px the six buttons wrap to
+                two rows and cover **25.9 %** of the live preview (6.2 % in one
+                row at 1440 px), and a mosaic adds a seventh ("Coverage"). A
+                quarter of the one thing the editor exists to show was hidden
+                behind its own toolbar, on the width the owner reads this app at.
+                Nothing is removed — the row simply sits under the picture at
+                every width (AGENTS.md §1: "don't get rid of features, just move
+                them to a more organized layout"). The transient overlays that
+                *label* the picture (the "Star mask" / "Proposed crop" captions,
+                the coverage legend, "Updating…") stay on it, because they are
+                about what is being shown rather than controls to aim at. */}
+            <Group gap={6} justify="flex-end" mt={6}>
+              {hist.data?.is_mosaic ? (
+                <Tooltip multiline w={230} withArrow
+                  label="Show this mosaic's frame-coverage map as a colour heatmap: yellow where the most frames overlap, dark blue at the ragged, uncovered edges. This is what 'Trim border' and 'Coverage leveling' act on.">
+                  <Button size="xs" variant={showCoverage ? "filled" : "default"}
                     color="grape"
                     disabled={!preview.data || cropPreview}
-                    loading={showMask && maskPreview.isLoading}
-                    onClick={() => setShowMask((s) => {
-                      if (!s) { setShowBase(false); setSoloExclude(false); setSoloSplit(false); setShowCoverage(false); setSplitCompare(false); setLookSplit(false); }
+                    loading={showCoverage && coveragePreview.isLoading}
+                    onClick={() => setShowCoverage((s) => {
+                      if (!s) { setShowMask(false); setShowBase(false); setSoloExclude(false); setSoloSplit(false); setSplitCompare(false); setLookSplit(false); }
                       return !s;
                     })}>
-                    {showMask ? "Hide mask" : "Star mask"}
+                    {showCoverage ? "Hide coverage" : "Coverage"}
                   </Button>
                 </Tooltip>
-                <Button size="xs" variant={showBase ? "filled" : "default"}
-                  disabled={!preview.data || showMask || showCoverage || splitCompare || lookSplit || cropPreview}
-                  onClick={() => setShowBase((s) => { if (!s) { setSoloExclude(false); setSoloSplit(false); setLookSplit(false); } return !s; })}>
-                  {showBase ? "Edited" : "Compare"}
+              ) : null}
+              <Tooltip label="Show the soft mask that gates star ops (white = treated as a star)">
+                <Button size="xs" variant={showMask ? "filled" : "default"}
+                  color="grape"
+                  disabled={!preview.data || cropPreview}
+                  loading={showMask && maskPreview.isLoading}
+                  onClick={() => setShowMask((s) => {
+                    if (!s) { setShowBase(false); setSoloExclude(false); setSoloSplit(false); setShowCoverage(false); setSplitCompare(false); setLookSplit(false); }
+                    return !s;
+                  })}>
+                  {showMask ? "Hide mask" : "Star mask"}
                 </Button>
-                <Tooltip multiline w={230} withArrow
-                  label="Drag a divider across the preview to reveal the Original on the left and your edit on the right in one frame — the clearest way to judge exactly what a change did.">
-                  <Button size="xs" variant={splitCompare ? "filled" : "default"}
-                    disabled={!preview.data || showMask || showCoverage || cropPreview}
-                    onClick={() => setSplitCompare((s) => {
-                      if (!s) { setShowBase(false); setShowMask(false);
-                        setShowCoverage(false); setSoloExclude(false); setSoloSplit(false);
-                        setLookSplit(false); setSplitFrac(0.5); }
-                      return !s;
-                    })}>
-                    {splitCompare ? "Hide split" : "Split"}
-                  </Button>
-                </Tooltip>
-                {/* Compare the current edit against another look (Auto / a preset)
-                    under the same split divider, so a repeat imager can judge
-                    "this look vs mine" in one frame before committing. */}
-                <LookComparePicker
-                  builtin={lookPresets.data?.builtin ?? []}
-                  user={lookPresets.data?.user ?? []}
+              </Tooltip>
+              <Button size="xs" variant={showBase ? "filled" : "default"}
+                disabled={!preview.data || showMask || showCoverage || splitCompare || lookSplit || cropPreview}
+                onClick={() => setShowBase((s) => { if (!s) { setSoloExclude(false); setSoloSplit(false); setLookSplit(false); } return !s; })}>
+                {showBase ? "Edited" : "Compare"}
+              </Button>
+              <Tooltip multiline w={230} withArrow
+                label="Drag a divider across the preview to reveal the Original on the left and your edit on the right in one frame — the clearest way to judge exactly what a change did.">
+                <Button size="xs" variant={splitCompare ? "filled" : "default"}
                   disabled={!preview.data || showMask || showCoverage || cropPreview}
-                  active={lookSplit}
-                  activeLabel={lookSel?.label ?? null}
-                  loading={pickLook.isPending}
-                  onPick={(choice) => pickLook.mutate(choice)}
-                  onStop={() => setLookSplit(false)}
-                  onAdopt={adoptLook} />
-                <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />}
-                  loading={preview.isFetching} onClick={refreshPreview}>Refresh</Button>
-                <Button size="xs" variant="default" leftSection={<IconZoomScan size={14} />}
-                  disabled={!shownSrc} onClick={() => setLightbox(true)}>Zoom</Button>
-              </Group>
-            </div>
+                  onClick={() => setSplitCompare((s) => {
+                    if (!s) { setShowBase(false); setShowMask(false);
+                      setShowCoverage(false); setSoloExclude(false); setSoloSplit(false);
+                      setLookSplit(false); setSplitFrac(0.5); }
+                    return !s;
+                  })}>
+                  {splitCompare ? "Hide split" : "Split"}
+                </Button>
+              </Tooltip>
+              {/* Compare the current edit against another look (Auto / a preset)
+                  under the same split divider, so a repeat imager can judge
+                  "this look vs mine" in one frame before committing. */}
+              <LookComparePicker
+                builtin={lookPresets.data?.builtin ?? []}
+                user={lookPresets.data?.user ?? []}
+                disabled={!preview.data || showMask || showCoverage || cropPreview}
+                active={lookSplit}
+                activeLabel={lookSel?.label ?? null}
+                loading={pickLook.isPending}
+                onPick={(choice) => pickLook.mutate(choice)}
+                onStop={() => setLookSplit(false)}
+                onAdopt={adoptLook} />
+              <Button size="xs" variant="default" leftSection={<IconRefresh size={14} />}
+                loading={preview.isFetching} onClick={refreshPreview}>Refresh</Button>
+              <Button size="xs" variant="default" leftSection={<IconZoomScan size={14} />}
+                disabled={!shownSrc} onClick={() => setLightbox(true)}>Zoom</Button>
+            </Group>
             <Histogram data={hist.data}
               guides={tonalHistGuides(selectedOp,
                 levels.data?.black != null && levels.data?.white != null
