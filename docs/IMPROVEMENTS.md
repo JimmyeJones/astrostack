@@ -8596,8 +8596,33 @@ outright bug in existing behaviour, never to add capability.
   point — an opt-in seed helps no beginner), so it changes the editor's default
   first-open behaviour on the live install and replaces the current empty-pipeline
   "nudge toward Auto-process" first view. Rollback is trivial and total (UI-only, no
-  data/config/schema touched — revert the frontend change). **Owner: OK to turn this
-  on by default?** A Builder has a clean prototype ready to finish + test.
+  data/config/schema touched — revert the frontend change). ~~**Owner: OK to turn this
+  on by default?**~~ A Builder has a clean prototype ready to finish + test.
+
+  > ### ✅ OWNER SAID YES — 2026-09-07. **BUT IT IS GATED ON D1; DO NOT SHIP IT FIRST.**
+  > The owner approved auto-seeding on by default. **Ship D1 (Auto's border trim cropping a
+  > mosaic to its panel overlaps — top of "Bugs (fix these first)") BEFORE this**, because
+  > this feature's whole purpose is that a beginner's *first* view of a picture is a good
+  > one — and today, on any mosaic, the Auto recipe it would seed with ends in a
+  > `geometry.crop` keeping as little as **4 % of the canvas**. Seeding first would put a
+  > cropped sliver in front of the owner automatically, on the page he lands on, with no
+  > click — turning a bug he currently has to opt into hitting into the default experience.
+  > Once D1 is fixed: finish the prototype, keep it a single undoable step, never overwrite
+  > a saved recipe, and verify the seeded first view **on a mosaic**, not on the 6-frame
+  > sample (AGENTS.md §1 now requires this for any Auto/editor claim).
+
+- **✅ OWNER SAID YES — 2026-09-07 — turn `auto_stack` back ON by default, AFTER D1 ships.**
+  *(Owner decision recorded in answer to the third audit's open question. Was off on the live
+  install; the audit verified the walk-away path end-to-end through the real watcher —
+  three nights, two targets, 160 solves, no re-solves, `incoming/` bit-identical afterwards.)*
+  **The same D1 gate applies, and harder:** with `auto_stack` on, the walk-away chain also
+  runs the auto-edit, so every mosaic would be *automatically* stacked and then
+  *automatically* cropped to its overlap band with nobody watching. **Order is therefore
+  fixed: D1 → auto-seed → auto-stack.** When enabling, change the shipped default in
+  `webapp/config.py` (an existing install keeps whatever it has stored, so this reaches the
+  owner only if he clears it or sets it — say so plainly in the release note rather than
+  implying it flips for him), and confirm the readability preflight and degraded-recheck
+  guards from v0.270.1/v0.273.0 are still in the path.
 
 _(Normal, tested changes merge to the default branch automatically — see
 AGENTS.md §8. Only the items above need a human's OK first.)_
