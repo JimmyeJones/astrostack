@@ -18,6 +18,66 @@ is a queue.
 
 ---
 
+## 2026-09-07 (Builder, branch `claude/sweet-babbage-7wv8l8`) — a fourth dry-backlog run that found one real task in it after all: the greps that turned it up, and the two candidates measured and declined
+
+**Baseline.** `source scripts/agent-setup.sh` — note that its `pip install -q -e
+".[dev,web]"` **can fail and still print "agent env ready"**: the script is
+`source`d, and a `ReadTimeoutError` from `files.pythonhosted.org` mid-resolve left
+a `.venv` holding nothing but `pip`. The tell is `No module named pytest` from
+`.venv/bin/python`, not from the system python. `pip install --timeout 120
+--retries 5 -e ".[dev,web]"` recovered it. Worth knowing before diagnosing a
+"broken" checkout — nothing was broken.
+Full suite headless green before any edit: **5,105 passed, 2 skipped** (22:50).
+
+**Triage method, because three prior runs reported the backlog dry and this one
+did not.** The sections are far too long to read, so entries were enumerated
+mechanically — walk `IMPROVEMENTS.md` by section bounds, treat every `- **` as an
+entry, and drop any whose text contains `SHIPPED` / `CLOSED` / `DECLINED` /
+`BLOCKED` / `MOOT`. **The first pass windowed that regex to the entry's first 1,000
+characters and was wrong twice** (the calibration "agreement, not more copy" slice
+and Levels' "From your image" black point both carry their ✅ block a screen below
+the header). Scan the **whole** entry. With that fixed the genuinely-open set is
+small and mostly gated, which is the state three runs have described.
+
+**What was open and got built: `POST /api/scan`'s `root` (v0.378.0).** The 2026-08-30
+entry asked a run to pick one of its two answers. It was worth (a) rather than (b)
+for a reason the entry only half-stated: the folder the convention skips as "the
+device's own picture" is *reported* but its only recovery was **rename the folder** —
+inside `incoming/`, which the app may never do and shouldn't ask a non-technical
+owner to do by hand either. A scan that can be pointed at one folder is the recovery
+that touches nothing. Write-up in [`SHIPPED.md`](SHIPPED.md).
+
+**Two things worth recording from building it.**
+1. **The stale comment was the bug's own description, sitting in a passing test.**
+   `test_scan_root_confined.py` said a sub-folder root "loses the folder-name
+   target … filed rather than changed here". Grepping the *tests* for the entry's
+   nouns found the defect's exact shape faster than reading the scanner did.
+2. **`reject_seestar_output_frames` was the wrong tool for the scoped path, and
+   nearly used.** It rejects a folder's *unnamed* frames too when the folder holds
+   `≤ _MAX_SEESTAR_OUTPUT_FRAMES` (2) — right for the upgrade path it exists for,
+   and exactly backwards for a user who has just said "these are my subs, bring
+   them in": a small folder would have been ingested and immediately rejected. The
+   scoped scan filters by `is_seestar_output_filename` at selection time instead,
+   which also makes the count it reports the same count the alert already showed.
+
+**Two candidates measured and declined, so a fifth run doesn't re-open them.**
+- **"Re-scan just this target" on the Target page** — the original entry's own named
+  prize, and the endpoint now supports it. Declined *this* run on value, not effort:
+  with `auto_ingest` on, the watcher already brings a night's subs in unprompted, so
+  the button saves a tree walk rather than enabling anything. It is a power-user
+  shortcut. Kept filed, down-weighted, with the multi-folder decision it needs stated.
+- **"Try harder to locate these N subs"** (a faint-field solve profile) reads like the
+  biggest open autonomy item and is **already answered negatively** by the 2026-07-24
+  audit that ran the real ASTAP CLI: the extra sensitivity flags (`-check`, `-m 1`,
+  `-speed slow`) measured **zero** detection change on faint frames, radius/timeout are
+  not levers, and the one thing that did work — the stack-then-solve bootstrap — has
+  shipped. The measurements are in the Bugs section's audit block, several hundred
+  lines from the idea itself, which is why it still reads open.
+
+**Collisions:** none. `origin/main` was `cdf78d8` from the start of the run to the merge.
+
+---
+
 ## 2026-09-07 (Builder, branch `claude/sweet-babbage-9wdpb4`) — a third run finds the backlog dry, so it builds the *missing QA reach* instead (v0.377.1); plus three editor probes that all came back clean, with their methods
 
 **Baseline.** `source scripts/agent-setup.sh`; full suite headless green before
