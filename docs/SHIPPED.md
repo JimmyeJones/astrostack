@@ -14,6 +14,96 @@ Newest first.
 
 ---
 
+## v0.382.2 — 2026-09-07 — the live preview stops re-solving the star field it solved a moment ago
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-8hitfe`.)** The first bite out
+of the one thing the "Live preview" entry (PRIORITY 1, editor) still listed as
+open: *"what remains here is **responsiveness** (heavy ops on the proxy can
+lag)"*. It is the same complaint the frontend already works around — the
+`previewDebounceMs` heuristic settles 600 ms instead of 250 ms when any enabled op
+is `heavy`, with the comment *"each render runs the full recipe through that op"*.
+That comment was the bug report.
+
+**The measurement that chose the fix.** Every editor render runs the whole recipe
+from the top, which is the live preview's contract and stays. But several ops
+**measure the whole image before they transform it** — the stretch's robust
+per-channel median/σ, the tone curve's derived control points, "Neutralize
+background"'s sky medians, and by far the largest, colour calibration's star
+detection and white-balance solve. Timed on a 1500×1000 proxy (the editor's
+`PROXY_MAX_PX` is 1500) carrying the one-click Auto recipe — gradient removal →
+colour calibration → stretch → SCNR → saturation → curves → sharpen:
+
+| | per render |
+|---|---|
+| today | 4.22 / 4.20 / 4.32 s |
+| with the unchanged ops' fits carried forward | 2.43 / 2.41 / 2.34 s |
+
+**1.78×, and `np.array_equal(before, after, equal_nan=True)` is `True`** — the
+carried numbers *are* the numbers the render would have measured, so this cannot
+move a pixel. And the editor fires **two** such renders on every change (the
+preview PNG and the histogram are separate requests over the same recipe and the
+same proxy), so the second one now costs the prefix it shares with the first.
+
+**Nothing new in the engine — the channel already existed.** `EditContext.fit`
+was built for the loupe (measure on the whole picture, hand the fits to a window
+render) and its docstring already says it "is also the place to keep an expensive
+measurement (a star solve, a mesh fit)". Nothing was carrying fits between two
+renders of the *same* picture. So this ships as one small webapp module,
+`webapp/edit_fit_cache.py`, and three lines at each of the two render sites; no
+engine file changed.
+
+**The safety rule is the whole design.** A fit may be reused only when that op's
+own params **and its input** are unchanged, so only the **longest common prefix**
+of the previous render's *enabled* ops is ever offered: the first op whose id or
+params differ ends the prefix, and it and everything below it measure for
+themselves exactly as before. Every op in a matching prefix was handed a
+bit-identical array (the ops are deterministic; the proxy is the same file), so
+its measurement is bit-identical too. Three details are load-bearing:
+
+- **Disabled ops are not in the fingerprint.** `apply_recipe` filters them out
+  before it runs anything, so editing a switched-off op changes no pixel and must
+  not invalidate the prefix.
+- **The prefix matches on position + id + params, not on uid**, and the carried
+  values are re-keyed onto this render's uids. A recipe posted without uids gets
+  fresh ones per request (`recipe_from_dict` mints them), so matching on the uid
+  would have made the carry a permanent miss — it passed its unit tests and did
+  nothing through the endpoints, which is exactly the shape of bug the endpoint
+  tests exist to catch.
+- **Geometry is in the key** (`proxy_scale`, proxy shape, `already_display`,
+  project, run), because `scaled_px` sizes the colour solve's own detection FWHM
+  from the scale — a windowed or rescaled render can never share a key with the
+  whole-picture preview.
+
+**Upgrade-safe (§9), and unusually cheaply so:** an in-process `OrderedDict`
+bounded to `MAX_ENTRIES = 8`, holding a handful of small fitted values per slot
+and never an image. Nothing is persisted, no config key, no schema, no API shape,
+no default flipped. A miss — a restarted container, an evicted slot, a changed
+first op — is precisely today's behaviour, so the worst case of the whole module
+is the render the app already does.
+
+**Tests (+10, `tests/webapp/test_edit_fit_cache.py`)** — five pure (a disabled op
+is not a change; param order is not a change; only the unchanged leading ops come
+back, and a changed *first* op yields `None` rather than an empty dict; a freshly
+minted uid still reuses; a different proxy geometry never shares a key; the store
+stays bounded and evicts oldest-first) and four through the endpoints, all
+fail-before: a repeat preview measures **once** and returns **byte-identical**
+PNG bytes; the histogram beside it shares that measurement; changing the first
+op's params re-measures *and* changes the picture; and a change **below** an op
+reuses the op above it while rendering exactly what a cold render renders.
+
+**The next slice, measured and deliberately not taken.** `EditContext` has the
+same trick for a *spatial* model — `frozen_deltas` / `replay_field`, for the three
+additive `background.*` ops, whose mesh fit is the other big cost. Replaying the
+captured field takes the same recipe from **2.39 s to 1.28 s** (another 1.8×), and
+the output differs from a re-fit by at most **4.2e-7** — below a 16-bit LSB, so it
+is almost certainly fine. It is not taken here because "almost certainly" is the
+wrong standard for the one number this change can currently promise exactly
+(bit-identical), and because capturing a field costs a copy of the array per
+additive op. A future run wanting it should ship it as its own change with that
+4.2e-7 re-measured on a mosaic proxy, not fold it into this one.
+
+---
+
 ## v0.382.1 — 2026-09-07 — the deferred "does a sky gradient cost Auto its sharpening?" question, answered with numbers
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-izlzeq`.)** Closes a
