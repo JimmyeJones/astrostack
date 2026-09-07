@@ -3794,9 +3794,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   measured (`coverage_thin_frac`) rather than guessed, and it self-hides below `_COVERAGE_THIN_SHARE` so an
   evenly-covered stack is never told about a border it hasn't got. **The one honest gap, recorded rather than
   built:** the wording is about *noise* ("noisier and uneven"), not about *black* — a beginner staring at a
-  flat black band may not connect the two. If anyone ever wants to close that, it is **four words inside the
+  flat black band may not connect the two. ~~If anyone ever wants to close that, it is **four words inside the
   existing sentence**, not a new caption or card: say the thin edge *looks dark*. Do not add a second surface
-  for it.
+  for it.~~ — **⚪ THE FOUR WORDS ARE THE WRONG WORDS; DECLINED WITH THE MEASUREMENT SO NOBODY SHIPS THEM
+  (Builder 2026-09-07).** Sized it, went to the statistic behind the note first — the lesson the entry
+  directly below this one exists to teach — and the copy would have been **false**. The note fires on
+  `run.coverage_thin_frac`, i.e. `stacker.coverage_thin_fraction`, whose docstring and code both say it
+  **excludes uncovered pixels**: `thin = count((cov > 0) & (cov < 0.25 * peak))` over
+  `n_covered = count(cov > 0)`. The black band a beginner is staring at is `cov == 0` — NaN, "no coverage",
+  rendered black — and it is in **neither** term of that ratio's numerator. Probed directly, holding the thin
+  fringe fixed at 500 px and growing the black region: the thin count stays **500** at 0, 20, 40 and 60 black
+  rows, while the reported share moves **0.0500 → 0.0625 → 0.0833 → 0.1250** purely because the *covered*
+  denominator shrinks. So the pixels this note counts are thin-**but-covered** — the same brightness as the
+  rest of the picture, just noisier — and telling the owner they "look dark" would explain the one part of
+  their picture this measurement is blind to. **Its wording is already right for what it measures.** If the
+  black is ever worth a sentence it needs its own measured quantity (an uncovered share, which nothing
+  records today), not a rewording of this one — and the entry directly below records that the wide black
+  bands seen on the sample were `AnnotatedImage` letterboxing, not canvas at all. Leave the sentence alone.
 
 - **⚪ CLOSED — THE PREMISE WAS WRONG, AND MEASURING IT IS WHAT SHOWED THAT (Builder 2026-09-04). The black
   was the *card*, not the canvas; see the shipped entry above (v0.351.1).** Probed on the running app rather
