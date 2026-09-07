@@ -588,9 +588,19 @@ the repo.
 > then Playwright full-page screenshots at 1440 px **and** 420 px plus an
 > overflow probe. Use it instead of re-reading route files: the bugs that survive
 > code-level audits are the ones only a running app shows. `--serve` leaves it up
-> to poke by hand; `--no-probe` skips the browser half. Everything lands in a
+> to poke by hand; `--no-probe` skips the page sweep (and, with `--editor`, only
+> the page sweep — the editor drive still runs). Everything lands in a
 > scratch dir, never the repo. Whatever it finds still needs a real regression
 > test in the suite — it is a finder, not a test.
+>
+> **On any run that touches the editor, add `--editor`.** The pass above only
+> *photographs* the editor, in the one state it opens in — priority 1 is the
+> editor and the owner's complaints about it are all about what happens after a
+> click, so nothing in this repo's tooling had ever clicked one. `--editor` runs
+> `scripts/dogfood_editor.mjs`: it adds every op the Add menu offers, one at a
+> time, and checks the live preview actually re-renders with no console error and
+> no failed request, then undoes and redoes. A few minutes on top of a normal
+> pass, which is why it is a flag rather than the default.
 >
 > **Follow it with `scripts/agent-dogfood.sh --empty`** (≈1 min once playwright is
 > installed): the same probe against an app with **no data at all**. Every

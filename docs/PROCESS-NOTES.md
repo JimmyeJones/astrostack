@@ -18,6 +18,105 @@ is a queue.
 
 ---
 
+## 2026-09-07 (Builder, branch `claude/sweet-babbage-9wdpb4`) — a third run finds the backlog dry, so it builds the *missing QA reach* instead (v0.377.1); plus three editor probes that all came back clean, with their methods
+
+**Baseline.** `source scripts/agent-setup.sh`; full suite headless green before
+any edit — **5,105 passed, 2 skipped** (20:43). Only docs, `scripts/` and the
+version line were touched afterwards, none of which pytest imports.
+
+**Backlog state — dry for the third consecutive run, and again confirmed by
+opening entries rather than skimming.** Everything ready-looking that was opened
+turned out already answered, and each cost a read. Recorded so a fourth run does
+not re-walk them:
+- *"Does my colour look right?"* — still blocked on the catalog field that does
+  not exist (one flat `nebula` bucket over 157 entries).
+- *a 3-frame stack gets no rejection* — overtaken by `auto_reject` on both
+  beginner paths, and the advisory half shipped as v0.323.1.
+- *auto-scale `min_max_reject_count` k with the frame count* — self-defeating as
+  filed, and the Builder note under it already says why: `auto_reject` resolves
+  to min/max only **below** `_auto_kappa_min_frames(κ)` (n < 11 at κ=3), where the
+  idea's own `2k ≤ n/4` cap forces k=1. It would be a no-op exactly where it fires.
+- *the background-mesh `_scaled_box` floor* — measured and closed **twice**
+  (2026-09-03 at the default box, 2026-09-04 at the small boxes it had not
+  measured); do not reopen without real mosaic pixels.
+- *"N spots instead of a percentage"*, *the trailing-"what these buttons do"
+  sweep*, *Levels' "From your image" black point*, *the `library_hygiene` double
+  walk* — all closed by their own authors with numbers.
+- *quiet hours / scheduling for auto-stack* — genuinely not filed and not
+  shipped, and deliberately **not** invented here: the Builder's lane (§4) is to
+  pick from the list, and the premise (why the owner keeps `auto_stack` off)
+  is not in the §1 OWNER FACTS block, so it would have been a guess.
+- Also re-checked as already-built before spending anything on them: target
+  **merging** (`Library.merge_targets`), the per-panel **mosaic depth map**
+  (v0.355.0 + the v0.361.0 aim hint), and the **min/max ignores quality
+  weighting** honesty note (`weightingHint.ts`, shared with Settings).
+
+**So the run's move was the one thing three dry runs point at: the QA method
+still finding defects is *running the app*, and its reach stopped short of the
+priority-1 surface.** `dogfood_probe.mjs` visits the editor and photographs it;
+nothing in this repo had ever *clicked* a control in it. That is v0.377.1 —
+write-up in [`SHIPPED.md`](SHIPPED.md), including the four things about the Add
+menu the drive had to learn (the "More operations" toggle, the label hiding
+inside the item's first `<p>`, the Common duplicates forcing index addressing,
+and `addOp` inserting on the correct side of the stretch so the op just added is
+**not** the last row).
+
+**Three editor/engine probes, run rather than read. All clean — recorded with
+their methods so nobody repeats them.** Each was written to be tolerance-free or
+ground-truthed, because the file's own history says a badly-shaped fixture
+manufactures editor bugs as readily as it hides them.
+
+1. **A generative preview↔export parity sweep over *every* registered op** (the
+   A2 class), not the named instances `tests/test_edit_proxy_parity.py` pins. A
+   1200×1800 synthetic OSC field (gradient sky, 300 stars, an extended nebula
+   blob, a per-channel sensor cast), rendered full-res then decimated, against
+   the same field decimated first and rendered at `proxy_scale` 3. Ratio of
+   |Δ| proxy to |Δ| full: **0.998–1.003 for every op except four** —
+   `detail.sharpen` 0.75, `detail.deconvolve` 0.72, `detail.denoise` 0.75,
+   `stars.reduce` 0.88. All four are the *documented* decimation limit (an S30
+   star is ~1 px on a step-3 proxy), three of them already carry their own
+   advisory helper (`sharpen_understates_on_proxy`, `deconv_understates_on_proxy`,
+   `star_reduce_differs_on_proxy`), and the denoise figure is the proxy having
+   less noise to remove, not a missing scale term. **No new A2 instance.**
+2. **The tolerance-free version of the same question: does each op *respond* to
+   `proxy_scale` at all?** Render the same image twice, once with
+   `proxy_scale=1` and once with `3`; an op whose pixel-unit parameter is not
+   divided by the factor is bit-identical between the two. Result: **every op
+   with a pixel-measured parameter responds** (`final_gradient` `dilate_px`,
+   `subtract` `box_size`, `chroma_denoise` `radius`, `deconvolve` `psf_sigma`,
+   `sharpen` `radius`, `stars.reduce`/`boost_nebula` `size` — the last via
+   `star_mask(ctx=…)`, plus `hot_pixels`, whose skip is `proxy_scale`-gated by
+   design), and **every op without one is invariant**. This is the cheap check
+   worth re-running on any *new* op: it needs no reference render and no
+   threshold, and a "flat" row on an op with a `(px)` parameter is the bug.
+3. **NaN = no coverage, across every op at both scales.** A picture with a ragged
+   uncovered corner and an interior hole, through all 21 ops at `proxy_scale` 1
+   and 3: **zero** gap pixels turned finite (a gap becoming 0 would print as
+   black *data*) and **zero** NaN leaks into covered pixels. Nothing to fix.
+
+**Dogfood — clean on both drives.** The page probe: **nothing overflowing, no
+console errors**; the eighth page-height baseline puts the tallest page at
+**3,040 px on a phone** (the Target page), *identical* to the 2026-09-07
+measurement and 26 px off the v0.338.1 one. That is now three consecutive
+measurements saying the same thing: **do not open a speculative IA slice.** The
+new editor drive: all **21** ops added, previewed and removed, undo and redo
+applied, **no console error and no failed request**, and every op re-rendered the
+preview — including the three geometry ops at their identity defaults, which
+issue a render regardless (so "unchanged" in that output really would mean an op
+that rendered nothing).
+
+**A method note worth carrying.** Probes 1 and 2 answer the same question and
+only one of them is worth keeping in a run's budget: probe 2 is a handful of
+lines, needs no fixture design, and cannot be argued with, while probe 1 needs a
+scene shaped like the owner's sky and produces numbers that then need
+interpreting. Reach for the invariant before the measurement when the invariant
+exists.
+
+**Collisions:** none. `origin/main` was `b7d798c` from the start of the run to
+the merge.
+
+---
+
 ## 2026-09-07 (Builder, branch `claude/sweet-babbage-0dli9u`) — one task, deep: the measured quantity two runs said the black bands needed (v0.377.0); and a survey that says the backlog is dry, with the greps to prove it
 
 **Baseline.** `source scripts/agent-setup.sh`. The baseline suite was started
