@@ -60,6 +60,16 @@ that touches nothing. Write-up in [`SHIPPED.md`](SHIPPED.md).
    scoped scan filters by `is_seestar_output_filename` at selection time instead,
    which also makes the count it reports the same count the alert already showed.
 
+**The grep that was one directory too narrow, and cost a full 22-minute suite run.**
+Adding an additive `path` key to the reported skipped folder, I grepped
+`skipped_folders` across `frontend/src` and `webapp/` — and not `tests/`.
+`tests/webapp/test_pipeline.py` compares that dict with `==`, so an *additive*
+field broke it, and the only thing that said so was the pre-merge full run.
+**When adding a field to a response, grep the tests for the field's container
+first**: this repo pins several response shapes exactly, on purpose, and an
+`==` on a dict is precisely the assertion an additive change is supposed to be
+safe against and is not.
+
 **Two candidates measured and declined, so a fifth run doesn't re-open them.**
 - **"Re-scan just this target" on the Target page** — the original entry's own named
   prize, and the endpoint now supports it. Declined *this* run on value, not effort:

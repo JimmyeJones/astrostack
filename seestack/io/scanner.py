@@ -119,6 +119,7 @@ def target_name_for_folder(folder_name: str) -> str:
         return base if base else folder_name
     return folder_name
 
+
 # The capture-mode folders that never hold stackable deep-sky sub-frames, so the
 # scanner skips them and the cleanup nudge offers to remove any a pre-convention
 # scan already ingested. One tuple so the two can never disagree about the family.
