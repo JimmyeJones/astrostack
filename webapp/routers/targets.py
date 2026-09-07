@@ -1175,7 +1175,7 @@ def target_stack_health(
     ``null`` when there's no matching genuine stack. Read-only; never a gate.
     """
     from seestack.coverage_backfill import (
-        backfill_coverage_thin_frac,
+        backfill_coverage_shares,
         backfill_seam_residual,
     )
     from seestack.stackhealth import recommended_dark_spec, stack_health
@@ -1197,14 +1197,15 @@ def target_stack_health(
             )
         if run is None:
             return None
-        # A run stacked before schema 20 has no thin-coverage share, and the
-        # coverage note self-hides on None — so a library stacked before the
-        # upgrade would get no coverage advice until each target was stacked
-        # again. The number is a pure function of the coverage map the run
-        # already wrote, so fill it in here, once, for the one run being graded
-        # (a no-op for every run that has it). Never a sweep: see
+        # A run stacked before schema 20 has no thin-coverage share, and one
+        # stacked before ``uncovered_frac`` existed has no empty-canvas share;
+        # both notes self-hide on None — so a library stacked before the upgrade
+        # would get no coverage advice until each target was stacked again. Both
+        # numbers are pure functions of the one coverage map the run already
+        # wrote, so fill them in here together, once, for the one run being
+        # graded (a no-op for every run that has them). Never a sweep: see
         # `seestack.coverage_backfill`.
-        backfill_coverage_thin_frac(proj, run)
+        backfill_coverage_shares(proj, run)
         # Same shape, same reason, for the *mosaic* half of the panel: a run
         # stacked before schema 15 never says whether its panels matched, on this
         # card or on the History chip and Gallery card that read the same column.
