@@ -18,6 +18,89 @@ is a queue.
 
 ---
 
+## 2026-09-07 (Builder, branch `claude/sweet-babbage-0dli9u`) — one task, deep: the measured quantity two runs said the black bands needed (v0.377.0); and a survey that says the backlog is dry, with the greps to prove it
+
+**Baseline.** `source scripts/agent-setup.sh`. The baseline suite was started
+first, as §2 requires, but was **cut short at ~75 %** and is not the run's
+evidence — see the harness trap below. The authoritative run is the full suite on
+the finished tree, reported in the merge.
+
+**What was picked, and the survey behind it — recorded so the next run doesn't
+repeat the search.** Every ready-looking entry I opened turned out to be already
+answered, and each one cost a read:
+
+- *"Does my colour look right?"* — blocked on a catalog field that does not exist
+  (one flat `nebula` bucket over 157 entries).
+- *auto-detect a dark↔light exposure mismatch* — **closed in place**: slices (b)
+  and (c) shipped long ago and (a) shipped as `calibration_warnings`.
+- *calibration match-confidence on the Stack form* — shipped as v0.321.0.
+- *"Try harder to locate these" / relaxed ASTAP retry* — the levers it guesses at
+  were **measured as non-levers** in 2026-07, and the ladder in `astap.py` already
+  implements what the measurement said does work (never bin past 2×, keep a
+  full-res `-s 1000` rung).
+- *a 3-frame stack gets no rejection* — overtaken; both beginner paths seed
+  `auto_reject`.
+- *the trailing-"what these buttons do" sweep* and *Levels' "From your image"
+  black point* — both closed by their own authors the day they were filed.
+- *"N spots instead of a percentage"* — stood down with numbers (1,323 blobs on a
+  scene with **no** trail).
+
+That is the state AGENTS.md §1 describes, and it is now two runs deep. **The
+useful move was not another backlog read**: it was to take the one thing a prior
+run had explicitly left as a *requirement* rather than a task.
+
+**The task: two declinations had already specified it.** 2026-09-04 declined a new
+caption for the black bands around a mosaic (the health panel already speaks on
+that page); 2026-09-07 declined *"four words inside the existing sentence"* after
+going to the statistic and finding they would be **false** —
+`stacker.coverage_thin_fraction` excludes uncovered pixels from **both** of its
+terms. That second declination ended: *"If the black is ever worth a sentence it
+needs its own measured quantity (an uncovered share, which nothing records
+today)."* Building that quantity — and only then the sentence — is v0.377.0.
+**The pattern worth reusing: a well-written stand-down is a spec.** Two runs had
+already done the hard part (establishing what would be dishonest and why); what
+was left was a small, well-fenced piece of work that neither of them could take
+without it.
+
+**The measurement decided the threshold, and one row of it was a surprise.** Eight
+geometries through real `run_stack`: an **undithered single field on the reference
+canvas is already 3.10 % uncovered**, because reprojection leaves a NaN margin a
+couple of pixels wide. So "any black at all" would have fired on every stack the
+app has ever made — the same mistake the pre-v0.320.2 `coverage_min` test made —
+and the floor had to be set from data (12 %, against honest cases at 1.1–5.1 % and
+ragged ones at 19.8 % / 36.6 %). The full table is in [`SHIPPED.md`](SHIPPED.md).
+Also worth carrying: **the thin share reads 0.00 % on all eight rows**, including
+the two that are a fifth and a third empty — the existing note is not merely quiet
+about the black, it is structurally incapable of mentioning it.
+
+**An upgrade-safety decision, taken the same way v0.375.0 took its own.** The
+column needed no `SCHEMA_VERSION` bump: `Project._check_schema` *raises* on a DB
+stamped newer than the build, so a bump would stop the **previous** Docker image
+opening the owner's projects — a rollback bomb on an install with no backup. The
+column went into `SCHEMA_SQL` and arrives through `_reconcile_table_columns`,
+which already runs on every open and already promises exactly this ("any additive
+column (past or future)"). It had a mechanism and no user; now it has one. Two
+tests pin both directions.
+
+**Harness trap that cost this run ~25 minutes — the sibling of the `pgrep -f`
+self-match already recorded on 2026-09-07.** `pkill -f "pytest -q"`, used to stop
+the contaminated baseline before starting the real run, **also killed the run it
+was about to start**: the launching shell's own command line contains that literal
+string, so the new process matched the pattern the moment it started (both jobs
+died with exit 144). Same root cause as the `pgrep` loop that never terminates,
+same fix: match on something the launching command does not itself contain, or
+just let the old run finish.
+
+**A smaller one, for whoever next edits a long-running baseline.** Editing the
+working tree while the baseline suite is still running makes that baseline
+worthless from the first edit onward — pytest imports modules as it reaches them.
+Either wait, or accept that only the post-change run is evidence and say so.
+
+**Collisions:** none. `origin/main` was `a0c9ea8` from the start of the run to the
+merge.
+
+---
+
 ## 2026-09-07 (Builder, branch `claude/sweet-babbage-25fa4c`) — two measured performance/friendliness fixes (v0.376.1, v0.376.2) and one copy change declined *because* it was measured
 
 **Baseline.** `source scripts/agent-setup.sh`; full suite headless green before
