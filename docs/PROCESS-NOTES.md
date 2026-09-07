@@ -18,6 +18,75 @@ is a queue.
 
 ---
 
+## 2026-09-07 (Builder, branch `claude/sweet-babbage-rb61y0`) — shipped the ⭐ "My wishlist" beginner feature whole (v0.375.0 + v0.376.0); dogfood CLEAN; one upgrade-safety decision taken *against* the backlog entry
+
+**Baseline.** `source scripts/agent-setup.sh`; full suite headless green before
+any edit — **5045 passed, 2 skipped** (22m53s). Ended at **5071 passed, 2
+skipped** (+26 Python), with `tsc` clean, `vitest` 3290 across 238 files (+12),
+and `vite build` clean. Both commits independently green; PR #757 merged.
+
+**What was picked and why.** The Bugs section is in the state AGENTS.md §1
+describes — every open entry is gated on data an agent cannot supply (a real
+cloudy night's subs, a real solved frame with non-zero field rotation) or is a
+stand-down that already carries its measurement — so nothing there was startable
+without blind-flipping a threshold on the on-by-default hot path. The last eleven
+merges were patch-level polish (v0.374.1 → .11), so a feature was genuinely due
+under the standing beginner-feature cadence, and the Scout had filed a ⭐ M-sized
+one that morning with its slicing already worked out. Taken top-down, not
+invented.
+
+**The one decision worth recording: the backlog entry asked for a
+`SCHEMA_VERSION` bump, and shipping it that way would have been a latent
+rollback bomb.** The entry's own words were *"a new additive table +
+`SCHEMA_VERSION` bump + `_migrate_schema`, §9 — never a reset"*, which is the
+right instinct and the wrong mechanism for **this** table. `Library._check_schema`
+raises `RuntimeError("… is newer than this build")` on `v > LIBRARY_SCHEMA_VERSION`
+— so bumping 5 → 6 means the **previous Docker image cannot open the registry at
+all**. On an install that is upgraded in place, has no backup, and whose owner is
+non-technical, that converts "pull the old image back" — the one recovery move
+available when a release misbehaves — into a bricked app. The table went into a
+new `_AUX_TABLES_SQL` instead, re-run idempotently on every open via
+`_ensure_aux_tables` (called from *both* `_init_schema` and `_check_schema`), so
+it is additive in **both** directions: a new build adds it to an old registry,
+and an old build ignores a table it has never heard of. That is exactly what
+`_check_schema`'s own comment already promised ("the schema only ever *adds*; the
+new code simply ignores any leftover tables") — the promise just had no mechanism
+behind it for tables, only for columns (`_ensure_columns`). Two tests pin it: a
+hand-built v2 registry gains the table with its targets intact, and a
+current-version registry with the table dropped self-heals.
+**Generalisation for the next agent:** `LIBRARY_SCHEMA_VERSION` should be bumped
+only for a change an older build would *mis-read*. A purely additive table is not
+that, and neither is an additive column (`_ensure_columns` already backfills
+those). Prefer the idempotent-DDL route and leave the version alone.
+
+**Two smaller things learned in the code.**
+- **A second-resolution timestamp is not an order.** `_utc_iso()` is
+  `%Y-%m-%dT%H:%M:%SZ`, so three objects starred in one burst all carry the same
+  `added_utc` and `ORDER BY added_utc` fell back to whatever SQLite felt like —
+  in practice alphabetical, an order the owner never chose. Fixed with
+  `ORDER BY added_utc, rowid`. Worth checking wherever a user-ordered list is
+  keyed on `_utc_iso()`.
+- **The `<button>`-inside-`<a>` trap, one door down from v0.374.11's
+  labelable-`<button>`-in-a-`<label>`.** A captured life-list tile is a `<Link>`;
+  putting the wishlist star inside it is invalid HTML and swallows one of the two
+  clicks. The star is a **sibling**, absolutely positioned over the tile
+  (top-left, so it never lands on the top-right "Got it" badge). Same family of
+  bug, different element pair — if a third turns up, it is worth a lint rule.
+
+**Dogfood (`scripts/agent-dogfood.sh`, sample) — CLEAN.** No overflow, no console
+errors. Tallest page on a phone is still the Target page at **3040 px** (the
+v0.338.1 baseline measured 3014 px), and `/life-list` — the page this run added a
+section and ~160 star buttons to — comes in at **3008 px on a phone / 1453 px on
+desktop**, i.e. the new section costs nothing while the wishlist is empty,
+because it renders nothing at all. So the standing IA measurement still says
+"don't open a speculative slice": three passes now agree.
+
+**Nothing filed.** No verified bug found, and per §4 a Builder does not invent
+features — the one lead worth noting is recorded in `IMPROVEMENTS.md`'s Shipped
+line, not here.
+
+---
+
 ## 2026-09-07 (Scout, branch `agent/scout-qa-mosaic-fold`) — stacking-engine re-audit CLEAN (with empirical probes of the newest code); dogfood CLEAN; one beginner feature filed
 
 **Baseline.** Fresh `source scripts/agent-setup.sh`; the stacking + calibrate
