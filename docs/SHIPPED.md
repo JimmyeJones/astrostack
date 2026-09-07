@@ -14,6 +14,76 @@ Newest first.
 
 ---
 
+## v0.377.1 — 2026-09-07 — the dogfood pass can *drive* the editor, not just photograph it: `scripts/dogfood_editor.mjs` + `agent-dogfood.sh --editor`
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-9wdpb4`.)** Tooling. No engine,
+webapp or frontend code changed; nothing about anyone's pictures moves.
+
+**The gap.** `scripts/dogfood_probe.mjs` already visits
+`/targets/<t>/edit/<run>` — its own comment says *"the editor is priority 1, so
+it is worth a shot even though it is slow"* — and takes a screenshot. That sees
+the editor in exactly **one** state: whatever recipe the run already carries,
+before anybody touches a control. But every complaint AGENTS.md §1 records about
+the editor — *"a live preview that doesn't match/behave, clunky and confusing
+controls"* — is about what happens **after a click**, and nothing in this repo's
+tooling had ever clicked one. The two runs before this one both reported the
+backlog dry after re-reading it, and this one makes three; the method that keeps finding real defects is running
+the app, and the highest-priority surface was the one the running-app method
+could not reach.
+
+**What it does.** `dogfood_editor.mjs` opens the editor on the stacked sample and,
+for **every op the Add menu offers**, adds it, waits for the debounced preview to
+settle, and asks three questions a screenshot cannot: did the live preview
+actually re-render; did the browser log an error; did any of this app's own API
+calls fail. Then it removes the op again — so op N is measured against the same
+recipe as op 1, not against a pile of everything before it — and finishes with an
+undo and a redo, the other thing only interaction reaches. The op list is read
+from the **open menu**, not hard-coded, so an op added next month is driven the
+day it is added.
+
+**Four things about that menu the drive had to learn, recorded because each cost
+a wrong reading first:**
+- It opens on a curated **Common** shortlist behind a *"More operations"* toggle,
+  so the toggle has to be clicked before the full list exists, and then excluded
+  from it.
+- Each `[role=menuitem]`'s `textContent` is the label **plus** its help line and
+  any *"slower preview"* chip, so the label is read off the item's first `<p>`.
+- Common ops appear **twice** once expanded (in Common and again under their
+  group), so items are addressed by **index** — a label is ambiguous — and the
+  duplicates are then dropped, since both entries call the same `addOp(spec)`.
+  Deduped, the menu offers exactly the **21** ops `registry.all_specs()` holds.
+- The op just added is **not** necessarily last: `addOp` inserts it on the correct
+  side of the stretch (`insertOnCorrectSide`). It *is* the selected row, so the
+  drive removes by `[aria-pressed="true"] [aria-label="Remove"]`. Removing by
+  position would have deleted somebody else's op and quietly invalidated every
+  reading after it.
+
+Undo/Redo are guarded on `isEnabled()`: both are disabled at the ends of the
+history stack and Playwright's `click` *waits* for an enabled element, so a
+disabled one would have hung the drive rather than skipped a step.
+
+**`--editor` is independent of `--no-probe`.** The playwright install and the
+`RUN_ID` lookup are hoisted out of the page-probe block, so `--editor --no-probe`
+means *"drive the editor, skip the page sweep"* rather than silently doing
+nothing — which is what the first cut did, and is exactly the kind of flag trap
+that makes a tool get re-invented instead of re-used.
+
+**It is off by default**, because it costs a few minutes on top of a pass that
+already stacks the sample. AGENTS.md §7 now tells a run to add it whenever it
+touches the editor.
+
+**Its first run, on this branch — clean.** All 21 ops added, previewed and
+removed; undo and redo applied; **no console error, no failed request, and every
+op re-rendered the preview** (including the three geometry ops at their identity
+defaults, which issue a render regardless). Recorded in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md) with the run's other measurements.
+
+**Upgrade-safe (§9):** developer tooling only — no config key, no schema, no
+on-disk change, no endpoint, no default. The script writes only into
+`$DOGFOOD_DIR`, never the repo and never a real library.
+
+---
+
 ## v0.377.0 — 2026-09-07 — "How's my stack?" can finally say what the black around a mosaic is: `stacker.uncovered_fraction` + `stack_runs.uncovered_frac` + the `uncovered` health note
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-0dli9u`.)** The measured

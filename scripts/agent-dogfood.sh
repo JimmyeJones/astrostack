@@ -17,6 +17,15 @@
 #   scripts/agent-dogfood.sh --no-stack      # skip the (slow) stack of the sample
 #   scripts/agent-dogfood.sh --no-probe      # boot only, don't drive a browser
 #   scripts/agent-dogfood.sh --empty         # probe a FIRST-RUN app: no data at all
+#   scripts/agent-dogfood.sh --editor        # ALSO drive the editor (adds every op)
+#
+# --editor exists because the page probe only ever *photographs* the editor, in
+# the one state it opens in. Priority 1 is the editor and the owner's complaints
+# about it are all about what happens after a click, so `dogfood_editor.mjs` adds
+# every op the Add menu offers and checks the live preview actually re-renders,
+# with no console error and no failed request. It is off by default only because
+# it costs a few minutes on top of a pass that already stacks the sample — run it
+# on any run that touches the editor.
 #
 # --empty exists because every measurement this script has ever taken was of the
 # sample-loaded app, so the screens a beginner meets *first* — an empty Dashboard,
@@ -40,7 +49,7 @@ cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.."
 REPO="$PWD"
 
 DOGFOOD_DIR="${DOGFOOD_DIR:-${TMPDIR:-/tmp}/astrostack-dogfood}"
-DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0
+DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0; DO_EDITOR=0
 for arg in "$@"; do
   case "$arg" in
     --serve) DO_SERVE=1 ;;
@@ -48,7 +57,8 @@ for arg in "$@"; do
     --no-probe) DO_PROBE=0 ;;
     --build) DO_BUILD=1 ;;
     --empty) DO_EMPTY=1 ;;
-    -h|--help) sed -n '1,37p' "$0"; exit 0 ;;
+    --editor) DO_EDITOR=1 ;;
+    -h|--help) sed -n '1,46p' "$0"; exit 0 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
@@ -143,10 +153,17 @@ if [ "$DO_STACK" = 1 ] && [ -n "$SAFE" ]; then
   fi
 fi
 
-# 5. The browser probe: full-page screenshots at desktop AND phone widths, plus
-#    the overflow check that found the clipped Gallery button. A finder, not a
-#    test — anything it turns up still needs a real regression test in the suite.
-if [ "$DO_PROBE" = 1 ]; then
+# 5. The browser half. Two independent drives share one playwright install and
+#    one shots dir, so the install is hoisted out of both: `--editor --no-probe`
+#    has to mean "drive the editor, skip the page sweep", not "do nothing".
+#      5a. the page probe — full-page screenshots at desktop AND phone widths,
+#          plus the overflow check that found the clipped Gallery button;
+#      5b. the editor drive (--editor) — 5a *photographs* the editor in the one
+#          state it opens in; this one clicks (adds every op, checks the live
+#          preview re-renders).
+#    Both are finders, not tests: anything either turns up still needs a real
+#    regression test in the suite.
+if [ "$DO_PROBE" = 1 ] || [ "$DO_EDITOR" = 1 ]; then
   PW_DIR="$DOGFOOD_DIR/pw"
   if [ ! -d "$PW_DIR/node_modules/playwright" ]; then
     echo "-- installing playwright into $PW_DIR (not into frontend/)"
@@ -156,18 +173,30 @@ if [ "$DO_PROBE" = 1 ]; then
       || echo "warn: could not install playwright — skipping the browser probe"
   fi
   if [ -d "$PW_DIR/node_modules/playwright" ]; then
-    echo "-- probing the running app"
-    # Copied in rather than run from the repo: an ESM `import "playwright"`
-    # resolves from the *script's* directory, and NODE_PATH doesn't apply.
-    cp "$REPO/scripts/dogfood_probe.mjs" "$PW_DIR/probe.mjs"
     RUN_ID=""
     if [ -n "$SAFE" ]; then
       RUN_ID="$(curl -sf "$BASE/api/targets/$SAFE/stack-runs" \
                 | python -c 'import json,sys; r=json.load(sys.stdin); print(r[0]["id"] if r else "")' \
                 2>/dev/null || true)"
     fi
-    (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS" TARGET_SAFE="$SAFE" \
-       TARGET_RUN_ID="$RUN_ID" node probe.mjs) || echo "warn: probe failed"
+    if [ "$DO_PROBE" = 1 ]; then
+      echo "-- probing the running app"
+      # Copied in rather than run from the repo: an ESM `import "playwright"`
+      # resolves from the *script's* directory, and NODE_PATH doesn't apply.
+      cp "$REPO/scripts/dogfood_probe.mjs" "$PW_DIR/probe.mjs"
+      (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS" TARGET_SAFE="$SAFE" \
+         TARGET_RUN_ID="$RUN_ID" node probe.mjs) || echo "warn: probe failed"
+    fi
+    if [ "$DO_EDITOR" = 1 ]; then
+      if [ -n "$SAFE" ] && [ -n "$RUN_ID" ]; then
+        echo "-- driving the editor (adding every op; this takes a few minutes)"
+        cp "$REPO/scripts/dogfood_editor.mjs" "$PW_DIR/editor.mjs"
+        (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS" TARGET_SAFE="$SAFE" \
+           TARGET_RUN_ID="$RUN_ID" node editor.mjs) || echo "warn: editor drive failed"
+      else
+        echo "-- --editor: no stacked target to edit, skipping"
+      fi
+    fi
     echo "-- screenshots: $SHOTS"
   fi
 fi
