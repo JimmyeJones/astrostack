@@ -592,6 +592,15 @@ the repo.
 > scratch dir, never the repo. Whatever it finds still needs a real regression
 > test in the suite — it is a finder, not a test.
 >
+> **On any run that touches the editor, add `--editor`.** The pass above only
+> *photographs* the editor, in the one state it opens in — priority 1 is the
+> editor and the owner's complaints about it are all about what happens after a
+> click, so nothing in this repo's tooling had ever clicked one. `--editor` runs
+> `scripts/dogfood_editor.mjs`: it adds every op the Add menu offers, one at a
+> time, and checks the live preview actually re-renders with no console error and
+> no failed request, then undoes and redoes. A few minutes on top of a normal
+> pass, which is why it is a flag rather than the default.
+>
 > **Follow it with `scripts/agent-dogfood.sh --empty`** (≈1 min once playwright is
 > installed): the same probe against an app with **no data at all**. Every
 > measurement this script took before 2026-09-07 was of the *sample-loaded* app, so
