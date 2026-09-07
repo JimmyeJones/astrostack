@@ -32,7 +32,16 @@ applies to **both** roles.
 - **Scout** (the planner + QA — schedule it a few times a day). *Fills* the backlog
   with high-value, vetted work for the Builder. It mostly **thinks and writes to
   the backlog rather than shipping code**: it dogfoods the whole app as the target
-  user (§1), runs a focused adversarial QA audit of one subsystem (editor first),
+  user (§1), runs a focused adversarial QA audit of one subsystem — **rotate, in
+  order: (1) scale-dependent preview↔export parity on a mosaic-size canvas;
+  (2) mosaic and walk-away divergence — any threshold taken from a whole-target or
+  *peak* number that is really per-panel; (3) filesystem side effects of
+  ASTAP/ffmpeg with a stub binary; (4) the webapp routers. A sweep counts only if
+  it ran the code on data shaped like the owner's. Do NOT re-sweep
+  `seestack/stack` or `seestack/calibrate` until a new bug is found there** —
+  *(this rotation moved here 2026-09-07: it previously lived only in
+  `docs/agent-prompt-scout.md`, which the Scout never reads at runtime, so all four
+  runs after it was written swept the very area it marks closed)* —
   files **verified** bugs (repro + severity + confidence) into "Bugs (fix these
   first)", and curates the backlog — reprioritising, pruning stale/duplicate/done
   items, and adding a few well-reasoned feature ideas (§4). It may fix one small,
@@ -100,6 +109,10 @@ higher on this list wins — always:
    result. **Go deep here: hunt and fix its bugs, make the controls obvious, and
    make the out-of-the-box result genuinely good.** Fixing/polishing the editor
    outranks any new feature.
+   **A dogfood pass that photographs the single-field sample does not count as an
+   editor check** *(added 2026-09-07)*. Use a **mosaic sample** (2×2 or 3×3 tiles,
+   uneven panel depth), and read the "What Auto did" note: **a trim above ~15 % of
+   the canvas is a bug**, not a ragged edge.
 2. **"Just works" autonomy.** Drop files in and get a great result with minimal
    clicks — smarter, well-defaulted auto-grade / auto-stack / auto-calibrate /
    auto-edit. Reduce the number of decisions the user must make.
@@ -160,6 +173,11 @@ two measurements both said not to. Full entry, measurements, slicing order and c
 slices by name rather than reading from the top of the section. A verified bug still outranks it; feature-piling does not —
 **prefer a slice of this over inventing another card**, and when you *do* add a feature, put it inside
 the new grouping rather than appending one more always-on banner.
+**Consolidation is not removal** *(added 2026-09-07)*. The owner's rule forbids *removing* a feature; it
+does **not** forbid merging two surfaces that answer the same question into one, provided every destination
+stays reachable in one click. **Prefer a consolidation over a new card, every time.** Concretely: the Target
+page's save/share menu has **12** items and History's has **19**, implemented twice; six new always-on cards
+now fire on the owner's real library; the phone Target page reached **3,853 px** on three nights of real data.
 
 **📜 HISTORICAL (was "⚡ IMMEDIATE PRIORITY", 2026-07-30; demoted 2026-09-03 because it
 is neither immediate nor a priority any more — it is a fixed bug's write-up, and a second
@@ -218,12 +236,15 @@ re-audits, which is why priority 1 is re-opened at the top of this section. What
 follows is about *marginal* value, not about the editor being finished: it no
 longer needs feature-piling, and if a *real* editor regression appears, fixing it
 still comes first. With that said, the highest marginal value is in:
-  1. **QA and harden the stacking engine itself.** Deeply audit and fix the
-     `seestack/stack/` path (`align.py`, `stacker.py`, `accumulator.py`,
-     `mosaic.py`, `drizzle_path.py`, rejection) and `seestack/calibrate/`. A bug
-     here silently corrupts the *final image* on a live install — this is
-     correctness / data-integrity work, so **treat a verified stacking-engine bug
-     like an editor bug: fix it first**, ahead of any polish.
+  1. **Mosaic-scale and walk-away behaviour of the Auto/editor path is the open
+     frontier.** *(Re-cut 2026-09-07 by the third external audit.)* The
+     single-field engine core has passed **twenty clean sweeps** and is **closed
+     until a new bug is found there** — do not re-sweep `seestack/stack/` or
+     `seestack/calibrate/`. Every Auto/editor claim is judged **on a tiled mosaic
+     canvas at the owner's scale, never on the 6-frame sample**. That sample is
+     where three audits' worth of real defects hid: D1 (Auto's border trim cropping
+     a mosaic to its panel overlaps) is correct on a single field and catastrophic
+     on a mosaic, and it survived every sweep because every sweep ran the sample.
   2. **Autonomy, friendliness, and image quality (priorities 2–4).** Smarter,
      better-defaulted auto-stack / auto-calibrate / auto-grade; clearer screens,
      guidance, and empty/error states; and cleaner final images for the OSC
