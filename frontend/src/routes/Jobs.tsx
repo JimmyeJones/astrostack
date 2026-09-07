@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { type ReactNode, useRef, useState } from "react";
 import { api, type Job } from "../api/client";
+import { BringFolderInButton } from "../components/BringFolderInButton";
 import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
 import { CalibrationSkippedNote } from "../components/CalibrationSkippedNote";
@@ -737,37 +738,6 @@ export function broughtFolderInNote(r: Record<string, unknown>): string | null {
 }
 
 /** Result-specific actions for finished editor jobs (download / view). */
-/** "Bring this folder in anyway" for a folder the scan skipped as the device's
- *  own picture.
- *
- *  Its own component so the summary stays hook-free, and so each folder's button
- *  carries its own pending state — a drop can skip several folders and they are
- *  separate decisions.
- *
- *  It scans just that folder, which is the whole point: the alert's other
- *  advice is to rename the folder, and the rename would have to happen inside
- *  `incoming/`, where the owner's only copy of their raws lives. Nothing here
- *  writes there — a scan reads. */
-function BringFolderInButton({ path, name }: { path: string; name: string }) {
-  const qc = useQueryClient();
-  const scan = useMutation({
-    mutationFn: () => api.scan(path),
-    onSuccess: () => {
-      notifications.show({
-        message: `Bringing "${name}" in — watch this page for the result`,
-        color: "violet",
-      });
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-    },
-    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
-  });
-  return (
-    <Button size="xs" variant="light" color="yellow" mt={6}
-      onClick={() => scan.mutate()} loading={scan.isPending}>
-      {`Bring "${name}" in anyway`}
-    </Button>
-  );
-}
 
 function JobResultActions({ job }: { job: Job }) {
   if (job.state !== "done" || !job.result) return null;

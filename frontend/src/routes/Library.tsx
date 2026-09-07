@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Target } from "../api/client";
 import { CleanupSuggestionsCard } from "../components/CleanupSuggestionsCard";
+import { SkippedFoldersCard } from "../components/SkippedFoldersCard";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { MergeSuggestionsCard } from "../components/MergeSuggestionsCard";
 import { QueryError } from "../components/QueryError";
@@ -197,6 +198,11 @@ export function Library() {
         </Card>
       ) : null}
 
+      {/* Not gated on having targets, unlike the two below it: this one says
+          "frames of yours may be missing", which is at its most important on a
+          library that came out thinner than the owner expected. It renders
+          nothing unless a scan actually walked past something unexplained. */}
+      <SkippedFoldersCard />
       {targets.length > 0 ? <CleanupSuggestionsCard /> : null}
       {targets.length > 0 ? <MergeSuggestionsCard /> : null}
 
