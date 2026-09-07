@@ -1628,13 +1628,21 @@ export function EditorView() {
                           positions are fractions of the *picture*, so nesting them
                           would re-base every percentage on the rectangle. */}
                       {cropHandlePositions(cropRect).map((h) => (
+                        // The grab area (22 px) is deliberately larger than the
+                        // marker (12 px): a handle you can hit with a finger on a
+                        // 374 px-wide phone preview, without a chequerboard of
+                        // white squares sitting over the picture.
                         <div key={h.handle} aria-label={`crop handle ${h.handle}`}
                           {...cropPointerProps(h.handle)}
                           style={{ position: "absolute", left: h.left, top: h.top,
-                            width: 14, height: 14, marginLeft: -7, marginTop: -7,
-                            background: "rgba(255,255,255,0.95)", borderRadius: 3,
-                            boxShadow: "0 0 3px rgba(0,0,0,0.8)", cursor: h.cursor,
-                            touchAction: "none", zIndex: 5 }} />
+                            width: 22, height: 22, marginLeft: -11, marginTop: -11,
+                            display: "flex", alignItems: "center",
+                            justifyContent: "center", cursor: h.cursor,
+                            touchAction: "none", zIndex: 5 }}>
+                          <div style={{ width: 12, height: 12, borderRadius: 3,
+                            background: "rgba(255,255,255,0.95)",
+                            boxShadow: "0 0 3px rgba(0,0,0,0.8)" }} />
+                        </div>
                       ))}
                     </>
                   ) : null}
@@ -1667,8 +1675,12 @@ export function EditorView() {
                   while it is dragged, in the same place every other "what am I
                   looking at" label sits. */}
               {cropDragReady ? (
+                // `pointerEvents: none` matters here and not on the other captions:
+                // this one sits over the top-left corner handle, which is the one
+                // control on screen you must be able to grab.
                 <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
-                  background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
+                  background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4,
+                  pointerEvents: "none", zIndex: 6 }}>
                   {cropKeptLabel(cropRect)}
                 </Text>
               ) : null}
