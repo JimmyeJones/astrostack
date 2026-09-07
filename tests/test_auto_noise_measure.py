@@ -197,6 +197,12 @@ def test_a_strong_gradient_never_costs_a_clean_stack_its_sharpening():
     stays hard at "not noisy", and Auto keeps the same sharpening with no denoise
     pass added. The sibling test above pins the σ property at one gradient; this
     pins the *decision* across the whole range the entry feared.
+
+    **Not a vacuous pin:** re-measured on these very scenes, the old level-MAD
+    estimator gives 0.0078→0.0722→0.1121→0.1610, i.e. ``_noise_fraction`` **1.0
+    from a gradient of 0.05** — this test fails on the first step of the ladder
+    against the estimator the entry was filed about, which is what makes it a
+    guard rather than a restatement of today's numbers.
     """
     baseline = None
     for gradient in (0.0, 0.05, 0.10, 0.20):
