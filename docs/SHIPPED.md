@@ -14,6 +14,119 @@ Newest first.
 
 ---
 
+## v0.375.0 + v0.376.0 — 2026-09-07 — "My wishlist": save the objects you want to shoot, and be told when they're up: `Library.add_to_wishlist` + `seestack/wishlist.py` + `/api/wishlist` + `WishlistStar` / `WishlistTonightCard`
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-rb61y0`.) The ⭐ beginner
+feature the Scout filed the same morning, shipped whole in the two slices it
+asked for: v0.375.0 the saved list, v0.376.0 the Tonight payoff.**
+
+**The gap it closed, in one sentence:** the app could say what is *up* tonight
+(`nightplan.plan_tonight`) and which famous objects you have *got*
+(`seestack/lifelist.py`, v0.279.0), but there was nowhere to put the single most
+natural planning thought a beginner has — *"I want to shoot the Andromeda Galaxy
+next"*. The life list is a **fixed** catalogue you cannot add to and the planner
+ranks **generically**, so that intent went nowhere.
+
+**Slice 1 (v0.375.0) — the list.** A `wishlist` table in the library registry
+(`catalog_id` PK, a name/RA/Dec snapshot, `added_utc`) with
+`Library.list_wishlist` / `add_to_wishlist` / `remove_from_wishlist`;
+`seestack/wishlist.py::wishlist_objects` resolving saved ids against the bundled
+catalog; `webapp/routers/wishlist.py` (`GET /api/wishlist`, `POST`/`DELETE
+/api/wishlist/{catalog_id}`); and `WishlistStar` on every life-list tile plus a
+self-hiding "My wishlist" section at the top of that page.
+
+**Slice 2 (v0.376.0) — the payoff.** `GET /api/wishlist/tonight` runs the
+planner's own `nightplan.well_placed_tonight` over *just* the saved objects, and
+`WishlistTonightCard` leads the Tonight page with *"M57 (Ring Nebula) is on your
+wishlist — and it's up tonight: climbs to about 78°, 5.0 h of it usable, until
+03:10."* The same star also went onto the Tonight page's catalog rows, which is
+where the "I want that one" thought actually happens.
+
+**Three decisions worth keeping:**
+
+1. **No `LIBRARY_SCHEMA_VERSION` bump — deliberately, against the entry's own
+   suggestion.** The new DDL lives in `_AUX_TABLES_SQL` and is re-run
+   idempotently on every open via `_ensure_aux_tables` (called from *both*
+   `_init_schema` and `_check_schema`). Bumping the version would make the
+   **previous** Docker image refuse to open the registry — `_check_schema` raises
+   *"newer than this build"* — turning a rollback on a live, backup-less install
+   into a bricked app. A bare `CREATE TABLE IF NOT EXISTS` is additive in *both*
+   directions, exactly as `_check_schema`'s own comment already promises ("the
+   schema only ever *adds*; the new code simply ignores any leftover tables").
+   Pinned by two tests: a hand-built v2 registry gains the table on open with its
+   targets intact, and a current-version registry with the table dropped
+   self-heals.
+2. **"Captured" is delegated, never re-derived.** `wishlist_objects` calls
+   `lifelist.catalog_capture_status` rather than re-implementing the match, so
+   the wishlist, the life list and the Dashboard tally can never disagree about
+   whether you have M31 — three screens quietly disagreeing would make all three
+   untrustworthy. A regression test asserts the two verdicts agree on the same
+   fixture.
+3. **The client never supplies coordinates.** Only ids the bundled catalog
+   defines can be saved (404 otherwise), so a wishlist row cannot become a way to
+   push an arbitrary sky position into the planner.
+
+**Two smaller ones:** saved order is `ORDER BY added_utc, rowid`, because
+`added_utc` has one-second resolution and starring three objects in a burst is
+normal — without the rowid tiebreak those three came back *alphabetically*, an
+order the owner never chose. And an id a future catalog revision drops is rebuilt
+from the snapshot stored beside it (`from_snapshot`) rather than silently
+deleted.
+
+**Self-hiding everywhere, which is the whole upgrade story:** an empty wishlist,
+no observing location, nothing saved that clears the altitude floor, or an older
+backend all render *nothing* — a first-run install and today's build see exactly
+the pages they see now (the standing no-new-always-on-banner rule). The Tonight
+card also stands down while another night is picked, rather than quietly
+answering about tonight: its copy says "tonight" and its endpoint takes a UTC
+instant, not the page's night-of date.
+
+**One trap worth recording:** the star is a **sibling** of the life-list tile,
+not a child. A captured tile is a `<Link>`, and a `<button>` inside an `<a>` is
+invalid HTML that swallows one of the two clicks — the same family as the
+v0.374.11 labelable-`<button>`-in-a-`<label>` trap.
+
+Additive throughout — no config, no existing DB table, no on-disk layout, no API
+shape and no default changed. Tests +38 (26 Python, 12 frontend). Full suite
+green; `tsc` / `vitest` / `vite build` clean.
+
+**The Scout's original entry, verbatim:**
+
+- **⭐ NEW BEGINNER FEATURE (Scout 2026-09-07) — "My wishlist": a personal, saved list of objects you
+  want to shoot, that then drives the Tonight planner.** *(Pillar: friendliness + autonomy / plan —
+  PRIORITY 2–3. Size: M. Clears the beginner bar: sane default is an empty list; "☆ Add to wishlist" is
+  one tap; the payoff is plain-language — "Your wishlist target **M45** is up and high by 11 pm tonight";
+  nothing pro/niche.)*
+  **The gap (verified this run — the pieces exist but nothing joins them):** the app already has a
+  fixed **famous-objects life-list** (v0.279.0 — the classic showpieces, with the ones you've captured
+  ticked off and the rest shown as a bucket list) and a **Tonight planner** (`nightplan.py` /
+  `routers/plan.py`) that ranks targets by altitude / season / Moon, plus a "Try something new tonight"
+  card (`SuggestTargetsCard`) of generic beginner showpieces. What a beginner *cannot* do is say **"I
+  want to shoot the Andromeda Galaxy next"** and have the app remember it and tell them, on the right
+  night, that it's up and well-placed. The life-list is a *fixed* catalogue you can't add to, and the
+  planner ranks *generically*, so the beginner's own intent — the single most natural planning act —
+  goes nowhere.
+  **The feature:** a small, additive "wishlist" the user builds from any object they can already see in
+  the app (a life-list row, a Sky Map object, a search result), persisted in the **library DB** (a new
+  additive table + `SCHEMA_VERSION` bump + `_migrate_schema`, §9 — never a reset), surfaced two ways:
+  (1) a **"Wishlist tonight"** slice on the Tonight page that runs the *existing* `nightplan` scoring
+  over just the user's saved objects and shows the ones that are up and well-placed, with the same
+  Moon-wash verdict the planner already computes; (2) a plain "☆ On my wishlist / captured" state on the
+  object so the loop closes when they finally shoot it (reuse the life-list's own "have I captured this?"
+  match against the library target list). **Sane default:** empty list → the card self-hides, so a
+  first-run app and an older/newer frontend both degrade to today's page (the standing IA rule — no new
+  always-on banner). **Deliberately NOT** a full observing-planner with constraints/notifications/weather
+  (weather needs a networked API → owner sign-off); it is one saved list plus the scoring that already
+  exists. **Builder slicing:** ship (1) the DB table + add/remove/list endpoints + the star toggle first
+  (a usable wishlist with no planner tie-in is already worth having), then (2) the "Wishlist tonight"
+  planner slice as its own commit. Tests: an old library DB migrates cleanly (upgrade test); add/remove/
+  list round-trips; the planner slice scores only wishlisted objects and reuses the shared Moon verdict;
+  the card self-hides on an empty list. **Grep before building:** `wishlist`, `life-list`, `nightplan`,
+  `SuggestTargetsCard` — the *bucket* life-list (fixed famous objects) is v0.279.0 and is **not** this;
+  this is the user-curated, planner-driving list that does not exist yet.
+
+---
+
 ## v0.374.9 — 2026-09-07 — reading a sub's stored solution stops re-verifying a FITS header card by card: `wcs_io._wcs_from_plain_tan_text` (a 6-second canvas computation becomes 0.9 s)
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-mg8isx`.) Performance — the

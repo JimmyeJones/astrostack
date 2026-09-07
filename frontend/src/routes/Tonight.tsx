@@ -8,6 +8,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type PlannedTarget } from "../api/client";
 import { NearlyThereCard } from "../components/NearlyThereCard";
+import { WishlistStar } from "../components/WishlistStar";
+import { WishlistTonightCard } from "../components/WishlistTonightCard";
 import { PlanWeekCard } from "../components/tonight/PlanWeekCard";
 import { QueryError } from "../components/QueryError";
 import { WorthMoreTimeList } from "../components/tonight/WorthMoreTimeList";
@@ -69,13 +71,22 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
   return (
     <Table.Tr>
       <Table.Td>
-        {t.target_safe ? (
-          <Anchor component={Link} to={`/targets/${t.target_safe}`} fw={600}>
-            {label}
-          </Anchor>
-        ) : (
-          <Text fw={600}>{label}</Text>
-        )}
+        <Group gap={6} wrap="nowrap" align="center">
+          {/* "I want that one" — the thought a beginner has while reading this
+              very table, and until now it had nowhere to go. Only on catalog
+              rows: a row you already shoot has its own target page, and its
+              `id` is a folder name rather than a catalog id. */}
+          {t.already_targeted ? null : (
+            <WishlistStar catalogId={t.id} label={label} size="xs" />
+          )}
+          {t.target_safe ? (
+            <Anchor component={Link} to={`/targets/${t.target_safe}`} fw={600}>
+              {label}
+            </Anchor>
+          ) : (
+            <Text fw={600}>{label}</Text>
+          )}
+        </Group>
         <Text size="xs" c="dimmed">
           {[t.type, t.con].filter(Boolean).join(" · ")}
           {t.already_targeted && t.frames_accepted != null
@@ -381,6 +392,15 @@ export function TonightView() {
           </Text>
         </Card>
       </SimpleGrid>
+
+      {/* "M57 is on your wishlist — and it's up tonight." The one card on this
+          page about what *you* asked for rather than what the catalogue offers,
+          so it leads. Self-hides until something saved is genuinely well placed.
+          Only shown for tonight itself: its copy says "tonight", and the
+          endpoint takes a UTC instant rather than the page's night-of date, so
+          rather than quietly answering a different question it stands down while
+          another night is picked. */}
+      {date ? null : <WishlistTonightCard minAlt={minAlt ? Number(minAlt) : undefined} />}
 
       {/* "You're one away from finishing Lyra — and it's up tonight." Self-hides
           until a constellation is genuinely close, so a fresh install never

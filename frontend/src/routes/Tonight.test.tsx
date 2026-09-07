@@ -420,6 +420,89 @@ describe("TonightView", () => {
     expect(screen.getAllByText("Nearly there")).toHaveLength(1);
   });
 
+  it("lets you save a catalog target to your wishlist from the row you read it on",
+    async () => {
+      // "I want that one" is the thought a beginner has *here*, while reading the
+      // ranking — so the star lives on the row rather than only on the life list.
+      vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+        targets: [
+          target({ id: "M42", name: "Orion Nebula" }),
+          target({ id: "M_31", name: "M 31", already_targeted: true,
+                   target_safe: "M_31", frames_accepted: 40, total_exposure_s: 400 }),
+        ],
+      }));
+      vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight([]));
+      vi.spyOn(client.api, "getWishlist")
+        .mockResolvedValue({ items: [], counts: { saved: 0, captured: 0 } });
+      renderTonight();
+
+      await waitFor(() =>
+        expect(screen.getByTestId("wishlist-star-M42")).toBeInTheDocument());
+      // Not on a target you already shoot: it has its own page, and its `id` is a
+      // folder name rather than a catalog id, so starring it would save nonsense.
+      expect(screen.queryByTestId("wishlist-star-M_31")).not.toBeInTheDocument();
+    });
+
+  it("says nothing about a wishlist when nothing saved is up tonight", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({ targets: [target({})] }));
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight([]));
+    vi.spyOn(client.api, "wishlistTonight")
+      .mockResolvedValue({ saved: 0, up: [], location_source: "settings" });
+    renderTonight();
+
+    await waitFor(() =>
+      expect(screen.getByText("Start something new tonight")).toBeInTheDocument());
+    expect(screen.queryByTestId("wishlist-tonight-card")).not.toBeInTheDocument();
+  });
+
+  it("leads with your own saved target when it's well placed tonight", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({ targets: [target({})] }));
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight([]));
+    vi.spyOn(client.api, "wishlistTonight").mockResolvedValue({
+      saved: 1,
+      up: [{
+        catalog_id: "M57", name: "Ring Nebula", type: "planetary nebula",
+        con: "Lyr", blurb: "", captured: false, safe_name: null,
+        max_altitude_deg: 78.4, minutes_above_min_alt: 300,
+        moon_separation_deg: 92, moon_up_fraction: 0.1,
+        usable_start_utc: "2026-07-15T21:40:00+00:00",
+        usable_end_utc: "2026-07-16T02:10:00+00:00",
+        transit_utc: "2026-07-16T00:00:00+00:00", score: 0.9,
+      }],
+      location_source: "settings",
+    });
+    renderTonight();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("wishlist-tonight-card")).toBeInTheDocument());
+    expect(screen.getByText(/M57 \(Ring Nebula\) is on your wishlist/))
+      .toBeInTheDocument();
+  });
+
+  it("stands down while another night is picked rather than answering about tonight",
+    async () => {
+      // The card's copy says "tonight" and its endpoint takes a UTC instant, not
+      // the page's night-of date — so on a future night it goes quiet instead of
+      // quietly answering a different question.
+      vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({ targets: [target({})] }));
+      vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight([]));
+      const tonight = vi.spyOn(client.api, "wishlistTonight").mockResolvedValue({
+        saved: 1, up: [], location_source: "settings",
+      });
+      renderTonight();
+      await waitFor(() =>
+        expect(screen.getByText("Start something new tonight")).toBeInTheDocument());
+      tonight.mockClear();
+
+      fireEvent.change(screen.getByLabelText("Night"),
+                       { target: { value: futureNight() } });
+
+      await waitFor(() => expect(screen.queryByText(/Start something new tonight/))
+        .not.toBeInTheDocument());
+      expect(screen.queryByTestId("wishlist-tonight-card")).not.toBeInTheDocument();
+      expect(tonight).not.toHaveBeenCalled();
+    });
+
   it("keeps the Night picker mounted on error so a bad date doesn't strand the user", async () => {
     vi.spyOn(client.api, "getTonight").mockRejectedValue(new Error("boom"));
     render(
