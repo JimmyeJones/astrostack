@@ -96,6 +96,31 @@ def test_every_catalog_object_gets_a_valid_or_absent_verdict():
         assert d.label and d.text
 
 
+def test_the_bundled_catalog_is_covered_end_to_end_today():
+    """Every object the app can offer currently carries a verdict — 157 of 157.
+
+    The test above only requires that an uncurated object *self-hides* cleanly,
+    which is the module's doctrine and stays. This one records the stronger fact
+    that the doctrine's escape hatch is not currently used by anything, because a
+    backlog idea proposed replacing the curated table with a surface-brightness
+    formula on the grounds that curation "doesn't scale to a growing catalog" —
+    and the measured gap it exists to close is **zero**. (Closed 2026-09-07 with
+    that number; see IMPROVEMENTS.md.)
+
+    So it is a *reminder*, not a rule: adding a catalog entry whose difficulty
+    genuinely can't be vetted is still allowed — it self-hides, exactly as
+    designed — but the choice should be deliberate rather than something a badge
+    quietly stops appearing for.
+    """
+    objs = load_catalog()
+    missing = [o.id for o in objs if target_difficulty(o.id, o.type) is None]
+    assert not missing, (
+        f"{len(missing)} of {len(objs)} bundled objects would show no difficulty "
+        f"badge: {missing[:10]}. Curate them in target_difficulty._CURATED, or "
+        f"relax this test deliberately if the verdict genuinely can't be vetted."
+    )
+
+
 def test_object_info_carries_the_difficulty_verdict():
     # End-to-end through identify_object: a matched object surfaces its verdict.
     info = identify_object("M_31")
