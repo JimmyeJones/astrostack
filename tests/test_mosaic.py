@@ -239,3 +239,31 @@ def test_unsalvageable_canvas_raises():
     frames = [_frame(10.0, 10.0), _frame(25.0, 10.0), _frame(40.0, 10.0)]
     with pytest.raises(ValueError, match="Frames table"):
         compute_mosaic_canvas(frames, reference_shape=(320, 480), max_canvas_px=4000)
+
+
+def test_the_canvas_is_identical_whether_or_not_the_fast_wcs_path_is_taken(monkeypatch):
+    """The union canvas must not depend on *how* each sub's WCS was read.
+
+    ``wcs_io._wcs_from_plain_tan_text`` exists purely for speed — it is what
+    keeps this computation from costing ~1 ms a sub on the §1 owner's
+    thousands-of-subs mosaic. It is only safe while it is a pure optimisation,
+    so pin that here, at the level that actually reaches the picture: the same
+    frames must produce the same canvas WCS, the same shape and the same
+    outlier verdict with the fast path disabled.
+    """
+    import seestack.io.wcs_io as wcs_io
+
+    frames = [
+        _frame(83.8 + col * 0.4, -5.4 + row * 0.4)
+        for row in range(3) for col in range(3)
+    ]
+    with_fast = compute_mosaic_canvas(frames, reference_shape=(320, 480))
+    monkeypatch.setattr(wcs_io, "_wcs_from_plain_tan_text", lambda text: None)
+    astropy_only = compute_mosaic_canvas(frames, reference_shape=(320, 480))
+
+    assert with_fast is not None and astropy_only is not None
+    assert with_fast.wcs_text == astropy_only.wcs_text
+    assert with_fast.shape == astropy_only.shape
+    assert with_fast.is_mosaic == astropy_only.is_mosaic
+    assert with_fast.span_deg == astropy_only.span_deg
+    assert with_fast.excluded_frame_ids == astropy_only.excluded_frame_ids

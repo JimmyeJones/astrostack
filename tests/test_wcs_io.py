@@ -426,3 +426,196 @@ def test_a_frame_with_no_recorded_size_still_answers_none():
     w = _make_simple_wcs()
     assert footprint_radec_deg(w, None, None) is None
     assert footprint_radec_deg(w, 100, None) is None
+
+
+# --- the plain-TAN fast path in `wcs_from_text` -----------------------------
+
+
+def _header_text(**cards) -> str:
+    """FITS header text with the cards in the order given (as ASTAP writes)."""
+    from astropy.io.fits import Header
+
+    header = Header()
+    for keyword, value in cards.items():
+        header[keyword.replace("__", "-")] = value
+    return str(header)
+
+
+def _astropy_wcs_from_text(text: str):
+    """What ``wcs_from_text`` used to do, verbatim — the reference to match."""
+    import warnings
+
+    from astropy.io.fits import Header
+    from astropy.wcs import WCS as AstropyWCS
+    from astropy.wcs import FITSFixedWarning
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FITSFixedWarning)
+        return AstropyWCS(Header.fromstring(text))
+
+
+_OURS_CDELT = wcs_to_text(_make_simple_wcs())
+
+
+def _rotated_cd_text() -> str:
+    w = _make_simple_wcs()
+    w.wcs.cd = np.array([[-7.5e-4, 3.1e-5], [3.1e-5, 7.5e-4]])
+    return wcs_to_text(w)
+
+
+def _astap_sidecar_text() -> str:
+    """An ASTAP-shaped solution: CD *and* the legacy CDELT/CROTA pair beside it."""
+    return _header_text(
+        SIMPLE=True, BITPIX=8, NAXIS=0,
+        CTYPE1="RA---TAN", CTYPE2="DEC--TAN", CUNIT1="deg", CUNIT2="deg",
+        CRPIX1=540.5, CRPIX2=960.5, CRVAL1=83.822, CRVAL2=-5.391,
+        CDELT1=-7.5e-4, CDELT2=7.5e-4, CROTA1=0.0, CROTA2=2.36,
+        CD1_1=-7.4936e-4, CD1_2=3.09e-5, CD2_1=3.09e-5, CD2_2=7.4936e-4,
+    )
+
+
+_FAST_PATH_CORPUS = {
+    "our own CDELT serialisation": _OURS_CDELT,
+    "our own CD serialisation": _rotated_cd_text(),
+    "an ASTAP sidecar (CD beside CDELT+CROTA)": _astap_sidecar_text(),
+    "the legacy CDELT+CROTA2 convention": _header_text(
+        CTYPE1="RA---TAN", CTYPE2="DEC--TAN",
+        CRPIX1=540.5, CRPIX2=960.5, CRVAL1=83.822, CRVAL2=-5.391,
+        CDELT1=-7.5e-4, CDELT2=7.5e-4, CROTA2=30.0),
+    "a half-written CD matrix": _header_text(
+        CTYPE1="RA---TAN", CTYPE2="DEC--TAN",
+        CRPIX1=540.5, CRPIX2=960.5, CRVAL1=83.822, CRVAL2=-5.391,
+        CD1_1=-7.5e-4, CD2_2=7.5e-4),
+    "a half-written PC matrix": _header_text(
+        CTYPE1="RA---TAN", CTYPE2="DEC--TAN",
+        CRPIX1=540.5, CRPIX2=960.5, CRVAL1=83.822, CRVAL2=-5.391,
+        CDELT1=-7.5e-4, CDELT2=7.5e-4, PC1_1=0.9, PC2_2=0.9),
+    "a frame carrying its own dimensions": _header_text(
+        SIMPLE=True, BITPIX=8, NAXIS=2, NAXIS1=1080, NAXIS2=1920,
+        CTYPE1="RA---TAN", CTYPE2="DEC--TAN",
+        CRPIX1=540.5, CRPIX2=960.5, CRVAL1=83.822, CRVAL2=-5.391,
+        CD1_1=-7.5e-4, CD1_2=0.0, CD2_1=0.0, CD2_2=7.5e-4),
+    "a frame stamped with its capture time and frame": _header_text(
+        CTYPE1="RA---TAN", CTYPE2="DEC--TAN",
+        CRPIX1=540.5, CRPIX2=960.5, CRVAL1=83.822, CRVAL2=-5.391,
+        CD1_1=-7.5e-4, CD1_2=0.0, CD2_1=0.0, CD2_2=7.5e-4,
+        RADESYS="ICRS", EQUINOX=2000.0,
+        DATE__OBS="2024-11-15T21:03:11", MJD__OBS=60629.877),
+    "a frame near the RA=0 seam": wcs_to_text(_make_simple_wcs(ra_deg=0.05)),
+    "a frame near the pole": wcs_to_text(_make_simple_wcs(dec_deg=89.4)),
+}
+
+
+@pytest.mark.parametrize("label", sorted(_FAST_PATH_CORPUS))
+def test_the_fast_wcs_path_is_indistinguishable_from_astropys_own_read(label):
+    """The fast path is only allowed to exist because it is not an
+    approximation: for every header shape this app stores, it must produce a WCS
+    that re-serialises byte-for-byte like astropy's, records the same pixel
+    shape, and transforms a grid of pixels to bit-identical RA/Dec.
+
+    Byte-identical ``to_header`` is the bar rather than "close enough on a pixel
+    grid" because ``solve.bootstrap.propagate_wcs`` reads a solution back,
+    shifts it and re-serialises it into the project DB — a dropped keyword would
+    become stored data, not just a transient object.
+    """
+    from seestack.io.wcs_io import _wcs_from_plain_tan_text
+
+    text = _FAST_PATH_CORPUS[label]
+    fast = _wcs_from_plain_tan_text(text)
+    assert fast is not None, "this header shape should take the fast path"
+    reference = _astropy_wcs_from_text(text)
+
+    assert str(fast.to_header(relax=True)) == str(reference.to_header(relax=True))
+    assert fast.pixel_shape == reference.pixel_shape
+
+    xs, ys = np.meshgrid(np.linspace(0, 1079, 21), np.linspace(0, 1919, 21))
+    fast_ra, fast_dec = fast.all_pix2world(xs.ravel(), ys.ravel(), 0)
+    ref_ra, ref_dec = reference.all_pix2world(xs.ravel(), ys.ravel(), 0)
+    assert np.array_equal(fast_ra, ref_ra)
+    assert np.array_equal(fast_dec, ref_dec)
+
+    # And through the public entry point, which is what every caller uses.
+    assert str(wcs_from_text(text).to_header(relax=True)) == \
+        str(reference.to_header(relax=True))
+
+
+_FAST_PATH_DECLINES = {
+    "SIP distortion": _header_text(
+        CTYPE1="RA---TAN-SIP", CTYPE2="DEC--TAN-SIP",
+        CRPIX1=1.0, CRPIX2=1.0, CRVAL1=1.0, CRVAL2=1.0,
+        CD1_1=-1e-4, CD1_2=0.0, CD2_1=0.0, CD2_2=1e-4,
+        A_ORDER=2, A_0_0=0.0, A_0_1=0.0, A_0_2=1e-6,
+        A_1_0=0.0, A_1_1=2e-6, A_2_0=3e-6,
+        B_ORDER=2, B_0_0=0.0, B_0_1=0.0, B_0_2=4e-6,
+        B_1_0=0.0, B_1_1=5e-6, B_2_0=6e-6),
+    "PV distortion": _header_text(
+        CTYPE1="RA---TAN", CTYPE2="DEC--TAN",
+        CRPIX1=1.0, CRPIX2=1.0, CRVAL1=1.0, CRVAL2=1.0,
+        CD1_1=-1e-4, CD1_2=0.0, CD2_1=0.0, CD2_2=1e-4, PV1_1=0.5),
+    "a galactic projection": _header_text(
+        CTYPE1="GLON-TAN", CTYPE2="GLAT-TAN",
+        CRPIX1=1.0, CRPIX2=1.0, CRVAL1=1.0, CRVAL2=1.0,
+        CDELT1=-1e-4, CDELT2=1e-4),
+    "a non-TAN projection": _header_text(
+        CTYPE1="RA---SIN", CTYPE2="DEC--SIN",
+        CRPIX1=1.0, CRPIX2=1.0, CRVAL1=1.0, CRVAL2=1.0,
+        CDELT1=-1e-4, CDELT2=1e-4),
+    "a third axis": _header_text(
+        WCSAXES=3, CTYPE1="RA---TAN", CTYPE2="DEC--TAN", CTYPE3="WAVE",
+        CRPIX1=1.0, CRPIX2=1.0, CRVAL1=1.0, CRVAL2=1.0,
+        CDELT1=-1e-4, CDELT2=1e-4),
+    "axes in arcsec rather than degrees": _header_text(
+        CTYPE1="RA---TAN", CTYPE2="DEC--TAN", CUNIT1="arcsec", CUNIT2="arcsec",
+        CRPIX1=1.0, CRPIX2=1.0, CRVAL1=1.0, CRVAL2=1.0,
+        CDELT1=-0.36, CDELT2=0.36),
+    "no reference point at all": _header_text(
+        CTYPE1="RA---TAN", CTYPE2="DEC--TAN", CDELT1=-1e-4, CDELT2=1e-4),
+    "a length that is not a whole number of cards": "CTYPE1  = 'RA---TAN'",
+    "an empty sidecar": "END" + " " * 77,
+}
+
+
+@pytest.mark.parametrize("label", sorted(_FAST_PATH_DECLINES))
+def test_a_header_the_fast_path_does_not_fully_understand_goes_to_astropy(label):
+    """The fast path's safety is that it declines rather than guesses: anything
+    it cannot reproduce keyword-for-keyword falls through to astropy's own
+    permissive read, which is what these headers got before it existed —
+    including the ones astropy itself refuses, which must still come back as
+    ``None`` rather than as a silently-simplified solution."""
+    from seestack.io.wcs_io import _wcs_from_plain_tan_text
+
+    text = _FAST_PATH_DECLINES[label]
+    assert _wcs_from_plain_tan_text(text) is None
+
+    try:
+        reference = _astropy_wcs_from_text(text)
+    except Exception:  # noqa: BLE001 — astropy rejects it; so must we
+        assert wcs_from_text(text) is None
+        return
+    result = wcs_from_text(text)
+    assert result is not None
+    assert str(result.to_header(relax=True)) == str(reference.to_header(relax=True))
+
+
+def test_a_duplicated_wcs_keyword_is_left_to_astropy():
+    """Our card scan keeps the *last* value it sees and astropy keeps the first,
+    so a header that says CRVAL1 twice must not take the fast path — otherwise
+    the two reads would place the same frame in two different places."""
+    from seestack.io.wcs_io import _wcs_from_plain_tan_text
+
+    text = wcs_to_text(_make_simple_wcs())
+    doubled = text[:-2880] + "CRVAL1  = 111.0".ljust(80) + text[-2880:]
+    assert _wcs_from_plain_tan_text(doubled) is None
+
+
+def test_a_blob_with_no_wcs_keys_still_reads_as_an_unsolved_frame():
+    """``wcs_text_is_usable`` leans on a bare "END" sidecar coming back as a
+    *non-None* WCS with no celestial axes — the fast path must not turn it into
+    ``None`` and silently reclassify the frame."""
+    from seestack.io.wcs_io import wcs_text_is_usable
+
+    blob = "END" + " " * 2877
+    wcs = wcs_from_text(blob)
+    assert wcs is not None
+    assert not wcs.has_celestial
+    assert not wcs_text_is_usable(blob)

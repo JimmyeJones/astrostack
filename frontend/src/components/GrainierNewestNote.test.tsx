@@ -82,3 +82,34 @@ describe("GrainierNewestNote", () => {
     expect(screen.queryByTestId("grainier-newest-note")).toBeNull();
   });
 });
+
+describe("GrainierNewestNote — how big the gap is said", () => {
+  it("says a runaway gap as a multiple, because a percentage stops reading", async () => {
+    // A manual restack of a handful of subs against a 500-sub master really is
+    // ~2400 % grainier. That is arithmetically right and reads as a bug — on
+    // the one note whose whole job is to be trustworthy when the picture got
+    // worse. Above a tripling it says the same fact the way anyone would.
+    vi.spyOn(client.api, "grainierNewest")
+      .mockResolvedValue({ ...NUDGE, percent_grainier: 2400 });
+    renderNote();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("grainier-newest-note")).toBeInTheDocument());
+    expect(screen.getByText(/about 25\.0× as much background grain as your/))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/2400%/)).toBeNull();
+  });
+
+  it("leaves the ordinary band reading as a percentage", async () => {
+    // The nudge's bar is ~17.6 %, so this is where nearly every real firing
+    // lands; the wording there must not move.
+    vi.spyOn(client.api, "grainierNewest")
+      .mockResolvedValue({ ...NUDGE, percent_grainier: 200 });
+    renderNote();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("grainier-newest-note")).toBeInTheDocument());
+    expect(screen.getByText(/about 200% more background grain than your/))
+      .toBeInTheDocument();
+  });
+});

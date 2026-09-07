@@ -375,3 +375,38 @@ export function formatNightDayMonth(
   const short = `${p.day} ${MONTHS_ABBR[p.month - 1]}`;
   return p.year === now.getFullYear() ? short : `${short} ${p.year}`;
 }
+
+/**
+ * Past this much *more* background grain, a percentage stops reading as a
+ * quantity and starts reading as a bug: "about 2400 % more" is arithmetically
+ * right and sounds broken — exactly the wrong impression for a note whose job
+ * is to be trustworthy when the picture got worse. Above it we say the same
+ * fact the way anyone would out loud, as a multiple.
+ *
+ * 200 % (= 3× as much) is where the two readings cross over in practice: the
+ * nudge's own bar is ~17.6 %, so nearly every real firing is well inside the
+ * percentage band and reads exactly as it always did.
+ */
+export const GRAIN_MULTIPLE_ABOVE_PERCENT = 200;
+
+/** How much more of something there is, and the word that joins it to the
+ *  thing it is being compared with — see {@link formatMoreThan}. */
+export type MoreThanPhrase = { amount: string; joiner: "than" | "as" };
+
+/**
+ * "about 24% more" / "about 25.0× as much" — a *ratio* said the way a person
+ * would say it, with the grammar it needs.
+ *
+ * `percentMore` is how much more there is as a whole percent (30 → "30 % more",
+ * i.e. 1.3× as much), which is what the cover nudges report. The joiner changes
+ * with the phrasing ("more grain **than** yours" vs "as much grain **as**
+ * yours"), so it comes back with the amount rather than being left for each
+ * caller to get right.
+ */
+export function formatMoreThan(percentMore: number): MoreThanPhrase {
+  const pct = Number.isFinite(percentMore) ? Math.max(1, Math.round(percentMore)) : 1;
+  if (pct <= GRAIN_MULTIPLE_ABOVE_PERCENT) {
+    return { amount: `about ${pct}% more`, joiner: "than" };
+  }
+  return { amount: `about ${(1 + pct / 100).toFixed(1)}× as much`, joiner: "as" };
+}
