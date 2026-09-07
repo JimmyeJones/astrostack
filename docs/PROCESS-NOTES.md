@@ -105,6 +105,17 @@ preview — including the three geometry ops at their identity defaults, which
 issue a render regardless (so "unchanged" in that output really would mean an op
 that rendered nothing).
 
+**And then the run got a second task out of the first one's output — by *looking*
+at it.** The `--editor` drive came back clean, but the phone screenshot it took
+did not: the preview's own control row was sitting on top of a quarter of the
+picture. Measured (`toolbar` vs `img[alt="preview"]` bounding boxes, both
+widths): **6.2 % of the picture covered at 1440 px in one row, 25.9 % at 420 px
+in two**, on six buttons — a mosaic renders a seventh. That is v0.377.2, and it
+is the argument for the tool in one step: the drive itself reported "clean",
+because *"a quarter of the preview is behind the toolbar"* is not a console
+error, a failed request or a preview that stopped re-rendering. **A probe finds
+what it was told to look for; the screenshots are still for a person to read.**
+
 **A method note worth carrying.** Probes 1 and 2 answer the same question and
 only one of them is worth keeping in a run's budget: probe 2 is a handful of
 lines, needs no fixture design, and cannot be argued with, while probe 1 needs a
