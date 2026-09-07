@@ -138,6 +138,67 @@ def test_a_dithered_stack_can_now_be_praised_for_even_coverage():
     assert "even coverage" in solid.message
 
 
+# --- and the black *around* the picture, which the note above cannot see ------
+# The thin share is a ratio over covered pixels, so a canvas that is a third
+# empty corners reads 0.00 on it. The empty share is the only thing that can
+# explain the black bands a mosaic's union canvas leaves.
+
+
+def test_a_mostly_empty_canvas_says_what_the_black_is():
+    # A diagonal two-panel mosaic measures ~37% empty on real run_stack output,
+    # with a thin share of 0.00 — i.e. the note above stays silent on it.
+    notes = stack_health(_run(coverage_min=0, coverage_max=30,
+                              coverage_thin_frac=0.0, uncovered_frac=0.37),
+                         [_frame() for _ in range(10)])
+    assert "coverage" not in _kinds(notes)
+    black = next(n for n in notes if n.kind == "uncovered")
+    assert "37%" in black.message
+    # It explains before it offers: nothing is wrong with the picture itself.
+    assert "normal" in black.message
+    assert black.severity == "info"
+    assert black.action == "trim_border"
+
+
+def test_an_ordinary_canvas_is_not_told_about_a_border_nobody_can_see():
+    # Measured on real run_stack output: an undithered single field on the
+    # reference canvas is already 3.1% empty (reprojection leaves a NaN margin a
+    # couple of pixels wide), a dithered union canvas 5.1%, and a regular
+    # 1x3 / 2x2 mosaic 4.1% / 3.1%. None of those is a black band.
+    for share in (0.031, 0.051, 0.041):
+        notes = stack_health(_run(coverage_min=0, coverage_max=30,
+                                  coverage_thin_frac=0.0, uncovered_frac=share),
+                             [_frame() for _ in range(10)])
+        assert "uncovered" not in _kinds(notes), share
+
+
+def test_a_run_recorded_before_the_empty_share_existed_stays_silent():
+    """The column is NULL on every run the owner already has until the heal
+    fills it in; "unknown" must never be read as "none"."""
+    notes = stack_health(_run(coverage_min=0, coverage_max=30,
+                              coverage_thin_frac=0.0, uncovered_frac=None),
+                         [_frame() for _ in range(10)])
+    assert "uncovered" not in _kinds(notes)
+
+
+def test_a_shallow_stack_is_not_told_about_its_empty_canvas():
+    # Same peak floor the thin note uses: below it the coverage distribution
+    # isn't worth advising on yet.
+    notes = stack_health(_run(coverage_min=0, coverage_max=3,
+                              coverage_thin_frac=0.0, uncovered_frac=0.4),
+                         [_frame() for _ in range(3)])
+    assert "uncovered" not in _kinds(notes)
+
+
+def test_a_ragged_mosaic_can_say_both_things_ranked_thin_first():
+    """They are different facts about different pixels — noisy-but-covered edges
+    and empty canvas — so a canvas with both keeps both, thin first."""
+    notes = stack_health(_run(coverage_min=0, coverage_max=30,
+                              coverage_thin_frac=0.4, uncovered_frac=0.3),
+                         [_frame() for _ in range(10)])
+    kinds = _kinds(notes)
+    assert kinds.index("coverage") < kinds.index("uncovered")
+
+
 def test_a_genuinely_ragged_mosaic_still_gets_the_note_and_says_how_much():
     # The 12/1/1-panel mosaic this was measured on: 62 % of the picture holds
     # under a quarter of the peak frame count.

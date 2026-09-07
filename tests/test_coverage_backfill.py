@@ -153,19 +153,146 @@ def test_an_empty_map_is_no_answer_rather_than_zero(tmp_path):
         proj.close()
 
 
-def test_a_run_that_already_has_a_share_is_left_exactly_alone(tmp_path):
-    """The common case — every run stacked since v0.320.2 — must cost nothing:
-    no map read, no write, and certainly no re-measurement."""
+def test_a_run_that_already_has_both_shares_is_left_exactly_alone(tmp_path,
+                                                                 monkeypatch):
+    """The common case — every run stacked since both columns existed — must
+    cost nothing: no map read, no write, and certainly no re-measurement."""
     fits_path = tmp_path / "out" / "m42.fits"
     # A map that would measure ⅔ if it were ever read.
     _write_map(fits_path.with_name("m42_framecov.fits"), _lopsided_coverage())
 
     proj, run_id = _project_with_run(
-        tmp_path, _run(fits_path=str(fits_path), coverage_thin_frac=0.004))
+        tmp_path, _run(fits_path=str(fits_path), coverage_thin_frac=0.004,
+                       uncovered_frac=0.02))
     try:
         row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+
+        def _no_read(*_a, **_k):  # pragma: no cover - the point is it isn't hit
+            raise AssertionError("a complete run must not open its coverage map")
+
+        monkeypatch.setattr("seestack.edit.proxy.load_frame_coverage", _no_read)
+        monkeypatch.setattr("seestack.edit.proxy.load_coverage", _no_read)
         assert backfill_coverage_thin_frac(proj, row) == pytest.approx(0.004)
         assert row.coverage_thin_frac == pytest.approx(0.004)
+        assert row.uncovered_frac == pytest.approx(0.02)
+    finally:
+        proj.close()
+
+
+# --- the empty-canvas share heals off the same read --------------------------
+
+
+def test_the_two_shares_are_healed_together_from_one_read(tmp_path):
+    """A run predating either column pays exactly one map read for both — and a
+    mosaic's empty corners are precisely what the thin share cannot report."""
+    from seestack.coverage_backfill import backfill_coverage_shares
+    from seestack.stack.stacker import uncovered_fraction
+
+    fits_path = tmp_path / "out" / "m42.fits"
+    cov = np.full((200, 200), 12.0, dtype=np.float32)
+    cov[:100, :100] = 0.0            # a quarter of the canvas: no frame reached
+    _write_map(fits_path.with_name("m42_framecov.fits"), cov)
+
+    reads = {"n": 0}
+
+    proj, run_id = _project_with_run(tmp_path, _run(fits_path=str(fits_path)))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert row.uncovered_frac is None
+
+        import seestack.edit.proxy as proxy
+
+        real = proxy.load_frame_coverage
+
+        def _counted(*a, **k):
+            reads["n"] += 1
+            return real(*a, **k)
+
+        proxy.load_frame_coverage = _counted  # type: ignore[assignment]
+        try:
+            backfill_coverage_shares(proj, row)
+        finally:
+            proxy.load_frame_coverage = real  # type: ignore[assignment]
+
+        assert reads["n"] == 1
+        assert row.uncovered_frac == pytest.approx(uncovered_fraction(cov))
+        assert row.uncovered_frac == pytest.approx(0.25)
+        assert row.coverage_thin_frac == pytest.approx(coverage_thin_fraction(cov))
+        # …and both are remembered, so the next read of the row is free.
+        again = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert again.uncovered_frac == pytest.approx(0.25)
+        assert again.coverage_thin_frac == pytest.approx(
+            coverage_thin_fraction(cov))
+    finally:
+        proj.close()
+
+
+def test_healing_only_the_missing_half_leaves_the_other_untouched(tmp_path):
+    """A run stacked between the two columns carries a thin share already; the
+    heal must fill in the empty share without re-measuring — or overwriting —
+    the number the stacker itself stamped."""
+    from seestack.coverage_backfill import backfill_coverage_shares
+
+    fits_path = tmp_path / "out" / "m42.fits"
+    cov = np.full((100, 100), 8.0, dtype=np.float32)
+    cov[:, :30] = 0.0
+    _write_map(fits_path.with_name("m42_framecov.fits"), cov)
+
+    proj, run_id = _project_with_run(
+        tmp_path, _run(fits_path=str(fits_path), coverage_thin_frac=0.123))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        backfill_coverage_shares(proj, row)
+        assert row.coverage_thin_frac == pytest.approx(0.123)
+        assert row.uncovered_frac == pytest.approx(0.3)
+    finally:
+        proj.close()
+
+
+def test_an_empty_map_leaves_the_empty_share_null_too(tmp_path):
+    """"Nothing covered" is not "100% black": a canvas with no picture on it
+    must leave both columns NULL, so every note stays silent."""
+    from seestack.coverage_backfill import backfill_coverage_shares
+
+    fits_path = tmp_path / "out" / "m42.fits"
+    _write_map(fits_path.with_name("m42_framecov.fits"),
+               np.zeros((50, 50), dtype=np.float32))
+
+    proj, run_id = _project_with_run(tmp_path, _run(fits_path=str(fits_path)))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        backfill_coverage_shares(proj, row)
+        assert row.uncovered_frac is None
+        assert row.coverage_thin_frac is None
+    finally:
+        proj.close()
+
+
+def test_a_read_only_database_still_answers_the_empty_share(tmp_path, monkeypatch):
+    """Same care point as the thin share: it writes from a read path, so a DB it
+    can't write costs the panel its advice — never an error at the user."""
+    import sqlite3
+
+    from seestack.coverage_backfill import backfill_coverage_shares
+
+    fits_path = tmp_path / "out" / "m42.fits"
+    cov = np.full((100, 100), 6.0, dtype=np.float32)
+    cov[:40] = 0.0
+    _write_map(fits_path.with_name("m42_framecov.fits"), cov)
+
+    proj, run_id = _project_with_run(tmp_path, _run(fits_path=str(fits_path)))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+
+        def _refuse(*_a, **_k):
+            raise sqlite3.OperationalError("attempt to write a readonly database")
+
+        monkeypatch.setattr(Project, "set_stack_uncovered_frac", _refuse)
+        backfill_coverage_shares(proj, row)
+        assert row.uncovered_frac == pytest.approx(0.4)
+        monkeypatch.undo()
+        assert next(r for r in proj.iter_stack_runs()
+                    if r.id == run_id).uncovered_frac is None
     finally:
         proj.close()
 
