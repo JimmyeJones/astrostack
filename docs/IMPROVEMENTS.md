@@ -7551,6 +7551,42 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Performance (only with a measurement)
 
+- **LEAD, MEASURED (Builder 2026-09-07, the residue v0.374.8 deliberately left) — `/stack-estimate` and
+  `/rejection-outlook` are still **~4.7 s** on the owner's 5,477-sub target, and it is now *all*
+  `wcs_from_text`.** *(Pillar: friendliness / performance — PRIORITY 3; size M; **do not blind-pick either
+  option below**.)* v0.374.8 took `mosaic.compute_mosaic_canvas` from 13.87 s to 4.75 s by vectorising the
+  footprint transform. What is left is measured and is one thing: `wcs_from_text` costs **0.755 ms** a frame
+  and is called once per sub, so **5,477 × 0.755 ms ≈ 4.1 s** of the remaining 4.75 s. It is not the parsing
+  — `Header.fromstring` alone is **0.042 ms** — it is `astropy.wcs.WCS()` construction, which re-serialises
+  and verifies the header (257,434 `Card._verify` calls across one canvas computation). `WCS(..., fix=False)`
+  buys 4 %; `relax=False` buys 20 % and changes what keywords are accepted, so neither is the answer.
+  **This matters because of where it runs:** the Stack page fires `/stack-estimate` **twice** and both queries
+  carry the drizzle and canvas-mode options in their query key, so every toggle of those controls re-pays it,
+  and `/rejection-outlook` runs on every Target-page load.
+  **Four shapes — (a) and (b) touch the engine and need care; (c) and (d) are frontend-side and smaller:**
+  (a) *Fast construction.* Build the WCS by assigning `ctype`/`crval`/`crpix`/`cd` onto a bare `WCS(naxis=2)`
+  — which is exactly what `mosaic.compute_mosaic_canvas` already does for the output canvas — for the headers
+  **we ourselves wrote** (`wcs_to_text`), falling back to the full parse for anything carrying SIP, `PV`
+  distortion, a non-TAN projection or extra axes. Needs the fallback to be conservative and a test that both
+  paths agree on a real ASTAP sidecar, not only on a synthetic. Measure it before committing: if a bare
+  `WCS(naxis=2)` plus assignment is not markedly cheaper than `WCS(header)`, this shape is worthless.
+  (b) *Memoise the canvas per target*, keyed on a frame-set fingerprint (count + max rowid + accept/solve
+  state). Cheapest by far, but it is the staleness trade **v0.374.6 explicitly warned about** for the Library
+  page — a stale canvas estimate after a scan is its own bug — so it needs the fingerprint to be genuinely
+  complete, not "good enough".
+  **(c) is the smallest and was checked rather than guessed** — `Stack.tsx` runs two queries and they
+  *do* legitimately differ (`stack-estimate` uses the user's current options; `stack-estimate-drizzle` asks a
+  fixed `drizzle: true, scale 1.5` feasibility question, enabled only when drizzle is off and ≥200 frames are
+  accepted). For the owner — thousands of subs, drizzle off by default — **both fire**, so the Stack page
+  pays ~9.3 s on load. Folding them into one request that answers both sizings from **one** canvas
+  computation halves that without touching the engine.
+  **(d), and the sharpest of the four:** the first query's key carries `sigma_kappa`, `sigma_clip`,
+  `min_max_reject`, `min_max_reject_count` and `auto_reject` — **none of which affect the canvas**; only
+  `drizzle*` and `mosaic_canvas` do. They are in the key because the same endpoint also answers
+  `rejection_reach`. So nudging the κ slider re-pays a 4.7 s canvas computation purely to refresh a rejection
+  note. Splitting the *rejection* answer out of `/stack-estimate` (or memoising the canvas half on the
+  canvas-affecting options alone) would make those toggles instant and is independent of (a) and (b).
+
 - **PERF WATCH ITEM (Builder 2026-09-04, introduced knowingly by the v0.347.0 video-demosaic fix) — a raw
   solar capture now pays a full `bilinear_debayer` per decoded frame, in *both* passes, including the ~70 %
   of frames pass 2 throws away.** *(Pillar: performance — size S for the cheap half, M for the rest.
@@ -8361,6 +8397,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.374.8** — Performance, found by running the app at the owner's scale (no behaviour change): **two endpoints took ~14 seconds each on a 5,477-sub target.** Sweeping all 36 per-target read-only GETs (enumerated from the app's own OpenAPI schema) against a 9-panel, 5,477-sub mosaic found the distribution sane except for `/stack-estimate` (**13.8 s** — the Stack page fires it *twice* and refetches on every drizzle/canvas toggle) and `/rejection-outlook` (**13.3 s** — the Target page NoticeBoard, every load). Both run `mosaic.compute_mosaic_canvas`, which calls `wcs_io.footprint_radec_deg` once per **sub**, and that transformed the four corners with four separate `pixel_to_world` calls — each building a whole `SkyCoord`. One vectorised `all_pix2world` instead: **1.299 ms → 0.011 ms** a frame (118×), `compute_mosaic_canvas` **13.87 s → 4.75 s** for the identical `3494×2470` canvas, the two endpoints **→ 4.66 s / 4.77 s**, the whole 36-endpoint sweep **28.3 s → 10.6 s**. Deviation from the old path over 200 WCSs: **0.0**. Gated on a new `_is_plain_radec` so a galactic WCS is never read as RA/Dec (it keeps the old path, which declines it), and fast-path failures fall through so a frame with no size still answers `None`. Every real stack benefits too. Entry in [`SHIPPED.md`](SHIPPED.md); the residual `wcs_from_text` cost is filed below with its number.
 - **v0.374.7** — Performance, measured on the owner's own shape (no behaviour change): **the shared mosaic-panel gate stopped clustering one row per sub.** `seestack/stack/pointings.py::cluster_pointings` is single-linkage union-find, **O(n²) in pure Python**, and `pointing_groups` — the one gate QC grading, quality weighting, photometric normalization, the transparency baseline, the session recap and bulk-select all delegate to — was handed a whole target's frame list, as was `detect_mixed_pointings` (the pre-flight of every unattended stack once `mixed_pointing_guard` is on). `mosaicmap` had already solved this for itself in v0.352.x by folding onto a 0.01° grid; the fold now lives in the engine as `fold_pointings` + `_cluster_distinct`, so all seven paths get it. On a 9-panel, **5,477-sub** mosaic (441 distinct cells): `pointing_groups` **1.152 s → 0.012 s** (96×), `detect_mixed_pointings` **2.650 s → 0.021 s** (126×) — ~3.5 s off a stack (three calls), and one call off every scan and two Target-page endpoints. **Nothing moves:** 0.01° is 25× below `PANEL_LINK_DIST_DEG` and 300× below `LINK_DIST_DEG`, every input index gets its own cell's label, `eligible`/`weights` are summed per cell, and the mixed-pointing verdict carries each cell's true sub count and true summed unit vector so `majority`/`others`/`separation_deg` stay the unfolded numbers. Verified by sweep — **664 configurations** with panel separations straddling both link distances exactly, zero mismatches against the rule spelled out on `cluster_pointings`. Two rails (a link distance near the grid, and an already-distinct set) fall back to the exact clustering. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.374.6** — Backlog curation, measured not guessed (no code change): **the standing "the Library page walks the library twice per refresh" perf watch item is closed — it costs ~196 ms, so caching it would buy nothing and risk a stale cleanup list.** The entry (filed with v0.319.3–4) asked for exactly this before anyone added a `registry_cache` layer. Built the owner's own shape — 6 targets / ~25k frame rows, the confirmed `M 3` + `M 3_SUB` duplicate pair at 5,477 + 5,455, the genuine `NGC 6888` two-folder pair at 4,815 + 3,110, and a mosaic pair, all plate-solved so both endpoints actually do their confirmation work — and timed the two endpoints the page polls together: **cleanup-suggestions ~106 ms, merge-suggestions ~105 ms, one refresh ~196 ms**, against `/api/targets` at 2 ms. Half of that is the duplicated walk, so the whole prize is ~100 ms on a page that is not polled in a loop — well under the staleness bug the entry itself warns the cache would introduce. Entry cut to [`SHIPPED.md`](SHIPPED.md) with the method, so nobody re-measures it.
 - **v0.374.5** — Coverage gap, test-only: **every read-only endpoint is now pinned to *answer* on a brand-new install and on a target that has never been stacked.** Those two states are the ones a beginner meets first and the ones the suite tested least — nearly every `tests/webapp/` test builds, solves and stacks a library before it asks anything — so a divide-by-zero-frames or an `[0]` into an empty run list would have surfaced first on somebody's first evening. `tests/webapp/test_first_run_endpoints.py` sweeps **90** endpoints enumerated from the app's **own OpenAPI schema** (52 parameterless + 38 per-target), so a route added next month is covered the day it is added, and asserts only *no 5xx* — 404 and 422 are honest answers here, and each endpoint's own tests pin what it should say. Guarded against rotting into a vacuous pass: each sweep asserts a floor on how many paths it found, and a third test points the helper at a deliberately-crashing route and requires it to report exactly that one. All 90 answer on `main` today — a net, not a fix. Entry in [`SHIPPED.md`](SHIPPED.md).
