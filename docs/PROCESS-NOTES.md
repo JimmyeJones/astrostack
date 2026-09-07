@@ -67,8 +67,8 @@ once, on purpose). Nothing was invented to fill the gap.
 **Dogfood — clean, twice, and the second one is new.** `scripts/agent-dogfood.sh`
 on the sample-loaded app: **nothing overflowing, no console errors**, tallest page
 still the Target page at **3,040 px on a phone** (3,014 px at v0.338.1 — the
-seventh baseline, and the sixth in a row saying *do not open a speculative IA
-slice*).
+seventh page-height baseline, and it says what the last few have: *do not open a
+speculative IA slice*).
 
 **Then the same probe against an app with no data at all** — a first-run install,
 which every dogfood measurement before this one has missed, because the script
