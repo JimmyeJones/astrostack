@@ -11,7 +11,7 @@ import {
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
@@ -43,10 +43,14 @@ import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { recentreCropRect, recentreKeptLabel } from "../components/editor/recentreCrop";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
-  cropCoveragePct, removeCropOps }
+  cropCoveragePct, removeCropOps, type TrimCrop }
   from "../components/editor/mosaicTrim";
 import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps, reshapesFrame }
   from "../components/editor/splitCompare";
+import { applyCropDrag, bigCropNote, cropDragBlockedReason, cropFromParams, cropHandlePositions,
+  cropKeptLabel, cropToParams, isFullFrame, pointerFraction, FULL_CROP,
+  type CropDragStart, type CropHandle }
+  from "../components/editor/cropDrag";
 import { LookComparePicker, type LookChoice } from "../components/editor/LookComparePicker";
 import { pngProgressLabel } from "../components/editor/pngProgress";
 import { isJobPollAbort, pollJobUntilDone } from "../components/editor/pollJob";
@@ -568,17 +572,41 @@ export function EditorView() {
   // whole-recipe Split. Reuses the same `withoutOpPreview` render and the shared
   // `splitFrac`/divider drag machinery.
   const [soloSplit, setSoloSplit] = useState(false);
-  useEffect(() => { setSoloExclude(false); setSoloSplit(false); }, [selected]);
+  // Drag-to-crop: while an enabled `geometry.crop` op is selected, the preview
+  // swaps to the recipe *with that crop bypassed* — the image entering it — and a
+  // draggable rectangle goes over the top, so aiming a crop is a drag rather than
+  // four fractions typed against a downscaled proxy. Opens by default when the op
+  // is selected (that is what makes it discoverable); "Done cropping" leaves it,
+  // and picking another op resets it for next time, like the compare modes.
+  // See `cropDrag.ts` for the arithmetic and for why the bypassed render is the
+  // right thing to draw on.
+  const [cropDragOn, setCropDragOn] = useState(true);
+  useEffect(() => { setSoloExclude(false); setSoloSplit(false); setCropDragOn(true); }, [selected]);
   const selForSolo = ops.find((o) => o.uid === selected) ?? null;
   const soloActive = soloExclude && !!selForSolo && selForSolo.enabled;
+  const cropDragOp = selForSolo?.id === "geometry.crop" && selForSolo.enabled
+    ? selForSolo : null;
+  const cropDragBlocked = cropDragOp ? cropDragBlockedReason(ops, cropDragOp.uid) : null;
+  // Wanted (so the bypassed render is fetched); whether it is *shown* also depends
+  // on no other overlay owning the preview box — see `cropDragActive` below.
+  const cropDragWanted = cropDragOn && !!cropDragOp && !cropDragBlocked;
   // Whether the without-op render is wanted by either per-op compare mode (full
   // swap or split), so the query fetches for both.
   const soloWanted = (soloExclude || soloSplit) && !!selForSolo && selForSolo.enabled;
+  // Key the bypassed render on the *other* ops only. A disabled op contributes
+  // nothing to a render, so its own params can't change this image — keying on the
+  // whole recipe (`dKey`) re-fetched an identical picture every time the user
+  // nudged the very op being bypassed, which for drag-to-crop is every drag.
+  const withoutOpKey = useMemo(
+    () => JSON.stringify(dRecipe.ops.filter((o) => o.uid !== selected)
+      .map((o) => ({ id: o.id, enabled: o.enabled, params: o.params }))),
+    [dRecipe, selected],
+  );
   const withoutOpPreview = useQuery({
-    queryKey: ["edit-without-op", safe, rid, dKey, selected, bust],
+    queryKey: ["edit-without-op", safe, rid, withoutOpKey, selected, bust],
     gcTime: 0,  // see the preview query — blob URLs are revoked, never re-serve a dead one
     placeholderData: keepPreviousData,  // see `basePreview` — no per-debounce flash
-    enabled: soloWanted && !!opsSchema.data && !saved.isLoading,
+    enabled: (soloWanted || cropDragWanted) && !!opsSchema.data && !saved.isLoading,
     queryFn: async ({ signal }) => {
       const withoutRecipe: Recipe = {
         ops: dRecipe.ops.map((o) => (o.uid === selected ? { ...o, enabled: false } : o)),
@@ -1112,12 +1140,20 @@ export function EditorView() {
   // proposed rectangle, so keep the old fall-back there (and don't let a coverage
   // failure block the crop UI); for a genuine A/B overlay, surface the error.
   const overlayError = overlay?.q.isError && !cropPreview ? overlay : null;
+  // Drag-to-crop owns the preview box like any other overlay: only when its mode
+  // is on, the op is draggable, and nothing else has the box.
+  const cropDragActive = cropDragWanted && !overlay && !cropPreview
+    && !splitCompare && !lookSplit;
   // No silent fall-back to the edited preview for A/B overlays: while an overlay
   // is on we show only that overlay's own data (a loader while it loads, an error
   // if it fails) so the caption never mislabels the edited image as the overlay.
-  const shownSrc = overlay
-    ? (overlay.q.data ?? (cropPreview ? preview.data : undefined))
-    : preview.data;
+  // Drag-to-crop shows the *bypassed* render for the same reason — falling back to
+  // the cropped preview here would draw the rectangle on the wrong picture.
+  const shownSrc = cropDragActive
+    ? withoutOpPreview.data
+    : overlay
+      ? (overlay.q.data ?? (cropPreview ? preview.data : undefined))
+      : preview.data;
   // Split before/after is its own mode: it renders over the edited preview
   // (`preview.data`, i.e. no `overlay`), so it's only live when no other overlay
   // and no crop proposal owns the box.
@@ -1143,6 +1179,60 @@ export function EditorView() {
     : "Original";
   const splitRightLabel = soloSplitActive ? "With" : "Edited";
   const anySplitActive = splitActive || soloSplitActive || lookSplitActive;
+
+  // --- drag-to-crop ---------------------------------------------------------
+  // The rectangle is held locally while the pointer is down and only written back
+  // to the op on release: a drag then costs zero renders (one undo step, no
+  // per-pixel re-fetch of a mosaic-sized preview) and still feels immediate.
+  const [cropDragStart, setCropDragStart] = useState<CropDragStart | null>(null);
+  const [liveCrop, setLiveCrop] = useState<TrimCrop | null>(null);
+  useEffect(() => { setCropDragStart(null); setLiveCrop(null); }, [selected]);
+  const cropRect = liveCrop ?? cropFromParams(cropDragOp?.params);
+  // The rectangle's coordinates are fractions of the picture *underneath* it, so
+  // the box it is placed in must have that picture's exact aspect. The bypassed
+  // render's dimensions are not among the ones the histogram reports (they are the
+  // recipe's, with this crop applied), so measure them off the loaded image —
+  // which is right whatever earlier ops did to the frame — and hold the rectangle
+  // back until the measurement belongs to the image actually on screen.
+  const [shownDims, setShownDims] = useState<{ w: number; h: number; src: string } | null>(null);
+  const cropBoxDims = cropDragActive && shownDims && shownDims.src === shownSrc
+    ? shownDims : null;
+  const cropDragReady = cropDragActive && !!shownSrc && !!cropBoxDims;
+  const setCrop = (crop: TrimCrop) => {
+    if (!cropDragOp) return;
+    setParams(cropDragOp.uid, { ...cropDragOp.params, ...cropToParams(crop) });
+  };
+  // One set of pointer handlers serves the eight edge/corner handles and the
+  // "slide the whole rectangle" body; only the handle name differs. Pointer
+  // capture keeps the drag alive when the cursor outruns the small handle.
+  const cropPointerProps = (handle: CropHandle) => ({
+    style: { touchAction: "none" as const },
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
+      if (!cropDragOp) return;
+      const r = previewBoxRef.current?.getBoundingClientRect();
+      if (!r) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const { fx, fy } = pointerFraction(e.clientX, e.clientY, r);
+      const crop = cropFromParams(cropDragOp.params);
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* jsdom */ }
+      setCropDragStart({ handle, crop, fx, fy });
+      setLiveCrop(crop);
+    },
+    onPointerMove: (e: ReactPointerEvent<HTMLElement>) => {
+      if (!cropDragStart) return;
+      const r = previewBoxRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const { fx, fy } = pointerFraction(e.clientX, e.clientY, r);
+      setLiveCrop(applyCropDrag(cropDragStart, fx, fy));
+    },
+    onPointerUp: (e: ReactPointerEvent<HTMLElement>) => {
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* jsdom */ }
+      if (cropDragStart && liveCrop) setCrop(liveCrop);
+      setCropDragStart(null);
+      setLiveCrop(null);
+    },
+  });
   // Entering the *trim* preview auto-shows the coverage heatmap so the proposed
   // crop is drawn over exactly what it's addressing — you can see it lands on the
   // well-covered interior. Remember the prior overlay state so Cancel/Apply
@@ -1441,12 +1531,25 @@ export function EditorView() {
                   // would put black bars around the trimmed preview and mis-align
                   // the Split divider / trim rectangle. Fall back to the raw proxy
                   // dims on an older backend that doesn't send render_* yet.
-                  ...previewBoxStyle(hist.data?.render_width ?? hist.data?.proxy_width,
-                                     hist.data?.render_height ?? hist.data?.proxy_height) }}>
+                  // While drag-to-crop owns the box the picture is the *bypassed*
+                  // render, whose dims the histogram doesn't report — measure them
+                  // off the image itself so the rectangle can't land offset.
+                  ...(cropBoxDims
+                    ? previewBoxStyle(cropBoxDims.w, cropBoxDims.h)
+                    : previewBoxStyle(hist.data?.render_width ?? hist.data?.proxy_width,
+                                      hist.data?.render_height ?? hist.data?.proxy_height)) }}>
                   <img src={shownSrc} alt="preview"
                     style={{ display: "block", width: "100%", height: "100%",
-                             objectFit: "contain", cursor: "zoom-in" }}
-                    onClick={() => setLightbox(true)} />
+                             objectFit: "contain",
+                             cursor: cropDragActive ? "default" : "zoom-in" }}
+                    onLoad={(e) => {
+                      const el = e.currentTarget;
+                      if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+                        setShownDims({ w: el.naturalWidth, h: el.naturalHeight,
+                                       src: el.getAttribute("src") ?? "" });
+                      }
+                    }}
+                    onClick={() => { if (!cropDragActive) setLightbox(true); }} />
                   {/* Split before/after: the "before" image (the Original for the
                       whole-recipe split, or the without-this-op render for the
                       per-op split) clipped to the left of a draggable divider, over
@@ -1507,6 +1610,34 @@ export function EditorView() {
                       border: "2px dashed #f0e", pointerEvents: "none",
                       outline: "9999px solid rgba(0,0,0,0.35)" }} />
                   ) : null}
+                  {/* Drag-to-crop: the rectangle the user aims by hand, over the
+                      picture as it enters the Crop op. The body slides it, the
+                      eight handles resize it, and everything outside is dimmed so
+                      what is being kept reads at a glance. Only once the image
+                      underneath has been measured (see `cropBoxDims`) — a
+                      rectangle placed on an unmeasured box could be offset. */}
+                  {cropDragReady ? (
+                    <>
+                      <div aria-label="crop rectangle" {...cropPointerProps("move")}
+                        style={{ position: "absolute", ...trimRectStyle(cropRect),
+                          boxSizing: "border-box", border: "2px solid rgba(255,255,255,0.95)",
+                          boxShadow: "0 0 3px rgba(0,0,0,0.8)", cursor: "move",
+                          outline: "9999px solid rgba(0,0,0,0.45)", touchAction: "none",
+                          zIndex: 4 }} />
+                      {/* Handles are siblings of the rectangle, not children: their
+                          positions are fractions of the *picture*, so nesting them
+                          would re-base every percentage on the rectangle. */}
+                      {cropHandlePositions(cropRect).map((h) => (
+                        <div key={h.handle} aria-label={`crop handle ${h.handle}`}
+                          {...cropPointerProps(h.handle)}
+                          style={{ position: "absolute", left: h.left, top: h.top,
+                            width: 14, height: 14, marginLeft: -7, marginTop: -7,
+                            background: "rgba(255,255,255,0.95)", borderRadius: 3,
+                            boxShadow: "0 0 3px rgba(0,0,0,0.8)", cursor: h.cursor,
+                            touchAction: "none", zIndex: 5 }} />
+                      ))}
+                    </>
+                  ) : null}
                 </div>
               ) : (
                 <Center h={240}><Loader /></Center>
@@ -1530,6 +1661,15 @@ export function EditorView() {
                   background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
                   Proposed crop{showCoverage ? " over coverage" : ""} — {cropProposal === "recentre"
                     ? recentreKeptLabel(proposedCrop) : trimKeptLabel(proposedCrop)}
+                </Text>
+              ) : null}
+              {/* Drag-to-crop's own caption: what the rectangle is keeping, live
+                  while it is dragged, in the same place every other "what am I
+                  looking at" label sits. */}
+              {cropDragReady ? (
+                <Text size="xs" c="white" style={{ position: "absolute", left: 12, top: 10,
+                  background: "rgba(0,0,0,0.6)", padding: "2px 8px", borderRadius: 4 }}>
+                  {cropKeptLabel(cropRect)}
                 </Text>
               ) : null}
               {/* Coverage heatmap legend: the overlay is a viridis map (dark blue =
@@ -1598,6 +1738,26 @@ export function EditorView() {
                   {showMask ? "Hide mask" : "Star mask"}
                 </Button>
               </Tooltip>
+              {/* Drag-to-crop's own switch, next to the other preview modes and
+                  only on the op it belongs to. It opens by itself when the Crop op
+                  is selected (that is the point — nobody hunts for a mode they
+                  don't know exists); this is how you put it away again. */}
+              {cropDragOp && !cropDragBlocked ? (
+                <Tooltip multiline w={240} withArrow
+                  label="Drag the white handles on the picture to choose what to keep. While this is on, the preview shows the picture as it goes into the crop, so you can see what you're cutting off.">
+                  <Button size="xs" variant={cropDragActive ? "filled" : "default"}
+                    color="grape" leftSection={<IconCrop size={14} />}
+                    disabled={!preview.data || cropPreview}
+                    onClick={() => setCropDragOn((s) => {
+                      if (!s) { setShowBase(false); setShowMask(false); setShowCoverage(false);
+                        setSoloExclude(false); setSoloSplit(false); setSplitCompare(false);
+                        setLookSplit(false); }
+                      return !s;
+                    })}>
+                    {cropDragActive ? "Done cropping" : "Drag to crop"}
+                  </Button>
+                </Tooltip>
+              ) : null}
               <Button size="xs" variant={showBase ? "filled" : "default"}
                 disabled={!preview.data || showMask || showCoverage || splitCompare || lookSplit || cropPreview}
                 onClick={() => setShowBase((s) => { if (!s) { setSoloExclude(false); setSoloSplit(false); setLookSplit(false); } return !s; })}>
@@ -2263,6 +2423,39 @@ export function EditorView() {
                     </Alert>
                   );
                 })()}
+                {/* Crop: say where the real control is. The four Left/Top/Right/
+                    Bottom sliders below are fractions of the frame, which is an
+                    honest way to store a crop and a hostile way to aim one — so
+                    point at the rectangle on the picture, keep a one-click way
+                    back to the whole frame, and be honest when a hard crop is
+                    about to cost real pixels. When dragging can't be offered
+                    (something after this op reshapes the frame) say why, rather
+                    than showing a rectangle that would be in the wrong place. */}
+                {selectedOp.id === "geometry.crop" ? (() => {
+                  const crop = cropFromParams(selectedOp.params);
+                  const note = bigCropNote(crop);
+                  return (
+                    <Alert color="blue" variant="light" py={6} mb="xs"
+                      icon={<IconCrop size={16} />}>
+                      <Text size="xs">
+                        {cropDragBlocked
+                          ? cropDragBlocked
+                          : selectedOp.enabled
+                            ? "Drag the white handles on the picture to choose what to keep — "
+                              + "the sliders below follow along."
+                            : "Turn this step on (the checkbox in the list) to drag the crop "
+                              + "on the picture."}
+                      </Text>
+                      {note ? <Text size="xs" mt={4} c="dimmed">{note}</Text> : null}
+                      <Button size="compact-xs" variant="light" mt={6}
+                        disabled={isFullFrame(crop)}
+                        onClick={() => setParams(selectedOp.uid,
+                          { ...selectedOp.params, ...cropToParams(FULL_CROP) })}>
+                        Back to the whole picture
+                      </Button>
+                    </Alert>
+                  );
+                })() : null}
                 <OpParamPanel spec={specs[selectedOp.id]} params={selectedOp.params}
                   histogram={hist.data}
                   curveGhost={curveGhost} onBakeCurve={bakeAutoCurve}
