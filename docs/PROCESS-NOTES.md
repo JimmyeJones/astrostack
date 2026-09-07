@@ -18,6 +18,71 @@ is a queue.
 
 ---
 
+## 2026-09-07 (Builder, branch `claude/sweet-babbage-25fa4c`) — two measured performance/friendliness fixes (v0.376.1, v0.376.2) and one copy change declined *because* it was measured
+
+**Baseline.** `source scripts/agent-setup.sh`; full suite headless green before
+any edit — **5071 passed, 2 skipped** (21m46s); `tsc` clean, `vitest` 3290 across
+238 files, `vite build` clean.
+
+**What was picked and why.** The Bugs section is still in the state AGENTS.md §1
+describes — every open entry gated on data an agent cannot supply, or a
+stand-down that already carries its numbers — and the last run shipped the
+⭐ wishlist beginner feature, so the cadence did not owe another one. What *was*
+ready was the four-shape performance lead whose shape (a) shipped as v0.374.9:
+shapes (b)–(d) were re-sized against the new number, as that entry instructs, and
+**(c)** was taken. The Sky-map coverage-mask idea was taken as the second task
+because its own gate — "measure before building" — was answerable from the repo.
+
+**The lesson of the run: the measurement decided all three outcomes, in three
+different directions.**
+
+1. **v0.376.1 (shape (c)) — measured, then built.** The Stack page fired two
+   `stackEstimate` requests, and the whole cost of a sizing is
+   `compute_mosaic_canvas` (one WCS read per sub), which the second request
+   re-derived identically because it asked about a different *drizzle scale*.
+   Split into `estimate_stack_basis` + `estimate_stack_from_basis`: **2.18 s →
+   1.13 s** on a 9-panel, 5,477-sub mosaic, and a second sizing off a held basis
+   costs **44 µs**.
+2. **v0.376.2 (the Sky-map idea) — measured, and the measurement split the
+   entry in half.** `stack_coverage_mask` on a 104 MB (3494×2470×3) master costs
+   **14–23 ms warm**, which *declines* the entry's shape (b) (a composed-RGBA
+   cache would buy tens of milliseconds and own an invalidation bug). It says
+   nothing about the case the entry was really about — those megabytes come off
+   a NAS, per target, on every visit — so shape (a) shipped: a strong `ETag` and
+   `private, no-cache` in place of `no-store`.
+3. **The "say the thin edge looks dark" follow-up — measured, and declined.** The
+   backlog left it as "four words inside the existing sentence". The statistic
+   behind the sentence, `stacker.coverage_thin_fraction`, **excludes uncovered
+   pixels by construction**: `count((cov > 0) & (cov < 0.25 * peak))` over
+   `count(cov > 0)`. Probed with the thin fringe held at 500 px and the black
+   region grown, the thin count stays **500** while the reported share moves
+   0.0500 → 0.0625 → 0.0833 → 0.1250 purely because the covered denominator
+   shrinks. The black band is in neither term, so the four words would have been
+   false. Recorded in the entry with the numbers so nobody ships them.
+
+**A trap worth naming for the next run.** `estimate_stack` returns
+`budget_bytes` derived from the box's *available* memory when
+`memory_budget_gb=None` — so "the refactor returns exactly what the original
+returned" cannot be asserted across two calls at the default budget; the number
+moves by a few kilobytes for reasons that have nothing to do with the change.
+The equivalence test parametrises over two **explicit** budgets instead. Anything
+comparing two `StackEstimate`s has the same problem.
+
+**A shape that paid off.** Both shipped tasks are "the answer is fully determined
+by inputs cheaper than the answer" — a canvas determined by the frames and
+`mosaic_canvas`; an overlay determined by two files' `mtime:size` plus the saved
+orientation. Naming those inputs in code (`StackCanvasBasis`, `_file_stamp` +
+`_derived_image_etag`) is what makes the saving safe, and in the first case a
+test now *enforces* the claim (a basis refuses options whose `mosaic_canvas`
+disagrees with it). Four sibling `no-store` image endpoints were left open on
+purpose: same shape, different invalidation inputs, none measured — one at a
+time, with the inputs enumerated, not as a sweep.
+
+**Collisions:** none. `origin/main` was unchanged (`984e8576`) from the start of
+the run through the merge.
+
+---
+
 ## 2026-09-07 (Builder, branch `claude/sweet-babbage-rb61y0`) — shipped the ⭐ "My wishlist" beginner feature whole (v0.375.0 + v0.376.0); dogfood CLEAN; one upgrade-safety decision taken *against* the backlog entry
 
 **Baseline.** `source scripts/agent-setup.sh`; full suite headless green before
