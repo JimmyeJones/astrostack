@@ -854,7 +854,7 @@ describe("EditorView", () => {
     // crop has loaded, the adopt captures an empty geometry and the crop is lost.
     // Under full-suite load the picker enables before the recipe seeds, which raced
     // this (passed in isolation, flaked in CI) — gate on the crop being present.
-    expect(await screen.findByText("Crop")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Select Crop")).toBeInTheDocument();
 
     const picker = await screen.findByRole("button", { name: "Compare a look" });
     await waitFor(() => expect(picker).not.toBeDisabled());
@@ -868,7 +868,7 @@ describe("EditorView", () => {
     // (before the fix the crop was dropped — the adopted frame no longer matched the
     // split preview).
     expect(await screen.findByText("Curves")).toBeInTheDocument();
-    expect(await screen.findByText("Crop")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Select Crop")).toBeInTheDocument();
   });
 
   it("offers a Coverage overlay on a mosaic and toggles it", async () => {
@@ -1545,7 +1545,7 @@ describe("EditorView", () => {
     renderEditor();
 
     // Selecting the Crop op disables both per-op compare buttons…
-    fireEvent.click(await screen.findByText("Crop"));
+    fireEvent.click(await screen.findByLabelText("Select Crop"));
     expect(await screen.findByRole("button", { name: "Without this op" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Split this op" })).toBeDisabled();
 
@@ -2257,10 +2257,11 @@ describe("EditorView", () => {
     await waitFor(() =>
       expect(screen.getByText(/Proposed crop — keeps the central 60% × 80%/)).toBeInTheDocument());
     expect(screen.queryByText("Left")).not.toBeInTheDocument();
-    // Apply commits the crop: it's inserted after the stretch and selected, so
-    // "Crop" shows in both the pipeline row and the selected-op panel header...
+    // Apply commits the crop: it's inserted after the stretch and selected, so it
+    // shows as a pipeline row (addressed by its own aria-label, since "Crop" is
+    // also the header button that adds one by hand)...
     fireEvent.click(screen.getByRole("button", { name: /Apply crop/ }));
-    await waitFor(() => expect(screen.getAllByText("Crop").length).toBeGreaterThan(1));
+    await waitFor(() => expect(screen.getByLabelText("Select Crop")).toBeInTheDocument());
     // ...and its adjustable bounds panel is shown; the preview caption is gone.
     expect(screen.getByText("Left")).toBeInTheDocument();
     expect(screen.queryByText(/Proposed crop/)).not.toBeInTheDocument();
@@ -2310,7 +2311,7 @@ describe("EditorView", () => {
     expect(screen.queryByText("Left")).not.toBeInTheDocument();
     // Apply commits it as an ordinary, adjustable Crop op.
     fireEvent.click(screen.getByRole("button", { name: /Apply crop/ }));
-    await waitFor(() => expect(screen.getAllByText("Crop").length).toBeGreaterThan(1));
+    await waitFor(() => expect(screen.getByLabelText("Select Crop")).toBeInTheDocument());
     expect(screen.getByText("Left")).toBeInTheDocument();
     expect(screen.queryByText(/Proposed crop/)).not.toBeInTheDocument();
   });
@@ -2352,6 +2353,254 @@ describe("EditorView", () => {
     await waitFor(() => expect(client.api.stackFraming).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: /Re-centre/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/Proposed crop/)).not.toBeInTheDocument();
+  });
+
+  // --- Drag-to-crop: aiming the Crop op by dragging a rectangle on the picture
+  // instead of typing four fractions into Left/Top/Right/Bottom. The rectangle is
+  // drawn over the render of the recipe with *this* crop bypassed (its own input),
+  // which is why the mode declines when something after it reshapes the frame.
+  const ROTATE: EditOp = {
+    id: "geometry.rotate", label: "Rotate", group: "stars_geometry", stage: "nonlinear",
+    proxy_safe: true, is_stretch: false, help: "Rotate.",
+    params: [{ key: "angle", label: "Angle (°)", type: "float", group: "simple",
+               default: 0, min: -180, max: 180, step: 0.5, options: null, help: null,
+               depends_on: null }],
+  };
+
+  /** jsdom never loads a real image and reports a 0×0 layout, so the two things
+   *  the crop overlay is measured against have to be supplied by hand: the
+   *  preview box's rectangle, and the picture's natural size (which the overlay
+   *  waits for before drawing, so it can never land offset). */
+  function stubPreviewGeometry(box = { left: 0, top: 0, width: 400, height: 300 }) {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      ...box, right: box.left + box.width, bottom: box.top + box.height,
+      x: box.left, y: box.top, toJSON: () => ({}),
+    } as DOMRect);
+  }
+  async function loadPreviewImage(w = 400, h = 300) {
+    const img = await screen.findByAltText("preview");
+    Object.defineProperty(img, "naturalWidth", { value: w, configurable: true });
+    Object.defineProperty(img, "naturalHeight", { value: h, configurable: true });
+    fireEvent.load(img);
+  }
+  function mockCropRecipe(ops: client.OpInstance[], specs: EditOp[] = [STRETCH, CROP]) {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue(specs);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops, base_run_id: 3 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+  }
+  const cropOp = (params: Record<string, number>): client.OpInstance =>
+    ({ uid: "cr1", id: "geometry.crop", enabled: true, params });
+  /** jsdom has no `PointerEvent`, so `fireEvent.pointerDown` falls back to a bare
+   *  `Event` and silently drops `clientX`/`clientY` — the two things a drag is
+   *  made of. Dispatch a `MouseEvent` under the pointer event's name instead:
+   *  React reads the coordinates off the native event either way. */
+  const pointer = (el: Element, type: string, clientX: number, clientY: number) =>
+    fireEvent(el, new MouseEvent(type, { clientX, clientY, bubbles: true, cancelable: true }));
+
+  it("draws a draggable crop rectangle over the picture when the Crop op is selected",
+    async () => {
+      mockCropRecipe([cropOp({ x0: 0.2, y0: 0.1, x1: 0.8, y1: 0.9 })]);
+      stubPreviewGeometry();
+
+      renderEditor();
+      fireEvent.click(await screen.findByLabelText("Select Crop"));
+      await loadPreviewImage();
+
+      const rect = await screen.findByLabelText("crop rectangle");
+      // Placed straight onto the picture from the op's own fractions.
+      expect(rect).toHaveStyle({ left: "20.00%", top: "10.00%",
+                                 width: "60.00%", height: "80.00%" });
+      // All eight grab points, and a plain-language read-out of what's kept.
+      expect(screen.getAllByLabelText(/^crop handle /)).toHaveLength(8);
+      expect(screen.getByText("Keeping 60% × 80% of the picture")).toBeInTheDocument();
+      // And the four fraction sliders are still there — nothing was removed.
+      expect(screen.getByText("Left")).toBeInTheDocument();
+    });
+
+  it("rewrites the crop bounds when a handle is dragged", async () => {
+    mockCropRecipe([cropOp({ x0: 0, y0: 0, x1: 1, y1: 1 })]);
+    stubPreviewGeometry({ left: 0, top: 0, width: 400, height: 300 });
+
+    renderEditor();
+    fireEvent.click(await screen.findByLabelText("Select Crop"));
+    await loadPreviewImage();
+
+    const se = await screen.findByLabelText("crop handle se");
+    pointer(se, "pointerdown", 400, 300);
+    pointer(se, "pointermove", 200, 150);
+    // The caption follows the drag live, before anything is committed.
+    await waitFor(() =>
+      expect(screen.getByText("Keeping 50% × 50% of the picture")).toBeInTheDocument());
+    pointer(se, "pointerup", 200, 150);
+
+    // On release the op itself carries the new bounds, so the rectangle survives
+    // the commit rather than snapping back to the old ones.
+    await waitFor(() => expect(screen.getByLabelText("crop rectangle"))
+      .toHaveStyle({ width: "50.00%", height: "50.00%" }));
+    expect(screen.getByText("Keeping 50% × 50% of the picture")).toBeInTheDocument();
+  });
+
+  it("slides the whole rectangle when its body is dragged, keeping its size", async () => {
+    mockCropRecipe([cropOp({ x0: 0.1, y0: 0.1, x1: 0.5, y1: 0.5 })]);
+    stubPreviewGeometry({ left: 0, top: 0, width: 400, height: 300 });
+
+    renderEditor();
+    fireEvent.click(await screen.findByLabelText("Select Crop"));
+    await loadPreviewImage();
+
+    const rect = await screen.findByLabelText("crop rectangle");
+    pointer(rect, "pointerdown", 100, 75);
+    pointer(rect, "pointermove", 180, 135);
+    pointer(rect, "pointerup", 180, 135);
+
+    await waitFor(() => expect(screen.getByLabelText("crop rectangle"))
+      .toHaveStyle({ left: "30.00%", top: "30.00%",
+                     width: "40.00%", height: "40.00%" }));
+  });
+
+  it("puts the rectangle away on 'Done cropping' without changing the crop", async () => {
+    mockCropRecipe([cropOp({ x0: 0.2, y0: 0.1, x1: 0.8, y1: 0.9 })]);
+    stubPreviewGeometry();
+
+    renderEditor();
+    fireEvent.click(await screen.findByLabelText("Select Crop"));
+    await loadPreviewImage();
+    expect(await screen.findByLabelText("crop rectangle")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Done cropping/ }));
+    await waitFor(() =>
+      expect(screen.queryByLabelText("crop rectangle")).not.toBeInTheDocument());
+    // The crop itself is untouched — this is a preview mode, not an edit.
+    expect(screen.getByRole("button", { name: /Drag to crop/ })).toBeInTheDocument();
+    expect(screen.getByText("Left")).toBeInTheDocument();
+  });
+
+  it("resets to the whole picture in one click, then dims the button", async () => {
+    mockCropRecipe([cropOp({ x0: 0.2, y0: 0.1, x1: 0.8, y1: 0.9 })]);
+    stubPreviewGeometry();
+
+    renderEditor();
+    fireEvent.click(await screen.findByLabelText("Select Crop"));
+    await loadPreviewImage();
+
+    const reset = await screen.findByRole("button", { name: "Back to the whole picture" });
+    expect(reset).not.toBeDisabled();
+    fireEvent.click(reset);
+
+    await waitFor(() => expect(screen.getByLabelText("crop rectangle"))
+      .toHaveStyle({ left: "0.00%", top: "0.00%", width: "100.00%", height: "100.00%" }));
+    expect(screen.getByText("Keeping the whole picture")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Back to the whole picture" })).toBeDisabled();
+  });
+
+  it("warns before a hard crop costs real pixels", async () => {
+    mockCropRecipe([cropOp({ x0: 0.4, y0: 0.4, x1: 0.6, y1: 0.6 })]);
+    stubPreviewGeometry();
+
+    renderEditor();
+    fireEvent.click(await screen.findByLabelText("Select Crop"));
+
+    expect(await screen.findByText(/That's a big crop/)).toBeInTheDocument();
+  });
+
+  it("declines to drag — and says why — when a Rotate sits after the crop", async () => {
+    // The rectangle would be drawn on a rotated picture while its numbers still
+    // describe the un-rotated one, so it would be confidently in the wrong place.
+    mockCropRecipe(
+      [cropOp({ x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 }),
+       { uid: "ro1", id: "geometry.rotate", enabled: true, params: { angle: 10 } }],
+      [STRETCH, CROP, ROTATE]);
+    stubPreviewGeometry();
+
+    renderEditor();
+    fireEvent.click(await screen.findByLabelText("Select Crop"));
+    await loadPreviewImage();
+
+    expect(await screen.findByText(/Dragging is off while another Crop, Rotate or Resize/))
+      .toBeInTheDocument();
+    expect(screen.queryByLabelText("crop rectangle")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Drag to crop/ })).not.toBeInTheDocument();
+    // The sliders still work, which is the whole point of declining rather than guessing.
+    expect(screen.getByText("Left")).toBeInTheDocument();
+  });
+
+  it("keeps the rectangle out of the way while another overlay owns the preview",
+    async () => {
+      mockCropRecipe([cropOp({ x0: 0.2, y0: 0.1, x1: 0.8, y1: 0.9 })]);
+      stubPreviewGeometry();
+
+      renderEditor();
+      fireEvent.click(await screen.findByLabelText("Select Crop"));
+      await loadPreviewImage();
+      expect(await screen.findByLabelText("crop rectangle")).toBeInTheDocument();
+
+      // Turning on the whole-recipe Split hands the box to that mode; the crop
+      // rectangle steps aside instead of drawing over someone else's picture.
+      fireEvent.click(screen.getByRole("button", { name: "Split" }));
+      await waitFor(() =>
+        expect(screen.queryByLabelText("crop rectangle")).not.toBeInTheDocument());
+    });
+
+  it("adds a Crop op from the header button and opens it for dragging", async () => {
+    // "Crop" sits beside the app's two automatic crop offers because all three end
+    // in the same adjustable Crop op — and until it existed the only route to one
+    // was Add operation → More operations → Crop, then four typed fractions.
+    mockCropRecipe([{ uid: "s1", id: "tone.stretch", enabled: true,
+                      params: { stretch: 0.6 } } as client.OpInstance]);
+    stubPreviewGeometry();
+
+    renderEditor();
+    expect(await screen.findByText("Stretch")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Select Crop")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Crop" }));
+
+    // One op added, selected, and already showing its rectangle.
+    expect(await screen.findByLabelText("Select Crop")).toBeInTheDocument();
+    await loadPreviewImage();
+    expect(await screen.findByLabelText("crop rectangle")).toBeInTheDocument();
+    expect(screen.getByText("Keeping the whole picture")).toBeInTheDocument();
+  });
+
+  it("re-opens the recipe's existing crop rather than stacking a second one", async () => {
+    // Two crops compound, and the second one's fractions would be relative to the
+    // first one's output — so the button is "open the crop", not "add a crop".
+    mockCropRecipe([cropOp({ x0: 0.2, y0: 0.1, x1: 0.8, y1: 0.9 })]);
+    stubPreviewGeometry();
+
+    renderEditor();
+    expect(await screen.findByLabelText("Select Crop")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Crop" }));
+    await loadPreviewImage();
+
+    // Still exactly one crop op, and it kept its bounds.
+    expect(screen.getAllByLabelText("Select Crop")).toHaveLength(1);
+    expect(await screen.findByText("Keeping 60% × 80% of the picture")).toBeInTheDocument();
+  });
+
+  it("turns a bypassed crop back on when the header button re-opens it", async () => {
+    // Pressing "Crop" is itself the ask to crop, so a crop the user had switched
+    // off comes back on rather than opening a rectangle that changes nothing.
+    mockCropRecipe([{ uid: "cr1", id: "geometry.crop", enabled: false,
+                      params: { x0: 0.2, y0: 0.1, x1: 0.8, y1: 0.9 } } as client.OpInstance]);
+    stubPreviewGeometry();
+
+    renderEditor();
+    expect(await screen.findByLabelText("Select Crop")).toBeInTheDocument();
+    // Disabled: no rectangle on offer yet.
+    expect(screen.queryByLabelText("crop rectangle")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Crop" }));
+    await loadPreviewImage();
+
+    expect(await screen.findByLabelText("crop rectangle")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Select Crop")).toHaveLength(1);
   });
 
   it("warns about a second enabled Stretch and disables the extra on click", async () => {
