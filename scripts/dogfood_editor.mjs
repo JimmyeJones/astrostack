@@ -6,15 +6,16 @@
 // Priority 1 (AGENTS.md §1) is the editor, and the owner's standing complaints
 // about it — "a live preview that doesn't match/behave, clunky and confusing
 // controls" — are all about what happens *after* a click. Nothing in this repo's
-// tooling ever clicked.
+// tooling had ever clicked one.
 //
 // So this one adds every operation the Add menu offers, one at a time, and after
 // each asks three questions a screenshot cannot:
 //
 //   * did the live preview actually re-render? (an op that renders nothing is
 //     the "the preview must show every enabled action" bug, v0.57.0's class);
-//   * did the browser log an error, or did an API call fail?
-//   * did the op come back at all, or did the preview request 4xx/5xx?
+//   * did the browser log an error — a thrown render, a bad prop, a crashed
+//     parameter panel;
+//   * did any of this app's own requests fail (4xx/5xx) while the op was on?
 //
 // Then it undoes and redoes, because the history stack is the other thing only
 // interaction reaches.
