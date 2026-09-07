@@ -1195,18 +1195,40 @@ def _kappa_sigma_keep_mask(
     return valid & within
 
 
-def estimate_stack(project: Project, options: StackOptions,
-                   memory_budget_gb: float | None = None) -> StackEstimate:
-    """Compute the output canvas dimensions and estimated peak working memory a
-    stack *would* need, without running it.
+@dataclass(frozen=True)
+class StackCanvasBasis:
+    """The expensive, *options-independent* half of :func:`estimate_stack`.
+
+    Sizing a stack is two jobs of wildly different cost. Picking the reference
+    frame, unioning every sub's footprint into a canvas
+    (:func:`~seestack.stack.mosaic.compute_mosaic_canvas`) and clustering the
+    pointings for :func:`auto_reject_depth` all read the *frames* — one WCS per
+    sub, so ~1 s on the owner's 5,477-sub mosaic. Everything after that (peak
+    bytes, the drizzle scale that fits, the print plan, the memory fix) is
+    arithmetic on ``dst_shape`` and costs microseconds.
+
+    Only ``mosaic_canvas`` reaches the first job — ``drizzle*`` and the rejection
+    knobs multiply the *output* of a canvas they cannot move. So one basis
+    answers as many option sets as a caller likes, which is what lets the Stack
+    form size the run on screen **and** its drizzle feasibility probe from a
+    single canvas computation instead of two.
+    """
+
+    ref_shape: tuple[int, int]     # (h, w) of the reference frame
+    dst_shape: tuple[int, int]     # (h, w) of the pre-drizzle stacking canvas
+    is_mosaic: bool                # union-of-footprints canvas (spans >1 field)
+    n_frames: int                  # frames that would reach the stacker
+    panel_depth: int | None        # thinnest substantial panel's depth (mosaic only)
+    mosaic_canvas: str             # the canvas mode this basis was built for
+
+
+def estimate_stack_basis(project: Project,
+                         mosaic_canvas: str = "auto") -> StackCanvasBasis:
+    """Compute the canvas half of a stack sizing — see :class:`StackCanvasBasis`.
 
     Mirrors ``run_stack``'s reference-pick and canvas-selection (reference vs
-    union-of-footprints), then reuses ``_estimate_peak_bytes`` /
-    ``_stack_memory_budget_bytes`` so the pre-run number matches the guard that
-    would refuse the run. Only the canvas-affecting options are consulted
-    (``drizzle``, ``drizzle_scale``, ``drizzle_reject``, ``mosaic_canvas``);
-    everything else is irrelevant to sizing. Raises ``ValueError`` with the same
-    guidance as ``run_stack`` when there's nothing solved to stack."""
+    union-of-footprints). Raises ``ValueError`` with the same guidance as
+    ``run_stack`` when there's nothing solved to stack."""
     choice = pick_reference_frame(project)
     if choice is None:
         raise ValueError(
@@ -1227,7 +1249,7 @@ def estimate_stack(project: Project, options: StackOptions,
 
     dst_shape = ref_shape
     is_mosaic = False
-    if options.mosaic_canvas != "reference":
+    if mosaic_canvas != "reference":
         try:
             from seestack.stack.mosaic import compute_mosaic_canvas
 
@@ -1246,20 +1268,46 @@ def estimate_stack(project: Project, options: StackOptions,
             # unlike run_stack this estimate never flags them rejected in the DB.
             bad = set(canvas.excluded_frame_ids)
             frames = [f for f in frames if getattr(f, "id", None) not in bad]
-        if canvas is not None and (options.mosaic_canvas == "union"
+        if canvas is not None and (mosaic_canvas == "union"
                                    or canvas.is_mosaic):
             dst_shape = canvas.shape
             is_mosaic = canvas.is_mosaic
 
-    n = len(frames)
+    # The depth is read from the same pointings ``run_stack`` reads, so the
+    # estimate cannot name a different method (and therefore a different peak)
+    # from the run it is estimating.
+    return StackCanvasBasis(
+        ref_shape=ref_shape, dst_shape=dst_shape, is_mosaic=is_mosaic,
+        n_frames=len(frames),
+        panel_depth=auto_reject_depth(_frame_radecs(frames)),
+        mosaic_canvas=str(mosaic_canvas),
+    )
+
+
+def estimate_stack_from_basis(basis: StackCanvasBasis, options: StackOptions,
+                              memory_budget_gb: float | None = None,
+                              ) -> StackEstimate:
+    """Size a stack from an already-computed :class:`StackCanvasBasis`.
+
+    The cheap half of :func:`estimate_stack` — pure arithmetic, no frame or WCS
+    reads — so a caller holding one basis can price several option sets for the
+    cost of one canvas computation. ``options.mosaic_canvas`` must match the
+    basis's, since that is the one option the canvas *does* depend on."""
+    if str(options.mosaic_canvas) != basis.mosaic_canvas:
+        raise ValueError(
+            f"basis was built for mosaic_canvas={basis.mosaic_canvas!r}, "
+            f"but options ask for {options.mosaic_canvas!r}"
+        )
+    ref_shape = basis.ref_shape
+    dst_shape = basis.dst_shape
+    is_mosaic = basis.is_mosaic
+    n = basis.n_frames
+    panel_depth = basis.panel_depth
     # Resolve auto-reject so the pre-run memory estimate matches the method
     # ``run_stack`` will actually use (min/max costs extra canvas planes), and the
     # drizzle half of the same question — an auto-enabled two-pass rejection is
     # only taken when it fits, so the estimate must not warn about planes the run
-    # would decline to allocate. The depth is read from the same pointings
-    # ``run_stack`` reads, so the estimate cannot name a different method (and
-    # therefore a different peak) from the run it is estimating.
-    panel_depth = auto_reject_depth(_frame_radecs(frames))
+    # would decline to allocate.
     options = _resolve_auto_reject(options, n, depth=panel_depth)
     options = replace(options, drizzle_reject=_afford_drizzle_reject(
         options, n, dst_shape, memory_budget_gb))
@@ -1324,6 +1372,27 @@ def estimate_stack(project: Project, options: StackOptions,
             rejection_map=_records_rejection_map(options, n), budget=budget),
         panel_depth=panel_depth,
     )
+
+
+def estimate_stack(project: Project, options: StackOptions,
+                   memory_budget_gb: float | None = None) -> StackEstimate:
+    """Compute the output canvas dimensions and estimated peak working memory a
+    stack *would* need, without running it.
+
+    Mirrors ``run_stack``'s reference-pick and canvas-selection (reference vs
+    union-of-footprints), then reuses ``_estimate_peak_bytes`` /
+    ``_stack_memory_budget_bytes`` so the pre-run number matches the guard that
+    would refuse the run. Only the canvas-affecting options are consulted
+    (``drizzle``, ``drizzle_scale``, ``drizzle_reject``, ``mosaic_canvas``);
+    everything else is irrelevant to sizing. Raises ``ValueError`` with the same
+    guidance as ``run_stack`` when there's nothing solved to stack.
+
+    A caller that wants to size *several* option sets for one target should
+    hold a :func:`estimate_stack_basis` and call
+    :func:`estimate_stack_from_basis` per option set instead — this convenience
+    wrapper rebuilds the canvas every call, which is the whole cost."""
+    basis = estimate_stack_basis(project, options.mosaic_canvas)
+    return estimate_stack_from_basis(basis, options, memory_budget_gb)
 
 
 CancelFn = Callable[[], bool]
