@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 import sharedIntegrationCases from "../../tests/fixtures/integration_format.json";
 import sharedNightRangeCases from "../../tests/fixtures/night_range_format.json";
 import {
+  GRAIN_MULTIPLE_ABOVE_PERCENT,
   captureNightsClause, formatCaptureNights, formatDiskSize, formatFrameStamp,
-  formatIntegration, formatMonthYear, formatNightDate, formatNightDayMonth,
-  formatStampDate, formatStampDateTime, isRecentNight, nightAgeDays,
-  pictureDateLabel,
+  formatIntegration, formatMonthYear, formatMoreThan, formatNightDate,
+  formatNightDayMonth, formatStampDate, formatStampDateTime, isRecentNight,
+  nightAgeDays, pictureDateLabel,
 } from "./format";
 
 describe("formatIntegration", () => {
@@ -410,6 +411,41 @@ describe("pictureDateLabel", () => {
       const inLabel = pictureDateLabel(start, end, "2026-08-30T12:00:00Z", n).includes("nights");
       const inClause = captureNightsClause(start, end, n).includes("nights");
       expect(inLabel).toBe(inClause);
+    }
+  });
+});
+
+describe("formatMoreThan", () => {
+  it("reads as a percentage across the band the cover nudge actually fires in", () => {
+    // Its bar is ~17.6 % more grain, so this is nearly every real firing.
+    expect(formatMoreThan(18)).toEqual({ amount: "about 18% more", joiner: "than" });
+    expect(formatMoreThan(50)).toEqual({ amount: "about 50% more", joiner: "than" });
+    expect(formatMoreThan(199)).toEqual({ amount: "about 199% more", joiner: "than" });
+  });
+
+  it("switches to a multiple exactly above the threshold, not at it", () => {
+    expect(formatMoreThan(GRAIN_MULTIPLE_ABOVE_PERCENT))
+      .toEqual({ amount: "about 200% more", joiner: "than" });
+    expect(formatMoreThan(GRAIN_MULTIPLE_ABOVE_PERCENT + 1))
+      .toEqual({ amount: "about 3.0× as much", joiner: "as" });
+  });
+
+  it("says a runaway gap as a multiple a person would say out loud", () => {
+    // "about 2400 % more" is right and reads as a bug; 25× reads as a fact.
+    expect(formatMoreThan(2400)).toEqual({ amount: "about 25.0× as much", joiner: "as" });
+    expect(formatMoreThan(350)).toEqual({ amount: "about 4.5× as much", joiner: "as" });
+  });
+
+  it("carries the joining word with the number, so the sentence stays grammatical", () => {
+    // "more grain THAN yours" vs "as much grain AS yours" — the phrasing change
+    // moves the preposition too, which is why the caller is not left to guess.
+    expect(formatMoreThan(50).joiner).toBe("than");
+    expect(formatMoreThan(500).joiner).toBe("as");
+  });
+
+  it("refuses to print a nonsense gap rather than rendering NaN at a beginner", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, 0, -30]) {
+      expect(formatMoreThan(bad)).toEqual({ amount: "about 1% more", joiner: "than" });
     }
   });
 });

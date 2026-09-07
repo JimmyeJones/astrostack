@@ -3,7 +3,7 @@ import { notifications } from "@mantine/notifications";
 import { IconCloud, IconStarFilled } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { formatStampDate } from "../format";
+import { formatMoreThan, formatStampDate } from "../format";
 
 /**
  * "Last night's stack came out grainier than an earlier one — show that instead?"
@@ -63,12 +63,17 @@ export function GrainierNewestNote({ safe }: { safe: string }) {
   // Say *why* only when the frame counts actually explain it; otherwise the
   // honest answer is "the sky was probably worse", not a number we don't have.
   const thinner = g.newest_n_frames_used < g.n_frames_used;
+  // A restack of a handful of subs against a 500-sub master can be thousands of
+  // percent grainier — true, and unreadable as a quantity. Past a tripling the
+  // same fact is said as a multiple instead (`formatMoreThan`), which is why the
+  // joining word travels with the number.
+  const grain = formatMoreThan(g.percent_grainier);
   return (
     <Alert color="yellow" variant="light" icon={<IconCloud size={18} />}
       title="Your newest stack came out grainier than an earlier one"
       data-testid="grainier-newest-note">
       <Text size="sm">
-        {`It has about ${g.percent_grainier}% more background grain than your `}
+        {`It has ${grain.amount} background grain ${grain.joiner} your `}
         {when ? `${when} ` : "earlier "}
         {"stack"}
         {thinner
