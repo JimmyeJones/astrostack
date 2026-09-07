@@ -56,6 +56,15 @@ minutes and turned a vague clause into a number: the one-click Auto recipe costs
 **4.2 s a render**, and the editor fires two such renders per change. That is the
 whole of v0.382.2.
 
+**Then the measurement paid a second time, which is the part worth copying.**
+Having timed the ops, the arithmetic didn't close: the recipe's ops summed to
+less than a render cost. The gap was `proxy._load_map` reading the run's
+**full-resolution** coverage canvas whole and striding it afterwards — 2.65 s
+cold on a 480 MB map, four times per edit — which is a bigger win (v0.382.3) than
+the one the run set out to get, and was invisible to every code-level audit
+because the line reads like a memmapped read. **When you time a pipeline, check
+the parts sum to the whole**; the residual is where the unaudited cost lives.
+
 **And the fix was already in the codebase, unused.** `EditContext.fit` was built
 for the loupe and its docstring already says it is "the place to keep an
 expensive measurement (a star solve, a mesh fit)" — nothing was carrying fits
