@@ -2020,30 +2020,24 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 - **✅ SHIPPED as answer (a) — v0.378.0 (`scanner.target_name_for_folder` + `scan_and_organize(single_target=…)`,
   and the "Bring this folder in anyway" button it exists for). Full entry in [`SHIPPED.md`](SHIPPED.md).**
   ~~`root` on `POST /api/scan` is a "rescan just this folder" shortcut that doesn't actually work.~~
-  **One slice deliberately left open, and it is the one the original entry named as the prize:** a *"Re-scan just
-  this target"* button on the Target page. The endpoint now supports it, but the page has no idea which folder a
-  target's subs came from — it would need the source folder derived server-side from the target's own frames
-  (they all carry `source_path`), plus a decision about a target whose frames span two folders, which is a real
-  case on this owner's library (a `<T>_sub` re-copied under a new name). Worth building; not blind. (S, autonomy —
-  PRIORITY 2–3.) **Sized and down-weighted in the same run that shipped the endpoint:** with `auto_ingest` on, the
-  watcher already brings a night's new subs in without anyone pressing anything, so the button saves a full-tree
-  walk rather than enabling something otherwise impossible. Real value on a library this size, but it is a
-  power-user shortcut, not a beginner capability — do not rate it above a genuine friendliness item.
+  **The one slice left open is the entry's own named prize — a *"Re-scan just this target"* button — and the run
+  that shipped the endpoint sized it and DOWN-weighted it.** The page doesn't know which folder a target's subs
+  came from; deriving it server-side from the frames' `source_path` needs a decision about a target whose frames
+  span two folders (real on this library). And with `auto_ingest` on, the watcher already brings a night's subs in
+  unprompted — so the button saves a tree walk rather than enabling anything. A power-user shortcut, not a
+  beginner capability: do not rate it above a genuine friendliness item. (S, autonomy — PRIORITY 2–3.)
 
 - **LEAD, NOT FINISHED (Builder 2026-09-07, filed while shipping v0.378.0) — the skipped-folder finding lives
-  only in a scan job's summary, which scrolls away.** *(Pillar: trust / autonomy — PRIORITY 2–3; size M;
-  **the cost is the whole question — do not build it as a poll-time walk without measuring**.)* A bare `<T>/`
-  folder holding files the Seestar's naming can't vouch for is now *reported* (v0.329.2) and, as of v0.378.0,
-  *actionable* — but both live on the **Jobs page**, attached to one scan's result. On this install the scan is
-  usually the watcher's, so nobody is looking when it lands, and the next few jobs push it out of view. The
-  finding renews itself on every scan, so nothing is lost permanently; what is missing is a **standing** place
-  for it, next to the `cleanup-suggestions` family on the Library page, where "your library has a folder of
-  4,815 files that isn't reaching any picture" is a fact about the library rather than about one job.
-  **Why it wasn't built in the same run:** the honest home is a poll-time endpoint, and re-deriving the skips
-  means walking `incoming/` on every poll — the exact trade `unexported-edits` was deliberately designed *not*
-  to make. The cheap shape is probably to have the scan **persist** what it skipped (it already computes it) and
-  have the poll read that, rather than re-walking; that is a schema question, so it is a decision, not a patch.
-  **Grep first:** `library_hygiene` / `cleanup-suggestions`, and `ScanResult.unvouched_skips`.
+  only in a scan job's summary, which scrolls away.** *(Trust / autonomy — PRIORITY 2–3; size M; **the cost is
+  the whole question**.)* A bare `<T>/` folder holding files the Seestar's naming can't vouch for is now
+  *reported* (v0.329.2) and *actionable* (v0.378.0) — but both live on the **Jobs page**, attached to one scan's
+  result, and on this install the scan is usually the watcher's, so nobody is looking when it lands. It renews
+  itself every scan, so nothing is lost permanently; what is missing is a **standing** home next to
+  `cleanup-suggestions` on the Library page. **Why it wasn't built in the same run:** re-deriving the skips at
+  poll time means walking `incoming/` on every poll — the exact trade `unexported-edits` was designed *not* to
+  make. The cheap shape is probably to **persist** what the scan already computed and have the poll read that,
+  which is a schema decision, not a patch. **Grep first:** `library_hygiene` / `cleanup-suggestions`,
+  `ScanResult.unvouched_skips`.
 
 - **✅ SHIPPED (Builder, v0.304.4, branch `claude/compassionate-galileo-ezix3s`) — ~~the *first* zoom clip on a
   target is a silent wait.~~** Fixed as filed, but with the **fetch-to-blob** half rather than the

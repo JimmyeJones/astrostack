@@ -136,9 +136,12 @@ Jobs page makes — scan, read the reported `path`, post it back, get the two su
 not the `Stacked.fit`. Frontend (+3 unit, +3 rendered): `broughtFolderInNote`'s three
 shapes, the `path` passthrough and its absence, the button calling `scan` with exactly
 that folder, no button without a path, and the scoped note appearing on one job and not
-the other. The stale comment in `test_scan_root_confined.py` that said a sub-folder root
-"loses the folder-name target … filed rather than changed here" is corrected — it was
-the description of this bug, sitting in a passing test.
+the other. Two existing tests were updated, neither weakened: the stale comment in
+`test_scan_root_confined.py` that said a sub-folder root "loses the folder-name target
+… filed rather than changed here" was the description of this bug sitting in a passing
+test; and `test_pipeline.py::test_the_scan_reports_a_skipped_folder_it_cannot_account_for`
+pinned the reported folder's dict **exactly**, so the additive `path` broke it — it now
+pins the same three counts plus the new key.
 
 **Left open, deliberately.** The original entry's stated prize was a *"Re-scan just
 this target"* button on the Target page. The endpoint now supports it; the page does
