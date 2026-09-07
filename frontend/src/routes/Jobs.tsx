@@ -499,7 +499,15 @@ export function autoRegradedBackNote(r: Record<string, unknown>): string | null 
 
 /** One folder a scan passed over as "the Seestar's own finished picture" while
  * holding files the device's naming can't vouch for. */
-export type SkippedFolder = { name: string; nFiles: number; nUnrecognised: number };
+export type SkippedFolder = {
+  name: string;
+  nFiles: number;
+  nUnrecognised: number;
+  /** The folder on disk, as the server named it. Posted back verbatim as a
+   *  scan root to bring the folder in; empty when an older backend didn't send
+   *  one, in which case the folder is still *reported*, just not actionable. */
+  path: string;
+};
 
 /** The folders this scan skipped that it can't fully explain (pure, tested).
  *
@@ -521,8 +529,9 @@ export function skippedFolders(r: Record<string, unknown>): SkippedFolder[] {
     const name = typeof e.name === "string" ? e.name : "";
     const nFiles = Number(e.n_files ?? 0) || 0;
     const nUnrecognised = Number(e.n_unrecognised ?? 0) || 0;
+    const path = typeof e.path === "string" ? e.path : "";
     if (!name || nUnrecognised <= 0) return [];
-    return [{ name, nFiles, nUnrecognised }];
+    return [{ name, nFiles, nUnrecognised, path }];
   });
 }
 
@@ -708,7 +717,58 @@ export function pipelineSummary(r: Record<string, unknown>): {
   return { line: `${clauses.join(" · ")}.`, held, heldFiles, healed };
 }
 
+/** What a **scoped** scan did (pure, tested) — the "bring this one folder in"
+ *  pass behind the skipped-folder button, rather than the whole-incoming scan
+ *  the Scan button runs.
+ *
+ *  Returns null for an ordinary scan, which is every scan the Scan button
+ *  starts, so this is silent unless the user actually pointed at a folder. It
+ *  says *which* folder because the summary line above it ("Imported N new
+ *  frames") reads identically either way, and it says what was left out because
+ *  the alert that offered the button promised exactly that. */
+export function broughtFolderInNote(r: Record<string, unknown>): string | null {
+  const folder = typeof r.folder === "string" ? r.folder : "";
+  if (!folder) return null;
+  const lead = `Scanned just "${folder}".`;
+  const skipped = Number(r.device_pictures_skipped ?? 0) || 0;
+  if (skipped <= 0) return lead;
+  return `${lead} Left out ${skipped} file${skipped === 1 ? "" : "s"} named like `
+    + "your Seestar's own finished picture — those aren't subs to stack.";
+}
+
 /** Result-specific actions for finished editor jobs (download / view). */
+/** "Bring this folder in anyway" for a folder the scan skipped as the device's
+ *  own picture.
+ *
+ *  Its own component so the summary stays hook-free, and so each folder's button
+ *  carries its own pending state — a drop can skip several folders and they are
+ *  separate decisions.
+ *
+ *  It scans just that folder, which is the whole point: the alert's other
+ *  advice is to rename the folder, and the rename would have to happen inside
+ *  `incoming/`, where the owner's only copy of their raws lives. Nothing here
+ *  writes there — a scan reads. */
+function BringFolderInButton({ path, name }: { path: string; name: string }) {
+  const qc = useQueryClient();
+  const scan = useMutation({
+    mutationFn: () => api.scan(path),
+    onSuccess: () => {
+      notifications.show({
+        message: `Bringing "${name}" in — watch this page for the result`,
+        color: "violet",
+      });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+  return (
+    <Button size="xs" variant="light" color="yellow" mt={6}
+      onClick={() => scan.mutate()} loading={scan.isPending}>
+      {`Bring "${name}" in anyway`}
+    </Button>
+  );
+}
+
 function JobResultActions({ job }: { job: Job }) {
   if (job.state !== "done" || !job.result) return null;
   const r = job.result as Record<string, unknown>;
@@ -812,9 +872,13 @@ function JobResultActions({ job }: { job: Job }) {
     const putBack = autoRegradedBackNote(r);
     const skipped = skippedFolders(r);
     const videos = videoFoldersNote(r);
+    const scoped = broughtFolderInNote(r);
     return (
       <Stack gap={4} mt="xs">
         <Text size="sm">{line}</Text>
+        {/* Silent on an ordinary scan; says which folder when the user asked for
+            one, because "Imported N new frames" reads the same either way. */}
+        {scoped ? <Text size="xs" c="dimmed">{scoped}</Text> : null}
         {rescue ? <Text size="xs" c="dimmed">{rescue}</Text> : null}
         {putBack ? <Text size="xs" c="dimmed">{putBack}</Text> : null}
         {/* Deliberately one dimmed line and not a second alert: nothing is
@@ -843,21 +907,27 @@ function JobResultActions({ job }: { job: Job }) {
               {"subs that aren't reaching your stack. Nothing on disk was "}
               {"changed — nothing was deleted, moved or renamed:"}
             </Text>
-            <Stack gap={0} mt={4}>
+            <Stack gap={2} mt={4}>
               {skipped.map((s) => (
-                <Text size="xs" key={s.name}>
-                  {`${s.name}: ${s.nFiles.toLocaleString()} file`}
-                  {s.nFiles === 1 ? "" : "s"}
-                  {` skipped, ${s.nUnrecognised.toLocaleString()} of them not `}
-                  {"recognised as your Seestar's own picture."}
-                </Text>
+                <div key={s.name}>
+                  <Text size="xs">
+                    {`${s.name}: ${s.nFiles.toLocaleString()} file`}
+                    {s.nFiles === 1 ? "" : "s"}
+                    {` skipped, ${s.nUnrecognised.toLocaleString()} of them not `}
+                    {"recognised as your Seestar's own picture."}
+                  </Text>
+                  {/* The button only appears on a backend that sent the folder's
+                      path; an older one still reports the folder, and the
+                      rename advice below still works. */}
+                  {s.path ? <BringFolderInButton path={s.path} name={s.name} /> : null}
+                </div>
               ))}
             </Stack>
             <Text size="xs" mt={4}>
-              {"If those really are subs you want in your picture, give that "}
-              {"folder a name that doesn't match the \"_sub\" folder next to it "}
-              {"(for example add the date), then scan again — it will come in as "}
-              {"its own target."}
+              {"If those really are subs you want in your picture, bring the "}
+              {"folder in above — its frames join the target of the same name, "}
+              {"and any of your Seestar's own finished pictures inside it are "}
+              {"left out. Nothing on your disk is renamed or moved."}
             </Text>
           </Alert>
         ) : null}

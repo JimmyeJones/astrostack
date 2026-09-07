@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -139,6 +140,25 @@ def _unstacked_video_captures(
     return out
 
 
+def _is_same_dir(a: Path, b: Path) -> bool:
+    """True when two paths name the same directory.
+
+    Lexical first, then a resolved comparison, for the same reason
+    ``routers/pipeline._confined_scan_root`` does it that way: on this box the
+    incoming folder is routinely a symlinked NAS share, so the two spellings of
+    it must not read as two different folders.
+    """
+    def norm(p: Path) -> str:
+        return os.path.normpath(os.path.abspath(str(p)))
+
+    if norm(a) == norm(b):
+        return True
+    try:
+        return norm(a.resolve()) == norm(b.resolve())
+    except (OSError, RuntimeError):  # unresolvable path (loop, permission)
+        return False
+
+
 def submit_pipeline(settings: Settings, jm: JobManager, *, root: str | None = None) -> Job:
     def body(job: Job) -> dict[str, Any]:
         return _pipeline_body(settings, jm, job, root=root)
@@ -150,7 +170,17 @@ def _pipeline_body(
 ) -> dict[str, Any]:
     lib = Library.open_or_create(settings.resolved_library_root)
     scan_root = Path(root) if root else settings.resolved_incoming_dir
+    # A ``root`` naming a folder *inside* incoming is the scoped "bring this one
+    # folder in" scan — the folder itself is the target, not a folder of target
+    # folders. Without this the frames landed in ``Unsorted``, because the target
+    # name is derived relative to the scan root and a folder pointed *at* leaves
+    # nothing to derive from. Absent/empty root, or the incoming folder itself,
+    # is the ordinary whole-library scan and is byte-for-byte unchanged.
+    single_target = bool(root) and not _is_same_dir(
+        scan_root, settings.resolved_incoming_dir)
     summary: dict[str, Any] = {"root": str(scan_root), "targets": []}
+    if single_target:
+        summary["folder"] = scan_root.name
     try:
         if settings.auto_ingest:
             job.set_progress("scan", 0, 0, f"Scanning {scan_root}")
@@ -158,7 +188,10 @@ def _pipeline_body(
                 lib, scan_root,
                 copy_to_cache=settings.copy_to_cache,
                 progress=_progress(jm, job),
+                single_target=single_target,
             )
+            if scan.n_device_output_skipped:
+                summary["device_pictures_skipped"] = scan.n_device_output_skipped
             # Re-QC a target when it gained new frames OR when a dedup-skipped
             # frame's cache was refreshed (a mid-copy sub whose source completed):
             # its stale QC was reset, so re-grade it here rather than waiting for
@@ -182,9 +215,16 @@ def _pipeline_body(
             # skipped folders are pure "Stacked*.fit"), so this only ever appears
             # when a scan really has passed over frames unexplained. Reported,
             # never acted on: the skip's behaviour is unchanged.
+            # ``path`` is what turns the report into something the user can act
+            # on: posted back as ``POST /api/scan``'s ``root`` it brings exactly
+            # that folder in, so the recovery stops being "rename it on your NAS"
+            # — a rename inside ``incoming/``, which this app may never make and
+            # would rather not ask for either (AGENTS.md §10). Re-confined
+            # server-side on the way back in, like any other scan root.
             unvouched = [
                 {"name": s.name, "n_files": s.n_files,
-                 "n_unrecognised": s.n_unvouched}
+                 "n_unrecognised": s.n_unvouched,
+                 "path": str(Path(s.parent) / s.name)}
                 for s in scan.unvouched_skips
             ]
             if unvouched:

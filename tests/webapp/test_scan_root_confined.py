@@ -56,9 +56,9 @@ def test_scan_still_accepts_the_incoming_folder_itself(client, data_root):
 
 def test_scan_still_accepts_one_folder_inside_incoming(client, data_root):
     # A sub-folder of incoming is inside the tree, so it is allowed through and
-    # scanned. (What the scanner then *calls* those frames is a separate, older
-    # question — a sub-folder root loses the folder-name target, which is why
-    # nothing in the app passes one; filed rather than changed here.)
+    # scanned — as *that folder's own target*, which is what its name always
+    # promised and did not do until the scoped scan shipped (see
+    # ``test_scoped_scan.py`` for the naming; this file only guards the fence).
     inside = data_root / "incoming" / "M_42"
     r = client.post("/api/scan", json={"root": str(inside)})
     assert r.status_code == 200
