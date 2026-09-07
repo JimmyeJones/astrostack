@@ -90,12 +90,15 @@ The Dashboard reads well empty — the plate-solve banner, "Your first image"
 (0 of 6, each step linked), the sample-image offer, zeroed stat tiles, then a
 proper "No stacks yet" empty state. **Nothing to fix was found on either pass.**
 
-**Method note worth keeping.** The empty-state probe is just
-`scripts/dogfood_probe.mjs` pointed at a second server booted on an empty
-`ASTROSTACK_DATA` (port 8812, `TARGET_SAFE=""`), reusing the playwright install
-the normal dogfood run drops in its scratch dir. It costs about a minute after a
-normal dogfood pass and it measures the screens a beginner meets first, which
-nothing else does.
+**And it is now a flag, not a method note** — `scripts/agent-dogfood.sh --empty`.
+It was an ad-hoc second server for the length of this run, and the script's own
+header says why that is not good enough (*"Every run used to reinvent how to get
+to that point, so in practice the pass degraded back into reading code"*). It
+boots on its own empty data root, its own port (8812) and its own
+`$DOGFOOD_DIR/empty/` scratch, so it follows a normal pass without disturbing it,
+and reuses the playwright install the normal pass drops in the shared scratch dir.
+The default path is untouched (smoke-tested both ways). `AGENTS.md` §7 now points
+at it beside the normal pass.
 
 **Harness trap that cost this run ~20 minutes, for the next agent.** A background
 wait loop spelled `until ! pgrep -f "python -m pytest -q"; do sleep 20; done`
