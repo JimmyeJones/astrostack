@@ -29,7 +29,7 @@ from webapp.routers import (
     auth as auth_router,
     calibration, editor, frames, gallery, jobs, lifelist, logs, plan, sample, seestar,
     settings, sky, stack, stackfailures, stats, storage, system, targets, upload,
-    video,
+    video, wishlist,
 )
 from webapp.routers import pipeline as pipeline_router
 from webapp.seestar.manager import SeestarManager
@@ -155,7 +155,7 @@ def create_app() -> FastAPI:
         gallery.router, logs.router, stats.router, storage.router,
         seestar.router, editor.router, calibration.router, auth_router.router,
         plan.router, upload.router, sample.router, video.router, lifelist.router,
-        stackfailures.router,
+        stackfailures.router, wishlist.router,
     ):
         app.include_router(r)
 

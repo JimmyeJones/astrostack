@@ -75,7 +75,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **"My wishlist"** (Features that serve real workflows, ⭐ Scout 2026-09-07) —
+  Builder, branch `claude/sweet-babbage-rb61y0`. Slice (1) — the registry table,
+  `/api/wishlist` add/remove/list and the ☆ toggle on the life list — is in;
+  slice (2), the "up tonight" card, is next in the same branch.
 
 ## Bugs (fix these first)
 
