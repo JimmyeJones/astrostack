@@ -75,7 +75,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **🔴🔴 D1 — Auto's border trim crops a mosaic to its panel overlaps** — Builder, branch
+  `claude/sweet-babbage-8hitfe`, started 2026-09-07. Fixing `coverage_trim.well_covered_mask`'s
+  peak-relative threshold and both consumers, with the seven shapes from the entry as regression tests.
 
 ## Bugs (fix these first)
 
