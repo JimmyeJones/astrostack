@@ -75,7 +75,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     capture_start_utc TEXT,
     capture_end_utc TEXT,
     capture_hours_json TEXT,
-    coverage_thin_frac REAL
+    coverage_thin_frac REAL,
+    uncovered_frac REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -1345,9 +1346,9 @@ class Project:
             "  noise_sigma, calstat, is_mosaic, engine_version,"
             "  rejection_fraction, rejection_mode, n_roughly_aligned, stack_fwhm_px,"
             "  seam_residual, capture_start_utc, capture_end_utc,"
-            "  capture_hours_json, coverage_thin_frac"
+            "  capture_hours_json, coverage_thin_frac, uncovered_frac"
             ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            "         ?, ?, ?, ?, ?)",
+            "         ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -1362,6 +1363,8 @@ class Project:
                 run.capture_hours_json,
                 (None if run.coverage_thin_frac is None
                  else float(run.coverage_thin_frac)),
+                (None if run.uncovered_frac is None
+                 else float(run.uncovered_frac)),
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -1461,6 +1464,10 @@ class Project:
                     row["coverage_thin_frac"]
                     if "coverage_thin_frac" in row.keys() else None
                 ),
+                uncovered_frac=(
+                    row["uncovered_frac"]
+                    if "uncovered_frac" in row.keys() else None
+                ),
             )
 
     def stack_run_options(self, run_ids: Iterable[int]) -> dict[int, tuple[str, str]]:
@@ -1533,6 +1540,21 @@ class Project:
         assert self._conn is not None
         cur = self._conn.execute(
             "UPDATE stack_runs SET coverage_thin_frac = ? WHERE id = ?",
+            (None if frac is None else float(frac), run_id))
+        return cur.rowcount > 0
+
+    def set_stack_uncovered_frac(self, run_id: int,
+                                 frac: float | None) -> bool:
+        """Record what share of a run's *canvas* no frame reached — the empty
+        black area. Normally stamped by the stack itself, but also filled in
+        after the fact for a run recorded before the column existed
+        (:func:`seestack.coverage_backfill.backfill_coverage_shares`, which
+        recomputes it from the same coverage map the thin share comes off).
+        Returns True if a row was updated, False if no run with ``run_id``
+        exists."""
+        assert self._conn is not None
+        cur = self._conn.execute(
+            "UPDATE stack_runs SET uncovered_frac = ? WHERE id = ?",
             (None if frac is None else float(frac), run_id))
         return cur.rowcount > 0
 
@@ -1715,6 +1737,14 @@ class StackRunRow:
     # runs recorded before this column existed (schema < 20) and when nothing was
     # covered — callers self-hide rather than judge the border on the old proxy.
     coverage_thin_frac: float | None = None
+    # What share of this stack's **canvas** no frame reached at all — the empty
+    # black area, as a fraction of every pixel on the canvas. The companion to
+    # ``coverage_thin_frac``, which excludes those pixels from both of its terms
+    # by construction and so is blind to them: a mosaic whose union canvas is
+    # 40 % empty corners can report a thin share of 0.00. None for runs recorded
+    # before this column existed and when nothing was covered at all — callers
+    # self-hide rather than describe a border they cannot measure.
+    uncovered_frac: float | None = None
     # How many contributing subs sub-pixel refine had to leave *only roughly
     # aligned* (its measured shift exceeded the cap, so the frame stacked
     # unshifted → possibly soft/doubled stars). None when refine was off, not

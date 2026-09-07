@@ -2103,6 +2103,41 @@ def coverage_thin_fraction(
     return thin / n_covered
 
 
+def uncovered_fraction(cov_2d: np.ndarray) -> float | None:
+    """What share of the **canvas** no frame reached — the black area.
+
+    The companion measure to :func:`coverage_thin_fraction`, and deliberately
+    blind to different pixels. That one asks how much of the *picture* is thin,
+    and excludes uncovered pixels from both of its terms by construction
+    (``count((cov > 0) & (cov < ratio·peak)) / count(cov > 0)``) — so a canvas
+    can be 40 % empty black and still report a thin share of 0.00. This asks how
+    much of the canvas is empty, over **every** pixel of it, which is the only
+    honest way to say anything about the black bands themselves.
+
+    Those bands are ordinary on a mosaic: the union canvas is the bounding box
+    of every panel's footprint, so a ragged or diagonal set of pointings leaves
+    the corners outside all of them (NaN = no coverage, rendered black). A
+    beginner meeting that on an unedited stack has nothing telling them whether
+    the picture is broken — see "How's my stack?", which reads this.
+
+    Returns ``None`` when nothing is covered at all (an empty canvas is not a
+    picture with a black border, and a caller should stay silent rather than
+    report "100 % empty"), and for an empty array. NaNs count as uncovered — a
+    coverage map holds counts, so a NaN is an absence, not a sample.
+    """
+    cov = np.asarray(cov_2d)
+    if cov.size == 0:
+        return None
+    covered = cov > 0            # NaN compares False → counted as uncovered
+    n_covered = int(np.count_nonzero(covered))
+    if n_covered == 0:
+        return None
+    # Counted, not masked-and-copied, for the same memory reason as above: on a
+    # 100 MP mosaic canvas the boolean temporary is ~100 MB where a fancy-index
+    # copy would be ~800 MB, on a path that is already memory-bounded.
+    return (int(cov.size) - n_covered) / int(cov.size)
+
+
 # How many subs a mosaic panel needs before it earns its own sub-pixel refine
 # reference patch. Two is the smallest number that can do anything: a panel of
 # one would only ever correlate its single frame against a patch cut from that
@@ -3308,6 +3343,13 @@ def run_stack(
             # border. Persisted so "How's my stack?" can judge a ragged edge by
             # its size rather than by its extreme.
             coverage_thin_frac=coverage_thin_fraction(cov_2d),
+            # …and how much of the canvas is empty *black* — the pixels the
+            # measure above excludes from both of its terms, so nothing else
+            # records them. A mosaic's union canvas is the bounding box of its
+            # panels, so its corners are routinely outside every footprint;
+            # persisted so "How's my stack?" can say what the black bands are
+            # instead of leaving a beginner to wonder if the picture is broken.
+            uncovered_frac=uncovered_fraction(cov_2d),
             # Persist the *effective* options: when auto_reject resolved to a
             # concrete method, record that method (so the History rejection badge
             # and any re-run reflect what actually ran) while ``auto_reject`` stays

@@ -19,6 +19,12 @@ run answers like any freshly-stacked one:
     stack the app had ever made, so re-using it on old runs would mean knowingly
     repeating a false alarm.
 
+``uncovered_frac`` (added additively, no version bump — see ``project.py``'s
+``_reconcile_table_columns``)
+    The share of the *canvas* no frame reached — the empty black area a mosaic's
+    union canvas leaves around its panels. Read off the same map as the thin
+    share above, in the same pass, so healing one heals both.
+
 ``seam_residual`` (schema 15)
     How flat a **mosaic's** panel joins came out, in units of the picture's own
     grain — the one mosaic failure mode a beginner can see but not diagnose. NULL
@@ -65,52 +71,84 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 log = logging.getLogger(__name__)
 
 
-def backfill_coverage_thin_frac(project: Project,
-                                run: StackRunRow) -> float | None:
-    """Compute ``run``'s thin-coverage share from its coverage sibling, record it
-    on the row, and return it — or ``None`` when it can't be known.
+def backfill_coverage_shares(project: Project, run: StackRunRow) -> None:
+    """Fill in whichever of ``run``'s two coverage shares are missing, from the
+    one coverage map they are both pure functions of, and record them on the row.
 
-    A no-op (returns the stored value) for a run that already has one, so callers
-    can call it unconditionally. ``run`` is updated in place on success, so the
-    caller's copy grades exactly like a freshly-stacked run.
+    ``coverage_thin_frac`` (how much of the *picture* is a thin border) and
+    ``uncovered_frac`` (how much of the *canvas* is empty black) answer different
+    questions off the same map — deliberately so, since the first excludes
+    uncovered pixels from both of its terms and is therefore blind to exactly
+    what the second measures. Healing them together means one read for both:
+    a run recorded before either column existed pays the map read once.
+
+    A no-op — and no disk touched — for a run that already carries both.
+    ``run`` is updated in place on success, so the caller's copy grades exactly
+    like a freshly-stacked run.
 
     Which map: the honest per-pixel **frame count** (``{stem}_framecov.fits``)
     when the run wrote one, else the weighted coverage map — the same preference,
     in the same order, that :func:`seestack.stack.stacker.run_stack` itself makes
-    when it stamps the column on a new run.
+    when it stamps the columns on a new run.
 
-    ``None`` — no master path, no sibling on disk, an unreadable one, or a map
-    with nothing covered — leaves the row NULL and the panel silent. It never
-    falls back to the ``coverage_min`` test that column replaced.
+    No master path, no sibling on disk, an unreadable one, or a map with nothing
+    covered leaves the rows NULL and every surface silent. It never falls back to
+    the ``coverage_min`` test the thin share replaced.
     """
-    if run.coverage_thin_frac is not None:
-        return float(run.coverage_thin_frac)
-    if not run.fits_path:
-        return None
+    want_thin = run.coverage_thin_frac is None
+    want_uncovered = run.uncovered_frac is None
+    if not (want_thin or want_uncovered) or not run.fits_path:
+        return
 
     from seestack.edit.proxy import load_coverage, load_frame_coverage
-    from seestack.stack.stacker import coverage_thin_fraction
+    from seestack.stack.stacker import coverage_thin_fraction, uncovered_fraction
 
     cov = load_frame_coverage(run.fits_path)
     if cov is None:
         cov = load_coverage(run.fits_path)
     if cov is None:
-        return None
-    share = coverage_thin_fraction(cov)
-    if share is None:
-        return None
+        return
 
-    if run.id is not None:
-        try:
-            project.set_stack_coverage_thin_frac(run.id, share)
-        except sqlite3.Error:
-            # A read-only DB (or one another process has locked) just means this
-            # run pays the map read again next time — never an error to the user,
-            # who only asked how their stack looks.
-            log.debug("could not record coverage_thin_frac for run %s", run.id,
-                      exc_info=True)
-    run.coverage_thin_frac = share
-    return share
+    if want_thin:
+        share = coverage_thin_fraction(cov)
+        if share is not None:
+            _record(project, run, "coverage_thin_frac", share)
+    if want_uncovered:
+        empty = uncovered_fraction(cov)
+        if empty is not None:
+            _record(project, run, "uncovered_frac", empty)
+
+
+def _record(project: Project, run: StackRunRow, column: str,
+            value: float) -> None:
+    """Write one healed share to the row and to the DB (best-effort)."""
+    setattr(run, column, value)
+    if run.id is None:
+        return
+    setter = getattr(project, f"set_stack_{column}")
+    try:
+        setter(run.id, value)
+    except sqlite3.Error:
+        # A read-only DB (or one another process has locked) just means this run
+        # pays the map read again next time — never an error to the user, who
+        # only asked how their stack looks.
+        log.debug("could not record %s for run %s", column, run.id,
+                  exc_info=True)
+
+
+def backfill_coverage_thin_frac(project: Project,
+                                run: StackRunRow) -> float | None:
+    """Compute ``run``'s thin-coverage share from its coverage sibling, record it
+    on the row, and return it — or ``None`` when it can't be known.
+
+    A thin wrapper over :func:`backfill_coverage_shares` (which heals the empty-
+    canvas share off the same read), kept because callers ask for this one number
+    by name. A no-op (returns the stored value) for a run that already has one,
+    so callers can call it unconditionally.
+    """
+    backfill_coverage_shares(project, run)
+    return (None if run.coverage_thin_frac is None
+            else float(run.coverage_thin_frac))
 
 
 # How far the seam heal may decimate the master before it reads it. The measure

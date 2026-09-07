@@ -60,6 +60,28 @@ _COVERAGE_MIN_PEAK = 4
 # ragged one.
 _COVERAGE_THIN_SHARE = 0.05
 
+# …and a canvas has enough *empty* (never-covered) area to be worth explaining
+# when this share of it is black. A different question and a different
+# denominator from the share above: that one is over the *covered* pixels and
+# excludes the black by construction, so it is silent about exactly what a
+# beginner is staring at. Measured on real ``run_stack`` output, the same way:
+#
+#     single field, no dither, reference canvas          3.1 %
+#     single field, ±6 px dither, reference canvas       1.1 %
+#     single field, ±6 px dither, union canvas           5.1 %
+#     1×2 / 1×3 strip mosaic                             4.3 % / 4.1 %
+#     2×2 grid mosaic                                    3.1 %
+#     L-shaped 3-panel mosaic                           19.8 %
+#     diagonal 2-panel mosaic                           36.6 %
+#
+# An unragged canvas is never *quite* 0 %: reprojection leaves a NaN margin a
+# couple of pixels wide, which on the 480×320 synthetic canvas is already a few
+# percent (and on the owner's multi-thousand-pixel canvases, a fraction of one).
+# So the honest cases run 1–5 % and the genuinely-black ones 20–37 %; 12 % sits
+# ~2.4× above the worst honest case and well under the ragged ones. Raising this
+# is safe; lowering it starts explaining a border nobody can see.
+_UNCOVERED_SHARE = 0.12
+
 # The κ-σ / drizzle outlier-rejection fraction band in which the "we cleaned the
 # trails out" reassurance is both meaningful and honest. Below the floor a stack
 # rejected essentially nothing (data was already clean — no clean-up to claim);
@@ -481,6 +503,32 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
                      "far fewer frames than the best-covered part, so it's "
                      "noisier and uneven there. Trim border gives a clean, even "
                      "rectangle."),
+            action="trim_border",
+        )))
+
+    # --- The black around the picture: canvas no frame ever reached -----------
+    # The note above cannot say this and never could: its ratio is over *covered*
+    # pixels, so the empty corners of a mosaic's union canvas are in neither of
+    # its terms. A beginner meeting a wide black wedge on an unedited stack has
+    # nothing telling them whether the picture is broken — it isn't; the canvas
+    # is the bounding box of every pointing, so a ragged or diagonal set of
+    # panels leaves sky no sub reached. Explains rather than prescribes: on a
+    # diagonal mosaic the largest well-covered rectangle is genuinely small, so
+    # the trim is offered as a choice, not named as the fix. Only fires with a
+    # real stack's depth behind it (the same peak floor the thin note uses), and
+    # self-hides on a run recorded before the share was measured.
+    empty_share = run.uncovered_frac
+    if (empty_share is not None and run.coverage_max >= _COVERAGE_MIN_PEAK
+            and empty_share >= _UNCOVERED_SHARE):
+        scored.append((21, HealthNote(
+            kind="uncovered",
+            severity="info",
+            message=(f"About {empty_share * 100:.0f}% of this canvas is empty — "
+                     "black sky none of your subs reached. That's normal when "
+                     "the subs don't all cover the same patch (a mosaic, or a "
+                     "night that drifted), and nothing is wrong with the picture "
+                     "itself. Trim border crops to the well-covered part if you "
+                     "want a clean rectangle."),
             action="trim_border",
         )))
 
