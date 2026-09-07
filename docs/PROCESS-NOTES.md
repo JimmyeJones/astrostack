@@ -18,6 +18,96 @@ is a queue.
 
 ---
 
+## 2026-09-07 — Builder run (branch `claude/sweet-babbage-55nznt`): a drained backlog, four empirical probes that all came back clean, and the **first browser measurement of the first-run app**
+
+**The run.** Baseline green before any change (**5,009 passed / 2 skipped**, full
+suite headless, 22:30). Shipped **v0.374.5** (a test-only net) and **v0.374.6** (a
+measured close). Both write-ups in [`SHIPPED.md`](SHIPPED.md).
+
+**Backlog state — dry, and confirmed by opening things rather than by skimming.**
+"Bugs (fix these first)" is in the gated state the runs below describe. The
+**Features that serve real workflows** list was opened top-down and every
+beginner-facing candidate in it turned out to be already shipped or already
+declined with numbers: *"Night by night"* (all four slices, v0.144.0 + v0.171.0),
+*"Does my colour look right?"* (blocked on a catalog field that does not exist —
+one flat `nebula` bucket over 157 entries), *"N spots instead of a percentage"*
+(measured and closed: 1,323 blobs on a scene with **no** trail), *the
+calibration match-confidence card* (v0.321.0), *the crop-anything idea* (declined
+once, on purpose). Nothing was invented to fill the gap.
+
+**Four probes, run rather than read. All clean — recorded so nobody repeats them.**
+
+1. **Every read-only endpoint on a first-run install** — 52 parameterless GETs on
+   an empty data root, 38 per-target GETs on a target ingested and never stacked.
+   **0 of 90 returned 5xx.** This one became a permanent test (v0.374.5); the
+   other three did not, and this block is their record.
+2. **The one-click Auto, across ten realistic scenes** (clean / noisy / very noisy
+   single fields, a mosaic with and without NaN gaps, a strong gradient, a blown
+   galaxy core, a star cluster, a nearly-blank sky, a dim low-signal sky).
+   Healthy everywhere: sky lands at 0.14–0.23, R/G/B stays neutral to ~0.006, no
+   non-finite pixel ever appears **inside** the covered area, and a mosaic's gaps
+   come through at exactly their input fraction (8.82 %). The output can sit a few
+   thousandths **below 0** on the denoise-firing scenes (min −0.005); that is not a
+   bug — `output.pack_unit`'s contract is that the caller clips, and all six export
+   paths do.
+3. **Whole-recipe preview↔export parity**, the A2 class, at mosaic scale
+   (3600×2400, `proxy_scale` 3) and single-field scale (2100×1400, scale 2), applied
+   **op by op** to the same sampled pixels so the divergence could be attributed
+   rather than just observed. Everything up to and including `tone.curves` agrees
+   to a mean of **0.0037** (≈1/255). The whole remaining gap is `detail.sharpen`
+   — mean 0.0192, chroma 0.180 preview vs 0.215 export — which is the *documented*
+   limitation (`sharpen_understates_on_proxy`, `_SHARPEN_PROXY_FLOOR_PX`) and is
+   surfaced to the user by the existing advisory. **Do not re-open it as a bug**;
+   at `proxy_scale` 3 an S30 star is ~1 px on the proxy, so no parameter scaling
+   can recover what the decimation already threw away.
+4. **The `library_hygiene` double walk**, the backlog's own "measure before you
+   cache" item — closed at ~196 ms a refresh; numbers and method in
+   [`SHIPPED.md`](SHIPPED.md) under v0.374.6.
+
+**Dogfood — clean, twice, and the second one is new.** `scripts/agent-dogfood.sh`
+on the sample-loaded app: **nothing overflowing, no console errors**, tallest page
+still the Target page at **3,040 px on a phone** (3,014 px at v0.338.1 — the
+seventh page-height baseline, and it says what the last few have: *do not open a
+speculative IA slice*).
+
+**Then the same probe against an app with no data at all** — a first-run install,
+which every dogfood measurement before this one has missed, because the script
+loads the sample before it probes. Also **nothing overflowing, no console
+errors**. First-run heights, for the next run to compare against:
+
+| page | phone | desktop |
+|---|---|---|
+| `/life-list` | 2,779 px | 1,224 px |
+| `/` (Dashboard) | 1,402 px | 1,028 px |
+| `/library` | 1,252 px | 923 px |
+| `/combine` | 1,196 px | — |
+| `/settings` | 1,067 px | — |
+
+`/life-list` is the tallest first-run page by 2× and that is *correct*: it is a
+bucket list, it already collapses to 12 of 110 behind "Show all 110 still to
+shoot", and its height is the two catalogs' preview grids, not stacked banners.
+The Dashboard reads well empty — the plate-solve banner, "Your first image"
+(0 of 6, each step linked), the sample-image offer, zeroed stat tiles, then a
+proper "No stacks yet" empty state. **Nothing to fix was found on either pass.**
+
+**And it is now a flag, not a method note** — `scripts/agent-dogfood.sh --empty`.
+It was an ad-hoc second server for the length of this run, and the script's own
+header says why that is not good enough (*"Every run used to reinvent how to get
+to that point, so in practice the pass degraded back into reading code"*). It
+boots on its own empty data root, its own port (8812) and its own
+`$DOGFOOD_DIR/empty/` scratch, so it follows a normal pass without disturbing it,
+and reuses the playwright install the normal pass drops in the shared scratch dir.
+The default path is untouched (smoke-tested both ways). `AGENTS.md` §7 now points
+at it beside the normal pass.
+
+**Harness trap that cost this run ~20 minutes, for the next agent.** A background
+wait loop spelled `until ! pgrep -f "python -m pytest -q"; do sleep 20; done`
+**never terminates**: `pgrep -f` matches its own shell's command line, which
+contains that literal string, so the loop waits on itself for ever. Match on
+something the waiting command does not itself contain, or poll the log.
+
+---
+
 ## 2026-09-06 (later) — Builder run (branch `claude/sweet-babbage-cqqyi1`): the newest-code audit again — a promise qualified only *after* the click, an engine probe that cleared `defects.py`, and a clean dogfood
 
 **The run.** Baseline green before any change (**5,007 passed / 2 skipped**, full

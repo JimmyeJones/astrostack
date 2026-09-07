@@ -591,6 +591,14 @@ the repo.
 > to poke by hand; `--no-probe` skips the browser half. Everything lands in a
 > scratch dir, never the repo. Whatever it finds still needs a real regression
 > test in the suite — it is a finder, not a test.
+>
+> **Follow it with `scripts/agent-dogfood.sh --empty`** (≈1 min once playwright is
+> installed): the same probe against an app with **no data at all**. Every
+> measurement this script took before 2026-09-07 was of the *sample-loaded* app, so
+> the screens a beginner meets first — an empty Dashboard, Library, Gallery, life
+> list — had never been in front of a browser. It uses its own port and its own
+> scratch, so it can follow a normal pass without disturbing it. The first-run
+> baseline to compare against is in `docs/PROCESS-NOTES.md` (2026-09-07).
 
 ---
 

@@ -16,6 +16,14 @@
 #   scripts/agent-dogfood.sh --serve         # boot and STAY UP (Ctrl-C to stop)
 #   scripts/agent-dogfood.sh --no-stack      # skip the (slow) stack of the sample
 #   scripts/agent-dogfood.sh --no-probe      # boot only, don't drive a browser
+#   scripts/agent-dogfood.sh --empty         # probe a FIRST-RUN app: no data at all
+#
+# --empty exists because every measurement this script has ever taken was of the
+# sample-loaded app, so the screens a beginner meets *first* — an empty Dashboard,
+# Library, Gallery, life list — had never been in front of a browser. It boots a
+# second app on its own empty data root (port 8812, its own $DOGFOOD_DIR/empty/
+# scratch) and runs the same probe with no target, so it can follow a normal pass
+# without disturbing it. Roughly a minute once playwright is installed.
 #
 # Everything it writes goes under a scratch directory ($DOGFOOD_DIR, default
 # ${TMPDIR:-/tmp}/astrostack-dogfood) — NEVER the repo, and never a real library.
@@ -32,24 +40,42 @@ cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.."
 REPO="$PWD"
 
 DOGFOOD_DIR="${DOGFOOD_DIR:-${TMPDIR:-/tmp}/astrostack-dogfood}"
-PORT="${ASTROSTACK_PORT:-8811}"
-BASE="http://127.0.0.1:${PORT}"
-DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0
+DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0
 for arg in "$@"; do
   case "$arg" in
     --serve) DO_SERVE=1 ;;
     --no-stack) DO_STACK=0 ;;
     --no-probe) DO_PROBE=0 ;;
     --build) DO_BUILD=1 ;;
-    -h|--help) sed -n '1,32p' "$0"; exit 0 ;;
+    --empty) DO_EMPTY=1 ;;
+    -h|--help) sed -n '1,37p' "$0"; exit 0 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
 
-DATA="$DOGFOOD_DIR/data"
-SHOTS="$DOGFOOD_DIR/shots"
+if [ "$DO_EMPTY" = 1 ]; then
+  # Its own root, its own port and its own shots, so an --empty pass can follow a
+  # normal one (or run beside a --serve'd one) without clobbering either. The data
+  # root is wiped first: "first run" means first run, not "whatever was left here".
+  DEFAULT_PORT=8812
+  DATA="$DOGFOOD_DIR/empty/data"
+  SHOTS="$DOGFOOD_DIR/empty/shots"
+  SERVER_LOG="$DOGFOOD_DIR/server-empty.log"
+  rm -rf "$DOGFOOD_DIR/empty"
+  DO_STACK=0
+else
+  DEFAULT_PORT=8811
+  DATA="$DOGFOOD_DIR/data"
+  SHOTS="$DOGFOOD_DIR/shots"
+  SERVER_LOG="$DOGFOOD_DIR/server.log"
+fi
+PORT="${ASTROSTACK_PORT:-$DEFAULT_PORT}"
+BASE="http://127.0.0.1:${PORT}"
 mkdir -p "$DATA" "$SHOTS"
 echo "dogfood scratch: $DOGFOOD_DIR"
+if [ "$DO_EMPTY" = 1 ]; then
+  echo "-- FIRST-RUN pass: no sample, no stack, no targets"
+fi
 
 # 1. The SPA. webapp/ serves whatever is in webapp/static, so a stale build
 #    would have you dogfooding last week's frontend.
@@ -62,7 +88,7 @@ fi
 [ -d .venv ] && source .venv/bin/activate
 echo "-- starting the app on $BASE (data: $DATA)"
 ASTROSTACK_DATA="$DATA" ASTROSTACK_PORT="$PORT" \
-  python -m webapp.main > "$DOGFOOD_DIR/server.log" 2>&1 &
+  python -m webapp.main > "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 cleanup() {
   if kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -75,8 +101,8 @@ trap cleanup EXIT
 for _ in $(seq 1 60); do
   if curl -sf "$BASE/api/system" >/dev/null 2>&1; then break; fi
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-    echo "server died on boot — $DOGFOOD_DIR/server.log:" >&2
-    tail -20 "$DOGFOOD_DIR/server.log" >&2
+    echo "server died on boot — $SERVER_LOG:" >&2
+    tail -20 "$SERVER_LOG" >&2
     exit 1
   fi
   sleep 1
@@ -84,8 +110,10 @@ done
 curl -sf "$BASE/api/system" >/dev/null || { echo "server never answered" >&2; exit 1; }
 
 # 3. Real data. The bundled sample is a genuine target with frames, so the app
-#    is exercised the way a user's is rather than through empty states.
-if [ "$(curl -sf "$BASE/api/targets" | tr -d '[:space:]')" = "[]" ]; then
+#    is exercised the way a user's is rather than through empty states — except
+#    under --empty, where the empty states ARE the thing being measured.
+if [ "$DO_EMPTY" = 0 ] && \
+   [ "$(curl -sf "$BASE/api/targets" | tr -d '[:space:]')" = "[]" ]; then
   echo "-- loading the bundled sample target"
   curl -sf -X POST "$BASE/api/sample" >/dev/null || echo "warn: sample load failed"
 fi
@@ -132,9 +160,12 @@ if [ "$DO_PROBE" = 1 ]; then
     # Copied in rather than run from the repo: an ESM `import "playwright"`
     # resolves from the *script's* directory, and NODE_PATH doesn't apply.
     cp "$REPO/scripts/dogfood_probe.mjs" "$PW_DIR/probe.mjs"
-    RUN_ID="$(curl -sf "$BASE/api/targets/$SAFE/stack-runs" \
-              | python -c 'import json,sys; r=json.load(sys.stdin); print(r[0]["id"] if r else "")' \
-              2>/dev/null || true)"
+    RUN_ID=""
+    if [ -n "$SAFE" ]; then
+      RUN_ID="$(curl -sf "$BASE/api/targets/$SAFE/stack-runs" \
+                | python -c 'import json,sys; r=json.load(sys.stdin); print(r[0]["id"] if r else "")' \
+                2>/dev/null || true)"
+    fi
     (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS" TARGET_SAFE="$SAFE" \
        TARGET_RUN_ID="$RUN_ID" node probe.mjs) || echo "warn: probe failed"
     echo "-- screenshots: $SHOTS"
