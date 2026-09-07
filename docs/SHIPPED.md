@@ -14,6 +14,109 @@ Newest first.
 
 ---
 
+## v0.374.9 — 2026-09-07 — reading a sub's stored solution stops re-verifying a FITS header card by card: `wcs_io._wcs_from_plain_tan_text` (a 6-second canvas computation becomes 0.9 s)
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-mg8isx`.) Performance — the
+residue v0.374.8 deliberately left, filed with its own number. No behaviour
+change: the WCS that comes out is byte-identical through `to_header`, and so is
+the canvas built from it.**
+
+**This is shape (a) of the four the v0.374.8 lead filed, and its own diagnosis
+was right.** v0.374.8 vectorised `footprint_radec_deg` and took
+`compute_mosaic_canvas` from 13.87 s to 4.75 s on the §1 owner's 5,477-sub
+mosaic; it then measured what was left and filed it: `wcs_from_text` at
+**0.755 ms** a frame, called once per **sub**, ≈ 4.1 s of the remaining 4.75 s.
+
+**Where that cost actually is.** Not the projection maths, and not the text
+parse — `Header.fromstring` alone is **0.047 ms**. It is `Card._verify`, which
+astropy pays building the `Header` **and again on every `key in header`
+lookup**. That second half is the part that is easy to miss: a first prototype
+that kept `astropy.io.fits.Header` for the parse and only replaced the `WCS`
+construction measured **0.47 ms** — better than 0.85 ms, but ten membership
+tests on a `Header` had eaten most of the win. Scanning the cards directly
+measures **0.07 ms**.
+
+| step | before | after |
+| --- | --- | --- |
+| `wcs_from_text`, one plain TAN header | 0.85 ms | **0.07 ms** (12×) |
+| `compute_mosaic_canvas`, 9-panel 5,477-sub mosaic | 6.02 s | **0.89 s** (6.8×) |
+| `estimate_stack` on the same project (what `/stack-estimate` calls) | 6.04 s | **1.06 s** (5.7×) |
+
+*(Timings on this run's box, which is slower than the one v0.374.8 measured on —
+the ratio is the number that carries, and the per-sub saving is 0.94 ms. The
+last row is measured against a real 5,477-row `project.sqlite` seeded the way
+the v0.374.7/.8 sweep seeded its, so it includes the two `iter_frames` walks and
+the reference pick; the HTTP endpoints themselves were not separately
+re-timed — `estimate_stack` is what they spend their time in.)*
+
+**And what is left, from a profile of that 1.06 s**, so the next run does not
+have to re-derive it: `_parse_fixed_format_cards` 0.29 s, the rest of
+`_wcs_from_plain_tan_text` 0.86 s cumulative (of which ~0.09 s is astropy
+parsing `"deg"` into a `Unit` on each `cunit` assignment — measured, and
+deliberately **not** optimised away with a "only set it when the header carries
+CUNIT" branch, which would buy ~8 % while making the object depend on a keyword's
+presence), `iter_frames` + `_row_to_frame` 0.37 s across the two walks. Nothing
+in that list justifies another pass on its own.
+
+**What shipped.** `_parse_fixed_format_cards` walks the header text in 80-column
+records and returns the couple of dozen well-known keywords it recognises;
+`_wcs_from_plain_tan_text` assigns them onto a bare `WCS(naxis=2)`.
+`wcs_from_text` tries it first and falls through to astropy's full read
+otherwise, so every caller — `mosaic.compute_mosaic_canvas`, `align.py`'s
+per-frame reproject, `stacker.py`, `solve.bootstrap.propagate_wcs`, the desktop
+footprint view — gets the fast path on the headers it actually sees, and the old
+path on everything else.
+
+**The rotation conventions are not re-implemented.** `CROTA` is handed to
+wcslib through `wcs.crota`, which is exactly what the header path does, so the
+legacy CDELT+CROTA2 convention converts identically instead of by a hand-rolled
+sign. And a header carrying `CD` keeps `CD`: wcslib ignores `CROTA`/`CDELT` when
+`CD` is present — verified against astropy with a deliberately inconsistent
+`CROTA2=45°` beside a real CD matrix, not assumed from the standard. That case
+matters, because it is the shape an **ASTAP sidecar** has.
+
+**Why it is safe: it declines rather than guesses.** The scan bails — returning
+`None`, so astropy answers — on anything at all outside the plain case: a
+keyword outside its allowlist (so SIP's `A_ORDER`, a `PV` term, a `HIERARCH`
+card, a third `CTYPE3` can never be silently dropped from the transform), a
+duplicated keyword (our scan would keep the last value and astropy the first, so
+the two reads could place one frame in two places), a non-TAN or galactic
+projection, `WCSAXES` ≠ 2, axes in anything but degrees, a missing reference
+point, a card with no `= ` value indicator, a value that doesn't parse, or a
+length that isn't a whole number of cards. A blob with no WCS keys at all —
+a truncated ASTAP sidecar reads as a bare `END` — also declines, so it still
+comes back as the non-`None`, `has_celestial=False` WCS that
+`wcs_text_is_usable` depends on to tell "unsolved" from "no file".
+
+**The test bar is byte-identity, not "close enough".** For each of ten header
+shapes — our own CDELT and CD serialisations, an ASTAP sidecar (CD beside
+CDELT+CROTA), the legacy CDELT+CROTA2 convention, a half-written CD matrix, a
+half-written PC matrix, a frame carrying its own `NAXIS1`/`NAXIS2`, a frame
+stamped with `DATE-OBS`/`MJD-OBS`/`RADESYS`/`EQUINOX`, a frame at the RA=0 seam
+and one near the pole — the fast WCS must re-serialise **byte-for-byte** like
+astropy's through `to_header(relax=True)`, record the same `pixel_shape`, and
+transform a 21×21 pixel grid to **bit-identical** RA/Dec. Byte-identity is the
+bar rather than a tolerance because `solve.bootstrap.propagate_wcs` reads a
+solution back, shifts `CRPIX` and re-serialises it **into the project DB** — a
+dropped keyword would become stored data, not a transient object. Nine more
+cases assert the decline-and-fall-through behaviour (including the ones astropy
+itself refuses, which must still come back as `None`), one asserts the duplicate
+guard, and `tests/test_mosaic.py` pins the invariant at the level that reaches
+the picture: the union canvas WCS, shape, `is_mosaic`, span and outlier verdict
+are identical with the fast path monkeypatched off.
+
+**Upgrade-safe (§9):** engine-internal, no config/schema/on-disk/API/default
+change, and nothing is written differently. **Tests:** +21
+(`tests/test_wcs_io.py` ×20, `tests/test_mosaic.py` ×1).
+
+**Still open (the other three shapes, with their care notes, in
+[`IMPROVEMENTS.md`](IMPROVEMENTS.md)):** (b) memoising the canvas per target —
+the staleness trade v0.374.6 warned about; (c) folding the Stack page's two
+`stack-estimate` queries into one; (d) splitting the *rejection* answer out of
+`/stack-estimate` so nudging the κ slider stops re-paying a canvas computation.
+
+---
+
 ## v0.374.8 — 2026-09-07 — the mosaic canvas stops building a `SkyCoord` per corner per sub: `wcs_io.footprint_radec_deg` (a 14-second Target/Stack page fetch becomes 4.7 s)
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-retf5t`.) Performance —
