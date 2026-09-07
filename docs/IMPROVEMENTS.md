@@ -5175,44 +5175,15 @@ problems. Dogfood it every big-picture run and fix root causes.
   (M31/M42) is worth a real-data A/B before any change — synthetic can't judge "looks better". Testable on
   `_highlight_rolloff`/`autostretch` in isolation; additive; changing it touches the default view + Auto, so
   real-data-gated like the SCNR / `sky_sigma` items below.
-- **Scout to vet on REAL data: does the Auto denoise↔sharpen crossfade over-read a *sky
-  gradient* as noise?** (M, image-quality/autonomy) `presets.auto_recipe` picks its denoise
-  strength and whether to sharpen from `analyze_proxy`'s `sky_sigma`, measured on the **raw**
-  linear proxy — *before* Auto's own first op (`background.final_gradient`) removes the gradient.
-  A Builder dogfood (2026-07-08) found `sky_sigma` is materially sensitive to a smooth background
-  gradient and to dynamic range: on synthetic proxies, gradient 0.0→0.10 moved `sky_sigma`
-  0.071→0.184 at *fixed* noise (crossfade band is 0.012–0.028, so it saturates to "very noisy" →
-  full denoise, **no sharpen**). This is very likely just an unrepresentative synthetic (the Scout's
-  real-data dogfoods *do* get sharpen chosen, so real proxies read < 0.012), **not** a confirmed
-  bug — hence a Scout item, not a Builder change to the most-used one-click path. Worth checking on
-  a real light-polluted / strong-gradient Seestar stack whether Auto ever *wrongly* drops sharpen and
-  over-denoises. If real: measure the crossfade `sky_sigma` on a **coarsely background-subtracted**
-  proxy (a cheap large-box detrend, matching what `final_gradient` will remove anyway) so it reflects
-  true pixel noise, not the gradient. Additive, testable on `analyze_proxy`/`auto_recipe` in isolation;
-  changing Auto's output needs the usual real-data validation.
-  _(Builder measurement 2026-07-08, v0.94.5 baseline — sharpens the case but did **not** ship a change,
-  deferring to the two prior deferrals + the real-data requirement. Three findings: **(1) The mechanism
-  is real, not merely a low-dynamic-range synthetic artifact.** My earlier same-day probe used a synthetic
-  whose 99.5th percentile landed *in the sky* (too little bright signal), which by itself blows up
-  `sky_sigma`. With a **realistic** proxy (extended nebula + 400 varied stars → proper normalization span)
-  and **low** noise (σ≈0.003), a modest left→right gradient still pushes `sky_sigma` well over `_NOISE_HI`
-  (0.028): gradient 0.00→0.05→0.10→0.20 of range → `sky_sigma` 0.015→0.028→0.054→0.098, i.e. Auto flips
-  from `sharpen≈0.40` to **sharpen 0.0 / full denoise** by a gradient of only ~0.05. This is exactly the
-  light-polluted-but-well-stacked case (gradient present, pixel noise driven low by thousands of subs) —
-  arguably *common* for the target user, not an edge. **(2) Op-order proof it's measuring the wrong signal
-  by construction:** in `auto_recipe` `background.final_gradient` is the **first** tone/detail op, *before*
-  `detail.denoise` — so the noise the denoise op actually sees is the post-gradient-removal noise, yet
-  `analyze_proxy` measures `sky_sigma` on the raw (gradient-laden) proxy. **(3) A naïve detrend backfires
-  — the fix is non-trivial.** A quick block-median + nearest-neighbour-upsample detrend *increased*
-  `sky_sigma` on a flat proxy (0.015→0.058) via block-edge steps, i.e. a poorly-tuned detrend adds
-  structure that reads as noise. So the eventual fix must use a genuinely smooth background estimate
-  (photutils `Background2D`-style interpolation, or a true low-pass) that removes only the large-scale
-  gradient while leaving pixel noise intact — and be validated on a **real** light-polluted Seestar stack
-  that it (a) leaves a flat clean stack's `sky_sigma` ≈ unchanged (so clean stacks still sharpen) and
-  (b) reads a gradient-heavy-but-low-noise stack as *not* very noisy. Safety of the eventual change:
-  flat images ≈ byte-for-byte (detrend ≈ no-op), genuinely-noisy images unchanged (high-freq noise
-  survives a coarse detrend), only gradient-heavy-low-noise images shift toward sharpen — but it still
-  touches the most-used one-click path, so it stays a Scout/real-data item.)_
+  ~~**Scout to vet on REAL data: does the Auto denoise↔sharpen crossfade over-read a *sky gradient* as
+  noise?**~~ — **CLOSED BY MEASUREMENT, v0.382.1** (Builder 2026-09-07). Deferred three times as
+  real-data-gated; the v0.225.0 *local* `sky_sigma` estimator had already closed it by construction, and
+  running the entry's own gradient ladder says so: at σ=0.003, gradient 0.00→0.05→0.10→0.20 now moves
+  `sky_sigma` **0.0042→0.0039→0.0035→0.0030** (it drifts *down*, not up), `_noise_fraction` stays 0
+  throughout, and Auto keeps the same sharpening with no denoise pass added — against the entry's recorded
+  pre-fix 0.015→0.028→0.054→0.098, which flipped Auto to *sharpen 0.0 / full denoise* by a gradient of
+  0.05. Pinned by `test_a_strong_gradient_never_costs_a_clean_stack_its_sharpening`. Entry, numbers and
+  the original trace in [`SHIPPED.md`](SHIPPED.md).
 - **Scout to vet on REAL data: does Auto's SCNR tint an already-neutral *background* magenta?**
   (S–M, image-quality) `tone.scnr` (`seestack/edit/ops/tone.py::_scnr`) is a one-sided clip — it
   can only ever pull green *down* toward the `0.5·(R+B)` neutral, never up. On data that already
@@ -8560,6 +8531,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.382.1** — PRIORITY 4 (image quality), a three-times-deferred real-data gate closed with numbers instead of another deferral: **"does the Auto denoise↔sharpen crossfade over-read a sky gradient as noise?" — no, and it has not since v0.225.0.** The entry was filed 2026-07-08 against the *level*-MAD `sky_sigma`, where gradient 0.00→0.05→0.10→0.20 of range moved it 0.015→0.028→0.054→0.098 and flipped Auto to *sharpen 0.0 / full denoise* by a gradient of 0.05. The local adjacent-pixel-difference estimator (v0.225.0, shipped for the mosaic grid regression) is blind to structure slower than a pixel, so running the entry's own ladder on the current code gives **0.0042→0.0039→0.0035→0.0030** — *down*, not up, because the tilt lifts the normalisation ceiling — with `_noise_fraction` 0 throughout, no denoise op added, and an identical sharpen amount. No product code changed; what ships is the pin: `test_a_strong_gradient_never_costs_a_clean_stack_its_sharpening` holds the *decision* across the whole feared range, where the existing sibling test held only the σ at one gradient. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.382.0** — PRIORITY 2 (autonomy) + the unblocking of a PRIORITY 4 gate: **the app starts collecting the real-data evidence its own gated highlight cue needs.** The automatic "your core is blown out" cue is deliberately real-data-gated — nobody knows how often a genuinely blown core occurs on the owner's stacks, or how severe — and runs keep meeting that gate and standing down while nothing accrues the measurement. Now every unattended auto-edit asks the editor's own solver what "Hold back highlights" would offer on the picture it just made and stamps the answer (`editor_auto_highlight:{run_id}`), **including an explicit `strength: null`** so "measured and clean" never reads as "never measured"; `pipeline.auto_highlight_summary` + `GET /api/auto-highlight-summary` aggregate it, and one dimmed line joins the Auto colour self-check on Settings → Maintenance. `editor.solve_highlight_protect` is the endpoint's body lifted out, so the button and the passive record cannot drift (with `uid=None` it solves against the recipe's *own* stretch — pinned). No pixel moves, no default flips; the proxy it measures on is the one the editor builds anyway, so a fresh run now warms it. Tests +16. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.381.0** — PRIORITY 2–3 (trust / autonomy), closing the "LEAD, NOT FINISHED" filed the same day: **the folder your scan walked past now waits for you on the Library page.** A bare `<T>/` beside `<T>_sub/` holding files the Seestar's naming can't vouch for — the owner's `NGC 6888`, 4,815 files — has been *reported* since v0.329.2 and *actionable* since v0.378.0, but only on the **Jobs page**, attached to one scan's result, and the scan that finds it is the watcher's, fired while nobody is looking. New `webapp/skipped_folders.py` has the scan **write the finding down** (one JSON value in the registry's existing `library_meta` table — the lead's feared "schema decision" was not needed), `GET /api/targets/skipped-folders` serves it, and `SkippedFoldersCard` shows it on the Library page with the same one-click "bring it in" (`BringFolderInButton`, now shared with Jobs so the two can't drift). **The part a standing card needs and a per-scan alert never did:** the convention keeps skipping the folder, so a card mirroring the newest scan would still be shouting after the owner acted — a remembered folder is therefore dropped as soon as its target owns *any* frame from inside it, and one that has left `incoming/` is forgotten. Polling never walks `incoming/` (pinned by a test that makes a walk fatal); nothing writes to it. Upgrade-safe: one additive meta row, one additive endpoint. Tests +23. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.380.0** — PRIORITY 1 + 3 (editor / friendliness), the completion of v0.379.0's beginner path: **a "Crop" button in the editor header, beside the app's two automatic crop offers.** Cropping is the edit a beginner is most likely to want *and* know the name of, and the only route to it was **Add operation → More operations → Crop** — the op is not in the Add menu's Common group — followed by four typed fractions. One click now adds the op (or **re-opens the recipe's existing crop**, via the new pure `cropDrag.ts::existingCropUid`, rather than stacking a second one whose fractions would be relative to the first's output; a crop the user had switched off comes back on, since pressing Crop *is* the ask), selects it, and opens the drag rectangle. **Placed in a group that already exists** — "Trim border" and "Re-centre" both end in the same adjustable Crop op — so it is not one more always-on banner, and it is hidden while a crop *proposal* owns the preview. **Measured, as the IA rule requires:** page heights byte-identical on the running app (phone editor **2,887 px**, desktop **1,841 px**, both unchanged; on a 420 px phone it shares the Auto-process row rather than starting a new one), nothing overflowing, no console errors. Nine existing `Editor.test.tsx` queries that reached the pipeline's Crop row by its bare text are now addressed by its own `aria-label` ("Select Crop") — more precise, not looser, and the reason one of them failed first. Frontend only. Tests +7.
