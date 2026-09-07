@@ -30,6 +30,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from seestack.stack.pointings import (
+    FOLD_GRID_DEG as _FOLD_GRID_DEG,
+)
 from seestack.stack.pointings import MIN_POINTING_FRAMES, pointing_groups
 
 #: A panel has to carry this many solved subs to count as a panel at all — the
@@ -58,13 +61,12 @@ MAX_GRID_SIDE = 24
 #: Pointings are folded onto a grid this fine before clustering, because the
 #: clustering is O(n²) and this runs on a page the owner opens with thousands of
 #: subs behind it (measured: 5,400 subs took 2.2 s unfolded and 0.05 s folded).
-#: 0.01° is ~36″ — an order of magnitude below a dither (≲0.1°) and 25× below
-#: :data:`~seestack.stack.pointings.PANEL_LINK_DIST_DEG`, so a fold moves a
-#: pointing by at most ~0.007° and can only change a link decision for a pair
-#: sitting within ~3 % of the link distance. The module's own margin either side
-#: is ~2×, so nothing real is at stake; the frame **counts** are exact either
-#: way, since the fold carries its size through ``pointing_groups(weights=…)``.
-FOLD_GRID_DEG = 0.01
+#: This module's fold also carries each cell's **integration**, which is why it
+#: still has one of its own; the *grid* is the engine's
+#: (:data:`seestack.stack.pointings.FOLD_GRID_DEG`, which `pointing_groups`
+#: itself now folds on) so the two can never drift into disagreeing about what
+#: counts as the same pointing. See there for why a fold cannot move the answer.
+FOLD_GRID_DEG = _FOLD_GRID_DEG
 
 
 @dataclass(frozen=True)

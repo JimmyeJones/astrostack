@@ -513,13 +513,58 @@ def cropped_center_radec_from_fits(fits_path: str | Path, crop
     return (ra, dec)
 
 
+def _is_plain_radec(wcs) -> bool:
+    """True for a 2-axis WCS whose world axes are plainly RA then Dec.
+
+    That is every WCS this app stores — ASTAP solves to ``RA---TAN``/``DEC--TAN``
+    and :func:`wcs_to_text` round-trips it — and it is the precondition for
+    reading :meth:`all_pix2world`'s output as ``(ra, dec)`` directly. A galactic
+    (``GLON``/``GLAT``) or otherwise non-equatorial WCS would hand back
+    longitude/latitude in the same two slots, which is why the caller below only
+    takes the fast path when this holds.
+    """
+    try:
+        ctype = list(wcs.wcs.ctype)
+    except Exception:  # noqa: BLE001 — no wcs sub-object; not our fast path
+        return False
+    return (
+        getattr(wcs, "naxis", 0) == 2
+        and len(ctype) == 2
+        and str(ctype[0]).upper().startswith("RA")
+        and str(ctype[1]).upper().startswith("DEC")
+    )
+
+
 def footprint_radec_deg(wcs, width_px: int, height_px: int) -> list[tuple[float, float]] | None:
     """
     Return the four corners of the frame in RA/Dec degrees, in image order
     (TL, TR, BR, BL). Useful for footprint plotting and mosaic detection.
+
+    **Transformed in one vectorised call, not four.** ``pixel_to_world`` builds a
+    whole ``SkyCoord`` (frame + representation objects) per corner, which is
+    ~1.3 ms a frame — and ``seestack.stack.mosaic.compute_mosaic_canvas`` calls
+    this once per *sub*, so on the §1 owner's 5,477-sub target it was **9.1 s of
+    the 13.9 s** one mosaic-canvas computation took, paid again by
+    `/stack-estimate` and `/rejection-outlook` on every Stack- and Target-page
+    load (measured: the same canvas now comes back in **4.8 s**).
+    ``all_pix2world`` is the same transform ``pixel_to_world`` applies (distortions
+    included) without the object wrapping: **0.011 ms**, and bit-identical on the
+    equatorial WCSs this app stores. A WCS that is anything else keeps the
+    original per-corner path, so nothing silently reads a galactic longitude as
+    an RA.
     """
     if wcs is None:
         return None
+    if _is_plain_radec(wcs):
+        try:
+            import numpy as np
+
+            xs = np.array([0, width_px - 1, width_px - 1, 0], dtype=float)
+            ys = np.array([0, 0, height_px - 1, height_px - 1], dtype=float)
+            ra, dec = wcs.all_pix2world(xs, ys, 0)
+            return [(float(a), float(d)) for a, d in zip(ra, dec, strict=True)]
+        except Exception:  # noqa: BLE001 — fall through to the general path,
+            pass           # which answers ``None`` for a frame with no size
     try:
         # pixel_to_world gives a SkyCoord; we want degrees as plain floats.
         corners_px = [(0, 0), (width_px - 1, 0), (width_px - 1, height_px - 1), (0, height_px - 1)]

@@ -14,6 +14,162 @@ Newest first.
 
 ---
 
+## v0.374.8 — 2026-09-07 — the mosaic canvas stops building a `SkyCoord` per corner per sub: `wcs_io.footprint_radec_deg` (a 14-second Target/Stack page fetch becomes 4.7 s)
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-retf5t`.) Performance —
+measured on the owner's own scale. No behaviour change: the corners are
+bit-identical and the canvas that comes out is the same canvas.**
+
+**Found by running it, not by reading it.** Nobody had ever timed a per-target
+endpoint at the size the §1 owner actually has: almost every `tests/webapp/` test
+builds a library of a handful of frames. Sweeping all **36** per-target read-only
+GETs enumerated from the app's own OpenAPI schema, against one target carrying
+**5,477** solved subs on a 9-panel mosaic, found the whole distribution sane
+except for two endpoints — and those two took **13.8 s** and **13.3 s**:
+
+| endpoint | where it runs | before | after |
+|---|---|---|---|
+| `/api/targets/{safe}/stack-estimate` | the **Stack page**, *twice* (`stack-estimate` and `stack-estimate-drizzle`), **refetched on every drizzle / canvas-mode toggle** — both are in the query key | 13.8 s | **4.66 s** |
+| `/api/targets/{safe}/rejection-outlook` | the **Target page**, via `RejectionOutlookNote` in the NoticeBoard, on every load | 13.3 s | **4.77 s** |
+| *(all 36 per-target GETs together)* | | 28.3 s | **10.6 s** |
+
+**Root cause.** Both go through `stacker.estimate_stack` →
+`mosaic.compute_mosaic_canvas`, which calls `footprint_radec_deg` **once per
+sub**. That function transformed the frame's four corners with **four separate
+`wcs.pixel_to_world` calls**, and each one builds a whole `SkyCoord` — frame
+object, representation object, the lot. Profiling `estimate_stack` at 5,477 subs
+put `footprint_radec_deg` at **18.7 s of 30.5 s** profiled, and the direct
+measurement puts it at **9.1 s of the 13.9 s** the canvas computation really
+took: 1.299 ms a frame, of which the transform itself is ~0.011 ms and the rest
+is object construction (43,851 `SkyCoord.__getattr__`, 87,636 `represent_as`,
+65,727 representation constructions).
+
+**Fix.** One vectorised `all_pix2world` over the four corners. That is the *same*
+transform `pixel_to_world` applies — distortions included — with the object
+wrapping left off: **1.299 ms → 0.011 ms**, a 118× cut on the function, and
+`compute_mosaic_canvas` goes **13.87 s → 4.75 s** returning the identical
+`3494×2470` canvas with the identical `is_mosaic`. Every real stack gets it too;
+it just never mattered there against the minutes of stacking.
+
+**Why it stays exact.** Measured deviation from the old per-corner path over 200
+WCSs: **0.0** — not "within tolerance", identical. And `all_pix2world` returns
+the WCS's *native* world coordinates, so a galactic (`GLON`/`GLAT`) WCS would
+hand back longitude/latitude in the same two slots and be silently read as
+RA/Dec. The fast path is therefore gated on a new `_is_plain_radec` — 2 axes,
+`ctype` `RA…`/`DEC…`, which is every WCS this app stores (ASTAP solves to
+`RA---TAN`/`DEC--TAN` and `wcs_to_text` round-trips it). Anything else keeps the
+original per-corner path, which has always *declined* a galactic WCS (there is no
+`SkyCoord.ra` there) rather than mislabelling its axes. The fast path's own
+failures fall through to that same path, so a frame with no recorded size still
+answers `None` instead of raising — it is only `mosaic` that guards its
+dimensions; the desktop footprint view does not.
+
+**What is left, and its number** — filed as a lead rather than guessed at. After
+this, `compute_mosaic_canvas`'s remaining 4.75 s is almost entirely
+`wcs_from_text`: **0.755 ms × 5,477 ≈ 4.1 s**, and that is `astropy.wcs.WCS()`
+construction itself (`Header.fromstring` is only 0.042 ms of it; `fix=False` buys
+4 %). Closing it means either a fast direct-assignment construction for the
+standard headers we write ourselves, with a conservative fallback, or memoising
+the canvas per target on a frame-set fingerprint — the second has the staleness
+problem v0.374.6 warns about. Neither is a blind change, so both are in the
+backlog with these numbers.
+
+**Upgrade-safe (§9):** two functions in one engine module, no config key, no
+schema change, no on-disk change, no default flipped, no endpoint or response
+shape touched.
+
+**Tests: +4 in `tests/test_wcs_io.py`** — the vectorised footprint is `==` the
+per-corner transform (not `approx`); a galactic WCS is refused by
+`_is_plain_radec` and still answers `None`; a frame straddling RA 0° still
+reports corners on both sides of the seam; and a frame with no recorded size
+answers `None` rather than raising.
+
+---
+
+## v0.374.7 — 2026-09-07 — the shared mosaic-panel gate stops clustering one row per sub: `pointings.fold_pointings` + `_cluster_distinct` (96× on the owner's largest target)
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-retf5t`.) Performance —
+measured, on the owner's own data shape. No behaviour change: the panels, the
+counts and the verdicts are the ones the exact clustering returns.**
+
+`seestack/stack/pointings.py::cluster_pointings` is a single-linkage union-find
+that is **O(n²) in pure Python**, and `pointing_groups` — the shared "does this
+target split into panels?" gate that QC grading, quality weighting, photometric
+normalization, the transparency baseline, the session recap and the bulk-select
+ranking all delegate to — was being handed **one row per sub**. So was
+`detect_mixed_pointings`, the pre-flight of every unattended stack once
+`mixed_pointing_guard` is on.
+
+`seestack/mosaicmap.py` had already hit this and solved it for itself in
+v0.352.x: fold the pointings onto a 0.01° grid and cluster the **distinct**
+positions, carrying each cell's size through `pointing_groups(weights=…)`. That
+fold lived in one module and one call site; the other seven paid full price.
+
+**Measured before/after**, on the §1 owner's shape — a 9-panel mosaic carrying
+**5,477 subs**, dithered over ±0.03° (441 distinct 0.01° cells):
+
+| call | before | after | |
+|---|---|---|---|
+| `pointing_groups` | **1.152 s** | **0.012 s** | 96× |
+| `detect_mixed_pointings` | **2.650 s** | **0.021 s** | 126× |
+
+A single stack makes three of those `pointing_groups` calls (weighting,
+photometric normalization, the per-panel transparency baseline), the auto-grade
+hook makes one on **every scan**, and two Target-page endpoints make one each —
+so this is ~3.5 s off a stack and ~1.2 s off a page the owner opens, on the one
+target where it is worst.
+
+**Why a fold cannot move the answer.** 0.01° is ~36″: 25× below
+`PANEL_LINK_DIST_DEG` (0.25°) and 300× below `LINK_DIST_DEG` (3°), so a fold
+moves a pointing by at most ~0.007° and can only change a link decision for a
+pair sitting within ~3 % of the link distance — where this module's own margin is
+~2× on both sides, and where the constant's own docstring already records that
+getting it wrong is safe in **both** directions (too tight → groups too small to
+be panels → the target-wide fallback, i.e. today's behaviour; too loose → the
+panels merge → also today's behaviour). Every **number** stays exact: each input
+index gets its own cell's label back, `eligible`/`weights` are summed per cell
+before the gate, and `detect_mixed_pointings` carries each cell's true sub count
+*and* the true sum of its members' unit vectors, so `majority`, `others` and
+`separation_deg` are the unfolded figures rather than cell tallies.
+
+**Two rails, so the argument above can't be fallen off later.** A caller asking
+for a link distance within 10 fold cells of the grid gets the **exact**
+clustering instead (no caller does today — every one uses 0.25° or 3°), and a set
+whose pointings are already all distinct skips the fold as well, since it would
+add the approximation and buy nothing.
+
+**Verified by sweep, not by assertion.** `pointing_groups` was compared against
+the rule spelled out directly on `cluster_pointings` across **384**
+configurations — panel separations of 0.10/0.20/0.24/**0.25**/0.26/0.30/0.5/1.0°
+(i.e. straddling the link distance exactly), four dither widths including zero,
+twelve seeds each — and `detect_mixed_pointings` across **280** more, sweeping
+2.0/2.9/**3.0**/3.1/5.0/40° with non-finite entries mixed in. **Zero
+mismatches**, and the full 5,477-sub partition is identical too.
+
+`mosaicmap.FOLD_GRID_DEG` is now the engine's constant rather than a second copy
+of the number (it keeps its own fold, which also carries integration). Its own
+double-fold is a no-op in kind: the compounded perturbation is still ≤0.014°, 18×
+below the link distance.
+
+**Upgrade-safe (§9):** one new pure engine helper and one private one, no config
+key, no schema change, no on-disk change, no default flipped, no endpoint or
+response shape touched. Purely internal to how a decision is *computed*; the
+decision is unchanged.
+
+**Tests: +7 in `tests/test_pointings.py`** — the fold returns the same panels,
+membership and label numbering as the exact clustering on a 9-panel mosaic; it
+actually collapses a dithered panel and centres each cell on its own members;
+an unsolved sub still comes back `-1` from both the helper and the gate; cell
+keys are wrap-safe across RA 0° (two sides of the seam stay one dithered
+pointing, and no cell centre is flung to ~180°); a link distance near the grid
+falls back to the exact clustering; the mixed-pointing verdict counts **subs**,
+not folded cells; and the verdict is unmoved across the 3° link distance. The
+sub-count test **fails before** (majority reads 36 instead of 300 if a cell's
+size is dropped), and it takes the two pre-existing `detect_mixed_pointings`
+count assertions down with it.
+
+---
+
 ## v0.374.6 — 2026-09-07 — the Library page's duplicated hygiene walk is measured and closed: ~196 ms a refresh, so do not cache it (`webapp/library_hygiene.py`, `/api/targets/{cleanup,merge}-suggestions`)
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-55nznt`.) Performance —

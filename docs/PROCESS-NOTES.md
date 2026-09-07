@@ -18,6 +18,93 @@ is a queue.
 
 ---
 
+## 2026-09-07 (later) — Builder run (branch `claude/sweet-babbage-retf5t`): the backlog was dry, so the app was **timed at the owner's scale** — and two 14-second endpoints fell out
+
+**The run.** Baseline green before any change (**5,012 passed / 2 skipped**, full
+suite headless, 17:17). Shipped **v0.374.7** and **v0.374.8**, both pure
+performance with no behaviour change; write-ups in [`SHIPPED.md`](SHIPPED.md).
+
+**Backlog state — dry again, and confirmed the same way the 09-06/09-07 runs
+confirmed it.** "Bugs (fix these first)" holds only gated entries (real
+elongated-target data, a legacy library shape, an external binary) and
+deliberate stand-downs that carry numbers. The **Features that serve real
+workflows** list was opened top-down: both ⭐ owner-requested entries are drained
+to their sign-off-gated slices (*Tonight* (a)+(b) shipped v0.95.0/v0.96.0, only
+the network weather slice remains; *Bulk upload* (a)+dropzone+progress+folder
+picker all shipped), *"Did it get better?"*, *"Have I shot enough?"*, *"Night by
+night"*, *"Will it fit?"*, *"Share card"* and *"Last night"* are all shipped in
+their named slices, *"Does my colour look right?"* is still blocked on the
+catalog field that does not exist, and the crop-anything idea is still declined.
+`grep -rn "TODO\|FIXME"` over `seestack/` and `webapp/` returns **one** hit, in
+the deprioritised desktop GUI. Nothing was invented to fill the gap.
+
+**So the run went looking empirically instead — and the method is the finding.**
+Almost every `tests/webapp/` test builds a library of a *handful* of frames, so
+**no per-target endpoint's cost had ever been measured at the size the owner
+actually has**. Seeding one target with **5,477 solved subs on a 9-panel mosaic**
+directly into the project DB (no FITS on disk — these endpoints read frame rows;
+~2 s to seed) and timing all **36** per-target read-only GETs, enumerated from
+the app's own OpenAPI schema the way `test_first_run_endpoints.py` does, took
+about a minute and found two endpoints at **13.8 s** and **13.3 s**. Both are
+user-facing on every load. Neither is visible at test scale, and neither would
+ever have surfaced from reading the code.
+
+**The distribution, for whoever measures next** (5,477 frames, best of 3, after
+both fixes; the two headline rows are `before → after`):
+
+| endpoint | ms |
+|---|---|
+| `/stack-estimate` | 13 762 → **4 664** |
+| `/rejection-outlook` | 13 306 → **4 774** |
+| `/frames/reject-summary` | 138 |
+| `/frames/auto-grade` | 127 |
+| `/frames` | 96 |
+| `/transparency-trend` | 96 |
+| `/calibration-suggestions` | 91 |
+| `/frames/sky-brightness` | 90 |
+| `/focus-trend`, `/live-session` | 90, 89 |
+| `/best-frame`, `/nights`, `/session-recap`, `/restack-gain` | 83, 81, 75, 71 |
+| `/mosaic-map` | 25 |
+| the other 22 | ≤ 11 each |
+| **all 36 together** | **28 304 → 10 619** |
+
+Everything outside the top two is healthy for 5,477 rows; the ~90 ms band is
+frame-table reads and is not worth touching. **Do not re-measure this** — it is
+the same shape and the same method both times; re-measure only after changing
+one of these paths.
+
+**Two fixes, both exact.** v0.374.7 folded the shared panel-clustering gate
+(`pointing_groups` 1.152 s → 0.012 s; `detect_mixed_pointings` 2.650 s →
+0.021 s) and v0.374.8 vectorised `footprint_radec_deg`
+(`compute_mosaic_canvas` 13.87 s → 4.75 s, identical canvas). Both were verified
+against the unfolded / per-corner path rather than merely tested: **664**
+clustering configurations sweeping panel separations through both link distances
+with zero mismatches, and a **0.0** deviation on the footprint transform over 200
+WCSs. That is the standard to hold a "this only changes the speed" claim to —
+neither change would have been safe to ship on the argument alone.
+
+**What was deliberately not done.** The remaining ~4.7 s on those two endpoints
+is `wcs_from_text` (0.755 ms × 5,477 ≈ 4.1 s, all of it `astropy.wcs.WCS()`
+construction). Both plausible fixes — a fast direct-assignment WCS build, and
+memoising the canvas per target — are judgement calls that need their own
+measurement, and the second is the staleness trade v0.374.6 warned about. Filed
+in [`IMPROVEMENTS.md`](IMPROVEMENTS.md) → Performance with the numbers, plus two
+smaller frontend-side observations found while checking it: `Stack.tsx` fires
+`stack-estimate` **twice** (both legitimately, so ~9.3 s per page load for the
+owner), and its query key carries five options that **do not affect the canvas**
+— so moving the κ slider re-pays a 4.7 s canvas computation purely to refresh a
+rejection note.
+
+**A trap worth knowing.** Editing engine source *while* a `pytest` run is in
+flight does **not** contaminate that run — pytest imports the modules at
+collection time, so the process holds the pre-edit code, and deferred
+`from … import` inside functions resolves from `sys.modules`. That is why the
+baseline here is trustworthy despite overlapping the first edits. It also means
+the reverse: a suite started before a fix does **not** verify it, so each of the
+two versions above got its own full run (17:17, 16:42, and the final one).
+
+---
+
 ## 2026-09-07 — Builder run (branch `claude/sweet-babbage-55nznt`): a drained backlog, four empirical probes that all came back clean, and the **first browser measurement of the first-run app**
 
 **The run.** Baseline green before any change (**5,009 passed / 2 skipped**, full

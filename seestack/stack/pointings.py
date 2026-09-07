@@ -45,6 +45,28 @@ MIN_POINTING_FRAMES = 5
 # merge back into one group — also today's behaviour.
 PANEL_LINK_DIST_DEG = 0.25
 
+# Pointings are folded onto a grid this fine before the panel clustering, because
+# :func:`cluster_pointings` is O(n²) in pure Python and every caller of
+# :func:`pointing_groups` hands it one row *per sub* — thousands of them on one
+# target, sitting on a handful of panels. 0.01° is ~36″: an order of magnitude
+# below a dither (≲0.1°) and 25× below :data:`PANEL_LINK_DIST_DEG`, so a fold
+# moves a pointing by at most ~0.007° and can only change a link decision for a
+# pair sitting within ~3 % of the link distance — where this module's own margin
+# is ~2× on both sides, and where getting it wrong is safe in *both* directions
+# (see :data:`PANEL_LINK_DIST_DEG`). Group **sizes** are exact either way: each
+# input index still gets its own cell's label, and ``eligible``/``weights`` are
+# summed per cell before the gate. Same constant, and the same reasoning, as the
+# fold ``seestack.mosaicmap`` shipped for its own copy of this problem.
+FOLD_GRID_DEG = 0.01
+
+# Only fold when the link distance is this many fold cells across, so a caller
+# that ever asks for a link distance near the grid itself gets the exact
+# clustering instead of an approximation that would be the same size as the
+# question. Every caller today uses ``PANEL_LINK_DIST_DEG`` (25 cells) or
+# ``LINK_DIST_DEG`` (300), so this rail never fires; it exists so a future one
+# can't quietly fall off the argument above.
+_MIN_FOLD_CELLS_PER_LINK = 10.0
+
 
 @dataclass(frozen=True)
 class MixedPointings:
@@ -129,6 +151,79 @@ def cluster_pointings(
     return labels
 
 
+def fold_pointings(
+    radecs: list[tuple[float | None, float | None]],
+    *,
+    grid_deg: float = FOLD_GRID_DEG,
+) -> tuple[list[tuple[float, float]], list[int]]:
+    """Fold pointings onto a ``grid_deg`` sky grid: ``(cells, cell_of_index)``.
+
+    ``cells`` is one ``(ra_deg, dec_deg)`` per distinct cell — the **mean** of the
+    pointings that landed in it — in first-appearance order, so a caller that
+    clusters the cells and maps back gets labels numbered exactly as it would
+    have got them unfolded. ``cell_of_index`` maps each input index to its cell,
+    or ``-1`` for a missing / non-finite pointing (the same entries
+    :func:`cluster_pointings` labels ``-1``).
+
+    Cell keys come from rounding each coordinate, so every member of a cell is
+    within one cell of every other and the cell mean is wrap-safe by
+    construction: RA 359.999° and 0.001° round to *different* keys, so a cell
+    never straddles the 0°/360° seam and the plain mean can never fling one to
+    the far side of the sky (the clustering itself is wrap-safe anyway, since it
+    works on unit vectors).
+    """
+    number: dict[tuple[int, int], int] = {}
+    sums: list[list[float]] = []            # [ra_sum, dec_sum, n] per cell
+    cell_of = [-1] * len(radecs)
+    for i, (ra, dec) in enumerate(radecs):
+        if ra is None or dec is None:
+            continue
+        ra_f, dec_f = float(ra), float(dec)
+        if not (math.isfinite(ra_f) and math.isfinite(dec_f)):
+            continue
+        key = (round(ra_f / grid_deg), round(dec_f / grid_deg))
+        n = number.get(key)
+        if n is None:
+            n = len(sums)
+            number[key] = n
+            sums.append([ra_f, dec_f, 1.0])
+        else:
+            cell = sums[n]
+            cell[0] += ra_f
+            cell[1] += dec_f
+            cell[2] += 1.0
+        cell_of[i] = n
+    return [(s[0] / s[2], s[1] / s[2]) for s in sums], cell_of
+
+
+def _cluster_distinct(
+    radecs: list[tuple[float | None, float | None]], link_dist_deg: float,
+) -> list[int]:
+    """:func:`cluster_pointings`, run over the *distinct* pointings.
+
+    The clustering is O(n²) in pure Python and every caller of
+    :func:`pointing_groups` passes one row per sub — measured at **1.14 s** for a
+    9-panel, 5,477-sub target, on a path that runs on every scan (the auto-grade
+    hook), on two Target-page endpoints, and three more times inside one stack.
+    Folding first (see :data:`FOLD_GRID_DEG`) collapses a dithered panel's
+    hundreds of subs to a few hundred distinct cells and takes the same target to
+    **0.01 s**, with each input index still receiving its own cell's label.
+
+    Falls back to the exact clustering when folding cannot help or would not be
+    sound: a link distance near the grid itself, and a set whose pointings are
+    already all distinct (where the fold would only add the approximation
+    without buying anything).
+    """
+    if link_dist_deg < _MIN_FOLD_CELLS_PER_LINK * FOLD_GRID_DEG:
+        return cluster_pointings(radecs, link_dist_deg=link_dist_deg)
+    cells, cell_of = fold_pointings(radecs)
+    n_finite = sum(1 for c in cell_of if c >= 0)
+    if len(cells) >= n_finite:
+        return cluster_pointings(radecs, link_dist_deg=link_dist_deg)
+    cell_labels = cluster_pointings(cells, link_dist_deg=link_dist_deg)  # type: ignore[arg-type]
+    return [cell_labels[c] if c >= 0 else -1 for c in cell_of]
+
+
 def pointing_groups(
     radecs: list[tuple[float | None, float | None]],
     *,
@@ -161,6 +256,14 @@ def pointing_groups(
     metric passes that here, so a panel is "substantial" by the population it
     can actually contribute.
 
+    **Cost.** The clustering underneath is O(n²) in pure Python and every caller
+    hands this one row *per sub*, so the pointings are folded onto a fine grid
+    first and clustered as their **distinct** positions — see
+    :func:`_cluster_distinct` for the measurement and :data:`FOLD_GRID_DEG` for
+    why a fold cannot move the answer that matters. A group is still substantial
+    by the frames it holds: ``eligible`` and ``weights`` are summed per cell
+    before the gate, and every input index gets its own cell's label back.
+
     ``weights`` (default: one each) says how many frames each entry stands for,
     for a caller that has already folded identical pointings together before
     calling — the clustering is O(n²), so a target with thousands of subs on a
@@ -170,7 +273,7 @@ def pointing_groups(
     the point of the parameter, and why it is here rather than in a second
     hand-written copy of this rule.
     """
-    labels = cluster_pointings(radecs, link_dist_deg=link_dist_deg)
+    labels = _cluster_distinct(radecs, link_dist_deg)
     counts: dict[int, int] = {}
     for i, label in enumerate(labels):
         if label < 0 or (eligible is not None and not eligible[i]):
@@ -194,6 +297,17 @@ def detect_mixed_pointings(
     accepted + solved frames — exactly what the stacker would combine). Entries
     with a ``None`` / non-finite coordinate are ignored. Returns ``None`` unless
     the set splits into two or more substantial, well-separated pointings.
+
+    Like :func:`pointing_groups`, this clusters the **distinct** pointings rather
+    than one row per sub (see :data:`FOLD_GRID_DEG`) — the caller hands it a whole
+    target's frame list, and the clustering is O(n²) in pure Python: 2.65 s for a
+    5,477-sub target, on the pre-flight of every unattended stack once
+    ``mixed_pointing_guard`` is on. The margin here is wider still, since
+    :data:`LINK_DIST_DEG` is 300 fold cells rather than 25. The **counts** and the
+    cluster **centroids** stay exact either way: each cell carries the true number
+    of subs behind it and the true sum of their unit vectors, so ``majority``,
+    ``others`` and ``separation_deg`` are the numbers the unfolded clustering
+    would have reported.
     """
     pts = [
         (ra, dec)
@@ -207,19 +321,30 @@ def detect_mixed_pointings(
     if len(pts) < 2 * min_pointing_frames:
         return None
 
-    vecs = [_to_vec(ra, dec) for (ra, dec) in pts]
-    # Single-linkage clustering via union-find: two frames within link_dist_deg
-    # share a cluster. O(n²), bounded by the frame-list cap. ``pts`` is already
-    # filtered to finite coordinates, so no label comes back -1.
-    labels = cluster_pointings(pts, link_dist_deg=link_dist_deg)  # type: ignore[arg-type]
+    # Fold to the distinct pointings, carrying each cell's true sub count and the
+    # true sum of its members' unit vectors — so only the *linking* sees the
+    # folded coordinate, while every reported number is computed from the subs.
+    cells, cell_of = fold_pointings(pts)  # type: ignore[arg-type]
+    sizes = [0] * len(cells)
+    cell_vecs: list[tuple[float, float, float]] = [(0.0, 0.0, 0.0)] * len(cells)
+    for (ra, dec), c in zip(pts, cell_of, strict=True):
+        v = _to_vec(ra, dec)  # type: ignore[arg-type]
+        sizes[c] += 1
+        s = cell_vecs[c]
+        cell_vecs[c] = (s[0] + v[0], s[1] + v[1], s[2] + v[2])
+
+    # Single-linkage clustering via union-find: two pointings within
+    # link_dist_deg share a cluster. ``cells`` is finite by construction, so no
+    # label comes back -1.
+    labels = cluster_pointings(cells, link_dist_deg=link_dist_deg)
 
     # Collect clusters as (count, summed unit vector) → centroid, keyed by label.
     groups: dict[int, tuple[int, tuple[float, float, float]]] = {}
     for i, label in enumerate(labels):
         count, s = groups.get(label, (0, (0.0, 0.0, 0.0)))
         groups[label] = (
-            count + 1,
-            (s[0] + vecs[i][0], s[1] + vecs[i][1], s[2] + vecs[i][2]),
+            count + sizes[i],
+            (s[0] + cell_vecs[i][0], s[1] + cell_vecs[i][1], s[2] + cell_vecs[i][2]),
         )
 
     clusters: list[tuple[int, tuple[float, float, float]]] = []
