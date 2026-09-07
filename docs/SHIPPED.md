@@ -14,6 +14,68 @@ Newest first.
 
 ---
 
+## v0.374.6 — 2026-09-07 — the Library page's duplicated hygiene walk is measured and closed: ~196 ms a refresh, so do not cache it (`webapp/library_hygiene.py`, `/api/targets/{cleanup,merge}-suggestions`)
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-55nznt`.) Performance —
+backlog curation. No code change: the outcome is a number and a decision.**
+
+The watch item below was filed with v0.319.3–4 and asked, in its own words, to
+**measure first** — *"time `GET /api/targets/cleanup-suggestions` on a library
+with several thousand-frame duplicate pairs before adding a cache, because a
+stale cleanup list after a scan is its own (worse) bug."* Nobody had, so it sat
+as a standing invitation to add a cache on a guess.
+
+**Method — the owner's own shape, not a toy library.** Six targets, ~25k frame
+rows: the confirmed duplicate pair `M 3` (5,477) + `M 3_SUB` (5,455, every one of
+them a path `M 3` also owns, so `confirm_duplicate_of_base` runs to completion);
+the *genuine* two-folder pair `NGC 6888` (4,815) + `NGC 6888_SUB` (3,110, disjoint
+paths, so the confirmation runs and correctly declines); and a mosaic pair
+(`M 31 (mosaic)` 3,200 + `M 31_mosaic_sub` 3,100). Every frame carries a solved
+centre — **this is what makes the measurement honest**: with unsolved frames
+`merge_suggestions` short-circuits before it clusters and reads **2 ms**, which
+would have understated the pair by 50× and "proved" there was nothing to fix.
+
+**Result (three runs each, warm):**
+
+| endpoint | per call |
+|---|---|
+| `GET /api/targets/cleanup-suggestions` | ~106 ms |
+| `GET /api/targets/merge-suggestions` | ~105 ms |
+| **one Library-page refresh (the page polls both)** | **~196 ms** |
+| `GET /api/targets`, for scale | ~2 ms |
+
+**Decision: leave it.** About half the 196 ms is the duplicated walk, so a perfect
+cache buys ~100 ms on a page that is not polled in a loop — against the entry's
+own stated risk, a cleanup list that is stale right after a scan, which is the
+moment the owner is most likely to be looking at it. The trade v0.319.3 made (one
+shared notion of "is this a duplicate?", paid for twice) stays the right one.
+
+**If the shape ever changes** — many more thousand-frame duplicate *pairs*, not
+just more frames — the fix is still the one the entry named
+(`webapp/registry_cache.py`, short-TTL keyed on the library's mtime), and the
+method above is how to re-justify it (a scratch library, not a suite fixture —
+25k rows is not something to make every test run pay for). Don't re-measure the current shape.
+
+*Original entry, for the record:*
+
+  - **PERF WATCH ITEM (Builder 2026-08-30, introduced knowingly by the v0.319.3–4 merge/cleanup unification) — the
+  Library page now pays for the same library walk twice per refresh.** *(Pillar: performance — file, don't
+  pre-optimise. Size: S. Confidence: certain by construction; the cost is unmeasured on real data.)*
+  `merge_suggestions` and `cleanup_suggestions` both walk the library through `webapp/library_hygiene.py`,
+  and they are polled by the same page, so each refresh opens every confirmed duplicate pair's two projects
+  twice and reads their `source_paths` twice. On the owner's library that is the `M 3`/`M 3_SUB` pair at ~5,477 + ~5,455 rows, plus
+  the mosaic pair — call it ~22k single-column reads per refresh instead of ~11k. **This was the right trade**:
+  the alternative was the two endpoints keeping separate notions of "is this a duplicate?", which is exactly
+  the bug v0.319.3 fixed. `Project.source_paths()` already cut the per-row cost by not building a `FrameRow`,
+  which is most of what a naive fix would have bought.
+  **If it ever shows up:** `webapp/registry_cache.py` already exists for precisely this shape — a short-TTL
+  `app.state` cache keyed on the library's mtime would serve both endpoints from one walk. **Measure first**:
+  time `GET /api/targets/cleanup-suggestions` on a library with several thousand-frame duplicate pairs before
+  adding a cache, because a stale cleanup list after a scan is its own (worse) bug.
+
+
+---
+
 ## v0.374.5 — 2026-09-07 — every read-only endpoint is pinned to answer on a first-run install, and on a target that has never been stacked (`tests/webapp/test_first_run_endpoints.py`)
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-55nznt`.) Coverage gap —
