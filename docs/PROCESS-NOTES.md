@@ -18,6 +18,69 @@ is a queue.
 
 ---
 
+## 2026-09-07 (Builder, branch `claude/sweet-babbage-wza0iq`) — the freshest backlog entry was the stalest one, and two closes that were re-traces rather than fixes
+
+**Baseline.** `source scripts/agent-setup.sh` green; full suite headless before any
+edit — **5,116 passed, 2 skipped** (22:23), the same number the previous Builder run
+recorded, so `main` was green on arrival.
+
+**The day-old idea was two days out of date.** Triage picked the top entry of
+"Features that serve real workflows": *"Is my mosaic evenly filled?"*, filed by the
+Scout **the same morning**, well-specified, beginner-facing, aimed squarely at the
+owner's heaviest workflow. It was already built. `seestack/mosaicmap.py` shipped it
+as **v0.355.0** two days earlier — the same `pointing_groups` clustering the entry
+says to reuse, the same thin-panel callout, the same plain sentence — and the
+"aim there next session" half as **v0.361.0**. One `grep -rn mosaicmap` finds all of
+it, and the entry's own text says to grep first.
+
+**The lesson is about *which* stale entry costs most.** The convention warns that
+the backlog carries items that shipped months earlier; this one was a day old, and
+that made it *more* dangerous, not less. A Builder triaging by "top of the highest
+section, most recently filed, unclaimed" reaches a fresh entry first and trusts it
+most — the staleness heuristics an agent actually uses (is it struck through? is it
+old? does it carry a stand-down?) all pass it. Grepping `SHIPPED.md` for the key
+nouns before *filing* is the only place this is cheap to catch.
+
+**Two closes that changed no code, deliberately.** The
+`ingest.py::_cache_stale`-refreshes-on-shrink note was re-traced against the current
+file and closed as already-defended: `_source_incomplete` (`ingest.py:338`) loads the
+pixel data and skips the frame whole before the cache is reached, so the harmful
+half — a mid-rewrite truncation overwriting a good Stage-1 cache — cannot happen;
+and a source that shrank *and* still reads as a complete FITS is a genuine content
+swap, where refreshing is the right answer. Making the test growth-only, as the note
+implied, would strip the swap refresh that stops a new capture stacking at the old
+sky position. Recorded in the entry so the next run doesn't re-derive it.
+
+**What shipped: v0.381.0**, the standing home for a scan's unexplained folder skips,
+closing a "LEAD, NOT FINISHED" filed the previous run. Two things worth carrying
+forward:
+
+1. **The feared schema decision wasn't one.** The lead stood the item down because
+   persisting the finding "is a schema decision, not a patch". The registry already
+   has a `library_meta` key/value table, so it is one JSON value and no bump —
+   worth checking for the *existing* store before sizing a persistence task as M.
+2. **A per-scan alert and a standing card answer different questions.** Lifting the
+   Jobs-page alert onto the Library page unchanged would have produced a permanent
+   nag: the convention keeps skipping the folder, so the scan keeps reporting it,
+   *including after the owner brought it in*. The standing version needs a "has this
+   been dealt with?" test the per-scan one never needed. Any future "move finding X
+   somewhere it will be seen" item inherits this question.
+
+**Verified in a real browser, not only jsdom** (AGENTS.md §7's standing advice). A
+scratch app on its own data root, the owner's exact folder shape in its `incoming/`,
+scan, then Playwright at 1440 px and 420 px: card present at both widths, zero
+horizontal overflow, no console errors, no failed requests; clicking *Bring "NGC
+6888" in anyway* brought the four real subs in, left the device's `Stacked.fit` out,
+and the card went silent. **One trap for a hand-rolled probe:** a fresh
+`npm install playwright` wants a newer browser build than `/opt/pw-browsers` ships
+(1243 vs 1194) and dies with "run `npx playwright install`", which this container
+forbids — launch with `executablePath: "/opt/pw-browsers/chromium"`. The repo's own
+`scripts/dogfood_probe.mjs` already does exactly this via its `BUNDLED` lookup, so
+**use the repo's probe rather than writing one**; this cost a few minutes only
+because the probe was ad-hoc.
+
+---
+
 ## 2026-09-07 (Scout, branch `claude/admiring-brahmagupta-8g9218`) — stacking-engine + calibration adversarial QA sweep: CLEAN (no wrong-result bugs); two by-design fail-closed notes in `discover.py` recorded, not filed
 
 **Baseline.** `source scripts/agent-setup.sh` green; stacking subset
