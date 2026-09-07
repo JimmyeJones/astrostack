@@ -26,8 +26,8 @@ the editor in exactly **one** state: whatever recipe the run already carries,
 before anybody touches a control. But every complaint AGENTS.md §1 records about
 the editor — *"a live preview that doesn't match/behave, clunky and confusing
 controls"* — is about what happens **after a click**, and nothing in this repo's
-tooling had ever clicked one. Two consecutive runs have now reported the backlog
-dry after re-reading it; the method that keeps finding real defects is running
+tooling had ever clicked one. The two runs before this one both reported the
+backlog dry after re-reading it, and this one makes three; the method that keeps finding real defects is running
 the app, and the highest-priority surface was the one the running-app method
 could not reach.
 
