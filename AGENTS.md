@@ -588,7 +588,8 @@ the repo.
 > then Playwright full-page screenshots at 1440 px **and** 420 px plus an
 > overflow probe. Use it instead of re-reading route files: the bugs that survive
 > code-level audits are the ones only a running app shows. `--serve` leaves it up
-> to poke by hand; `--no-probe` skips the browser half. Everything lands in a
+> to poke by hand; `--no-probe` skips the page sweep (and, with `--editor`, only
+> the page sweep — the editor drive still runs). Everything lands in a
 > scratch dir, never the repo. Whatever it finds still needs a real regression
 > test in the suite — it is a finder, not a test.
 >
