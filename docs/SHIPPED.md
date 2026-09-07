@@ -14,6 +14,58 @@ Newest first.
 
 ---
 
+## v0.382.3 — 2026-09-07 — the live preview stops reading a mosaic's whole coverage canvas, twice, on every render
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-8hitfe`.)** The second bite
+out of the "Live preview → responsiveness" clause, found while measuring the
+first: after the ops were timed, the remaining unexplained cost was **not** in
+the ops at all.
+
+**What it was.** `seestack/edit/proxy.py::_load_map` — the reader behind
+`load_coverage` and `load_frame_coverage` — did
+`np.asarray(fits.getdata(path), dtype=np.float32)` and *then* strided the result
+to the proxy grid. `getdata` opens with a memmap, but the `asarray` cast copies,
+so the whole plane was materialised every time. And that plane is the run's
+**full-resolution canvas**: on the mosaic sizes this owner shoots it is hundreds
+of megabytes. The editor asks for **two** of them (coverage and frame coverage)
+per render, and fires **two renders** per edit (the preview PNG and the histogram
+are separate requests) — so a single slider drag was four full-canvas reads and
+four full-canvas allocations, before a single op ran.
+
+**Measured** on a 480 MB (10,000 × 12,000 float32) coverage map at the proxy's
+own step of 8:
+
+| | one read |
+|---|---|
+| materialise-then-stride (today) | **2.65 s** cold, **0.21 s** off the page cache |
+| memmap, strided in place | **0.011–0.021 s** |
+
+**The fix is the order of two lines**: open with `memmap=True`, slice
+`[::step, ::step]` *first*, cast to float32 *last*. Only the rows the proxy grid
+samples are ever paged in, and nothing full-canvas is ever allocated. The
+returned array is proxy-sized either way and holds **identical values** — the
+decimation picks pixels and the cast rounds each one, so neither order changes
+which pixels or what they round to. The defensive 3-D collapse moves after the
+stride for the same reason (a per-pixel channel reduction is independent of its
+neighbours).
+
+**Tests (+2, `tests/test_edit_engine.py`)** — one pins the memory contract as its
+two observable halves (the read asks for a memmap; `fits.getdata`, the
+whole-array reader, is monkeypatched to raise and is never reached) *and* that
+the values are still exactly `cov[::8, ::8]`; the other pins the reorder against
+the cases it could have broken — a **float64** map (stride-then-cast must equal
+cast-then-stride) and a stray **3-D** map on both branches (≤3 channels takes the
+first, more averages them). The existing `load_coverage` / frame-coverage /
+coverage-leveling suites (133 tests) pass unchanged, which is the parity
+statement that matters.
+
+**Upgrade-safe (§9):** one function body in the engine, same signature, same
+return type, same values; no config, schema, on-disk layout, API shape or default
+touched. A file that cannot be memmapped (a compressed HDU) still reads
+correctly — it simply does not get the saving.
+
+---
+
 ## v0.382.2 — 2026-09-07 — the live preview stops re-solving the star field it solved a moment ago
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-8hitfe`.)** The first bite out
