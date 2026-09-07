@@ -32,8 +32,9 @@ the *genuine* two-folder pair `NGC 6888` (4,815) + `NGC 6888_SUB` (3,110, disjoi
 paths, so the confirmation runs and correctly declines); and a mosaic pair
 (`M 31 (mosaic)` 3,200 + `M 31_mosaic_sub` 3,100). Every frame carries a solved
 centre — **this is what makes the measurement honest**: with unsolved frames
-`merge_suggestions` short-circuits before it clusters and reads **2 ms**, which
-would have understated the pair by 50× and "proved" there was nothing to fix.
+`merge_suggestions` short-circuits before it clusters and reads **2 ms** — 50×
+under its real cost, and it would have made the refresh look like 94 ms rather
+than 196, i.e. "proved" there was nothing to fix.
 
 **Result (three runs each, warm):**
 
