@@ -14,6 +14,71 @@ Newest first.
 
 ---
 
+## v0.382.0 — 2026-09-07 — the app starts collecting the real-data evidence its own gated highlight cue needs
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-izlzeq`.)** Ships the
+2026-08-06 idea "the highlight suggestion is a ready-made way to collect the
+real-data evidence the *automatic* highlight-clip cue is gated on" — exactly as
+filed, and for the reason it was filed.
+
+**The problem it is aimed at.** Several image-quality items in this backlog are
+**real-data-gated**: the automatic "your core is blown out" cue can't be
+defaulted on because nobody knows how often a genuinely blown core occurs on the
+owner's own stacks, or how severe it is when it does, and a threshold picked from
+a synthetic scene would silently change everyone's picture. Runs keep meeting
+that gate and standing down — correctly — but nothing was accruing the
+measurement that would ever open it. This does.
+
+**What ships.**
+* `webapp/routers/editor.py::solve_highlight_protect` — the existing
+  highlight-suggestion endpoint's body, lifted out so **one function** answers
+  "what would 'Hold back highlights' offer on this picture?". The endpoint calls
+  it with the clicked op's `uid`; the unattended path calls it with `uid=None`,
+  which solves against the recipe's **own** first `tone.stretch` (pinned by a
+  test — otherwise the passive record would describe a stretch the picture was
+  never rendered through). Measured on the run's cached proxy, exactly as the
+  button is, so the number recorded is the number the owner would be offered.
+* Every unattended auto-edit (`pipeline._auto_edit_process_run` — Process-target
+  / reprocess-everything / watcher auto-stack) stamps that answer beside the
+  sky-cast it already stamps, as `editor_auto_highlight:{run_id}`. **An explicit
+  `{"strength": null}` is written when the solver finds nothing to suggest**, so
+  "measured and clean" is distinguishable from "never measured"; a failed
+  measurement writes nothing at all. Best-effort and wrapped, like the cast — a
+  missed data point, never a failed job.
+* `pipeline.auto_highlight_summary(lib)` + `GET /api/auto-highlight-summary` —
+  the sibling of `auto_cast_summary` / `/api/auto-cast-summary`, returning
+  `{measured, blown, median_strength, median_flat_fraction, max_flat_fraction}`.
+* One dimmed line under the existing Auto colour self-check on Settings →
+  Maintenance (`autoHighlightSummaryText`), silent until something is measured:
+  *"3 of 8 auto-edited results came out with a washed-out bright core. "Hold back
+  highlights" at about 60% would reopen them."* — or the reassuring form when
+  none of them did.
+
+**No pixel moves.** The recipe, the render, the preview bytes and every export
+are byte-for-byte what they were; this reads the picture the auto-edit just made
+and writes a number down. Nothing is shown *on* the image, and no default is
+flipped — which is why it can ship without the sign-off the automatic cue itself
+would need.
+
+**Upgrade-safe (§9):** one additive project-meta key (no schema bump — it is the
+existing key/value store), one additive endpoint, one additive response type; an
+install upgrading in place simply has no readings until its next unattended
+auto-edit, and the Settings line stays absent until then.
+
+**Cost, and a side benefit.** The measurement runs on the run's **cached** proxy,
+which the editor builds anyway on first open — so on a fresh run the auto-edit
+now warms it, and the editor opens faster afterwards.
+
+**Tests (+16):** 5 python on the aggregation (the blown/clean/unstamped split,
+"measured and clean" reported as such, empty-until-runs-accrue, malformed metas
+skipped, the endpoint) plus 2 more (the `uid=None` solver using the recipe's own
+stretch params; the real `_auto_edit_process_run` leaving a reading on the run),
+and 9 frontend (four on `autoHighlightSummaryText` — null, all-clean,
+blown-with-strength, blown-without-strength — plus two on the rendered
+Maintenance panel, and the shared default mock).
+
+---
+
 ## v0.381.0 — 2026-09-07 — the folder your scan walked past now waits for you on the Library page
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-wza0iq`.)** Closes the
