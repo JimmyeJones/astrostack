@@ -1317,6 +1317,14 @@ export interface AutoCastSummary {
   median_deviation: number | null;   // median largest per-channel departure from grey
 }
 
+export interface AutoHighlightSummary {
+  measured: number;                       // auto-edited runs with a highlight reading
+  blown: number;                          // of those, how many had a recoverable blown core
+  median_strength: number | null;         // "Hold back highlights" strength that would fix them
+  median_flat_fraction: number | null;    // median share of the core rendering flat white
+  max_flat_fraction: number | null;       // the worst one seen
+}
+
 export interface StackWeightingSummary {
   mode: string;
   n_downweighted?: number;
@@ -3243,6 +3251,8 @@ export const api = {
     }),
   reprocessStatus: () => req<ReprocessStatus>("/api/reprocess-status"),
   autoCastSummary: () => req<AutoCastSummary>("/api/auto-cast-summary"),
+  autoHighlightSummary: () =>
+    req<AutoHighlightSummary>("/api/auto-highlight-summary"),
 
   // sky viewer
   getSky: () => req<SkyData>("/api/sky"),

@@ -19,7 +19,8 @@ from seestack.io.project import StackRunRow
 def _make_run(data_root, safe, basename="master", h=80, w=100,
               coverage_min=1, coverage_max=5, is_mosaic=None,
               ts="2026-05-02T00:00:00Z",
-              capture_start_utc=None, capture_end_utc=None):
+              capture_start_utc=None, capture_end_utc=None,
+              with_preview=False):
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -33,9 +34,17 @@ def _make_run(data_root, safe, basename="master", h=80, w=100,
             cube += 0.4 * np.exp(-(((xx - w / 2) / 8) ** 2 + ((yy - h / 2) / 8) ** 2))
             fp = outdir / f"{basename}.fits"
             fits.writeto(fp, cube, overwrite=True)
+            preview_path = None
+            if with_preview:
+                # A real (tiny) preview PNG on disk, for the paths that rewrite it.
+                from PIL import Image
+                preview = outdir / f"{basename}.png"
+                Image.new("RGB", (4, 4), (10, 20, 30)).save(preview)
+                preview_path = str(preview)
             return proj.add_stack_run(StackRunRow(
                 id=None, timestamp_utc=ts, output_basename=basename,
-                fits_path=str(fp), tiff_path=None, preview_path=None, n_frames_used=5,
+                fits_path=str(fp), tiff_path=None, preview_path=preview_path,
+                n_frames_used=5,
                 canvas_h=h, canvas_w=w, coverage_min=coverage_min,
                 coverage_max=coverage_max, options_json="{}", is_mosaic=is_mosaic,
                 capture_start_utc=capture_start_utc,
@@ -2322,3 +2331,80 @@ def test_highlight_suggestion_threads_already_display(client, solved_library,
         f"?recipe={q}&uid=s1")
     assert r.status_code == 200
     assert captured["already_display"] is True
+
+
+def test_highlight_solver_without_a_uid_uses_the_recipes_own_stretch(
+        client, solved_library, monkeypatch):
+    """The unattended path has a recipe but no clicked control, so it asks with
+    ``uid=None`` — which must solve against the recipe's **own** Stretch op, not
+    the op's defaults. Otherwise the passive record would describe a stretch the
+    picture was never rendered through."""
+    from seestack.edit import registry as registry_mod
+    from seestack.edit.recipe import recipe_from_dict
+    from webapp.routers.editor import solve_highlight_protect
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="hilite_nouid")
+
+    seen: list[dict] = []
+    spec = registry_mod.get_op("tone.stretch")
+    real_apply = spec.apply
+
+    def _spy_apply(rgb, params, ctx):
+        seen.append(dict(params))
+        return real_apply(rgb, params, ctx)
+
+    monkeypatch.setattr(spec, "apply", _spy_apply)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == rid)
+            rec = recipe_from_dict({"ops": [
+                {"id": "tone.stretch", "uid": "auto-stretch",
+                 "params": {"mode": "asinh", "stretch": 0.7, "black": 0.2}},
+            ]})
+            solve_highlight_protect(Path(proj.project_dir), run, rec)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    assert seen, "the recipe's stretch op should have been re-run to solve the knob"
+    assert all(p["mode"] == "asinh" and p["stretch"] == 0.7 and p["black"] == 0.2
+               for p in seen)
+
+
+def test_auto_edit_records_what_the_highlight_button_would_say(
+        client, solved_library):
+    """The unattended auto-edit stamps the editor's own highlight answer into the
+    run's provenance — an explicit ``strength: null`` when there is nothing to
+    suggest, so "measured and clean" never reads as "never measured".
+
+    This is passive real-data collection, not a behaviour change: no pixel moves,
+    and the number recorded is the one the owner would be offered in the editor
+    (``solve_highlight_protect`` answers both)."""
+    from webapp.pipeline import _auto_edit_process_run
+    from webapp.routers.editor import AUTO_EDIT_HIGHLIGHT_PREFIX
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="hilite_autoedit",
+                    with_preview=True)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        assert _auto_edit_process_run(lib, safe, rid)
+        proj = lib.open_target(safe)
+        try:
+            raw = proj.get_meta(f"{AUTO_EDIT_HIGHLIGHT_PREFIX}{rid}")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    assert raw, "the auto-edit should record a highlight reading for the run"
+    reading = json.loads(raw)
+    assert set(reading) == {"strength", "flat_fraction", "core_px"}
+    # The fixture stack has no blown core, so the honest reading is "nothing to
+    # suggest" — recorded, rather than left absent.
+    assert reading["strength"] is None

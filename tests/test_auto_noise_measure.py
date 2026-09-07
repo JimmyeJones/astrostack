@@ -178,6 +178,47 @@ def test_uncovered_mosaic_border_does_not_inflate_the_measurement():
     assert ragged == pytest.approx(covered, rel=0.25)
 
 
+def test_a_strong_gradient_never_costs_a_clean_stack_its_sharpening():
+    """The deferred "does the denoise↔sharpen crossfade over-read a sky gradient
+    as noise?" question, run as its own experiment and pinned.
+
+    Filed 2026-07-08 against the *old* level-MAD estimator and deferred three
+    times as real-data-gated. Its recorded measurement was a gradient of
+    0.00→0.05→0.10→0.20 of range moving ``sky_sigma`` 0.015→0.028→0.054→0.098 at
+    a fixed low noise — flipping Auto from ``sharpen≈0.40`` to **sharpen 0.0 /
+    full denoise** by a gradient of only ~0.05, on exactly the
+    light-polluted-but-deeply-stacked frame the owner shoots.
+
+    The local estimator (v0.225.0) closed it by construction, and this walks the
+    entry's own ladder to say so with numbers rather than by argument: measured
+    at σ=0.003, ``sky_sigma`` now goes 0.0042→0.0039→0.0035→0.0030 — it does not
+    rise with the gradient at all (it drifts *down*, because the tilt lifts the
+    99.5th-percentile ceiling the frame is normalised against), the crossfade
+    stays hard at "not noisy", and Auto keeps the same sharpening with no denoise
+    pass added. The sibling test above pins the σ property at one gradient; this
+    pins the *decision* across the whole range the entry feared.
+
+    **Not a vacuous pin:** re-measured on these very scenes, the old level-MAD
+    estimator gives 0.0078→0.0722→0.1121→0.1610, i.e. ``_noise_fraction`` **1.0
+    from a gradient of 0.05** — this test fails on the first step of the ladder
+    against the estimator the entry was filed about, which is what makes it a
+    guard rather than a restatement of today's numbers.
+    """
+    baseline = None
+    for gradient in (0.0, 0.05, 0.10, 0.20):
+        sigma = analyze_proxy(_scene(0.003, seed=5, gradient=gradient))["sky_sigma"]
+        assert _noise_fraction(sigma) == 0.0, f"{gradient=} {sigma=}"
+        ops = {op.id: op for op in auto_recipe(
+            _scene(0.003, seed=5, gradient=gradient), median_fwhm=3.0).ops}
+        sharpen = ops.get("detail.sharpen")
+        assert sharpen is not None and sharpen.enabled, f"{gradient=} lost sharpening"
+        # A gradient must not conjure a grain pass onto a clean stack either.
+        assert "detail.denoise" not in ops, f"{gradient=} gained a denoise pass"
+        if baseline is None:
+            baseline = sharpen.params["amount"]
+        assert sharpen.params["amount"] == pytest.approx(baseline), f"{gradient=}"
+
+
 def test_an_unmeasurable_image_still_reads_as_clean():
     """The 'can't tell' convention the rest of the auto chain relies on."""
     assert analyze_proxy(np.zeros((4, 4, 3), np.float32))["sky_sigma"] == 0.0

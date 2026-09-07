@@ -11,7 +11,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
-import { api, type AutoCastSummary, type ReprocessStatus } from "../api/client";
+import {
+  api, type AutoCastSummary, type AutoHighlightSummary, type ReprocessStatus,
+} from "../api/client";
 import { dependencyMet } from "../api/depends";
 import { compassPoint } from "../tonight";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
@@ -302,6 +304,36 @@ export function autoCastSummaryText(summary: AutoCastSummary | undefined): strin
   );
 }
 
+// The highlight sibling of the colour self-check above: every unattended
+// auto-edit asks the editor's own "Hold back highlights" solver what it would
+// offer on the picture it just made, and this turns those readings into one
+// plain answer — how often Auto's stretch leaves a bright core washed out, and
+// how strong the fix would be. Null until any auto-edited run is measured, so
+// nothing is shown on a fresh install.
+export function autoHighlightSummaryText(
+  summary: AutoHighlightSummary | undefined,
+): string | null {
+  if (!summary || summary.measured <= 0) return null;
+  const { measured, blown, median_strength: strength } = summary;
+  const runs = measured === 1 ? "auto-edited result" : "auto-edited results";
+  if (blown <= 0) {
+    return (
+      `None of the ${measured} ${runs} so far came out with a washed-out bright `
+      + `core — Auto's stretch is holding your highlights.`
+    );
+  }
+  // Name the strength that would reopen them, because that is the knob the
+  // owner would actually reach for in the editor ("Hold back highlights").
+  const fix = strength != null
+    ? ` "Hold back highlights" at about ${Math.round(strength * 100)}% would `
+      + `reopen ${blown === 1 ? "it" : "them"}.`
+    : "";
+  return (
+    `${blown} of ${measured} ${runs} came out with a washed-out bright core.${fix}`
+    + ` A bright galaxy or nebula core doing this now and then is normal.`
+  );
+}
+
 export function Maintenance() {
   const navigate = useNavigate();
   // Default to "only outdated" — after an upgrade the user wants to reprocess just
@@ -327,6 +359,12 @@ export function Maintenance() {
     staleTime: 60_000,
   });
   const castText = autoCastSummaryText(castSummary.data);
+  const highlightSummary = useQuery({
+    queryKey: ["auto-highlight-summary"],
+    queryFn: api.autoHighlightSummary,
+    staleTime: 60_000,
+  });
+  const highlightText = autoHighlightSummaryText(highlightSummary.data);
   const reprocess = useMutation({
     mutationFn: (opts: { staleOnly: boolean; deepRescan: boolean; autoEdit: boolean }) =>
       api.reprocessAll(opts.staleOnly, opts.deepRescan, opts.autoEdit),
@@ -427,6 +465,11 @@ export function Maintenance() {
         {castText && (
           <Text size="xs" c="dimmed" mt={4}>
             {castText}
+          </Text>
+        )}
+        {highlightText && (
+          <Text size="xs" c="dimmed">
+            {highlightText}
           </Text>
         )}
       </Stack>

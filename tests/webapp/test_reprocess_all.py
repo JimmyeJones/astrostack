@@ -631,6 +631,148 @@ def test_auto_cast_summary_endpoint(solved_client, solved_library):
     assert body["by_cast"] == {"green": 1}
 
 
+# --------------------------------------------------------------------------- #
+# Library-wide auto-edit highlight aggregation
+# --------------------------------------------------------------------------- #
+
+def _seed_run_with_highlight(proj, reading):
+    """Add a stack run and stamp it with an auto-edit highlight meta (or none
+    when ``reading`` is ``None``). Returns the new run id."""
+    from webapp.routers.editor import AUTO_EDIT_HIGHLIGHT_PREFIX
+
+    run_id = proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc="2026-05-01T00:00:00Z",
+        output_basename="master", fits_path=None, tiff_path=None,
+        preview_path=None, n_frames_used=3, canvas_h=10, canvas_w=10,
+        coverage_min=1, coverage_max=3,
+        options_json=json.dumps({"method": "sigma", "sigma_kappa": 4.25}),
+        engine_version=pipeline.APP_VERSION,
+    ))
+    if reading is not None:
+        proj.set_meta(f"{AUTO_EDIT_HIGHLIGHT_PREFIX}{run_id}", json.dumps(reading))
+    return run_id
+
+
+def _blown(strength, flat_fraction, core_px=900):
+    return {"strength": strength, "flat_fraction": flat_fraction,
+            "core_px": core_px}
+
+
+def test_auto_highlight_summary_aggregates_blown_cores(solved_library):
+    """Aggregates every auto-edited run's stamped highlight reading into a
+    how-often/how-strong distribution — counting the measured-and-clean runs in
+    ``measured`` but not in ``blown``, and skipping runs with no stamp at all."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(targets[0])
+        try:
+            _seed_run_with_highlight(proj, _blown(0.4, 0.12))
+            _seed_run_with_highlight(proj, _blown(0.6, 0.31))
+            # Measured, nothing to suggest — a clean core. Counted as measured.
+            _seed_run_with_highlight(proj, _blown(None, None, None))
+            _seed_run_with_highlight(proj, None)   # manual / pre-feature run
+        finally:
+            proj.close()
+        proj = lib.open_target(targets[1])
+        try:
+            _seed_run_with_highlight(proj, _blown(0.8, 0.55))
+        finally:
+            proj.close()
+        summary = pipeline.auto_highlight_summary(lib)
+    finally:
+        lib.close()
+
+    # 4 readings (3 blown + 1 clean); the unstamped run is not a data point.
+    assert summary["measured"] == 4
+    assert summary["blown"] == 3
+    assert summary["median_strength"] == 0.6
+    assert summary["median_flat_fraction"] == 0.31
+    assert summary["max_flat_fraction"] == 0.55
+
+
+def test_auto_highlight_summary_separates_clean_from_unmeasured(solved_library):
+    """A library where every auto-edit measured a *clean* core reports
+    ``measured > 0, blown == 0`` — the whole point of stamping the null reading,
+    since "measured and fine" must not read as "never measured"."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(targets[0])
+        try:
+            _seed_run_with_highlight(proj, _blown(None, None, None))
+            _seed_run_with_highlight(proj, _blown(None, None, None))
+        finally:
+            proj.close()
+        summary = pipeline.auto_highlight_summary(lib)
+    finally:
+        lib.close()
+    assert summary == {"measured": 2, "blown": 0, "median_strength": None,
+                       "median_flat_fraction": None, "max_flat_fraction": None}
+
+
+def test_auto_highlight_summary_empty_until_runs_accrue(solved_library):
+    """With nothing stamped the read-out is all zeros — silent on a fresh or
+    pre-feature install."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        summary = pipeline.auto_highlight_summary(lib)
+    finally:
+        lib.close()
+    assert summary == {"measured": 0, "blown": 0, "median_strength": None,
+                       "median_flat_fraction": None, "max_flat_fraction": None}
+
+
+def test_auto_highlight_summary_ignores_malformed_meta(solved_library):
+    """A corrupt/non-JSON or non-dict highlight meta is skipped rather than
+    crashing the aggregation (defensive against a partially-written meta)."""
+    from webapp.routers.editor import AUTO_EDIT_HIGHLIGHT_PREFIX
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(targets[0])
+        try:
+            _seed_run_with_highlight(proj, _blown(0.5, 0.2))
+            bad1 = _seed_run_with_highlight(proj, None)
+            proj.set_meta(f"{AUTO_EDIT_HIGHLIGHT_PREFIX}{bad1}", "not json")
+            bad2 = _seed_run_with_highlight(proj, None)
+            proj.set_meta(f"{AUTO_EDIT_HIGHLIGHT_PREFIX}{bad2}", json.dumps([1, 2]))
+        finally:
+            proj.close()
+        summary = pipeline.auto_highlight_summary(lib)
+    finally:
+        lib.close()
+    assert summary["measured"] == 1
+    assert summary["blown"] == 1
+
+
+def test_auto_highlight_summary_endpoint(solved_client, solved_library):
+    """GET /api/auto-highlight-summary reports the library-wide distribution."""
+    r = solved_client.get("/api/auto-highlight-summary")
+    assert r.status_code == 200
+    assert r.json() == {"measured": 0, "blown": 0, "median_strength": None,
+                        "median_flat_fraction": None, "max_flat_fraction": None}
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(targets[0])
+        try:
+            _seed_run_with_highlight(proj, _blown(0.4, 0.18))
+            _seed_run_with_highlight(proj, _blown(None, None, None))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = solved_client.get("/api/auto-highlight-summary").json()
+    assert body["measured"] == 2
+    assert body["blown"] == 1
+    assert body["median_strength"] == 0.4
+    assert body["max_flat_fraction"] == 0.18
+
+
 def test_reprocess_all_deep_rescan_reruns_qc_solve_grade_before_each_stack(
         solved_library, monkeypatch):
     """With deep_rescan, each target is re-QC'd/re-solved/re-graded *before* it's
