@@ -155,22 +155,17 @@ export function StackView() {
   // reaches for it. We only suggest it once the stack is big enough to be worth it
   // (matching the field help's "200+ dithered frames") and drizzle is off, and we
   // gate the *suggestion* on a drizzle-on dry-run sizing so we never nudge toward
-  // a run that'd be refused for OOM. This query must sit above the loading
-  // early-return with the other hooks (rules-of-hooks); the frame count is read
-  // straight off `frames.data` since `solvedAccepted` is derived further down.
+  // a run that'd be refused for OOM. That sizing used to be a *second*
+  // `stackEstimate` request, which re-read every sub's WCS to rebuild the
+  // identical canvas — ~1 s of duplicated work on the biggest targets, on every
+  // page load. It now rides along on the one estimate as `drizzle_probe`. The
+  // frame count is read straight off `frames.data` since `solvedAccepted` is
+  // derived further down.
   const DRIZZLE_SUGGEST_MIN_FRAMES = 200;
   const drizzleWorthChecking =
     !frames.isLoading && !values.drizzle
     && (frames.data ?? []).filter((f) => f.accept && f.solved).length
        >= DRIZZLE_SUGGEST_MIN_FRAMES;
-  const drizzleEstimate = useQuery({
-    queryKey: ["stack-estimate-drizzle", safe, mosaicCanvas],
-    queryFn: () => api.stackEstimate(safe, {
-      drizzle: true, drizzle_scale: 1.5, drizzle_reject: false, mosaic_canvas: mosaicCanvas,
-    }),
-    enabled: drizzleWorthChecking && Object.keys(values).length > 0,
-    retry: false,
-  });
 
   const qcSolve = useMutation({
     mutationFn: () => api.qcSolve(safe),
@@ -820,15 +815,18 @@ export function StackView() {
     return `${base}${capped} Drop ${n === 1 ? "it" : "them"} in one click, or review on the Target page.`;
   })();
 
-  // Proactive Drizzle nudge (derivation — the feasibility query lives up with the
-  // other hooks, before the loading early-return). Fire when the stack is big
+  // Proactive Drizzle nudge (derivation — `drizzleWorthChecking` lives up with
+  // the other hooks, before the loading early-return). Fire when the stack is big
   // enough for drizzle to pay off, it's off, and the drizzle-on dry-run sizing
-  // confirms it fits the memory budget and isn't a giant mosaic canvas, so we
-  // never nudge toward a run that'd be refused for OOM. Advisory; the sizing line
-  // below shows the real memory/time cost once it's on.
+  // that rides along on the estimate confirms it fits the memory budget and isn't
+  // a giant mosaic canvas, so we never nudge toward a run that'd be refused for
+  // OOM. `is_mosaic` is a property of the canvas both sizings share, so it is
+  // read off the estimate itself. An older backend sends no `drizzle_probe` and
+  // the nudge simply stays quiet. Advisory; the sizing line below shows the real
+  // memory/time cost once it's on.
   const drizzleNudge =
-    drizzleWorthChecking && drizzleEstimate.data
-    && !drizzleEstimate.data.would_exceed && !drizzleEstimate.data.is_mosaic
+    drizzleWorthChecking && estimate.data?.drizzle_probe
+    && !estimate.data.drizzle_probe.would_exceed && !estimate.data.is_mosaic
       ? `Your ${solvedAccepted} accepted frames are a large, well-dithered set (a Seestar dithers automatically as it captures) — exactly where Drizzle pays off, reconstructing the fine detail a Bayer sensor and short focal length under-sample. It renders to a larger canvas, so it costs more memory and time (the sizing below shows how much) and is off by default, but on a set this big it's one of the biggest resolution wins available.`
       : null;
 

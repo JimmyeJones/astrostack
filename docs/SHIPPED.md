@@ -14,6 +14,139 @@ Newest first.
 
 ---
 
+## v0.376.2 — 2026-09-07 — The Sky map stops re-reading every target's master FITS on every visit: `sky_overlay`'s `ETag` + `_derived_image_etag` / `_file_stamp` / `_etag_matches`
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-25fa4c`.)** Shape **(a)** of the
+filed "every visit to the Sky map re-derives each target's coverage mask" idea.
+No pixel of any overlay changes; this is purely about not recomputing one.
+
+**Measured first, because the entry made that the gate.** On a
+**3494×2470×3 float32 (104 MB)** master — the owner's mosaic canvas shape —
+`stack_coverage_mask` costs **14–23 ms** warm. A whole-cube `isfinite` runs at
+memory bandwidth, so a *page-cached* master is genuinely cheap, and that is what
+**declines shape (b)**: caching the composed RGBA beside the preview would buy
+tens of milliseconds and own an invalidation bug in exchange.
+
+**What the measurement does not cover is the case the entry was about.** The
+Sky map requests one overlay **per target with a stack** (`routers/sky.py` sets
+`preview_url` on every tile), and on the owner's box those masters live on a NAS.
+Cold, that is ~104 MB pulled over the network per target, on every visit and every
+reload — and `Cache-Control: no-store` forbade the browser from even *keeping* the
+copy a revalidation would refer to, so a reload could never be cheap.
+
+**So the response is now revalidated rather than recomputed.** Three small helpers
+in `routers/stack.py`:
+
+- `_file_stamp(path)` — `mtime_ns:size`, or `-` when the file is missing or
+  unreadable, so a master that disappears (or comes back) changes the answer
+  rather than looking unchanged.
+- `_derived_image_etag(*parts)` — a strong ETag (SHA-256, 32 hex chars) over
+  those stamps plus whatever else determines the bytes, with `webapp.__version__`
+  folded in so an upgrade that changes how the image is composed cannot be masked
+  by a browser holding the old one.
+- `_etag_matches(request, etag)` — `If-None-Match` handling that copes with the
+  list form, the `W/` weak prefix a proxy may add, and `*` (RFC 9110).
+
+`sky_overlay` builds its tag from the preview stamp, the FITS stamp,
+`preview_north_up_deg` and `preview_crop_json` — the entry's own caution was that
+a History **"Adjust"** re-save rewrites the preview in place *and* changes the
+orientation, and both are stamped. A match returns **304** having done two `stat`
+calls and no read at all. `Cache-Control` moves `no-store` → `private, no-cache`:
+still revalidated on **every** request, so a re-edited run can never be served
+stale, but revalidation is now possible at all.
+
+**Upgrade-safe (§9):** response headers only — no config, schema, on-disk,
+default, endpoint or response-*body* change, and the 200 path returns byte-identical
+PNGs. A 304 is what `<img>` and every HTTP client already do with a validator.
+
+**Tests (+2, both fail before).** `tests/webapp/test_stack_render.py`: the first
+response carries a strong (not `W/`) ETag and a `no-cache`, not-`no-store`
+`Cache-Control`; the same tag comes back **304** with an empty body; the weak-prefixed
+and `*` forms match while somebody else's tag does not; and rewriting the preview
+in place moves the tag and stops the stale one being honoured.
+
+**Left open deliberately:** four other `no-store` image endpoints in
+`routers/stack.py` and `routers/editor.py` are the same shape, but each has its
+own invalidation inputs and none was measured. Do them one at a time, with the
+inputs enumerated — not as a sweep.
+
+---
+
+## v0.376.1 — 2026-09-07 — The Stack page stops building the same mosaic canvas twice per load: `stacker.StackCanvasBasis` + `estimate_stack_basis` / `estimate_stack_from_basis`, and `/stack-estimate`'s `drizzle_probe`
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-25fa4c`.)** Shape **(c)** of the
+four filed under the "`/stack-estimate` and `/rejection-outlook` are still ~4.7 s"
+performance lead (shape (a) shipped v0.374.9). Pure performance — no pixel, no
+option, no default, and no existing response field moves.
+
+**The duplication.** `routes/Stack.tsx` ran *two* `stackEstimate` queries: the
+sizing for the options on screen, and a fixed `drizzle: true, scale 1.5`
+feasibility probe behind the proactive drizzle nudge (enabled when drizzle is off
+and ≥200 frames are accepted — i.e. always, for the owner). Both went through
+`estimate_stack`, whose whole cost is `mosaic.compute_mosaic_canvas`: one stored
+WCS read per **sub**. So the page re-derived a canvas it had just derived, from
+the same frames, because the second request asked about a different *drizzle
+scale* — a knob that multiplies the canvas's output and cannot move the canvas.
+
+**The engine now says so, and a test enforces it.** `estimate_stack` is split into
+its two halves:
+
+- `estimate_stack_basis(project, mosaic_canvas)` → the new frozen
+  `StackCanvasBasis` (ref shape, canvas shape, `is_mosaic`, `n_frames`,
+  `panel_depth`, and the canvas mode it was built for). This is the expensive
+  half: reference pick, footprint union, gross-outlier exclusion, and the
+  pointing clustering behind `auto_reject_depth`.
+- `estimate_stack_from_basis(basis, options, memory_budget_gb)` → the cheap half:
+  peak bytes, the memory fix, the largest drizzle scale that fits, the print plan.
+  Arithmetic only — it touches no frame and no WCS.
+- `estimate_stack` is now those two composed, byte-for-byte identical to what it
+  returned before (its docstring points a multi-sizing caller at the pair).
+
+`mosaic_canvas` is the **one** option the canvas depends on, so
+`estimate_stack_from_basis` **refuses** options whose `mosaic_canvas` disagrees
+with the basis's rather than silently sizing the wrong canvas.
+
+**The endpoint answers both questions from one basis.** `/stack-estimate` gains an
+additive `drizzle_probe` (`drizzle_scale`, `peak_bytes`, `peak_gb`,
+`would_exceed`) sized at the module constant `DRIZZLE_PROBE_SCALE = 1.5` — exactly
+what the second request used to ask. It is deliberately *not* built with
+`replace(options, …)`: it is a fresh `StackOptions`, so the rejection knobs on the
+form cannot make the nudge flicker (pinned). `is_mosaic`, the probe's other input,
+is a property of the shared canvas and was already in the response, so the
+frontend reads it there.
+
+**Measured** on the entry's own shape — a 9-panel mosaic of **5,477** synthetic
+solved subs, this box: a Stack-page load's sizing work **2.18 s → 1.13 s**
+(1,800 subs: 0.72 s → 0.35 s), and a second sizing off a held basis costs
+**44 µs**. Every subsequent toggle of a canvas-affecting knob is halved too, since
+the page now issues one request where it issued two.
+
+**Upgrade-safe (§9):** one additive response key and one additive optional client
+field; no config, schema, on-disk, default or existing-response-shape change. An
+older frontend ignores `drizzle_probe`; a newer frontend against an older backend
+gets `undefined` and **withholds** the nudge, which is the safe half — it must
+never suggest a run that would be refused for OOM. Both directions are pinned by a
+test.
+
+**Tests (+11; 4 fail before).** `tests/test_estimate_basis.py` (new): the split
+reproduces `estimate_stack` field-for-field across **nine** option sets × two
+budgets; one basis prices many sizings with `compute_mosaic_canvas` called
+**once** (counted) while still returning genuinely different answers; the basis's
+own canvas facts; the `mosaic_canvas` mismatch refusal; and the same
+"run Plate Solve first" guidance when nothing is solved. (Both budgets are
+explicit — with `memory_budget_gb=None` the budget is read from *available*
+memory, which moves between two calls.) `tests/webapp/test_stack_estimate.py`:
+the probe is present and is not an echo of the main sizing, agrees exactly with
+the separate drizzled request it replaces, is unmoved by the rejection knobs,
+flags a drizzled run that busts the budget while the plain one fits, and the
+canvas is built **once** per request. `frontend/src/routes/Stack.test.tsx`: the
+page issues **one** sizing on a nudge-worthy target, and no nudge at all against a
+backend that sends no probe. The two tests that pinned the *second request* were
+rewritten, not deleted — each still pins its behaviour (over-budget and mosaic
+both suppress the nudge), now through the folded-in answer.
+
+---
+
 ## v0.375.0 + v0.376.0 — 2026-09-07 — "My wishlist": save the objects you want to shoot, and be told when they're up: `Library.add_to_wishlist` + `seestack/wishlist.py` + `/api/wishlist` + `WishlistStar` / `WishlistTonightCard`
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-rb61y0`.) The ⭐ beginner

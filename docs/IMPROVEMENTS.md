@@ -3794,9 +3794,23 @@ problems. Dogfood it every big-picture run and fix root causes.
   measured (`coverage_thin_frac`) rather than guessed, and it self-hides below `_COVERAGE_THIN_SHARE` so an
   evenly-covered stack is never told about a border it hasn't got. **The one honest gap, recorded rather than
   built:** the wording is about *noise* ("noisier and uneven"), not about *black* — a beginner staring at a
-  flat black band may not connect the two. If anyone ever wants to close that, it is **four words inside the
+  flat black band may not connect the two. ~~If anyone ever wants to close that, it is **four words inside the
   existing sentence**, not a new caption or card: say the thin edge *looks dark*. Do not add a second surface
-  for it.
+  for it.~~ — **⚪ THE FOUR WORDS ARE THE WRONG WORDS; DECLINED WITH THE MEASUREMENT SO NOBODY SHIPS THEM
+  (Builder 2026-09-07).** Sized it, went to the statistic behind the note first — the lesson the entry
+  directly below this one exists to teach — and the copy would have been **false**. The note fires on
+  `run.coverage_thin_frac`, i.e. `stacker.coverage_thin_fraction`, whose docstring and code both say it
+  **excludes uncovered pixels**: `thin = count((cov > 0) & (cov < 0.25 * peak))` over
+  `n_covered = count(cov > 0)`. The black band a beginner is staring at is `cov == 0` — NaN, "no coverage",
+  rendered black — and it is in **neither** term of that ratio's numerator. Probed directly, holding the thin
+  fringe fixed at 500 px and growing the black region: the thin count stays **500** at 0, 20, 40 and 60 black
+  rows, while the reported share moves **0.0500 → 0.0625 → 0.0833 → 0.1250** purely because the *covered*
+  denominator shrinks. So the pixels this note counts are thin-**but-covered** — the same brightness as the
+  rest of the picture, just noisier — and telling the owner they "look dark" would explain the one part of
+  their picture this measurement is blind to. **Its wording is already right for what it measures.** If the
+  black is ever worth a sentence it needs its own measured quantity (an uncovered share, which nothing
+  records today), not a rewording of this one — and the entry directly below records that the wide black
+  bands seen on the sample were `AnnotatedImage` letterboxing, not canvas at all. Leave the sentence alone.
 
 - **⚪ CLOSED — THE PREMISE WAS WRONG, AND MEASURING IT IS WHAT SHOWED THAT (Builder 2026-09-04). The black
   was the *card*, not the canvas; see the shipped entry above (v0.351.1).** Probed on the running app rather
@@ -7645,12 +7659,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   state). Cheapest by far, but it is the staleness trade **v0.374.6 explicitly warned about** for the Library
   page — a stale canvas estimate after a scan is its own bug — so it needs the fingerprint to be genuinely
   complete, not "good enough".
-  **(c) is the smallest and was checked rather than guessed** — `Stack.tsx` runs two queries and they
+  ~~**(c) is the smallest and was checked rather than guessed** — `Stack.tsx` runs two queries and they
   *do* legitimately differ (`stack-estimate` uses the user's current options; `stack-estimate-drizzle` asks a
   fixed `drizzle: true, scale 1.5` feasibility question, enabled only when drizzle is off and ≥200 frames are
   accepted). For the owner — thousands of subs, drizzle off by default — **both fire**, so the Stack page
   pays ~9.3 s on load. Folding them into one request that answers both sizings from **one** canvas
-  computation halves that without touching the engine.
+  computation halves that without touching the engine.~~ — **SHIPPED v0.376.1**
+  (`stacker.StackCanvasBasis` + `estimate_stack_basis` / `estimate_stack_from_basis`, and
+  `/stack-estimate`'s additive `drizzle_probe`). It *did* touch the engine, and that turned out to be the
+  right place: the split makes "the canvas depends on `mosaic_canvas` alone" a thing the code states and a
+  test enforces, rather than a fact a router has to remember. Measured on the entry's own shape (9-panel,
+  **5,477** synthetic solved subs, this box): a Stack-page load's sizing work **2.18 s → 1.13 s**, and a
+  second sizing off a held basis costs **44 µs**. Entry in [`SHIPPED.md`](SHIPPED.md).
   **(d), and the sharpest of the four:** the first query's key carries `sigma_kappa`, `sigma_clip`,
   `min_max_reject`, `min_max_reject_count` and `auto_reject` — **none of which affect the canvas**; only
   `drizzle*` and `mosaic_canvas` do. They are in the key because the same endpoint also answers
@@ -7682,10 +7702,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   on-by-default hot path, and its edge handling is load-bearing (see its own `_shift` docstring on the dark
   seam), so any change needs bit-for-bit output tests before speed tests.
 
-- **NEW IDEA (Builder 2026-08-27, traced while fixing the Sky-map north-up overlay; TRACED, NOT MEASURED —
+- ~~**NEW IDEA (Builder 2026-08-27, traced while fixing the Sky-map north-up overlay; TRACED, NOT MEASURED —
   measure before building, per this section's own rule) — every visit to the Sky map re-derives each target's
   coverage mask by reading its whole master FITS, and the response forbids caching, so the work repeats on
-  every visit and every reload.** *(Pillar: friendliness / performance — PRIORITY 3. Size: S–M. Confidence for
+  every visit and every reload.**~~ — **SHAPE (a) SHIPPED v0.376.2; (b) DECLINED ON THE MEASUREMENT.**
+  The gate was met before a line was written: on a **3494×2470×3 float32 (104 MB)** master — the owner's mosaic
+  canvas shape — `stack_coverage_mask` costs **14–23 ms** warm, i.e. a whole-cube `isfinite` runs at memory
+  bandwidth and a *page-cached* master is cheap. That is what closes (b): a composed-RGBA cache beside the
+  preview would buy tens of milliseconds and own an invalidation bug. What it does **not** close is the cold
+  case the entry was really about — those 104 MB are read **off the NAS**, per target, on every visit and every
+  reload, and `no-store` forbade even keeping the copy a revalidation would refer to. So (a) shipped:
+  `_derived_image_etag` over `_file_stamp(preview)` + `_file_stamp(fits)` + `preview_north_up_deg` +
+  `preview_crop_json` + `webapp.__version__`, `private, no-cache`, and a matching `If-None-Match` answered
+  **304** from two `stat` calls. Still revalidated on every request, so an "Adjust" re-save can never serve
+  stale — the entry's own caution, met by stamping the preview *and* the orientation. Entry in
+  [`SHIPPED.md`](SHIPPED.md). **Sibling left open deliberately:** the four other `no-store` image endpoints in
+  `routers/stack.py` / `routers/editor.py` are the same shape, but each has its own invalidation inputs and
+  none was measured — do them one at a time, with the inputs enumerated, not as a sweep. *(Original entry
+  follows, struck.)* *(Pillar: friendliness / performance — PRIORITY 3. Size: S–M. Confidence for
   the mechanism: traced end to end; the cost is unmeasured and that is the first task.)*
   `sky_overlay` (`webapp/routers/stack.py`) calls `stack_coverage_mask(fits_path)`, which opens the master and
   runs `np.isfinite` over **every plane of the full canvas** to build the alpha — memory-frugal (it reduces
@@ -8468,6 +8502,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.376.2** — Friendliness / performance (PRIORITY 3), measured before it was built (no pixel changes): **the Sky map stopped re-reading every target's master FITS on every visit.** The map requests one `sky-overlay` per target with a stack, each of which runs `stack_coverage_mask` over the whole master cube — **14–23 ms warm on a 104 MB (3494×2470×3) mosaic master**, which is what **declines shape (b)** (a composed-RGBA cache would buy tens of milliseconds and own an invalidation bug), but those megabytes come **off the NAS** cold, per target, on every visit and reload — and `Cache-Control: no-store` forbade even keeping the copy a revalidation would refer to. New `_file_stamp` / `_derived_image_etag` / `_etag_matches` give the response a strong `ETag` over the preview's and the master's `mtime:size`, `preview_north_up_deg`, `preview_crop_json` and `webapp.__version__`; `private, no-cache` keeps it revalidated on **every** request (so a History "Adjust" re-save can never serve stale) while making revalidation possible at all, and a matching `If-None-Match` is answered **304** from two `stat` calls. Weak (`W/`) and `*` validators handled. Headers only — no body, endpoint, config, schema, on-disk or default change. Tests +2, both fail-before. Four sibling `no-store` image endpoints left open on purpose: same shape, different invalidation inputs, none measured. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.376.1** — Performance, measured on the owner's shape (no behaviour change): **the Stack page stopped building the same mosaic canvas twice per load.** `routes/Stack.tsx` ran two `stackEstimate` queries — the sizing for the options on screen, and a fixed `drizzle: true, scale 1.5` feasibility probe behind the proactive drizzle nudge — and both went through `estimate_stack`, whose whole cost is `mosaic.compute_mosaic_canvas`: one stored WCS read per **sub**. The second request re-derived the identical canvas because it asked about a different *drizzle scale*, a knob that multiplies the canvas's output and cannot move the canvas. `estimate_stack` is now split into `estimate_stack_basis` (the expensive, options-independent half → the new frozen `StackCanvasBasis`) and `estimate_stack_from_basis` (pure arithmetic), composed back into an unchanged `estimate_stack`; `mosaic_canvas` is the one option the canvas depends on, so a basis **refuses** options that disagree with it rather than silently sizing the wrong canvas. `/stack-estimate` gains an additive `drizzle_probe` sized off that shared basis at `DRIZZLE_PROBE_SCALE = 1.5`, built from a fresh `StackOptions` so the rejection knobs can't make the nudge flicker. Measured on a 9-panel **5,477**-sub mosaic: a Stack-page load's sizing work **2.18 s → 1.13 s**, a second sizing off a held basis **44 µs**. Upgrade-safe both ways — an older frontend ignores the key; a newer frontend against an older backend withholds the nudge rather than suggesting a run that might be refused. Shape (c) of the four-shape perf lead; (b) and (d) stay open. Tests +11, 4 fail-before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.375.0 + v0.376.0** — ⭐ NEW BEGINNER FEATURE: **"My wishlist"** — save the objects *you* want to shoot (a `wishlist` table in the library registry, `Library.add_to_wishlist`, `seestack/wishlist.py`, `GET`/`POST`/`DELETE /api/wishlist`, `WishlistStar` on every life-list tile and on the Tonight page's catalog rows) and be told on the right night that one of them is up (`GET /api/wishlist/tonight` over the planner's own `nightplan.well_placed_tonight`, `WishlistTonightCard`). **No `LIBRARY_SCHEMA_VERSION` bump — deliberately:** the DDL lives in `_AUX_TABLES_SQL` and is re-run idempotently on every open (`_ensure_aux_tables`), because a bump would make the *previous* Docker image refuse to open the registry and turn a rollback into a bricked install. "Captured" is delegated to `lifelist.catalog_capture_status`, never re-derived, so the two screens cannot disagree. Self-hides on an empty list, no location, nothing up, an older backend, and while another night is picked. Tests +38. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.374.11** — Friendliness (PRIORITY 3) with a **verified bug** at its centre: **tapping "what does this do?" on a stacking option changed the option.** `HintLabel` — the *only* explanation surface for a descriptor-driven option, shared by the Stack form, Settings, the editor's op parameter panel and the editor's print-size control — hung `field.help` on a hover `Tooltip` around a bare 14 px `<svg>`. It is passed as a `Switch`'s `label`, which Mantine renders **inside a `<label>`**, so a click on the icon activated the control: driving the pre-change component directly, one click on a boolean option's icon fired `onChange(true)`. A phone has no hover, so that click is the only gesture a beginner has for "what does this do?" — it flipped their setting and showed them nothing. The icon is now a real control (`UnstyledButton component="span" role="button" tabIndex={0}`, controlled tooltip opened by tap, hover *or* focus, `preventDefault()` on the click). **A span and not a button is load-bearing:** a `<button>` inside that `<label>` is a *labelable* element, so the field's label would name two controls at once — it broke seven `Settings.test.tsx` queries the moment it was tried, and reads the same way to a screen reader; the `aria-label` is generic (*"What does this do?"*) for the same reason. **No page gets taller** — same icon, `lineHeight: 0`, no padding, no new prose — and hover is unchanged for anyone with a mouse, while keyboard users reach the hint for the first time. Second slice of the "a Tooltip is invisible on a phone" entry, taken at the shared component rather than one route. Frontend only; tests +7, four fail-before.
 - **v0.374.10** — Friendliness / trust (PRIORITY 3), copy only: **the grainier-restack note stops saying "about 2400% more background grain".** A manual restack of a handful of subs against a 500-sub master really is that much grainier — arithmetically right, and it reads as a bug, on the one note whose whole job is to be trustworthy when the picture got *worse*. New pure `format.formatMoreThan` says a gap past a tripling as a multiple instead — *"about 25.0× as much background grain as your 14 May one"* — and returns the **joining word** with the number, because the phrasing change moves the preposition (*more … than* → *as much … as*) and that is exactly where a hand-assembled sentence breaks. The ordinary band is untouched, which is where nearly every real firing lands (the nudge's bar is ~17.6 % more grain), and 200 % itself still prints as a percentage — both sides of the crossover are pinned. A non-finite, zero or negative gap prints "about 1% more" rather than `NaN`. `percent_cleaner`, the mirror note's number, needed nothing: a fraction *less* is bounded below 100 % by construction. Endpoint and engine untouched; frontend only. Tests +7.
