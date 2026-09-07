@@ -77,6 +77,21 @@ AUTO_EDIT_SKYCAST_PREFIX = "editor_auto_skycast:"
 # hands-off image was really white-balanced (and by which route). Absent on
 # manual/un-edited runs, so it only ever annotates runs the auto-edit touched.
 AUTO_EDIT_COLORCAL_PREFIX = "editor_auto_colorcal:"
+# What the editor's "Hold back highlights" suggestion would say about the picture
+# an *unattended* auto-edit just produced — the strength that would reopen its
+# bright core, the share of that core rendering flat white today, and the core's
+# size — or ``{"strength": null}`` when the measurement ran and found nothing to
+# suggest (a core that is fine, absent, or beyond the knob's reach). Stored as
+# JSON per run, and **absent** when the measurement itself couldn't be taken, so
+# "measured and clean" is distinguishable from "not measured".
+#
+# It changes no pixel and is never shown on the picture. It exists because the
+# automatic highlight-clip cue is real-data-gated: nobody knows how often a
+# genuinely blown core occurs on the owner's own stacks, or at what severity, and
+# a threshold guessed from a synthetic scene would silently change everyone's
+# picture. Aggregated by ``pipeline.auto_highlight_summary`` into the Settings
+# self-check line, this accrues that distribution passively, from real runs.
+AUTO_EDIT_HIGHLIGHT_PREFIX = "editor_auto_highlight:"
 # The recipe *look* (``stack._recipe_look``, as JSON) that an unattended auto-edit
 # actually baked into this run's stored preview PNG. The auto-edit writes the recipe
 # and the preview in one step, so at that moment the two agree — and several surfaces
@@ -1092,36 +1107,11 @@ async def highlight_suggestion(safe: str, run_id: int, request: Request,
     saturated in the linear data is reported as no suggestion, because holding
     the highlights back would only darken it.
     """
-    from seestack.edit.highlights import suggest_highlight_protect
-    from seestack.edit.registry import get_op
-
     project_dir, run = _run_info(request, safe, run_id)
     rec = _decode_recipe_query(request, safe, run_id, recipe)
-    # The op we're suggesting *for* — its own params (asinh vs STF, strength,
-    # black point, sky level) shape the stretch we solve against. Fall back to
-    # the op's defaults when the uid isn't in the recipe.
-    spec = get_op("tone.stretch")
-    stretch_params = dict(spec.defaults()) if spec is not None else {}
-    for op in rec.ops:
-        if op.uid == uid and op.id == "tone.stretch":
-            stretch_params.update(op.params or {})
-            break
-    sub = _recipe_before_uid(rec, uid, drop_ids=("tone.stretch",))
 
     def work() -> HighlightSuggestionOut:
-        if spec is None:
-            return HighlightSuggestionOut(strength=None)
-        rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
-        ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
-                          coverage=_proxy_coverage(run.fits_path, scale),
-                          frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
-                          already_display=_run_display_space(run))
-        linear = apply_recipe(rgb, sub, ctx, for_preview=True, auto_stretch=False)
-
-        def restretch(protect: float) -> np.ndarray:
-            return spec.apply(linear, {**stretch_params, "highlights": protect}, ctx)
-
-        found = suggest_highlight_protect(linear, restretch)
+        found = solve_highlight_protect(project_dir, run, rec, uid)
         if found is None:
             return HighlightSuggestionOut(strength=None)
         return HighlightSuggestionOut(
@@ -1129,6 +1119,53 @@ async def highlight_suggestion(safe: str, run_id: int, request: Request,
             core_px=found.core_px)
 
     return await run_in_threadpool(work)
+
+
+def solve_highlight_protect(project_dir: Path, run: Any, rec: Recipe,
+                            uid: str | None = None):
+    """Solve the "Hold back highlights" strength for ``rec``'s Stretch op — the
+    one answer behind both the editor's button and the passive record an
+    unattended auto-edit stamps.
+
+    ``uid`` names the Stretch op being solved for; when it is ``None`` (the
+    unattended path, which has a recipe but no clicked control) the recipe's
+    **first** ``tone.stretch`` op is used, which is the one the Auto recipe
+    builds. Returns a ``BlownCore`` or ``None`` (no recoverable blown core).
+
+    Measured on the run's cached **proxy**, exactly as the button is, so the
+    recorded number is the number the owner would be offered — a full-resolution
+    measurement would be a different, unfalsifiable one.
+    """
+    from seestack.edit.highlights import suggest_highlight_protect
+
+    spec = get_op("tone.stretch")
+    if spec is None:
+        return None
+    # The op we're suggesting *for* — its own params (asinh vs STF, strength,
+    # black point, sky level) shape the stretch we solve against. Fall back to
+    # the op's defaults when the uid isn't in the recipe.
+    stretch_params = dict(spec.defaults())
+    target_uid = uid
+    for op in rec.ops:
+        if op.id != "tone.stretch":
+            continue
+        if op.uid == uid or (uid is None and target_uid is None):
+            stretch_params.update(op.params or {})
+            target_uid = op.uid
+            break
+    sub = _recipe_before_uid(rec, target_uid, drop_ids=("tone.stretch",))
+
+    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+    ctx = EditContext(proxy_scale=scale, is_proxy=True, wcs=None,
+                      coverage=_proxy_coverage(run.fits_path, scale),
+                      frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
+                      already_display=_run_display_space(run))
+    linear = apply_recipe(rgb, sub, ctx, for_preview=True, auto_stretch=False)
+
+    def restretch(protect: float) -> np.ndarray:
+        return spec.apply(linear, {**stretch_params, "highlights": protect}, ctx)
+
+    return suggest_highlight_protect(linear, restretch)
 
 
 class CurveSuggestionOut(BaseModel):

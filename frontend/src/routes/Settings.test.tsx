@@ -5,9 +5,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  autoCastSummaryText, dropEmptyFields, HINTS, Maintenance, reprocessNudgeText,
-  SETTINGS_PAGE_SECTIONS, SettingsView, WALK_AWAY_KEYS, walkAwayEnabled,
-  withWalkAway,
+  autoCastSummaryText, autoHighlightSummaryText, dropEmptyFields, HINTS,
+  Maintenance, reprocessNudgeText, SETTINGS_PAGE_SECTIONS, SettingsView,
+  WALK_AWAY_KEYS, walkAwayEnabled, withWalkAway,
 } from "./Settings";
 import { SETTINGS_SECTIONS, settingsLink, type SettingsSection } from "../settingsSections";
 import * as client from "../api/client";
@@ -38,6 +38,11 @@ beforeEach(() => {
   // measured yet" so the button tests don't hit an unmocked fetch.
   vi.spyOn(client.api, "autoCastSummary").mockResolvedValue({
     measured: 0, neutral: 0, cast: 0, by_cast: {}, median_deviation: null,
+  });
+  // …and its highlight sibling, for the same reason.
+  vi.spyOn(client.api, "autoHighlightSummary").mockResolvedValue({
+    measured: 0, blown: 0, median_strength: null,
+    median_flat_fraction: null, max_flat_fraction: null,
   });
 });
 
@@ -214,6 +219,68 @@ describe("Maintenance — Auto colour self-check", () => {
       expect(screen.getByRole("button", { name: /Reprocess .* targets/ }))
         .toBeInTheDocument());
     expect(screen.queryByText(/auto-edited result/)).toBeNull();
+  });
+});
+
+describe("autoHighlightSummaryText", () => {
+  it("returns null when nothing has been measured or the summary is missing", () => {
+    expect(autoHighlightSummaryText(undefined)).toBeNull();
+    expect(autoHighlightSummaryText({
+      measured: 0, blown: 0, median_strength: null,
+      median_flat_fraction: null, max_flat_fraction: null,
+    })).toBeNull();
+  });
+
+  it("reassures when every measured run came out with its highlights held", () => {
+    // The whole reason the null reading is stamped rather than left absent: a
+    // library of clean cores must read as "measured and fine", not as silence.
+    const msg = autoHighlightSummaryText({
+      measured: 6, blown: 0, median_strength: null,
+      median_flat_fraction: null, max_flat_fraction: null,
+    });
+    expect(msg).toContain("None of the 6 auto-edited results");
+    expect(msg).toContain("holding your highlights");
+  });
+
+  it("counts the blown ones and names the strength that would reopen them", () => {
+    const msg = autoHighlightSummaryText({
+      measured: 8, blown: 3, median_strength: 0.6,
+      median_flat_fraction: 0.24, max_flat_fraction: 0.55,
+    });
+    expect(msg).toContain("3 of 8 auto-edited results");
+    expect(msg).toContain("Hold back highlights");
+    expect(msg).toContain("60%");
+    expect(msg).toContain("them");
+  });
+
+  it("stays honest when only one run is blown and no strength is known", () => {
+    const msg = autoHighlightSummaryText({
+      measured: 1, blown: 1, median_strength: null,
+      median_flat_fraction: null, max_flat_fraction: null,
+    });
+    expect(msg).toContain("1 of 1 auto-edited result");
+    expect(msg).not.toContain("Hold back highlights");
+  });
+});
+
+describe("Maintenance — Auto highlight self-check", () => {
+  it("shows the read-out once auto-edited runs are measured", async () => {
+    vi.spyOn(client.api, "autoHighlightSummary").mockResolvedValue({
+      measured: 4, blown: 1, median_strength: 0.4,
+      median_flat_fraction: 0.2, max_flat_fraction: 0.2,
+    });
+    renderMaintenance();
+    await waitFor(() =>
+      expect(screen.getByText(/1 of 4 auto-edited results came out with a washed-out/))
+        .toBeInTheDocument());
+  });
+
+  it("shows no read-out before any auto-edited run is measured", async () => {
+    renderMaintenance();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Reprocess .* targets/ }))
+        .toBeInTheDocument());
+    expect(screen.queryByText(/washed-out bright core/)).toBeNull();
   });
 });
 
