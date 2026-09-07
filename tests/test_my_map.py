@@ -228,7 +228,15 @@ def test_the_detail_mask_is_bounded_in_memory_on_a_big_canvas(tmp_path, monkeypa
     fp = tmp_path / "big.fits"
     fits.PrimaryHDU(data=cube).writeto(fp)
     counts = np.full((h, w), 6.0, dtype=np.float32)
-    counts[:, :1000] = 1.0
+    # A badly-covered *end band*. It was 1,000 of the 4,200 columns until D1 was
+    # fixed (2026-09-07): a quarter of the canvas at a sixth of the depth is not a
+    # fringe, it is a shallower panel, and calling it fringe is precisely the bug
+    # — the audit's "1x2 with no overlap, 400 vs 150 subs" case is this shape and
+    # it counted discarding the thin side as a wrong result. The band is now a
+    # real border (1 % of the width); everything this test is actually about —
+    # that the map is read strided, and that the answer lines up with the canvas —
+    # is unchanged.
+    counts[:, :40] = 1.0
     fits.PrimaryHDU(data=counts).writeto(tmp_path / "big_framecov.fits")
 
     seen: list[int] = []
@@ -243,5 +251,5 @@ def test_the_detail_mask_is_bounded_in_memory_on_a_big_canvas(tmp_path, monkeypa
     assert seen and seen[0] > 1, "the frame-count map was read at full resolution"
     # …and the answer still lines up with the canvas it will be composited on.
     assert mask.shape == (h, w)
-    assert not mask[:, :900].any()        # the badly-covered end is excluded
-    assert mask[:, 1100:].all()           # the good end survives
+    assert not mask[:, :30].any()         # the badly-covered end is excluded
+    assert mask[:, 60:].all()             # the good end survives

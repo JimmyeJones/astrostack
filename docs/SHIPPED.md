@@ -14,6 +14,148 @@ Newest first.
 
 ---
 
+## v0.382.4 — 2026-09-07 — 🔴🔴 D1: Auto's border trim measured "well covered" against the panel *overlaps*, and cropped every mosaic down to them
+
+**(Builder 2026-09-07, branch `claude/sweet-babbage-8hitfe`.)** The third external
+audit's find, and its own assessment — *"the single most valuable find of the
+three"* — was right. Fixed at the root, in the one function that owns the rule.
+
+**What it was.** `coverage_trim.well_covered_mask` defined *well covered* as at or
+above half the coverage map's own **peak**. On a single field the peak **is** the
+interior — every frame covers the whole field — so half of it correctly trims the
+dithered fringe. On a tiled mosaic the peak is where panels **overlap**: two
+overlapping panels are 2x a panel's depth and four are 4x, so "half the peak" sat
+*above every panel interior* and the only well-covered region was the overlap
+band. Default Auto output, mosaics only, and it had been there since the module
+was written.
+
+**Reproduced here before a line was changed**, with the audit's own shapes and the
+real functions (panels of 30 subs unless stated):
+
+| shape | canvas kept, before |
+|---|---|
+| 2x2 @ 15 % overlap | **8.0 %** — a horizontal strip |
+| 3x3 @ 20 % | 7.8 % |
+| 3x3 @ 5 % | **1.7 %** |
+| 12x8 raster @ 10 % | 1.5 % |
+| 1x2, no overlap, 400 vs 150 subs | the 150-sub panel **dropped whole** |
+| *control:* single field + ragged fringe | 92.2 %, crop `(0.02, 0.02, 0.98, 0.98)` ✅ |
+
+**The fix: measure against a panel, not the peak.** New
+`coverage_trim.panel_coverage_level` returns the **lowest coverage level that a
+real share of the canvas actually sits at**, and `well_covered_mask` takes its
+fraction of *that*. It needs no mosaic flag and no extra input, because the same
+sentence gives the right answer for both shapes:
+
+* a **single field** has exactly one such level — the interior plateau, which
+  *is* the peak — so the rule is **byte-for-byte what it always was**. The
+  reprojection border's ramp steps are each a fraction of a percent of the covered
+  area and never qualify. (The audit's own control returns the identical crop.)
+* a **mosaic** has several (one panel, two overlapping, four overlapping) and the
+  lowest is one panel — the depth the trim should keep.
+* a mosaic whose **panels differ in depth** has both as levels, and the lowest is
+  the *thinner* panel, which is what stops it being discarded whole.
+
+Two details are load-bearing. Levels are found by **relative tolerance**
+(`PANEL_LEVEL_TOL = 0.10`), not exact integer value, because coverage is a sum of
+per-frame *weights* once quality weighting is on — a 30-sub panel reads as
+30 ± jitter and integer bucketing would shatter it (pinned by a test at 8 %
+jitter, on both the mosaic and the single field). And a level must clear an
+**absolute pixel floor** as well as a fraction (`PANEL_LEVEL_MIN_PIXELS = 256`):
+on a map of a few dozen covered pixels, 8 % rounds down to "one pixel is a
+plateau", which is an artefact of the sample size — below the floor the function
+declines and the peak stands, so small and legacy maps keep exactly today's
+behaviour.
+
+**The safety property that makes this un-scary, and it is tested:** the reference
+is always at or below the peak, so the threshold can only fall and the
+well-covered mask can only **grow**. The worst case of the new rule is leaving
+fringe in, never trimming a panel away.
+
+**Both consumers, as the entry required.** The same mask drives
+`render/thumbnail.stack_detail_mask` (the all-sky "My map" fade); it changed with
+the shared function and its tests are in the same pass.
+
+**The fixtures were the reason three audits missed it, and correcting them is
+half this commit.** Six tests shared one fixture — a full canvas at coverage 1.0
+with a deeper block dropped in the middle — commented *"thin single-frame
+fringe"* while being **62 % of the canvas**. A large region at a lower depth is
+not a border; it is a shallower panel, and calling it fringe *is* D1 (the audit's
+own 400-vs-150 case is that exact shape). They now use one shared
+`_ragged_border_coverage` helper: a 4 px **ramped** border, which is what a
+reprojection/dither border actually is. No assertion was loosened — the trim
+tests still demand an exact rectangle, and it is now the exact rectangle a real
+border implies (the two outer rings fall below half a panel and are cut, the two
+inner ones clear it and are kept).
+
+**Tests (+8 in `tests/test_coverage_trim.py`, plus the corrected fixtures).**
+The audit's seven shapes, the ragged-mosaic case that proves the trim still does
+its job (a 2x2 with a 10 px border keeps ~95 % and its panels survive), the
+single-field control, the weight-jitter case, the keep-more property over 40
+random maps, and the empty population. Three of them fail before the change and
+pass after; the single-field control passes on both sides, which is the point of
+it. Full suite green.
+
+**Upgrade-safe (§9):** one engine function's rule, plus a new pure helper. No
+config, schema, on-disk layout, API shape or default touched, and nothing is
+persisted — a run whose Auto recipe already carries a bad crop keeps it (the
+recipe is stored), but re-running Auto now produces the honest one.
+
+**What is left, deliberately.** The audit also noted the run's health card saying
+*"The panels of this mosaic evened out"* beside the mangled picture, and the
+"What Auto did" note calling the crop a "ragged mosaic edge to trim". Those are
+copy on a now-correct crop rather than part of the wrong result, so they are not
+folded in here.
+
+*(Original entry, kept verbatim for its measurements and its provenance:)*
+
+- **🔴🔴 D1 — AUTO'S BORDER TRIM CROPS A MOSAIC DOWN TO ITS PANEL OVERLAPS, THROWING AWAY THE PANEL INTERIORS.
+  Default Auto output, mosaics only, and it has been there the whole time.** *(Third external audit, 2026-09-07,
+  baselined `a301b75` / v0.382.1. Severity: **wrong result on the owner's primary workflow** — he is a heavy
+  mosaic user. Confidence: **reproduced end-to-end AND independently re-reproduced here as a pure function**
+  before filing. **This predates v0.322 and survived all three audits** — it is the single most valuable find
+  of the three.)*
+
+  **The rule.** `well_covered_mask` (`seestack/edit/coverage_trim.py`) defines "well covered" as *at or above
+  `DEFAULT_MIN_FRAC = 0.5` of the map's own **peak** coverage*. On a single field the peak **is** the interior,
+  so half of it correctly trims the dithered fringe. **On a tiled mosaic the peak is where panels overlap** —
+  two overlapping panels give 2× a panel's depth, four give 4× — so "half the peak" sits **above every panel
+  interior**, and the only "well covered" region is the overlap band.
+
+  **Re-reproduced here with the real functions** (2×2 mosaic, 4 panels × 30 subs, 15 % overlap):
+  | | |
+  |---|---|
+  | `coverage_is_mosaic` | `True` |
+  | coverage levels | 30 (panel) · 60 (2-panel) · **120 (4-way peak)** |
+  | threshold = 50 % of peak | **60** — a panel interior at 30 is *below* it |
+  | `well_covered_mask` keeps | 26.9 % of pixels |
+  | `largest_covered_rect` | `(0.0, 0.4275, 1.0, 0.5725)` |
+  | **canvas kept** | **14.5 %** — a horizontal strip |
+  | **control: single field + fringe** | `is_mosaic False`, crop `(0.02,0.02,0.98,0.98)` ✅ correct |
+
+  **The audit's own end-to-end run** (real watcher, auto-stack + auto-edit on, 2×2 S30-shaped mosaic, 4 panels ×
+  30 subs over three nights, canvas 2045×3577, coverage ≈28/56/113): the recorded Auto recipe ends with
+  `geometry.crop {x0 0.4608, y0 0.4638, x1 0.9829, y1 0.5382}` — 52 % of width, **7.4 % of height, under 4 % of
+  the canvas**. The Target page hero shows a thin strip in a black card, the "What Auto did" note calls it
+  "ragged mosaic edge to trim", and stack health on the same run cheerfully says *"The panels of this mosaic
+  evened out"*. Their other measured shapes: 3×3 @20 % overlap → **7.7 %** kept; 3×3 @5 % → **1.7 %**; 1×2 with
+  no overlap and 400 vs 150 subs → **the thin panel is dropped whole**; 12×8 raster → 19.9 %.
+
+  **Why three audits and twenty clean sweeps missed it.** Every dogfood baseline and the editor drive run on the
+  bundled **6-frame single field**, where the rule is correct; the unit tests cover a ragged fringe around **one**
+  plateau, never two. **The owner did report the symptom** — the v0.226.0 entry records Auto "silently reframed
+  the owner's picture", and the response was an off switch that **defaults to on**. `AGENTS.md` §1 has been
+  re-cut (2026-09-07) so mosaic-shaped data is now the standard for any Auto/editor claim.
+
+  **Fix direction.** Measure "well covered" against a **robust panel statistic, not the peak**: the median of
+  covered pixels, or the thinnest panel's depth via the existing `pointing_groups`, and treat ≥ roughly half of
+  *that* as covered. Alternative: trim only pixels below a small **absolute** floor (2–3 frames). **Keep
+  `coverage_is_mosaic` and the single-field path byte-identical.** **Fix both consumers together** — the same
+  mask drives `stack_detail_mask` (`seestack/render/thumbnail.py`) for the all-sky "My map" fade. **Regression
+  tests: the seven shapes in the table above**, including the single-field control that must not move.
+
+---
+
 ## v0.382.3 — 2026-09-07 — the live preview stops reading a mosaic's whole coverage canvas, twice, on every render
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-8hitfe`.)** The second bite

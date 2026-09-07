@@ -74,9 +74,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- **🔴🔴 D1 — Auto's border trim crops a mosaic to its panel overlaps** — Builder, branch
-  `claude/sweet-babbage-8hitfe`, started 2026-09-07. Fixing `coverage_trim.well_covered_mask`'s
-  peak-relative threshold and both consumers, with the seven shapes from the entry as regression tests.
+*No live claims.*
 
 ## Bugs (fix these first)
 
@@ -87,51 +85,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > rather than skimmed. **Grep those two files for anything older than v0.352.3**, including
 > the target of any "see above" / "see below" in the entries below that no longer resolves
 > here.
-
-- **🔴🔴 D1 — AUTO'S BORDER TRIM CROPS A MOSAIC DOWN TO ITS PANEL OVERLAPS, THROWING AWAY THE PANEL INTERIORS.
-  Default Auto output, mosaics only, and it has been there the whole time.** *(Third external audit, 2026-09-07,
-  baselined `a301b75` / v0.382.1. Severity: **wrong result on the owner's primary workflow** — he is a heavy
-  mosaic user. Confidence: **reproduced end-to-end AND independently re-reproduced here as a pure function**
-  before filing. **This predates v0.322 and survived all three audits** — it is the single most valuable find
-  of the three.)*
-
-  **The rule.** `well_covered_mask` (`seestack/edit/coverage_trim.py`) defines "well covered" as *at or above
-  `DEFAULT_MIN_FRAC = 0.5` of the map's own **peak** coverage*. On a single field the peak **is** the interior,
-  so half of it correctly trims the dithered fringe. **On a tiled mosaic the peak is where panels overlap** —
-  two overlapping panels give 2× a panel's depth, four give 4× — so "half the peak" sits **above every panel
-  interior**, and the only "well covered" region is the overlap band.
-
-  **Re-reproduced here with the real functions** (2×2 mosaic, 4 panels × 30 subs, 15 % overlap):
-  | | |
-  |---|---|
-  | `coverage_is_mosaic` | `True` |
-  | coverage levels | 30 (panel) · 60 (2-panel) · **120 (4-way peak)** |
-  | threshold = 50 % of peak | **60** — a panel interior at 30 is *below* it |
-  | `well_covered_mask` keeps | 26.9 % of pixels |
-  | `largest_covered_rect` | `(0.0, 0.4275, 1.0, 0.5725)` |
-  | **canvas kept** | **14.5 %** — a horizontal strip |
-  | **control: single field + fringe** | `is_mosaic False`, crop `(0.02,0.02,0.98,0.98)` ✅ correct |
-
-  **The audit's own end-to-end run** (real watcher, auto-stack + auto-edit on, 2×2 S30-shaped mosaic, 4 panels ×
-  30 subs over three nights, canvas 2045×3577, coverage ≈28/56/113): the recorded Auto recipe ends with
-  `geometry.crop {x0 0.4608, y0 0.4638, x1 0.9829, y1 0.5382}` — 52 % of width, **7.4 % of height, under 4 % of
-  the canvas**. The Target page hero shows a thin strip in a black card, the "What Auto did" note calls it
-  "ragged mosaic edge to trim", and stack health on the same run cheerfully says *"The panels of this mosaic
-  evened out"*. Their other measured shapes: 3×3 @20 % overlap → **7.7 %** kept; 3×3 @5 % → **1.7 %**; 1×2 with
-  no overlap and 400 vs 150 subs → **the thin panel is dropped whole**; 12×8 raster → 19.9 %.
-
-  **Why three audits and twenty clean sweeps missed it.** Every dogfood baseline and the editor drive run on the
-  bundled **6-frame single field**, where the rule is correct; the unit tests cover a ragged fringe around **one**
-  plateau, never two. **The owner did report the symptom** — the v0.226.0 entry records Auto "silently reframed
-  the owner's picture", and the response was an off switch that **defaults to on**. `AGENTS.md` §1 has been
-  re-cut (2026-09-07) so mosaic-shaped data is now the standard for any Auto/editor claim.
-
-  **Fix direction.** Measure "well covered" against a **robust panel statistic, not the peak**: the median of
-  covered pixels, or the thinnest panel's depth via the existing `pointing_groups`, and treat ≥ roughly half of
-  *that* as covered. Alternative: trim only pixels below a small **absolute** floor (2–3 frames). **Keep
-  `coverage_is_mosaic` and the single-field path byte-identical.** **Fix both consumers together** — the same
-  mask drives `stack_detail_mask` (`seestack/render/thumbnail.py`) for the all-sky "My map" fade. **Regression
-  tests: the seven shapes in the table above**, including the single-field control that must not move.
 
 - **🟡 D2 — "Only N of M subs could be located … installing ASTAP's star database helps" fires while the night
   is still being solved.** *(Third audit; severity: misleading copy, transient; confidence: traced and observed
@@ -8607,6 +8560,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.382.4** — 🔴🔴 **D1, the third audit's headline find: Auto's border trim cropped every mosaic down to its panel overlaps.** `coverage_trim.well_covered_mask` measured "well covered" as half the map's **peak** — right on a single field (the peak *is* the interior), catastrophic on a mosaic (the peak is where panels **overlap**, so the threshold sat above every panel interior). Reproduced before changing anything, with the audit's own shapes: 2x2 @15% kept **8.0 %** of the canvas, 3x3 @5% **1.7 %**, 12x8 raster 1.5 %, and a 1x2 with unequal depths **dropped the thin panel whole** — while the single-field control returned its correct `(0.02, 0.02, 0.98, 0.98)`. New pure `coverage_trim.panel_coverage_level` measures against **one panel** instead: the lowest coverage level a real share of the canvas sits at. That one sentence is right for both shapes — a single field has exactly one such level and it *is* the peak, so that path is **byte-for-byte unchanged**; a mosaic has several and the lowest is one panel; unequal panels give the *thinner* one. Levels are found by relative tolerance (weighted coverage reads as 30±jitter, and integer bucketing would shatter it) above an absolute pixel floor (on a tiny map 8 % rounds down to "one pixel is a plateau"). **The reference is always ≤ the peak, so the mask can only grow — the worst case is leaving fringe in, never trimming a panel away**, and that property is itself tested. Both consumers move together (`render/thumbnail.stack_detail_mask`, the "My map" fade). Half the commit is fixtures: six tests shared a "thin single-frame fringe" that was **62 % of the canvas** — the same shape as the bug — and now share one ramped 4 px border, with no assertion loosened. Tests +8, three fail-before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.382.3** — PRIORITY 1 (editor responsiveness), the second bite out of the same clause and the bigger one: **the live preview stops reading a mosaic's whole coverage canvas, twice, on every render.** `seestack/edit/proxy.py::_load_map` did `np.asarray(fits.getdata(path), dtype=np.float32)` and strided *afterwards* — the cast copies, so the run's **full-resolution** map was materialised every time, and that map is hundreds of MB at this owner's mosaic sizes. The editor asks for two of them (coverage + frame coverage) per render and fires two renders per edit, so one slider drag was four full-canvas reads and four full-canvas allocations before any op ran. Now: open with `memmap=True`, slice `[::step, ::step]` first, cast last — measured on a 480 MB map at the proxy's own step of 8, **2.65 s cold / 0.21 s warm → 0.011–0.021 s**, with identical values (the decimation picks pixels, the cast rounds each one; neither order changes which or what). The defensive 3-D collapse moves after the stride for the same reason. Tests +2 (the memory contract as its two observable halves — a memmap is asked for, `fits.getdata` is monkeypatched to raise and never reached — plus the float64 and 3-D reorder cases); the 133 existing coverage/leveling tests pass unchanged. Same signature, same values, nothing persisted or defaulted differently. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.382.2** — PRIORITY 1 (editor), the first bite out of the only thing the "Live preview" entry still listed as open — *responsiveness*: **the live preview stops re-solving the star field it solved a moment ago.** Several ops measure the whole image before they transform it (the stretch's per-channel stats, the tone curve's points, "Neutralize background"'s sky medians, and by far the largest, colour calibration's star detection + white-balance solve), and every render redid all of it from the top — twice, since the preview PNG and the histogram are two requests over the same recipe and the same proxy. New `webapp/edit_fit_cache.py` carries those measurements forward through the `EditContext.fit` channel the loupe already uses, but **only for the longest common prefix of enabled ops**: the first op whose id or params differ ends the prefix, so an op either receives the number it would have measured anyway or measures it. Measured on a 1500×1000 proxy with the one-click Auto recipe: **4.25 s → 2.39 s per render (1.78×)**, `np.array_equal(before, after, equal_nan=True)` **True**. Position-not-uid matching is load-bearing (a recipe posted without uids gets fresh ones per request, which would have made the carry a permanent miss); proxy geometry is in the key so a windowed render can never share one. In-process, bounded to 8 slots of small scalars, nothing persisted — a miss is exactly today's behaviour. Tests +10, four of them through the endpoints. Full entry, and the measured next slice (`frozen_deltas`, another 1.8×, 4.2e-7 apart), in [`SHIPPED.md`](SHIPPED.md).
 - **v0.382.1** — PRIORITY 4 (image quality), a three-times-deferred real-data gate closed with numbers instead of another deferral: **"does the Auto denoise↔sharpen crossfade over-read a sky gradient as noise?" — no, and it has not since v0.225.0.** The entry was filed 2026-07-08 against the *level*-MAD `sky_sigma`, where gradient 0.00→0.05→0.10→0.20 of range moved it 0.015→0.028→0.054→0.098 and flipped Auto to *sharpen 0.0 / full denoise* by a gradient of 0.05. The local adjacent-pixel-difference estimator (v0.225.0, shipped for the mosaic grid regression) is blind to structure slower than a pixel, so running the entry's own ladder on the current code gives **0.0042→0.0039→0.0035→0.0030** — *down*, not up, because the tilt lifts the normalisation ceiling — with `_noise_fraction` 0 throughout, no denoise op added, and an identical sharpen amount. No product code changed; what ships is the pin: `test_a_strong_gradient_never_costs_a_clean_stack_its_sharpening` holds the *decision* across the whole feared range, where the existing sibling test held only the σ at one gradient. Full entry in [`SHIPPED.md`](SHIPPED.md).
