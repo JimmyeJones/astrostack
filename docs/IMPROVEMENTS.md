@@ -963,10 +963,21 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
     counted `added` (L84) before the cache block, and when `old_cache.exists()` is False it does `missing += 1`
     while the frame is **still merged** (usable via `source_path`, `cached_path=None`). So the counter reports
     "added-but-cache-missing", not "skipped". Reporting-only; no data loss. (Cosmetic; confidence: traced.)
-  - `seestack/io/ingest.py:93-103` `_cache_stale` refreshes on source *shrink* too, not just growth: the
+  - ~~`seestack/io/ingest.py:93-103` `_cache_stale` refreshes on source *shrink* too, not just growth: the
     docstring justifies it as "source grew after it was cached" but the `st_size != st_size` test is symmetric,
     so a source later truncated/replaced smaller than its cache overwrites a good Stage-1 cache and resets that
-    frame's QC. Pathological input; low severity. (Confidence: traced.)
+    frame's QC.~~ — **CLOSED as already-defended, not fixed; re-traced 2026-09-07 so nobody spends a slot on it.**
+    `_cache_stale` is symmetric and stays that way, because the harmful half is caught **before** it is reached.
+    A shrunk source means `fp_changed` → `content_changed`, and `_source_incomplete(src)` (`ingest.py:338`) runs
+    first: it *loads the pixel data*, so a mid-rewrite truncation fails to read and the whole frame is skipped
+    with `skip_reason="still copying (incomplete rewrite)"` — nothing touched, cache intact, re-checked once the
+    source settles. A source that shrank and is still a **complete, readable** FITS is a genuinely different,
+    smaller capture at a reused path, and refreshing the cache is then the *right* answer (it is the second case
+    `_refresh_frame_metadata`'s docstring names). The only residue is a pre-fingerprint row from a library
+    upgraded and not yet re-scanned, where `stored_fp is None` skips the guard for exactly one scan before the
+    fingerprint is backfilled — and its worst outcome is a re-QC. Do not "fix" the symmetry: making it
+    growth-only would strip the content-swap refresh that keeps a new capture from stacking at the old sky
+    position. (Confidence: re-traced against the current code.)
   - `seestack/io/scanner.py:123` + `ingest.py:143` a symlinked duplicate subdir double-ingests: if `root`
     contains both a real subdir and a symlink to it, both pass `is_dir()` and become separate targets/projects,
     and the per-project `realpath` dedup (built only from that project's own frames) doesn't catch the same
