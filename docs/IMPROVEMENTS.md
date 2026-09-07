@@ -5286,6 +5286,28 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW BEGINNER FEATURE (Scout 2026-09-07) — "Is my mosaic evenly filled?": a per-panel depth /
+  gap readout that tells a mosaic shooter where to point next.** *(Pillar: 2 autonomy + 3 friendliness,
+  with a 4 image-quality edge; size M.)* The owner is a **heavy mosaic user** (`<T>_mosaic_sub/`, AGENTS.md
+  §1) shooting big canvases over many nights — but nothing tells them, in plain language, whether the tiles
+  came out *even*. A mosaic whose corner panel is 12 subs deep while its body panels are 80 has one visibly
+  noisier patch, and the beginner has no way to see that until it is baked into the finished picture, nor any
+  guidance on which panel to add frames to on the next clear night. **What a beginner gets:** a small
+  per-target "Mosaic panels" readout (a card or a nested `/library/<target>/mosaic` route — new pages are
+  explicitly allowed, AGENTS.md §1 IA rule) showing each pointing group as a tile with its sub count / depth,
+  the thinnest panel called out ("Panel bottom-left is only 12 subs — its background will be grainier than the
+  rest; aim there next session for an even result"), and the overall spread ("your deepest panel has 6× the
+  frames of your thinnest"). Sane default: it only appears for a target the app already recognises as a mosaic
+  (≥2 sound pointing groups), and says nothing for a single field. **This is not the whole-sky coverage map**
+  (`/api/sky/coverage`, `Sky.tsx` — "what patches of sky have I imaged"): this is *one target's* panel balance
+  and a next-action nudge. **Reuse, don't reinvent (grep before building):** the per-panel clustering already
+  exists — `seestack.stack.pointings.pointing_groups` / `cluster_pointings` at `PANEL_LINK_DIST_DEG`, the same
+  split `auto_reject_depth`, the per-panel weighting/photometric medians, and per-panel auto-grade (v0.270.2)
+  all rely on — so the panel definition is settled and shared; the new work is aggregating each group's frame
+  count (accepted / solved / total) and rendering it. **Verify non-overlap first** with the existing footprint
+  view and the rejection-outlook `panel_depth` surfacing before starting; if a per-panel *count* is already
+  exposed anywhere, this becomes a thin presentation slice. Additive, read-only, off nobody's hot path.
+
 - **✅ ALL THREE SLICES SHIPPED — ~~"Your year under the stars": a year-bounded recap of a season of
   imaging.~~** (a)+(c) in v0.343.0 (Builder, branch `claude/sweet-babbage-l67sz2`), as composition over the
   night fold the Dashboard heatmap already pays for. **(b) has shipped too** — corrected 2026-09-06 after a
