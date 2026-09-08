@@ -115,6 +115,12 @@ def test_rename_refuses_a_blank_name_or_one_another_target_owns(tmp_path: Path):
         assert lib.rename_target(a.safe_name, "M 42").name == "M 42"
         # An unknown target reports "no such target" the way update_target does.
         assert lib.rename_target("no_such_target", "M 13") is None
+        # …and not another target's *folder* name either: `find_target` resolves
+        # "name OR safe_name", so that name would answer to the other target's
+        # own URL and could shadow it out of the app entirely.
+        with pytest.raises(ValueError):
+            lib.rename_target(b.safe_name, a.safe_name)
+        assert lib.find_target(a.safe_name).id == a.id
     finally:
         lib.close()
 
