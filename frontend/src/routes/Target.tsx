@@ -15,7 +15,7 @@ import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
 import { formatCaptureNights, formatFrameStamp, formatIntegration } from "../format";
-import { integrationReadiness, readinessColor, noiseReductionHint } from "../readiness";
+import { integrationReadiness, readinessColor, noiseReductionHint, fmtGoal } from "../readiness";
 import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
 import { AutoStackHoldNote } from "../components/AutoStackHoldNote";
@@ -1448,7 +1448,7 @@ export function TargetView() {
                           setGoalHoursInput(Number(readiness.goalHours.toFixed(2)));
                           setEditingGoal(true);
                         }}>
-                        {readiness.customGoal ? "your goal" : "goal"} ~{readiness.goalHours} h
+                        {readiness.customGoal ? "your goal" : "goal"} ~{fmtGoal(readiness.goalHours)} h
                         {!readiness.customGoal && readiness.fieldFulls > 1
                           ? ` (${readiness.fieldFulls.toFixed(2).replace(/\.?0+$/, "")}-field mosaic)`
                           : ""}

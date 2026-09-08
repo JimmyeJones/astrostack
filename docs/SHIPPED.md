@@ -110,7 +110,7 @@ renamed. An old run record with no `panel_gain_match` key takes the dataclass
 default; an old master with no `PANG*` cards reads as "the panels were left as
 shot", which is what they were.
 
-**Tests: +9 engine (`tests/test_overlap_panel_gain.py`), +2 API, +3 vitest.** The
+**Tests: +15 engine (`tests/test_overlap_panel_gain.py`), +2 API, +3 vitest.** The
 hazy-panel before/after fails on `main`. `test_a_wholly_hazy_panel_is_deliberately_left_alone`
 was rewritten as `test_transparency_scores_alone_never_reach_across_the_join` — it
 pinned the behaviour this entry changes, and its fixture cannot carry the new
