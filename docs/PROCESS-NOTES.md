@@ -18,6 +18,46 @@ is a queue.
 
 ---
 
+## 2026-09-08 (Builder, branch `claude/sweet-babbage-5fx14v`) — collision twelve **and** thirteen, in one run, against one other run — and the timing that made it unavoidable
+
+**What happened.** This run shipped three tasks and **two of them were built
+simultaneously by another Builder** (`claude/sweet-babbage-niew4h`), which merged
+first as **v0.382.5** (D2) and **v0.383.0** (the Storage "only copy" sentence).
+Both of this run's duplicates were **dropped whole** at merge time — branch reset
+to `origin/main`, only the unique commit cherry-picked — rather than merged or
+re-litigated. That is the standing default (see the 2026-09-08 D1 note directly
+below): an item on `main` is done, and a second implementation of a shipped fix
+is churn on a live install.
+
+**The two implementations agreed, which is the useful finding.** On D2 both runs
+independently landed on the same rule — count only frames whose solve has *run*,
+identified by the `solve_failed:` reject reason, because a failure deliberately
+leaves `accept` alone — and both corrected the same four existing fixtures that
+had pinned the bug by building "unsolved" frames the solver would never leave.
+On Storage both wrote a `Project.source_frames_under` with the same signature and
+the same "never `stat` under `incoming/`" pin; theirs matches the prefix with
+`substr`, this one with an escaped `LIKE`. When two runs converge that precisely,
+the backlog entry was doing its job — which is also why both runs picked it.
+
+**Why claiming would not have helped, again.** Both runs started within minutes of
+each other and the other run's first push landed at 01:44–01:45 UTC, by which time
+this run had already written both fixes. The §11 rule that *would* have caught it
+is the cheap one: **`git fetch origin main` before starting each task, not just at
+start of run** — the second duplicate (Storage) was begun well after the other
+run's D2 commit existed, and a fetch at that moment would have shown D2 on a
+branch and prompted a different pick. Recorded because this is the second run in
+two days to learn it the same way.
+
+**What did survive** is the item neither run's peer touched: the lucky-imaging
+pass-2 demosaic skip (**v0.383.1**). Three "READY" entries were filed by the
+2026-09-07 backlog-readiness run and two Builders picked from the same three in
+the same hour — with only three ready items, a uniform-random pick among the top
+four (§11) collides about a third of the time. **The backlog being thin on
+*ready* work is itself the collision risk**, which is a Scout-side finding, not a
+Builder-side one.
+
+---
+
 ## 2026-09-08 (Builder, branch `claude/sweet-babbage-niew4h`) — the eleventh D1 collision, and the one thing that would have caught it
 
 **What happened.** Two Builder runs picked **D1** within the same hour and both

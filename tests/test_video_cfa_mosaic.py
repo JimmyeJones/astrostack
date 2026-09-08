@@ -189,3 +189,70 @@ def test_a_stacked_raw_solar_capture_has_no_mesh(tmp_path):
     raw = _mesh_strength(_raw_rgb24_frame(path, 64, 48)[..., 1])
     assert raw > 0.2, f"the fixture does not carry the artefact ({raw})"
     assert stacked < raw / 20.0, f"mesh survived the stack: {raw} -> {stacked}"
+
+
+# --- and without paying for it twice ---------------------------------------
+
+def test_pass_two_does_not_debayer_the_frames_it_is_about_to_discard(tmp_path, monkeypatch):
+    """The wait, not the picture. Demosaicing is the expensive part of decoding a
+    raw capture — ~350 ms a frame on the owner's 1080×1920 solar file — and pass 2
+    used to pay it for *every* frame before dropping all but ``keep_percent`` of
+    them one line later. Pass 1 still grades them all (it measures sharpness on
+    the colour frame's luma); pass 2 now prepares only the keepers."""
+    from seestack.video import ffmpeg as ffmpeg_mod
+
+    path = solar_raw_video(
+        tmp_path / "Solar_video.avi", n_frames=12, w=64, h=48, sharp_indices=(2, 5, 8))
+    calls = 0
+    real = ffmpeg_mod._demosaic_frame
+
+    def counted(frame, *a, **kw):
+        nonlocal calls
+        calls += 1
+        return real(frame, *a, **kw)
+
+    monkeypatch.setattr(ffmpeg_mod, "_demosaic_frame", counted)
+    result = stack_video(path, LuckyOptions(keep_percent=50, align=False))
+
+    assert result.n_stacked == 6
+    # 12 graded + 6 kept. Before this, both passes debayered all 12 → 24.
+    assert calls == 18
+
+
+def test_the_stacked_picture_is_identical_with_and_without_the_skip(tmp_path, monkeypatch):
+    """This is a skip, not a change: the frames that reach the accumulator are
+    the same frames, prepared the same way. Pinned against the pre-fix behaviour
+    itself — pass 2 with ``wanted`` dropped, i.e. every frame debayered."""
+    from seestack.video import lucky as lucky_mod
+
+    path = solar_raw_video(
+        tmp_path / "Solar_video.avi", n_frames=12, w=64, h=48, sharp_indices=(1, 4, 7))
+    opts = LuckyOptions(keep_percent=50, align=True)
+    fast = stack_video(path, opts)
+
+    real_iter = lucky_mod.iter_frames
+
+    def eager(*a, wanted=None, **kw):
+        """Pass 2 as it was: debayer every frame, then throw the unwanted ones
+        away afterwards."""
+        for i, frame in enumerate(real_iter(*a, **kw)):
+            yield frame if (wanted is None or i in wanted) else None
+
+    monkeypatch.setattr(lucky_mod, "iter_frames", eager)
+    eager_result = stack_video(path, opts)
+
+    assert fast.n_stacked == eager_result.n_stacked
+    assert np.array_equal(fast.image, eager_result.image)
+
+
+def test_a_kept_frame_is_debayered_even_when_the_first_frame_is_discarded(tmp_path):
+    """The "is this really a mosaic" test latches on the first frame off the
+    wire, which under ``wanted`` may be one nobody asked for. Decide it there
+    anyway, or a capture whose first frame is discarded would stack raw mosaics."""
+    path = solar_raw_video(tmp_path / "Solar_video.avi", n_frames=6, w=64, h=48)
+    every = list(iter_frames(path))
+    picked = list(iter_frames(path, wanted={3}))
+
+    assert picked[0] is None
+    assert np.array_equal(picked[3], every[3])
+    assert _mesh_strength(picked[3][..., 1]) < 0.05
