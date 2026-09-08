@@ -1066,7 +1066,15 @@ describe("EditorView", () => {
     expect(screen.getByText("Stretch")).toBeInTheDocument();
   });
 
-  it("nudges a first-timer with an empty pipeline toward Auto-process", async () => {
+  // --- first open: the pipeline a beginner arrives on ----------------------
+  // This block used to be one test asserting that a first-timer met an empty
+  // pipeline and a nudge to press Auto-process. The owner's decision (2026-09-07)
+  // is that the first view should *be* the good picture, so the same case now
+  // asserts the seeded view — and the nudge is pinned directly below, on the
+  // failure path and after an Undo, where it still has to appear.
+
+  /** Everything a run with no saved recipe and no look of the user's own needs. */
+  const firstTimerMocks = () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
     vi.spyOn(client.api, "previousRecipe").mockResolvedValue(
@@ -1075,35 +1083,119 @@ describe("EditorView", () => {
     vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
     vi.spyOn(client.api, "getHistogram").mockResolvedValue(
       { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
-    const autoProcess = vi.spyOn(client.api, "autoProcess").mockResolvedValue({
-      ops: [{ uid: "a1", id: "tone.stretch", enabled: true,
-              params: { mode: "stf", target_bg: 0.2 } }], base_run_id: 3,
-    });
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
     })));
+  };
+
+  const SEED_RECIPE = {
+    ops: [{ uid: "a1", id: "tone.stretch", enabled: true,
+            params: { mode: "stf", target_bg: 0.2 } }],
+    base_run_id: 3,
+  };
+
+  it("starts a first-timer on the Auto-process look, unasked", async () => {
+    firstTimerMocks();
+    const autoProcess = vi.spyOn(client.api, "autoProcess")
+      .mockResolvedValue(SEED_RECIPE);
 
     renderEditor();
 
-    // The empty pipeline shows a guided nudge with its own Auto-process button.
-    expect(await screen.findByText(/build a good starting recipe from/i))
-      .toBeInTheDocument();
-    // Clicking it (the in-panel one) kicks off auto-process.
-    fireEvent.click(screen.getAllByRole("button", { name: /Auto-process/ })[1]);
-    // The trailing arg is the per-run "Auto-crop edges" override; undefined
-    // means "use the saved setting", which is what an untouched editor sends.
+    // No click: the good picture is what the editor opens on. The trailing arg is
+    // the per-run "Auto-crop edges" override; undefined means "use the saved
+    // setting", which is what an untouched editor must send.
     await waitFor(() => expect(autoProcess).toHaveBeenCalledWith("M_42", 3, undefined));
     // ...and a plain-language note explains what Auto did.
     expect(await screen.findByText("What Auto-process did")).toBeInTheDocument();
     expect(screen.getByText("Applied a natural stretch.")).toBeInTheDocument();
     // ...and names the data-driven value it chose (the STF sky level).
     expect(screen.getByText("Tuned to your data: stretched sky level 0.2.")).toBeInTheDocument();
+    // The nudge is gone, because there is nothing left to nudge toward.
+    expect(screen.queryByText(/build a good starting recipe from/i)).not.toBeInTheDocument();
+    // Exactly once — a re-render must not re-seed.
+    expect(autoProcess).toHaveBeenCalledTimes(1);
 
     // Editing the pipeline (removing the op) drops the note so it can't
     // misdescribe the current recipe.
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() =>
       expect(screen.queryByText("What Auto-process did")).not.toBeInTheDocument());
+  });
+
+  it("puts the seed one Undo away from the plain stack", async () => {
+    firstTimerMocks();
+    vi.spyOn(client.api, "autoProcess").mockResolvedValue(SEED_RECIPE);
+
+    renderEditor();
+    await screen.findByText("What Auto-process did");
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    // Back to the plain stack — and to the nudge a first-timer used to meet, so
+    // undoing a seed nobody asked for loses nothing.
+    expect(await screen.findByText(/build a good starting recipe from/i))
+      .toBeInTheDocument();
+  });
+
+  it("falls back to the empty pipeline and its nudge when the seed fails", async () => {
+    firstTimerMocks();
+    vi.spyOn(client.api, "autoProcess").mockRejectedValue(new Error("nope"));
+
+    renderEditor();
+
+    // The editor is never blocked on a seed nobody asked for: it opens exactly as
+    // it did before the seed existed, with the nudge and its own button.
+    expect(await screen.findByText(/build a good starting recipe from/i))
+      .toBeInTheDocument();
+    // ...and no red error is raised at a user who asked for nothing.
+    expect(screen.queryByText("nope")).not.toBeInTheDocument();
+  });
+
+  it("leaves a run that already has a saved recipe alone", async () => {
+    firstTimerMocks();
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "s1", id: "tone.stretch", enabled: true, params: { mode: "asinh" } }],
+      base_run_id: 3,
+    });
+    const autoProcess = vi.spyOn(client.api, "autoProcess")
+      .mockResolvedValue(SEED_RECIPE);
+
+    renderEditor();
+
+    await screen.findByText("Stretch");
+    // A saved edit is the user's work; the seed must never reach it.
+    expect(autoProcess).not.toHaveBeenCalled();
+  });
+
+  it("stands aside when the user has a look of their own to offer", async () => {
+    firstTimerMocks();
+    // The previous run's edit is the user's own choice, and its one-click button
+    // lives in the nudge an Auto seed would replace — so it keeps winning.
+    vi.spyOn(client.api, "previousRecipe").mockResolvedValue({
+      run_id: 2, count: 1,
+      ops: [{ uid: "p1", id: "tone.stretch", enabled: true, params: { mode: "asinh" } }],
+    });
+    const autoProcess = vi.spyOn(client.api, "autoProcess")
+      .mockResolvedValue(SEED_RECIPE);
+
+    renderEditor();
+
+    expect(await screen.findByText(/Use my previous edit/i)).toBeInTheDocument();
+    expect(autoProcess).not.toHaveBeenCalled();
+  });
+
+  it("stands aside for the user's saved default edit too", async () => {
+    firstTimerMocks();
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({
+      count: 1,
+      ops: [{ uid: "d1", id: "tone.stretch", enabled: true, params: { mode: "asinh" } }],
+    });
+    const autoProcess = vi.spyOn(client.api, "autoProcess")
+      .mockResolvedValue(SEED_RECIPE);
+
+    renderEditor();
+
+    expect(await screen.findByText(/Use my default/i)).toBeInTheDocument();
+    expect(autoProcess).not.toHaveBeenCalled();
   });
 
   it("offers the classified starting preset as a chip on an empty pipeline", async () => {
@@ -1192,11 +1284,10 @@ describe("EditorView", () => {
 
     renderEditor();
 
-    // Wait for the empty-pipeline nudge (with its in-panel Auto-process button).
-    await screen.findByText(/build a good starting recipe from/i);
-    fireEvent.click(screen.getAllByRole("button", { name: /Auto-process/ })[1]);
-    // The trailing arg is the per-run "Auto-crop edges" override; undefined
-    // means "use the saved setting", which is what an untouched editor sends.
+    // The first-open seed runs Auto for this empty-recipe run, so the note is
+    // reached without a click. The trailing arg is the per-run "Auto-crop edges"
+    // override; undefined means "use the saved setting", which is what an
+    // untouched editor sends.
     await waitFor(() => expect(autoProcess).toHaveBeenCalledWith("M_42", 3, undefined));
     expect(await screen.findByText("What Auto-process did")).toBeInTheDocument();
     // The informational classification line rides alongside the recipe explanation.

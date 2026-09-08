@@ -643,6 +643,14 @@ export interface HeldForFiles {
   target: string; offered: number; readable: number; unreadable: number;
 }
 
+/** One target the walk-away auto-stack is holding back because subs are **still
+ * arriving** for it — the night is not over. Stacking now would re-stack every
+ * night the target has, publish a picture of an unfinished night, and be
+ * superseded by the next batch a few minutes later, so the scan waits for the
+ * target to go quiet (`auto_stack_held_settling`). Nothing is skipped: the first
+ * scan after the subs stop stacks it once, on the whole night. */
+export interface HeldSettling { target: string; quietMin: number; settleMin: number; }
+
 /** One target the scan re-stacked because its newest picture had come out much
  * thinner than one the same target already made — the state a storage hiccup
  * leaves behind — and all of its subs are readable again
@@ -660,7 +668,8 @@ export interface HealedThin {
  * the Target page already explains the wait per target, but a beginner who kicks
  * off a scan and watches Jobs had no signal there. */
 export function pipelineSummary(r: Record<string, unknown>): {
-  line: string; held: HeldForSubs[]; heldFiles: HeldForFiles[]; healed: HealedThin[];
+  line: string; held: HeldForSubs[]; heldFiles: HeldForFiles[];
+  heldSettling: HeldSettling[]; healed: HealedThin[];
 } {
   const scanned = Number(r.scanned ?? 0) || 0;
   const stacked = Array.isArray(r.auto_stacked) ? r.auto_stacked.length : 0;
@@ -682,6 +691,15 @@ export function pipelineSummary(r: Record<string, unknown>): {
           offered: Number(o.offered ?? 0) || 0,
           readable: Number(o.readable ?? 0) || 0,
           unreadable: Number(o.unreadable ?? 0) || 0,
+        }))
+    : [];
+  const heldSettling: HeldSettling[] = Array.isArray(r.auto_stack_held_settling)
+    ? (r.auto_stack_held_settling as unknown[])
+        .filter((h): h is Record<string, unknown> => !!h && typeof h === "object")
+        .map((o) => ({
+          target: typeof o.target === "string" ? o.target : "",
+          quietMin: Number(o.quiet_min ?? 0) || 0,
+          settleMin: Number(o.settle_min ?? 0) || 0,
         }))
     : [];
   const healed: HealedThin[] = Array.isArray(r.auto_stack_healed)
@@ -710,12 +728,15 @@ export function pipelineSummary(r: Record<string, unknown>): {
   if (heldFiles.length > 0) {
     clauses.push(`held ${heldFiles.length} — some subs aren't on disk`);
   }
+  if (heldSettling.length > 0) {
+    clauses.push(`waiting on ${heldSettling.length} still being shot`);
+  }
   if (healed.length > 0) {
     clauses.push(
       `re-made ${healed.length} picture${healed.length === 1 ? "" : "s"} that came out thin`);
   }
   if (errors > 0) clauses.push(`${errors} couldn't finish`);
-  return { line: `${clauses.join(" · ")}.`, held, heldFiles, healed };
+  return { line: `${clauses.join(" · ")}.`, held, heldFiles, heldSettling, healed };
 }
 
 /** What a **scoped** scan did (pure, tested) — the "bring this one folder in"
@@ -836,7 +857,7 @@ function JobResultActions({ job }: { job: Job }) {
     );
   }
   if (job.kind === "pipeline") {
-    const { line, held, heldFiles, healed } = pipelineSummary(r);
+    const { line, held, heldFiles, heldSettling, healed } = pipelineSummary(r);
     const autoEdited = Number(r.auto_edited ?? 0) || 0;
     const rescue = bootstrapRescueNote(r);
     const putBack = autoRegradedBackNote(r);
@@ -943,6 +964,32 @@ function JobResultActions({ job }: { job: Job }) {
                   ) : "This target"}
                   {`: ${h.unreadable} of ${h.offered} subs couldn't be read `}
                   {`(${h.readable} still readable).`}
+                </Text>
+              ))}
+            </Stack>
+          </Alert>
+        ) : null}
+        {heldSettling.length ? (
+          <Alert color="blue" variant="light" p="xs"
+            title="Still being shot — waiting for the night to settle">
+            <Text size="xs">
+              {"New subs are still arriving for these, so the picture is not "}
+              {"made yet. Stacking after every batch would re-stack the whole "}
+              {"target over and over all night and hand you a picture of a night "}
+              {"that isn't over. Nothing is skipped — the next check after the "}
+              {"subs stop stacks each one, once, from everything it has. Open a "}
+              {'target and use "Stack" if you want one now:'}
+            </Text>
+            <Stack gap={0} mt={4}>
+              {heldSettling.map((h) => (
+                <Text size="xs" key={h.target}>
+                  {h.target ? (
+                    <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
+                  ) : "This target"}
+                  {h.quietMin === 0
+                    ? ": a sub arrived just now"
+                    : `: last sub ${h.quietMin} min ago`}
+                  {` — waits for ${h.settleMin} min of quiet.`}
                 </Text>
               ))}
             </Stack>

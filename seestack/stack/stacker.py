@@ -2084,18 +2084,97 @@ def _build_output_header_meta(
     return meta
 
 
-# Below this share of the peak per-pixel frame count, a pixel counts as "thinly
-# covered" — the border ramp a dither leaves, or a mosaic panel that got a
-# fraction of the others' subs. The *share of the picture* that is thin is what
+# Below this share of **one panel's** per-pixel frame count, a pixel counts as
+# "thinly covered" — the border ramp a dither leaves, or the ragged fringe of a
+# mosaic's union canvas. The *share of the picture* that is thin is what
 # "How's my stack?" judges a ragged border on (``_COVERAGE_THIN_SHARE`` there).
 COVERAGE_THIN_RATIO = 0.25
+
+# The rule the two coverage shares are measured by, stamped beside them so a run
+# recorded under an older rule can be told apart from a fresh one and re-derived
+# (:func:`seestack.coverage_backfill.backfill_coverage_shares`).
+#
+#   1  (never stamped) ``coverage_thin_fraction`` measured "thin" against the
+#      map's **peak**. Correct on a single field, where the peak *is* the
+#      interior; on a mosaic the peak is where panels overlap, so a quarter of
+#      it is one panel's own depth and whole panels read as "thin border".
+#      Measured: a 2x2 mosaic 6/6/6/3 subs deep reported 22 % thin, a 3x3 with
+#      8 % weight jitter 69 %, a 12x8 raster with uneven depth 74 % — every one
+#      of them offering a Trim that post-D1 keeps the whole canvas.
+#   2  measured against :func:`seestack.edit.coverage_trim.panel_coverage_level`
+#      — the same reference the trim itself uses, so the note and its action can
+#      no longer disagree. Byte-identical on a single field.
+COVERAGE_SHARES_VERSION = 2
+
+# How many coverage pixels the panel-depth estimate reads. Panel depth is a
+# *distribution* statistic — where the plateaus sit — and a regular stride over a
+# map whose panels are large blocks samples every level in proportion, so the
+# estimate is stable long before the whole canvas is read. It is bounded because
+# this runs at stack time on the full canvas and ``panel_coverage_level`` sorts a
+# float64 copy of whatever it is handed: a 100 MP mosaic canvas would allocate
+# ~1.6 GB on a path that is memory-bounded on purpose (OOM history). At this size
+# ``PANEL_LEVEL_MIN_FRAC`` (8 % of the sample) is still four orders of magnitude
+# above ``PANEL_LEVEL_MIN_PIXELS``, so the stride never changes the verdict.
+_PANEL_DEPTH_SAMPLE_PX = 2_000_000
+
+
+def _covered_depth_sample(cov_2d: np.ndarray) -> np.ndarray:
+    """The finite, strictly-positive coverage values, strided down to at most
+    :data:`_PANEL_DEPTH_SAMPLE_PX` of them — the input both depth measures below
+    read. A map at or under the cap is sampled whole, so small maps (every test
+    fixture, every modest single field) are exact."""
+    cov = np.asarray(cov_2d)
+    if cov.size > _PANEL_DEPTH_SAMPLE_PX and cov.ndim >= 2:
+        step = int(math.ceil(math.sqrt(cov.size / _PANEL_DEPTH_SAMPLE_PX)))
+        cov = cov[::step, ::step]
+    vals = cov[np.isfinite(cov)]
+    return vals[vals > 0]
+
+
+def coverage_panel_depth(cov_2d: np.ndarray) -> float | None:
+    """How many frames deep **one panel** of this stack is, from the coverage
+    map's own distribution — or ``None`` when nothing is covered.
+
+    A thin wrapper over :func:`seestack.edit.coverage_trim.panel_coverage_level`
+    (which is where the reasoning lives) that takes a whole coverage map rather
+    than its covered values, and bounds what it reads. On a single field this is
+    the interior plateau, i.e. the peak; on a mosaic it is the depth of a typical
+    panel rather than the depth where panels overlap.
+    """
+    from seestack.edit.coverage_trim import panel_coverage_level
+
+    covered = _covered_depth_sample(cov_2d)
+    if covered.size == 0:
+        return None
+    level = panel_coverage_level(covered)
+    if level is None or not (level > 0):
+        level = float(covered.max())
+    return float(level)
+
+
+def coverage_median_depth(cov_2d: np.ndarray) -> float | None:
+    """The **median** per-pixel frame count over the covered pixels — the depth
+    at least half the picture is at or below. ``None`` when nothing is covered.
+
+    The provable counterpart to ``coverage_max`` for anything that asks "how many
+    subs actually overlap here?". The peak is the *deepest* pixel, which on a
+    mosaic is the corner where four panels meet — so a 2x2 mosaic three subs deep
+    presents a peak of 12 to a question whose answer, nearly everywhere on the
+    canvas, is 3. This one cannot overstate the picture: by construction half of
+    it sits at or below. On a single field the interior plateau is the majority of
+    the canvas, so this and the peak are the same number.
+    """
+    covered = _covered_depth_sample(cov_2d)
+    if covered.size == 0:
+        return None
+    return float(np.median(covered))
 
 
 def coverage_thin_fraction(
     cov_2d: np.ndarray, *, ratio: float = COVERAGE_THIN_RATIO,
 ) -> float | None:
     """What share of the picture is *thinly covered* — the fraction of covered
-    pixels holding fewer than ``ratio`` of the peak frame count.
+    pixels holding fewer than ``ratio`` of **one panel's** frame count.
 
     The honest measure of a ragged border, as opposed to the *extreme minimum*
     (``coverage_min``): on any dithered stack some pixel at the very fringe was
@@ -2105,13 +2184,30 @@ def coverage_thin_fraction(
     actually thin, which a 6 px dither on a 480 px frame answers with "a couple
     of percent" whatever N is.
 
+    **The reference is the panel depth, not the map's peak** — and was the peak
+    until v0.389.2, which is the same mistake D1 removed from the trim itself.
+    On a single field the peak *is* the interior, so that path is unchanged to the
+    digit. On a mosaic the peak is where panels **overlap**: two overlapping
+    panels are 2x a panel's depth and four are 4x, so a quarter of the peak sits
+    at or above whole panel interiors and the measure read a mosaic's ordinary
+    panels as a ragged border — 22 % of the app's own 2x2 sample, 74 % of a 12x8
+    raster with uneven panel depth — while the "Trim border" it offered kept the
+    entire canvas. Measuring against
+    :func:`seestack.edit.coverage_trim.panel_coverage_level` is measuring against
+    what the trim keeps, so the note and its action agree by construction.
+
+    A mosaic panel that is genuinely thinner than its neighbours is therefore no
+    longer counted here, and should not be: it is not a border to crop away but a
+    place to point the scope next, which is what the mosaic depth map
+    (:func:`seestack.mosaicmap.mosaic_depth_map`) says, with a *where*.
+
     Uncovered pixels (NaN gaps, the canvas corners outside every footprint) are
     excluded: they are not part of the picture. Returns ``None`` when nothing is
     covered at all, so a caller can tell "no thin border" from "no answer".
     """
     cov = np.asarray(cov_2d)
-    peak = float(cov.max()) if cov.size else 0.0
-    if peak <= 0:
+    reference = coverage_panel_depth(cov)
+    if reference is None or reference <= 0:
         return None
     n_covered = int(np.count_nonzero(cov > 0))
     if n_covered == 0:
@@ -2119,8 +2215,9 @@ def coverage_thin_fraction(
     # Counted rather than masked-and-averaged: a boolean count is one temporary
     # the size of the canvas, where ``cov[covered]`` would copy out a float array
     # of every covered pixel — on a 100 MP mosaic canvas that is the difference
-    # between ~100 MB and ~800 MB on a path that is already memory-bounded.
-    thin = int(np.count_nonzero((cov > 0) & (cov < ratio * peak)))
+    # between ~100 MB and ~800 MB on a path that is already memory-bounded. (The
+    # reference above reads a bounded *sample*, for the same reason.)
+    thin = int(np.count_nonzero((cov > 0) & (cov < ratio * reference)))
     return thin / n_covered
 
 
@@ -3476,6 +3573,15 @@ def run_stack(
             # persisted so "How's my stack?" can say what the black bands are
             # instead of leaving a beginner to wonder if the picture is broken.
             uncovered_frac=uncovered_fraction(cov_2d),
+            # …and which rule those two were measured by, so a run stamped under
+            # an older one can be told apart and re-derived rather than keeping a
+            # wrong note until the target happens to be stacked again.
+            coverage_shares_version=COVERAGE_SHARES_VERSION,
+            # …and the depth at least half the picture is at or below. The
+            # min/max pair above brackets the canvas; on a mosaic neither end
+            # describes it, because the minimum is the fringe and the maximum is
+            # the corner where four panels meet.
+            coverage_median_depth=coverage_median_depth(cov_2d),
             # Persist the *effective* options: when auto_reject resolved to a
             # concrete method, record that method (so the History rejection badge
             # and any re-run reflect what actually ran) while ``auto_reject`` stays

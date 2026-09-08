@@ -727,8 +727,10 @@ def stack_detail_mask(fits_path: str | Path, *, min_frac: float = 0.5
     Stricter than :func:`stack_coverage_mask`, which only asks "is there data
     here?". This asks "did enough frames land here to trust it?", using the
     per-pixel frame-count sibling every run writes (``{stem}_framecov.fits``) and
-    the same "at least ``min_frac`` of the peak" rule the editor's one-click
-    border trim already uses (:func:`seestack.edit.coverage_trim.well_covered_mask`)
+    the same "at least ``min_frac`` of **one panel's** depth" rule the editor's
+    one-click border trim already uses
+    (:func:`seestack.edit.coverage_trim.well_covered_mask`; it was the *peak*
+    until D1, which on a mosaic is the panel-overlap band)
     — so the number isn't picked blind, it is the app's existing definition of
     "enough coverage".
 

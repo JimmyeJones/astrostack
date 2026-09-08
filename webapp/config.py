@@ -139,6 +139,23 @@ class Settings(BaseModel):
     # one-click "Process target" button still stack whatever the user explicitly
     # asks for.
     auto_stack_min_frames: int = Field(default=3, ge=1, le=1000)
+    # How long a target must have gone **without a new sub** before the hands-off
+    # chain will stack it, in minutes. 0 = the old behaviour, exactly.
+    #
+    # Why this exists. ``_auto_stack_frame_count`` fires whenever more solved subs
+    # exist than the last stack covered, and nothing between it and the stack asks
+    # whether subs are still *arriving*. So on a night of shooting one target, each
+    # poll (``watch_poll_interval_s``, 5 min) delivers a batch, the scan solves it,
+    # and the app re-stacks the **whole target** — every night's subs — only for
+    # the next poll to make it do so again. The single-worker job manager
+    # serialises those, so the box spends the night re-stacking, and the target's
+    # "newest picture" keeps being replaced by a picture of a night that is not
+    # over. Twenty minutes is longer than any poll interval and shorter than a
+    # meridian-flip pause, so it settles between sessions without stranding one.
+    # Only the *unattended* chain is held: the Stack form and "Process target"
+    # stack immediately, whatever this says. See
+    # ``webapp.pipeline._auto_stack_settle_hold``.
+    auto_stack_settle_min: int = Field(default=20, ge=0, le=1440)
     # Let the *unattended* chains (the watcher's auto-stack and the one-click
     # "Process target") pick the outlier-removal method themselves, even for a
     # target whose saved defaults already name one.

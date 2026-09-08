@@ -13,7 +13,7 @@ import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { api, type EditOp, type OpInstance, type Recipe } from "../api/client";
+import { api, type AutoAnalysis, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { ObjectInfoCard } from "../components/ObjectInfoCard";
@@ -151,6 +151,16 @@ export function EditorView() {
     enabled: !!opsSchema.data && savedIsEmpty,
     staleTime: 30_000,
   });
+  // Does the user have a look of their **own** to offer on this run? Both seeds
+  // above are the user's own choice, so both beat Auto — and both live as buttons
+  // in the empty-pipeline nudge, which an Auto seed would replace. So the
+  // first-open Auto seed (below) stands aside whenever either has something, and
+  // waits for both to settle before deciding. They are enabled by `savedIsEmpty`,
+  // i.e. by the very state the seed is deciding about, so they resolve in a beat.
+  const ownLookOffered = (prevRecipe.data?.count ?? 0) > 0
+    || (defaultRecipe.data?.count ?? 0) > 0;
+  const ownLookSettled = (prevRecipe.isSuccess || prevRecipe.isError)
+    && (defaultRecipe.isSuccess || defaultRecipe.isError);
   // The "what Auto did (and why)" note a *background* job stamped when it auto-edited
   // this run (Process-target / reprocess / watcher auto-stack — v0.92.0). The
   // Process-target deep-link lands the user straight in the editor on a recipe they
@@ -292,14 +302,11 @@ export function EditorView() {
     return () => { mounted.current = false; };
   }, []);
   const pollOptions = { getJob: api.getJob, isAbandoned: () => !mounted.current };
-  useEffect(() => {
-    if (saved.data && !seeded) {
-      const ops0 = saved.data.ops ?? [];
-      resetOps(ops0);
-      setSeedKey(JSON.stringify(ops0));
-      setSeeded(true);
-    }
-  }, [saved.data, seeded, resetOps]);
+  // Whether this run has already been offered an Auto-process seed on first open
+  // (see the seed effect, below the mutations). A ref rather than state: it must
+  // not re-render, and it must be read by the effect in the same tick it is set.
+  const autoSeedTried = useRef(false);
+  useEffect(() => { autoSeedTried.current = false; }, [rid]);
 
   const specs = useMemo(() => {
     const m: Record<string, EditOp> = {};
@@ -718,27 +725,99 @@ export function EditorView() {
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
+  // Fetch the Auto recipe and its causal analysis together; the analysis is
+  // best-effort (an older backend has no such endpoint) so it never blocks Auto.
+  // `autoCropArg` is undefined until the user touches the per-run switch, which
+  // means "use the library's saved setting" — never send a guess.
+  const fetchAuto = async () => {
+    const [recipe, analysis] = await Promise.all([
+      api.autoProcess(safe, rid, autoCropArg),
+      api.autoAnalysis(safe, rid, autoCropArg).catch(() => null),
+    ]);
+    return { recipe, analysis };
+  };
+  // Everything that applying an Auto result does, shared by the button and the
+  // first-open seed so the two cannot drift: the ops land as one undoable step,
+  // and the three "what Auto-process did" sentences are set with the key that
+  // drops them again the moment the recipe diverges from what Auto produced.
+  const applyAutoResult = (recipe: Recipe, analysis: AutoAnalysis | null) => {
+    const built = (recipe.ops ?? []).map((o) => ({ ...o, uid: o.uid || uid() }));
+    setOps(built);
+    setAutoSummary(autoSummarySentence(built, specs));
+    setAutoValues(autoValueSentence(built));
+    setAutoCause(autoCauseSentence(analysis));
+    setAutoKey(JSON.stringify(built));
+    return built;
+  };
   const auto = useMutation({
-    // Fetch the recipe and its causal analysis together; the analysis is
-    // best-effort (an older backend has no such endpoint) so it never blocks Auto.
-    mutationFn: async () => {
-      const [recipe, analysis] = await Promise.all([
-        api.autoProcess(safe, rid, autoCropArg),
-        api.autoAnalysis(safe, rid, autoCropArg).catch(() => null),
-      ]);
-      return { recipe, analysis };
-    },
+    mutationFn: fetchAuto,
     onSuccess: ({ recipe, analysis }) => {
-      const built = (recipe.ops ?? []).map((o) => ({ ...o, uid: o.uid || uid() }));
-      setOps(built);
-      setAutoSummary(autoSummarySentence(built, specs));
-      setAutoValues(autoValueSentence(built));
-      setAutoCause(autoCauseSentence(analysis));
-      setAutoKey(JSON.stringify(built));
+      applyAutoResult(recipe, analysis);
       notifications.show({ message: "Auto-process applied — tweak from here", color: "violet" });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
+  // The same call, run *for* the user when they open a picture that has never been
+  // edited — see the seed effect below. Deliberately its own mutation rather than
+  // a flag on the one above: it must not claim the button's "applied — tweak from
+  // here", and a failure must fall through to the plain stack rather than raise a
+  // red error at someone who never asked for anything.
+  const autoSeed = useMutation({
+    mutationFn: fetchAuto,
+    onSuccess: ({ recipe, analysis }) => {
+      // `resetOps` first: on a run reached by navigating from another run, `ops`
+      // still holds the *previous* run's recipe (only the seed effect clears it),
+      // and it must not end up in this run's undo history.
+      resetOps([]);
+      applyAutoResult(recipe, analysis);
+      // The recipe this run *opened with* is the empty one, so that is the seed
+      // signature: the seed is unsaved work — nothing is persisted unless the user
+      // presses Save — and it is exactly one Undo away from the plain stack.
+      setSeedKey(JSON.stringify([]));
+      setSeeded(true);
+      notifications.show({
+        message: "Started you off with Auto-process — Undo to see the plain stack.",
+        color: "violet",
+      });
+    },
+    onError: () => {
+      // Never block the editor on it: fall through to the empty pipeline and its
+      // nudge, which is exactly what this screen did before the seed existed.
+      resetOps([]);
+      setSeedKey(JSON.stringify([]));
+      setSeeded(true);
+    },
+  });
+  // --- first open: what the pipeline starts as ------------------------------
+  // Three cases, in order.
+  //  1. The run has a saved recipe → open on it, exactly as this always has.
+  //  2. It has none, but the user has a look of their own on offer (the previous
+  //     run's edit, or their saved default) → open empty with the nudge, so those
+  //     one-click buttons still win. Their look beats Auto's.
+  //  3. It has none and there is nothing of theirs to offer → run Auto-process
+  //     once and open on *that*. The owner asked for this on 2026-09-07: a
+  //     beginner's first view of a picture should *be* the picture, not a flat
+  //     default stretch beside a nudge to press the one button they don't know to
+  //     press. It is safe to do unasked because it is one Undo from the plain
+  //     stack, is never persisted without a Save, and can only fire on a run with
+  //     no saved recipe — so it can never overwrite an edit.
+  // Nothing is seeded until the decision is made, which is why this holds `seeded`
+  // rather than seeding twice: every preview/histogram query is gated on it, so a
+  // seed-then-reseed would render the plain stack and flash.
+  useEffect(() => {
+    if (!saved.data || seeded) return;
+    const ops0 = saved.data.ops ?? [];
+    const openOn = (o: OpInstance[]) => {
+      resetOps(o);
+      setSeedKey(JSON.stringify(o));
+      setSeeded(true);
+    };
+    if (ops0.length > 0 || autoSeedTried.current) { openOn(ops0); return; }
+    if (!ownLookSettled) return;                 // decide once, with both answers
+    if (ownLookOffered) { openOn(ops0); return; }
+    autoSeedTried.current = true;
+    autoSeed.mutate();
+  }, [saved.data, seeded, resetOps, ownLookSettled, ownLookOffered, autoSeed]);
   const exportRun = useMutation({
     mutationFn: () => api.exportRun(safe, rid, recipe, outputName.trim() || `${safe}_edit`),
     onSuccess: ({ job_id }) => {
