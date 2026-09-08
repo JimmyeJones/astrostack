@@ -70,7 +70,8 @@ def _register_run(data_root, safe: str, *, preview: Image.Image,
 
 def _register_native_run(data_root, safe: str, *, canvas=(1200, 900),
                          preview_long: int = 400, rotation_deg: float = 0.0,
-                         display_space: bool = False) -> int:
+                         display_space: bool = False,
+                         recipe: str | None = None) -> int:
     """Register a run the way a real stack leaves one: a full-resolution master
     FITS, and a stored preview that is the *capped* render of it.
 
@@ -119,6 +120,9 @@ def _register_native_run(data_root, safe: str, *, canvas=(1200, 900),
                 canvas_h=h, canvas_w=w, coverage_min=1, coverage_max=5,
                 options_json=json.dumps(opts),
             ))
+            if recipe is not None:
+                from webapp.routers.editor import RECIPE_META_PREFIX
+                proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe)
         finally:
             proj.close()
         lib.refresh_target_stats(safe)
@@ -219,17 +223,37 @@ def test_wallpaper_native_source_is_the_same_picture_as_the_preview(
     assert np.abs(small_a - small_b).max() < 12.0
 
 
-def test_wallpaper_falls_back_to_the_preview_for_a_processed_run(
+def test_wallpaper_falls_back_for_a_processed_run_with_no_saved_recipe(
         client, solved_library):
     """A "Process target" run's preview is a display-space auto-edit only its saved
-    recipe can reproduce, so the native render is declined and the endpoint behaves
-    exactly as it did before."""
+    recipe can reproduce. With no recipe stored there is nothing to render *from* —
+    the linear master is the un-edited picture — so the endpoint behaves exactly as
+    it did before."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     run_id = _register_native_run(solved_library, safe, canvas=(1200, 900),
                                   preview_long=400, display_space=True)
     img = _open(client.get(
         f"/api/targets/{safe}/stack-runs/{run_id}/wallpaper?aspect=phone").content)
     assert img.height == 300                            # the stored preview's height
+
+
+def test_wallpaper_of_a_processed_run_comes_off_the_master_through_its_recipe(
+        client, solved_library):
+    """With the recipe saved — which every "Process target" run has — his main
+    path finally gets a device-resolution wallpaper instead of a 400 px preview
+    stretched across a phone screen."""
+    from seestack.edit.recipe import OpInstance, Recipe
+
+    recipe = Recipe(ops=[OpInstance(
+        id="tone.stretch", params={"mode": "stf", "target_bg": 0.5},
+        enabled=True)]).to_json()
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_native_run(solved_library, safe, canvas=(1200, 900),
+                                  preview_long=400, display_space=True,
+                                  recipe=recipe)
+    img = _open(client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/wallpaper?aspect=phone").content)
+    assert img.height > 300                             # more than the preview had
 
 
 def test_wallpaper_falls_back_when_the_master_is_gone(client, solved_library):

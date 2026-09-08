@@ -752,6 +752,14 @@ RUN_ARTEFACT_SUFFIXES: dict[str, str] = {
     "zoom_webp": "_zoom.webp",
     "zoom_apng": "_zoom.png",
     "zoom_sig": "_zoom.sig",
+    # The share source: one render of the run's finished picture at the largest
+    # size any hand-out needs, plus its signature. A cache like the clip above —
+    # rebuilt from the master whenever the preview, the saved recipe or the app
+    # version moves — but big (tens of MB on a mosaic), so it must travel with the
+    # run: left behind by a delete it would be the single largest orphan the
+    # output tree can hold.
+    "share_png": "_share.png",
+    "share_sig": "_share.sig",
 }
 
 # The artefacts that have a dedicated ``stack_runs`` column, i.e. the only ones a

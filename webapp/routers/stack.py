@@ -3722,8 +3722,146 @@ def stack_run_options(safe: str, run_id: int, request: Request) -> dict[str, Any
 SHARE_JPEG_MAX_LONG_EDGE = 2560
 
 
+def _share_source_long_edge(run: Any, prev_w: int, prev_h: int) -> int:
+    """One size that serves **every** picture handed out for a run.
+
+    The share JPEG wants :data:`SHARE_JPEG_MAX_LONG_EDGE`; a wallpaper wants
+    whatever its preset's device size needs, which for the desktop shapes is
+    larger. Rendering each on demand would mean a fresh master read per tap, so
+    one render at the largest of those needs is cached and the smaller callers
+    decimate the decoded PNG — milliseconds, and never a second FITS read.
+    Capped at the canvas's own long edge, since nothing can be sharper than the
+    pixels that exist.
+    """
+    from seestack.wallpaper import WALLPAPER_PRESETS, wallpaper_source_long_edge
+
+    needed = max(
+        [SHARE_JPEG_MAX_LONG_EDGE]
+        + [wallpaper_source_long_edge(prev_w, prev_h, p)
+           for p in WALLPAPER_PRESETS.values()]
+    )
+    canvas = [int(d) for d in (run.canvas_w, run.canvas_h) if d]
+    if canvas:
+        needed = min(needed, max(canvas))
+    return int(needed)
+
+
+def _share_source_signature(run: Any, recipe_json: str | None, long_edge: int) -> str:
+    """Content signature of a run's cached share source.
+
+    Everything the render depends on: the stored preview (a History "Adjust →
+    Save" rewrites it), the master, the saved recipe that decides what a
+    display-space run's picture *is*, the size asked for, and the app version —
+    so a renderer change rebuilds rather than serving last release's pixels.
+    Two stats and a hash; no read. Mirrors :func:`_zoom_clip_signature`.
+    """
+    import hashlib
+
+    from webapp import __version__
+
+    parts = [
+        "v1",
+        _file_stamp(run.preview_path),
+        _file_stamp(run.fits_path),
+        hashlib.sha1((recipe_json or "").encode()).hexdigest(),
+        str(int(long_edge)),
+        __version__,
+    ]
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()
+
+
+def _build_or_get_share_source(run: Any, recipe_json: str | None,
+                               long_edge: int) -> bytes | None:
+    """PNG bytes of this run's picture at ``long_edge``, cached beside the run.
+
+    The render itself is `pipeline.render_run_full_res_png` — the one place that
+    decides *which* full-resolution render a finished run means (the saved recipe
+    for a display-space run, the asinh curve a History "Adjust" saved, the STF
+    otherwise), so the Full-res PNG button, the pictures archive and every share
+    cannot drift apart. That render is multi-second on a NAS master, and the nine
+    things a run can be handed out as would each have paid it, every tap — hence
+    the cache: ``<basename>_share.png`` plus a ``_share.sig`` validator, written
+    ``.tmp``-then-renamed so a concurrent request can never read a half-written
+    file. Both are registered artefacts, so they are deleted with the run.
+
+    Returns ``None`` (and the caller keeps the stored preview, exactly as before)
+    when there is nothing to render from. Blocking; the callers are sync
+    endpoints, which FastAPI already runs in a threadpool.
+    """
+    from seestack.stack.output import RUN_ARTEFACT_SUFFIXES
+
+    fits_path = run.fits_path
+    if not fits_path:
+        return None
+    master = Path(fits_path)
+    if not master.exists():
+        return None
+    stem = master.name[:-len(master.suffix)] if master.suffix else master.name
+    out_dir = master.parent
+    cache = out_dir / f"{stem}{RUN_ARTEFACT_SUFFIXES['share_png']}"
+    sig_file = out_dir / f"{stem}{RUN_ARTEFACT_SUFFIXES['share_sig']}"
+    sig = _share_source_signature(run, recipe_json, long_edge)
+    if cache.exists() and sig_file.exists():
+        with contextlib.suppress(OSError):
+            if sig_file.read_text().strip() == sig:
+                return cache.read_bytes()
+    try:
+        png = pipeline.render_run_full_res_png(
+            run, recipe_json, max_long_edge=int(long_edge))
+    except Exception:  # noqa: BLE001 — a broken FITS just falls back to the preview
+        return None
+    # A temporary of this writer's own, not a shared one: these endpoints are sync
+    # `def`s, so FastAPI runs them concurrently in a threadpool, and two requests
+    # for the same run would otherwise write one another's `.tmp` half-through.
+    # The rename is atomic, so the loser of the race simply overwrites an
+    # identical file.
+    import threading
+
+    tmp = cache.with_name(f"{cache.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    with contextlib.suppress(OSError):
+        tmp.write_bytes(png)
+        tmp.replace(cache)
+        sig_file.write_text(sig)
+    with contextlib.suppress(OSError):
+        tmp.unlink(missing_ok=True)
+    return png
+
+
+def _decimate_png(png: bytes, long_edge: int) -> bytes:
+    """``png`` shrunk so its long edge is at most ``long_edge`` — or unchanged
+    when it is already no bigger. Box-averaged, the same filter every other
+    downscale in the app uses, and never an upscale."""
+    import io
+
+    from PIL import Image
+
+    with Image.open(io.BytesIO(png)) as img:
+        w, h = img.size
+        if max(w, h) <= int(long_edge):
+            return png
+        scale = int(long_edge) / max(w, h)
+        out = img.convert("RGB").resize(
+            (max(1, round(w * scale)), max(1, round(h * scale))), Image.BOX)
+        buf = io.BytesIO()
+        out.save(buf, format="PNG")
+        return buf.getvalue()
+
+
+def _run_recipe_json(proj: Any, run: Any, run_id: int) -> str | None:
+    """The saved editor recipe for a run whose preview is a baked display-space
+    edit, else ``None`` — the same read the Full-res PNG download does, in one
+    place so the share, the wallpaper and the download cannot disagree about what
+    a "Process target" picture is. Call it with the project still open."""
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    if run is None or not _preview_is_display_space(run.options_json):
+        return None
+    return proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}")
+
+
 def _native_picture_source(run: Any, preview_png: bytes, baked_north_up: float,
-                           needed_long_edge: int) -> bytes | None:
+                           needed_long_edge: int,
+                           recipe_json: str | None = None) -> bytes | None:
     """A **native-resolution** render of the same picture the stored preview shows,
     up to ``needed_long_edge`` px — or ``None`` to use the stored preview bytes as
     before.
@@ -3733,11 +3871,20 @@ def _native_picture_source(run: Any, preview_png: bytes, baked_north_up: float,
     of every picture this app hands over: the wallpaper cropped it (a ~470 px-wide
     lock screen for a 1170 px phone) and the share JPEG re-encoded it. The
     full-resolution pixels are right there in the run's FITS, and
-    :func:`~seestack.render.thumbnail.render_preview_png_full_res` is the renderer
-    that already reproduces the stored preview's own look at a chosen size (it is
-    what the "Full-res PNG" download serves), so each caller asks it for exactly
-    the pixels it needs — decimated *during* the FITS load, so the memory cost is
-    bounded by the request, not by the canvas.
+    :func:`webapp.pipeline.render_run_full_res_png` is the renderer that already
+    reproduces the stored preview's own look at a chosen size (it is what the
+    "Full-res PNG" download and the pictures archive serve) — so the share and the
+    download can never be two different pictures of one run.
+
+    The render goes through :func:`_build_or_get_share_source`, which caches it
+    beside the run at one size that serves every caller; this function decimates
+    to what *it* needs. That is what makes a **"Process target" run** — a preview
+    that is a baked display-space auto-edit, i.e. this owner's main path — servable
+    at all: reproducing it means running the saved recipe at native size, far too
+    slow to pay per tap and exactly right to pay once. ``recipe_json`` is that
+    saved recipe, read by the caller (only it has the project open); a
+    display-space run without one is declined, because the plain render of its
+    linear master is the *un-edited* picture.
 
     Declines — leaving the caller bit-for-bit as it was — whenever the render
     could show a *different* picture from the one on screen:
@@ -3745,21 +3892,19 @@ def _native_picture_source(run: Any, preview_png: bytes, baked_north_up: float,
     * a preview a past "Adjust → North up → Save" baked a rotation into (the FITS
       grid is the un-rotated one, and matching a baked angle is the North-up
       view's question, not this one);
-    * a "Process target" run, whose preview is a display-space auto-edit that only
-      the saved recipe can reproduce (the full-res render of *that* is a whole
-      editor pipeline at native size — worth it for an explicit "native size"
-      download, not yet for a one-tap share: see the backlog follow-on);
-    * a preview that shows only part of the canvas (an auto-crop border trim);
+    * a display-space preview with no saved recipe to reproduce it;
+    * a preview that shows only part of the canvas (an auto-crop border trim) —
+      the render is of the whole canvas, so it would hand back a wider picture
+      than the one on screen;
     * a run with no readable FITS, or one whose canvas is no bigger than the
       preview already is — where there is nothing to gain.
     """
     from seestack.previewcrop import parse_preview_crop
-    from seestack.render.thumbnail import render_preview_png_full_res
     from seestack.wallpaper import png_size
 
     if baked_north_up:
         return None
-    if _preview_is_display_space(run.options_json):
+    if _preview_is_display_space(run.options_json) and not recipe_json:
         return None
     crop = parse_preview_crop(run.preview_crop_json)
     if crop is not None:
@@ -3780,12 +3925,12 @@ def _native_picture_source(run: Any, preview_png: bytes, baked_north_up: float,
     needed = int(needed_long_edge)
     if needed <= preview_long:
         return None
-    try:
-        png = render_preview_png_full_res(
-            fits_path, max_long_edge=needed,
-            stretch=run.preview_stretch, black=run.preview_black)
-    except Exception:  # noqa: BLE001 — a broken FITS just falls back to the preview
+    png = _build_or_get_share_source(
+        run, recipe_json if _preview_is_display_space(run.options_json) else None,
+        _share_source_long_edge(run, size[0], size[1]))
+    if png is None:
         return None
+    png = _decimate_png(png, needed)
     rendered = png_size(png)
     if rendered is None or max(rendered) <= preview_long:
         return None                       # no more pixels than we already had
@@ -3831,6 +3976,11 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
         entry = lib.find_target(safe)
+        # The saved editor recipe, when the run's preview is a baked display-space
+        # edit — read here because only here is the project open. It is what lets
+        # a "Process target" picture be re-rendered at device resolution instead
+        # of cropping the 1024 px preview.
+        recipe_json = _run_recipe_json(proj, run, run_id) if run is not None else None
     finally:
         proj.close()
         lib.close()
@@ -3855,6 +4005,7 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
     native = _native_picture_source(
         run, preview, baked_north_up,
         wallpaper_source_long_edge(prev_size[0], prev_size[1], preset),
+        recipe_json,
     ) if prev_size else None
     if native is not None:
         preview = native
@@ -3906,6 +4057,10 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # The library entry supplies the target-name fallback for the nameplate
         # (fetched while the library is open, before it's closed below).
         entry = lib.find_target(safe) if run is not None and kind == "jpeg" else None
+        # …and the saved editor recipe, for the same reason the full-res download
+        # reads it: a display-space run's picture is the recipe, not the master.
+        recipe_json = (_run_recipe_json(proj, run, run_id)
+                       if run is not None and kind == "jpeg" else None)
     finally:
         proj.close()
         lib.close()
@@ -3929,7 +4084,7 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # before. Everything baked on below (the marks, the caption, the matte) is
         # sized as a *fraction* of the picture, so all of it scales with this.
         native = _native_picture_source(run, preview, baked_north_up,
-                                        SHARE_JPEG_MAX_LONG_EDGE)
+                                        SHARE_JPEG_MAX_LONG_EDGE, recipe_json)
         if native is not None:
             preview = native
         # The width the scale bar is measured against: the bar's length is a
