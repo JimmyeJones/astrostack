@@ -14,6 +14,50 @@ Newest first.
 
 ---
 
+## v0.382.5 — 2026-09-08 — D2: the "installing ASTAP's star database helps" note stops firing at a night that is merely still being solved
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-niew4h`.)** The third external
+audit's second find, traced and observed on the owner's rig.
+
+**What it was.** A scan **ingests every new sub before any of them is solved**, and
+the `unsolved` health note in `seestack/stackhealth.py` counted every accepted sub
+with no `wcs_json` as a plate-solve *failure* — guarding only on "at least one sub
+did locate". So mid-pipeline, on a perfectly healthy night, it announced **"Only 36
+of 120 subs could be located (plate-solved)… Installing ASTAP's star database
+(Settings) helps"** and pointed the owner at a setup problem that does not exist.
+On this install a night of several hundred new subs keeps that note up **for the
+whole length of the solve**.
+
+**What changed.** Both terms now count only frames whose solve has actually run. A
+failed solve leaves `reject_reason='solve_failed:…'` and deliberately does *not*
+touch `accept` (`solve/runner.apply_solve_result_to_db` — the pixels may be fine,
+they just couldn't be located), so that mark is the only thing separating "ASTAP
+tried and failed" from "ASTAP hasn't reached this frame yet". New pure
+`_solve_was_tried` reads it, and the note's numerator, denominator and both guards
+(`_UNSOLVED_MIN_ACCEPTED`, `_UNSOLVED_NOTE_FRACTION`) are measured over
+`located + tried-and-failed` instead of over every accepted frame. Same predicate
+the DB-side tally already uses (`Project.solve_failure_reasons`:
+`wcs_json IS NULL AND reject_reason LIKE 'solve_failed:%'`), so the note and the
+reject breakdown cannot disagree.
+
+A side effect worth naming: the **ratio the beginner reads is now the true failure
+rate**, not one diluted by the queue. A night that is 6 located / 6 failed / 300
+pending used to read "6 of 312"; it now reads "6 of 12".
+
+**Conservative on purpose.** A frame carrying a *concrete* prior reason
+(`qc_error…`, which keeps `accept=True`) keeps that reason when a solve fails on
+it, so it reads here as untried. Undercounting failures makes the note stay quiet;
+overcounting them makes it cry wolf on every night in progress — which is the bug.
+
+**Tests +2**, both fail-before, plus four existing tests whose "accepted but
+unsolved" fixtures now carry the `solve_failed:` mark a real failed solve leaves
+(same assertions, and it is what restores what two of them claimed to test —
+without the mark they would have passed vacuously). Copy and engine only; no
+config, schema, on-disk, API or default change, and no frontend work (the note is
+a plain string the card renders).
+
+---
+
 ## v0.382.4 — 2026-09-07 — 🔴🔴 D1: Auto's border trim measured "well covered" against the panel *overlaps*, and cropped every mosaic down to them
 
 **(Builder 2026-09-07, branch `claude/sweet-babbage-8hitfe`.)** The third external

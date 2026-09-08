@@ -322,17 +322,52 @@ def test_plain_mean_stack_has_no_rejection_note():
     assert "rejection" not in _kinds(notes)
 
 
+def _solve_failed(**kw):
+    """An accepted sub ASTAP *tried* and could not locate. A failed solve stamps
+    ``solve_failed:`` and leaves ``accept`` alone, so this is what a real one looks
+    like — and what tells it apart from a sub the solver hasn't reached yet."""
+    return _frame(wcs=None, reason="solve_failed:no star match", **kw)
+
+
 def test_mostly_unsolved_subs_leads_with_an_actionable_note():
     # A faint field where ASTAP solved only a handful of subs: the whole night
     # collapses to the located few, so the card leads with the highest-value fix.
     frames = [_frame(wcs="{}") for _ in range(20)]      # located
-    frames += [_frame(wcs=None) for _ in range(190)]    # accepted but unsolved
+    frames += [_solve_failed() for _ in range(190)]     # tried, couldn't locate
     notes = stack_health(_run(), frames)
     assert notes[0].kind == "unsolved"
     assert notes[0].action == "solve_help"
     assert notes[0].severity == "info"
     assert "20 of 210" in notes[0].message
     assert "star database" in notes[0].message.lower()
+
+
+def test_subs_the_solver_has_not_reached_yet_are_not_counted_as_failures():
+    """D2: a scan ingests every new sub *before* any of them is solved, so an
+    unlocated sub with no ``solve_failed:`` mark is pending, not a failure. Counting
+    those made the note fire mid-pipeline on a healthy night — 84 of 120 "couldn't
+    be located" — and point at a setup problem that does not exist."""
+    frames = [_frame(wcs="{}") for _ in range(36)]      # solved so far
+    frames += [_frame(wcs=None) for _ in range(84)]     # queued, not yet tried
+    assert "unsolved" not in _kinds(stack_health(_run(), frames))
+
+    # …and the note still fires once those same subs have actually been tried.
+    tried = [_frame(wcs="{}") for _ in range(36)] + [_solve_failed() for _ in range(84)]
+    notes = stack_health(_run(), tried)
+    assert notes[0].kind == "unsolved"
+    assert "36 of 120" in notes[0].message
+
+
+def test_a_night_in_progress_counts_only_the_subs_already_tried():
+    """The denominator is what the solver has finished with, so the ratio a
+    beginner reads is the true failure rate — not one diluted by a queue."""
+    frames = [_frame(wcs="{}") for _ in range(6)]       # located
+    frames += [_solve_failed() for _ in range(6)]       # tried and failed
+    frames += [_frame(wcs=None) for _ in range(300)]    # still queued
+    notes = stack_health(_run(), frames)
+    unsolved = next(n for n in notes if n.kind == "unsolved")
+    assert "6 of 12" in unsolved.message
+    assert "the other 6" in unsolved.message
 
 
 def test_all_located_subs_get_no_unsolved_note():
@@ -343,7 +378,7 @@ def test_all_located_subs_get_no_unsolved_note():
 
 def test_a_few_unsolved_subs_below_the_fraction_stays_silent():
     # 2 of 20 unlocated (10%) is normal attrition, not a solve problem.
-    frames = [_frame(wcs="{}") for _ in range(18)] + [_frame(wcs=None) for _ in range(2)]
+    frames = [_frame(wcs="{}") for _ in range(18)] + [_solve_failed() for _ in range(2)]
     notes = stack_health(_run(), frames)
     assert "unsolved" not in _kinds(notes)
 
@@ -356,9 +391,9 @@ def test_no_located_subs_stays_silent_solve_pending():
 
 
 def test_too_few_accepted_subs_no_unsolved_note():
-    # Below the minimum accepted count the fraction is meaningless (a tiny target),
+    # Below the minimum tried count the fraction is meaningless (a tiny target),
     # so even a high unlocated share doesn't nag.
-    frames = [_frame(wcs="{}") for _ in range(3)] + [_frame(wcs=None) for _ in range(3)]
+    frames = [_frame(wcs="{}") for _ in range(3)] + [_solve_failed() for _ in range(3)]
     notes = stack_health(_run(), frames)
     assert "unsolved" not in _kinds(notes)
 
@@ -366,7 +401,7 @@ def test_too_few_accepted_subs_no_unsolved_note():
 def test_unsolved_note_ranks_before_calibration():
     # When both fire, the "most subs couldn't locate" fix outranks calibration —
     # it's the bigger lever on a thin faint-field result.
-    frames = [_frame(wcs="{}") for _ in range(10)] + [_frame(wcs=None) for _ in range(30)]
+    frames = [_frame(wcs="{}") for _ in range(10)] + [_solve_failed() for _ in range(30)]
     notes = stack_health(_run(calstat=None), frames)
     order = _kinds(notes)
     assert order.index("unsolved") < order.index("calibration")

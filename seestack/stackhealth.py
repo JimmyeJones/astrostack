@@ -38,7 +38,9 @@ _ECC_ELONGATED = 0.6
 # "gibberish" report). Surface that loss with the concrete fix once it's large.
 # We can only speak to solve success when at least one sub *did* locate; if we see
 # zero located subs, plate-solve simply hasn't run yet, so stay silent rather than
-# nag. Needs a handful of accepted subs for the fraction to be meaningful.
+# nag. Needs a handful of *tried* subs for the fraction to be meaningful — see
+# ``_solve_was_tried``: the denominator counts frames whose solve has actually run,
+# not every accepted frame.
 _UNSOLVED_MIN_ACCEPTED = 8
 _UNSOLVED_NOTE_FRACTION = 0.30  # ≥30% of accepted subs unlocated → worth surfacing
 
@@ -424,6 +426,25 @@ def _median_sub_fwhm(accepted: list[FrameRow]) -> float | None:
     return statistics.median(vals)
 
 
+def _solve_was_tried(frame: FrameRow) -> bool:
+    """Whether plate-solve has actually **run** on an unlocated frame.
+
+    A failed solve leaves ``reject_reason='solve_failed:…'`` and does *not* touch
+    ``accept`` (:func:`seestack.solve.runner.apply_solve_result_to_db` — the pixels
+    may be fine, they just couldn't be located), so that mark is the only thing
+    separating "ASTAP tried and failed" from "ASTAP has not reached this frame
+    yet". The same predicate the DB-side tally uses
+    (:meth:`seestack.io.project.Project.solve_failure_reasons`:
+    ``wcs_json IS NULL AND reject_reason LIKE 'solve_failed:%'``).
+
+    Conservative on purpose: a frame carrying a *concrete* prior reason (``qc_error``
+    and friends) keeps that reason even when a solve fails on it, so it reads here as
+    untried. Undercounting failures makes a note stay quiet; overcounting them makes
+    it cry wolf on every night in progress, which is what it used to do.
+    """
+    return (frame.reject_reason or "").startswith("solve_failed:")
+
+
 def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
                  noise_ratio: float | None = None,
                  noise_crop_depth: int | None = None) -> list[HealthNote]:
@@ -458,17 +479,26 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # lever when it fires (it explains the faint-field "gibberish"), so it ranks
     # first. Guarded on ≥1 located sub so we only speak once solve has actually run
     # (all-unsolved = solve pending, not a failure to report), and on a handful of
-    # accepted subs so the fraction is meaningful.
+    # *tried* subs so the fraction is meaningful.
+    #
+    # Both terms count only frames whose plate-solve has actually **run**. A scan
+    # ingests every new sub before any of them is solved, so counting "accepted but
+    # unlocated" as failures made this note fire *mid-pipeline* on a perfectly
+    # healthy night — 84 of 120 "couldn't be located", pointing at a setup problem
+    # that does not exist, for as long as the solve takes. On the owner's install
+    # that is a night of several hundred new subs.
     located = [f for f in accepted if f.wcs_json]
-    n_acc = len(accepted)
+    failed = [f for f in accepted if not f.wcs_json and _solve_was_tried(f)]
     n_loc = len(located)
-    if (n_loc > 0 and n_acc >= _UNSOLVED_MIN_ACCEPTED
-            and (n_acc - n_loc) >= _UNSOLVED_NOTE_FRACTION * n_acc):
+    n_failed = len(failed)
+    n_tried = n_loc + n_failed
+    if (n_loc > 0 and n_tried >= _UNSOLVED_MIN_ACCEPTED
+            and n_failed >= _UNSOLVED_NOTE_FRACTION * n_tried):
         scored.append((5, HealthNote(
             kind="unsolved",
             severity="info",
-            message=(f"Only {n_loc} of {n_acc} subs could be located (plate-solved), "
-                     f"so the other {n_acc - n_loc} couldn't be stacked and this "
+            message=(f"Only {n_loc} of {n_tried} subs could be located (plate-solved), "
+                     f"so the other {n_failed} couldn't be stacked and this "
                      "result is thinner than your night. Installing ASTAP's star "
                      "database (Settings) helps far more subs solve — especially on "
                      "faint or sparse-star fields."),
