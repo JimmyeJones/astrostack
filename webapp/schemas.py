@@ -874,6 +874,12 @@ class SkippedFolderOut(BaseModel):
     path: str
     n_files: int
     n_unrecognised: int
+    #: Which rule skipped it: ``"device_output"`` (the case above) or
+    #: ``"temp_folder"`` — another program's scratch directory, skipped by name
+    #: at scan time (owner-decided 2026-09-08). Additive with a default, so an
+    #: older frontend ignores it and an older backend omitting it reads as the
+    #: only case that backend could produce.
+    reason: str = "device_output"
 
 
 class ScanRequest(BaseModel):

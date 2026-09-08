@@ -1340,7 +1340,7 @@ describe("skippedFolders", () => {
       }],
     })).toEqual([{
       name: "NGC 6888", nFiles: 4815, nUnrecognised: 4815,
-      path: "/incoming/NGC 6888",
+      path: "/incoming/NGC 6888", reason: "device_output",
     }]);
   });
 
@@ -1349,7 +1349,10 @@ describe("skippedFolders", () => {
     // worth saying that thousands of files were passed over.
     expect(skippedFolders({
       skipped_folders: [{ name: "NGC 6888", n_files: 4815, n_unrecognised: 4815 }],
-    })).toEqual([{ name: "NGC 6888", nFiles: 4815, nUnrecognised: 4815, path: "" }]);
+    })).toEqual([{
+      name: "NGC 6888", nFiles: 4815, nUnrecognised: 4815, path: "",
+      reason: "device_output",
+    }]);
   });
 
   it("drops a folder the device's naming fully explains", () => {
@@ -1370,7 +1373,33 @@ describe("skippedFolders", () => {
     expect(skippedFolders({ skipped_folders: [null, 7, { n_files: 3 }] })).toEqual([]);
     expect(skippedFolders({
       skipped_folders: [{ name: "M 13", n_files: "lots", n_unrecognised: 2, path: 7 }],
-    })).toEqual([{ name: "M 13", nFiles: 0, nUnrecognised: 2, path: "" }]);
+    })).toEqual([{
+      name: "M 13", nFiles: 0, nUnrecognised: 2, path: "",
+      reason: "device_output",
+    }]);
+  });
+
+  it("keeps another program's working folder even with nothing unrecognised", () => {
+    // The device-output rule can be certain it is right, so a fully-explained
+    // folder is dropped above. A name-pattern guess about someone else's
+    // directory cannot be — and this report is the only place the "bring it in"
+    // override is offered, so dropping it would make the skip unrecoverable.
+    expect(skippedFolders({
+      skipped_folders: [{
+        name: "batch_stack_tmp", n_files: 137, n_unrecognised: 0,
+        path: "/incoming/batch_stack_tmp", reason: "temp_folder",
+      }],
+    })).toEqual([{
+      name: "batch_stack_tmp", nFiles: 137, nUnrecognised: 0,
+      path: "/incoming/batch_stack_tmp", reason: "temp_folder",
+    }]);
+  });
+
+  it("reads an unknown reason as the only one an older backend could send", () => {
+    expect(skippedFolders({
+      skipped_folders: [{ name: "M 13", n_files: 3, n_unrecognised: 1,
+                          reason: "something_new" }],
+    })[0].reason).toBe("device_output");
   });
 });
 
@@ -1415,6 +1444,34 @@ describe("the scan's skipped-folder note", () => {
     expect(screen.getByText(/NGC 6888: 4,815 files skipped/)).toBeInTheDocument();
     expect(screen.getByText(/nothing was deleted, moved or renamed/))
       .toBeInTheDocument();
+  });
+
+  it("says what another program's working folder actually is", async () => {
+    // Calling a scratch directory "your Seestar's own finished picture" would be
+    // a plain untruth, and it is the sentence this alert used to carry for every
+    // skip. Fails before: the title and the paragraph named the wrong rule.
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-tmp", kind: "pipeline", target: null, state: "done",
+        result: {
+          scanned: 40,
+          skipped_folders: [{
+            name: "batch_stack_tmp", n_files: 137, n_unrecognised: 137,
+            path: "/data/incoming/batch_stack_tmp", reason: "temp_folder",
+          }],
+        },
+      }),
+    ]);
+    renderJobs();
+    expect(await screen.findByText(
+      "Another program's working folder was skipped")).toBeInTheDocument();
+    expect(screen.getByText(
+      /batch_stack_tmp: 137 files skipped — another stacking program's working folder/,
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/finished picture your Seestar made/)).toBeNull();
+    // …and it is still recoverable, which is the owner's condition on the skip.
+    expect(screen.getByRole(
+      "button", { name: 'Bring "batch_stack_tmp" in anyway' })).toBeInTheDocument();
   });
 
   it("offers to bring the folder in, and scans exactly that folder", async () => {

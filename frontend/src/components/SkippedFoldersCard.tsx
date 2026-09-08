@@ -4,6 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type SkippedIncomingFolder } from "../api/client";
 import { BringFolderInButton } from "./BringFolderInButton";
+import {
+  skipReasonOf, skippedFolderLine, skippedFoldersCardTitle,
+  skippedFoldersExplainer,
+} from "./skippedFolderCopy";
 
 /** Folders the owner has already decided about, by path. Per-folder rather than
  *  one flag for the card, so dismissing "I know about NGC 6888" never hides a
@@ -39,9 +43,16 @@ export function undismissedFolders(
   return folders.filter((f) => !hidden.has(f.path));
 }
 
-/** The one-line count that heads the alert (pure, tested). */
+/** The one-line count that heads the alert (pure, tested).
+ *
+ * Counted in files the scan could not account for — which for another program's
+ * working folder is every file in it, since nothing there is vouched for by a
+ * naming rule we own. */
 export function skippedFoldersLead(folders: SkippedIncomingFolder[]): string {
-  const files = folders.reduce((n, f) => n + f.n_unrecognised, 0);
+  const files = folders.reduce(
+    (n, f) => n + (skipReasonOf(f.reason) === "temp_folder"
+      ? f.n_files : f.n_unrecognised),
+    0);
   const where = folders.length === 1
     ? `A folder in your incoming folder`
     : `${folders.length} folders in your incoming folder`;
@@ -92,25 +103,23 @@ export function SkippedFoldersCard() {
       color="yellow"
       variant="light"
       icon={<IconFolderQuestion size={18} />}
-      title="Some of your subs may not be reaching a picture"
+      title={skippedFoldersCardTitle(folders.map((f) => skipReasonOf(f.reason)))}
       mb="md"
     >
       <Stack gap={6}>
         <Text size="sm">
-          {skippedFoldersLead(folders)}
-          {" A folder named the same as one of your \"_sub\" folders is normally "}
-          {"the finished picture your Seestar made on the scope, so it isn't "}
-          {"stacked with your raw subs — but these hold files that don't look "}
-          {"like your Seestar's own pictures."}
+          {skippedFoldersLead(folders)}{" "}
+          {skippedFoldersExplainer(folders.map((f) => skipReasonOf(f.reason)))}
         </Text>
         <Stack gap={2}>
           {folders.map((f) => (
             <div key={f.path}>
               <Text size="xs">
-                {`${f.name}: ${f.n_files.toLocaleString()} file`}
-                {f.n_files === 1 ? "" : "s"}
-                {` skipped, ${f.n_unrecognised.toLocaleString()} of them not `}
-                {"recognised as your Seestar's own picture."}
+                {skippedFolderLine({
+                  name: f.name, nFiles: f.n_files,
+                  nUnrecognised: f.n_unrecognised,
+                  reason: skipReasonOf(f.reason),
+                })}
               </Text>
               <BringFolderInButton path={f.path} name={f.name} />
             </div>

@@ -9,6 +9,10 @@ import { Link } from "react-router-dom";
 import { type ReactNode, useRef, useState } from "react";
 import { api, type Job } from "../api/client";
 import { BringFolderInButton } from "../components/BringFolderInButton";
+import {
+  type SkipReason, skipReasonOf, skippedFolderLine, skippedFoldersExplainer,
+  skippedFoldersTitle,
+} from "../components/skippedFolderCopy";
 import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
 import { CalibrationSkippedNote } from "../components/CalibrationSkippedNote";
@@ -498,8 +502,9 @@ export function autoRegradedBackNote(r: Record<string, unknown>): string | null 
       + "no longer outliers.";
 }
 
-/** One folder a scan passed over as "the Seestar's own finished picture" while
- * holding files the device's naming can't vouch for. */
+/** One folder a scan passed over: either "the Seestar's own finished picture"
+ * while holding files the device's naming can't vouch for, or another stacking
+ * program's working folder skipped by name (see `skippedFolderCopy.ts`). */
 export type SkippedFolder = {
   name: string;
   nFiles: number;
@@ -508,6 +513,8 @@ export type SkippedFolder = {
    *  scan root to bring the folder in; empty when an older backend didn't send
    *  one, in which case the folder is still *reported*, just not actionable. */
   path: string;
+  /** Which rule skipped it; `device_output` on an older backend that sends none. */
+  reason: SkipReason;
 };
 
 /** The folders this scan skipped that it can't fully explain (pure, tested).
@@ -531,8 +538,13 @@ export function skippedFolders(r: Record<string, unknown>): SkippedFolder[] {
     const nFiles = Number(e.n_files ?? 0) || 0;
     const nUnrecognised = Number(e.n_unrecognised ?? 0) || 0;
     const path = typeof e.path === "string" ? e.path : "";
-    if (!name || nUnrecognised <= 0) return [];
-    return [{ name, nFiles, nUnrecognised, path }];
+    const reason = skipReasonOf(e.reason);
+    // A device-output skip is only worth a word when the device's naming can't
+    // vouch for what is inside; a temp folder is always worth one, because the
+    // rule is a guess about another program's directory and this report is the
+    // only place the "bring it in" override is offered.
+    if (!name || (nUnrecognised <= 0 && reason !== "temp_folder")) return [];
+    return [{ name, nFiles, nUnrecognised, path, reason }];
   });
 }
 
@@ -889,24 +901,14 @@ function JobResultActions({ job }: { job: Job }) {
             frames it can't account for, which is the only case worth a word. */}
         {skipped.length ? (
           <Alert color="yellow" variant="light" p="xs"
-            title="Some folders were skipped as your Seestar's own pictures">
+            title={skippedFoldersTitle(skipped.map((s) => s.reason))}>
             <Text size="xs">
-              {"A folder named the same as one of your \"_sub\" folders is "}
-              {"normally the finished picture your Seestar made on the scope, so "}
-              {"it isn't stacked with your raw subs. These ones also hold files "}
-              {"that don't look like the Seestar's own pictures, so they may be "}
-              {"subs that aren't reaching your stack. Nothing on disk was "}
-              {"changed — nothing was deleted, moved or renamed:"}
+              {skippedFoldersExplainer(skipped.map((s) => s.reason))}
             </Text>
             <Stack gap={2} mt={4}>
               {skipped.map((s) => (
                 <div key={s.name}>
-                  <Text size="xs">
-                    {`${s.name}: ${s.nFiles.toLocaleString()} file`}
-                    {s.nFiles === 1 ? "" : "s"}
-                    {` skipped, ${s.nUnrecognised.toLocaleString()} of them not `}
-                    {"recognised as your Seestar's own picture."}
-                  </Text>
+                  <Text size="xs">{skippedFolderLine(s)}</Text>
                   {/* The button only appears on a backend that sent the folder's
                       path; an older one still reports the folder, and the
                       rename advice below still works. */}
