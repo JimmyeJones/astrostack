@@ -4,6 +4,15 @@ import { IconStars } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type DifficultyHint, type FramingHint, type MosaicPlan } from "../api/client";
+import { loadDismissedSig, saveDismissedSig } from "../dismissal";
+
+/** Where a dismissed "use this name?" offer is remembered, per target. The
+ *  stored signature is the suggested *name*, following the app's dismissal
+ *  convention: saying "keep my name" to one suggestion never silences a
+ *  genuinely different one (a re-solve that lands on another object). */
+export function renameOfferKey(safe: string): string {
+  return `astrostack.renameOffer.${safe}`;
+}
 
 /** A plain-language one-liner for the object card, e.g.
  *  "A galaxy in the constellation Andromeda." Constellation is dropped when the
@@ -87,7 +96,9 @@ export function ObjectInfoCard(
   { safe: string; hideFraming?: boolean; allowRename?: boolean },
 ) {
   const qc = useQueryClient();
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState<string | null>(
+    () => (allowRename ? loadDismissedSig(renameOfferKey(safe)) : null),
+  );
   const identity = useQuery({
     queryKey: ["identify", safe],
     queryFn: () => api.identifyTarget(safe),
@@ -108,7 +119,8 @@ export function ObjectInfoCard(
   });
   const d = identity.data;
   if (!d) return null;
-  const suggestion = allowRename && !dismissed ? (d.rename_to || "") : "";
+  const offered = allowRename ? (d.rename_to || "") : "";
+  const suggestion = offered && offered !== dismissed ? offered : "";
   return (
     <Paper withBorder p="sm" radius="md" bg="var(--mantine-color-default-hover)">
       <Group gap="sm" wrap="nowrap" align="flex-start">
@@ -179,7 +191,12 @@ export function ObjectInfoCard(
                 Use this name
               </Button>
               <Anchor component="button" type="button" size="xs" c="dimmed"
-                onClick={() => setDismissed(true)}>
+                onClick={() => {
+                  // Remembered, so someone who likes their own folder names is
+                  // asked once rather than on every visit to the target.
+                  saveDismissedSig(renameOfferKey(safe), suggestion);
+                  setDismissed(suggestion);
+                }}>
                 Keep my name
               </Anchor>
             </Group>
