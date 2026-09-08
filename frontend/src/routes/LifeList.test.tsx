@@ -254,4 +254,31 @@ describe("LifeListView", () => {
     // And every tile carries the toggle that put it there.
     expect(screen.getAllByTestId("wishlist-star-M42").length).toBeGreaterThan(0);
   });
+
+  it("offers the grid as one shareable picture once you've captured something", async () => {
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list());
+    renderList();
+
+    const link = await screen.findByRole("link", { name: /Share my grid/ });
+    expect(link).toHaveAttribute("href", "/api/life-list/grid.jpg");
+    expect(link).toHaveAttribute("download");
+    expect(screen.getByText(/All 110 squares as one picture/)).toBeInTheDocument();
+  });
+
+  it("hides the share offer on a fresh install", async () => {
+    // A grid of grey squares is a picture of Messier's catalogue, not of your
+    // sky — and the endpoint 404s there, so the button must not be offered.
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list({
+      messier: [obj({ catalog_id: "M31", name: "Andromeda Galaxy" })],
+      counts: {
+        messier_captured: 0, messier_total: 110,
+        other_captured: 0, other_total: 47,
+      },
+    }));
+    renderList();
+
+    await waitFor(() => expect(screen.getByText(/All 110 Messier objects are still ahead/))
+      .toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /Share my grid/ })).not.toBeInTheDocument();
+  });
 });

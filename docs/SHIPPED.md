@@ -14,6 +14,140 @@ Newest first.
 
 ---
 
+## v0.393.0 — 2026-09-08 — PRIORITY 3 (enjoy + share): the life list becomes one shareable picture (`seestack/lifelistcard.py`, `GET /api/life-list/grid.jpg`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-9wjrt9`. Slice (iii) of the
+life-list follow-ups filed 2026-08-27 — the last one open; (i) shipped v0.373.0
+and (ii) shipped v0.280.0. The original entry is kept verbatim at the foot of
+this block.)**
+
+**The gap.** "My life list" answers the question a beginner is actually counting —
+*how many of the 110 have I got?* — but it answers it as a **web page**: a
+scrolling grid of cards that only whoever is looking at the app can see. The one
+thing this app could hand someone to post at the end of a good run of clear
+nights is that same grid as an image, because it says both halves of the story at
+once: the squares you have filled, and how far there is to go. The montage wall
+(`/api/gallery/montage.jpg`) is deliberately *not* this — it shows only the
+pictures you have, so it is a gallery; the empty squares are what makes a life
+list a life list.
+
+**What shipped.** `seestack/lifelistcard.py` — pure, offline, engine-side, the
+same contract as `seestack/montage.py` and `seestack/recap.py`: no network, no
+bundled asset (Pillow's built-in scalable font), no `webapp` imports, nothing
+written anywhere. It takes one `GridCell` per catalog object (label, captured,
+optionally the owner's picture) and composes all 110 Messier squares in catalog
+order under a title strip — `"My Messier list · 42 of 110 captured"` plus a
+second line that changes with how far along you are ("All still to shoot." →
+"The dim squares are the 68 still to shoot." → "The whole list — every one of
+them."), because the motivating fact does.
+
+**Three drawing decisions, each the opposite of the wall's, and deliberately:**
+- **Cover-crop, not letterbox.** On the wall the picture *is* the subject and must
+  be whole. Here a tile is a ~114 px checkbox and the grid only reads as progress
+  if the squares are filled, so each picture is centre-cropped square through
+  `recap._cover_crop` — the centre being what a plate-solved Seestar capture is
+  framed on.
+- **Its own label drawer,** not `render.deepening._draw_corner_label`. That one is
+  `width * 0.028`, which on a 114 px square clamps to its 9 px floor and leaves
+  the *captured* squares' ids visibly smaller than the to-shoot squares'. On a
+  checklist the two halves must read at the same weight, or the empty half shouts
+  over the half the owner is proud of. Same look (dark chip, white text), sized
+  for a tile.
+- **Left-aligned, catalog order, short last row and all.** The montage centres a
+  short last row so a gap doesn't read as a failed load; here a beginner reads the
+  squares as M1, M2, M3…, so re-ordering (or re-centring) breaks the counting.
+
+**Three tile states, not two.** Captured-with-a-picture shows the picture;
+captured-but-not-stacked-yet is a faintly lit square (a real state the page
+already distinguishes with "Not stacked yet"); still-to-shoot is the app's dim
+deep-space tile. A picture that cannot be decoded falls back to the lit
+placeholder, so one truncated preview costs one square and never the poster —
+the same best-effort-per-tile the montage wall makes.
+
+**`GET /api/life-list/grid.jpg`** renders it on demand from the previews the app
+already keeps and writes nothing, exactly like the recap poster. It resolves each
+captured target's picture through `targets.current_picture_path` — the shared
+helper the life-list tile, the Library tile and the montage all use — so the
+poster cannot show a different picture from the page it was shared from. **404s
+until at least one object is captured** (`MIN_CAPTURED`), so the offer self-hides
+on a fresh install rather than handing someone a wall of grey.
+
+**The memory shape is the one thing worth reading twice.** A full library fills
+110 squares, and holding 110 full previews to build one poster is exactly the peak
+this app's RAM-capped NAS cannot afford. Each preview is therefore downscaled to
+`TILE_SOURCE_MAX_PX` (256) **on the way in** — past that the cover-crop throws the
+pixels away anyway — and each target is resolved and loaded **once** even when
+several Messier objects match it (a mosaic across M65/M66), so the working set is
+tens of megabytes rather than hundreds.
+
+**Frontend:** one `Button` inside the life-list page's existing header card — not
+another block on the page (the standing rule that a new feature joins a grouping
+instead of becoming one more banner) — self-hidden until `messier_captured > 0`,
+which is exactly where the endpoint 404s. `api.lifeListGridUrl()` is a
+href/download like the montage and the recap poster; nothing is fetched.
+
+**Upgrade-safe (§9):** one new engine module, one additive read-only GET, one new
+client helper and one self-hiding button. No config, DB-schema, on-disk, API-shape
+or default change, and nothing removed. An older frontend never asks for the
+route; an older backend simply 404s the button's href.
+
+**Tests (+18):** `tests/test_lifelistcard.py` (+13 — the 11x10 grid, the column cap,
+the title/subtitle wording at all three stages, "nothing captured is not a poster",
+one capture is enough, every object drawn captured or not, catalog order pinned by
+reading the corner squares' pixels, the picture in a captured square and none in a
+to-shoot one, captured-but-unstacked distinguishable from to-shoot, the id burned
+onto a captured square too, an undecodable picture falling back rather than
+sinking the grid, and the title strip only taking room when asked for) and
+`tests/webapp/test_life_list.py` (+5 — 404 on an empty library with the plain-language
+detail, one capture gets a JPEG with the attachment filename, the capture drawn as
+*one* square out of 110 rather than the poster, an unreadable preview still getting
+its square, and the route being read-only) and `LifeList.test.tsx` (+2 — the link's
+href/download and copy, and the offer hidden on a fresh install).
+
+**The original entry, cut from the backlog:**
+
+
+- **NEW IDEA (Builder 2026-08-27, the follow-ups the life list v0.279.0 deliberately left out) — three small
+  slices that turn the life list from a page you visit into something that finds you.** *(Pillar: friendliness
+  / "enjoy + come back tomorrow" — PRIORITY 3. Size: S each, independent — pick one, they don't stack.)*
+  All three are cheap now that `GET /api/life-list` exists and `seestack/lifelist.py` is a pure function:
+  * ~~**(i) The Dashboard stat.**~~ — **SHIPPED v0.373.0** (Builder 2026-09-06, branch
+    `claude/sweet-babbage-owcg4d`), and the IA caution in the brief decided its shape: **not a seventh stat
+    tile** (the grid is `lg: 6`, so a seventh card would sit alone on a second row) and **not another card**,
+    but **one quiet line** in the same grouping as the sky-coverage read-out, whose own comment already spells
+    out the rule — *"a new fact joins a grouping instead of becoming one more block"*. Self-hides until at
+    least one famous object is captured, so a fresh install never meets a 0-of-110 scoreboard for a game that
+    has not started. New `GET /api/life-list/counts` serves just the tally through the same
+    `life_list_summary` over the same `catalog_capture_status` the full route uses — pinned by a test
+    asserting the whole counts block is byte-identical between the two, so the Dashboard's sentence and the
+    life-list page's header can never quote different numbers. It is its own route because the Dashboard asks
+    on every visit and the full response carries ~160 catalog rows *plus* a preview stat per captured target;
+    a test asserts the Dashboard never calls `getLifeList`. Pure `components/lifeListLine.ts` decides the
+    words, and the tail changes with how far along you are because the motivating fact does (plain count →
+    "over halfway" → "just N to go" → "the whole list"). Additive/read-only: one new endpoint, one new
+    frontend module, one self-hiding line; no schema, config, on-disk or default change, and the line stays
+    absent against a backend that has no such route. Tests: +4 `tests/webapp/test_life_list.py`, +8
+    `lifeListLine.test.ts`, +4 `Dashboard.test.tsx`.
+  * ~~**(ii) "One away from Orion" — tie the list into the night planner.**~~ — **SHIPPED v0.280.0** (Builder
+    2026-08-27, branch `claude/compassionate-galileo-4maz3z`), to the letter of the brief below: one nudge,
+    only when a constellation is genuinely close (≥1 captured, ≤2 missing — `MAX_MISSING_FOR_NEARLY`).
+    `nearly_complete_constellations` (pure, in `seestack/lifelist.py`) groups the life-list entries by `con`
+    and ranks fewest-missing → most-captured → alphabetically; `GET /api/life-list/nearly-there` then walks
+    the top 4 candidates and prefers the closest one that has a missing object genuinely **up tonight**, so
+    the nudge is actionable rather than a to-do note. It falls back to the closest constellation with no
+    "tonight" half when nothing is up or no site is set (and says which, via `location_source`). The
+    observability is one batched pass, not one per constellation — `suggest_targets` was refactored to share
+    its engine as the new public `nightplan.well_placed_tonight(observer, when, objects, …)`, behaviour
+    unchanged (the existing suggest suite passes untouched). `NearlyThereCard` renders it on the **Tonight**
+    page, above the tables, self-hiding until a constellation is close. Tests: 6 engine, 7 endpoint (a `when`
+    query param, like `/api/plan/suggest`, keeps the "is it up?" assertions off the wall-clock), 5 component.
+    *(Still open: (iii) share the grid. (i) shipped as v0.373.0 — see above.)*
+  * **(iii) Share the grid.** The existing share-card machinery (`ShareYourSkyCard` / `sharePictureText`)
+    renders a keepsake; a "my Messier grid so far" image is the same shape and is the single most
+    shareable artefact the app could produce. Largest of the three; do it last.
+
+---
+
 ## v0.392.0 — 2026-09-08 — PRIORITY 1 (editor): the editor asks before it drops a look you haven't saved (`components/editor/UnsavedLookGuard.tsx`, `Editor.tsx::committedKey`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-lso4r6`. The LEAD the v0.390.0
