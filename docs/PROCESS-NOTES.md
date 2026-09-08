@@ -18,6 +18,77 @@ is a queue.
 
 ---
 
+## 2026-09-08 (later) — Builder run (branch `claude/sweet-babbage-lso4r6`): the editor's unsaved-changes guard, and a dogfood pass that finally ran the editor drive to the end on both samples
+
+**The run.** Baseline green before any change (**5,284 passed / 2 skipped**, full
+suite headless, 28:44). Shipped **v0.392.0** — the editor asks before it drops a
+look you haven't saved; write-up in [`SHIPPED.md`](SHIPPED.md). Then a full §2
+dogfood pass, recorded below because it found nothing.
+
+**Dogfood: CLEAN on all four probes** (`scripts/agent-dogfood.sh --mosaic --editor`,
+then `--empty`). This is the first pass in the record that runs every axis §1 asks
+for — the field sample, the mosaic sample, the editor *driven to the end* on
+both, and the first-run app — and none of them turned anything up.
+
+**And it corrects the budgeting note the block below leaves.** That run measured
+`--editor` at *~3.5 minutes per op* and truncated at 4 of 21, warning the next
+agent to budget ≈2.5 hours for 21 ops × 2 samples. It does not cost that here:
+the whole `--mosaic --editor` pass — booting, loading and stacking **both**
+samples, two page probes and **both** full 21-op editor drives — took about **40
+minutes** wall clock, i.e. roughly 30 s per op. So the earlier figure was that
+container, not the flag. Run it in the background and poll the log; don't skip it
+on the strength of that estimate.
+
+- **Mosaic trim: Auto would cut 7.9 % of the canvas** — healthy (AGENTS.md §1: a
+  trim above ~15 % is a bug, not a ragged edge). Unchanged from the v0.386.0
+  measurement, i.e. v0.391.1's `TRIM_KEEP_RATIO` change left the honest case alone
+  in a running app, not only in the unit fixtures.
+- **Editor drive clean on both samples.** All **21** ops the Add menu offers added
+  one at a time, live preview re-rendering on every one, then Undo and Redo — on
+  the *field* run and again on the *mosaic* run. No console error, no failed
+  request, either time.
+- **Page heights, nothing overflowing, no console errors.** Field sample: phone
+  Target **3,040 px** (the seventh consecutive measurement at 3,014–3,040 across
+  ~180 versions), `/life-list` 3,008, editor 2,887, `/` 2,432. Mosaic sample:
+  phone Target **3,369 px**, editor 2,917. **So the standing IA banner still says
+  what it has said for three passes: do not open a speculative slice.**
+- **First-run app (`--empty`) matches the 2026-09-07 baseline to the pixel** —
+  `/life-list` 2,779 px phone / 1,224 desktop, `/` 1,402 / 1,028, `/library`
+  1,252 / 923, `/combine` 1,196, `/settings` 1,067. Nothing overflowing, no
+  console errors. (`/sky` again never reaches network-idle and is probed anyway,
+  as before — the all-sky viewer holds an open request by design.)
+
+**The pass also served as the real-browser check on this run's own change**, which
+is why it was run after the commit rather than before: the probe walks *into and
+out of* the editor page on both samples, and the editor drive leaves a 21-op
+unsaved recipe on screen. Neither tripped the new guard — which is the design
+working, not luck: the probe's editor opens on the v0.390.0 Auto seed, and
+`committedKey` deliberately treats that seed as committed, so a page a beginner
+merely *looked at* raises nothing.
+
+**Backlog state — unchanged in shape, and this is now the fourth run to say so.**
+"Bugs (fix these first)" holds no startable bug: every entry is either gated on
+something an agent cannot supply (real elongated-target data, a GPU box, a legacy
+library shape, a real cloudy night's subs), or a deliberate stand-down that
+already carries its measurement. "Features that serve real workflows" is likewise
+dry — every open bullet in it is struck, closed-as-already-built, or explicitly
+declined. So one task shipped, and the run stopped rather than manufacturing a
+second (AGENTS.md §2).
+
+**One item re-examined and deliberately left filed, so it is not re-derived a
+third time:** the LEAD about the all-sky "My map" fading whole thin panels
+(`thumbnail.py` → bare `well_covered_mask`). The tempting fix is to port
+v0.391.1's discriminator — compare against what the coverage *alone* allows and
+halve the threshold when the depth rule does much worse. **It does not transfer,
+and the filer was right.** v0.391.1 compares two *rectangles*, where a ragged rim
+cannot form one; per-pixel, a real mosaic's fringe **is** covered, just thinly, so
+a "kept ≥ 80 % of the covered area" rule would refuse to fade exactly the fringe
+the map's fade exists for. A per-pixel fix genuinely needs the connected-region
+discriminator the LEAD names, which is real engine work on a cosmetic navigation
+aid. Left alone.
+
+---
+
 ## 2026-09-08 (Builder, branch `claude/sweet-babbage-91fx05`) — dogfood CLEAN on both samples with `--editor --mosaic`; and the fixture inverted an engine measurement for the fourth time
 
 **Dogfood record (CLEAN).** `scripts/agent-dogfood.sh --editor --mosaic`, run

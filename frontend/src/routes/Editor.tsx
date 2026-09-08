@@ -26,6 +26,7 @@ import { tonalHistGuides } from "../components/editor/tonalGuides";
 import { OpList } from "../components/editor/OpList";
 import { AutoFeedback } from "../components/editor/AutoFeedback";
 import { saveRecipeMessage } from "../components/editor/saveMessage";
+import { UnsavedLookGuard } from "../components/editor/UnsavedLookGuard";
 import { degenerateLevelsUids, extraEnabledStretchUids, hasEnabledStretch, insertOnCorrectSide, moveToCorrectSide }
   from "../components/editor/stageConflicts";
 import { autoCauseSentence, autoSummarySentence, autoValueSentence, presetSuggestionSentence } from "../components/editor/autoSummary";
@@ -292,7 +293,17 @@ export function EditorView() {
   // didn't build fades the moment they change anything, and never re-appears (even
   // after a Save re-syncs `saved.data`) because this key stays frozen for the run.
   const [seedKey, setSeedKey] = useState<string | null>(null);
-  useEffect(() => { setSeeded(false); setSeedKey(null); }, [rid]);
+  // Signature of the last look the user *committed* — what the unsaved-changes
+  // guard measures "dirty" against. It starts as the look the editor actually put
+  // on screen (so the Auto-process seeded on first open is not, by itself, unsaved
+  // work: nobody asked for it and the next open re-seeds it for free) and moves
+  // forward on a successful Save or Export. Deliberately separate from `seedKey`,
+  // which stays frozen for the run because the "What Auto-process did" note needs
+  // to fade permanently once the recipe diverges.
+  const [committedKey, setCommittedKey] = useState<string | null>(null);
+  useEffect(() => {
+    setSeeded(false); setSeedKey(null); setCommittedKey(null);
+  }, [rid]);
   // Export/render jobs are polled in a loop that used to outlive the page: a poll
   // resolving after the user navigated away still clicked a hidden download link,
   // firing a surprise download on an unrelated screen. The pollers check this.
@@ -715,12 +726,21 @@ export function EditorView() {
 
   // --- mutations -----------------------------------------------------------
   const saveRecipe = useMutation({
-    mutationFn: () => api.putRecipe(safe, rid, recipe),
-    onSuccess: () => {
+    // The signature is captured *beside* the recipe being sent, not read again in
+    // onSuccess: the user can keep editing while a save is in flight, and marking
+    // the newer recipe as committed would let their later change slip past the
+    // unsaved-changes guard.
+    mutationFn: async () => {
+      const committed = JSON.stringify(ops);
+      await api.putRecipe(safe, rid, recipe);
+      return committed;
+    },
+    onSuccess: (committed) => {
       // Say what Save actually did: the look is stored with the picture, but it
       // is Export that makes it the picture every other screen shows. See
       // `saveRecipeMessage`.
       notifications.show({ message: saveRecipeMessage(ops), color: "teal" });
+      setCommittedKey(committed);
       qc.invalidateQueries({ queryKey: ["recipe", safe, rid] });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
@@ -769,11 +789,15 @@ export function EditorView() {
       // still holds the *previous* run's recipe (only the seed effect clears it),
       // and it must not end up in this run's undo history.
       resetOps([]);
-      applyAutoResult(recipe, analysis);
+      const built = applyAutoResult(recipe, analysis);
       // The recipe this run *opened with* is the empty one, so that is the seed
       // signature: the seed is unsaved work — nothing is persisted unless the user
       // presses Save — and it is exactly one Undo away from the plain stack.
       setSeedKey(JSON.stringify([]));
+      // The guard's baseline is what the editor actually put on screen, i.e. the
+      // seed: it is a look nobody asked for and the next open reproduces it, so
+      // stopping someone leaving a picture they never touched would be noise.
+      setCommittedKey(JSON.stringify(built));
       setSeeded(true);
       notifications.show({
         message: "Started you off with Auto-process — Undo to see the plain stack.",
@@ -785,6 +809,7 @@ export function EditorView() {
       // nudge, which is exactly what this screen did before the seed existed.
       resetOps([]);
       setSeedKey(JSON.stringify([]));
+      setCommittedKey(JSON.stringify([]));
       setSeeded(true);
     },
   });
@@ -810,6 +835,7 @@ export function EditorView() {
     const openOn = (o: OpInstance[]) => {
       resetOps(o);
       setSeedKey(JSON.stringify(o));
+      setCommittedKey(JSON.stringify(o));
       setSeeded(true);
     };
     if (ops0.length > 0 || autoSeedTried.current) { openOn(ops0); return; }
@@ -819,13 +845,24 @@ export function EditorView() {
     autoSeed.mutate();
   }, [saved.data, seeded, resetOps, ownLookSettled, ownLookOffered, autoSeed]);
   const exportRun = useMutation({
-    mutationFn: () => api.exportRun(safe, rid, recipe, outputName.trim() || `${safe}_edit`),
-    onSuccess: ({ job_id }) => {
+    mutationFn: async () => {
+      const committed = JSON.stringify(ops);
+      const r = await api.exportRun(safe, rid, recipe,
+        outputName.trim() || `${safe}_edit`);
+      return { ...r, committed };
+    },
+    onSuccess: ({ job_id, committed }) => {
       // Stay in the editor (don't bounce to Jobs); the navbar job badge tracks it.
       notifications.show({
         message: "Export running — the new image will appear in History when done.",
         color: "violet",
       });
+      // Export doesn't write the recipe back to *this* run — but it is a
+      // deliberate commit that turns the look into a picture, and the very next
+      // thing the notification invites is a trip to History. Warning about
+      // unsaved changes there would be the "nags at someone who just did the
+      // thing" case the guard exists to avoid.
+      setCommittedKey(committed);
       qc.invalidateQueries({ queryKey: ["jobs"] });
       // Poll the job in the background purely to surface any ops that failed on the
       // full-res data (dropped best-effort, so the export look changed silently).
@@ -1459,8 +1496,18 @@ export function EditorView() {
     return <QueryError error={opsSchema.error} onRetry={() => opsSchema.refetch()} />;
   }
 
+  // An edit is unsaved work only once it differs from the look the user last
+  // committed (see `committedKey`). Gated on `seeded` so the pre-seed empty
+  // recipe — which every preview query is already held back for — can never read
+  // as a change the user made.
+  const dirty = seeded && committedKey !== null && recipeKey !== committedKey;
+
   return (
     <Stack>
+      {/* Nothing here writes a recipe on its own, so leaving the page drops the
+          whole look. Ask first — quietly, and never about the Auto seed. */}
+      <UnsavedLookGuard dirty={dirty} saving={saveRecipe.isPending}
+        onSave={() => saveRecipe.mutateAsync()} />
       <Group justify="space-between" wrap="wrap">
         <Group gap="xs">
           <Button component={Link} to={`/targets/${safe}/history`} variant="subtle"

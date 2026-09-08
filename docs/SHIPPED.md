@@ -14,6 +14,103 @@ Newest first.
 
 ---
 
+## v0.392.0 — 2026-09-08 — PRIORITY 1 (editor): the editor asks before it drops a look you haven't saved (`components/editor/UnsavedLookGuard.tsx`, `Editor.tsx::committedKey`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-lso4r6`. The LEAD the v0.390.0
+run filed against itself — it assumed a guard existed, checked, and found none.)**
+
+**The problem.** Nothing in the editor writes a recipe on its own: a look lives in
+the browser until **Save**. So the nav bar, the in-page "History" button, a deep
+link or the browser's back button dropped the whole edit silently, and every other
+screen carried on showing the plain stack. `grep -rn "useBlocker|usePrompt|beforeunload|unsaved" frontend/src`
+returned nothing — there was no guard of any kind, in either direction.
+
+**What shipped.** `frontend/src/components/editor/UnsavedLookGuard.tsx`, rendered
+once at the top of the editor's tree:
+
+- an **in-app navigation** is intercepted with `useBlocker` — `main.tsx` mounts
+  `createBrowserRouter`, so a data router is genuinely there — and answered with a
+  small modal: *Save and leave* / *Leave without saving* / *Stay here*. "Leave it"
+  is kept as an easy, unpunished answer, per the entry's own care note;
+- a **tab close or reload** can only raise the browser's generic dialog, so
+  `beforeunload` is registered — and only while dirty, so an untouched editor never
+  makes the browser ask;
+- **Save and leave** awaits the save and proceeds; on failure it stays put, because
+  navigating away from a save that did not persist loses exactly the work the
+  button promised to keep.
+
+**The one design call: the baseline is NOT the filed one, and that is the point.**
+The entry proposed dirty = `seedKey !== null && recipeKey !== seedKey`. `seedKey`
+is set to the **empty** recipe on a v0.390.0 auto-seeded open, so that rule makes
+*every* first open of an unedited picture dirty — and the same entry's care note
+says a guard that nags about a seed nobody asked for "would be worse than no
+guard". Both cannot hold. So dirtiness is measured against a new
+`Editor.tsx::committedKey` — *the look the editor actually put on screen*:
+
+- seeded from the saved recipe, or from the Auto seed, or from the empty recipe on
+  a failed seed — i.e. all four places that end the first-open decision;
+- the **Auto seed is therefore not unsaved work**: nobody asked for it, and the
+  next open re-seeds it for free, so nothing is lost by walking away. The first
+  slider the user moves *is* their work, and the guard applies from there;
+- it moves forward on a successful **Save**, and also on a successful **Export** —
+  export does not write the recipe back to this run, but it is a deliberate commit
+  that turns the look into a picture, and its own notification sends the user
+  straight to History. Warning them there is the "nags at someone who just did the
+  thing" case;
+- both signatures are captured **inside the mutation, beside the recipe being
+  sent** (`mutationFn` returns the key), not read again in `onSuccess`: React Query
+  refreshes its callbacks on every render, so an edit made while a save is in
+  flight would otherwise be marked committed and slip past the guard.
+
+`seedKey` is deliberately left exactly as it was — the "What Auto-process did" note
+needs it frozen for the run so the note fades permanently once the recipe diverges.
+Search-param-only navigations are **not** blocked: the editor rewrites its own
+query string (`setSearchParams`, e.g. dropping the `?recentre=1` deep link), and
+blocking that would pop a modal at someone who never navigated.
+
+**Upgrade-safe (§9):** frontend-only. No config, DB schema, on-disk layout, API
+shape or default change; no new request of any kind.
+
+**Tests (+10, in `Editor.test.tsx`).** Walking away from an untouched picture is
+free; an unsaved change is asked about and *Leave without saving* is honoured;
+*Stay here* keeps both the user and the edit; *Save and leave* PUTs the exact ops
+then navigates; a failed save holds you here with the modal still up; a toolbar
+Save and, separately, an Export each stop the asking; the Auto seed is **never**
+nagged about, while changing it yourself is; and `beforeunload` is cancelled only
+while dirty. The file's harness moved from `<MemoryRouter>` to
+`createMemoryRouter`/`RouterProvider` — the router `main.tsx` really mounts, and
+the only one `useBlocker` works on — with a sibling route and a link so a
+navigation can be driven at all; all 113 pre-existing cases pass unchanged, none
+weakened.
+
+**The entry as filed, for the record:**
+
+- **LEAD, filed by the Builder that shipped v0.390.0 (a lead it could not finish,
+  not an invented idea) — the editor has no unsaved-changes guard at all, and the
+  auto-seed makes that matter more.** *(Pillar: editor — PRIORITY 1; size S–M,
+  frontend only. Confidence: checked — `grep -rn "useBlocker\|usePrompt\|beforeunload\|unsaved" frontend/src`
+  returns nothing in `routes/Editor.tsx`; the v0.390.0 entry assumed a guard
+  existed and it does not.)*
+  **The problem, in the owner's terms.** An edit lives only in the browser until
+  Save; navigating away (the nav bar, the back button, a deep link) drops it
+  silently, and the hero keeps showing the plain stack. Since v0.390.0 that also
+  covers a look the app itself put in front of the user: the seeded Auto recipe
+  is real, unsaved work they did not build and may not know is unsaved.
+  **Code sites.** `frontend/src/routes/Editor.tsx`: `seedKey` (~284) is already
+  exactly the signature such a guard needs — the recipe the run *opened with*,
+  frozen for the run, and set to the **empty** recipe on a seeded open precisely
+  so the seed counts as unsaved; `recipeKey` is the live one. `react-router-dom`
+  is already a dependency (a data router is needed for `useBlocker`; check which
+  router `main.tsx` mounts before assuming it).
+  **Shape.** Dirty = `seedKey !== null && recipeKey !== seedKey`. Guard an
+  in-app navigation with a small confirm ("Save this look, leave it, or stay"),
+  and a tab close with `beforeunload`. Keep it quiet: never fire on a pristine
+  recipe, and never on a Save→navigate. **Watch the seed case specifically** — a
+  guard that nags on a seed the user never asked for would be worse than no
+  guard, so the confirm's wording must offer "leave it" as the easy answer.
+
+---
+
 ## v0.391.1 — 2026-09-08 — BUG FIX: a thin mosaic panel is not a ragged border (`coverage_trim.TRIM_KEEP_RATIO`, `_rect_from_mask`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-0r3aga`. Verified by

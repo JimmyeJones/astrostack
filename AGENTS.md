@@ -596,6 +596,18 @@ before any test is collected). Disabling the plugin skips it cleanly; the three
 fallback, not a licence to ignore GUI regressions when Qt *is* available.)
 Frontend: `npx tsc --noEmit`, `npx vitest run`, `npx vite build`.
 
+> **⚠️ Run all three from `frontend/`, and check you are there.** They are the
+> same trap as the pytest one above, in a second costume: from the **repo root**
+> there is no `tsconfig.json` and no local `typescript`, so `npx tsc --noEmit`
+> prints TypeScript's **help text and exits 0** — a clean pass that compiled
+> nothing. (`vitest` and `vite build` at least exit non-zero there.) A shell's
+> working directory persists between tool calls, so one `cd` earlier in a run is
+> enough to poison every later check. Prefix each command with its own
+> `cd frontend &&`, and treat tsc output that does not name files — or names none
+> — with the same suspicion as a pytest summary that doesn't end in `passed`.
+> *(Cost: two type errors reached a pushed commit on 2026-09-08 behind a green
+> `npx tsc` run from the root.)*
+
 Lint is not enforced in CI yet, but check before claiming quality-bar work:
 `ruff check .` has pre-existing debt — don't let it block unrelated work, and
 don't add to it. Put temp/scratch files under the session scratchpad, never in
