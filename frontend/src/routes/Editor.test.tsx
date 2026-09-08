@@ -3291,7 +3291,7 @@ describe("EditorView — the unsaved-changes guard", () => {
 
   it("saves the look and then lets you go", async () => {
     savedRecipeMocks();
-    const putRecipe = vi.spyOn(client.api, "putRecipe").mockResolvedValue({ ok: true });
+    const putRecipe = vi.spyOn(client.api, "putRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
     renderEditor();
     await screen.findByText("Stretch");
     await addCurves();
@@ -3326,7 +3326,7 @@ describe("EditorView — the unsaved-changes guard", () => {
 
   it("stops asking once the look has been saved from the toolbar", async () => {
     savedRecipeMocks();
-    vi.spyOn(client.api, "putRecipe").mockResolvedValue({ ok: true });
+    vi.spyOn(client.api, "putRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
     renderEditor();
     await screen.findByText("Stretch");
     await addCurves();
