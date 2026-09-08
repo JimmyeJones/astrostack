@@ -154,6 +154,25 @@ describe("Auto-stack hint", () => {
     expect(HINTS.auto_stack).toMatch(/only apply when you haven't picked/i);
     expect(HINTS.auto_stack).toMatch(/Stack form is never touched/i);
   });
+
+  // v0.391.0 flipped the shipped default to on. That reaches a *fresh* install
+  // only — an existing config.json keeps whatever it stored (AGENTS.md §9) — and
+  // the switch is the same switch it always was, so the copy has to be honest
+  // about both halves or an owner upgrading will expect a change that isn't
+  // coming.
+  it("says the default is on for new installs and unchanged for existing ones", () => {
+    expect(HINTS.auto_stack).toMatch(/on for new installs/i);
+    expect(HINTS.auto_stack).toMatch(/keeps whatever you last set/i);
+  });
+
+  // The three guards that made turning it on by default defensible. If the copy
+  // doesn't name them, "it stacks on its own now" reads as a risk rather than a
+  // feature.
+  it("names the guards that keep a hands-off stack from publishing rubbish", () => {
+    expect(HINTS.auto_stack).toMatch(/waits for the night to settle/i);
+    expect(HINTS.auto_stack).toMatch(/too few located subs/i);
+    expect(HINTS.auto_stack).toMatch(/never replaces a good picture with a thinner one/i);
+  });
 });
 
 describe("Walk-away mode", () => {

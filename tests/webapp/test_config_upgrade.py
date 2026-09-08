@@ -78,6 +78,32 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     assert s.astap_bootstrap_solve is False
 
 
+def test_auto_stack_defaults_on_for_a_fresh_install(tmp_path):
+    # v0.391.0 flipped the shipped default: a brand-new install walks the whole
+    # chain (ingest → QC → solve → stack) without the owner finding a switch.
+    assert Settings().auto_stack is True
+    # And a genuinely fresh state dir — no config.json at all — gets that default.
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)
+    assert SettingsStore(str(tmp_path)).get().auto_stack is True
+
+
+def test_a_stored_auto_stack_false_survives_the_default_flip(tmp_path):
+    # The whole point of AGENTS.md §9. Every install that has ever booted carries
+    # an explicit "auto_stack": false (SettingsStore re-saves the full model), and
+    # the file cannot tell "the owner turned it off" from "the app dumped the old
+    # default" — so an upgrade must never flip it back on. A stored false loads as
+    # False *and differs from the fresh default*, which is what makes this a real
+    # assertion rather than a tautology.
+    _write_cfg(tmp_path, {"auto_stack": False, "cpu_workers": 6})
+    s = SettingsStore(str(tmp_path)).get()
+    assert s.auto_stack is False
+    assert s.auto_stack is not Settings().auto_stack
+    # It also survives the re-save the store does on every boot.
+    assert SettingsStore(str(tmp_path)).get().auto_stack is False
+    assert json.loads(
+        (tmp_path / "state" / "config.json").read_text())["auto_stack"] is False
+
+
 def test_astap_bootstrap_solve_round_trips(tmp_path):
     _write_cfg(tmp_path, {"astap_bootstrap_solve": True})
     s = SettingsStore(str(tmp_path)).get()

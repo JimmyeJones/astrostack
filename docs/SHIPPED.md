@@ -14,6 +14,105 @@ Newest first.
 
 ---
 
+## v0.391.0 — 2026-09-08 — SHIPPED: auto-stack is on for a fresh install (`webapp/config.Settings.auto_stack`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-0r3aga`.)** The ⭐ READY —
+GATE OPEN entry the owner approved 2026-09-07, with both prerequisites landed
+(the editor auto-seed v0.390.0 and the settle hold v0.390.1) and nothing in
+front of it.
+
+**What shipped.** `Settings.auto_stack` is `True`. A brand-new install now walks
+the whole chain — ingest → QC → solve → **stack** — without the owner having to
+find a switch, which is what "drop your subs in and come back to a picture"
+actually means. Until now a fresh install did the first three steps and then
+stopped at a Stack form.
+
+**What it deliberately does *not* do, and why the release note has to say so.**
+`SettingsStore.__init__` loads `state/config.json` and re-saves the *full* model
+on every boot, so every install that has ever run carries an explicit
+`"auto_stack": false` and keeps it. That is AGENTS.md §9 working exactly as
+intended, and no migration flips it: the file cannot distinguish "the owner
+turned it off in August" from "the app dumped the old default", and flipping a
+setting someone deliberately turned off is the breach §9 exists to prevent. So
+this reaches **fresh installs only**; the owner turns it on himself from
+Settings → "Auto-stack" (still the one item under "REQUIRES MANUAL OWNER
+ACTION").
+
+**Why it is safe on by default now, when it was not before.** Three guards had
+to land first, and all three are in the path: the readability preflight and the
+thinner-than-best hold (v0.270.1) — a stack never publishes a picture thinner
+than the one the target already has, and a transient storage fault holds without
+stamping the attempt marker; `auto_stack_min_frames` = 3 (v0.256.0) — one or two
+lone solved subs are held, not published as colour speckle; and the settle
+window `auto_stack_settle_min` = 20 min (v0.390.1) — a target still receiving
+subs waits for the night to finish instead of re-stacking after every 5-minute
+poll. `auto_edit_on_autostack` stays **off**: the owner's decision named
+`auto_stack`, and whether the walk-away picture should also be auto-*edited* is
+question 1 on his one-sitting list.
+
+**Copy.** The Settings hint now says both halves — on for new installs, unchanged
+for an existing one — and names the three guards, so "it stacks on its own now"
+reads as a feature rather than a risk. The "Walk-away mode" master switch is
+unaffected (it needs all five of its keys, and the other four still default off).
+
+**Tests (+3 Python, +2 vitest; all five fail before the flip).**
+`test_config_upgrade.py::test_auto_stack_defaults_on_for_a_fresh_install`
+(`Settings()` and a state dir with no `config.json`);
+`::test_a_stored_auto_stack_false_survives_the_default_flip` — a stored `false`
+loads as `False`, **differs from the fresh default** (the assertion that makes it
+more than a tautology), survives the boot-time re-save, and is still `false` in
+the file afterwards;
+`test_auto_stack_pipeline.py::test_the_shipped_defaults_stack_a_target_with_nobody_watching`
+— the one test in that file that does *not* name `auto_stack`, so it is the only
+one that could ever have caught this; plus two `Settings.test.tsx` cases pinning
+the two halves of the copy and the three guards. Nothing loosened: every existing
+auto-stack test already set the flag explicitly.
+
+**Upgrade safety.** One default value; no schema, on-disk, API-shape or endpoint
+change. A stored config is bit-for-bit unaffected.
+
+**The entry, as it stood:**
+
+- **⭐ READY — GATE OPEN, AND BOTH PREREQUISITES HAVE NOW LANDED (D1 v0.382.4; the editor auto-seed **v0.390.0**;
+  the settle hold **v0.390.1**, 2026-09-08 — this is the next item in the order the owner fixed, and nothing is
+  in front of it). ✅ APPROVED BY THE OWNER 2026-09-07: turn `auto_stack` back on
+  by default.** *(Pillar: autonomy — PRIORITY 2; size S. Owner decision recorded in
+  answer to the third audit, which verified the walk-away path end-to-end through the real watcher — three
+  nights, two targets, 160 solves, no re-solves, `incoming/` bit-identical afterwards. Re-checked against the
+  current code 2026-09-08.)*
+  **What the owner asked for, and what a default flip can and cannot do.** He wants the walk-away chain on.
+  `webapp/config.py::Settings.auto_stack: bool = False` (~115) is the shipped default. **A default flip does
+  not reach his install:** `SettingsStore.__init__` (~401–423) loads `state/config.json` and **re-saves the
+  full model on every boot** (`save()` writes `model_dump_json()`), so every install that has ever booted
+  carries an explicit `"auto_stack": false` and keeps it — AGENTS.md §9 says a stored value survives an
+  upgrade, and there is no way to tell a value he set from a value the app dumped. So this item is two things,
+  and must be honest about both: (1) the shipped default flips for **fresh** installs; (2) the owner flips the
+  switch himself on his install (Settings → the "Auto-stack" `Switch`, `routes/Settings.tsx` ~712) — that is
+  the one live item under "REQUIRES MANUAL OWNER ACTION", and it stays until he does. **Do not write a
+  migration that flips a stored `false`** — the file cannot distinguish "he turned it off in August" from "the
+  app wrote the default", and flipping a setting he deliberately turned off is the breach §9 exists to prevent.
+  Say all of this in the release note.
+  **Code sites.** `webapp/config.py` — `auto_stack` and, directly under it, `auto_edit_on_autostack: bool =
+  False`: **leave that one off**; the owner's decision named `auto_stack`, and whether the walk-away picture
+  should also be auto-*edited* is the first question on the owner's one-sitting list below. `webapp/pipeline.py`
+  ~399 (`if settings.auto_stack:` — the walk-away batch) and ~543 (the `auto_edit_on_autostack` gate). The
+  guards that must still be in the path: the readability preflight and the thinner-than-best hold (v0.270.1),
+  `_auto_stack_degraded_recheck` (v0.273.0), `auto_stack_min_frames` (default 3).
+  `frontend/src/routes/Settings.tsx` ~44 (the `auto_stack` hint copy).
+  `tests/webapp/test_config_upgrade.py::test_old_config_loads_keeps_values_and_defaults_new_fields` (~22).
+  **Shape.** Flip the default; update the Settings hint to say it is on for new installs; **write the upgrade
+  test first**: a `config.json` carrying `"auto_stack": false` loads as `False` after the flip. Grep the suite
+  (`grep -rn auto_stack tests/webapp`: `test_auto_stack_pipeline.py`, `test_autostack_hold.py`,
+  `test_auto_stack_defaults.py`, `test_api.py`, `test_pipeline*.py`) — most set it explicitly; fix any that
+  relied on the default by **setting it explicitly**, never by loosening. Run `scripts/agent-dogfood.sh
+  --empty`: a first-run app now has auto-stack on — check the empty-Dashboard copy still reads right.
+  **Tests.** `test_config_upgrade.py`: a stored `false` survives *and differs from the fresh default* (**fails
+  today** — both are `False`); `Settings().auto_stack is True` (**fails today**); `test_auto_stack_pipeline.py`:
+  with defaults, a scan of a new target with ≥ `auto_stack_min_frames` located subs stacks it, and the thin /
+  unreadable holds still hold.
+
+---
+
 ## v0.390.1 — 2026-09-08 — SHIPPED: hold a target the sky is still filling (`pipeline._auto_stack_settle_hold`, `auto_stack_settle_min`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-ldlc6c`.)** The READY entry
