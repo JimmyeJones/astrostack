@@ -625,6 +625,18 @@ the repo.
 > scratch dir, never the repo. Whatever it finds still needs a real regression
 > test in the suite — it is a finder, not a test.
 >
+> **On any run making an Auto/editor claim, add `--mosaic`** *(v0.386.0)*. §1
+> judges those claims on a tiled mosaic at the owner's scale, never on the
+> 6-frame single field — and until now the tooling could not produce one, so
+> every "dogfood CLEAN" recorded here was still measured on the field. `--mosaic`
+> loads and stacks a second, generated sample: four overlapping panels of one
+> shared sky, uneven depth (6/6/6/3), one panel shot through haze, and a ragged
+> union canvas that is genuinely ~5 % uncovered — so the surfaces gated on NaN
+> "no coverage" are finally in front of a browser. It prints the trim Auto would
+> apply to that canvas (**above ~15 % is a bug, not a ragged edge**) and writes
+> its shots to `$SHOTS/mosaic/`, leaving the field sample's page-height baselines
+> alone. Combine with `--editor` to drive the editor on the *mosaic* run.
+>
 > **On any run that touches the editor, add `--editor`.** The pass above only
 > *photographs* the editor, in the one state it opens in — priority 1 is the
 > editor and the owner's complaints about it are all about what happens after a

@@ -14,6 +14,70 @@ Newest first.
 
 ---
 
+## v0.386.0 — 2026-09-08 — `--mosaic`: a sample shaped like the owner's shooting, so a mosaic claim can be checked
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-113tio`.)** The READY infra
+entry filed by the 2026-09-07 backlog-readiness run, built to its spec.
+`AGENTS.md` §1 judges every Auto/editor claim **on a tiled mosaic at the owner's
+scale, never on the 6-frame single field** — and the tooling could not produce
+one, so every "dogfood CLEAN" recorded since was still measured on the field.
+That sample's canvas has no uncovered pixel and one coverage plateau, so every
+surface gated on NaN "no coverage" (the union canvas, coverage levelling,
+per-panel photometry, the uncovered-fraction note, the depth map, Auto's border
+trim) was structurally invisible to the probe. It is how D1 — Auto cropping a
+mosaic to its overlap band, correct on a single field and catastrophic on a
+mosaic — survived twenty clean sweeps and three audits.
+
+**What shipped.** `webapp/sample_data.load_sample(lib, shape="mosaic")` builds a
+**separate** target (`"Sample: M42 mosaic (2×2)"`, its own reserved name) from
+**one shared star catalog**: `_star_catalog` draws the stars over the whole sky
+window once and `_render_star_field` renders each panel's window onto it, so an
+overlap really does hold the *same* stars — without that, the overlaps are two
+unrelated star fields and nothing that measures a mosaic's seams is exercised at
+all. Panels step 82 % of a frame (~18 % overlap) with a per-panel pointing
+jitter, which is what makes the union canvas *ragged*; depth is deliberately
+uneven (6/6/6/3 — one panel clouded out early, and it is on the following night);
+and one panel was shot through haze — ×0.85 on the signal, +8 % on the sky, the
+multiplicative case per-frame photometric normalisation cannot fix from inside a
+single panel. Each sub records **its own panel's** centre (`_frame_center_deg`
+through the frame's real WCS), because every per-panel decision in the engine
+clusters on exactly that pair.
+
+**Measured on the built sample, not asserted from the design:** 21 subs → a
+907×615 union canvas, **4.8 % uncovered**, coverage plateaus at 3 / 6 / 12 / 21,
+`coverage_is_mosaic` True, `pointing_groups` finds 4 panels of 6/6/6/3, 0 align
+failures, and the trim Auto suggests is **7.9 %** of the canvas (healthy — D1 is
+fixed; above ~15 % is the D1 shape and the script says so in as many words).
+
+**`scripts/agent-dogfood.sh --mosaic`** loads it after the field sample, stacks
+it (the stack-and-wait is now one `stack_target` function rather than two copies),
+prints that trim fraction, and runs the page probe — and, with `--editor`, the
+editor drive — against the mosaic run too, writing into `$SHOTS/mosaic/` so the
+field sample's page-height baselines cannot be overwritten and compared against by
+mistake. Opt-in, because the field sample is what keeps a standard pass fast.
+
+**Upgrade-safe and default-unchanged.** `load_sample`/`get_sample_status` take
+`shape` with a `"field"` default; `POST /api/sample` takes an optional
+`{"shape": "mosaic"}` body, so the Dashboard button and the frontend's
+`loadSample()` (no body) are byte-for-byte what they were. `SampleStatusOut`
+gains three fields *with defaults* (`mosaic_loaded`, `mosaic_safe`,
+`mosaic_n_frames`) — `loaded` still means the single-field sample. One `DELETE`
+removes both. The refactor that made the shared catalog possible is provably
+free: the field sample's generated pixels are **bit-identical** to the old
+implementation's, checked against a transcribed copy of it for three dithers.
+The subs are written under the *target's own* directory, never `incoming/` (§10).
+
+**Tests** (`tests/webapp/test_sample_data.py`, +7): the mosaic is four panels of
+6/6/6/3 by `pointing_groups`; it stacks onto a canvas bigger than a frame in both
+axes with 0.5–25 % NaN and `coverage_is_mosaic` True; neighbouring panels
+correlate > 0.9 in their overlap (the shared-sky property, rendered directly);
+the hazy panel really is brighter-skied; the two samples are separate targets,
+loading the mosaic leaves the field one untouched, and one remove sweeps both;
+the API loads the field by default and the mosaic only on request. Full suite
+green.
+
+---
+
 ## v0.385.0 — 2026-09-08 — one "Save / share" menu, shared by the Target hero and every History card
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-113tio`.)** The READY entry
