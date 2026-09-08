@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ObjectInfoCard,
+  renameOfferKey,
   describeObject,
   difficultyColor,
   framingColor,
@@ -25,7 +26,10 @@ function renderCard(safe = "M_31", hideFraming = false, allowRename = false) {
   );
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  localStorage.clear();
+});
 
 describe("describeObject", () => {
   it("phrases a plain-language one-liner with the right article", () => {
@@ -346,6 +350,27 @@ describe("ObjectInfoCard — \"use this name?\"", () => {
         { name: "North America Nebula" }));
   });
 
+  it("remembers a dismissal for that suggestion only", async () => {
+    // Someone who likes their own folder names should be asked once, not on
+    // every visit — but a dismissal is stored against the *name* suggested, so
+    // a later re-solve landing on a different object still gets to ask.
+    localStorage.setItem(renameOfferKey("MyWorks_2026"), "North America Nebula");
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(folderNamed);
+    const { container, unmount } = renderCard("MyWorks_2026", false, true);
+    await waitFor(() =>
+      expect(screen.getByText("North America Nebula")).toBeInTheDocument());
+    expect(container.textContent).not.toContain("still named after its folder");
+    unmount();
+
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      ...folderNamed, id: "M31", name: "Andromeda Galaxy",
+      rename_to: "Andromeda Galaxy",
+    });
+    renderCard("MyWorks_2026", false, true);
+    expect(await screen.findByRole("button", { name: "Use this name" }))
+      .toBeInTheDocument();
+  });
+
   it("takes no for an answer", async () => {
     vi.spyOn(client.api, "identifyTarget").mockResolvedValue(folderNamed);
     const patch = vi.spyOn(client.api, "patchTarget");
@@ -354,8 +379,11 @@ describe("ObjectInfoCard — \"use this name?\"", () => {
     fireEvent.click(await screen.findByText("Keep my name"));
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Use this name" })).toBeNull());
-    // Dismissing is a *decision*, not a rename — nothing is written.
+    // Dismissing is a *decision*, not a rename — nothing is written to the app.
     expect(patch).not.toHaveBeenCalled();
+    // …only to this browser, so the offer doesn't come back on the next visit.
+    expect(localStorage.getItem(renameOfferKey("MyWorks_2026")))
+      .toBe("North America Nebula");
     // …and the card itself is still there doing its describing job.
     expect(screen.getByText(/A nebula in the constellation Cygnus\./))
       .toBeInTheDocument();

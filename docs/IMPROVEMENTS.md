@@ -550,8 +550,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   exact); the JPEG, nameplate, scale-bar and keepsake items, which describe what they bake rather than a size;
   and the FITS, whose "Raw data — for re-processing, not sharing" is right.
 
-  **Still open, filed as its own item below:** the **colour-space** axis — the TIFF download carries *no*
-  description at all, and a plain stack's TIFF is written **linear**, so it opens looking black. The
+  ~~**Still open, filed as its own item below:** the **colour-space** axis — the TIFF download carries *no*
+  description at all, and a plain stack's TIFF is written **linear**, so it opens looking black.~~ — **DONE, and
+  this line was stale** *(struck 2026-09-08 by a Builder that grepped before building)*: `frontend/src/tiffDownload.ts`
+  owns the wording (`tiffOpensAsShown` / `tiffDownloadHint`) and every TIFF item renders it through the shared
+  `SavePictureMenu` — *"16-bit raw levels — opens dark until you stretch it in another app"* for a linear stack,
+  *"16-bit — the finished picture, at full depth"* for one saved in display space, with `tiffDownload.test.ts`
+  pinning both. The
   **geometry** axis (cropped/rotated vs the stored canvas) was not swept.
   **▶ The geometry axis was then swept by the `…-e1p1x8` Builder and turned up a real one straight away:**
   "Full-res PNG (native size)" served a picture **rotated away from the one on screen** on any run saved North
