@@ -427,6 +427,11 @@ export interface SkippedIncomingFolder {
   path: string;
   n_files: number;
   n_unrecognised: number;
+  /** Which rule skipped it — `"device_output"` (the case above) or
+   *  `"temp_folder"` (another stacking program's working folder, skipped by
+   *  name at scan time). Optional: an older backend sends none, which reads as
+   *  the only case it could produce. See `components/skippedFolderCopy.ts`. */
+  reason?: string;
 }
 
 export interface FramingHint {
