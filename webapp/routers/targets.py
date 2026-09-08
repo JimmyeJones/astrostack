@@ -442,6 +442,7 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
                                      moons=info.angular_size.moons,
                                      text=info.angular_size.text)
                       if info.angular_size is not None else None),
+        nebula_class=info.nebula_class,
     )
 
 

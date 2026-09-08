@@ -104,6 +104,12 @@ class ObjectInfo:
     # catalog has no vetted size, or the object is too small for the comparison
     # to say anything (see :mod:`seestack.angularsize`).
     angular_size: AngularSize | None = None
+    # Which family a nebula's glow belongs to ("emission" / "reflection" /
+    # "both" / "unknown"), straight from the catalog; "" for everything that
+    # isn't a classified nebula. Drives the "does my colour look right?" note
+    # (:mod:`seestack.colourcheck`), which stays silent on everything but the
+    # first two.
+    nebula_class: str = ""
 
 
 def _norm_name(s: str) -> str:
@@ -261,4 +267,5 @@ def _to_info(obj: CatalogObject, matched_by: str,
             **({"fov_long_arcmin": field.long_arcmin} if field else {})),
         light_travel=light_travel(obj.distance_ly),
         angular_size=angular_size(obj.size_arcmin),
+        nebula_class=obj.nebula_class,
     )

@@ -508,6 +508,11 @@ export interface ObjectInfo {
   // when the catalog has no vetted size or the object is too small for the
   // comparison to help (older backends omit it — the card shows nothing).
   angular_size?: AngularSize | null;
+  // Which family a nebula's glow belongs to — "emission" | "reflection" |
+  // "both" | "unknown"; "" for everything that isn't a classified nebula. The
+  // "does my colour look right?" note is built from this server-side (older
+  // backends omit it).
+  nebula_class?: string;
 }
 
 export interface BackgroundModeHint {
@@ -2390,6 +2395,13 @@ export interface Histogram {
   // so the editor can show whether the background ended up neutral (see
   // skyCastCaption). Absent on an older backend.
   sky_cast?: SkyCast;
+  // "Does my colour look right?" — the same finished display image, measured over
+  // the *object* population instead of the sky and compared against what this
+  // object's catalog family (emission / reflection nebula) actually looks like.
+  // `null` far more often than not: only a catalog-identified emission or
+  // reflection nebula whose colour is clearly right, or clearly wrong, says
+  // anything at all. Absent on an older backend.
+  colour_check?: ColourCheck | null;
   // True when this run is already in display space (a re-opened editor export, so
   // no default stretch runs). The one-click "Neutralize background" fix only lands
   // in display space — where the cast is measured — when an explicit stretch is
@@ -2412,6 +2424,17 @@ export interface SkyCast {
   neutral: boolean;
   cast: string;
   deviation: number;
+}
+
+// One plain-language line about the finished picture's colour, built server-side
+// (seestack/colourcheck.py) from the object's catalog family plus the measured
+// colour of the object pixels. `ok` picks a reassuring vs advisory tone; the
+// text is already phrased for a beginner and names the fix when there is one.
+export interface ColourCheck {
+  ok: boolean;
+  family: string;    // "emission" | "reflection"
+  expected: string;  // "red-pink" | "blue"
+  text: string;
 }
 
 // Which white-balance path the unattended auto-edit ran. `mode_used` is one of
