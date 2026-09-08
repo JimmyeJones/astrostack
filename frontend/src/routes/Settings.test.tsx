@@ -175,7 +175,7 @@ describe("Auto-stack hint", () => {
   });
 });
 
-// v0.394.0 flipped auto_edit_on_autostack's shipped default to on, with the
+// v0.395.0 flipped auto_edit_on_autostack's shipped default to on, with the
 // owner's condition ("easy to override with manual settings") shipping alongside
 // it rather than after it. The copy has to carry both halves — the same
 // fresh-install-only caveat auto_stack's does, and where to find the override —

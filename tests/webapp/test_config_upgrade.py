@@ -34,7 +34,7 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     # own; the sensitivity default is the balanced middle.
     assert s.auto_grade_frames is False
     assert s.auto_grade_sensitivity == "balanced"
-    # Auto-edit-on-autostack defaults ON since v0.394.0 (the owner approved it
+    # Auto-edit-on-autostack defaults ON since v0.395.0 (the owner approved it
     # 2026-09-08). That reaches a *fresh* install only, and this config is a
     # hand-made partial one: a real install that has ever booted carries an
     # explicit value, because SettingsStore re-saves the whole model — which is
@@ -91,7 +91,7 @@ def test_auto_stack_defaults_on_for_a_fresh_install(tmp_path):
 
 
 def test_auto_edit_on_autostack_defaults_on_for_a_fresh_install(tmp_path):
-    # v0.394.0 flipped the shipped default, so a brand-new install comes back
+    # v0.395.0 flipped the shipped default, so a brand-new install comes back
     # from a night to a *picture* rather than a flat linear master — the last
     # step of the walk-away promise. Approved by the owner on 2026-09-08 with a
     # condition ("easy to override"), which ships alongside it: the Settings

@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import {
-  Anchor, Badge, Card, Center, Group, Image, Loader, Progress, SegmentedControl,
+  Anchor, Badge, Button, Card, Center, Group, Image, Loader, Progress, SegmentedControl,
   SimpleGrid, Stack, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconChecklist, IconCircleCheck, IconStarFilled } from "@tabler/icons-react";
+import {
+  IconChecklist, IconCircleCheck, IconDownload, IconStarFilled,
+} from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type LifeListItem, type WishlistItem } from "../api/client";
@@ -285,6 +287,27 @@ export function LifeListView() {
           stays greyed out until it's solved. Tap anything you've got to jump
           straight to its picture, or tap its ☆ to put it on your wishlist.
         </Text>
+        {/* The shareable half of the same fact, one tap along and inside this
+            card rather than as another block on the page (the standing rule
+            that a new feature joins a grouping instead of becoming one more
+            banner). Self-hides until something is captured — a grid of grey
+            squares is a picture of Messier's catalogue, not of your sky, which
+            is also why the endpoint 404s there. */}
+        {counts.messier_captured > 0 ? (
+          <Group gap="xs" mt="sm">
+            <Button
+              size="xs" variant="light" color="teal"
+              leftSection={<IconDownload size={14} />}
+              component="a" href={api.lifeListGridUrl()} download
+            >
+              Share my grid
+            </Button>
+            <Text size="xs" c="dimmed">
+              All {counts.messier_total} squares as one picture — yours filled in,
+              the rest still to shoot.
+            </Text>
+          </Group>
+        ) : null}
       </Card>
 
       <WishlistSection />
