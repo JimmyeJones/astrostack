@@ -18,6 +18,67 @@ is a queue.
 
 ---
 
+## 2026-09-08 (Builder, branch `claude/sweet-babbage-xm81q4`) — the fixture that *looked* like a mosaic and let a new pass invent a 2.6× gain
+
+**One task this run** (v0.387.0, cross-panel gain matching in a mosaic's
+overlaps). Two things it learned are about *how to check work*, not about the
+work, so they live here.
+
+**1. "It is a mosaic" is not the same as "its overlaps hold the same sky", and
+only one of those is testable by shape.** The engine's existing mosaic fixture
+(`tests/test_photometric_mosaic_auto.py::_hazy_mosaic_project`) draws a fresh
+star field per *frame*: two panels stepped 80 % of a field, overlapping on the
+canvas, each holding stars the other has never seen. It is a perfectly good
+fixture for everything it was built for — per-panel photometric behaviour, panel
+bins, provenance — and it says so in its own docstring ("Both panels use the
+*same* per-sub star seeds", which makes the two halves *statistically* alike, not
+*positionally* alike). What it cannot carry is any claim about the **overlap**.
+The new pass was written against it, measured a 2.6× gain between two
+equally-exposed panels, and applied a 28 % step — the manufactured panel grid the
+pass exists to prevent — and the only reason that surfaced was that an unrelated
+existing test (`test_haze_within_a_panel_is_gain_matched_out`) asserted the panels
+still matched afterwards. **Without that one assertion, this would have shipped.**
+The lesson generalises past this pass: before measuring anything *between* two
+regions of a synthetic canvas, check the fixture puts the same photons in both.
+`tests/synth.star_catalog` + `make_shared_sky_field` now exist for that (the
+test-side twin of what `webapp.sample_data` gained in v0.386.0), and
+`tests/test_overlap_panel_gain.py` uses them.
+
+**This is the same shape as the D1 lesson recorded on 2026-09-07** ("six tests had
+the bug pinned in a fixture that contradicted its own comment"). Twice in two days
+a defect survived because the fixture, not the code, was where the wrong
+assumption lived. A fixture is an assertion about the world; it deserves the same
+adversarial reading as a function.
+
+**2. The bug the false positive exposed was worth more than the false positive.**
+The fix was not "use a better fixture" — that only hides it. Overlapping
+*footprints* mean two WCS solutions agree, which a **mis-solved panel** also
+achieves while pointing somewhere else entirely. So the pass now correlates the
+shared strip before believing it (`MIN_OVERLAP_CORRELATION`), and correlation is
+blind to gain — precisely the quantity being measured — so a genuinely hazy panel
+still passes while unrelated sky does not. A synthetic fixture stood in for a real
+failure mode nobody had thought to guard against.
+
+**3. Two of the run's defects were my own, found by measuring rather than
+reading.** The first implementation aligned each sub onto a *coarse* canvas WCS
+**and then** block-folded it again — a double downsample that happened to give the
+right answer (both panels were squashed identically) while doing something the
+docstring did not describe. And the fit's consistency check originally dropped
+disagreeing pairs until the residual fell, which always terminates: a loop-free
+graph fits *any* ratios with exactly zero residual, so "it agrees now" was
+guaranteed rather than earned. Both were caught by writing a test that stated the
+intended arithmetic (`test_the_block_fold_lands_a_window_where_the_canvas_put_it`,
+`test_ratios_that_never_settle_stand_the_whole_pass_down`) instead of a test that
+only checked the end-to-end number, which was green throughout.
+
+**4. The end-to-end check that mattered was the sample nobody wrote for it.**
+Stacking v0.386.0's mosaic sample — four panels, one at ×0.85 signal, built by a
+different run for a different purpose — recovered panel scales of [0.999, 1.174]
+against a true 1/0.85 = 1.176. A fixture written by the same run that writes the
+feature can only confirm the author's own model; one written earlier, elsewhere,
+for something else, is evidence.
+
+---
 ## 2026-09-08 (Scout, branch `claude/admiring-brahmagupta-luiss8`) — mosaic Auto/editor + coverage-trim + ASTAP filesystem re-audit CLEAN; one verified friendliness bug found and fixed (the goal chip)
 
 **Baseline.** Fresh `source scripts/agent-setup.sh`; stacking+calibrate subset green
