@@ -248,6 +248,8725 @@ that must not drift between two implementations.
   object-info card (frontend, gated on presence). **Care:** this must earn a beginner's *trust*, so bias hard
   toward silence — a single wrong "your colour is off" on a genuinely fine picture is worse than ten correct
   reassurances are good.
+## The backlog's own "Shipped" list, compressed to one line per entry on 2026-09-08 — the 400 multi-line entries, verbatim, newest first
+
+Each block below is one `✅ v0.x.y` entry exactly as it stood in `IMPROVEMENTS.md` → "Shipped" at v0.388.0.
+`IMPROVEMENTS.md` keeps its first line. Search the version to find the full text.
+
+### (also archived) "Smaller click-path items (2026-07-26 audit)" — every sub-item struck; cut from "Bugs"
+
+- **Smaller click-path items (2026-07-26 audit — batch into cleanup passes; each traced, several reproduced):**
+  (a) ~~Editor PNG/share job polling has no try/catch and survives unmount (`Editor.tsx:678+,690-722,729-768`) — a
+  transient 5xx or a concurrent "Clear finished jobs" discards a FINISHED render that is still downloadable, and
+  navigating away later fires a surprise download; contrast `pollJobForOpErrors` (655-668) which swallows errors~~ —
+  **FIXED v0.211.1** (Builder 2026-07-29, branch `claude/loving-bardeen-wwcey3`). All four of the editor's
+  copy-pasted polling loops (full-res PNG, share JPEG, share-to-app, and the advisory op-errors watcher) now go
+  through one tested helper, `pollJobUntilDone` (`frontend/src/components/editor/pollJob.ts`), which (i) rides out up
+  to 5 *consecutive* status-fetch failures — a success resets the budget — so one 5xx or dropped connection mid-render
+  no longer surfaces "PNG render failed" and throws away a render that is still going, and (ii) takes an
+  `isAbandoned` predicate wired to an Editor `mounted` ref, so a poll that resolves after the user navigated away
+  rejects with a `JobPollAbort` sentinel instead of clicking a hidden download link on an unrelated screen (the three
+  export `onError` handlers stay silent for that sentinel). Frontend-only, no API/schema/default change. Tests:
+  `pollJob.test.ts` (+9 — happy path, transient-failure ride-out, error-budget reset, persistent-failure give-up,
+  terminal `error`/`cancelled`/`interrupted` with and without job text, abandon-on-unmount before and after the first
+  poll). *(A job record genuinely **deleted** by "Clear finished jobs" still ends as an error after the retries —
+  correct, since the client can't know it had finished.)*;
+  (b) ~~Seestar page spins forever on API error~~ **FIXED v0.210.19** (Builder 2026-07-29, branch
+  `claude/pensive-faraday-rlkdvs`): `SeestarView` now returns a retryable `QueryError` on `isError` like every
+  other route (test in `Seestar.test.tsx`); (c) ~~Tonight's error state unmounts its own date picker and altitude
+  select (`Tonight.tsx:187-192`) — one failing date strands the user~~ **FIXED v0.210.19** (same branch): the error
+  branch now keeps a minimal header with the **Night date picker** mounted (+ Retry) so the user can pick a different
+  night to recover (test `Tonight.test.tsx` "keeps the Night picker mounted on error"); (d) ~~single-frame
+  accept/reject doesn't invalidate `["reject-summary", safe]` (`Target.tsx:425-432`, unlike every sibling mutation)
+  so the left-out hovercard goes stale~~ **FIXED v0.210.20** (same branch): the `patch` mutation's `onSuccess` now
+  invalidates `["reject-summary", safe]` too; (e) ~~Storage "Prune old stacks" with an emptied keep box means keep
+  **0** (`Storage.tsx:21,110-111`,
+  `Number("") === 0` passes the backend's `keep<0` guard) — one confirm deletes every run for the target~~
+  **FIXED v0.210.17** (Builder 2026-07-29, branch `claude/pensive-faraday-nl5fvd`): a new pure `sanitizeKeep`
+  helper (`frontend/src/components/pruneKeep.ts`) rejects an emptied/blank/zero/negative/non-integer keep box, and
+  `confirmPrune` (`Storage.tsx`) now refuses to prune (prompting "keep at least 1") instead of honouring `keep: 0`
+  as delete-everything; the `NumberInput` min is also raised 0→1. Tests: `pruneKeep.test.ts`. (The backend `keep=0`
+  stays valid for the explicit-ids delete path.);
+  (f) ~~"Reject worst" on metric-less frames silently reports "Updated 0 frames" (`webapp/routers/frames.py:378-380`
+  excludes NULL-QC frames; reproduced `{"changed":0}`) with no explanation~~ **FIXED v0.210.20** (Builder
+  2026-07-29, branch `claude/pensive-faraday-rlkdvs`): `bulk_frames` now returns an optional `note` explaining the
+  no-op ("No accepted frames have a <metric> measurement yet — run QC / grade first, then try again.") when a
+  `reject_worst` finds accepted frames but none carry the chosen metric, and the Target-page toast shows that
+  guidance (yellow) instead of a bare "Updated 0 frames"; additive response field, upgrade-safe. Tests:
+  `test_bulk_reject_worst_metricless_explains_the_no_op` (`tests/webapp/test_api.py`); (g) ~~`/sky-so-far`
+  double-highlights two nav items (`App.tsx:168` prefix match)~~ **FIXED v0.210.19** (same branch): a pure
+  `isNavActive(pathname, to, end)` helper (`frontend/src/navActive.ts`) matches whole path segments (exact or
+  `to + "/"`), so `/sky-so-far` no longer also lights "Sky Map" (`/sky`). Tests: `navActive.test.ts`.
+  (S each, UX — PRIORITY 3.)
+
+  AND low-resolution reports) — the scanner ignores the Seestar folder convention:
+  it ingests the Seestar's own OUTPUT folders (and `_video` folders) as if they were
+  raw sub-frames.**~~ — **FIXED v0.184.9** (Builder 2026-07-24, branch
+  `claude/pensive-faraday-m76tgt`; **traced + reproduced + regression-tested**). Made
+  `scan_and_organize` (`seestack/io/scanner.py`) Seestar-aware via a new pure
+  classifier `_apply_seestar_convention(subdirs_with_fits)` applied between "walk the
+  tree" and "make targets". It: (1) maps `<T>_sub/` → target `"<T>"` and
+  `<T>_mosaic_sub/` → the **separate** target `"<T> (mosaic)"` (distinct name →
+  distinct `safe_name` `<T>_mosaic`, so a mosaic and its single field are never one
+  target); (2) **skips a bare `<T>/` output folder when its `<T>_sub/` sibling is
+  present** (covers both `M 31` for `M 31_sub` and `M 3_mosaic` for `M 3_mosaic_sub`,
+  since the sub-sibling of `M 3_mosaic` is exactly `M 3_mosaic_sub`) — so we never
+  build a 1-frame "stack" (→ colour-speckle gibberish, at the output's lower
+  resolution) from an on-device output; (3) **skips `*_video/` folders entirely**;
+  (4) stays **backward-compatible** — a bare folder with FITS, **no `_sub` sibling**,
+  and not `*_video` still ingests exactly as before (non-Seestar / older layouts).
+  Suffix tests are case-insensitive (firmware casing varies) but the target keeps the
+  folder's original casing. Regression tests (`tests/test_scanner.py`, all fail-before
+  where applicable): `test_apply_seestar_convention_maps_sub_and_skips_output_and_video`
+  (the exact backlog example → `["M 31", "M 3 (mosaic)", "M 3"]`),
+  `…_bare_folder_without_sub_sibling_kept` (no regression for non-Seestar layouts),
+  `…_is_case_insensitive`, and `test_scan_is_seestar_aware_end_to_end` (a realistic
+  dump: `M 3_sub`+`M 3`+`M 3_mosaic_sub`+`M 3_mosaic`+`Lunar_video` → exactly the two
+  real targets "M 3" (3 raw subs) and "M 3 (mosaic)" (2 raw subs), no output/video
+  junk targets). Upgrade-safe: pure folder→target mapping change, no config/DB-schema/
+  API-shape/on-disk/default change; re-scanning an already-polluted library simply
+  ingests the raw subs under the correct target name and leaves the old junk targets
+  for the owner to remove (see the follow-up below). **On the position-based
+  auto-merge guard (part 3b of the original entry):** `library.find_target_within()`
+  currently has **no callers** anywhere in `seestack/`/`webapp/`, so there is no live
+  auto-merge that could fold a mosaic into a single field — the distinct-name fix is
+  the active protection today; if a same-sky-area auto-merge is ever wired up it must
+  gate on same-framing (filed as the follow-up idea below). *(Original trace kept for
+  provenance: the old code did `units.append((d.name, fits))` for every immediate
+  subfolder — no suffix handling — so it built bogus targets from the Seestar's output
+  and video folders and treated those single output images as raw frames.)* Confidence:
+  reproduced. (M–L, autonomy/correctness — PRIORITY 1/2)
+
+- **v0.288.0** — Share/back-up: **"Download all my pictures" now really means all of them.** The zip walked
+  library targets only, so it silently left out every finished Moon and Sun still — for a Seestar owner
+  usually the first picture they were proud of, and the one they'd most notice missing from a backup. The
+  archive now appends each still's stored `stack.png` verbatim as `Moon_2026-05-02.png`, sharing one
+  collision-suffix tally with the targets so nothing is overwritten. `/api/library/summary` gained an additive
+  `n_finished_stills`, so the button's count matches what the archive holds, and the card stops hiding from
+  someone whose only pictures so far are lunar ones. Tests: +4
+  `tests/webapp/test_gallery_pictures_zip.py`, +2 `MyDeepSkyWallCard.test.tsx`.
+
+- **v0.287.4** — Editor/export parity: **the full-res PNG download now keeps the look you saved.** Tuning a
+  run with History's "Adjust" sliders re-bakes the stored preview through the asinh curve — so the thumbnail,
+  the share-JPEG and the wallpaper all showed the tuned picture while the one export you'd frame or print
+  silently reverted to the STF autostretch. `render_preview_png_full_res` now accepts the saved
+  `stretch`/`black` and the download endpoint passes the run's stored values through; runs you never adjusted
+  (columns NULL) and display-space editor exports are byte-for-byte unchanged. Tests: +2
+  `tests/webapp/test_full_res_png.py`.
+
+- **v0.287.3** — Data-integrity: **a plate solve is only believed when its WCS actually locates the frame.**
+  ASTAP returning 0 with a readable-but-empty/truncated `.wcs` sidecar used to be persisted as a *solved*
+  frame carrying a garbage `wcs_json` and a null centre — never re-solved (the solve arglist skips any truthy
+  `wcs_json`), and its celestial-less WCS slipped past `align_one`'s `is None` guard into reprojection. New
+  `wcs_text_is_usable()` gates the four places a stored solution is trusted: the DB write (honest failure,
+  frame stays retryable), the stack-then-solve bootstrap (won't stamp a celestial-less base onto every rescued
+  member), the `solve_ok` "located N" counter (same bar as the DB write), and `align_one` (the backstop that
+  heals a row an older version already stored). A real solve always ends with a centre, so a healthy install
+  is unaffected. Tests: +5 regression tests across `test_solve_runner.py`, `test_bootstrap_solve.py`,
+  `test_stack_align.py`, `test_wcs_io.py`.
+
+- **v0.281.0** — Autonomy: **a walk-away stack whose drizzle canvas won't fit now makes a slightly smaller
+  picture instead of no picture.** `_best_memory_fix` has always computed the one lever that would fit
+  (*"lower the drizzle scale to ×1.3 (~4.2 GB)"*) and the run-time guard has always quoted it — perfect for a
+  watching user, useless at 3 a.m., where the refusal just stopped a target that made a picture yesterday. On
+  an **unattended** run only (the new `StackOptions.unattended`, below), when that lever is `drizzle_scale`
+  the engine takes it: the guard, the in-flight cap and `DrizzleParams` all switch to the effective scale, the
+  FITS carries `DRZSCLAD`/`DRZSCLRQ`, the run record persists the scale that *ran* (so a reprocess rebuilds the
+  same picture), and the History Info panel says it plainly — *"Super-resolution used ×1.3 instead of the ×1.5
+  it was set to … It's slightly less zoomed-in; none of your subs were left out."* Narrow on purpose: never
+  `reference_canvas` (cropping a five-night mosaic is a different order of change), never an attended run,
+  and a canvas even ×1.0 can't hold still refuses. Additive/self-hiding/upgrade-safe. Tests: +6
+  `tests/test_drizzle_reject.py`, +2 `tests/webapp/test_stack_render.py`, +5 vitest.
+
+- **v0.281.0** (same change, the half it rests on) — Correctness/autonomy: **`StackOptions.unattended` — one
+  honest answer to "is anybody watching this run?"** `_afford_drizzle_reject` had been reading `auto_reject` as
+  the proxy, but `get_stack_defaults`
+  seeds `auto_reject=True` into the *manual Stack form* for a never-configured target — so a beginner sitting
+  right there had their explicitly-ticked drizzle rejection quietly dropped instead of getting the actionable
+  refusal the docstring promised, and the pre-submit estimate disagreed with the run. The posture is now
+  explicit: `unattended: bool = False`, in `NON_FORM_KEYS` (no descriptor, never client-settable), written by
+  `_stack_target` **after every option merge**, so a saved per-target default, a POST body, the global config
+  blob and reprocess-all's replayed prior-run options can none of them spoof it. Off by default → existing run
+  records, configs and the desktop app are byte-for-byte unchanged. Tests: +2
+  `tests/webapp/test_auto_stack_defaults.py`, +1 `tests/test_drizzle_reject.py` (fails on the old signal).
+
+- **v0.280.0** — Beginner feature / friendliness (Builder, branch `claude/compassionate-galileo-4maz3z`):
+  **"You're one away from finishing Lyra — and it's up tonight."** The life list says *how many* famous
+  objects you have, which is a number you look at; this says what to point at **next**, which is what gets
+  someone outside. New pure `nearly_complete_constellations` (`seestack/lifelist.py`) finds the constellation
+  the owner is closest to completing (≥1 captured, ≤2 missing); `GET /api/life-list/nearly-there` prefers the
+  closest candidate that has a missing object genuinely well-placed in tonight's dark window, in one batched
+  observability pass via the newly-public `nightplan.well_placed_tonight` (extracted from `suggest_targets`,
+  behaviour unchanged). `NearlyThereCard` shows it on the Tonight page and self-hides until a constellation is
+  close, so a fresh install never sees it. No new data, network or settings — read-only, additive, and
+  upgrade-safe.
+
+- **v0.279.1** — Autonomy/trust (Builder, branch `claude/compassionate-galileo-4maz3z`): **"Your cleanest shot
+  so far"** — a pinned cover never changes on its own, so a beginner who keeps adding subs can have every
+  showcase surface (Library tile, "My best pictures", the montage wall) showing an older, grainier picture than
+  their own library already holds. New pure `seestack/covernudge.py` compares the newest *genuine* stack's
+  `noise_sigma` against the pinned cover's and, only when it is ≥15 % cleaner, `GET
+  /api/targets/{safe}/cleanest-shot` offers the swap; the self-hiding `CleanestShotNote` renders it inside the
+  Target page's existing NoticeBoard with one button that reuses the existing `set-cover` path. It never
+  auto-swaps, stays silent on every ambiguous case (nothing pinned, pruned/editor-export pin, missing or
+  non-finite σ, a noisier stack, a candidate with no preview on disk), and rounds the quoted percentage down.
+  Additive and read-only — no config/DB/layout/default/API change.
+
+- **v0.277.3** — Memory/hardening (Scout, branch `claude/vigilant-knuth-yeeeim`; found by the calibrate-masters
+  QA sub-audit this run): `build_master` (`seestack/calibrate/masters.py`) held **three live copies** of the
+  frame set through the combine — the `arrays`+`loaded` lists, the `np.stack` copy, *and* a second full N×H×W
+  copy from `finite_stack = np.where(np.isfinite(stack), stack, np.nan)` — so peak RAM was ~3× the docstring's
+  advertised "~0.5 GB for 64 Seestar frames" (measured shape: ~1.6 GB), a real OOM-headroom gap on a
+  memory-constrained box building a large dark/flat set. Now drops the per-frame arrays once `np.stack` owns
+  them (`del arrays, loaded`) and masks non-finite samples **in place** in the stack it exclusively owns instead
+  of allocating the second copy — **byte-for-byte identical output** (the combine reduces the same finite-masked
+  buffer), verified by the existing NaN/inf-awareness suite plus a new all-inf-pixel regression across all three
+  methods (`test_build_master_all_inf_pixel_stays_nan`). Docstring corrected to the real peak. Single file, no
+  config/schema/API/default change, upgrade-safe; `incoming/` untouched (read-only).
+
+- **v0.272.1** — Friendliness: the Stack form's **Lucky imaging** knob was labelled "keep best **%**" but its
+  value is a *fraction* (0.05–1.0, default 1.0 = keep all) — so a beginner reads the default "1" as "keep best
+  1%", or types "50" for 50% and is silently clamped to the 1.0 max (keep-all, the opposite of a cut). The
+  Gallery already renders the same value honestly as "Lucky 50%" (`Gallery.tsx:322` → `round(f*100)%`), so the
+  input label was the lone inconsistency. Relabelled to "keep sharpest fraction" with an explicit help
+  ("1.0 = keep all, 0.75 = the sharpest three-quarters, 0.5 = the sharpest half; shown as a percentage on the
+  finished picture"). Display-only string change in `webapp/schemas.py` — no key/bounds/default/API/schema
+  change, upgrade-safe. New drift guard in `tests/webapp/test_schema_drift.py`
+  (`test_fractional_fields_do_not_label_themselves_as_percentages`) fails on the old label, passes on the new,
+  and blocks any future fraction (max ≤ 1.0) field from labelling itself a percentage. (Scout, branch
+  `claude/vigilant-knuth-r0qxeh`; found by dogfooding the running Stack page.)
+
+- **v0.270.4** — 🟠 The editor levels a mosaic's sky by **frame count**, the way the stack that produced it
+  always has. `level_by_coverage` has always accepted `frame_coverage` and the in-stack pass has always
+  passed it, but nothing wrote that map to disk — so the editor fell back to the weighted coverage map, which
+  is Σ of per-frame weights on every walk-away stack (`quality_weighted` is auto-on). Measured on a two-region
+  mosaic: the weighted map binned it as **four** levels, splitting each real region exactly 50/50 along a
+  weight boundary, and levelled each half's sky independently; the frame count gives the **two** the canvas
+  has. Now persisted as a sibling `{base}_framecov.fits` (only when it differs from the coverage map, so an
+  unweighted run's output set is unchanged), loaded by `load_frame_coverage`, carried on `EditContext`.
+  Also unblocks the `photometric_normalize`-on-mosaics item. Tests: `tests/test_frame_coverage_sibling.py`
+  (+6, new).
+
+- **v0.270.2** — 🟠 A star-poor mosaic panel is no longer auto-rejected as "cloud". `grade_frames` built its
+  star-count / sky-level / transparency populations across the **whole target**, but a mosaic's panels are
+  different patches of sky — so on the audit's repro **40 of 40** of a legitimately star-poor panel's subs
+  were recommended for rejection (z = 31.6, *"far fewer stars than typical — likely cloud"*), real permanent
+  data loss since `auto_grade_frames` acts unattended. Those three position-dependent metrics are now graded
+  per pointing cluster (`PANEL_LINK_DIST_DEG = 0.25°`, via a `cluster_pointings` extracted from
+  `detect_mixed_pointings`), the 25% rejection rail applies per panel as well as target-wide, and the split
+  only engages when it's sound — single-pointing, unsolved and tightly-packed targets behave exactly as
+  before. **0 recommendations after**; a real clouded sub inside a panel is still caught. The Auto-grade
+  dialog explains it. Tests: `tests/test_qc_grading.py` (+5), `tests/webapp/test_auto_grade.py` (+2),
+  `frontend/src/routes/Target.test.tsx` (+2), all fail-before.
+
+- **v0.270.1** — 🔴 The walk-away auto-stack can no longer publish a picture made worse by subs whose files
+  aren't on disk — the owner's "my images turned out worse" regression (787 → 575 → 271 frames across one
+  growing night). A readability preflight (`_auto_stack_readability_hold`) now holds a target back, without
+  stamping the attempt marker, when stacking *now* would land below the minimum-frames floor or thinner than
+  the best stack that target already has; and `_stack_target` stamps the missing-file count next to the
+  attempt marker (`AUTO_STACK_UNREADABLE_META_KEY`) so a crippled attempt is retried once the files return
+  instead of being recorded as "covered" forever. Gated on `unreadable > 0`, so a healthy install is
+  bit-for-bit unaffected; a first stack is never held merely for missing files. The Jobs page says so in plain
+  language with the real numbers. Tests: `tests/webapp/test_auto_stack_pipeline.py` (+5, 4 fail-before),
+  `frontend/src/routes/Jobs.test.tsx` (+3).
+
+- **v0.237.2** — Level a big mosaic's thin panel the same way in the preview and the export.
+  `coverage_leveling` scaled its per-level pixel floor by the proxy stride, but a hard
+  `_MIN_STRIDED_PIXELS = 12` safety floor stopped that scaling past ~×4 — so on a canvas over ~7500 px
+  (step ≥ 5, an ordinary deep mosaic) the **preview demanded more full-res-equivalent pixels than the
+  export** and a thin overlap panel fell out of the level set entirely: neither measured **nor filled**,
+  keeping its whole residual in the live preview while the export removed most of it. Split the one floor
+  into two: `include_min` (the export-equivalent count — which levels are *considered*) and
+  `effective_min` (unchanged — which levels may have their own sky median *measured*). A level between
+  them now takes the neighbour-interpolated offset the export already gives its own unmeasurable levels.
+  Measured on a ×6 proxy: preview residual **162.7 → 30.7 ADU** against the export's 30.0 (a 132.6 ADU
+  divergence gone). Byte-for-byte unchanged at step ≤ 4 (the two floors coincide) and on every full-res
+  export; a level below the export-equivalent floor is still an untouched sliver. Tests:
+  `tests/test_coverage_leveling.py` (+2; the parity one fails before / passes after).
+
+- **v0.231.1** — "Point here right now" now respects the Moon: the whole-night plan's proximity penalty is
+  extracted into one shared `nightplan.moon_penalty` and applied to the right-now sky term too, so a faint target
+  sitting beside a full Moon can't out-rank one in clean sky — and the card says "the Moon is fairly close to it
+  tonight" instead of silently down-ranking. Tests: `tests/test_nightplan.py` (+1).
+
+- **v0.231.0** — NEW beginner feature "Point here right now": a Dashboard card that picks, from the user's *own*
+  targets, the one that's best-placed at this moment **and** would gain most from another hour — scored as
+  (altitude now + dark sky left) × the √N noise cut one more hour would buy — with a one-sentence plain-language
+  why and a single Open button. New read-only `GET /api/plan/best-tonight`; self-hides when there's nothing to
+  recommend, and degrades to the "worth more time" half (never claiming a target is up) when no site is known.
+  Tests: +16 Python, +11 frontend.
+
+- **v0.230.2** — Honest accounting for subs that simply **weren't on disk**: a `count_unreadable_frames` preflight in
+  `run_stack` (+ `StackResult.n_unreadable` and a `NUNREAD` header card) splits the offered-vs-combined gap into
+  "couldn't be read" and "couldn't be aligned", so a cleared Stage-1 cache over an offline share reads as the storage
+  problem it is — with the reconnect-and-rescan fix — instead of sending the user to re-solve good frames. Surfaced on
+  the History card and as a Jobs Process-target alert. Tests: +7 Python, +9 frontend.
+
+- **v0.219.0** — NEW beginner feature "Your first image": a self-checking four-step map of the journey (point at your
+  subs → locate → check & grade → stack) on the Dashboard, each step ticking itself off from `/api/system` +
+  `/api/stats` (no new endpoint), leading with the single next thing to do and turning into a one-line well-done at
+  the end. Never appears on an established install (it only renders once it has seen this box mid-journey), and
+  dismissal is permanent. Tests: `firstImageSteps.test.ts` (+9), `FirstImageCard.test.tsx` (+8).
+
+- **v0.218.0** — The master-coverage roll-up now *explains* itself: each missed target carries a plain-language
+  reason from the binder's own gates (`coverage_miss_reason` — frame size / gain / temperature / a dark's exposure,
+  and the honest "another master is a closer match" / "a dark already includes the bias" when nothing is wrong with
+  the master itself), shown one per line in the tooltip; and the "no master covers this" nudge names the exposure/gain
+  to shoot the darks at, or says outright when the uncovered subs weren't all shot the same way. Additive payload
+  fields (`missed_detail`, `uncovered_detail`). Tests: `tests/webapp/test_calibration.py` (+7),
+  `calibrationCoverage.test.ts` (+7).
+
+- **v0.217.1** — The skipped-calibration-master note now reaches the walk-away user: the same recorded
+  `calibration_skipped` sentences the History *Info* panel shows are now also on the Jobs page's "Process target"
+  result and the Target page's newest-run block, via one shared self-hiding `CalibrationSkippedNote` component
+  (best-effort — a clean run, an older backend, or a failed fetch all render nothing). Tests:
+  `CalibrationSkippedNote.test.tsx` (+5), `Jobs.test.tsx` (+1), `Target.test.tsx` (+2).
+
+- **v0.213.0** — ⭐⭐ Fixed the PER-FRAME background flatten's starved object mask — the last stacking-engine source of
+  the "one corner is washed out" final picture. `_build_object_mask_for_bg` now detrends by a robust low-order
+  tile-median sky poly (shared `seestack/bg/sky_poly.py`), drops noise-sized detections, and adds a cheap
+  block-averaged faint-extended pass; the GPU path calls the same builder instead of its own global-threshold
+  approximation. Mask coverage dim→bright fifth 0.4 %…59.7 % → a flat ~3 %; honest-path stack tilt Σ|R/G/B| 102.7 →
+  18.1 ADU (18 % LP) and 59.0 → 7.7 (8 % LP); the finished one-click Auto picture's brightness tilt +64 % → +11 % of
+  sky, which also closes the ⭐ surviving-luminance-tilt bug. Faint-nebula colour survives the flatten far better
+  (G 1.8 → 12.0 of 18 ADU). Mask build ~200 ms vs ~215 ms before (subsampled clip stats + broadcast poly evaluation),
+  so the hot path is no slower. Tests: `tests/test_bg_object_mask_starvation.py` (+7), `tests/test_bg_gpu_shim.py`
+  (+1).
+
+- **v0.212.0** — NEW beginner feature "Was last night's sky bright?": a relative, self-hiding read on the latest
+  night's sky brightness, measured from the `sky_adu_median` QC already records and compared against the target's own
+  nights (never an absolute Bortle claim). Exposure- and gain-grouped so a settings change can't masquerade as a
+  brighter sky; hidden until there are 3 nights of ≥5 measured subs. Pure engine module + read-only endpoint +
+  Target-page note. Tests: `tests/test_sky_quality.py` (+13), `tests/webapp/test_api.py` (+3),
+  `SkyBrightnessNote.test.tsx` (+5).
+
+- **v0.211.1** — Editor export/render job polling hardened into one tested helper (`pollJob.ts`): rides out up to 5
+  consecutive status-fetch failures so a transient 5xx no longer discards a full-res render that is still going, and
+  stops on unmount so a late-finishing render can't fire a surprise download on another page. Click-path audit item
+  (a). Tests: `pollJob.test.ts` (+9).
+
+- **v0.211.0** — ⭐⭐ Fixed the one-click Auto colour split (purple one side / green the other) at its root: the
+  final-gradient object mask was reading the whole *bright half* of a light-polluted frame as "object" (5 % vs 66 %
+  masked), starving the fit so it removed only ~10 % of the gradient. Detection is now against a robust low-order
+  tile-median trend (plus a minimum detection area and a faint-extended pass), and `luminance` mode also flattens each
+  channel's own low-order gradient (`match_channels`, default on). Cross-channel sky spread 34.3 → 3.9 ADU (1.7 σ →
+  0.20 σ) on an 18 % LP gradient; luminance tilt +103 % → +46 % of sky; faint-nebula chroma preserved. Tests:
+  `tests/test_final_gradient.py` (+5), `tests/test_edit_engine.py` (+1 end-to-end).
+
+- **v0.210.20** — Click-path audit fix (f) + (d): `bulk_frames` now returns a `note` so "Reject worst" on a
+  metric-less batch explains "run QC first" instead of a silent "Updated 0 frames" (Target toast shows it in yellow);
+  and the single-frame accept/reject `patch` mutation now invalidates `["reject-summary", …]` like every sibling so
+  the left-out hovercard doesn't go stale. Tests: `test_bulk_reject_worst_metricless_explains_the_no_op`.
+
+- **v0.210.19** — Four frontend click-path/UX fixes from the 2026-07-26 audit: (g) `isNavActive` matches whole path
+  segments so `/sky-so-far` no longer double-highlights "Sky Map"; (b) `SeestarView` surfaces a retryable
+  `QueryError` instead of spinning forever on API error; the Telescope live-stacking bar is now an honest
+  indeterminate "working" bar (was a `% 100` sawtooth); (c) the Tonight error state keeps the Night date-picker
+  mounted so a failing date doesn't strand the user. Tests: `navActive.test.ts`, `Seestar.test.tsx`,
+  `Tonight.test.tsx`.
+
+- **v0.203.0** — Fix the aliased/low-res interactive stack render: `load_stack_rgb` now downscales with a NaN-aware
+  area (box) average to the full `max_width` instead of nearest striding, so the History "Adjust" view (and the
+  stretch-suggestion measurement + >8000 px full-res PNG) renders a native 1080-wide stack at 1024 px, not a coarse,
+  twinkling 540 px — matching the box-averaged baked preview beside it. Stars' flux is spread, not dropped; NaN
+  coverage gaps still preserved. +1 regression test (1080→1024, odd-coord star survives). (branch
+  `claude/pensive-faraday-0ggbe3`)
+
+- **v0.202.0** — ⭐⭐⭐ Auto-derive the plate-solve FOV per frame from the FITS header (S30 ≈ 2.1°, S50 ≈ 1.27°) +
+  wire the dead ASTAP FOV/timeout Settings through to every real solve. The owner-confirmed root cause of an S30
+  owner's solves failing across ALL targets: every real solve was hardcoded to 1.3° (an S50 value) — a mismatch
+  ASTAP's quad-matching does not forgive. `solve_one` now derives the true FOV from each frame's own
+  FOCALLEN/XPIXSZ/dimensions (new pure `fov_deg_from_header`), falling back to the now-threaded Settings FOV, then
+  1.3°. Upgrade-safe (defaults identical). +8 tests (fits_loader FOV math + solve_one derivation/fallback +
+  run_qc_and_solve settings threading). (branch `claude/pensive-faraday-0ggbe3`)
+
+- **v0.196.0** — ⭐⭐ Full-res PNG offered on every beginner picture-download surface (consistency follow-up to
+  v0.195.0): the fullscreen viewer menu (Gallery / My best pictures / History lightbox), the Target page's "Picture"
+  menu, and the Dashboard recent-stack card all now lead with "Full-res PNG (native size)" and honestly relabel the
+  1024px option "Quick preview PNG"; the misleading "(best quality)" label is gone app-wide. Added `has_fits` to the
+  stats `recent_stacks` summary (additive) so the Dashboard menu only offers full-res when a FITS exists. +2 lightbox /
+  updated Gallery/Target/Dashboard / +1 stats tests. (branch `claude/pensive-faraday-xflilv`)
+
+- **v0.195.0** — ⭐⭐ Full-resolution PNG download on the History card (directly answers the owner "my output is
+  low-res" report — candidate 3): a new "Full-res PNG" button renders the run's FITS at native output resolution
+  (`…/stack-runs/{id}/full-res-png` → `render_preview_png_full_res`, same STF/verbatim look as the preview, 8000 px
+  long-edge cap), and the misleading "(best quality)" tooltip on the 1024 px quick PNG is corrected. Additive endpoint
+  + frontend button; +4 engine / +3 endpoint / +1 frontend tests. (branch `claude/pensive-faraday-xflilv`)
+
+- **v0.184.11** — ⭐ "How's my stack?" now surfaces the #1 cause of the owner-reported faint-field "gibberish": when
+  a large fraction of a target's *accepted* subs never plate-solved (so they silently never reached the stacker),
+  `stack_health` leads with a plain-language note — "Only N of M subs could be located (plate-solved) … installing
+  ASTAP's star database (Settings) helps far more subs solve" — wired to a one-click Settings link (new `solve_help`
+  action). Fires only above 30% unlocated with ≥8 accepted subs and ≥1 located (so solve-pending targets stay silent);
+  ranks above every other note. Complements the `thinStackWarning` (which only fires at ≤4 frames *used*) by catching
+  the plentiful-but-mostly-unsolved night the owner actually hit. Additive pure-function note + a frontend action link;
+  no schema/config/default/API-shape change. Tests: `tests/test_stackhealth.py` (+6), `StackHealthCard.test.tsx` (+1).
+  Friendliness + autonomy (surfaces the gibberish root cause). Branch `claude/pensive-faraday-h5qn26`.
+
+- **v0.178.2** — The "why frames were left out" high-drop verdict now names the *dominant actual cause* (soft focus →
+  check focus/dew, clouds, couldn't-be-located → check subs, unsolved → Run Plate Solve) instead of the generic
+  "cloud or wind", when one actionable bucket is strictly the majority of the dropped frames; a mixed night or a
+  trailed/removed-dominated night keeps the generic reassurance. Pure-function; friendliness + trust. Branch
+  `claude/pensive-faraday-xgym08`.
+
+- **v0.178.1** — ⭐ Fixed the "One frame vs your stack" reveal rendering its two halves under different tone curves.
+  Persist the saved custom asinh stretch/black on the run (additive nullable `stack_runs.preview_stretch`/`preview_black`,
+  `SCHEMA_VERSION` 10→11) and render the "before" sub through the *same* curve; self-hide the card for display-space
+  editor exports (a raw sub can't honestly match a bespoke tone-mapped image), mirroring the noise-ratio endpoint.
+  Backend-only (frontend already self-hides on `available:false`); upgrade-safe. Branch `claude/pensive-faraday-xgym08`.
+
+- ~~**Calibration exposure-mismatch warning was silenced exactly when a wrong-shaped bias disabled dark-scaling.**~~
+  — **FIXED v0.176.1** (Scout 2026-07-23, branch `claude/kind-mccarthy-449g7g`; traced + reproduced + regression-tested).
+  *(Stacking/calibration correctness + broken-guardrail; Medium — advanced manual-calibration path; found by this run's
+  calibrate/weighting adversarial audit.)* `calibrate/apply.py::calibration_warnings` computed `scaling_active =
+  self.scale_dark_to_light and self.bias is not None` (no shape check), but `_effective_dark` **only** exposure-scales the
+  dark when `self.bias.shape == self.dark.shape`. So a user with a dark + a **wrong-shaped** master bias + scaling on got the
+  unscaled dark subtracted (a 30 s dark's pedestal over/under-subtracted on 10 s subs, every frame — background crushed by
+  ~133 ADU in the repro) **while the exposure-mismatch advisory that exists to catch exactly this was suppressed**. Reproduced
+  (2×2 bias vs 4×4 dark, 30 s→10 s: `_effective_dark(10)` returns 300 not the scaled 166.67, `calibration_warnings(10)` returns
+  `[]`; control with a matching bias correctly scales and stays silent). **Fix:** extracted a shared `_dark_scaling_applies`
+  property (scale-on ∧ dark present ∧ bias present ∧ **bias.shape == dark.shape**) and used it in **both** `_effective_dark`
+  and `calibration_warnings` so the two can never drift apart again. Byte-for-byte unchanged on every already-correct path
+  (matched-shape bias still scales silently; no bias / no dark / matched-exposure all as before). Regression
+  `tests/test_calibrate.py::test_calibration_exposure_warning_fires_when_bias_shape_mismatch_disables_scaling` (asserts the
+  unscaled 300 ADU fallback AND that the advisory now fires; fail-before: warning was `[]`). Upgrade-safe: within-class
+  predicate refactor, no config/DB/API-shape/on-disk/default change.
+
+- **QA re-audit record (Scout 2026-07-23, branch `claude/kind-mccarthy-49jli6`).** Adversarial correctness sweep
+  of the stacking engine per the current focus. **`drizzle_path.py` / `mosaic.py` / `pointings.py` /
+  `photometric.py` traced CLEAN** (drizzle weighted-average output, E[v²]−E[v]² variance, photometric scale
+  direction + `1/s²` re-weight, mosaic canvas geometry / CRPIX pad, pointing union-find all verified correct; only
+  by-design edge-ring coverage falloff + a per-frame `out_wht.copy()` overhead noted, neither corrupts pixels).
+  **`align.py` + `calibrate/apply.py` + `calibrate/masters.py` math traced CLEAN** (flat div-by-zero floors, NaN
+  pedestal sanitisation + no-data masks, CFA R/B registration, order-1 reproject NaN propagation, subpixel-shift
+  mask recompute, MAD==0 degrade all already defended); the only real gaps are **calibration-frame *matching*
+  being unvalidated** — filed as the exposure/temperature-mismatch warning idea + the `validate()` unused-bias
+  false-positive bug. **`stacker.py` rejection math** yielded one fixed data-integrity edge (κ-σ pass-2
+  coverage-gap, FIXED v0.172.1) and one filed low-severity memory-guard gap; weighting, Welford, min/max
+  k-insertion, float32 drift over 10⁴ subs, and the NaN=no-coverage hot-path semantics all verified sound.
+
+- **v0.141.0** — NEW BEGINNER FEATURE / friendliness (PRIORITY 3 — "annotated results"; Builder 2026-07-21,
+  branch `claude/pensive-faraday-d04mpi`). **"What's in this picture?" — label the catalog objects inside a
+  finished stack.** Engine `seestack/annotate.py::objects_in_field` projects the bundled offline deep-sky
+  catalog through a run's output WCS (read from the master FITS header via new
+  `wcs_io.celestial_wcs_from_fits` — corrected the filed premise that the WCS lived on `stack_runs`) and
+  returns the objects whose centre lands in-frame; read-only `GET …/stack-runs/{id}/annotations`; a reusable
+  `AnnotatedImage` overlay (pure contain-fit/letterbox `objectMarkerLayout`) wired to an **"Identify"** toggle
+  on each History run card (off by default, lazy fetch, plain "Found N" readout). RA-seam/pole safe, offline,
+  additive — no schema/config/default/API change. Tests: `test_annotate.py` (6), `test_stack_annotations.py`
+  (3), `AnnotatedImage.test.tsx` (7), `History.test.tsx` (+2). Slice (d) burned-in labelled JPEG + Gallery
+  lightbox / editor surfaces remain open follow-ups.
+
+- **v0.139.0** — NEW BEGINNER FEATURE / autonomy (PRIORITY 2/3 — pre-stack reassurance; Builder 2026-07-21,
+  branch `claude/pensive-faraday-c78iq5`). **"First look" — the sharpest accepted sub, shown the moment QC
+  finishes and before the stack runs.** Pure `qc.grading.best_frame` (lowest FWHM, tie-broken by star count) →
+  new read-only `GET /api/targets/{safe}/best-frame`; a `FirstLookCard` on the Target hub renders that frame's
+  existing `/preview` thumbnail with a plain-language caption, shown only while no finished stack exists (the
+  real picture supersedes it). Reuses the preview render + QC metrics — no new render path, offline,
+  additive/upgrade-safe. Tests: `test_qc_grading.py` (+7), `tests/webapp/test_target_best_frame.py` (+3),
+  `FirstLookCard.test.tsx` (+9). Python 1392 + tsc + vitest 916 + vite build green.
+
+- **v0.137.0** — NEW BEGINNER FEATURE / autonomy (PRIORITY 2/3 — "drop files, walk away, get told when it's
+  ready"; Builder 2026-07-17, branch `claude/pensive-faraday-ql4ddd`). **Opt-in "Notify me when done" desktop
+  notifications on the Jobs page.** The north-star flow is "drop subs, walk away" — but a beginner who kicks off
+  a stack / process-target and switches to another browser tab had no way to know it finished except sitting and
+  watching the progress bar. Slice (a): a new pure/testable `frontend/src/jobNotify.ts` (`justFinishedJobs(prev,
+  curr)` detects the in-progress→done/error transition between polls — never bursting on a fresh load or firing
+  for a user-cancelled job; `jobNotificationText` plain-language title/body; thin Notification-API/localStorage
+  wrappers) + a **`Notify me when done` switch** in the Jobs header that requests browser permission on enable
+  and persists the opt-in. While the Jobs page is open (the route the user lands on after starting a job), each
+  job that finishes fires one desktop notification. **Off by default**, hidden entirely where the browser has no
+  Notification API, and it changes **no** processing behaviour — purely mirrors a finish. Frontend-only,
+  additive/upgrade-safe: no backend/schema/config/API/default change. Tests: `jobNotify.test.ts` (11 —
+  transition detection incl. fresh-load/cancelled/still-running guards, done-vs-error phrasing, permission +
+  persistence helpers, `showJobNotification` fires only when granted) and `Jobs.test.tsx` (+2 — the toggle
+  requests permission when supported / is hidden when unsupported). tsc + full vitest (905) + vite build green.
+  *(Beginner bar ✔ — one obvious toggle, plain language, no new astro concepts, no deps.)* **Follow-up (slice b)
+  filed in Ideas:** a global cross-route watcher so the ping also fires while the user is on a *different* page
+  (today it only fires while the Jobs page is mounted).
+
+- **v0.136.7** — Stacking-engine correctness (PRIORITY 1 — sub-pixel alignment consistency; Builder 2026-07-17,
+  branch `claude/pensive-faraday-ql4ddd`). **Build the sub-pixel-refine reference patch in the same domain as
+  the frames it is phase-correlated against.** `run_stack` (`seestack/stack/stacker.py:868`) built the reference
+  patch via `align_one(...)` **without** `calibration=`/`mono=`, whereas every frame it is later cross-correlated
+  against (`_align_for_stack`) passes both — so for a **mono** stack the reference was OSC-debayered (a different
+  luminance representation from the mono frames' `raw`-replicated luminance) and for a **calibrated** stack the
+  reference was uncalibrated. That domain mismatch degrades the measured sub-pixel shift (off-by-default
+  `subpixel_refine`; benign but a genuine inconsistency in the stacking hot path, found by a fresh adversarial
+  engine audit which otherwise traced clean). Fix threads `calibration=calibration, mono=options.mono` into that
+  one call so the reference matches the frames. Additive/upgrade-safe: no schema/config/API/default change; a
+  non-mono, uncalibrated stack (where both were already the defaults) is byte-for-byte unchanged. Regression
+  `tests/test_stack_pipeline.py::test_subpixel_reference_patch_matches_frame_alignment_domain` (spies on
+  `align_one`: fail-before the reference call omits `mono`/`calibration` / pass-after it shares the per-frame
+  calls' domain).
+
+- **v0.136.6** — Friendliness (PRIORITY 3 — beginner-facing frames table; Builder 2026-07-17, branch
+  `claude/pensive-faraday-ghypg3`). Frames-table sort now keeps **unmeasured (None-metric) frames last in
+  both directions**: a descending "worst first" sort used to invert the nulls-last trick and pin a block of
+  unmeasured/unsolved subs to the top instead of the actually-worst measured frames. Partition + sort measured,
+  append unmeasured. Regression `test_api.py::test_frame_sort_keeps_unmeasured_last_in_both_directions`.
+
+- **v0.136.5** — Calibration-engine robustness (PRIORITY 4 — image-quality/consistency; Builder 2026-07-17,
+  branch `claude/pensive-faraday-ghypg3`). Sanitize the master **flat-dark** through `_sanitize_pedestal` at
+  load (mirroring dark/bias): a non-finite flat-dark pixel now subtracts 0 (= no correction there) instead of
+  propagating an inf that made the flat's `nanmean` non-finite and silently dropped the *entire* flat; the
+  flat-drop warning now names a non-finite mean distinctly from a genuinely non-positive one. Regression
+  `test_calibrate.py::test_flat_dark_nonfinite_pixel_does_not_drop_the_whole_flat`.
+
+- **v0.132.1** — Stacking-engine correctness (PRIORITY 1 — data-integrity of a beginner-facing diagnostic;
+  Builder 2026-07-16, branch `claude/pensive-faraday-vgnbsy`). **Honest per-pixel frame count under
+  per-channel κ-σ rejection.** `WeightedSumAccumulator.add`/`add_window` (the default OSC sigma-clip path)
+  and the drizzle two-pass reject path both counted a frame's contribution to a pixel by **channel 0 (red)
+  only** (`covered = valid[..., 0]` / a strict increase in channel-0's drizzle `out_wht`). In the standard
+  path this is harmless (a debayered frame's channels share a valid mask, so any==channel-0), but pass-2 κ-σ
+  builds a **per-channel** `keep` mask — a pixel whose red alone is clipped (an outlier) while green/blue
+  still contribute was then *not* counted, so `frame_coverage` (→ the `coverage_min`/`coverage_max`
+  "N frames per pixel" diagnostic) was biased **low**. That number feeds `stackhealth.py`'s beginner
+  "How's my stack?" note — an understated `coverage_min` can trip a **false "the edges have far fewer frames …
+  trim border" warning** on an otherwise even stack — and the History "coverage N–M frames" display. **Fix:**
+  count a frame wherever it contributed to **any** channel (`valid.any(axis=2)`; drizzle ORs the three
+  channels' weight increases via one reusable snapshot + a bool plane, staying memory-bounded). Byte-for-byte
+  unchanged for the common all-or-nothing case (ordinary + unweighted stacks, the existing parity tests still
+  hold); only the pixel image is *never* touched — this is a diagnostic-count fix. Additive, no
+  schema/config/API/default change (the `coverage_min`/`coverage_max` columns are just computed more
+  accurately going forward; old run rows are untouched). Regression tests: `tests/test_accumulator.py`
+  (2 — a red-only-clipped frame still counts, direct + windowed) and `tests/test_drizzle_reject.py`
+  (1 — a red-only outlier block clipped in pass 2 still counts the frame, 17 not 16) — all fail-before
+  (16)/pass-after (17). Found by a fresh adversarial stacking-engine correctness audit (the audit otherwise
+  traced the image-forming hot path clean). Severity: wrong beginner-facing diagnostic (broken-UX/trust; no
+  pixel data affected). Confidence: reproduced + fixed.
+
+- **v0.132.0** — Beginner feature / friendliness (PRIORITY 3 — "should I wait or walk away?"; Builder 2026-07-16,
+  branch `claude/pensive-faraday-hmlp4a`). The **Jobs page now shows a plain-language "time left" estimate** next
+  to each running step ("aligning 1200/3000 · ~2 min left") — the first thing a beginner who dropped a night's
+  subs and kicked off a long stack wants to know. A stack runs several steps and each step restarts its own
+  `done`/`total` (a two-pass sigma-clip stack streams every frame once per pass), so a naive whole-job estimate
+  from the job's start time would be wrong; the new pure `frontend/src/jobEta.ts` instead estimates only the
+  **current step**, anchoring on the first observation of that step and projecting from the rate since, and the
+  readout sits right beside that step's name + count so it reads unambiguously as "this step" (not the whole
+  job). Fully division-guarded (a missing/empty/complete observation, or an implausible >24 h early guess, shows
+  *nothing* — never a wrong number or a throw, so a bad estimate can't erode trust); coarse rounding (5 s / whole
+  minutes / h+min) keeps it from jittering between the 1.5 s polls; and it never appears on a queued/finished job.
+  Frontend-only, additive, off-nothing: no backend/schema/API/default change (reuses the existing `phase`/`done`/
+  `total` the Jobs poll already returns). Tests: `jobEta.test.ts` (18 — anchor reset on step change/restart/
+  resize, rate projection + all the null guards, friendly formatting, label incl. the >24 h suppression) +
+  `Jobs.test.tsx` (+3 — the estimate renders beside a running step's count, is omitted when unavailable, and
+  never leaks onto a queued job). tsc + full vitest + vite build green. (S, beginner-feature — PRIORITY 3;
+  beginner bar ✔.)
+
+- **v0.131.3** — Stacking-engine correctness (drizzle edge/floor polish — focus #1; Builder 2026-07-16, branch
+  `claude/pensive-faraday-d9xp84`). `stack/drizzle_path.py`: (1) `add_frame`'s in-bounds mask now keys on the
+  astropy pixel-*edge* extent `[-0.5, N-0.5]` instead of centre indices `[0, N-1]`, so an input pixel whose
+  centre falls in the outer ≤½-px band deposits its footprint instead of being dropped (fixes edge-ring
+  coverage/intensity falloff; off-canvas stray-sub `intersects` semantics preserved); (2) the κ-σ resolution
+  floor now judges the raw `m2−m²` (extracted to a testable `_clip_tolerance` helper) rather than the
+  Bessel-inflated variance, so a low-`neff` bright pixel stays floored. Additive, upgrade-safe; interior image
+  byte-for-byte unchanged. Regressions in `tests/test_drizzle_reject.py` (edge deposit + neff-independent floor,
+  both fail-before/pass-after).
+
+- **v0.123.0** — Beginner feature / friendliness (PRIORITY 3 — "enjoy & share a good image"; Builder 2026-07-14,
+  branch `claude/pensive-faraday-lb2btt`; spotted dogfooding the History/Gallery download surface). A beginner
+  can now **download their finished picture as a shareable PNG** in one click — previously the only download
+  options were the raw 100 MB+ FITS or a large TIFF (scientific formats, useless for sharing/printing), and the
+  fullscreen viewer's "Download" button confusingly saved a FITS rather than the image you were looking at. No
+  backend change was needed (the `preview` artifact was already served as a download with a `{basename}.png`
+  filename): **(1)** the History card gains a plain-language **"Picture"** download button (gated on
+  `has_preview`, placed before FITS/TIFF, tooltip "Download the finished picture as a shareable PNG image"), with
+  the FITS button re-tooltipped as "raw scientific data … for re-processing, not sharing"; **(2)** the shared
+  `ImageLightbox` now downloads the **picture being shown** (PNG) as its primary action (`IconPhotoDown`, "Download
+  picture (PNG)") with the raw FITS offered as a clearly-labelled *secondary* download (`IconDatabase`, "Download
+  raw data (FITS)") via a new optional `rawHref` prop — so History and Gallery's fullscreen viewers now save the
+  actual image, not a scientific file, while power users keep FITS access. Frontend-only, additive, no
+  schema/config/API/default change; the Editor lightbox (no download href) is unaffected. Tests:
+  `ImageLightbox.test.tsx` (+3 — no-download default, primary picture href, distinct secondary raw href),
+  `History.test.tsx` (+2 — Picture button hrefs to the preview when `has_preview`, absent otherwise with FITS still
+  offered), `Gallery.test.tsx` (+1 — the fullscreen view downloads the picture + raw FITS). tsc + full vitest (816)
+  + vite build green.
+
+- **v0.121.5** — Engine robustness (calibration-engine contract-hardening — focus #1; Builder 2026-07-14, branch
+  `claude/pensive-faraday-irqhx4`). `calibrate/apply.py::apply_raw` now honours its documented "returns a new
+  array" contract on the empty-bundle path: it copies at the return only when the result would alias `raw`, so a
+  future in-place consumer can't corrupt a shared source frame — with no hot-path double-copy (a real master path
+  already yields a fresh array). Regression `tests/test_calibrate.py::test_apply_raw_empty_bundle_returns_a_fresh_array`
+  (+ a no-double-copy guard). Closes latent trap (2) from the 2026-07-10 engine audit.
+
+- **v0.121.4** — Engine robustness (stacking-engine hardening — focus #1; Builder 2026-07-14, branch
+  `claude/pensive-faraday-yiosal`). Harmonised `stacker.py`'s `StackResult` `coverage_min/max` slice (~L1307) to
+  carry the same `coverage.ndim == 3` guard its history-record sibling (~L1275) already had, so a future
+  `frame_cov=None` + 2-D-coverage path can't silently take a wrong `[..., 0]` slice. No reachable behaviour
+  change today (the reachable path stays 3-D); existing stack-pipeline suite green.
+
+- **v0.121.3** — Engine robustness (stacking-engine hardening — focus #1; Builder 2026-07-14, branch
+  `claude/pensive-faraday-yiosal`). Made the accumulators' documented "broadcastable" `mask` contract true: a
+  shared `accumulator._mask_bool` expands a per-pixel 2-D `(H,W)` mask to `(H,W,1)` before broadcasting so it
+  masks across all channels instead of raising `ValueError`, wired through `WeightedSumAccumulator.add`/
+  `add_window` + `MinMaxRejectAccumulator._add_into`. Not on any live path today (same-shape masks byte-for-byte
+  unchanged); closes a latent trap for any future per-pixel-reject path. +3 regression tests in
+  `tests/test_accumulator.py` (fail-before with `ValueError` / pass-after).
+
+- **v0.119.8** — Bug fix (**upgrade-safety / data-integrity — §9, top priority class**; Scout 2026-07-14,
+  branch `claude/practical-dirac-9awndt`; found by an adversarial ingest/QC audit, **traced + reproduced +
+  regression-tested**). **A project created before the QC frame columns existed was permanently bricked on an
+  in-place upgrade.** `seestack/io/project.py::_migrate_schema` only ever `ALTER`ed the `frames` table for the
+  v3 `ra_hint_deg`/`dec_hint_deg` hints — every later frame column (`aligned_cache_path`, `eccentricity_median`,
+  `transparency_score`, `streak_detected`, `streak_count`, `mosaic_panel_id`, `user_override`) reached the base
+  `SCHEMA_SQL` with **no matching migration**. So a genuine older `project.sqlite` whose `frames` table predates
+  those columns opened, got its `user_version` stamped to the current `SCHEMA_VERSION` (9) — and then **every**
+  `iter_frames()`/`get_frame()` raised `IndexError: No item with that key` because `_row_to_frame` reads
+  `row["transparency_score"]` etc. Worse, once the version was stamped, `_check_schema` returned early on
+  re-open, so the failure was **permanent** — a live install's target would silently become unopenable after
+  pulling the new image (exactly the §9 "never lose data/settings on upgrade" guarantee). Reproduced against a
+  v3-shaped frames table (built the way the repo's own migration tests model a v3 project): open succeeds,
+  stamps 9, first frame read raises `IndexError`; re-open still raises. **Fix (correct-by-construction):** a new
+  `_reconcile_table_columns()` reads the authoritative column set of `frames`/`stack_runs` from `SCHEMA_SQL`
+  once at import (`_EXPECTED_COLUMNS`) and, on **every** open, additively `ALTER TABLE … ADD COLUMN`s any column
+  the on-disk table lacks (name/type/notnull/default reconstructed from `PRAGMA table_info`; each wrapped so a
+  reconcile can never itself fail an open). `_check_schema` now runs it **even when `user_version ==
+  SCHEMA_VERSION`**, so it *self-heals* a DB a past build already stamped-but-broke, not only a forward
+  migration. Never drops/renames/rewrites — a current-schema project matches exactly, so it's a no-op there
+  (byte-identical). This also closes the whole *class* of bug: any future additive column that reaches the
+  schema without a hand-written `ALTER` is now backfilled automatically. Regressions in `tests/test_history.py`:
+  `test_legacy_frames_table_backfills_qc_columns_and_reads` (a pre-QC-columns frames row survives + reads its
+  backfilled columns as schema defaults) and `test_current_version_but_missing_column_self_heals` (an
+  already-stamped-current-but-missing-column DB recovers on open) — both fail-before (IndexError) / pass-after.
+  Additive, no schema-version bump needed, no config/API/on-disk-layout/default change; the version-specific
+  migration blocks are untouched (reconcile is a safety net after them). §9 upgrade-safety hardened, not
+  weakened. (PR: this branch.)
+
+- **v0.119.6** — Bug fix (data integrity / autonomy — PRIORITY 2/3; Builder 2026-07-14, branch
+  `claude/pensive-faraday-x09w10`; found by a fresh adversarial audit of the bulk-upload path, traced +
+  reproduced + regression-tested). **Silent data loss on a folder upload where two different subs share a
+  basename.** The browser folder-upload path collapsed every sub to its **basename** before writing
+  (`safe_component`), so two genuinely-different subs in different session subfolders — e.g.
+  `night1/Light_0001.fit` and `night2/Light_0001.fit` (capture tools, Seestar included, restart frame
+  numbering **per session**, so this recurs constantly) — landed on one destination: the first was written,
+  the second was reported to the user as `skipped` ("already present") and its bytes were **lost**, with a
+  misleading success summary. Worse, the frontend's drag-drop walker (`readEntryFiles`) discarded each file's
+  folder-relative path (`entry.fullPath`) *before* upload, so the server never even saw what distinguished
+  the two. **Fix (frontend + backend):** (1) `readEntryFiles` now preserves each dropped file's
+  folder-relative path as the `File` name (and `uploadFits` sends `webkitRelativePath || name`), so distinct
+  subs arrive distinct; (2) a new `safe_relname` on the server **preserves** that relative subpath by
+  flattening its separators into one traversal-safe filename (`night1__Light_0001.fit`) instead of reducing
+  to the bare basename — distinct source files stay distinct (no lost data), while a genuine re-upload of the
+  *same* path still dedups (ingest keys on the source path, so no double-count), and everything still lands
+  flat in `incoming/<target>/` so the scanner's one-subfolder-per-target rule is unchanged. A `..` segment
+  anywhere now rejects the name outright (safer than the old silent strip-to-basename). Additive /
+  upgrade-safe: no schema/config/API-shape/default change; uploads stay unauthenticated-by-default as before.
+  Tests: `tests/webapp/test_upload.py` (`safe_relname` helper matrix; endpoint keeps two same-named subs from
+  different folders with correct bytes; a traversal name is rejected) and
+  `frontend/src/components/UploadFits.test.tsx` (`readEntryFiles` preserves the subpath for same-named subs
+  and leaves a bare filename untouched). Python + tsc + full vitest + vite build all green. (Wrong-outcome /
+  irreversible data loss on the beginner on-ramp.)
+
+- **v0.119.5** — Bug fix (friendliness/trust — PRIORITY 3; Builder 2026-07-14, branch
+  `claude/pensive-faraday-x09w10`; found by a fresh adversarial audit of the recently-added
+  `session_recap`/`stats` code, traced + reproduced + regression-tested). The Dashboard **"Last night"**
+  card undercounted a target imaged early and **revisited near dawn** across a >6 h intra-target gap on a
+  normal multi-target night (shoot A at dusk → B/C for hours → back to A near dawn). `library_session_recap`
+  trimmed each target to *its own* last session (`last_session_frames`) **before** merging targets onto one
+  timeline, so A's dusk batch — severed from its dawn batch by A's own 7 h gap — was dropped even though B's
+  in-between subs bridged the whole night into one ≤6 h-step cluster; the card then understated the night's
+  sub count, integration time, the revisited target's contribution, and the night's start time. **Fix (two
+  parts):** (1) `library_session_recap` no longer pre-trims per target — it merges *all* handed datable
+  frames and lets the existing trailing-cluster gap-walk make the precise cross-target "last night" cut (an
+  older isolated session still falls away; a bridged early batch is kept). (2) A new memory-bound helper
+  `recent_session_window_frames` (keep frames within `LAST_NIGHT_WINDOW_HOURS=30 h` of a target's *own*
+  latest capture — wide enough to never sever a bridged night, small enough to never hold a target's whole
+  history) replaces the caller's `last_session_frames` pre-trim in `stats.py::_collect_last_night`, so the
+  bridged early batch survives to the merge while memory stays bounded. Pure/offline/read-only; no
+  schema/config/API-shape/default change. All prior `library_session_recap` tests stay green (the gap-walk
+  already did the correct cut — the pre-trim was redundant *and* buggy). Regressions:
+  `tests/test_session_recap.py` (revisited-target counted across a bridge; window keeps a bridged early batch
+  but drops last week's session + is empty without timestamps) and `tests/webapp/test_last_night.py`
+  (end-to-end revisit through `GET /api/last-night`). (Broken-outcome for a beginner-facing summary; no pixel
+  data affected.)
+
+- **v0.114.0** — Beginner feature (friendliness/workflow — PRIORITY 3; Builder 2026-07-13). "Share card"
+  slice (a): a "Download share image (JPEG)" editor action renders the displayed result to a social-sized
+  JPEG (long edge ≤ 2048, LANCZOS) + a copy-friendly caption blurb ("M 42 · 3h 12m · 152 subs") with a Copy
+  button — the beginner's "how do I post this?" step. New `write_share_jpeg` + `seestack/sharecard.py`,
+  `submit_editor_share` job, `POST/GET …/editor/share` endpoints. Burned-in caption strip deferred (needs a
+  bundled font). Additive; no schema/API/default change. Tests across engine/webapp/frontend.
+
+- **v0.113.2** — Robustness (Builder 2026-07-13). Harden `session_recap._parse`: coerce a tz-naive timestamp
+  parse to UTC so `_split_sessions`' sort/subtraction never raises "can't compare offset-naive and
+  offset-aware datetimes". Reachable via `fits_loader._parse_timestamp`'s `return raw` fallback for an
+  unnormalised header `DATE-OBS`. Regression test on a mixed-tz frame pair (fails-before / passes-after).
+  Additive, pure.
+
+- **v0.113.1** — Autonomy/image-quality/correctness (Builder 2026-07-13). Re-QC a frame whose Stage-1 cache
+  was refreshed after a mid-copy ingest: `ingest_files` now resets the frame's stale QC (computed on the
+  truncated data) via new `Project.reset_frame_qc`, flags the refresh (`IngestResult.refreshed` →
+  `TargetScanResult.n_frames_refreshed`), and `_pipeline_body` re-QCs the refreshed target in the same run
+  instead of leaving wrong FWHM/star-count metrics (which feed auto-grade and the v0.113.0 drift nudge).
+  Preserves `user_override`; off the hot path (fires only on a proven size mismatch). Tests across
+  project/ingest/scanner/pipeline.
+
+- **v0.113.0** — Autonomy/friendliness/image-quality (Builder 2026-07-13). Cross-session quality-drift nudge:
+  `seestack/session_recap.py` compares the newest capture session's median FWHM (over accepted, measured subs)
+  against the target's sharpest prior session and, when materially softer (≥25% *and* ≥0.6 px, both sessions
+  ≥4 measured subs), surfaces a gentle "Last session" card line ("…softer than your usual best — worth checking
+  focus"). Catches a whole soft/out-of-focus night that auto-grade (within-session outliers) can't see; purely
+  informational, read-only, off-nothing. New nullable `quality_drift` on the `…/session-recap` endpoint.
+  Tests: `tests/test_session_recap.py`, `tests/webapp/test_target_session_recap.py`, `SessionRecapCard.test.tsx`.
+
+- **v0.109.26** — Correctness/data-retention (image-quality/autonomy; Builder 2026-07-12; found by an
+  adversarial qc/solve audit). `qc/runner.py::apply_qc_result_to_db` now self-heals an `auto:streak`
+  rejection on a clean, non-override re-QC (mirroring the existing `qc_error` heal), so a frame that's no
+  longer a streak isn't silently kept out of the stack with a contradictory record. Regression
+  `tests/test_qc_streak_heal.py` (heal + three must-not-touch guards).
+
+- **v0.109.25** — Determinism/idempotency (image-quality/autonomy; Builder 2026-07-12; found by an
+  adversarial qc/solve audit). Seeded the QC streak detector's `probabilistic_hough_line`
+  (`qc/streaks.py`) so `streak_count` (stored to the DB) no longer varies run-to-run on re-QC — restoring QC
+  idempotency and stabilising a marginal `streak_detected`. Regression `tests/test_qc_streak_determinism.py`.
+
+- **v0.109.24** — SECURITY: fixed an unauthenticated path-traversal / arbitrary-file-read in the SPA static
+  fallback (`webapp/main.py::spa`). Confine the resolved served path to `STATIC_DIR`
+  (`is_relative_to(static_root)`) so a percent-encoded `../` escape (`/%2e%2e/…/etc/passwd`) falls back to the
+  SPA shell instead of streaming out-of-root files. Only the production Docker image (which builds `webapp/
+  static/`) was exposed; auth ships off by default. Regression `tests/webapp/test_spa_static.py`
+  (fails-before/passes-after). Found by a fresh-angle adversarial webapp security audit. (Builder 2026-07-12.)
+
+- **v0.109.17** — Data-integrity bug (autonomy/image-quality; Builder 2026-07-11; found + reproduced by an
+  adversarial webapp-orchestration audit). **Calibration master ids (and their `{kind}_{id}.fits` filenames)
+  were reused after deleting the newest master**, so a stack run's persisted `dark_path`/`flat_path` could
+  silently rebind to a *different* master's pixels — miscalibrating a walk-away **Reprocess everything** (which
+  reuses each run's recorded `options_json` verbatim). Root cause: `webapp/calibration.py::_next_id` allocated
+  `max(current ids)+1`, which is **not monotonic across deletions** — deleting the current highest-id master
+  (always the most-recently-built one) freed its id, and the next build of any kind reused both the id and the
+  on-disk filename (`dark_1.fits`), so a run recorded to `.../dark_1.fits` (over-)subtracted a completely
+  different dark on reprocess (e.g. a 30 s/gain-200 dark on 10 s/gain-100 subs). Fixed by making id allocation
+  **monotonic** via a persisted high-water mark (`calibration/masters_next_id`, its own tiny file so `masters.json`
+  stays a bare list): `mid = max(registry_max, high_water) + 1`, advanced on every `register_master`. Upgrade-safe
+  (an old library with no counter falls back to the registry max, then tracks forward) **and** downgrade-safe (an
+  older app version ignores the extra file entirely — it only reverts to the old id policy, loses no masters).
+  Regression tests `tests/webapp/test_calibration.py::test_master_ids_are_never_reused_after_deletion` (delete the
+  newest → rebuild gets a fresh id/filename and the stale path no longer resolves to the new master; and ids keep
+  climbing even after the registry is emptied — fails before / passes after) and
+  `test_master_id_high_water_falls_back_to_registry_max_when_absent` (missing counter still allocates correctly).
+  Additive, no schema/config/API-shape change. (M severity, data-integrity on the unattended reprocess path.)
+
+- **v0.109.16** — Autonomy (PRIORITY 2; Builder 2026-07-11): the **unattended slice** of the pre-flight
+  "this batch looks like two targets" guard. A new off-by-default `mixed_pointing_guard` setting makes the two
+  *walk-away* stack chains — the watcher **auto-stack** and one-click **Process target** — cluster a target's
+  accepted+solved pointings *before* stacking (new pure engine helper `seestack/stack/pointings.py::
+  detect_mixed_pointings`, the Python mirror of the shipped frontend `detectMixedPointings`: single-linkage
+  union-find on unit vectors at a 3° link distance, so a contiguous mosaic stays one cluster but two
+  well-separated targets split, wrap/pole-safe). When the batch is clearly bimodal (≥2 substantial pointings),
+  the chain **skips the stack with a plain-language reason** ("This batch looks like 2 different targets … open
+  the Frames table and reject the odd-target frames, then stack") instead of silently combining one pointing and
+  dropping the rest of the night as align failures. Process returns `stack_skipped_reason="mixed_pointings"` (+ a
+  `mixed_pointings` count blob and message); auto-stack reports `auto_stack_mixed_skipped` and — crucially —
+  does **not** write the crash-loop attempt marker, so once the user rejects the odd frames a later scan
+  re-checks and stacks rather than stranding the target. Off by default (§9: a bimodal batch stacks exactly as
+  before until the owner opts in); the interactive Stack form is untouched (it already warns + offers a one-click
+  "reject the odd-target frames" fix). Settings toggle added. Tests: `tests/test_pointings.py` (8 geometry cases
+  — single/mosaic/bimodal/stray/wrap-safe/too-few), `tests/webapp/test_pipeline.py` (Process skips a bimodal
+  batch with the reason and stacks it with the guard off; a single-pointing target still stacks with the guard
+  on; watcher auto-stack mixed-skips without stranding), and a config-upgrade default assertion. Closes the
+  "Remaining (higher-bar) slice" of the Pre-flight two-targets item under Autonomy. (S–M, autonomy — PRIORITY 2.)
+
+- **v0.109.15** — Editor (PRIORITY 1): the **Compare** toggle now disables itself while previewing a trim crop,
+  like every sibling overlay button (Builder 2026-07-11; found + reproduced by a frontend editor-UX audit). The
+  v0.109.7 commit set out to "disable overlay/compare toggles while previewing a trim crop" and its message
+  asserts Compare already guards it — but Compare's `disabled` was the one that never referenced `trimPreview`.
+  Reachable via a real query race: the "Trim border" button appears as soon as the lighter *trim-suggestion*
+  query resolves, which can beat the heavier *histogram* query, and `enterTrimPreview` only force-enabled the
+  coverage overlay + cleared other overlays *inside* `if (hist.data?.is_mosaic)`. So clicking Trim before the
+  histogram loaded left Compare enabled; clicking it showed the un-edited **Original** under the dashed "Proposed
+  crop" rectangle and a "Proposed crop …" caption — a contradictory state (no coverage backdrop, Original
+  mislabelled as the trim target) that persisted the whole trim session. Two-part fix: (1) add `|| trimPreview`
+  to the Compare button's `disabled` (the belt), and (2) dedent the `setShowMask/ShowBase/SoloExclude(false)`
+  overlay-clears out of the `is_mosaic` branch so entering trim always clears an active overlay regardless of the
+  histogram's load state (the braces). Frontend-only, additive, no backend/API/default change. Regression
+  `Editor.test.tsx > "disables Compare during trim even before the histogram resolves as a mosaic"` (non-mosaic
+  histogram + mosaic trim suggestion → Compare must be disabled during trim; fails before / passes after). (S,
+  editor — PRIORITY 1.)
+
+- **v0.109.14** — Watcher auto-stack no longer redundantly re-stacks an already-current target after a manual
+  stack (Builder 2026-07-11; found + reproduced by a webapp-orchestration audit). `_auto_stack_frame_count`'s
+  "already stacked?" guard compared the current solved+accepted count to the last run's **`n_frames_used`**, which
+  excludes subs dropped at *alignment* — so a perfectly-normal stack where any solved+accepted sub failed to align
+  (`n_frames_used < solved+accepted`; common with mosaics, mixed sessions, or a few bad solves) read the gap as
+  "new work". The auto-stack path masks this with the crash-loop marker (`AUTO_STACK_ATTEMPT_META_KEY`, stamped
+  before each auto-stack), but targets last stacked via the interactive **Stack form** / **Process target** /
+  **Reprocess everything** carried no marker — so the very next watcher poll on an `auto_stack`-enabled install
+  re-stacked each of them once: a surprise duplicate `stack_runs` row + a full expensive stack on the walk-away
+  path, even though nothing new arrived. Fix: `_stack_target` (the single funnel for **all** stack paths) now
+  stamps the solved+accepted count it covered into the same marker after a successful, non-cancelled run, so the
+  marker — keyed on solved+accepted, not the align-reduced `n_frames_used` — authoritatively answers "have I
+  stacked this data?" for every path. The `n_frames_used` check stays as the upgrade-safe fallback for
+  pre-existing marker-less runs; a user cancel writes nothing (the outer handler clears the pre-stack marker).
+  Additive per-target meta write (no schema/config/API/default change), upgrade-safe. Regression
+  `tests/webapp/test_auto_stack_pipeline.py::test_stack_marks_solved_count_so_watcher_skips_align_dropped_target`
+  (a manual stack that dropped 1 sub at alignment → the watcher must skip, not re-stack; fails before / passes
+  after). (S, autonomy — PRIORITY 2.)
+
+- **v0.109.12** — Job-worker robustness: `_persist` no longer risks killing the single worker on a
+  non-serialisable result (Builder 2026-07-11; latent hardening flagged independently by two webapp audits + a
+  prior v0.108.x note). `webapp/jobs.py::_persist` ran `json.dumps(job.result)` **inside** a `try` that only
+  caught `sqlite3.Error`, so a future job body returning a non-JSON-serialisable field (a stray `numpy` scalar /
+  `Path` / `set`) would raise `TypeError` past the guard, propagate out of `_persist` in the worker's `finally`,
+  and **kill the single `job-worker` thread — silently halting all job processing until restart** — the exact
+  failure the method's own docstring claims to prevent. No current job body triggers it (all return JSON-native
+  results, so not a live bug), but the worker is a single point of failure, so the invariant is worth making
+  real. Fix: serialise the result *before* the DB write and guard it separately, dropping just the result (and
+  logging) on a serialisation failure while still persisting the row's state/error. Additive, no behaviour change
+  on the live path. Regression `tests/webapp/test_job_cancel.py::test_non_serializable_result_does_not_kill_worker`
+  (a job returning `np.int64` must stay `done` **and** a subsequently-submitted job must still run — fails before
+  / passes after).
+
+- **v0.109.11** — Job-state correctness bug (Builder 2026-07-11; found by an adversarial webapp-orchestration
+  audit): a **cancelled interactive stack was reported as "done"** on the Jobs page instead of "cancelled". When
+  the user cancels a running stack from the Stack form, `run_stack` honors the cancel and returns a
+  `StackResult(cancelled=True)` with **no output** (empty `fits_path`, `run_id=None`, nothing written to
+  disk/history), which `_stack_target` surfaces as a top-level `{"cancelled": True, "run_id": None, …}`. In the
+  `JobManager` worker loop (`webapp/jobs.py`) the cancel test was `if job.cancel_requested() and not completed`,
+  but `completed = result or job.result` is **truthy** for that sentinel dict — so the honored-cancel path was
+  skipped and the job fell through to `state = "done"`, showing the user a "successful" stack with `run_id: None`
+  and no openable output. Fixed by also treating an explicit top-level `cancelled is True` sentinel as a
+  cancellation (`engine_cancelled`), while preserving the two existing semantics (a non-cancel-aware job that
+  returns a full, non-cancelled result after a late cancel stays "done"; a job that returns nothing stays
+  "cancelled"). Only the plain `submit_stack` / `reprocess_all` returns carry a top-level `cancelled` key, so
+  `process_target` and the other chains are unaffected. Additive, no API/schema/default change. Regression
+  `tests/webapp/test_job_cancel.py::test_cancel_sentinel_result_marks_cancelled` (fails before / passes after);
+  the two pre-existing cancel-semantics tests still pass.
+
+- **v0.109.10** — QC-engine correctness hardening (PRIORITY: stacking/QC-engine data-integrity; Builder
+  2026-07-11; found by an adversarial `qc/*` audit). Two defects in `seestack/qc/metrics.py`, each fixed against
+  its own documented contract and regression-tested. (1) `green_channel` summed the two Bayer-green sub-planes in
+  the **input dtype before** the `0.5 *` float promotion, so a raw 16-bit mosaic (Seestar native — and the
+  function's documented input) wrapped bright green pixels modulo 2**16 (60000+60000 → 27232), silently
+  corrupting exactly the bright stars QC measures; now promotes to float32 before the add. Latent today (the sole
+  pipeline caller feeds float32 via `load_seestar_raw`), but a real data-integrity trap in a public, documented
+  API. (2) `median_eccentricity` didn't drop non-finite roundness before the median, so one NaN source turned the
+  whole frame's eccentricity into NaN — contrary to the module's "NaN-safe … ecc" promise and unlike its
+  `median_fwhm`/`median_star_flux` siblings; now filters `np.isfinite` and returns `None` when nothing survives.
+  Both additive, no behaviour change on the live float32 path, upgrade-safe. Regressions
+  `test_metrics.py::test_green_channel_no_uint16_overflow` and `::test_median_eccentricity_is_nan_safe` (both fail
+  before / pass after).
+
+- **v0.109.9** — Friendliness / UX bug (PRIORITY 3; Builder 2026-07-11; found by the frontend non-editor route
+  audit): the Tonight "Start something new" object-type filter could show a contradictory empty table. When the
+  picked bucket (e.g. "Nebula") was no longer present after the data changed (a different night via the date
+  picker, or a min-altitude change), `filterByTypeBucket(freshUp, typeFilter)` filtered to `[]` — a
+  valid-but-absent bucket isn't inert — while the SegmentedControl fell back to displaying "All", so the control
+  read "All" yet the table showed "No targets of that type…", hiding real targets. Fixed by deriving one
+  `effectiveTypeFilter` (`typeOptions.includes(typeFilter) ? typeFilter : "All"`) used by **both** the control's
+  value and the filter, so a stale selection cleanly falls back to All in both. Frontend-only, additive, no
+  backend/schema change. Regression `Tonight.test.tsx::"falls back to All (not an empty table) when the picked
+  type vanishes after a data change"` (pick Nebula → re-plan a nebula-less night → the galaxy still shows, no
+  empty state; fails before / passes after).
+
+- **v0.109.8** — Friendliness / display bug (PRIORITY 3; Builder 2026-07-11; found by the frontend non-editor
+  route audit): three time formatters rounded their remainder into the next unit's threshold and then printed it
+  in the smaller unit — the Library card's `expo(7190)` (1h 59.8m) read **"1h 60m"**, `formatIntegration(3599)`
+  read **"60 min"** (should be ~1 h) and `(59.9)` **"60 s"**, and Tonight's `formatMinutes(89.9)` read
+  **"90 min"** (should be 1.5 h). Fixed each to round first / re-check the rounded figure and roll into the next
+  unit (`expo` rounds to whole minutes then splits h/m; `formatIntegration`/`formatMinutes` promote a value that
+  rounds up to a full unit). Genuine sub-boundary values are unchanged (`30 s`, `50 min`, `89 min`). Frontend
+  display only, no backend/schema change. `expo` is now exported for unit testing. Tests: new `format.test.ts`,
+  an `expo` block in `Library.test.tsx`, and a `formatMinutes` boundary case in `tonight.test.ts` (each fails
+  before / passes after).
+
+- **v0.109.7** — Editor bug (PRIORITY 1; Builder 2026-07-11; found by the same frontend editor-logic audit —
+  the same enumeration-oversight class as the v0.109.4 look-compare fix): while previewing a mosaic **trim
+  crop** (`trimPreview` active, with the coverage heatmap auto-enabled + Apply/Cancel controls), the overlay/
+  compare toggles that don't guard trim could still be clicked — clicking **Star mask** set `showMask` while
+  `trimPreview` stayed true, rendering the star-mask overlay *underneath* the "Proposed crop" rectangle with its
+  caption suppressed (a contradictory state); the Coverage toggle and the per-op "Without this op"/"Split this
+  op" buttons had the same gap. Split/Look/Compare already disable themselves during trim; brought the four
+  stragglers (Coverage, Star mask, Without-this-op, Split-this-op) into line by adding `|| trimPreview` to their
+  `disabled`, so the user finishes (Apply/Cancel) the trim before switching overlay/compare modes. Frontend-only,
+  additive, no backend/schema/API change. Regression `Editor.test.tsx::"disables the overlay/compare toggles
+  while previewing a trim crop"` (enter trim on a mosaic → Star mask + Coverage buttons are disabled; fails
+  before / passes after).
+
+- **v0.109.6** — Editor bug (PRIORITY 1; Builder 2026-07-11; found by an adversarial audit of the frontend
+  editor state/lifecycle logic): the live-preview (and the five sibling base/mask/coverage/without-op/look)
+  queries fetch a PNG blob, mint an object URL per fetch, and revoke it the instant the query's `data` changes.
+  React Query cached each result by key with the app's default 5-min gcTime, so an **undo/redo** — which
+  reproduces a prior recipe → prior query key, fresh within the 10s staleTime → served straight from cache with
+  no refetch — re-served a URL that was **already revoked** when the user first left that state, blanking the
+  preview until an unrelated edit healed it (and re-entering the editor could hit the same dead URL). Fixed by
+  setting `gcTime: 0` on the six blob-URL queries so a superseded blob query is dropped immediately and never
+  re-served after revocation; `keepPreviousData` still holds the last good image on screen while the fresh
+  render loads (no flash — verified by the existing Editor tests, all 59 green). Frontend-only, additive, no
+  backend/schema/API change. Regression `frontend/src/components/editor/blobRevoke.test.tsx` exercises the exact
+  react-query + revoke-effect interaction across a key A→B→A transition: with `gcTime: 0` the returned URL is
+  fresh/live, and a control case proves the cached-entry path re-serves the revoked URL (the bug).
+
+- **v0.109.5** — Security / invariant hardening (Builder 2026-07-11; found by an adversarial audit of the
+  webapp schema-adaptation seam, which otherwise traced clean): a calibration master **path** placed in the
+  global `default_stack_options` (via a raw settings PUT body or an imported backup) leaked straight into
+  `StackOptions` on every default-based stack — bypassing the "calibration paths are resolved server-side,
+  never from raw client input" invariant that `trigger_stack` (pops `*_path`, resolves master *ids*) and
+  `put_stack_defaults` (form-key filter) already honour. `default_stack_options` was the one ingress with no
+  guard. Fixed at both the ingress and the consumption point: a new `schemas.strip_non_form_keys` drops
+  `NON_FORM_KEYS` (`dark_path`/`flat_path`/`flat_dark_path`/`bias_path`) from a persisted
+  `default_stack_options` on `PUT`/`POST /import` (new `_sanitize_patch`), and `pipeline._stack_target` strips
+  them from the global-defaults base so even an already-persisted config can't apply a leaked path (legitimate
+  server-resolved paths still arrive later via explicit run options / auto-bind, after the stripped base).
+  Additive, no config/schema/API-shape change, upgrade-safe (an old config with such a key is neutralised, not
+  rejected). Regression tests: `test_auto_stack_defaults.py::test_global_default_calibration_paths_never_reach_the_stacker`
+  (a config carrying the four paths → `run_stack` sees `dark_path`/… `None`, `sigma_kappa` kept; fails before /
+  passes after) and `test_api.py::test_settings_put_strips_calibration_paths_from_default_stack_options`.
+
+- **v0.109.2** — Friendliness / consistency (PRIORITY 3; Builder 2026-07-11): the History card's **Adjust**
+  sliders now open on a data-driven asinh stretch/black anchored to the run's own sky (new read-only
+  `GET …/stack-runs/{id}/render-suggestion` → `edit/stretch.suggest_asinh_stretch` via a shared
+  `render.thumbnail.load_stack_rgb` loader; the `RunCard` fetches it lazily on first Adjust and keeps the STF
+  thumbnail on screen until it resolves), so the first adjustable look matches the STF preview thumbnail instead
+  of jumping to a fixed 0.5/0.35. Took framing (a) from the filed idea (anchor the sliders, keep the surface's
+  asinh-with-sliders nature) over (b) (STF zero-state). Falls back to the fixed defaults when there's no useful
+  suggestion or on a display-space export. Additive, read-only, byte-for-byte-unchanged render; tests in
+  `test_stack_render.py` + `History.test.tsx`.
+
+- **v0.109.1** — Two safe, self-contained hardening fixes (Builder 2026-07-11): (1) **image quality** —
+  `calibrate/masters.py::_sigma_clip_mean` now iterates the sigma-clip to convergence over the surviving samples
+  (kept set only shrinks; `max_iters=5` cap) instead of a single round, matching DSS/Siril/PixInsight so a mild
+  outlier a strong one's inflated first-round MAD leaves in is caught once the strong one is removed; default
+  `median` path + mad==0 guard + finite fallback all preserved (regression `test_sigma_clip_mean_iterates_to_convergence`).
+  (2) **editor tidiness/safety** — `routers/editor.py::stretch_suggestion` now threads `already_display` into its
+  ctx like every sibling endpoint, closing a latent re-edit double-stretch trap (regression
+  `test_stretch_suggestion_threads_already_display`). Both additive, no config/schema/API/default change.
+
+- **v0.109.0** — Editor (PRIORITY 1; Builder 2026-07-11): the editor's no-recipe fallback view now uses the
+  adaptive **STF autostretch**, not the fixed-slider asinh default. When a stack is opened before any stretch op
+  is added (and on a no-stretch export), `edit/pipeline.py`/`webapp/pipeline.py` rendered it with a bare
+  `asinh_stretch(out)` at a fixed `stretch=0.5, black=0.35` — a middling one-size-fits-all look that ignores the
+  actual sky level. Both fallbacks now call `render.thumbnail.autostretch`, which anchors each channel's robust
+  sky median to a neutral target grey and adapts to the data — the same stretch the stored History/Target
+  thumbnail (`generate_thumbnail`) and the one-click Auto recipe already use, so the first-open view is now a
+  good-looking, correctly-exposed image *and* consistent with the thumbnail the user just saw. Purely a render
+  default (no seeded/persisted recipe, no config/schema/API/on-disk change); the `already_display` re-edit guard
+  and the NaN=coverage restore are unchanged. Preview (proxy) and export (full-res) call the identical stretch,
+  and STF re-anchors the sky median regardless of the top-end scale, so preview↔export parity holds within the
+  documented decimation floor. Regression tests `tests/test_edit_engine.py::
+  test_no_recipe_fallback_uses_adaptive_stf_autostretch` (fallback == `autostretch()`; sky grey is scale-invariant
+  near 0.20 — the adaptive property asinh lacks) and `::test_no_recipe_fallback_preview_export_parity`
+  (proxy↔full-res sky grey agree <0.02). Supersedes the v0.108.5 asinh-robustness fix for this default path.
+
+- **v0.108.4** — Editor robustness (PRIORITY 1; Scout 2026-07-11): `recipe_from_dict` no longer 500s on a
+  malformed `version` in the `PUT …/editor/recipe` body. `edit/recipe.py` coerced `version=int(...)` with no
+  guard while `put_recipe` calls it directly on the unvalidated `dict` body, so `{"version":"x"|null|[1]}` raised
+  out to an HTTP 500 — the exact class the sibling `params` coercion already documents guarding against. Now
+  wrapped in `try/except`, falling back to `RECIPE_VERSION`. Regression test
+  `tests/test_edit_engine.py::test_recipe_from_dict_tolerates_non_int_version`. One-file, additive.
+
+- **v0.108.1** — Image-quality / trust (PRIORITY 4; Builder 2026-07-11): surface the colour-cal *clamp* warning.
+  `autoColorCalCaption` (shared by History Info and the interactive editor) now appends a dimmed "(capped an
+  extreme channel)" when the stamped `color_cal.notes` flags a clamped per-channel scale, so the user learns Auto
+  hit the `[_MIN_CAL_SCALE, _MAX_CAL_SCALE]` rail on an extreme-colour field — on both surfaces from one helper.
+  Frontend-only read of a field already returned; additive. Tests in `colorCal.test.ts`.
+
+- **v0.108.0** — Friendliness / trust (PRIORITY 3; Builder 2026-07-11): surface Auto's colour-calibration outcome
+  in the *interactive* editor too. The `…/editor/histogram` endpoint reads the colour-cal op's outcome off
+  `ctx.op_notes["tone.color_calibrate"]` (recorded during the live-preview render) and returns it as a nullable
+  `color_cal` field; the editor shows the same `autoColorCalCaption` line it shows on History Info (v0.107.10), so
+  a user who clicks Auto in the editor learns whether their picture was really white-balanced. Read-only, additive,
+  new nullable field. Test `tests/webapp/test_editor.py::test_histogram_reports_color_cal_outcome`.
+
+- **v0.107.10** — Friendliness / trust (PRIORITY 3/4; Builder 2026-07-11): surface *which* colour-calibration
+  (white-balance) path Auto ran and on how many stars. `edit/ops/tone.py::_color_calibrate` no longer discards
+  its `ColorCalibrationResult` — it records `{mode_used, n_stars_used, notes}` into a new generic
+  `EditContext.op_notes`, `render_run_display_array(return_ctx=True)` hands the ctx back, and
+  `_auto_edit_process_run` stamps it as `editor_auto_colorcal:{run_id}` provenance (mirrors the
+  `editor_auto_skycast:` pattern — no schema change). The `…/info` endpoint returns a nullable `color_cal` field
+  and the History Info panel shows a dimmed line ("Auto white-balanced from 240 stars ✓" / "…from the background
+  — too few stars ✓" / "couldn't white-balance — try Neutralize background"). Pairs with the v0.107.9 fallback.
+  Additive, off-nothing, upgrade-safe. Tests: `test_pipeline.py` (extended), `test_edit_tone_ops.py`,
+  `colorCal.test.ts`, `History.test.tsx`.
+
+- **v0.107.9** — Autonomy / image-quality (PRIORITY 2/4; Builder 2026-07-11): when Auto's colour calibration
+  can't run (too few stars — the common sparse-star OSC case), `post/color_cal.py` now falls back to a starless
+  **background-neutral** white balance (equalise the per-channel sky medians so the background is neutral grey)
+  instead of shipping the raw green/magenta cast unchanged. NaN-aware, clamped, `mode_used="background_neutral"`;
+  genuine `none` only when the sky can't be measured. Additive/off-nothing (only the do-nothing path changes).
+  Regression tests in `tests/test_color_cal.py`.
+
+- **v0.107.5** — Autonomy (PRIORITY 2; found by the same 2026-07-11 auto-stack audit): finish the v0.107.1
+  auto-bind robustness by extending the "iterate candidates when the top pick fails its gate" logic from the
+  **dark** path to the **flat** and **bias** paths, which still keyed off only `recommend_masters`' single
+  top pick. If the best-scored flat/bias failed its confidence or **dimension** gate (e.g. it's from a
+  different-sized camera) while a slightly-further same-dimension one existed, the stack was left
+  flat-/bias-uncalibrated even though a usable master was available — the exact masking case v0.107.1 fixed for
+  darks. Now both iterate their candidates in ascending match distance and bind the first that clears both
+  gates (the flat-dark is matched to the flat actually bound, not the top-ranked one). Never binds a master we
+  wouldn't already trust (same per-candidate gates); byte-for-byte unchanged when the top pick binds (the
+  common case). Regression tests `test_auto_bind_recovers_a_flat_when_the_top_pick_fails_its_gate` and
+  `..._bias_...` (a wrong-size top pick masks a bindable same-size one — fail before / pass after). Additive,
+  upgrade-safe, auto-bind stays confident-only. (claude/happy-franklin-t22hm6)
+
+- **v0.107.4** — Autonomy / "just works" (PRIORITY 2; found by a fresh adversarial audit of the auto-stack
+  path 2026-07-11): a **recoverable** auto-stack failure permanently stranded the target's auto-stack. The
+  watcher's auto-stack loop writes a crash-loop marker (`web_auto_stack_attempt = solved_accepted`) *before*
+  the stack, so a stack that OOM-kills the whole process can't re-loop on restart. But a **survivable**
+  exception (a transient read error off a flapping SMB/NFS mount while auto-binding a calibration master, a
+  momentary lock, a bad-frame `ValueError`) is *caught* at `pipeline.py:138` — the process lives — yet the
+  marker was left set, so `_auto_stack_frame_count` returned `None` on every later scan and the target
+  **never auto-stacked again until brand-new frames arrived** (worse when a prior smaller stack existed: the
+  new frames were silently never integrated, and the user kept being served the stale master). Fixed by
+  clearing the marker in the recoverable-exception handler (`_clear_auto_stack_attempt` → new additive
+  `Project.delete_meta`), so the next scan retries a transient failure; a true process crash never reaches the
+  handler, so the crash-loop guard is unweakened. Rewrote the misleading raise-as-crash test into two honest
+  ones: `test_auto_stack_process_crash_marker_prevents_reloop` (persisted marker → guard skips, the genuine
+  protection) and `test_auto_stack_retries_after_a_recoverable_failure` (caught error → marker cleared → retry;
+  fails before / passes after), plus `test_delete_meta`. Additive, upgrade-safe (no schema/config/API/on-disk
+  change — `delete_meta` uses the existing `project_meta` table); auto-stack stays off by default.
+  (claude/happy-franklin-t22hm6)
+
+- **v0.107.2** — Image-quality/correctness (Scout, #238): clamp `_solve_gray_star`'s per-channel colour-cal
+  scales to `[_MIN_CAL_SCALE, _MAX_CAL_SCALE]` like the Gaia path, so the default gray-star white balance
+  (used by the Auto recipe) can only rescale a channel, never invert/extinguish it. See the FIXED entry in Bugs.
+
+- **v0.107.3** — Stacking-engine memory safety (found by a fresh adversarial audit of the stacker
+  orchestration path 2026-07-11): the κ-σ (default sigma-clip) path never freed its **pass-1 Welford
+  accumulator** (`_n`/`_mean`/`_m2` — 3 full-canvas arrays) before pass 2 allocated `mean`, `std` and the
+  weighted-sum buffers, so the live set through all of pass 2 was ~7 canvas arrays, not the **4** the
+  pre-allocation OOM guard (`_PEAK_CANVAS_ARRAYS`) charges — a ~1.8× underestimate that persists for the whole
+  second pass. On a large mosaic union canvas sized to pass the guard at 4 arrays but exceed RAM at 7, the run
+  the guard *certified as safe* could OOM-kill mid-stack (the exact failure the guard exists to prevent). Fixed
+  with a one-line `del wel` after `mean()`/`std()` extract fresh arrays (they don't alias `wel`), mirroring the
+  drizzle two-pass path's existing `del stats`; `del` also empties the cell the pass-1 consumer closure shares
+  with `wel`, so the accumulator is genuinely freed. Byte-for-byte identical output; only the memory profile
+  changes. Regression test `tests/test_stack_pipeline.py::test_sigma_clip_frees_pass1_accumulator_before_pass2`
+  (asserts no `WelfordAccumulator` is live when pass 2 builds its `WeightedSumAccumulator` — fails before /
+  passes after). Additive, no config/schema/API/on-disk change. (claude/happy-franklin-t22hm6)
+
+- **v0.107.0** — Editor (PRIORITY 1): one-click **"Neutralize background"** fix for a residual sky
+  colour cast — the action slice the v0.104.0 read-out deferred. New display-space op
+  `tone.neutralize_background` (self-measures the sky median at render time via factored-out
+  `sky_channel_medians`, balances each channel to the darkest → neutral grey, gains ≤ 1 so no
+  clipping, `strength` 0..1); a "Neutralize" button next to the sky-cast caption, gated by
+  `canNeutraliseSkyCast` to only show when a real cast is measured and the fix lands in display space
+  (enabled stretch or already-display re-open); histogram endpoint returns `already_display`. Off by
+  default, undoable, additive, NaN-aware. Tests across engine/webapp/frontend. (agent/editor-neutralise-bg)
+
+- **v0.106.0** — Image quality / trust (PRIORITY 4): library-wide "does Auto land the background neutral?"
+  read-out. New `pipeline.auto_cast_summary(lib)` aggregates every auto-edited run's stamped sky-cast
+  (`editor_auto_skycast:` meta, v0.105.0) across all targets into `{measured, neutral, cast, by_cast,
+  median_deviation}` — ignoring runs with no stamp and unmeasurable (`unknown`) ones; a new
+  `GET /api/auto-cast-summary` endpoint serves it, and the Settings → Reprocess panel shows one dimmed
+  self-check line ("Auto's background came out neutral on 7 of 10 auto-edited results; 3 carried a slight
+  cast (2 green, 1 magenta)…"). Turns the per-run passive signal into a real-Seestar-data distribution the
+  owner (and a future agent weighing the deferred SCNR/neutralise-background decisions) can read, without
+  touching any pixels. Pure read-only aggregation, additive, off-nothing (empty until auto-edited runs
+  accrue), no schema/default/API-shape change. New pure `autoCastSummaryText` helper; tests in
+  `test_reprocess_all.py` (aggregation + endpoint + malformed-meta) and `Settings.test.tsx`.
+
+- **v0.105.0** — Image quality / trust (PRIORITY 4): the unattended auto-edit now measures the finished
+  picture's residual sky-background colour cast (`measure_sky_cast` on the render it already produces) and
+  stamps the r/g/b sky medians + verdict into run provenance (`editor_auto_skycast:` meta); the `…/info`
+  endpoint returns a nullable `sky_cast` and the History Info panel shows a "Auto's background came out
+  neutral ✓ / …slight green cast" line under the auto-edit note. Gives the owner a passive real-data read
+  on whether Auto's colour path lands neutral on real Seestar backgrounds. Best-effort, read-only,
+  additive, off-nothing (only auto-edited runs). New `autoSkyCastCaption` helper; tests in
+  `test_pipeline.py`, `skyCast.test.ts`, `History.test.tsx`.
+
+- **v0.104.1** — Friendliness (PRIORITY 3 / trust): total integration time on the Target detail page.
+  A dimmed teal "X.X h integration" badge next to the "N/M accepted" badge (from the target's accepted
+  `total_exposure_s`, reusing `formatIntegration`), so the page where a user decides whether to keep
+  shooting a target now shows the honest "do I have enough light yet?" figure — closing the one gap
+  after the History card, Library card and Dashboard, which already surfaced it. Frontend-only,
+  additive, omitted when no light collected. Tests in `Target.test.tsx`.
+
+- **v0.104.0** — Feature (editor, PRIORITY 1 / trust): sky-background colour-cast readout. The
+  `…/editor/histogram` endpoint now returns a read-only `sky_cast` measurement of the *finished*
+  picture — `edit/histogram.py::measure_sky_cast` computes the robust per-channel sky medians over the
+  sky population (finite pixels at/below the luminance median, so stars/target don't pull it) and a
+  plain colour-cast verdict — and the editor shows a dimmed "Sky background: neutral ✓ / slight green
+  cast" line, so a beginner can *see* whether their background ended up neutral. NaN-aware, additive,
+  no config/schema/API-shape change (new nullable field). The smallest-first slice of the Scout's
+  colour-cast item; the one-click "neutralise background" action is a deferred follow-up (still listed
+  under Ideas → Editor).
+
+- **v0.103.17** — Fix (editor, PRIORITY 1): the editor's undo/redo hook (`useUndoable`) misbehaved under
+  React StrictMode (Builder 2026-07-10; found by an adversarial frontend-logic audit, reproduced with a
+  deterministic test before fixing). The history was kept in `useRef` arrays that were **mutated inside the
+  `setStateRaw` updater** (`past.current.push(prev)` etc.) — a side effect in a state updater, which React's
+  StrictMode double-invokes in dev *specifically to surface this class of impurity*. The whole SPA renders
+  under `<StrictMode>` (main.tsx), so in `npm run dev` the double-invoke double-pushed/​double-popped the
+  history and **a single undo after an edit silently did nothing** — the editor's core undo interaction
+  visibly broken during development (and latent tech-debt for prod: React concurrent features may invoke or
+  discard a reducer more than once). Rewrote the hook over a **pure `useReducer`** (history in reducer state,
+  `Date.now()` computed by the caller and passed in the action, no ref mutation), so it's idempotent under a
+  repeated invoke; the public API (`state/set/reset/undo/redo/canUndo/canRedo`) and the coalescing semantics
+  (keyed slider-drag → one undo step, gesture-boundary time window) are byte-for-byte preserved. Frontend-only,
+  additive. Regression tests: two new StrictMode cases (single-edit undo, and a coalesced drag) that **fail on
+  the old ref hook and pass on the reducer**, plus all six existing history/coalesce tests unchanged. tsc/
+  vitest (678)/vite build green.
+
+- **v0.103.15** — Fix (editor, PRIORITY 1): the per-op "Split this op" / "Without this op" compare
+  mis-aligned on a frame-reshaping op (Builder 2026-07-10; adversarial editor dogfood). The per-op compare
+  overlays the with-op preview on the without-op render and clips both under one divider sized to the
+  (cropped) rendered box; when the selected op is `geometry.crop`/`rotate`/`resize`, disabling it changes the
+  frame shape, so the without-op image is a *different shape* and `objectFit:contain`-letterboxes at a
+  different scale — nothing lines up across the divider, yet the tooltip promised "see exactly what just this
+  op did". (The whole-recipe Split sidesteps this by rendering its Original through all enabled geometry ops so
+  the shapes match; the per-op path, which must toggle exactly one op, had no such guard.) New pure
+  `splitCompare.reshapesFrame(opId)` (mirrors `GEOMETRY_OP_IDS`) now disables both per-op compare buttons for a
+  reshaping op with an explanatory tooltip pointing to Compare/Split for the whole edit — a pixel-aligned
+  per-op A/B is meaningless for a reshaping op anyway. Frontend-only, additive (removes a misleading control
+  for three op ids; tone/detail/star ops unchanged). Tests: `reshapesFrame` unit cases + an Editor component
+  test that the buttons disable on Crop and re-enable on a tonal op.
+
+- **v0.103.14** — Fix: the REST job endpoints silently stripped the server-classified `error_kind` (Builder
+  2026-07-10; adversarial webapp-router audit). `Job.to_dict()`, the SSE stream, and the frontend `Job` type
+  all carry the stable canonical `error_kind` (v0.84.4, added to be reword-proof), but the `JobOut` response
+  model never declared the field — so FastAPI's `response_model` dropped it from `GET /api/jobs` and
+  `GET /api/jobs/{id}`. The **Jobs page loads its history over `GET /api/jobs`, not SSE**, so every finished
+  failed job arrived with `error_kind` undefined and `friendlyJobError` fell back to brittle string-matching of
+  the raw error text — defeating the whole point of the server-side classification (a reworded engine message
+  would silently regress the friendly sentence). One-line additive fix: declare `error_kind: str | None = None`
+  on `JobOut` (matches `to_dict()`, the SSE payload, and the frontend type; older clients ignore it). Regression
+  test `tests/webapp/test_jobs.py::test_rest_endpoints_include_error_kind` submits a `MemoryError` job and
+  asserts both REST endpoints return `error_kind == "memory_budget"` (fails before / passes after). Upgrade-safe
+  (no schema/config/API-shape change — purely adds a field the client already expected).
+
+- **v0.103.13** — Actionable "why uncalibrated" advice on the History Info panel (Builder 2026-07-10). For a
+  provenance-carrying stack that came out uncalibrated, the panel now names the concrete fix when the library
+  holds a gain/temperature-confident master **dark** at a mismatched exposure with no confident **bias** to
+  exposure-scale it — "build a master bias and AstroStack will scale that dark to your subs automatically" —
+  instead of the generic "build or pick a master". New pure `calibration.diagnose_uncalibrated` (reuses the
+  auto-bind confidence/exposure gates); the info endpoint returns it best-effort as `calibration_advice` only
+  on an uncalibrated run, and `calibrationSummaryText` swaps it in for the generic uncalibrated copy (never the
+  calibrated line). Read-only, additive, no schema/config/API-shape change. Tests: `diagnose_uncalibrated` unit
+  cases + info-endpoint integration + `calibrationSummaryText` frontend cases.
+
+- **v0.103.12** — Auto-enable *dark exposure-scaling* in the unattended chains (Builder 2026-07-10). The
+  unattended `auto_bind_master_paths` bound a dark only when its exposure matched the subs within 25%,
+  otherwise leaving the walk-away stack dark-uncalibrated entirely — even when a same-gain/temp dark **and** a
+  matching master bias were both in the library and scaling would recover a correct dark (the interactive form
+  already offers exactly this via "select your master bias and scale the dark", v0.82.2). Now, when the
+  recommended dark confidently matches gain/temperature but fails only the *exposure* gate and a confident
+  master bias with known exposures is available, the binder returns `dark_path` + `bias_path` +
+  `scale_dark_to_light=True` (the engine scales `bias + (dark − bias)·t_light/t_dark` and stamps `DARKSCAL`).
+  This beats the bias-only fallback — it recovers the thermal signal + amp glow a bare bias can't — and leaves
+  the stack uncalibrated exactly as before when no confident bias exists (or the dark's gain is wrong, since
+  scaling can't fix a wrong gain). Gated behind the off-by-default `auto_bind_calibration` setting; purely
+  local; strictly an improvement to the opt-in path. The return type widened to `dict[str, Any]` (a bool key
+  joins the existing path keys). Regression tests: `test_auto_bind_scales_exposure_mismatched_dark_via_bias`,
+  `test_auto_bind_no_dark_scaling_without_a_bias`, `test_auto_bind_no_scaling_when_dark_gain_mismatched`, plus
+  end-to-end `test_reprocess_all_auto_binds_scaled_dark_with_bias`; the existing
+  `test_auto_bind_binds_bias_only_when_no_dark` was updated to use a gain-mismatched (genuinely unscalable)
+  dark so it still exercises the bias-only path. Upgrade-safe (no config/schema/API/default change). (#PR)
+
+- **v0.103.11** — Gate the auto-bound *dark* on a gain/temperature confidence match too, completing the
+  "confident only" auto-bind contract across all three master kinds (Builder 2026-07-10). The unattended
+  `auto_bind_master_paths` bound the dark on **exposure only** (25% gate, v0.99.0) with no gain/temperature
+  check — so a same-exposure dark from a genuinely different rig (very different gain/offset) would still be
+  bound to a walk-away stack, and a dark encodes the gain-dependent bias pedestal, so a wrong-gain dark
+  over-/under-subtracts even at the right exposure. New `_dark_match_confident` mirrors
+  `_flat_match_confident`/`_bias_match_confident` (same `_AUTO_BIND_DARK_MAX_DIST == _AUTO_BIND_FLAT_MAX_DIST`
+  bar; exposure passed as `None` so only gain/temperature is scored — the exposure gate stays a separate
+  check; unknown gain/temperature still binds, so the gate only *tightens*). Regression tests
+  `test_auto_bind_skips_gain_mismatched_dark` (a gain-400 dark at the right exposure is left off for gain-80
+  subs; a same-gain dark still binds; `recommend_masters` still *offers* it for the interactive form) +
+  `test_auto_bind_binds_dark_with_unknown_gain_temp`. One file (`webapp/calibration.py`), strictly
+  conservative (only tightens what auto-bind applies), upgrade-safe (no config/schema/API/default change). (#PR)
+
+- **v0.103.10** — Gate the auto-bound *bias* on a gain/temperature confidence match (Scout 2026-07-10;
+  the genuinely last "confident only" gap in the v0.99.0 auto-bind contract — the v0.103.6 flat-gate
+  write-up claimed to close it, but the **bias** was still bound whenever one merely existed). In the
+  unattended `auto_bind_master_paths`, the dark is exposure-gated (v0.99.0) and the flat is gain/temperature
+  gated (v0.103.6), but the bias (bound for the lights when no dark matched) had **no** confidence gate — so
+  a walk-away stack whose only dark was an exposure mismatch would fall back to a bias from a genuinely
+  different rig. A master bias carries fixed-pattern structure (readout pedestal, amp glow, column offsets)
+  that scales with the camera's gain/offset, and the per-frame background subtraction removes only the DC
+  offset, not that spatial pattern — so a wrong-gain bias leaves a mis-scaled structure in the final image
+  with no human to catch it. New `_bias_match_confident` mirrors `_flat_match_confident` (same
+  `_AUTO_BIND_BIAS_MAX_DIST == _AUTO_BIND_FLAT_MAX_DIST` bar; exposure ignored — a bias is a zero-second
+  read; unknown gain/temperature still binds, so the gate only *tightens*). Regression tests
+  `test_auto_bind_skips_gain_mismatched_bias` (a gain-400 bias is left off for gain-80 subs; a same-gain
+  bias still binds; `recommend_masters` still *offers* it for the interactive form) +
+  `test_auto_bind_binds_bias_with_unknown_gain_temp`. One file (`webapp/calibration.py`), strictly
+  conservative (only tightens what auto-bind applies), upgrade-safe (no config/schema/API/default change). (#PR)
+
+- **v0.103.9** — Fix drizzle frame-accounting counting an off-canvas stray sub as *used* (Builder
+  2026-07-10; found by a fresh adversarial audit of the newest v0.100 provenance code, reproduced
+  end-to-end before fixing). The standard/κ-σ/min-max paths skip a frame whose reprojected footprint
+  misses the reference canvas via `align_one → None` (so `n_frames_used` / `NALIGNFL` are honest), but the
+  drizzle path did `used += 1` whenever `DrizzleStacker.add_frame` didn't *raise* — and an off-canvas frame
+  builds an all-zero weight map, deposits nothing, and returns cleanly, so a stray sub from a different
+  pointing dropped in the same batch was **counted as aligned**. Two consequences: (1) wrong provenance —
+  `n_frames_used` over-reported and `NALIGNFL` under-reported (and `coverage_max`, which `frame_coverage`
+  computes correctly, could sit *below* the claimed `n_frames_used`); (2) worse — if the *whole* batch
+  reprojected off-canvas (wrong reference / batch-wide bad solve) `used` stayed non-zero, slipping past the
+  `n_used == 0` guard, so `drizzler.result()` returned an **all-NaN image that was written to disk** with a
+  bogus frame count instead of raising "no frames could be aligned". `add_frame` now returns whether the
+  frame's footprint intersects the output canvas (`in_bounds.any()`, the drizzle analogue of `align_one`'s
+  non-`None`; a wholly clip-rejected but on-canvas frame still counts as aligned, matching the standard
+  path), and `_drizzle_pass` only counts a frame that intersected. Regression tests in `tests/test_drizzle.py`
+  (`test_add_frame_reports_off_canvas_frames_as_not_aligned` unit + `test_drizzle_does_not_count_an_off_canvas_stray_frame`
+  end-to-end via `run_stack`; both fail before / pass after). Additive, upgrade-safe (no config/DB/API/on-disk
+  change). (#PR)
+
+- **v0.103.8** — Carry the calibration-status trust line onto the editor's auto-note surface (Builder
+  2026-07-10; the second surface of the v0.103.7 History calibration line). The one-click Process-target
+  deep-link lands a walk-away user in the *editor* on the finished picture, where the "This picture was
+  auto-edited" note (v0.93.0) explained only the *editing* steps and said nothing about *calibration*. That
+  note now also shows the positive "Calibrated with your master dark and master flat." line when the run's
+  `CALSTAT` provenance records applied masters, so the beginner who took the most hands-off path sees — on
+  the surface they're actually looking at — that their result was calibrated. Positive line only (the
+  "build a master" nudge stays on History so the editor note doesn't scold mid-edit). Reused the exact
+  `calibrationSummaryText` History ships (extracted to a shared `components/calibrationSummary.ts`; History
+  re-exports it, tests unchanged) and the existing read-only `…/stack-runs/{id}/info` cards endpoint —
+  frontend-only, additive, no backend/schema/API change. Two new `Editor.test.tsx` cases (calibrated shows,
+  uncalibrated stays quiet). (#PR)
+
+- **v0.103.7** — Surface calibration provenance in plain language on the run Info panel (Builder 2026-07-10;
+  the trust complement to the v0.99.0/v0.103.4/v0.103.6 auto-bind work). A hands-off (auto-bound) stack now
+  tells the walk-away user, in the provenance panel they open for trust, whether it was calibrated — a plain
+  "Calibrated with your master dark and master flat." line when `CALSTAT` is present, and an explicit "No
+  calibration masters were applied — build or pick a master dark/flat…" note when a stack that carries
+  provenance came out uncalibrated (the panel previously showed only a cryptic `CALSTAT  dark+flat` row when
+  calibrated and said *nothing at all* when uncalibrated, so a beginner had no cue to go build masters). The
+  presence of `CALSTAT` among other provenance cards reliably distinguishes calibrated from uncalibrated (the
+  panel already returns early when a stack has no provenance at all), so it's derived purely from the existing
+  `…/info` response — frontend-only, additive, no backend/schema/API change. Pure `calibrationSummaryText`
+  helper + tests in `History.test.tsx`. (#PR)
+
+- **v0.103.6** — Auto-bind calibration: gate the auto-bound *flat* on a gain/temperature confidence match
+  (Builder 2026-07-10; closes the last "confident only" gap the Scout filed on the v0.99.0 auto-bind
+  contract). `recommend_masters` always returns the best *available* flat no matter how poorly it matches
+  (a flat is exposure-independent, so the interactive form only *warns* on gain/temperature), but the
+  unattended `auto_bind_master_paths` applied it regardless — so a flat shot on a genuinely different optical
+  train (a different scope/reducer on the same camera body) or at a very different gain/temperature would be
+  silently divided into a walk-away stack, corrupting the illumination pattern with no human to catch it. It
+  now gates the flat (and, with it, its flat-dark) on the same gain/temperature match distance the flat-dark
+  already uses (`_AUTO_BIND_FLAT_MAX_DIST = 1.0`), mirroring the dark's exposure gate: leave the flat
+  uncalibrated rather than risk the wrong one. Because an unknown gain/temperature on either side contributes
+  0 distance, a flat that never recorded those fields still binds — the gate only *tightens*, catching a
+  materially mismatched flat. Regression tests in `test_calibration.py`
+  (`test_auto_bind_skips_gain_mismatched_flat`, `test_auto_bind_binds_flat_with_unknown_gain_temp`,
+  `test_auto_bind_flat_dark_dropped_with_gain_mismatched_flat`; the mismatched flat is still *recommended* to
+  the interactive form). Additive, upgrade-safe (no config/DB/API/on-disk change). (#PR)
+
+- **v0.103.5** — Engine robustness (background flatten; Builder 2026-07-10, found by a fresh adversarial
+  audit of `seestack/bg/*` — the stacker + align/accumulator audits ran alongside and came back clean).
+  `bg/per_frame.py::subtract_background`'s **luminance** mode called `_subtract_background_gpu` directly with
+  **no** try/except and never consulted the `_gpu_bg_disabled` latch, while the **per-channel** mode wrapped
+  the same GPU call in a guard that falls back to CPU (and latches the disable + warns once) on any cupy/CUDA
+  hiccup. So the *identical* GPU failure — cupy not importable in a worker process (the exact case the
+  per-channel guard was written for), or a CUDA OOM on a large frame — degraded gracefully in per-channel but
+  **aborted the whole stack** in luminance mode. Since `use_gpu` auto-selects `True` for any ≥500k-px frame
+  (every Seestar sub) and luminance is the *recommended* mode for extended-emission nebulae (M42, Lagoon,
+  North America — see the mode docstring), a walk-away nebula stack could crash on a GPU wobble that a star
+  field would have survived. Extracted the guarded GPU→CPU dispatch into a shared `_flatten_gpu_or_cpu`
+  helper now used by **both** modes, so they degrade identically; byte-for-byte unchanged on the happy path
+  (GPU success or CPU-only). Regression test `test_bg_modes.py::test_gpu_failure_falls_back_to_cpu_in_both_modes`
+  (monkeypatches the GPU routine to raise; per-channel recovered before/after, luminance raised before / falls
+  back after). Additive, upgrade-safe (no config/DB/API/on-disk change). (#PR)
+
+- **v0.103.4** — Auto-bind calibration: dimension-gate the masters so an unattended stack can't
+  hard-fail (Scout 2026-07-10, traced + reproduced, then fixed under the full quality bar).
+  `webapp/calibration.py::auto_bind_master_paths` picked the best-matching library master by
+  exposure/gain/temperature but **never checked pixel dimensions**, and the unattended chains
+  (watcher auto-stack / Process target / reprocess-all, via `pipeline.py::_auto_bind_calibration`)
+  passed no dimensions to gate on. So a library holding a master from a **different-sized camera**
+  (two Seestars, an upgrade, a binning change) would auto-bind that master to the subs, and
+  `run_stack` → `CalibrationMasters.validate(ref_shape)` then **raised `ValueError`, aborting the whole
+  walk-away stack** — the exact opposite of auto-bind's documented "leave uncalibrated rather than risk
+  anything / never fail" contract. Reproduced end-to-end: a 1000×800 flat auto-bound against 1920×1080
+  subs → `validate` raises "master is 1000×800 but the frames are 1920×1080". Notably the existing
+  `test_reprocess_all_auto_binds_calibration_when_enabled` had registered a **4×4** master against 480×320
+  synthetic frames and still "passed" — because the test patches `run_stack`, so `validate` never fired,
+  hiding the bug. Fix: `auto_bind_master_paths` now takes optional `width_px`/`height_px` and binds a
+  master only when its recorded dimensions match (a master with unrecorded dims fails the gate when the
+  subs' dims are known; the gate is skipped only when the subs' dims are unknown, so prior behaviour is
+  preserved); `_auto_bind_calibration` computes the frames' most-common dims and passes them. The gate can
+  only ever bind *fewer* masters, never a wrong one, so it can't introduce a mis-calibration. Regression
+  tests `test_auto_bind_skips_dimension_mismatched_masters` + `test_auto_bind_dimension_gate_skipped_when_subs_dims_unknown`
+  (fail before / pass after); the reprocess fixture master now matches the frame dims (as a real one would).
+  Additive, upgrade-safe (no config/DB/API/on-disk change; auto-bind stays off by default). PR #<this>.
+
+- **v0.103.2** — Stacking-engine correctness (drizzle reject; Builder 2026-07-10, found by a fresh
+  adversarial audit of `stack/align.py`/`drizzle_path.py`/`mosaic.py` — reproduced numerically, then fixed).
+  `DrizzleStacker.clip_reference` built its per-output-pixel clip tolerance from a **float32** variance
+  `m2 − m²`, where `m` (weighted mean) and `m2` (weighted mean-of-squares) are ~counts² for a bright pixel:
+  at ~5.5e4 ADU, `m² ≈ 3e9` where float32's ULP (~360) dwarfs a true per-frame variance of ~1e2, so the
+  variance suffered **catastrophic cancellation** and underflowed to 0 → tolerance collapsed to 0 → in
+  pass 2 *every* real contribution failed `|value − mean| > 0` → zero weight → `out_wht == 0` → the
+  fully-covered bright pixel came back **NaN**. Net effect with `drizzle` + `drizzle_reject` on: a bright,
+  flat region — a near-saturated star core or a smooth bright nebula — could be punched into a NaN coverage
+  hole (a NaN=coverage-invariant violation, and the exact "star cores are not eaten" the module docstring
+  promises). Verified by sweep: at V=48–64k, real σ=8–20, fp32 collapsed to *all 40 contributions rejected*.
+  The fix computes the difference in float64 **and** — since `m2` is itself accumulated in float32 by the
+  drizzle library, so a variance below `ULP(m²)` is already lost before the subtract — disables rejection
+  where the variance is at/below the float32 resolution of `m²` (`var ≤ 16·εf32·m²`), treating it like the
+  existing low-`neff` guard (`tol = +inf`, never reject). The threshold scales with brightness, so dim
+  sky/nebula (`var ≫ ULP(m²)`) is byte-for-byte unchanged and legitimate outliers at normal brightness are
+  still clipped. Additive, upgrade-safe (no config/DB/API/on-disk change; `drizzle_reject` stays off by
+  default). Regression tests `test_drizzle_reject_keeps_a_bright_flat_region` (fails before / passes after)
+  and `test_drizzle_reject_still_clips_a_real_outlier_at_normal_brightness` (guards the floor doesn't disable
+  real rejection). The two lower-severity items the same audit raised were dismissed: `rejection_counts`
+  tallies channel-samples *consistently* with the standard κ-σ path (the fraction is correct — same
+  convention, not a bug), and the returned `win_valid` staleness is covered by every consumer recomputing
+  `isfinite(win_rgb)`.
+
+- **v0.103.1** — Editor/parity hardening (PRIORITY 1; Builder 2026-07-10, found by a fresh adversarial
+  editor-pipeline audit). `geometry.crop`'s "too small → ignore" degenerate guard was evaluated in *this
+  render's* pixels, so a tiny fractional crop that is a real (≥2 px) crop on the full-res image but rounds
+  to <2 px on the heavily-decimated preview proxy no-op'd on the proxy while it still applied on the export
+  (or vice-versa) — the preview showed the whole frame while the export cropped, breaking the fractional-
+  coordinate proxy↔export parity the module's own docstring promises. The guard now decides degeneracy in
+  **full-resolution** pixels (`(x1−x0)·w·proxy_scale`), so proxy and export make the identical crop/no-crop
+  call, and the proxy slice is clamped to ≥1 px per axis so a real full-res crop that rounds sub-pixel on a
+  small proxy still crops instead of returning an empty (render-crashing) image. Byte-for-byte on the export
+  (proxy_scale=1) and on every real crop; only the absurd ~2–8 px fractional-crop edge changes. Regression
+  tests `test_crop_degenerate_decision_matches_between_proxy_and_fullres` (fails before / passes after) and
+  `test_crop_truly_degenerate_is_ignored_on_both_scales`. Additive, upgrade-safe (no config/DB/API/on-disk
+  change). _(Same 2026-07-10 audit re-read the whole stacking engine (`stack/{accumulator,stacker,weighting,
+  photometric,align}.py`, `calibrate/apply.py`) and the whole editor op set (`edit/pipeline,proxy,registry,
+  presets` + `ops/{tone,detail,background,geometry}.py`) against the NaN=coverage, memory-bound, photometric-
+  sign, calibrate-xor, frame-id-0, and proxy_scale invariants + a numeric stack→Auto→export dogfood — both
+  came back **clean** (17th consecutive), so the engine/editor stay well-hardened. Two sub-threshold
+  observations logged for a future run, neither a bug: (1) `detail.denoise` wavelet/TV smoothing scale isn't
+  proxy-scaled — but it exposes no scalable spatial knob and prior measurement put the parity gap at
+  0.37–0.53 % (< the ≤2 % decimation floor), so it's an accepted inherent limit, not a fix; (2) the crop
+  clamp above is the concrete half of that same parity family, now closed.)_ (#PR)
+
+- **v0.103.0** — One-click "Reject the N odd-target frames" on the mixed-pointing guard (autonomy/
+  friendliness, priority 2–3; Builder 2026-07-10). The v0.101–0.102 pre-flight guard only *told* the user
+  to open the Frames table and reject the odd subs by hand; this closes the loop. `detectMixedPointings`
+  now also returns `minorityIds` — every accepted+solved sub outside the largest pointing (exactly what the
+  stacker would silently drop; includes lone strays, which would be dropped anyway) — and both surfaces that
+  show the amber warning (Target page + Stack form) carry a "Reject the N odd-target frames" button that
+  rejects just those subs via the existing `bulk` endpoint (`action:"reject"` → `reject_reason="user"`),
+  leaving a clean single-target batch. Undoable like the auto-grade "Drop N" hint: the warning swaps to a
+  teal "Rejected N — Undo — re-accept N" confirmation (its own state, so the messaging is specific), so a
+  stray good frame is one click back. Frontend-only, additive, no backend/schema/default change. Pure-helper
+  tests (`minorityIds` contents incl. the stray case) + existing route tests green. (#PR)
+
+- **v0.102.0** — Pre-flight "batch looks like two targets" guard on the Stack form too (autonomy/
+  friendliness/trust, priority 2–3; Builder 2026-07-09). Extends the v0.101.0 detection to the Stack form —
+  the surface a user is literally on when they click "Start stacking", so the warning sits right next to the
+  button they're about to press (with a link back to the Frames table to fix it). Refactored the pure
+  `detectMixedPointings` helper out of `Target.tsx` into a shared `components/target/mixedPointings.ts` module
+  (matching the `components/target/solveSetup.ts` convention) so both routes import one implementation; the
+  Target page (v0.101.0) is unchanged behaviourally. Frontend-only, read-only, additive. Dedicated pure-helper
+  unit tests moved to `mixedPointings.test.ts` (+ a three-pointing case + an RA=0-seam two-target case) and two
+  Stack-form component tests (warns on two pointings; quiet on one). (#PR)
+
+- **v0.101.0** — Pre-flight "this batch looks like two targets" guard, first slice (autonomy/friendliness/
+  trust, priority 2–3; Builder 2026-07-09). A new pure `detectMixedPointings(frames)` helper on the Target
+  page single-linkage-clusters the accepted, plate-solved subs' `ra_center_deg`/`dec_center_deg` (converted
+  to unit vectors, so RA-wrap and the poles need no special case) at a 3° link distance and flags when they
+  split into two or more *substantial* (≥ 5 frames each) well-separated pointings. A contiguous Seestar mosaic
+  (panels step ~1° and overlap) stays one cluster because single-linkage keys on the *gap between* groups, not
+  their total span, so it never trips; a lone mis-solved stray (< 5 frames) is ignored (the stack's own
+  outlier rejection already handles it). When it fires, an orange Target-page callout ("This batch looks like
+  N different targets") names the majority/minority split + their separation and tells the user to reject the
+  odd frames *before* stacking — closing the *prevention* half the v0.100.0 post-hoc accounting couldn't (the
+  unattended stack silently drops the minority pointing as NALIGNFL and the user only learns afterward). It
+  catches the "dropped two nights of different targets in one incoming folder" mistake pre-stack, so a
+  walk-away run isn't wasted on half the data. Frontend-only, read-only, additive — no backend/schema/API/
+  default change; suppressed while plate-solving is misconfigured (RA/Dec would be unreliable). Pure-helper
+  unit tests (single pointing, contiguous mosaic, two targets, lone stray, RA=0 wrap, unsolved/rejected/
+  coordinate-less exclusion) + two component tests. The *unattended*-chain action (refuse/auto-split) remains
+  as the higher-bar follow-up. (#PR)
+
+- **v0.100.0** — Honest per-run frame accounting + large-align-failure diagnosis (friendliness/trust,
+  priorities 2–3; Builder 2026-07-09). The stacker now records how many subs it *attempted* to combine
+  and how many couldn't be aligned, stamping `NOFFERED`/`NALIGNFL` into the master FITS header (the same
+  durable, self-documenting provenance route REJMODE/PHOTNORM/DARKSCAL use — no schema migration,
+  upgrade-safe: older masters simply lack the cards and degrade to nothing). `StackResult` gains
+  `n_offered`/`n_align_failed` (`n_offered − n_align_failed == n_frames_used`) and the pipeline surfaces
+  them on the job result. The `…/info` endpoint parses them into a `frame_accounting` summary, and the
+  History Info panel shows a dimmed "1,850 of 2,000 subs combined · 150 couldn't be aligned" line **only
+  when there's a gap** (a clean all-aligned stack stays quiet — the integration "· N subs" line already
+  tells that story). When the align-failure share is materially large (≥ 20% of a ≥ 10-sub stack) the line
+  turns amber and appends an actionable next step (mixed targets in one folder / bad plate-solves → open
+  the Frames table, sort by RA/Dec, reject/re-solve the outliers), reusing the guidance the mosaic-canvas
+  error already gives. Closes the trust hole where a user with thousands of subs who walked away had no way
+  to see that 150 of their 2,000 solved subs silently dropped out. Additive/off-nothing; regression tests:
+  engine (all-aligned → `n_align_failed==0` + `NOFFERED`/`NALIGNFL` cards; a stray far-pointing sub →
+  `n_align_failed==1`), backend (`frame_accounting` parsed / absent on older master), and frontend
+  (`frameAccountingNote` thresholds + Info-panel render). Closes two Scout-filed 2026-07-09 Ideas.
+
+- **v0.99.10** — Drizzle pre-run estimate reports the **real** output canvas size (stacking-engine
+  trust — current focus, Builder 2026-07-09). `_estimate_peak_bytes` computed the post-drizzle output
+  shape as `int(dim·s + 1)`, but the canvas the run actually allocates
+  (`drizzle_path._compute_output_canvas`) uses `int(round(dim·s))`; whenever `dim·s` was near-integer
+  (e.g. 320×1.5 = 480.0) the estimate over-stated each axis by 1 px, so the `output_w`/`output_h` the
+  Stack form shows before a run (and the shape the memory guard reserved against) didn't match the FITS
+  the run writes. Now uses the identical `int(round(dim·s))`, so estimate == actual. Harmless for the
+  guard either way (the old value only over-reserved), purely a trust/honesty fix on the displayed
+  dimensions. Regression test `tests/test_stack_memory_guard.py::
+  test_estimated_drizzle_output_shape_matches_the_real_canvas` cross-checks the estimate against a real
+  `DrizzleStacker.output_canvas_shape` (fails before / passes after). Found by a Builder adversarial
+  audit of the stacking engine (see the audit note in Bugs).
+
+- **v0.99.9** — Honest per-pixel *frame count* for `coverage_min`/`coverage_max` on the **drizzle**
+  path too (stacking-engine trust — current focus, Builder 2026-07-09). Completes the v0.99.6
+  frame-count family: `DrizzleStacker` now keeps an unweighted `frame_coverage` (uint32) alongside
+  `coverage` (out_wht = Σ weighted footprint overlap), marking each frame's output support by the
+  strict post-add increase in channel-0's accumulated weight, and `run_stack`'s drizzle branch routes
+  it through the existing `frame_cov` diagnostics path — so a `drizzle=True` + `quality_weighted=True`
+  run reports an honest "N frames per pixel" instead of the smaller weight sum (also fixes the
+  unweighted pixfrac<1 / scale≠1 fractional understatement). `coverage` untouched (coverage-map output
+  + `level_by_coverage` byte-for-byte identical); stats-only accumulator skips the tracking. Regression
+  tests in `tests/test_drizzle.py` (fail before / pass after).
+
+- **v0.99.6** — Honest per-pixel *frame count* for `coverage_min`/`coverage_max` under quality
+  weighting (stacking-engine hardening — current focus, Builder 2026-07-09). Found by a deep
+  adversarial audit of the stacking hot path (the audit otherwise came back clean of any
+  image-corrupting bug). `WeightedSumAccumulator.coverage` is Σ-of-weights, not a frame count, so
+  with `quality_weighted` on the persisted `coverage_min`/`coverage_max` diagnostics — surfaced to
+  the user as "coverage N–M **frames** per pixel" (History Info) — *understated* coverage (a
+  fully-covered 4-frame stack could report max 2; a heavily-weighted 100-frame stack could read
+  "0–6 frames"). The accumulator now also keeps a cheap 2-D **unweighted** contribution count
+  (`frame_coverage`), and `run_stack` reads it for the coverage_min/max scalars, so "frames per
+  pixel" is honest even when weights ≠ 1. `.coverage` (Σweights) is unchanged, so `level_by_coverage`
+  and the on-disk `master_coverage.fits` are byte-for-byte identical; an unweighted stack (the
+  default) is byte-for-byte identical too (count == Σweights). The min/max-reject path already
+  reported a true count; **drizzle+quality_weighted still reports Σweights** (a niche opt-in-on-opt-in
+  combo) — logged as a follow-up idea below. Regression tests: `tests/test_accumulator.py`
+  (`frame_coverage` semantics: unweighted parity, NaN gaps, windowed) + `tests/test_stack_pipeline.py::
+  test_quality_weighted_coverage_reports_frame_count_not_weight_sum` (a weighted 4-frame stack reports
+  coverage_max 4, not the weight sum; fails before / passes after).
+
+- **v0.99.3** — Plain-language help on every advanced Stack-form knob (friendliness — priority 3,
+  Builder 2026-07-09). The advanced group of the Stack form was a wall of bare jargon: 14 fields
+  (Background mode, Background/Final-gradient box size, Hot-pixel suppression + σ, Sub-pixel refine,
+  Final gradient mode, Color calibration + mode, Canvas mode, TIFF mode, Drizzle pixfrac/scale/kernel)
+  had no `help` tooltip at all, so a beginner opening "Advanced" got no idea what any of them did or when
+  to change them. Added a concise "what/why" tooltip to each in `webapp/schemas.py::_DESCRIPTORS` (they
+  flow to the tooltip via the existing `HintLabel`, so no frontend change — and the same help now also
+  appears on the Settings default-stack-options editor, which reuses `StackOptionControl`). In particular
+  `background_mode`/`final_gradient_mode` now spell out the documented OSC gap — per-channel flatten leaves
+  "cyan cores / red halos" on extended emission nebulae, so switch to Luminance for a big diffuse nebula —
+  a safe, no-classifier slice of the still-open luminance-bg nudge idea (surfaces the knob so a beginner
+  can find it, without touching Auto/defaults). New regression guard
+  `test_every_form_field_has_plain_language_help` (fails before / passes after) keeps future fields from
+  shipping without help. Purely additive descriptor text, zero behaviour/default/schema change,
+  upgrade-safe.
+
+- **v0.99.2** — Retry a transient QC error in the auto-pipeline (autonomy/robustness — priority 2,
+  Builder 2026-07-09; Scout-traced, the QC analog of the v0.94.9 ingest cache-copy retry). When
+  `compute_frame_metrics` raised on a frame (a transient read blip — NAS hiccup, a file still being
+  written), it was stamped `qc_error:…` and `build_qc_arglist(only_new=True)` treated it as permanently
+  "done", so the watcher auto-pipeline never re-measured it — it stayed uncheck-able until a manual full
+  re-QC. Now a first `qc_error` is **re-offered once** by the auto-pipeline; a second consecutive failure
+  is stamped terminal (`qc_error_final:…`) and skipped thereafter, so a genuinely-corrupt file isn't
+  re-QC'd on every scan forever (a manual `only_new=False` re-QC still retries even terminal frames). Bonus
+  correctness fix: a retry that finally succeeds clears the stale `qc_error` reject reason (so it no longer
+  shows as "couldn't be quality-checked") while never touching a user/auto reject. No schema change,
+  additive, upgrade-safe. `tests/test_qc_retry.py` (retryable→terminal, success-clears-stale,
+  user-reject-untouched) + updated `tests/test_qc_idempotent.py`.
+
+- **v0.99.1** — Surface "N frames couldn't be quality-checked" on the Target page (friendliness/trust —
+  priority 3, Builder 2026-07-09; Scout-traced). When QC *raises* on a frame (unreadable/corrupt/truncated
+  FITS) it's stamped `reject_reason="qc_error:…"` but left `accept=1`, so it inflates the accepted count,
+  silently drops out of the stack (the stacker skips a frame it can't load), and — because the
+  reject-summary tallies only `accept=0` rows — never appears in the "why frames were dropped" breakdown,
+  leaving a beginner with zero signal that some subs were unreadable. New pure `countQcUncheckable(frames)`
+  helper counts `qc_error`-reasoned frames (from the already-fetched frames list, any accept state) and a
+  dimmed gray Target-page callout names the count, explains they're skipped when stacking, and offers a
+  one-click "Re-check these frames" reusing the existing QC + Solve action (`only_new_qc=False` retries
+  them, in case the read failure was transient). Frontend-only, additive, read-only detection — no backend
+  or schema change. Helper unit tests + two component tests (callout appears + re-checks; quiet when clean).
+
+- **v0.99.0** — Auto-bind matching calibration masters to the *unattended* stack chains (autonomy +
+  image-quality — priorities 2 & 4, Builder 2026-07-09). `recommend_masters` was wired **only** into the
+  interactive Stack form, so a beginner who built masters once but reached a finished image via the
+  one-click **Process target**, the walk-away **watcher auto-stack**, or a library-wide **reprocess-all**
+  got an *uncalibrated* stack even with a perfectly-matching master dark/flat sitting in the store. New
+  off-by-default `auto_bind_calibration` setting (Settings → "Auto-apply matching calibration masters to
+  hands-off stacks"): when a stack in one of those chains has no calibration chosen, a new pure
+  `calibration.auto_bind_master_paths` picks the library's best **confidently-matching** masters and binds
+  them — stricter than the interactive recommender (which only *warns* on a poor match): a dark only when
+  its exposure matches the subs within 25% (mirroring the Stack form's own `expMismatch` threshold), the
+  recommended flat + flat-dark, and a bias only when no dark matched. An ambiguous/mismatched library
+  leaves the stack uncalibrated exactly as today, and the bound masters flow through the normal path so
+  `CALSTAT` provenance records what was applied. The interactive Stack form is untouched — it still honours
+  exactly what the user picked (or deliberately left blank). Off by default (§9): a live install's
+  autonomous output is unchanged until the user opts in. Tests: `auto_bind_master_paths` unit coverage
+  (confident dark+flat bound / exposure-mismatched dark dropped / bias-only-when-no-dark / empty store),
+  reprocess-all integration (auto-binds when on, uncalibrated when off), a regression that the interactive
+  form never auto-binds even with the setting on, and a config-upgrade default-off assertion.
+
+- **v0.98.2** — Tonight planner (friendliness — priority 3, Builder dogfood-found 2026-07-09): the
+  "Start something new" (and "Add more to what you're shooting") tables listed **every** target the
+  planner returns regardless of observability — and the engine returns the whole 157-object catalog, so
+  on a typical night ~**half the rows were dead** (targets that never clear the minimum-altitude floor
+  tonight: score 0, "—" transit / "—" time-up), diluting the ranking whose entire job is "what's worth
+  shooting tonight?" (measured: 79 of 157 fresh catalog rows unobservable at a 40°N / min-alt-30 October
+  night). Both tables now list only targets **up tonight** (`minutes_above_min_alt > 0`) and collapse the
+  rest into a dimmed footnote naming the count with a "lower the minimum altitude to include them" hint —
+  so nothing is hidden (the escape hatch is one control away) but the table reads as a clean shortlist,
+  and the "well placed tonight" copy is honest. New pure helpers `partitionByUpTonight` + `notUpTonightNote`
+  (unit-tested) + a component test (dead row hidden behind the count); the type filter now derives its
+  buckets from the up-tonight set too. Frontend-only, additive, read-only — no engine/schema/API/default
+  change (`minutes_above_min_alt` has always been on the response). Dogfood also confirmed the planner is
+  healthy end-to-end across polar (no dark window), southern-hemisphere, future-date and min-alt 0/80
+  edge cases — no engine bug found.
+
+- **v0.97.8** — Tonight planner (friendliness/autonomy — priority 3, Builder §4 top-up): show *when
+  tonight* a target is actually shootable, which the single transit time can't answer (a 7-hour target
+  could clear the floor at 21:00 or not until 01:00). `_observability_batch` now derives the usable
+  window's enclosing clock bounds from the per-sample above-floor mask it already computes and reports
+  them as nullable `usable_start_utc`/`usable_end_utc` on `Observability`/`PlannedTarget` (both `None`
+  when never usable); the Tonight page renders them as a dimmed "HH:MM–HH:MM" line under "Time up" via a
+  pure `usableWindowNote` helper. Honest: `minutes_above_min_alt` stays the true usable total, so a rare
+  horizon-mask gap shows as the enclosing span (exact for the common no-mask case). Additive/offline, no
+  score/ranking change. Tests: `test_nightplan.py` (bounds enclose transit & sit in the dark window, span
+  matches usable minutes, `None` when never usable) + a `usableWindowNote` block in `tonight.test.ts`. (#PR)
+
+- **v0.97.7** — Tonight planner (friendliness/trust): a dimmed per-row Moon cue explains *why* a
+  bright-Moon night still ranked a target well. The planner now surfaces each target's Moon-up overlap
+  (`moon_up_fraction` on `PlannedTarget`/`Observability` — the same share the score already computes,
+  `None` when the target has no usable window) and the Tonight page renders it via a pure
+  `moonCueForTarget` helper: "Moon down for its window" when the overlap is ~0 (reconciling a scary
+  single-instant `moon_separation_deg` with the ranking), "Moon up N% of its window" for a partial
+  overlap, and nothing when the Moon is up throughout. Additive/offline, no score/ranking change. Tests:
+  `test_nightplan.py` (per-target fraction, relief-tracking, `None` for a never-usable target) + a
+  `moonCueForTarget` block in `tonight.test.ts`. (#PR)
+
+- **v0.97.6** — Tonight planner (autonomy/trust): the observability score now weights each target's Moon
+  penalty by whether the Moon is *actually up* while the target is observable. `_observability_batch`
+  samples topocentric Moon altitude over the dark-window grid and passes each target a `moon_up_fraction`
+  (share of its usable samples with the Moon above the horizon) to the new `moon_up_fraction` arg on
+  `_score` (default 1.0 = old behaviour), which scales the illumination×proximity penalty. Monotonic:
+  the penalty can only shrink, so a Moon-up-all-night sky is unchanged and only post-moonset/pre-moonrise
+  targets get relief — fewer good targets buried by a Moon that isn't up for them. Offline, additive.
+  Tests in `test_nightplan.py` (scaling, up-all-night no-change, waxing-sets relief). (#PR)
+
+- **v0.97.5** — Tonight planner (friendliness): the Moon card now shows *when* the Moon rises or sets
+  during tonight's dark window, complementing the phase with a concrete time. New offline
+  `nightplan.moon_window(observer, window)` samples the topocentric Moon altitude across the dark
+  window (5-min grid) and reports the first setting/rising horizon crossing inside it (interpolated,
+  rounded to the minute), or an `up_all_night` / `down_all_night` flag when it never crosses; surfaced
+  as an additive nullable `moon_window` field on the plan and rendered as one dimmed line under
+  `moonPhaseLabel` via a pure `moonWindowNote` helper ("Sets ~23:40, dark after" / "Rises ~01:10, dark
+  before" / "Above/Below the horizon all night"), which replaces the generic "nearer + brighter" hint
+  only when a concrete cue exists. Additive, offline, upgrade-safe (older backend → plain hint). Tests:
+  `test_nightplan.py` (full/new-Moon all-night, waxing-sets, waning-rises against real 2026 ephemeris
+  with a crossing-direction check, plan wiring, no-window case), `test_plan.py` (endpoint carries
+  `moon_window`), and TS (`tonight.test.ts` `moonWindowNote`, `Tonight.test.tsx` Moon card). Found
+  dogfooding the newest feature.
+
+- **v0.97.4** — Tonight planner (friendliness): the Moon card now distinguishes a **waxing** from a
+  **waning** Moon ("Waxing gibbous (72%)" / "Waning gibbous"; "First Quarter" / "Last Quarter";
+  "Waxing crescent" / "Waning crescent"), which tells the planner *when* the Moon is up — a waxing
+  Moon sets in the evening (early-night targets stay dark), a waning one rises after midnight — a
+  distinction the illuminated *fraction* alone can't make. New offline
+  `nightplan.moon_is_waxing(when_utc)` (Moon-vs-Sun ecliptic longitude, `0 < Δλ < 180` = waxing),
+  surfaced as an additive nullable `moon_waxing` field on the plan (`asdict`) and woven into
+  `moonPhaseLabel(illum, waxing)`. New/Full never take a prefix; an older backend without the field
+  falls back to the plain labels. Additive, offline, upgrade-safe. Tests: `test_nightplan.py`
+  (`test_moon_waxing_matches_the_phase_cycle`, `test_plan_reports_moon_waxing_state`), `test_plan.py`
+  (endpoint carries `moon_waxing`), and TS (`tonight.test.ts` waxing/waning labels, `Tonight.test.tsx`
+  Moon card). Found dogfooding the newest feature.
+
+- **v0.97.3** — Tonight planner (friendliness): section-accurate empty states. The two target
+  tables shared one message — "Nothing here clears your minimum altitude tonight." — which is
+  *never* accurate for the "Add more to what you're shooting" (already-targeted) section: the engine
+  always lists a positioned library target in the plan (with score 0 if it doesn't clear the floor),
+  so that section is empty **iff** the user has no positioned library targets, not because of
+  altitude. A first-timer with an empty library was told the wrong reason. `TargetTable` now takes an
+  `empty` message: the already-targeted section says "You haven't shot any targets with a known
+  position yet — start something new below."; the catalog section keeps the (accurate-there) altitude
+  message with a "try lowering it" nudge. Frontend-only, additive. Component regression in
+  `Tonight.test.tsx` (empty library shows the guidance, not the altitude blame). Found in the same
+  §2 dogfood as v0.97.2.
+
+- **v0.97.2** — Tonight planner (friendliness): the "Minimum altitude" picker no longer renders
+  **blank** when the user's `min_target_altitude_deg` setting isn't one of the round presets. The
+  Settings input steps by 5° (so 15° / 45° / 55° are all reachable) but the Tonight `Select` only
+  listed {10,20,30,40,50}, so an active floor like 45° left the control showing nothing (the plan was
+  still correct — only the control looked broken). New pure `minAltOptions(active)` helper (in
+  `tonight.ts`) splices the active floor into the options list, numerically sorted, whenever it isn't
+  already a preset, so the picker always shows the real floor the plan was computed for. Frontend-only,
+  additive, no backend/API change. Unit tests for the helper (`tonight.test.ts`: preset/non-preset/
+  rounded/null cases) + a component regression (`Tonight.test.tsx`: a 45° floor renders "45°", not
+  blank). Found by a big-picture dogfood of the newest feature (§2).
+
+- **v0.97.0** — ⭐ OWNER-REQUESTED "Tonight" night planner — widen the bundled catalog beyond Messier.
+  A second static, offline file `seestack/data/deepsky_popular.json` (47 curated popular non-Messier
+  NGC/IC targets — Double Cluster, Veil, North America/Pelican, Heart/Soul, Rosette, Iris, Cocoon,
+  Helix, Blue Snowball, Cat's Eye, Sculptor Galaxy, Centaurus A, Needle, Omega Cen, 47 Tuc, …) is now
+  concatenated into `nightplan.load_catalog()` (refactored into `_load_catalog_file` + a de-duping
+  loop keyed on id — first file wins), so "Start something new" suggests the well-known objects an OSC
+  Seestar owner actually shoots, not just Messier. Same schema/vocabulary as `messier.json`; coordinates
+  are sub-degree J2000 (ample for altitude/window ranking); ids are the primary NGC/IC designation and
+  don't collide with Messier ids. Additive, offline, upgrade-safe (packaging already globs `data/*.json`;
+  API shape unchanged — just more entries). New validation tests pin catalog well-formedness (unique ids,
+  valid IAU constellations, known types, no positional overlap with Messier) and that a curated target
+  surfaces in a plan. Frontend "Start something new" description reworded to match. (this branch)
+
+- **v0.95.0** — ⭐ OWNER-REQUESTED "Tonight" night planner, slice (a) — the offline astronomy core.
+  New pure engine module `seestack/nightplan.py` (astropy, offline, deterministic): computes tonight's
+  dark window (astronomical −18° with nautical/civil fallbacks; `None` for polar day), and per target
+  max altitude, transit, usable minutes above a configurable min altitude, Moon separation + phase → a
+  0–100 observability score. Combines the user's library targets ("already targeted", annotated with
+  subs + integration) with a **bundled 110-object Messier catalog** (`seestack/data/messier.json`,
+  static, no network), deduping the catalog copy of any already-shot target. New `GET /api/plan/tonight`
+  (observer location from new opt-in `site_lat`/`site_lon`/`site_elevation_m` Settings, else read
+  best-effort from a solved frame's `SITELAT`/`SITELONG` header) + a read-only **Tonight** frontend page
+  (dark-window/Moon summary, two ranked tables). Additive, read-only, off-by-default config (§9). Tests:
+  `tests/test_nightplan.py`, `tests/webapp/test_plan.py`, `test_config_upgrade` site cases, frontend
+  `tonight.test.ts` + `Tonight.test.tsx`.
+
+- **v0.94.17** — Friendliness: `post/target_id.py` now maps SIMBAD short OTYPE codes to plain words
+  via a new `_OTYPE_NAMES` table + `friendly_object_type()` helper, so `object_type_name` (and the GUI
+  identify dialog) reads "Galaxy"/"Globular cluster"/"HII region" instead of a bare "G"/"GlC"/"HII";
+  unknown codes fall back to the raw code. Tests `test_friendly_object_type_*`.
+
+- **v0.94.16** — Colour-calibration robustness: `post/color_cal.py::_solve_gaia` now clamps both solved
+  per-channel scales to a physical positive range (`0.05`–`20.0`) before returning, so the linear-in-colour
+  model's negative `expected_bg` on an extremely-reddened (`BP−RP > 2.44`) field can no longer produce a
+  negative `scale_b` that would *invert* the blue channel; a no-op on realistic OSC fields. Regression test
+  `test_solve_gaia_clamps_a_negative_channel_scale`.
+
+- **v0.94.15** — Engine/data-integrity fix (found by a fresh adversarial editor-pipeline audit): the
+  full-res editor **export** dropped the NaN=coverage restore that the live preview performs. When a
+  recipe has **no explicit stretch op** (an empty recipe, or a custom/preset recipe relying on the
+  default), `_render_recipe_fullres` applied its fallback `asinh_stretch` — which renders uncovered
+  (NaN) pixels as black `0` — and returned it **without** re-marking those pixels NaN, unlike
+  `seestack/edit/pipeline.apply_recipe` (which does `out[uncovered] = np.nan`). Because `_write_fits`
+  writes the float32 cube verbatim (no `nan_to_num`), the exported **FITS** baked a mosaic-gap /
+  reproject-border "no coverage" region to *real black* — so the export diverged from the live preview
+  (which shows NaN) and a **re-edit** of that export saw the gap as covered black (`finite_mask` reports
+  it covered), mis-treating it in coverage-leveling / border-trim / histogram-levels. The image-only
+  PNG/TIFF looked identical (both `nan_to_num` to black), which is why prior image audits missed it.
+  Fix mirrors the preview exactly (`finite_mask` → asinh → restore NaN); a recipe *with* a stretch op
+  was already correct and stays byte-for-byte unchanged. Regression test
+  `test_fullres_export_keeps_nan_coverage_on_a_no_stretch_recipe` (fails before / passes after) plus a
+  guard that the explicit-stretch export is unchanged. (`webapp/pipeline.py`, `tests/webapp/test_editor.py`)
+
+- **v0.94.14** — Friendliness polish: the Dashboard readiness banners' dismissal now keys on the
+  *specific* problem (readiness *signature*) instead of a global boolean, so dismissing one banner
+  no longer suppresses a genuinely different or returning problem (ASTAP→database, incoming→library,
+  or a fault that recurs after having worked). New pure `astapReadinessSignature` /
+  `folderReadinessSignature` helpers + a shared signature-keyed localStorage dismissal in the
+  Dashboard; both banners still self-hide once fixed. Closes the follow-up note filed with v0.94.12.
+  Frontend-only, additive (`astapReadiness.ts`, `folderReadiness.ts`, `routes/Dashboard.tsx`).
+
+- **v0.94.13** — Friendliness (first-run): extended the Dashboard readiness banners to a
+  missing/unwritable **incoming or library folder** — the other silent first-run blocker after
+  the plate-solver. `GET /api/system` gained an additive `folders` field (`_folder_status` reports
+  each resolved directory's `exists`/`writable`, cheap + never raises), and the Dashboard shows a
+  second dismissible yellow Alert (own localStorage key) covering the four cases (incoming/library ×
+  missing/unwritable) with a "Fix in Settings" link, so a beginner learns upfront instead of after a
+  Scan finds nothing / a stack fails to write. Pure `folderReadiness(folders)` helper mirrors
+  `astapReadiness` (only a *definite* false fires → older backends never nag; incoming checked
+  first). Off-nothing, no default/schema change (`webapp/routers/system.py`,
+  `frontend/src/components/dashboard/folderReadiness.ts`, `frontend/src/routes/Dashboard.tsx`).
+
+- **v0.94.12** — Friendliness/autonomy: a proactive, dismissible "plate-solving isn't set up"
+  banner on the **Dashboard** (the one screen a beginner always lands on first). A pure
+  `astapReadiness(astap)` helper classifies `GET /api/system` into ready / ASTAP-missing /
+  star-database-missing (only a *definite* `star_db_found === false` flags the DB, so an older
+  backend that omits the field never nags), and the Dashboard shows a yellow Alert with a "Fix
+  in Settings" link when it isn't ready — caught upfront instead of after scanning frames and
+  hitting a mid-workflow wall. One-time localStorage dismissal (guarded); self-clears once
+  ASTAP is set up. Frontend-only, additive, no backend/schema/default change
+  (`frontend/src/components/dashboard/astapReadiness.ts`, `frontend/src/routes/Dashboard.tsx`
+  + tests).
+
+- **v0.94.11** — Friendliness (cosmetic): the ASTAP "no star database" hint on Settings now
+  reads "(*.290 or *.1476)" instead of "(*.290)" only — the count already tallied both series
+  and the hint's own `d05` example is a `.1476` file, so the old wording was misleading in a
+  genuine zero-database state. Text-only; no behaviour or test change (`webapp/routers/system.py`).
+
+- **v0.94.10** — Project-DB robustness: opening an empty/foreign `project.sqlite` (a blank or
+  corrupt file sitting at `user_version==0` with no `frames` table) no longer produces a
+  structurally-broken DB. `_migrate_schema` ran only `ALTER TABLE frames …` (each swallowing
+  `OperationalError`) and never `SCHEMA_SQL`, so with no `frames` table the ALTERs no-op'd,
+  `user_version` was stamped current, and the next `add_frame` raised "no such table: frames".
+  It now builds the base schema (idempotent `CREATE … IF NOT EXISTS`) when the `frames` table is
+  missing, before migrating — a no-op for every genuine older project. Regression test in
+  `tests/test_project.py`. Near-unreachable (real projects go through `Project.create`) but a
+  reproduced structural break with a cheap, additive fix.
+
+- **v0.94.9** — Ingest robustness: a transient Stage-1 copy failure (a NAS blip during
+  `shutil.copy2`) no longer leaves a frame **permanently** uncached. `ingest_files` keyed
+  `existing` on the source-path string, so a re-scan skipped the already-registered row and
+  never retried the copy — the size-check "resume" branch was dead for this case. It now keys
+  `existing` on the frame row and, when a registered frame is still uncached and caching is on,
+  retries the copy via a shared `_copy_to_stage1` helper; already-cached frames are never
+  re-copied. Not a wrong-image bug (downstream falls back to `source_path`), but the Stage-1
+  cache is now populated on the next scan instead of never. Regression tests in `tests/test_ingest.py`.
+
+- **v0.94.8** — Stacking-engine data-integrity fix (current-focus §1): the bilinear debayer
+  (`seestack/io/fits_loader.py`) systematically **darkened the outermost 1-px ring of every
+  debayered frame** (~50% on edges, ~75% at the four corners). Root cause: the missing-sample
+  interpolators average same-channel neighbours, but the colour planes are *sparse* (zero at every
+  non-sample site), and when an edge pixel's interpolation reached off the frame the previous
+  edge-replicate `_shift` replicated a **zero line** — so a real edge sample got averaged against 0.
+  The align path insets 3 px so it never showed there, but the **drizzle stack path feeds the full
+  frame** (no inset) straight into the drizzler, so the dark seam reached the *final image*. Fix:
+  `_shift` now zero-fills the vacated edge and both `_interp_g`/`_interp_rb` use **normalized
+  convolution** — each average divides by the count of genuine in-frame same-channel samples it
+  summed, so an off-frame contributor is *excluded* rather than diluting toward 0. Interior sites
+  (all neighbours present) are **byte-for-byte unchanged** (verified on random data); only the border
+  is corrected. Found by a fresh adversarial audit of the FITS I/O layer + reproduced numerically (a
+  constant mosaic now debayers to that exact constant across all four Bayer patterns). Regression
+  tests `test_bilinear_debayer_constant_image` (strengthened to assert the full frame, all patterns —
+  fails before / passes after) and `test_bilinear_debayer_border_not_darkened`.
+
+- **v0.94.7** — Job-progress robustness (autonomy/friendliness): fixed two real `useJobEvents` SSE bugs
+  found by a fresh adversarial audit of the job-events + export-polling surface. **(1)** `es.onerror`
+  unconditionally called `es.close()`, defeating EventSource's built-in auto-reconnect — so any
+  *transient* mid-job drop (laptop sleep, proxy idle-timeout, a network blip during a multi-minute
+  stack) permanently froze the progress panel on its last snapshot: the job could finish while
+  disconnected and the UI never resolved (stuck spinner, frame list never refreshed, reload required).
+  The backend re-sends current state (plus `done` if already terminal) on *every* reconnect, so the fix
+  is to let EventSource reconnect and only close when it has permanently given up (`readyState ===
+  CLOSED`). **(2)** The hook reset its snapshot only when `jobId` became falsy, so on a job→job change
+  (e.g. starting a second stack without leaving the page) it returned the *previous* job's stale
+  (often `"done"`) snapshot — with its "View result" button — until the new stream emitted. Now it
+  clears on every id change. Frontend-only, additive. Regression tests for both (fail before / pass
+  after), using an extended EventSource mock (readyState + terminal constant). The editor's own
+  export/PNG polling loops were audited and found correct (terminal-state handling, no stale-job
+  closures, no blob leak, button-gated against progress races).
+
+- **v0.94.6** — Editor/undo correctness (PRIORITY 1): fixed undo *over-reverting* a second use of the
+  same control. `useUndoable`'s coalescing keyed only off the previous set's key with **no
+  gesture-end signal** — and releasing a slider fires no event — so a second drag of the *same*
+  slider merged into the first history entry, making the value between the two gestures unreachable by
+  undo (e.g. drag strength 3→5, release, drag 5→7, Ctrl+Z → jumped back to 3, not 5). Root-cause fix:
+  coalesce a keyed set only when it lands within `COALESCE_WINDOW_MS` (500 ms) of the previous
+  same-key set, so the time gap between two gestures ends one (continuous drag ticks fire ms apart and
+  still collapse to one step). Also fixed a related contract violation the audit flagged: `CurvesWidget`
+  passed `coalesce=true` for **every** curve mutation, so a *discrete* structural edit (add/remove point,
+  keyboard Delete, the "reset" link) merged into the preceding drag — one Ctrl+Z then wiped a whole
+  curve-editing session. `CurvesWidget.onChange` now carries a `coalesce` flag (true only for a point
+  drag or an arrow-key nudge; false for add/remove/reset), threaded through `OpParamPanel`. Frontend-only,
+  additive. Regression tests: `useUndoable` gesture-boundary test (fails before / passes after) +
+  `CurvesWidget` discrete-vs-continuous flag assertions. Found by a fresh adversarial editor-logic audit
+  (which otherwise came back clean: preview races, split/compare geometry, suggestion wiring, recipe
+  immutability, history bounds all verified correct).
+
+- **v0.94.5** — Engine/NaN-coverage: `geometry.rotate` now guards degenerate sizes (`h < 3 or
+  w < 3` → return the sliver untouched), the last op in the geometry/detail degenerate-guard family
+  that lacked one. Rotation's ~1 px NaN border consumes a sub-3-px axis entirely, so a fully-covered
+  2×2/1×5/… came back all-NaN (a NaN=coverage violation; a `<2` px crop upstream can feed exactly a
+  2×2). No-op on any real ≥3 px image. Regression tests `test_rotate_on_a_tiny_image_is_a_safe_noop`
+  + `test_rotate_full_size_is_unchanged_by_the_tiny_guard`. Found by a fresh adversarial numeric
+  editor-ops audit that otherwise came back clean.
+
+- **v0.94.4** — Robustness/friendliness: `POST /api/calibration/masters` now returns 400 (not 500)
+  when `Path(source_dir).is_dir()` *raises* (e.g. an embedded null byte → ValueError on platforms
+  that raise). Wrapped the check in a `(OSError, ValueError)` guard treating a raise as "not a
+  folder", matching every other bad-input path in the handler. Regression test monkeypatches
+  `Path.is_dir` to raise so it's platform-independent (the CI container returns False rather than
+  raising). Defensive/additive, no-op where `is_dir()` returns False.
+
+- **v0.94.3** — Engine/NaN-coverage: sub-pixel refine now marks the vacated edge NaN on a
+  fully-finite window. `align.py::_apply_subpixel_shift` + `_apply_subpixel_shift_windowed` dropped
+  the `if nan_mask.any()` guard so the `cval=1.0` NaN-mask shift always runs — the ~1 px strip vacated
+  by the correction shift is NaN=uncovered, not the old `cval=0.0` fill (a fractional dimming of the
+  ring). A ~0 shift still adds no NaN. Reproduced first, then fixed; regression tests in
+  `tests/test_subpixel_align.py` (fail before / pass after). Near-unreachable in practice (real frames
+  carry a NaN border; `subpixel_refine` off by default) but a reproduced violation of the NaN=coverage
+  hard invariant, byte-for-byte-safe on real frames.
+
+- **v0.94.2** — Editor friendliness: surface the content classification in the "What Auto-process
+  did" note. The "try this preset?" chip only shows on an *empty* pipeline, so a user who clicked
+  Auto straight away never learned their image was classified; a new pure `presetSuggestionSentence`
+  helper now renders one dimmed informational line ("Your image looks like a Star cluster — its
+  preset is another good starting point to compare.") inside the Auto note, reusing the
+  already-fetched `…/editor/preset-suggestion` payload. Purely informational (no button, never
+  implies Auto was wrong), hidden when the classifier declined, and it exposes the same
+  already-shipped classification the chip does — no new classifier-accuracy risk. Frontend-only,
+  additive; unit tests on the helper + a component test that the line rides alongside the Auto note.
+
+- **v0.94.1** — Robustness: `detail.denoise` now guards a degenerate 1-px-thin image
+  (`shape[0] < 2 or shape[1] < 2` → return untouched), mirroring the geometry ops' degenerate-size
+  guards. Before the guard the wavelet path emitted all-NaN in the *covered* region (breaking the
+  NaN=coverage hard guardrail) and bilateral raised `IndexError`. Regression test
+  `test_denoise_on_a_one_px_thin_image_is_a_safe_noop` (wavelet/bilateral/tv × 1×N/N×1; fails
+  before / passes after).
+
+- **v0.94.0** — Auto-preset classifier — *safer-first slice* (a preset **suggestion**, not a change
+  to Auto's output). New pure `presets.classify_target(rgb)` coarsely classifies a run's own proxy as a
+  **star cluster / nebula / galaxy** from cheap geometry-first cues (`star_share` from a grey-opening
+  compact-vs-diffuse split; `ext_frac` = frame fraction of extended signal; colour as a soft nebula
+  gate so a big *neutral* galaxy like M31 isn't confidently mis-labelled) and returns the matching
+  built-in preset — or **declines (`preset_id=None`)** on an ambiguous/blank field so it stays quiet
+  unless one archetype is clear. A read-only `POST …/editor/preset-suggestion` endpoint serves it; the
+  editor shows a dimmed *"This looks like a Star cluster — try the Star-cluster preset?"* chip in the
+  empty-pipeline nudge that applies the preset (sized to the target's data + mosaic-aware, as the
+  Presets menu does) in one undoable click. A mis-pick costs a *click*, not a worse image — Auto's
+  output is untouched — so it can ship and gather real-world signal before any graduation to seeding
+  Auto. Additive; nothing persisted; new suggestion is off-nothing (hidden when unsure).
+  `tests/test_target_classify.py` (6 archetype cases incl. the neutral-galaxy guard),
+  `tests/webapp/test_editor.py` (endpoint classifies a cluster / declines on a blank field),
+  `Editor.test.tsx` (chip shows + applies; hidden when declined) (`claude/happy-franklin-3zj9nk`).
+
+- **v0.93.4** — Extracted the RA 0°/360° unwrap heuristic into one shared dependency-free
+  `seestack/coords.py` (`unwrap_ra_deg` + `circular_median_ra_deg`) and pointed all three sites at it
+  (`stack/mosaic.py` `_bbox`+`_footprint_outlier_indices`, `stack/reference.py::pick_reference_frame`,
+  `io/library.py::_median_radec`), so a fourth site can't reintroduce the wrap bug. Fixed a latent
+  float-boundary edge (a seam-centred target folding to exactly `360.0`). `tests/test_coords.py` pins
+  the boundary cases; the three existing per-site regression tests pass unchanged (`claude/happy-franklin-jlglfe`).
+
+- **v0.93.3** — Target aggregate RA is now 0°/360°-wrap-safe (`claude/happy-franklin-te45e2`).
+  `_median_radec` (`seestack/io/library.py`) set a target's catalog `ra_deg`/`dec_deg` from a plain
+  `np.median` of its accepted frames' RAs. For a target imaged near RA=0h whose frames straddle the
+  wrap that flipped the position ~180° to the opposite side of the sky (a 50/50 split of
+  359.9°/0.1° medians to **180.0°**), so the **sky-map plot** placed the target wrong and
+  `find_target_within` target-matching/dedup compared against a bogus centre. Fix unwraps the RAs
+  into a continuous range before the median (the same heuristic `compute_mosaic_canvas` /
+  `pick_reference_frame` use) and folds back to `[0, 360)`; a no-op when nothing straddles the wrap,
+  so a normal target's stored position is unchanged. Sibling of the v0.93.2 reference-frame fix.
+  Regression test `test_target_ra_is_wrap_safe_across_ra_zero` (fails before at 180.0° / passes
+  after near 0°).
+
+- **v0.93.2** — Reference-frame selection is now RA 0°/360°-wrap-safe
+  (`claude/happy-franklin-te45e2`). `pick_reference_frame` (`seestack/stack/reference.py`) took a
+  naive `sorted()` median of candidate RAs and plain `(ra − med_ra)` distances, so for a target
+  imaged near RA=0h whose frames straddle the wrap (some ~359.9°, some ~0.1°) it scored the
+  wrapped frames as ~360° distant — picking a poorly-centred, *blurrier* edge frame as the output
+  canvas reference (defeating the sharpest-central-frame rule) and reporting a garbage ~360° span.
+  Verified: a single field with its sharpest frame at RA 0.0 and edges at 359.85–0.15 picked the
+  0.15° edge frame and reported span ~338° before; now picks the central frame and span < 1°. Fix
+  unwraps the candidate RAs into a continuous range (the same heuristic `compute_mosaic_canvas`
+  already uses) before the median/distance/span — a no-op when no wrap, so a normal target is
+  byte-for-byte unchanged. Affects both single-field (canvas = reference footprint) and mosaic
+  (reference seeds `ref_shape` + canvas). Regression test
+  `test_picks_central_frame_across_ra_zero_wrap` (fails before / passes after).
+
+- **v0.93.1** — Make the editor's `denoise-suggestion` recipe-aware, matching its
+  levels/stretch/curve siblings (`claude/happy-franklin-a5ivvh`). The per-op "From your image"
+  denoise button now measures the *linear image entering* the denoise op (any prior linear ops —
+  the Auto recipe places `background.final_gradient` + `tone.color_calibrate` ahead of denoise —
+  applied, default stretch suppressed so σ stays in the linear domain) instead of the bare proxy,
+  so an upstream gradient/colour op is reflected in the suggested strength rather than ignored.
+  Backend `GET …/editor/denoise-suggestion` gained optional `recipe`+`uid` (via the shared
+  `_recipe_before_uid`); with neither it measures the raw proxy **byte-for-byte as before**, so the
+  recipe-independent "Your data" noise chip + bulk-apply (the stack's *inherent* noise) are
+  unchanged and old clients keep working. Frontend adds one gated recipe-aware query for the per-op
+  button only. Regression tests: backend (empty-recipe ≡ raw; a sharpen ahead of denoise raises the
+  measured σ) + frontend (the per-op button reads the recipe-aware strength, called with recipe+uid).
+
+- **v0.93.0** — Show the auto-edit "why" note in the *editor* when opening a run a background
+  job auto-edited (`claude/happy-franklin-c8bh0j`). Process-target deep-links straight into the
+  editor (v0.85.3) on a recipe the user didn't build; before this it opened with a non-empty
+  pipeline and *no* explanation — the trust gap v0.92.0 closed on History Info but not on the
+  surface the user actually lands on. New read-only `GET …/editor/auto-note` serves the stored
+  `editor_auto_note:` note (`AutoNoteOut`, `None` when no unattended job touched the run); the
+  editor fetches it best-effort and shows a dimmed "This picture was auto-edited" note — purely
+  explanatory, no new op/control — gated on (a) a note actually being stored (a hand-built recipe
+  never shows one) and (b) the pipeline still matching a frozen open-time seed signature, so it
+  fades the instant the user hand-edits and never re-appears (even after a Save). While pristine
+  the working recipe *is* the auto recipe, so the note also surfaces the same "Tuned to your data:
+  sky level … saturation …" values line (`autoValueSentence`) the interactive Auto note shows —
+  so a Process-target lander gets an equally-complete explanation as a user who clicked Auto.
+  Backend test
+  `test_auto_note_endpoint_returns_stored_note_only`; frontend tests for show-then-hide-on-edit
+  and no-note-for-a-hand-built-recipe. Additive, off-nothing, API-back-compat (new sibling
+  endpoint; the recipe endpoint shape is untouched).
+
+- **v0.92.0** — Carry the Auto "why" note onto the *autonomous* auto-edit paths
+  (`claude/happy-franklin-yidmkh`). The interactive editor already explains a clicked Auto
+  (what → values → why), but the unattended chains that auto-apply the same recipe in a
+  background job (Process-target, Reprocess-everything, watcher auto-stack) produced the
+  finished picture *silently*. A new pure `presets.auto_edit_summary(recipe, analysis)` (the
+  Python mirror of the frontend `autoSummarySentence` + `autoCauseSentence`) builds a
+  plain-language note; `_auto_edit_process_run` stamps it as a per-run project meta
+  (`editor_auto_note:{id}`) alongside the recipe it already saves; the run `…/info` endpoint
+  returns it as a nullable `auto_edit` field and the History Info panel shows it ("Auto-edited:
+  flattened the background, balanced the colour, then sharpened detail · measured a ~0.1 sky,
+  4.7 px stars."). All three chains share the helper, so one change covers them all. Additive
+  and off-nothing (manual/un-edited runs get no note; absent field on older backends). Tests:
+  `auto_edit_summary` pure unit test, `_auto_edit_process_run`→`…/info` integration (note present
+  on Process, absent on a manual stack), and a History render test.
+
+- **v0.91.0** — "Why these steps?" — surface the Auto recipe's *causal inputs*
+  (`claude/happy-franklin-fifsfa`). Completes the trust-note trilogy (what → chosen values →
+  *why*): a new additive `POST …/editor/auto-analysis` sibling endpoint returns the measured
+  cues that drove the recipe (`presets.analyze_auto_inputs` — the same `analyze_proxy` sky/noise,
+  FWHM→sharpen-radius map, and mosaic trim rect `auto_recipe` consumes), and the editor shows
+  `autoCauseSentence` ("Measured from your image: a ~0.10 sky, 4.7 px stars, some background noise,
+  12% of ragged mosaic edge to trim.") as a dimmed line in the "What Auto-process did" note. Keeps
+  the `…/editor/auto` Recipe response shape untouched; fetched best-effort so an older backend just
+  omits the line; every cue nullable and degrades gracefully. Tests: `analyze_auto_inputs` +
+  endpoint (single-field & mosaic-trim) + `autoCauseSentence` unit tests.
+
+- **v0.90.0** — "N new subs since your last stack — restack?" nudge on the Target page
+  (`claude/happy-franklin-tz1lk5`). Serves the multi-night Seestar workflow: after a target is
+  stacked, the owner drops another night's frames in and the master silently no longer reflects
+  all their subs. The page now counts accepted + plate-solved frames captured *after* the target's
+  most recent *genuine* stack run (an editor-export/combine run — `reusable === false` — doesn't
+  reset the clock) and shows a "N new subs since your last stack" callout with a one-click
+  **Restack** reusing the existing `processTarget` chain. Frontend-only, additive, read-only
+  detection (no backend/schema change); only accepted+solved frames count so rejected/unsolved
+  new subs never nag; suppressed while the "Ready to process?" / plate-solve-setup banners take
+  precedence; UTC-normalised timestamps so a non-UTC browser can't shift the comparison. Pure
+  helper `countNewSubsSinceStack` + 3 unit + 3 component tests in `Target.test.tsx`.
+
+- **v0.89.3** — Chain the auto-edit onto the watcher's background auto-stack
+  (`agent/auto-edit-on-autostack`), closing the last gap in the fully-unattended "just works"
+  story: the one-click Process (v0.86.0) and Reprocess-everything (v0.86.1) already finished their
+  masters into pictures, but the watcher auto-stack — the most autonomous path — stopped at a flat
+  linear `master.fits`. A new off-by-default `auto_edit_on_autostack` setting (requires
+  `auto_stack`) runs the same best-effort `_auto_edit_process_run` after each successful auto-stack,
+  so "drop subs in, walk away, come back to a great image" now returns a finished picture. Off by
+  default (§9 — it seeds an editor recipe on every unattended stack), best-effort per target, only
+  sets the recipe on the new run, fully reversible in the editor. Settings toggle + summary
+  "auto_edited N". Tests: `test_auto_edit_on_autostack_finishes_the_picture` /
+  `test_auto_stack_without_auto_edit_leaves_linear_master` + a config-upgrade default-off assertion.
+
+- **v0.89.2** — Graceful degradation for `background.final_gradient` on busy / dense-star
+  fields (`agent/final-gradient-degrade`). The `Background2D` fit used to raise and the op
+  vanish silently when the object mask covered >80% of every box (a dense cluster — the *cluster*
+  preset's own target — or a very-flat frame), so the beginner lost gradient removal on exactly
+  those fields with no fallback. `_fit_background_2d` now retries through an `exclude_percentile`
+  ladder (80 → 95 → 100) and finally a half-size box before giving up, degrading to a coarse
+  gradient subtract instead of none. The strict `exclude_percentile=80` fit stays the first rung,
+  so any stack that already succeeded is byte-for-byte unchanged (full-res export parity holds).
+  Regression tests: `test_dense_field_degrades_instead_of_giving_up` (fails before / passes
+  after — a 6000-star field that raises at strict-80 now flattens with no surfaced error) and
+  `test_ladder_first_rung_matches_strict_fit` (a succeeding fit is identical to the old path).
+
+- **v0.89.1** — Two verified low-severity webapp-router robustness fixes (Scout,
+  `agent/router-input-robustness`): (1) `GET /api/stats?recent_limit=…` now clamps the
+  user-supplied slice size to `[1,100]` like the other int query params (render `size`,
+  frame_preview `size`) — a negative value previously sliced `recent[:-n]` and silently
+  dropped the oldest stacks, and `0` returned an empty strip. (2) `GET /api/sky` now guards
+  `Path(run.preview_path).exists()` when picking the run to place (matching gallery.py /
+  stats.py and its own "actually has a preview on disk" comment), so a run whose preview PNG
+  was deleted isn't placed on the sphere with a 404-ing tile. Regression tests fail before /
+  pass after.
+
+- **v0.89.0** — Editor "Compare a look" follow-up: a "Switch to this look" action on the
+  picker adopts the currently-compared look (Auto / a preset) as the working recipe in one
+  click — an undoable step, confirm-gated when replacing a non-empty edit — so the user goes
+  from compare straight to adopt. Reuses the v0.88.0 resolved-look ops. Frontend-only.
+  Editor integration test.
+
+- **v0.88.0** — Editor "Compare a look" split: a picker (Auto + built-in + saved presets)
+  next to Split/Compare renders the chosen look on the proxy and feeds it into the same
+  split-divider overlay as the "before" image, so a repeat imager can drag to judge their
+  current edit against any other look in one frame. Built-in presets sized to the data +
+  mosaic-aware (as applying would be); Auto fetched fresh (never persisted); rendered on the
+  current edit's framing (`lookCompareOps`) so the divider aligns. Frontend-only, additive.
+  New `LookComparePicker` component + `lookCompareOps` helper; unit + Editor integration tests.
+
+- **Companion caution: Drizzle on with too few frames (v0.87.1, image-quality/PRIORITY 4).**
+  The symmetric footgun to the v0.87.0 nudge: drizzle only pays off with *lots* of dithered
+  frames (the engine recommends 200+) — spreading each sub across a finer output grid needs
+  enough dither-phased samples to fill it, so with few frames it's slower for no gain and, at
+  higher scales, noisier/gappier, while the ordinary weighted-mean path is "faster, equally
+  clean" on Seestar data (`drizzle_path.py`). Since drizzle is off by default this only fires
+  when the user turned it on (manually or via "Reuse settings") on a small stack (<100
+  accepted+solved frames), with a one-click "Turn off Drizzle". Advisory; mirrors the existing
+  sigma-clip-too-few-frames caution. Frontend-only, additive. Tests in `Stack.test.tsx`
+  (cautions under the floor; silent on a large set / when drizzle off; one-click off then hides).
+
+- **Proactive Drizzle nudge on the Stack form (v0.87.0, autonomy/image-quality/PRIORITY 2–4).**
+  Drizzle recovers the fine detail a Seestar's Bayer sensor + short focal length under-sample,
+  but it lives in the advanced knobs and is off by default, so a beginner sitting on thousands
+  of auto-dithered subs never reaches for one of the biggest resolution wins available. The
+  Stack form now fires an advisory blue nudge (with a one-click "Turn on Drizzle") when the
+  accepted+solved frame count is large enough to be worth it (≥200, matching the field help's
+  "200+ dithered frames"), drizzle is off, **and** a drizzle-*on* dry-run sizing (`stack-estimate`
+  with `drizzle=true`) confirms it fits the memory budget and isn't a giant mosaic canvas — so
+  it never nudges toward a run that'd be refused for OOM. Frontend-only (reuses the existing
+  `stack-estimate` endpoint), additive, advisory (nothing changes until the user clicks). The
+  feasibility query sits with the other hooks above the loading early-return (rules-of-hooks).
+  Tests in `frontend/src/routes/Stack.test.tsx` (nudges on a large fitting set; silent on a
+  small set / over-budget drizzle / mosaic canvas; one-click enable then hides).
+
+- **Don't claim quality weighting influenced a min/max-reject stack (v0.86.2, image-quality/
+  trust/PRIORITY 4).** Found by the Builder's 2026-07-06 stacking-engine audit. The min/max
+  order-statistic combine path (`min_max_reject` on a non-drizzle ≥3-frame stack) combines by
+  rank and *ignores* per-frame weights, but `_build_output_header_meta` still stamped
+  `WGTMODE=quality`/`WGTNDOWN`/… into the FITS header + `stack_runs` row whenever
+  `quality_weighted` computed a `wstats` — so a stack run with **both** flags on told the
+  History Info card "N frames down-weighted" when the weights had zero effect on the pixels: a
+  false trust signal. The fix threads a `weights_applied` flag into the provenance builder
+  (`False` only when the min/max path actually ran) and gates the WGT* stamping on it; every
+  other path (drizzle, κ-σ pass-2 weighted sum, plain weighted sum, min/max fall-back-to-mean
+  at n<3) still records it honestly. Not pixel corruption — the stacked image is correct either
+  way; this is a provenance-honesty fix in the same family as the rejection/dark-scaling/
+  photometric trust lines. Regression tests: unit `test_weighting_provenance_absent_when_min_max_
+  reject_ignored_the_weights` + e2e `test_weighting_provenance_omitted_when_min_max_reject_ignores_
+  weights` (both fail before / pass after; the e2e keeps a κ-σ control that still stamps WGT*).
+
+- **Chain the auto-edit onto library-wide "Reprocess everything" (v0.86.1, autonomy/image-
+  quality/PRIORITY 2).** Completes the owner-requested "reprocess everything → great images"
+  story: a new off-by-default `auto_edit` flag on `POST /api/reprocess-all` (surfaced as an
+  "Also auto-edit each result into a finished picture" switch on the Settings Reprocess panel)
+  chains the shipped `_auto_edit_process_run` helper onto every restacked run, so a reprocess
+  can produce finished *pictures* (saved editor recipe + re-rendered thumbnail) across the
+  whole library, not flat linear masters. Only touches each new run's own recipe/preview
+  (never an existing run's saved edit), best-effort per run, reversible in the editor; the
+  Jobs summary reports "auto-edited N". Regression tests in `tests/webapp/test_reprocess_all.py`
+  (unit: chains per-run on / never on by default; e2e: recipe saved on each new run vs empty
+  by default) + `Settings.test.tsx`/`Jobs.test.tsx`.
+
+- **Chain a one-click auto-edit onto the "Process target" result (v0.86.0, autonomy/editor/
+  PRIORITY 2).** Completes the one-click autonomy story: after `process_target` stacks a
+  fresh master it now chains `_auto_edit_process_run`, which builds the run's own Auto recipe
+  (the shared `build_auto_recipe_for_run` helper factored out of the `…/editor/auto`
+  endpoint), persists it as the run's saved editor recipe (`editor_recipe:{run_id}` meta), and
+  re-renders the run's History/Target preview thumbnail through it (`render_run_display_array`
+  + `_write_preview_png`, display-space) — so the one-click Process lands the user on a
+  finished *picture*, not a flat linear master. Best-effort (a failure only skips the edit;
+  the master is already recorded), scoped to the explicit Process action (existing manual/auto
+  stacks and old runs untouched), additive (recipe meta + this run's own preview PNG only),
+  and fully reversible in the editor (Reset/undo restores linear). Regression test
+  `test_process_target_chains_auto_edit`.
+
+- **Deep-link the one-click "Process target" result to its editor in one hop (v0.85.3,
+  friendliness/autonomy/PRIORITY 2–3).** `StackResult` now carries the produced `stack_runs`
+  row id (`run_id`, captured from `add_stack_run`'s return, `None` on the cancel path), and
+  `_stack_target` exposes it in its job summary. The Jobs "View result" button now points at
+  `/targets/{safe}/edit/{run_id}` when known — landing the user *on the finished picture* to
+  edit — and falls back to the target's History on an older backend that didn't report the id.
+  Additive summary field, no schema/API-shape break. Tests: `test_process_target_stacks_end_to_end`
+  now asserts `result["stack"]["run_id"]` equals the created run; three Jobs.tsx integration
+  tests cover the edit deep-link, the History fallback, and the "Open target" no-stack case.
+
+- **Surface the one-click "Process target" job's outcome + a "View result" link on Jobs
+  (v0.85.2, friendliness/PRIORITY 3).** The new `process_target` job (v0.85.0) finished with a
+  bare "done" and no action — unlike `reprocess_all`/`editor_export`, the user was left not
+  knowing whether a master was produced or where it is. `JobResultActions` now renders a
+  plain-language `processTargetSummary` line ("Stacked N frames into a new master", or, when the
+  stack was skipped, why — nothing plate-solved yet / cancelled) plus a "View result" button to
+  the target's History (or "Open target" when nothing stacked, so the user can fix solving).
+  Pure tested helper `processTargetSummary` (5 cases); frontend-only, additive.
+
+- **"Ready to process?" getting-started callout for a fresh target (v0.85.1,
+  friendliness/PRIORITY 3).** A dimmed violet callout on the Target page now highlights the
+  one-click "Process target" (QC + solve + stack) as the next step whenever the target has
+  frames but no stack yet, or accepted frames still awaiting a plate-solve — so a beginner
+  who just ingested frames isn't left guessing which toolbar button to press. Suppressed
+  while the plate-solve *setup* banner is showing (that must be fixed first) and once every
+  accepted frame is solved and a stack exists, so it fades out instead of nagging. Reuses
+  the shipped `api.processTarget` mutation; frontend-only, additive, changes no defaults.
+  Tests in `Target.test.tsx` (fires on a fresh target / on accepted-but-unsolved frames;
+  stays quiet once processed / while the setup banner shows).
+
+- **One-click "Process target" — QC + solve + auto-grade + stack in one job (v0.85.0,
+  autonomy/PRIORITY 2).** A prominent "Process target" button on the Target page and a new
+  `POST /api/targets/{safe}/process` endpoint enqueue one `process_target` job that runs QC →
+  plate-solve → auto-grade (when `auto_grade_frames` is on) → stack, reusing the same tested
+  primitives as the auto pipeline (`run_qc_and_solve` → `_auto_grade_target` → `_stack_target`)
+  but scoped to one target, on demand, independent of the global `auto_*` toggles. The stack
+  uses the target's saved defaults (falling back to the global defaults) and is non-destructive
+  (a new `stack_runs` row); the stack step is skipped with a `stack_skipped_reason`
+  (`no_solved_frames`/`cancelled`) instead of failing the whole job when there's nothing solved.
+  Plain-language Jobs label added. Tests: `test_process_target_stacks_end_to_end` (full chain on
+  a solved fixture → real run) and `test_process_target_skips_stack_when_nothing_solved`; a
+  frontend Target test drives the button; `jobKindLabel` test extended. Additive, opt-in,
+  changes no defaults (upgrade-safe).
+
+- **De-flake the Stack-form photometric-nudge test that reddened main CI + fix the underlying
+  nudge flash (v0.84.13, bug/friendliness).** Main CI was red at this run's start (v0.84.10):
+  `Stack.test.tsx > does not nudge photometric normalization when it is already on` flaked
+  because the form body rendered for one frame after `getStackDefaults` resolved but *before*
+  the effect that seeds `values` committed — so `values.photometric_normalize` was still the
+  empty-state `undefined` and the transparency nudge briefly flashed even when the default was
+  on. Root-caused (not just retried): the loading guard now also waits on an `initialized` flag
+  set once `values` is seeded, so no data-driven nudge renders against the empty initial state.
+  Hardened the seed effect to settle on the reuse (`?from=`) fetch succeeding *or erroring*
+  (the new gate would otherwise hang the loader on a reuse error) — deterministic regression
+  test `still renders the form (never hangs the loader) when the reuse fetch errors`
+  (fails before / passes after).
+
+- **Clamp `background.final_gradient`'s box to the image size so Auto can't hard-fail on a
+  small frame (v0.84.12, robustness).** `_fit_background_2d` clamps `box_size` to tile the
+  image (`min(box, max(8, min(h//4, w//4)))`, mirroring `BackgroundOptions.for_image_size`) —
+  a box wider than a small frame previously left too few unmasked boxes to survive
+  `exclude_percentile`, so `photutils.Background2D` raised and the editor turned it into a hard
+  `RuntimeError: edit op failed: Gradient removal`, breaking the whole Auto preview/export
+  (Auto includes `final_gradient`). On a real ≥1080 px stack the 256 px box already tiles ≥4×
+  so the clamp is a no-op (exports unchanged). Tests:
+  `test_small_image_does_not_raise_and_still_flattens`, `test_full_size_box_is_unchanged_by_the_clamp`.
+
+- **Extend the rejection-clipped trust line to the drizzle-reject path (v0.84.11, PRIORITY-4
+  image-quality/trust; completes the rejection-trust family started v0.84.9).** The
+  "Rejection …%" History line covered κ-σ (v0.84.9) and min/max (v0.84.10) but not the two-pass
+  drizzle-reject path. `DrizzleStacker` now tallies `(n_contributed, n_rejected)` memory-free
+  as pass 2 zero-weights outlier contributions (`rejection_counts()` — only samples that would
+  have contributed, in-bounds & finite), and the stacker's drizzle branch emits a
+  `RejectionStats(mode="drizzle-reject", …)` when the reject pass ran. Data-driven fraction
+  (contributions outside `mean ± κ·σ`), so it reuses the shipped FITS-card/info-endpoint/History
+  wiring and the sigma-clip trust wording (transient-outliers vs too-tight-κ caution), not
+  min/max's structural one; plain single-pass drizzle stamps nothing. Tests:
+  `test_rejection_counts_tallies_the_clip`, `test_rejection_counts_zero_without_clip`,
+  `test_e2e_drizzle_reject_stamps_rejection_provenance`, plus a `rejectionSummaryText`
+  drizzle-reject case.
+
+- **Extend the rejection-clipped trust line to the min/max-reject path (PRIORITY-4
+  image-quality/trust; completes the v0.84.9 feature for a path real users hit).** The
+  v0.84.9 "Rejection clipped ~X% of samples" History line only appeared for the default κ-σ
+  path — but the Stack form actively *nudges* users toward min/max reject when a streak is
+  detected, so a user who took that nudge saw no rejection line at all and couldn't tell it
+  did anything. `MinMaxRejectAccumulator` now exposes `rejection_counts() → (n_contributed,
+  n_rejected)`, derived from its final `_count` map at reduce time (no per-frame tracking, no
+  extra canvas — matching the exact 2k/2/0-per-pixel drop schedule `result()` applies), and
+  the min/max branch stamps the same `REJMODE`/`REJFRAC`/`REJNREJ`/`REJNTOT` cards tagged
+  `mode="min-max-reject"`. Because min/max's fraction is *structural* (≈ 2k / frames — small
+  at a long stack, large-by-design at a short one), `rejectionSummaryText` is now mode-aware:
+  min/max reads "Rejection dropped the ~X% most-extreme samples (min/max reject)" with **no**
+  "too-tight κ" over-clipping caution (which would misfire on a 4-frame stack's structural
+  50%), while κ-σ keeps its data-driven wording. Engine-only counting + additive FITS cards +
+  a display-only frontend branch — no config/schema/API/default change, upgrade-safe. Tests:
+  pytest (`rejection_counts` full-trim / k=3 multi-band / empty cases; a real min/max stack
+  stamps `REJMODE="min-max-reject"` with a positive `REJFRAC == REJNREJ/REJNTOT`) + Vitest
+  (`rejectionSummaryText` words min/max as a by-design drop and never shows the κ caution).
+  Drizzle-reject logged as the remaining follow-up. (v0.84.10, this run — Builder)
+
+- **Surface how much the stack's rejection actually clipped — a trust line on History
+  (PRIORITY-4 image-quality/trust; current-focus stacking-engine area).** When the default
+  κ-σ rejection runs, the user previously had no visibility into whether it quietly removed
+  transient outliers (satellites/planes/cosmic rays — good) or over-clipped real signal (a
+  too-tight κ — bad); they just got an image and had to trust it. Pass-2 already computes a
+  per-pixel `keep` mask, so `run_stack` now sums two scalars over it — `contributed` (covered
+  samples seen) and `rejected` (those that failed the κ-σ test) — **memory-free, no extra
+  canvas** (respecting the OOM-bounded hot path). A new `RejectionStats` dataclass carries the
+  tally into `_build_output_header_meta`, which stamps `REJMODE`/`REJFRAC`/`REJNREJ`/`REJNTOT`
+  provenance cards (mirroring the `PHOTNORM`/`DARKSCAL` pattern — present only when a κ-σ pass
+  actually ran, even at 0% since "clipped nothing" is itself a clean-data signal). The run
+  `…/info` endpoint parses them into a `rejection` summary and the History Info panel renders
+  one plain line ("Rejection clipped ~0.4% of samples (transient outliers)", "…(data was
+  already clean)" at 0%, or a "check that κ isn't clipping real signal" caution once the
+  fraction is unusually high). Engine-only counting + additive FITS cards + one info field +
+  one History line — no config/schema/API/default change, upgrade-safe (old runs without the
+  cards simply omit the line). Only the default κ-σ path reports it for now (min/max &
+  drizzle reject logged as a follow-up idea). Tests: pytest (`_build_output_header_meta`
+  stamps/omits the cards incl. the 0%-rejected and no-pass cases; a real 12-frame κ-σ stack
+  with a planted streak stamps a positive `REJFRAC` == `REJNREJ`/`REJNTOT` while a plain-mean
+  stack stamps nothing; the `…/info` endpoint surfaces/omits the `rejection` summary) + Vitest
+  (`rejectionSummaryText` — transient-outlier / clean / <0.1% / too-tight-κ / missing-fraction
+  wording). (v0.84.9, this run — Builder)
+
+- **Stacking hot path: per-frame weight/scale lookups honour a frame whose DB id is 0
+  (current-focus engine hardening).** The quality-weight and photometric-scale maps are keyed by
+  the frame's real `id` (frames with `id is None` are skipped when the maps are built), but the
+  two stacking passes read them with `mapping.get(f.id or -1, 1.0)` — which silently drops a
+  frame with `id == 0` (`0 or -1 == -1`) to the neutral `1.0` default instead of its real value,
+  a store-key/lookup-key mismatch that would corrupt that frame's contribution to the *final
+  image*. Unreachable today (SQLite autoincrement ids start at 1) but a genuine latent
+  correctness bug in the hot path, in the current-focus stacking-engine area. All four sites
+  (`_pass` weight + photometric scale, `_drizzle_pass` weight + photometric scale) now key with
+  `f.id if f.id is not None else -1`, keeping store- and lookup-keys identical. Engine-only,
+  additive, upgrade-safe — no config/schema/API/default change; a value that was already correct
+  for every real id stays correct, and the id-0 case now reads its real value. Test: pytest
+  (`tests/test_stack_frame_id_zero.py` — a `_pass` over a frame with `id == 0` applies its real
+  weight and photometric scale, not the 1.0 defaults; fails before / passes after). (v0.84.8,
+  this run — Builder)
+
+- **Target page: recoverable error state instead of a broken shell when the target 404s
+  (PRIORITY-3 friendliness).** Found by a Builder friendliness dogfood: the Target route — the
+  app's most-visited screen — handled `isLoading` but had **no** error branch, while all five
+  sibling data routes (Dashboard/Library/Gallery/Jobs via `QueryError`, History via an Alert)
+  already do. Because every field access is optional-chained, a 404 from `api.getTarget` (a
+  deleted target, or a stale bookmark / shared link to a removed one — `deps.open_target_project`
+  raises `HTTPException(404)`) didn't crash but rendered a *broken shell*: a blank title, a
+  "`/accepted`" badge and an empty frame table, with no explanation and no recovery. It now shows
+  the shared `QueryError` ("Couldn't load this page" + Retry), gated on `!target.data` so a
+  background-refetch blip never blanks a working page. Frontend-only, additive, upgrade-safe — no
+  engine/API/schema/default change, reuses the existing component the siblings use. Tests: Vitest
+  (a rejected `getTarget` renders the error + Retry instead of the empty table). (v0.84.7,
+  this run — Builder)
+
+- **One-click actions on the three remaining advisory-only Stack-form rejection nudges
+  (PRIORITY-2/3 autonomy/friendliness; completes the "every nudge is one-click" pattern).**
+  Nearly every Stack-form nudge already carries a one-click action (turn on sigma/min-max/
+  quality-weight/photometric, drop outliers, use recommended masters…), but three rejection
+  hints were still advisory-only text: the large-stack **sigma-κ tighten** hint (told the user
+  to "lower the Sigma kappa in Advanced options"), the **streak-with-no-rejection** warning, and
+  the **drizzle+sigma-clip mismatch** hint. Each now has a button that applies exactly the
+  suggested change in place, matching the v0.83.2 auto-grade one-click work that closed the last
+  *other* un-one-clicked nudge: "Tighten κ to 2.5" (`sigma_kappa` → 2.5, so the hint self-clears
+  as κ drops below 3), a context-aware "Turn on sigma clipping" / "Turn on drizzle outlier
+  rejection" on the streak warning (picks the field that fits the current path), and "Turn on
+  drizzle outlier rejection" on the drizzle mismatch. Frontend-only, additive, upgrade-safe — no
+  engine/API/schema/default change; each button flips a setting the user could already toggle by
+  hand. Tests: Vitest (each button appears, applies the change, and the nudge disappears once its
+  condition is resolved). (v0.84.6, this run — Builder)
+
+- **Plain-language "Build master" empty-folder failure (PRIORITY-3 friendliness; follow-up to
+  v0.84.4).** The calibration Build-master job raised a bare `FileNotFoundError: No FITS files
+  found in {dir}` when a beginner pointed it at an empty or wrong folder (a real mistake in the
+  OSC darks/flats workflow), which surfaced verbatim on the Jobs page. Added a
+  `no_fits_in_folder` canonical `error_kind` (classified server-side on the specific
+  "no FITS files found" phrase, so internal missing-target/run FileNotFoundErrors aren't
+  mis-dressed as a folder problem) and its plain-language translation ("No FITS frames were
+  found in that folder." + a point-it-at-your-.fits-calibration-frames next step), extending
+  the v0.84.4 error-kind family. Additive/upgrade-safe — no schema/API/default change. Tests:
+  pytest (`classify_job_error` maps the folder phrase, leaves an internal `no target` FNF as
+  None) + Vitest (`friendlyJobError` translates it via both the raw phrase and the canonical
+  kind). (v0.84.5, this run — Builder)
+
+- **Robust server-side `error_kind` on failed jobs — makes the plain-language job-error
+  translation reword-proof (PRIORITY-3 friendliness/robustness; follow-up to v0.84.3).** The
+  v0.84.3 `friendlyJobError` helper recognised known-fatal failures by string-matching the raw
+  `job.error` text — which silently breaks if an engine message is ever reworded. `JobManager`
+  now classifies a fatal exception into a **stable canonical** `error_kind` at the catch point
+  in `_run` (webapp/jobs.py), where the exception *type* and the full untruncated message are
+  both available: `memory_budget` (type-based — `MemoryError`, so it survives any message
+  wording), `no_solved_frames`, `no_alignment`, `no_reference_wcs` (message signatures), or
+  `None` for anything unrecognised so the raw text is still shown verbatim. The kind is
+  persisted (additive nullable `error_kind` column, added in place via `ALTER TABLE` so old
+  `jobs.sqlite` history migrates cleanly, never a reset) and exposed on the job dict; the
+  frontend `friendlyJobError(raw, kind)` prefers the kind and falls back to the existing string
+  matcher when it's absent (older backend) or unknown. Additive/upgrade-safe — new nullable
+  column + new response field + a text map moved into `JOB_ERROR_KIND`; no schema-version,
+  API-shape, or default change. Tests: pytest (`classify_job_error` matrix incl. type-based
+  memory + unrecognised→None; a MemoryError job's kind persists + reloads from disk; an old
+  pre-column DB migrates in place and keeps serving its rows) + Vitest (`friendlyJobError`
+  prefers a known kind over unrecognisable raw text and falls back when absent/unknown; a
+  JobsView job whose raw text is unmatchable still renders the plain message via its
+  `error_kind`). (v0.84.4, this run — Builder)
+
+- **Plain-language job failure messages on the Jobs page (PRIORITY-3 friendliness; follow-up to
+  v0.84.2).** A failed job previously surfaced its raw `job.error` string verbatim — stored as
+  `"{ExceptionType}: {message}"` (webapp/jobs.py), so a beginner's first stack failure read as a
+  bare Python exception like `MemoryError: stack output canvas 8000×6000 ×2 drizzle needs ~7.2 GB
+  …` or `ValueError: no accepted, plate-solved frames to stack`. A new pure `friendlyJobError`
+  helper (mirroring the `jobKindLabel`/`rejectReasonLabel` translation pattern) recognises the
+  handful of *known fatal* signatures — the memory-budget refusal (the OOM guard), nothing
+  accepted+plate-solved to stack, an empty-alignment failure (non-overlapping / different-field
+  frames), and a missing-reference-WCS — and renders a plain sentence in red plus a dimmed
+  next-step line, falling back to the raw text **verbatim** for anything unrecognised so no
+  information is ever hidden. Frontend-only, additive, upgrade-safe — no engine/API/schema/default
+  change, purely a display translation of an existing field. Tests: Vitest unit (each known
+  signature → plain message + next step; unrecognised → raw text unchanged) + JobsView (a
+  MemoryError job shows the plain message and never the `MemoryError:` prefix; an unknown
+  `OSError` falls back to raw). (v0.84.3, this run — Builder)
+
+- **Plain-language job names + a guided empty state on the Jobs page (PRIORITY-3 friendliness).**
+  Found by a Builder friendliness dogfood: the Jobs page is the *very first screen a new Seestar
+  owner lands on* — clicking the header's "Scan incoming" submits a job and navigates straight
+  here — yet it was the one route still showing the engine's raw snake_case job identifiers
+  (`pipeline`, `qc_solve`, `stack`, `reprocess_all`, `editor_png`, `editor_export`,
+  `editor_batch`, `build_master`, `channel_combine`) verbatim, so a beginner's first-ever action
+  produced a row that just said `pipeline`. Every other screen already translates engine jargon
+  (History's `combineMethodLabel`, Target's `rejectReasonLabel`); Jobs now matches with a pure,
+  tested `jobKindLabel` map ("Importing & processing new frames", "Quality check & plate-solve",
+  "Stacking", …) that falls back to the raw kind for any future job type. Its bare "No jobs yet."
+  empty state is also brought into the house style (icon + plain-language + a "click 'Scan
+  incoming'…" next-step, matching Dashboard/Library/Target/History). Frontend-only, additive,
+  upgrade-safe — no engine/API/schema/default change, purely a display translation. Tests: Vitest
+  (`jobKindLabel` maps every known kind + falls back for an unknown; the first `pipeline` job a
+  beginner sees renders as plain language and never as `pipeline`; the empty state guides to Scan
+  incoming; the two existing kind-label assertions updated to the new "Stacking" label). A dogfood
+  of the other five routes found them already well-handled (logged under Friendliness). (v0.84.2,
+  this run — Builder)
+
+- **Robust server-side plate-solve setup classification — makes the star-database "not set up"
+  signal as reliable as the astap-missing one (PRIORITY-3 friendliness/robustness; follow-up
+  to v0.84.0).** The v0.84.0 banner detected the setup problem from the stored (120-char
+  truncated) `reject_reason` strings — reliable for the deterministic "astap.exe not found"
+  installer message, but only best-effort for "no star database", whose ASTAP log line can
+  land past the truncation window (leaving the whole target's frames as un-classifiable
+  "Plate-solve failed" chips). Now: (1) a new engine helper `classify_solve_setup_error`
+  (in `seestack/solve/astap.py`, mirroring the frontend's conservative signatures — a generic
+  "could not open / error reading" is *not* a setup problem) classifies a failure at solve
+  time, where the *full* log is available; (2) `apply_solve_result_to_db` stores a **stable
+  canonical** `reject_reason` (`solve_failed:no star database` / `solve_failed:astap not found`)
+  for setup failures so the signature always survives truncation, keeping the raw truncated
+  message only for ordinary per-frame failures; (3) the `…/frames/reject-summary` response gains
+  a server-computed `solve_setup_problem` `{kind, frames}` field, and the Target banner prefers
+  it (falling back to the existing client-side `detectSolveSetupProblem(counts)` on an older
+  backend). Additive/upgrade-safe: no schema change (same `reject_reason` column, just canonical
+  values for *new* setup failures — old rows keep working via the client fallback), a new
+  response field (nothing removed/renamed), and the banner still renders nothing when there's no
+  setup problem. Tests: engine/runner (`classify_solve_setup_error` matrix; a "no star database"
+  message buried past char 120 is canonicalised so it's reliably classifiable — fails before /
+  passes after; a per-frame failure keeps its raw message) + webapp (reject-summary reports the
+  `solve_setup_problem` for a database-missing target, `None` for ordinary rejects) + Vitest
+  (the banner fires from the server field even when `counts` lacks the raw phrase). (v0.84.1,
+  this run — Builder)
+
+- **Actionable "plate-solving isn't set up" banner on the Target page (PRIORITY-3 friendliness +
+  "just works").** Found by a Builder friendliness pass: when ASTAP (the plate-solver) or its
+  star database isn't available, *every* frame's solve fails with the same fatal message, so a
+  fresh/misconfigured install piles up a whole target's frames as "Plate-solve failed" chips with
+  no hint that the fix is a one-time setup step (install/point at ASTAP, download a star database)
+  rather than dropping frames one by one — a total blocker at first use with zero guidance. The
+  Target page now shows one orange Alert when the target's rejected-reason tally carries a solve
+  *setup* signature, with the right plain-language guidance for the ASTAP-missing vs
+  star-database-missing case and one-click "Re-run QC + Solve" + "Open Settings" actions. Detection
+  is a pure, tested helper (`detectSolveSetupProblem`) that mirrors the engine's own
+  `_is_fatal_solve_error` signatures + the "astap.exe not found" installer hint, and is
+  deliberately conservative — a generic "could not open / error reading" (which can be one corrupt
+  frame) does **not** trigger it, so it never nags about setup when the real issue is a single bad
+  file. Frontend-only, additive, upgrade-safe — reads the existing `reject-summary` `counts`, no
+  schema/API/default change; renders nothing (today's behaviour) when there's no setup problem.
+  Tests: Vitest unit (setup vs per-frame vs corrupt-file vs empty; case-insensitive; ASTAP-missing
+  preferred over database) + Target route (banner + its actions render for a whole-target
+  ASTAP-missing failure; absent for an ordinary "no solution" per-frame failure). A robustness
+  follow-up (server-side classification so the star-database case is as reliable as ASTAP-missing)
+  is logged under Friendliness. (v0.84.0, this run — Builder)
+
+- **QA — stacking-engine adversarial audit + one-click Auto dogfood (top current-focus areas),
+  both clean; no code shipped.** Per the 2026-07 focus, ran a fresh adversarial correctness audit
+  of the stacking engine (`stacker.py` rejection/pass-2 + photometric-scale application,
+  `accumulator.py` WeightedSum/Welford/MinMaxReject NaN+order-statistics, `align.py` sub-pixel
+  shift/valid-mask, `drizzle_path.py` two-pass clip, `photometric.py` scale direction,
+  `calibrate/apply.py`+`build.py`, plus the always-on `coverage_leveling.py`). **No reachable
+  wrong-result bug found** — NaN=coverage preservation, k-min/k-max disjointness (`count≥2k+1`),
+  transparency-scale direction (`ref/score`, hazy→scale>1), Bessel corrections (Welford `M2/(n−1)`,
+  drizzle `neff/(neff−1)` gated ≥3), dark exposure-scaling pedestal math, and neutral calibration
+  fallbacks all verified correct. Near-misses explicitly ruled out (all non-bugs): pass-2 `tol=0`
+  on a bit-exact-constant pixel (Welford `delta=0` keeps it safe), `level_by_coverage` running on a
+  single-field stack (offset ≈0 for an already-bg-subtracted frame; object-masked), the stale
+  `win_valid` after a sub-pixel shift (never read — coverage derives from `isfinite`). Separately
+  **dogfooded the one-click Auto recipe** across five realistic proxies (typical / very-dim /
+  bright / heavy-green / noisy): no op errors, **zero NaN leak** in the covered region, sensible
+  display medians (~0.19–0.25), green cast removed (post-SCNR green below max(R,B) in every case),
+  and minimal clipping — the out-of-the-box result is solid. Recorded so future runs/Scout don't
+  re-tread these two well-hardened areas. (this run — Builder)
+
+- **Fix (PRIORITY-1 editor): a cropped/geometry-edited live preview letterboxed with spurious
+  black bars, and the Split/Compare divider mis-aligned, whenever a reshaping geometry op was
+  in the recipe.** Found by a Builder editor-UI dogfood: the histogram endpoint reported
+  `proxy_width`/`proxy_height` from the *raw* proxy (measured before `apply_recipe`), but the
+  preview PNG is the *post-recipe* image — so after any enabled `geometry.crop`/rotate/resize
+  (the headline case: one-click mosaic **Trim border → Apply**) the editor sized its image box
+  to the un-cropped aspect and `objectFit:contain` pillarboxed the cropped preview inside it —
+  unexplained black bars that read as "the crop broke something" — while the Split/Compare
+  "Original" (a full un-cropped render) and the divider no longer lined up with the edited
+  frame. Export was unaffected (it never reads these dims). Fix, additive/upgrade-safe: (a) the
+  histogram endpoint now also returns `render_width`/`render_height` from the rendered `out`
+  shape (equal to the raw proxy dims when there's no reshaping op; the raw `proxy_*` stay put
+  for the "downscaled ×N" caption), and the editor sizes its box from those (fallback to
+  `proxy_*` on an older backend); (b) the Split/Compare "Original"/base render and the star-mask
+  overlay are now rendered through the recipe's enabled geometry ops (reusing `apply_geometry_to_map`,
+  the same path the coverage overlay already uses), so every overlay shares the edit's framing
+  and the divider aligns. No schema/API-shape/default change — new response fields + a
+  frontend box-sizing/overlay change. Tests: webapp (histogram reports rendered dims matching
+  the cropped preview PNG and < the raw proxy dims; the star-mask width tracks a recipe crop) +
+  Vitest (the box aspect follows `render_*`, falls back to `proxy_*` when absent, and the split
+  "Original" fetch carries only the geometry ops). (v0.83.3, this run — Builder)
+
+- **Engine hardening (PRIORITY-1 stacking-engine QA): correct a stale `WelfordAccumulator`
+  docstring that claimed population variance `M2/n`.** A Builder adversarial audit of the
+  combine maths found the class docstring stated it uses population variance "not the sample
+  variance", directly contradicting `variance()`, which deliberately returns the *unbiased
+  sample* variance `M2/(n-1)` (NaN for `n<2`, so the sigma-clip pass keeps single-coverage
+  mosaic-edge pixels). The lie briefly misled the auditor itself; the docstring now matches
+  the code. Docs-only, zero behaviour change (no version-visible effect; rides the v0.83.3
+  bump). (this run — Builder)
+
+- **One-click "Drop N outlier frames" + safety-cap notice on the Stack-form auto-grade hint
+  (PRIORITY-2/3 autonomy + friendliness).** The auto-grade hint was the last Stack-form
+  advisory nudge with no one-click action — it only offered a "Review Auto-grade" link that
+  sent the user to the Target page. It now carries a **"Drop N outlier frames"** button (beside
+  the retained link) that calls the already-shipped `api.autoGradeApply(safe)`; on success the
+  yellow hint is replaced by a green **"Dropped N — Undo"** confirmation whose Undo re-accepts
+  the returned `changed_ids` (auto-grade never sets `user_override`, so the revert is clean).
+  Because this mutates target-wide accept-state, the frame/auto-grade-preview/stack-estimate
+  queries are invalidated on both apply and undo. Companion change: when the grader hits its 25%
+  `MAX_REJECT_FRACTION` safety cap (`GradeReport.capped`), the hint now appends a plain-language
+  "this looks like a rough session — only the worst are recommended; review before stacking"
+  sentence, so a user who skips the Target page still learns many more frames were suppressed.
+  Frontend-only, additive, advisory — no engine/API/schema change; the endpoint + client method
+  already existed. Tests: Vitest (the Drop button applies + swaps to the green Undo confirmation
+  and Undo re-accepts the ids; the capped notice appears when `capped` is true). (v0.83.2, this
+  run — Builder)
+
+- **Surface the deep-rescan count on the finished reprocess-all job summary (follow-up to
+  v0.83.0; PRIORITY-3 friendliness).** The Jobs page's plain-language reprocess outcome now
+  reads "Restacked N/M targets — re-ran QC/solve/grade on K …" when the deep_rescan option
+  was used (the new `rescanned` summary field), closing the feedback loop so the user can
+  confirm the (slower) rescan actually ran. Omitted entirely for a plain restack
+  (`rescanned` 0). Pure `reprocessSummary` helper + Vitest (rescan clause present/omitted and
+  ordered before the skip/failure notes). Frontend-only, additive. (v0.83.1, this run — Builder)
+
+- **Reprocess-everything slice (b): optional deep full rescan (re-QC / re-solve / re-grade
+  before restacking) — completes the ⭐ owner-requested "reprocess everything" feature
+  (PRIORITY-2 autonomy).** The slice-(a) reprocess restacks each target with the current
+  engine, but reused the target's existing QC/solve/grade decisions — so improvements to
+  *those* steps (not just the stacker) didn't reach the reprocessed image. A new
+  off-by-default `deep_rescan` flag on `POST /api/reprocess-all` re-runs QC + plate-solve
+  (`run_qc_and_solve` with `only_new_qc=False`, so every frame is re-derived with the new
+  engine) and, when the user has grading enabled, re-applies auto-grade over each target's
+  existing frames *before* that target's restack. A new `_refresh_target` helper does the
+  refresh best-effort per target (a flaky re-QC is logged and swallowed, never sinking the
+  restack) and honours manual accept/reject decisions (`apply_qc_result_to_db` respects
+  `user_override`, so re-QC can't clobber a hand-made choice); solving is best-effort (no
+  ASTAP → nothing solved). It runs only for targets that will actually be restacked, so a
+  `stale_only` skip skips the (expensive) rescan too, and the batch stays cancellable between
+  targets. The job summary gains a `rescanned` count. Settings → Reprocess panel adds an
+  off-by-default "Also re-run QC, plate-solving & grading first" switch (with a confirm-dialog
+  note and manual-choices reassurance) wired through `api.reprocessAll(staleOnly, deepRescan)`.
+  Additive/upgrade-safe: a new opt-in flag on an existing endpoint + one new job-summary field
+  + one UI switch — no schema/default/API-shape change; an omitted flag is exactly today's
+  plain restack. Tests: webapp (deep_rescan re-runs QC/solve with `only_new_qc=False` before
+  each stack + reports `rescanned`; default off never rescans; a failing refresh is isolated
+  and the restack still happens; a `stale_only`-skipped target isn't rescanned) + Vitest (the
+  toggle passes `deep_rescan=true`; the two existing scope tests updated to the two-arg call).
+  (v0.83.0, this run — Builder)
+
+- **Proactively nudge dark exposure-scaling from the calibration store (PRIORITY-2 autonomy;
+  follow-up to the v0.82.0 `scale_dark_to_light` feature).** The one-click "Scale this dark to
+  your subs' exposure" only appeared once the user had *manually* selected a master bias — so a
+  beginner with a mismatched dark and an unused bias in the library still faced a two-step
+  discovery (find and pick the bias, then flip the option). Now, when the dark's exposure is
+  mismatched, no bias is selected, *and* the library holds a master bias, the Stack form's
+  dark-mismatch Alert offers a single "Select your master bias and scale the dark" button that
+  selects the bias (the recommended one when it's among the available options, else the first)
+  and enables scaling in one click — replacing the yellow warning with the teal "scaling is on"
+  confirmation. Falls back to the existing prose ("Add a master bias to scale it…") when there's
+  genuinely no bias to select. Frontend-only, additive, advisory — no engine/API/schema change,
+  nothing happens until the user clicks. Tests: Vitest (the button appears with an available bias
+  and selecting it turns on scaling + swaps to the teal note; absent when the library has no
+  bias). (v0.82.2, this run — Builder)
+
+- **Surface dark exposure-scaling provenance on the run Info / History card (PRIORITY-4
+  image-quality/trust; companion to the v0.82.0 `scale_dark_to_light` feature, mirroring
+  the v0.81.1 photometric-normalization provenance).** The off-by-default dark
+  exposure-scaling shipped in v0.82.0, but a stack that used it said nothing — the user
+  couldn't tell from History whether the feature actually rescaled the dark. Now, when a
+  dark was genuinely scaled to the subs' exposure — the option was on, a master bias was
+  present to hold the pedestal fixed, a dark was set, and the dark's exposure differs from
+  the subs' — `_build_output_header_meta` stamps three provenance cards (`DARKSCAL`
+  "exposure" mode + `DARKDEXP`/`DARKLEXP`, the dark and sub exposures) alongside the
+  existing `PHOTNORM`/`WGT*`/`CALSTAT` keys. The scale is applied per-frame, so the stamp
+  records the run-level option + the (median) exposures, not a per-pixel value; it's
+  omitted (exactly like `PHOTNORM`) whenever nothing was actually scaled — a matched
+  exposure, no bias, or an unknown exposure all leave the dark unscaled. The run `…/info`
+  endpoint parses them into a `dark_scaling` `{mode, dark_exposure, light_exposure}`
+  summary, and the History Info panel renders one dimmed line ("Dark scaled to sub
+  exposure · 30s → 10s") via a pure `darkScalingSummaryText` helper. Additive/upgrade-safe:
+  new nullable FITS cards + a new response field + one advisory UI line — no schema/API-shape/
+  default change; an old run with no `DARKSCAL` card simply omits the line. Tests: engine
+  unit (stamped when scaled to a 10s sub from a 30s dark; absent when the option is off, the
+  exposures match, or the bias/exposure is missing) + webapp (the info endpoint parses the
+  cards into `dark_scaling` and reports `null` for a plain stack) + Vitest
+  (`darkScalingSummaryText` null/exposures/fractional/mode-only). (v0.82.1, this run — Builder)
+
+- **Dark exposure-scaling — reuse a dark library shot at one exposure to calibrate subs
+  at another (PRIORITY-4 image-quality/correctness; slice (b) of the calibration item).**
+  A master dark records thermal (dark-current) signal at a *specific* exposure, so a dark
+  shot at a different exposure than the lights either under- or over-subtracts — today
+  AstroStack only *warns* about the mismatch, leaving the user to re-shoot darks per
+  exposure. A new off-by-default `scale_dark_to_light` StackOptions flag scales the dark's
+  dark current to the light's integration time while holding the exposure-independent bias
+  pedestal fixed: `dark = bias + (dark − bias)·(t_light / t_dark)`. It needs a master bias
+  (to separate pedestal from dark current) and known exposures; without either — or when
+  the exposures match — it falls back to the unscaled dark, so nothing changes for the
+  common matched-dark case. The light's own exposure is threaded from `load_seestar_raw`
+  into `CalibrationMasters.apply_raw(raw, light_exposure_s=…)` at both hot-path call sites
+  (`align.py`, the drizzle prepare worker); direct callers that omit it get the unscaled
+  dark (backward-compatible). The Stack form's existing dark-exposure-mismatch warning now
+  carries a one-click **"Scale this dark to your subs' exposure"** (shown only when a master
+  bias is also selected) that flips the flag, replacing the yellow warning with a teal
+  "scaling is on" confirmation; the "bias ignored because a dark is present" note is
+  correctly suppressed while scaling is on (the bias *is* used then). Additive/upgrade-safe:
+  a new off-by-default option field with a descriptor (drift test satisfied) + an optional
+  `apply_raw` kwarg — no schema/API/default/on-disk change; an existing install's stacks are
+  identical until opted in. Tests: engine unit (scales the dark current to a 10 s sub from a
+  30 s dark / matched-exposure and off-by-default and missing-bias and missing-exposure all
+  neutral) + end-to-end through `align_one` (the synth sub's 10 s exposure reaches
+  `apply_raw` and scales the 30 s dark, the aligned output higher by the pedestal
+  difference) + Vitest (the warning's one-click enables scaling and swaps to the teal note).
+  (v0.82.0, this run — Builder)
+
+- **Make the remaining advisory Stack-form nudges one-click actionable (PRIORITY-2/3
+  autonomy + friendliness).** Three Stack-form advisory hints told the user to change a
+  setting but made them hunt for it, while their siblings (photometric-normalization,
+  min/max-reject) already offered a one-click button — an inconsistency a beginner feels
+  as friction. Now: the **quality-weighting** nudge (fires on a wide FWHM/star-count
+  spread) and the **hazy-transparency** hint (run median well below the target's clear-sky
+  baseline) each carry a one-click **"Turn on quality weighting"** button, and the
+  **sigma-clip-low-frame** caution (sigma clip on with <5 accepted+solved frames) carries a
+  one-click **"Turn off sigma clipping"** — each doing exactly the safe action the hint's
+  own text recommends. The transparency-hint button is guarded on `!quality_weighted` (so it
+  vanishes once weighting is on while the "you were shot through haze" advisory stays), and
+  the quality-weighting nudge already only renders while weighting is off. Prose reworded so
+  it reads naturally beside a button ("Turn on Quality weighting in the options above" →
+  the button carries the action). Frontend-only, additive, advisory — no engine/API/schema
+  change, nothing happens until the user clicks. Tests: Vitest (each button turns its option
+  on and clears/updates the nudge; the transparency button leaves the advisory text in
+  place). (v0.81.10, this run — Builder)
+
+- **Fix: mosaic canvas iterative-shrink dropped a good central frame instead of the real
+  outlier when the group straddled RA=0° (stacking-engine data-integrity).** The primary
+  plate-solve-outlier pass computes each frame's centre RA wrap-safely with
+  `_circ_mean_ra_deg`, but the *iterative canvas-shrink fallback* — reached only when the
+  union footprint exceeds the pixel cap (`MAX_CANVAS_PX`, 16000 px) — picked the frame to
+  drop using a plain `np.median` of its corner RAs. For a frame whose footprint straddles
+  the 0°/360° wrap (corners at, say, 359.6° and 0.4°) that median is ~180°, flinging the
+  frame's apparent centre to the opposite side of the sky — so a perfectly good *central*
+  frame looked like the worst outlier and was dropped from the mosaic (silently losing a
+  real panel), while the actual far frame survived. Fix: the shrink loop now uses the same
+  wrap-safe `_circ_mean_ra_deg` for each frame's centre RA (Dec doesn't wrap, so its median
+  is unchanged), mirroring the primary pass. Reachable only for a genuinely huge (>16000 px)
+  mosaic *and* an RA≈0 straddle, but a real data-integrity path in the top-focus stacking
+  engine when it triggers. Engine-only, additive/upgrade-safe (no schema/API/default change;
+  a well-solved non-straddling stack is unaffected — the loop is a rarely-hit backstop).
+  Regression test `test_canvas_shrink_loop_drops_the_real_outlier_near_ra_zero`: four frames
+  around RA≈0 (below the proactive pass's frame threshold, so the size-cap loop does the
+  dropping) with a forced small `max_canvas_px` — before the fix the central straddler is
+  dropped (n_footprints=2), after it the real far frame is dropped and the central one kept
+  (n_footprints=3). (v0.81.9, this run — Builder)
+
+- **Fix: a manual re-stack (or re-export/re-combine) under an existing basename silently
+  made the *previous* run's history row serve the new image (data-integrity/trust).** A
+  plain re-stack from the Stack form defaults to `output_name="master"` (the frontend sends
+  no name), so `write_stack_outputs` archived the existing `master.*` to a timestamped file
+  that **no** `stack_runs` row referenced, then wrote the new pixels back at `master.fits` —
+  and the *old* run's row (still pointing at `master.fits`) began serving the new image while
+  the true old image was orphaned. History showed two runs but both resolved to the newest
+  image, defeating before/after comparison (the same mechanic the v0.81.4 reprocess fix
+  addressed, but user-initiated). Fix takes the note's preferred "newest stays `master`,
+  older is renamed+rerowed" direction: `_archive_existing_outputs` now moves an existing set
+  aside under a single consistent `{base}_{stamp}` basename (so the `_coverage`/`_preview`
+  siblings stay siblings of the archived FITS — `coverage_path_for` resolves them from the
+  FITS basename) and returns a `{original→archived}` map; `write_stack_outputs` surfaces it
+  as a new additive `"archived"` result key; and the stacker (plus the editor-export and
+  channel-combine paths) call a new `Project.repoint_stack_runs` to point the previous run's
+  `fits/tiff/preview` columns at the archived files *before* recording the new run. Net:
+  `master.*` is always the newest image, the previous run keeps resolving to its own
+  (byte-for-byte preserved) image + coverage, and nothing is orphaned. Reprocess-all is
+  unaffected (it already uses fresh version-tagged basenames, so it archives nothing).
+  Additive/upgrade-safe: no schema/API/default change — a new nullable-ish result key and a
+  history repoint (no run added/deleted/content-changed); direct engine callers that ignore
+  the new key are unaffected. Tests: engine unit (archive to one basename + coverage sibling
+  resolvable; repoint moves the old row to distinct existing files; no-op on empty map) +
+  end-to-end (two real `run_stack`s under `master` — old row repointed to a distinct file
+  holding its original bytes, new run keeps `master.fits`; fails before / passes after).
+  (v0.81.8, this run — Builder)
+
+- **Fix: watcher could permanently drop a batch from auto-ingest when a file stabilised
+  during a running pipeline (PRIORITY-2 autonomy / data-completeness).** Frames dropped
+  into `incoming/` while a prior pipeline job was mid-run were silently never imported: the
+  `StabilityTracker` reports each file "newly stable" exactly once, and `_on_batch_ready`
+  skipped enqueuing (with no re-trigger flag) when a pipeline was already `queued`/`running`
+  — so the file's one-and-only trigger was lost and it sat unprocessed in `incoming/` until
+  some later new file happened to kick a fresh pipeline (or the user manually clicked Scan).
+  Worst case (the last batch of a session, nothing arriving after) it was never picked up at
+  all — undermining the core "drop files in and it just processes" promise. Fix:
+  `_on_batch_ready` now **returns** whether it enqueued a pipeline (`True`) or declined
+  because one was active (`False`); on a decline the watcher marks the batch **pending** and
+  re-offers it on every subsequent poll until it's accepted, so the deferred batch is picked
+  up on the first poll after the running pipeline finishes (bounded by the poll interval)
+  rather than being dropped forever. Self-contained to the watcher's poll loop — no schema,
+  API, config, or default change (additive/upgrade-safe; a callback returning `None`, as the
+  legacy signature did, is still treated as "consumed"). Regression test
+  (`test_batch_pending_when_pipeline_busy_is_reoffered`) simulates a busy-then-free pipeline
+  and asserts the pending batch is re-offered until accepted then not again — fails before,
+  passes after. (v0.81.7, this run — Builder)
+
+- **Fix four more flaky Editor "From your data" tests that reddened main's CI (test-only,
+  same remount race #109 fixed).** The v0.81.5 merge's frontend CI job failed on
+  `Editor.test.tsx > 'sets both black+white points via Auto stretch'` (`Set Strength from
+  your data` not disabled). Root cause is the same toolbar-remount race #109 traced: the
+  per-op suggestion / default-recipe queries settle and remount the toolbar right after the
+  buttons first appear, so a `fireEvent.click` fired *before* the remount lands on a detached
+  node (its React `onClick` never runs) and the button never reaches its applied/disabled
+  state — or a button reference captured before the remount is stale by assertion time. Fix
+  is **test-only** and does not weaken any assertion: for the four sibling "From your data" /
+  "Auto stretch/levels" tests, re-find the button and (where a click is needed) re-click
+  *inside* the existing `waitFor` so the idempotent click retries across the remount flicker,
+  matching the durable pattern #109 introduced for the "Auto curve" test. Verified the
+  Editor suite passes 44/44 across 4 consecutive local runs. No source/behaviour change.
+  (v0.81.6, this run — Builder)
+
+- **Proactive "N targets are out of date" nudge — reprocessing after an upgrade is no
+  longer purely reactive (PRIORITY-2 autonomy / PRIORITY-3 friendliness).** The
+  "Reprocess everything" feature (owner-requested) + per-run `engine_version` provenance
+  (v0.76) + the `stale_only` filter (v0.77) shipped, but nothing *told* the user their
+  images were stale — after an in-place upgrade they silently kept whatever engine build
+  made them unless the user remembered to visit Settings and reprocess. Now a read-only
+  `GET /api/reprocess-status` reports `{current_version, outdated, up_to_date,
+  total_targets}` (a target is *outdated* when its newest **genuine** stack — editor/combine
+  runs skipped, via a shared `_newest_genuine_stack_run` helper — was made by a different
+  version than the running build; a never-stacked target is neither, so the count is exactly
+  the images a reprocess would change). A small grape count badge on the Settings nav link
+  (`OutdatedTargetsBadge`) surfaces it app-wide, and the Settings → Reprocess panel shows a
+  plain-language advisory Alert ("N targets were last stacked with an older AstroStack
+  version… reprocess — it's non-destructive") built from a pure, unit-tested
+  `reprocessNudgeText` helper. Advisory only — no reprocess happens until the user clicks the
+  existing (default-on "outdated only") button. Additive/upgrade-safe: new read-only endpoint
+  + advisory UI, no schema/default/API-shape change; the badge/nudge simply don't show when
+  nothing is outdated. Tests: webapp (status counts outdated vs up-to-date vs never-stacked;
+  legacy `engine_version=None` counts as outdated; newest-run-wins; editor/combine runs
+  ignored; endpoint end-to-end) + Vitest (`reprocessNudgeText` null/singular/plural; the
+  Alert renders when outdated and is absent when up to date). (v0.81.5, this run — Builder)
+
+- **Fix: "Reprocess everything" silently overwrote each target's existing stack output
+  (data-integrity bug on the owner-requested feature; found by a Builder webapp audit).**
+  `submit_reprocess_all` reused each target's last run's `options_json`, which carries the
+  original run's `output_name="master"`. So the restack wrote to the *same* basename:
+  `write_stack_outputs`→`_archive_if_exists` renamed the existing `master.fits`/`.tif`/
+  `_preview.png` to timestamped files that **no DB row references**, and wrote the new
+  pixels back at the original paths — so the *old* run's `stack_runs` row (still pointing
+  at `master.fits`) silently began serving the *new* image, and the original became an
+  orphan the UI never shows. This directly contradicted the feature's promise ("nothing is
+  deleted or overwritten — compare them in History") and defeated its safety guarantee (a
+  worse restack *could* lose a good result). Fix: reprocess now writes each run to a fresh,
+  version-tagged basename (`master_v<version>`, `_2`/`_3` suffixed if that already exists),
+  via a new `output_name` override threaded into `_stack_target` — so the reprocessed image
+  lands *alongside* the existing one, both reachable as separate runs. Nothing reads
+  `master.fits` by name (all reads go through the run row's `fits_path`), so the rename is
+  safe. Additive/upgrade-safe: no schema/API/default change; only the on-disk basename of
+  *new* reprocess outputs changes. Tests: pure (`_reprocess_output_basename` version-tag +
+  collision-suffix) + end-to-end regression (a real first stack's `master.fits` is
+  byte-for-byte unchanged after reprocess, and a second version-tagged run appears with its
+  own FITS — fails before the fix, passes after). (v0.81.4, this run — Builder)
+
+- **Stack form nudges to enable Photometric normalization when transparency varies a lot
+  (PRIORITY-2/3 autonomy + friendliness, companion to v0.81.0).** v0.81.0 shipped the
+  off-by-default `photometric_normalize` option that gain-matches hazy vs clear subs
+  before combine, but a beginner won't know to reach for it. The Stack form now fires a
+  sibling advisory nudge (alongside the existing hazy-night and quality-weighting hints)
+  when the transparency spread across the frames-to-be-stacked is wide — p90/p10 ≳ 1.5×,
+  computed from the `transparency_score` values already fetched — *and* the option is off:
+  it explains in plain language that the frames vary a lot in brightness (haze/airmass
+  across nights) and offers a one-click **"Turn on photometric normalization"** button.
+  Requires ≥5 measured frames so a couple of subs can't trigger it (the engine itself
+  needs ≥3 to normalize at all). Distinct from the quality-weighting nudge (that
+  down-weights the worst subs' *contribution*; this gain-matches their *values* — they
+  compose). Frontend-only, additive, advisory — no engine/API/schema change and nothing
+  changes until the user opts in. Tests: Vitest (fires on a wide 2000…9000 spread and the
+  button turns the option on + clears the nudge; silent on a tight spread; silent when
+  already on). (v0.81.3, this run — Builder)
+
+- **Fix flaky Editor "Auto curve" test that was intermittently reddening main's CI.**
+  The frontend CI job failed on several recent `main` pushes (including a docs-only
+  commit, `#108`), always in `Editor.test.tsx > sets a gentle starting curve via the
+  header 'Auto curve'`. Root cause (traced with an instrumented repro): the test
+  captured the "Auto curve" `<button>` reference across an `await`, but the toolbar
+  subtree **remounts** while the per-op suggestion / `default-recipe` (v0.79.0) queries
+  settle — so the captured node is detached (`isConnected === false`) by click time and
+  its React `onClick` never fires (a native listener still fires, which is the tell).
+  The added async queries shifted render timing so the remount now reliably lands right
+  after the button first appears. Fix is **test-only** and does not weaken the assertion:
+  re-find and click the button *inside* the existing `waitFor`, polling until the
+  suggested points reach a preview fetch (the durable effect) — the click is idempotent
+  (sets the same points), so retrying across the remount flicker is safe. Verified the
+  test now passes fast (≈1.4 s vs the prior 20 s `asyncUtilTimeout`) and stably (5/5
+  reruns); full frontend suite green (454 passed). No source/behaviour change. (v0.81.2,
+  this run — Builder)
+
+- **Surface photometric-normalization provenance on the run Info / History card
+  (PRIORITY-4 trust, companion to v0.81.0).** The stack run's `…/info` endpoint now
+  parses the `PHOTNORM`/`PHOTN*` FITS keys into a friendly `photometric` summary
+  (mirroring the existing quality-`weighting` summary), and the History provenance
+  card renders a single line — "Photometrically normalized · N frames gain-matched ·
+  scales lo–hi (median m)" — so a user who turned normalization on can see it happened
+  and how many subs were actually scaled (and trust the off-by-default feature did
+  something). Present only on normalized stacks; absent otherwise. New pure
+  `photometricSummaryText` helper. Additive/upgrade-safe (new nullable response field +
+  advisory UI line, no schema/behaviour change). Tests: webapp (a stamped run surfaces
+  the parsed summary; a plain run reports `photometric: null`) + Vitest
+  (`photometricSummaryText`: null when un-normalized / full range / singular-frame +
+  missing-range tolerant). (v0.81.1, this run — Builder)
+
+- **Photometric (multiplicative) frame normalization before combine — gain-match the
+  signal so haze/airmass doesn't weaken rejection or dim the result (PRIORITY-4
+  image-quality/correctness).** Frames are additively sky-zeroed per frame, but nothing
+  gain-matched their *signal*: haze, airmass and thin cloud scale a sub's recorded star/
+  nebula flux by tens of percent across a multi-night session, which (a) inflates the
+  per-pixel spread κ-σ / min-max rejection clips against — so real outliers on bright
+  structure survive — and (b) lets hazy nights quietly dim the combined image. A new
+  `photometric_normalize` StackOptions flag (**off by default**) estimates a per-frame
+  multiplicative scale from the frame's own `transparency_score` (the median flux of its
+  brightest stars, already measured by QC) relative to the **median** transparency of the
+  stacked frames, and the stacker multiplies it into each frame's pixels *before*
+  accumulation — so it flows identically through every path (single-pass mean, κ-σ pass
+  1+2, min/max reject, and the drizzle prepare worker) and every accumulator. Normalising
+  to the median keeps overall brightness stable (half scale gently up, half down); scales
+  are bounded to `[0.5, 2×]` so one wild transparency estimate can't blow a frame up; a
+  frame with no usable score stays neutral (1.0), and if fewer than 3 frames carry a score
+  the whole run is neutral (a median off 1–2 frames isn't trustworthy). Orthogonal to and
+  composes with quality weighting (that down-weights the *contribution*; this gain-matches
+  the *values*). The run self-documents via `PHOTNORM`/`PHOTN*` FITS provenance keys
+  (mirroring the `WGT*` keys). New engine module `seestack/stack/photometric.py`
+  (`compute_photometric_scales` + `PhotometricStats`); surfaces in the Stack form as an
+  advanced checkbox (descriptor-driven, no frontend change). Additive/upgrade-safe: a new
+  off-by-default option field + new nullable FITS header keys, no schema/API/default change
+  — an existing install's stacks are unaffected until opted in. Tests: engine unit
+  (gain-match to median / clamp both sides / missing-score neutral / <3-measured fully
+  neutral / identical-transparency all-neutral / non-positive scores ignored / NaN
+  coverage preserved) + end-to-end (a hazy frame's boost lifts the combined bright-star
+  level ~1.1×+ and stamps PHOTNORM; off by default writes no PHOTNORM; enabled-but-no-
+  transparency stays neutral; runs on the drizzle path). (v0.81.0, this run — Builder)
+
+- **Per-op split before/after — drag a divider to see the image with vs without just
+  the op you're tuning (PRIORITY-1 editor/trust).** v0.78.0 added a whole-recipe split
+  divider (Original vs Edited); this extends it to the more common editing question,
+  "is *this* slider actually helping?". A new "Split this op" button next to the
+  existing "Without this op" per-op compare overlays the editor's already-fetched
+  *without-this-op* render (`withoutOpPreview`) on the edited preview and clips it with
+  the same draggable vertical divider — left of the divider shows the image **without**
+  the selected op, right shows it **with** — so the user judges exactly what one
+  Sharpen/denoise/curve did at a glance, not just the whole recipe vs the raw base. It
+  reuses the shipped `splitCompare.ts` geometry helpers and the shared `splitFrac`/
+  divider drag state (one render block now serves both splits, choosing its "before"
+  image + labels from which mode is active), so the only new state is a per-op
+  `soloSplit` toggle (reset on selection change like the existing `soloExclude`, and
+  mutually exclusive with every other overlay/trim/compare mode). Frontend-only,
+  additive — no engine/API/schema change, off until clicked, no default change.
+  Tests: Vitest (an Editor test that toggling "Split this op" on a selected Curves op
+  overlays the clipped without-op render + divider at the default 50%, labels the sides
+  "Without Curves" / "With", and clears when toggled off) on top of the existing
+  `splitCompare.ts` helper coverage. (v0.80.0, this run — Builder)
+
+- **Personal default recipe — "my house style" one click away on every new run
+  (PRIORITY-2 autonomy).** User presets already let you save a recipe, but you had to
+  name it and dig into the Presets menu to reuse it on each new target. Now the editor
+  keeps one designated **default** recipe library-wide: a "Set current as my default" /
+  "Clear my default edit" action in the Presets menu (`PUT`/`GET`/`DELETE
+  /api/editor/default-recipe`, stored as a validated `editor_default_recipe` library-
+  meta key alongside user presets), and any run opened with **no** saved edit now
+  offers a one-click "Use my default (N)" button in the empty-pipeline nudge (next to
+  the existing "Use my previous edit"), so a repeat imager's preferred look seeds a new
+  target in one click. The seed is applied as a single **undoable** step and is not
+  persisted unless the user Saves; the stored recipe is validated on load (unknown ops
+  dropped, params clamped) so a stale op can never 500 the editor. **Off until the user
+  sets a default** — nothing changes on a live install until they opt in (no default
+  flip, no schema change — reuses the existing library-meta KV store; additive,
+  upgrade-safe). Tests: webapp (unset → empty; set→get round-trips validated ops and
+  drops unknown ones; DELETE and empty-PUT both clear) + Vitest (PresetMenu Set calls
+  `putDefaultRecipe` with the current ops, Clear appears only once a default exists and
+  calls `deleteDefaultRecipe`; an Editor test that a saved default surfaces the "Use my
+  default (2)" seed, applying it lands exactly those ops in the pipeline and fires a
+  preview carrying them, and the nudge clears once non-empty). (v0.79.0, this run —
+  Builder)
+
+- **Split before/after compare — drag a divider to see Original vs Edited in one
+  frame (PRIORITY-1 editor/trust).** Compare was a *toggle*: you flipped the whole
+  preview between "Original" and "edited" and had to remember the difference. A new
+  "Split" mode button (next to Compare) overlays the Original empty-recipe render on
+  top of the edited preview and clips it with a draggable vertical divider — the left
+  of the divider shows the Original, the right shows the edit — so the user judges
+  exactly what a stretch/denoise/curve changed at a glance, the clearest answer to the
+  priority-1 "is my edit actually an improvement?" question. It reuses the two renders
+  the editor already fetches (live edited preview + the existing `basePreview`
+  empty-recipe "Original"), sits inside the existing `previewBoxStyle` image box so it
+  lines up under `objectFit: contain`, and is its own mode (mutually exclusive with the
+  mask/coverage/Compare overlays and suppressed during a trim preview). Frontend-only,
+  additive — no engine/API/schema change, no default change (Compare stays a toggle,
+  split is off until clicked). New pure helpers `splitFraction` / `splitClipLeft` /
+  `splitLeftPct` in `splitCompare.ts` (pointer-x → clamped divider fraction → clip-path
+  / offset). Tests: Vitest helper (pointer inside/past-edge clamping, unmeasured-box
+  centre fallback, clip/offset strings) + an Editor test that toggling Split shows the
+  clipped Original overlay + divider at the default 50%, disables Compare while on, and
+  clears cleanly when toggled off. (v0.78.0, this run — Builder)
+
+- **Reprocess-everything gains an "only outdated targets" filter (owner-requested
+  slice c) — skips targets already stacked on the current version.** Building on the
+  v0.76.0 per-run version stamp, the reprocess maintenance action no longer has to
+  restack the *whole* library after an upgrade: a new `stale_only` flag on
+  `POST /api/reprocess-all` (Settings toggle, **default on**) skips any target whose
+  most recent *genuine* stack (a `_last_stack_version_for_target` helper walks
+  newest-first, skipping editor/combine runs) already carries the current
+  `webapp.__version__` — so only the images an upgrade would actually change get
+  reprocessed. The batch summary now reports `skipped`, surfaced on the Jobs card as
+  "… — K already up to date". Strictly opt-in and backward-compatible: the endpoint
+  defaults `stale_only=False` for any caller that omits it (so the plain "reprocess
+  everything" behaviour is unchanged), a target with no genuine stack / no recorded
+  version is treated as stale and reprocessed, and nothing is ever deleted. The
+  Settings toggle defaults to the more useful "outdated only" and relabels the button
+  accordingly. Tests: engine (stale_only skips a current-version target and stacks a
+  stale one; default reprocesses even current-version targets) + webapp end-to-end
+  (POST `{stale_only:true}` skips up-to-date targets and adds no new runs) + Vitest
+  (`reprocessSummary` skipped line; the Settings toggle drives the button label and
+  passes the flag). (v0.77.0, this run — Builder)
+
+- **Stack runs record the producing app version ("made with vX") — provenance +
+  foundation for stale-target reprocessing (owner-requested slice c).** After an
+  in-place upgrade a target's stack stays stale until restacked, and there was no way
+  to tell *which* engine build produced a given image — so the "Reprocess everything"
+  feature could only restack the whole library wholesale. Every stack run now stamps
+  the AstroStack version that made it: a new nullable `engine_version TEXT` column on
+  `stack_runs` (schema `SCHEMA_VERSION` 8→9, additive `ALTER TABLE`, backfilling NULL —
+  old DBs migrate cleanly, pre-existing runs read None), populated from
+  `webapp.__version__`. The engine stays webapp-free: `run_stack` gained an optional
+  `app_version` param the webapp passes (`None` for direct engine callers); the two
+  webapp-layer run records (editor export, channel combine) stamp it directly. The
+  version rides through `StackRunOut` to the History card's metadata line ("… · v0.76.0"),
+  omitted for legacy runs. Additive / upgrade-safe (new nullable column + new response
+  value, no default/API-shape change). Tests: schema (v8→v9 migrates, old run reads
+  None, new insert round-trips a version), engine end-to-end (`run_stack` records the
+  passed version; `None` when unset), webapp (the stack-runs endpoint surfaces
+  `webapp.__version__`), and Vitest (`formatEngineVersion` v-prefix/blank cases + the
+  History card shows the version for a versioned run and omits it for a legacy one).
+  (v0.76.0, this run — Builder)
+
+- **Recipe carry-over across re-stacks: one-click "Use my previous edit"** — the Seestar
+  user re-stacks a target repeatedly as more nights come in, and each new run opened on
+  the flat default, losing the look they'd dialled in. A new read-only
+  `GET …/editor/previous-recipe` endpoint returns the newest *other* stack run of the
+  target that carries a non-empty saved recipe (walking `stack_runs` newest-first,
+  probing `editor_recipe:{id}` meta; the recipe is validated on load so stale ops are
+  dropped). When the current run has no saved edit, the editor's empty-pipeline nudge now
+  shows a "Use my previous edit (N)" button that copies those ops into the working recipe
+  as a single **undoable** step (a violet notification says Undo to revert / Save to
+  keep); nothing is persisted unless the user Saves, and the query only fires when the
+  run's saved recipe is empty (never nags a run with its own edit). **Off until clicked**
+  — no default flip, no schema change (recipes already live in project meta keyed by run
+  id, so it's a copy), upgrade-safe/additive. Tests: webapp (returns the newest edited
+  run's ops with validated params / prefers the most recent of several / None when no
+  other run is edited / None when nothing's edited) + Vitest (the button names the step
+  count, applying it lands the ops in the pipeline and fires a preview carrying exactly
+  those ops, and the nudge disappears once non-empty). (v0.75.0, this run — Builder)
+
+- **Curves widget now previews the auto-contrast curve (read-only ghost) + "Bake to
+  edit"** — the v0.73.0 auto-contrast (`tone.curves` `auto`) derives its curve at
+  *render* time from the image entering the op while the stored points stay a flat
+  identity, so selecting Auto's curve op showed **contrast in the preview but a flat
+  identity line in the Curves widget** — a preview↔control mismatch and a missed teaching
+  moment. Now when auto is engaged (on + points still identity) the widget draws the
+  derived shape — the same one `…/editor/curve-suggestion` returns — as a read-only
+  dashed ghost behind the (still-identity) editable curve, with a caption explaining
+  what's happening, and a one-click **"Bake to edit"** that writes those points into the
+  recipe and clears `auto` so the user can hand-tune from the real shape (a single
+  undoable step). The redundant header "Auto curve" button is hidden while auto is
+  engaged, so Bake is the single control. Frontend-only, additive, no API/behaviour
+  change (the ghost is advisory; nothing is written until Bake or a manual edit). New
+  pure `isIdentityCurve` helper (mirrors the engine `_points_are_identity`); a `ghost`
+  prop on `CurvesWidget`; `curveGhost`/`onBakeCurve` on `OpParamPanel`. Vitest:
+  `isIdentityCurve` (identity/moved/malformed), the widget ghost (dashed read-only
+  polyline, not a draggable handle; absent when no ghost), and an Editor test that an
+  auto+identity curve shows the ghost/caption, hides the header button, and Bake writes
+  the suggested points with `auto:false`. (v0.74.4, this run — Builder)
+
+- **"Cropped view — showing N% of the frame" indicator + one-click "Remove crop"** —
+  a `geometry.crop` op silently shrinks the visible frame, so an auto-applied trim or a
+  forgotten manual crop just looked like "my image got smaller" with nothing to say so.
+  A dimmed advisory caption now renders below the editor preview whenever the recipe has
+  an *enabled* `geometry.crop`, naming how much of the frame is still shown ("Cropped
+  view — showing 64% of the frame."), with a one-click "Remove crop" that drops the
+  crop op(s) as a single undoable step. The kept fraction is derived purely from the
+  crop ops' own fractional bounds (mirroring the engine `_crop`'s clamp-to-[0,1] + sort
+  semantics, and *multiplying* successive crops since each is relative to its input), so
+  no new data/endpoint is needed. A disabled crop op is ignored (it isn't shrinking the
+  view), and a crop that keeps the whole frame doesn't nag. Frontend-only, additive,
+  advisory — no engine/API/behaviour change. New pure helpers `cropCoveragePct` /
+  `cropCoverageFraction` / `removeCropOps` in `mosaicTrim.ts`. Vitest: the helpers
+  (no-crop / full-frame / single & multiplied crops / clamp+sort of out-of-range bounds
+  / garbage-tolerant / disabled-crop-kept) + an Editor test that a loaded crop shows the
+  64% caption and "Remove crop" clears it. (v0.74.3, this run — Builder)
+
+- **Fix: single-field stacks were misclassified as mosaics (Scout-verified
+  wrong-result/broken-UX bug on the primary user's every-session case)** — the
+  editor decided "is this a mosaic?" from `coverage_max > coverage_min`, but a real
+  reprojected stack *always* has an uncovered NaN/zero border, so `coverage_min` is
+  ~always 0 and the test was ~always True — mislabelling **single-field** stacks as
+  mosaics. Consequence: one-click Auto prepended a no-op `background.level_coverage`
+  *and* appended a spurious `geometry.crop` that trimmed a few px off every edge (and
+  changed the export dimensions), plus the editor showed the mosaic banner, the
+  "Trim border" button and the coverage-map overlay — all on a plain single-field
+  OSC frame. Root fix: persist the stacker's **authoritative** union-canvas decision
+  (`run_stack`'s own `is_mosaic_canvas`) as a new nullable `is_mosaic` column on
+  `stack_runs` (schema `SCHEMA_VERSION` 7→8, additive `ALTER TABLE` migration,
+  backfilling NULL — old DBs migrate cleanly, old runs read None). The three editor
+  sites (histogram `is_mosaic`, trim-suggestion, Auto) now resolve the verdict via a
+  shared `_run_is_mosaic` helper: the persisted flag when present, else — for legacy
+  NULL runs — a **coverage-distribution** check (`coverage_is_mosaic`: a genuine
+  mosaic has ≥2 large coverage plateaus at distinct levels; a single-field stack has
+  one dominant interior level + a thin border ramp), *never* the old
+  `max>min` test. `auto_recipe` now takes an explicit `is_mosaic: bool` (the buggy
+  `coverage_span`→`_is_mosaic` heuristic is removed from the engine entirely). The
+  histogram hot path reuses the coverage array it already loads (no extra I/O);
+  legacy trim/auto load a strided coverage map. Additive/upgrade-safe (nullable
+  column, no default/API-shape change; `is_mosaic` is a new response *value*, not a
+  new field). Tests: engine (`coverage_is_mosaic` single-field-with-ramp→False /
+  two-plateaus→True / empty / 3-D), schema (v7→v8 migrates, old run reads None, new
+  inserts round-trip True/False), end-to-end (a real single-field `run_stack` records
+  `is_mosaic=False`), and webapp regression (a **legacy** single-field run with a
+  realistic coverage sibling now reports `is_mosaic:false` where the old heuristic
+  said true; a legacy mosaic still classifies true). The fabricated
+  `coverage_min==coverage_max` editor tests were updated to set the authoritative
+  flag so a fabricated span can't hide the bug again. (v0.74.2, this run — Builder)
+
+- **Jobs page surfaces the reprocess-all batch outcome in plain language** —
+  companion to the v0.74.0 reprocess-everything feature: a finished `reprocess_all`
+  job carries a `{total, stacked, failed, cancelled}` summary that the Jobs page
+  previously didn't render, so the user couldn't see how many targets restacked or
+  which failed. The job row now shows "Restacked N/M targets [(cancelled early)]
+  [— K failed]." plus a red "Failed: …" line naming the targets that errored,
+  driven by a pure, tested `reprocessSummary` helper (singularises one target;
+  tolerates missing/garbage `failed` entries). Frontend-only, additive, advisory
+  (no API/behaviour change). Vitest: helper (clean run / cancel+failures /
+  singular+garbage-tolerant) + a Jobs row test that a batch result renders the
+  summary and the failed-target list. (v0.74.1, this run — Builder)
+
+- **⭐ OWNER-REQUESTED — "Reprocess everything" (slice a): one-click restack of
+  every target with the current engine** — after an engine upgrade a target's
+  final image stays stale until it's restacked by hand. A new confirm-gated
+  "Reprocess all targets" action on the Settings page (a `Maintenance` panel) hits
+  a new `POST /api/reprocess-all` endpoint that enqueues one serial `reprocess_all`
+  job. The job walks every target and restacks it **reusing the settings that made
+  its current image** — a new `_last_stack_options_for_target` helper reads each
+  target's newest *genuine* stack run's `options_json` (a companion
+  `_stack_options_from_run_json` rejects editor-export/channel-combine runs, which
+  share the `stack_runs` table, and empty/garbage JSON), falling back to the
+  target's saved stack defaults / global auto-defaults when it has none. It's
+  **non-destructive** (each restack is recorded as a *new* `stack_runs` row via the
+  normal `run_stack` path — old outputs are never touched, so a worse restack can't
+  lose a good result and both show up in History) and **memory-safe** (the
+  per-target stacks run serially inside the single job, so the memory-bounded stack
+  hot path is never oversubscribed — OOM history). Cancellable between targets *and*
+  within each target's stack; a target that fails to stack is isolated (its error is
+  recorded and the batch carries on). A duplicate-batch guard
+  (`JobManager.active_of_kind`) returns the running job instead of enqueuing a
+  second. Additive / upgrade-safe: new endpoint + job kind + UI action, reusing the
+  existing `stack_runs` schema and job manager (no config/DB/on-disk/API-shape
+  change). Tested: engine (helper accept/reject cases; the batch reuses each
+  target's last kappa, isolates a failing target, cancels between targets; the
+  guard is active only for queued/running jobs) + webapp end-to-end (the endpoint
+  enqueues a batch that restacks both targets and leaves the seeded prior run in
+  place — additive) + Vitest (the confirm gate, the start/already-running/error
+  notifications). (v0.74.0, this run — Builder)
+
+- **Auto-process now gives its one-click result a gentle, data-driven contrast
+  curve (the top PRIORITY-1 item, Scout-vetted & unblocked)** — the built-in
+  galaxy/nebula presets ship a `tone.curves` S-curve, but the general `auto_recipe`
+  was the flat exception (denoise → stretch → SCNR → saturation → sharpen, *no*
+  contrast shaping), so the one-click "Auto" result was flatter than the presets the
+  same app ships. `tone.curves` gained an `auto` bool param (default False): when set
+  *and* the points are still the untouched identity, the op derives a gentle
+  midtone-lift curve from its own (display-space) input **at apply time** via
+  `suggest_tone_curve` — pinning the sky floor (p1) and highlight shoulder (p99.5) on
+  the identity so it only *gently* lifts faint midtone structure (no sky brightening,
+  no blown star cores), falling back to the presets' fixed gentle S-curve when the
+  data offers no useful suggestion. `auto_recipe` appends `("tone.curves",
+  {"auto": True})` after the saturation boost. Because it's computed at apply time
+  from robust global percentiles it adapts to the actual stack *and* holds
+  proxy↔export parity (measured mean |diff| ~0 for the curve itself). A hand-edited
+  (non-identity) curve always wins, so toggling auto never discards manual work; Auto
+  is an explicit button (no default flip, upgrade-safe/additive — older recipes
+  simply lack the op/param). Verified empirically on a dim synthetic OSC stack
+  (p50 0.191→0.221, sky/highlight deltas ≤0.0001), matching the Scout's visual
+  vetting. Tests: engine (auto lifts the midtone from identity / falls back to the
+  fixed S-curve when the suggestion is None / manual points win / NaN preserved),
+  auto_recipe (curve appended after saturation with `auto=True` + identity points;
+  end-to-end the rendered result's median rises), webapp (the `/editor/auto` recipe
+  carries the curve). Frontend: the Auto-summary names it "added a gentle contrast
+  curve"; the `auto` toggle surfaces as an advanced control on the Curves op.
+  (v0.73.0, this run — Builder)
+
+- **Auto-process summary names the mosaic coverage-leveling step in plain language** —
+  the "What Auto-process did" summary maps each Auto op to a plain-language phrase
+  (v0.70.1 added `geometry.crop`), but `background.level_coverage` — which
+  `auto_recipe` prepends as the *first* step on a mosaic to even out uneven-overlap
+  panel brightness — had no phrase, so on a Seestar mosaic the whole one-click
+  summary opened with the bare jargon registry label "Coverage leveling" while
+  every other step read cleanly. Added a phrase ("evened out the mosaic panel
+  brightness") to `OP_PHRASES`, completing plain-language coverage of every op Auto
+  can emit. Frontend-only, additive, advisory (no image/behaviour/API change).
+  Vitest: a regression case that a `background.level_coverage`-led recipe summarises
+  with the plain phrase, not the jargon label. (v0.72.5, this run — Builder)
+
+- **Fix: SCNR "Protect" tooltip had gentler/stronger reversed (misled the most
+  common OSC fix)** — Builder editor audit found the `tone.scnr` `mode` param's help
+  read "to the average (gentler) or maximum (stronger) of red/blue" — exactly
+  backwards. SCNR caps green with `min(g, neutral)`: `average` uses the *lower*
+  neutral `0.5·(r+b)` so it removes **more** green (stronger), `maximum` uses the
+  *higher* neutral `max(r,b)` so it removes **less** (gentler) — matching standard
+  (PixInsight "Average/Maximum Neutral") terminology. A beginner wanting a light
+  touch reads "average (gentler)", picks it, and gets the *most* aggressive green
+  removal — desaturating real teal/cyan nebulosity, the opposite of the promise.
+  Green-cast removal is the single most common OSC nebula fix and this tooltip is
+  the only guidance for the choice, so the label matters. Swapped the parentheticals
+  to "average (stronger) or maximum (gentler)". Metadata/text-only, additive,
+  upgrade-safe (no behaviour, API, or default change). Regression test in
+  `tests/test_edit_tone_ops.py` pins the *semantics* (average caps green to
+  `0.5·(r+b)`, maximum to `max(r,b)`, so average leaves less green — the stronger
+  effect) **and** asserts the help text labels them that way round, so the tooltip
+  can't drift back out of sync with the maths. (v0.72.4, this run — Builder)
+
+- **Fix: a thin crop + downscale no longer crashes the editor preview/export with
+  an empty image** — Builder dogfood (fuzzing every edit op with adversarial
+  inputs) found that `geometry.resize` computed its output shape via scipy `zoom`'s
+  `round(dim·scale)`, so a heavy downscale of a thin frame (a ≤2px sliver crop on
+  the proxy — which survives the crop op's own `>=2px` guard — or a small proxy)
+  drove an axis to **0 px**, yielding a `(0, N, 3)` empty image that then raised
+  `ValueError: cannot write empty image` in the PNG/TIFF render — an unhandled
+  **500** in `GET …/editor/preview`, `…/editor/histogram`, `POST …/editor/export`
+  and `…/editor/export-png`, plus a failed batch job (same input-hardening class as
+  the v0.69.0/v0.69.5 malformed-recipe 500 fixes). `_resize` now derives exact
+  per-axis zoom factors from a guaranteed-`>=1px` target shape, so an extreme
+  downscale lands on a valid 1px strip instead of an empty array (and the coverage
+  overlay's `apply_geometry_to_map`, which reuses the same op, is covered too).
+  Engine-only, additive/upgrade-safe (the effect is unchanged for any resize that
+  didn't previously collapse). Regression tests: engine (`geometry.resize` never
+  returns a zero-size axis on collapsing scales; a stretch→thin-crop→downscale
+  recipe stays PNG-encodable) + webapp (the preview & histogram endpoints return a
+  valid PNG/200 for that recipe instead of a 500) — all three fail before the fix.
+  (v0.72.3, this run — Builder)
+
+- **Editor exports are marked display-space — no more re-edit double-stretch, and
+  the FITS is honest** — an editor export writes its already tone-mapped `[0,1]`
+  result to a FITS, but it was stamped `BUNIT = "ADU (linear)"` and carried no
+  "this is display-space" marker, so (a) re-opening the edited run in the editor
+  (empty recipe) ran the default asinh stretch *again* — the re-edit
+  double-stretch — and (b) the FITS told Siril/PixInsight it was linear ADU when
+  it's a picture. Now `_write_fits` stamps an `SSDISPLY = T` card + honest
+  `BUNIT = "display"` on editor exports, the export run's `options_json` carries a
+  `display_space` flag, and a new engine helper `fits_is_display_space` +
+  `EditContext.already_display` let the render/edit paths *skip* the default
+  fallback stretch for a display-space image: `render_stack_png` (used by
+  `render_stack_run`/save-preview) renders it verbatim, the editor proxy preview/
+  histogram/star-mask/levels+curve suggestions build the context with
+  `already_display`, and `_render_recipe_fullres` (re-edit → export) suppresses its
+  fallback too. An explicit stretch op the user adds still runs. Absence of the
+  card/flag = today's linear behaviour, so old runs and non-editor stacks are
+  unaffected (upgrade-safe, additive). Engine (`output.py`, `registry.py`,
+  `pipeline.py`, `thumbnail.py`) + webapp (`pipeline.py`, editor router). Tested:
+  engine (`already_display` suppresses the fallback but an explicit stretch still
+  runs; `SSDISPLY`/BUNIT stamped for display exports and absent for linear;
+  `fits_is_display_space` incl. missing-file), render (display-space FITS renders
+  verbatim, sliders a no-op, vs a linear stack), webapp (export marks the new run
+  in options_json + FITS, source unaffected; re-opening a display-space run's
+  editor preview doesn't double-stretch while the same data without the flag
+  does). (v0.72.2, this run — Builder)
+
+- **"Auto curve" button names its goal + dims when already applied (data-driven
+  family consistency)** — small follow-up to v0.72.0: the new Curves-op "Auto
+  curve" header button was opaque ("Auto curve") and always enabled, unlike the
+  rest of the data-driven tonal family (Auto levels shows its black–white values,
+  Auto stretch its strength, the gamma button names "~25% grey", per-param buttons
+  flip to a disabled ✓). It now reads "Auto curve (lifts to ~N% grey)" — the grey
+  the midtone lift solves for, served honestly from the suggestion's existing
+  `target_bg` — and dims to a disabled "Auto curve ✓" once the current control
+  points already equal the suggestion, so re-clicking a no-op isn't invited. A pure
+  `curvePointsMatch` helper does the structural point-list compare (same length,
+  each `[x,y]` within a tiny epsilon; a missing/malformed list or absent suggestion
+  never matches). Frontend-only, additive; no API or behaviour change beyond the
+  label/disabled state. Vitest: helper (identical / within-epsilon / moved /
+  different-length / absent suggestion / malformed) + the existing Editor "Auto
+  curve" test extended to assert the goal-naming label and the disabled ✓ after a
+  click. (v0.72.1, this run — Builder)
+
+- **Data-driven "Auto curve" starting point for the Curves op (completes the
+  family of data-driven tonal defaults)** — the Curves op was the last major tonal
+  control that dropped a beginner on a flat identity line to hand-shape, while
+  Levels (black/white/gamma), Stretch (strength/black), Sharpen, Denoise, Star-size
+  and Deconv-PSF all offer a one-click "From your image" start. A new pure engine
+  helper `seestack/edit/curve.py:suggest_tone_curve` measures the display-space
+  histogram of the image *entering* the op and returns a gentle, strictly-monotone
+  midtone-lift curve: the sky floor (p1) and highlight shoulder (p99.5) sit on the
+  identity (background not crushed, star cores roll off rather than blow) while the
+  median is lifted a *fraction* of the way (`_LIFT_FRACTION` 0.5) toward the same
+  pleasant target grey (`CURVE_TARGET_BG` 0.25) the Levels gamma suggestion uses. It
+  returns `None` on degenerate/low-range data or when the typical tone already sits
+  at/above target (nothing to lift), merges a zero-valued sky anchor into the pinned
+  (0,0) endpoint (so a hard black clip doesn't force a duplicate point), and
+  validates the assembled points are strictly increasing in both axes so the LUT can
+  never invert or posterise. Exposed as a `…/editor/curve-suggestion` endpoint
+  (mirrors levels/stretch-suggestion; measures the image entering the op via
+  `_recipe_before_uid(..., drop_ids=("tone.curves",))`) plus a header "Auto curve"
+  one-click. Engine + one endpoint + frontend; additive/upgrade-safe (older clients
+  ignore the endpoint). Tested: engine (midtone lifted toward target / ends anchored
+  / monotone, clamp+round, NaN-ignored, degenerate & already-bright → None, and the
+  suggested curve round-trips through the real `_curves` op preserving NaN and
+  staying in range), webapp (a stretched stack yields a monotone endpoint-pinned
+  curve + target_bg; unknown-uid falls back to 200), Vitest (selecting the Curves op
+  surfaces "Auto curve" and one click propagates exactly the suggested points into
+  the recipe). (v0.72.0, this run — Builder)
+
+- **Every tonal control's landing shown on the histogram (Stretch/clip edges +
+  Curves points, not just Levels)** — the `Histogram` `guides` prop (v0.65.0) only
+  ever marked the Levels black/white points, so a beginner setting a Curves bend or
+  over-stretching into a clip had no visual cue of *where on the tonal range* it
+  landed. Now (a) whenever the clipping caption fires, an orange "clip" guide marks
+  the exact edge it warns about — value 0 (crushed shadows) and/or value 1 (blown
+  highlights) — driven by a new `clippingEdges` helper refactored out of
+  `clippingCaption` so the caption and the guide can never disagree; and (b) when a
+  `tone.curves` op is selected, faint dashed purple guides mark each *interior*
+  control point's input position (endpoints are pinned at 0/1 and already covered by
+  the clip edges), with a one-line caption, so the user can see whether a bend sits
+  on the sky peak, the midtones, or the highlights. A new pure `tonalHistGuides`
+  composes the Levels + Curves + clipping guide helpers into the single `guides`
+  prop. Frontend-only, additive, advisory (changes nothing about the image). Vitest:
+  `clippingEdges` (threshold parity with the caption), `curvesHistGuides` (interior
+  only / identity curve / malformed points), `clippingHistGuides` (each edge + both),
+  `tonalHistGuides` (composition), plus an Editor test that selecting a Curves op
+  surfaces the caption. (v0.71.2, this run — Builder)
+
+- **Fix flaky frontend CI at the root: run vitest test files sequentially
+  (`fileParallelism: false`)** — `main`'s frontend CI had been intermittently red
+  (it was already failing on the commit this run branched from) with "unable to find
+  element" timeouts in `Editor.test.tsx`, despite the code being fine and the suite
+  passing locally. Root cause (as v0.69.19 diagnosed but only mitigated with
+  timeouts): the heavy Editor tests spin up many full-app renders, and when several
+  test-file workers run in parallel on a small CI runner the Editor worker is
+  CPU-starved — a `findBy*`/`waitFor` that settles sub-second when scheduled instead
+  drags past 10s, and any *synchronous* assertion right after it races the lagging
+  render. Raising timeouts repeatedly didn't stop it. Serialising the test files
+  (each gets the full CPU; whole suite ~65s vs ~27s parallel — a fine trade for a
+  reliably green gate) removes the starvation so the timeouts are never approached.
+  Also hardened this run's new Stretch-suggestion test to click the header button via
+  `findByRole` (waits for its render) rather than a synchronous `getByRole`.
+  Test-infra only; no product code or assertion weakened. (v0.71.1, this run — Builder)
+
+- **Data-driven "From your image" Strength + Black point for the asinh Stretch
+  (completes the family of data-driven tonal defaults)** — the Stretch op was the
+  single most consequential editor control yet the only major tonal op *without* a
+  data-driven suggestion button (Levels/Sharpen/Denoise/Star-size/Deconv-PSF all
+  have one), so a beginner hand-guessed its two asinh sliders. A new pure engine
+  helper `seestack/edit/stretch.py:suggest_asinh_stretch` measures the *linear*
+  image entering the op and solves for a good pair: the **black point** puts the
+  sky floor (a low percentile) at black — exactly as the Levels suggestion does —
+  by inverting asinh's `shadows = median + (6·black − 2)·σ`; the **strength** is
+  solved (bisection; the asinh response is monotone in stretch) so the sky median
+  lands at a clean dark-sky grey (`STRETCH_TARGET_BG`, 0.10 — deliberately below
+  the STF's 0.20 because asinh's gentler curve can't reach it on a bright-star
+  stack, so the suggestion lands on a meaningful intermediate value instead of
+  always maxing out). Exposed as a `…/editor/stretch-suggestion` endpoint (mirrors
+  levels-suggestion; measures the linear proxy via a new opt-in
+  `apply_recipe(..., auto_stretch=False)` that suppresses the default-stretch
+  fallback so we never measure a tone-mapped image) plus a header "Auto stretch"
+  one-click and per-slider "From your image" buttons (only in asinh mode; the
+  Strength button names the target grey it solves for). Engine + one endpoint +
+  frontend; additive/upgrade-safe (older clients ignore the endpoint; the new
+  `auto_stretch` flag defaults to today's behaviour). Tested: engine (target-grey
+  landing verified against the real `asinh_stretch`, higher-DR-needs-more-strength,
+  clamp-on-extreme-DR, NaN/degenerate/rounding guards), pipeline
+  (`auto_stretch=False` returns the linear ops output), webapp (in-range
+  strength/black + target_bg, unknown-uid fallback), Vitest (Auto stretch sets both,
+  the buttons name the values/goal, and the suggestion is hidden in STF mode).
+  (v0.71.0, this run — Builder)
+
+- **Auto-process summary names the mosaic border trim in plain language** — small
+  companion to v0.70.0: now that Auto can append a `geometry.crop`, the "What
+  Auto-process did" note would have fallen back to a bare "…then crop." (the op's
+  registry label). Added a plain-language phrase for `geometry.crop` ("trimmed the
+  ragged mosaic border") so the one-click summary reads honestly and a beginner
+  understands the frame shrank on purpose. Frontend-only, additive. Vitest: the
+  phrase appears in `autoSummaryPhrases`. (v0.70.1, this run — Builder)
+
+- **Auto-process trims a mosaic's ragged low-coverage border (cleanly framed
+  one-click result)** — on a mosaic, `auto_recipe` levelled the panel steps but
+  left the union canvas's ragged, single-frame-coverage fringe in the one-click
+  result, so "Auto" framed the picture with a noisy low-coverage border the user
+  had to discover the Trim tool to remove. Auto now appends a final `geometry.crop`
+  to the largest well-covered rectangle — reusing the exact `largest_covered_rect`
+  machinery behind the "Trim border" button (extracted into a shared
+  `_trim_rect_for_run` helper the trim-suggestion endpoint now also calls). The crop
+  runs *last* (after every tone/detail op) so the coverage-leveling op still sees the
+  native-geometry coverage map, and it's only added when the trim is *meaningful*
+  (`largest_covered_rect` returns `None` on a full-frame result) and only on a mosaic
+  — a single-field stack is never cropped. The crop is a normal, visible, removable
+  op (and the coverage overlay, per v0.69.20, now follows it). Off-by-default risk is
+  nil (Auto is an explicit button; no default flip). Engine (`auto_recipe` gains an
+  optional `trim_crop`) + webapp wiring; additive/upgrade-safe. Tested: engine (crop
+  appended last iff a trim is supplied; none for single-field/None), webapp (a mosaic
+  with a ragged coverage sibling gets a final interior crop; single-field and
+  no-sibling get none). (v0.70.0, this run — Builder)
+
+- **Coverage overlay now follows the recipe's geometry ops (was frozen on the
+  uncropped frame)** — the editor's mosaic coverage-map overlay rendered the run's
+  *raw* full-frame coverage sibling, so once a `geometry.crop`/rotate/resize op was
+  in the recipe (very likely after "Trim border") the heatmap no longer lined up
+  with the reshaped preview — v0.61.5 could only *caption* the mismatch ("shown for
+  the uncropped frame"). Now a pure engine helper `apply_geometry_to_map(cov,
+  recipe, ctx)` (in `seestack/edit/ops/geometry.py`, keyed on a new `GEOMETRY_OP_IDS`
+  constant) runs the recipe's *enabled geometry ops only*, in recipe order, over the
+  2-D coverage map — feeding it through each op as three identical channels —
+  preserving NaN = uncovered (crop copies, rotate fills exposed corners with NaN,
+  resize interpolates). The `…/editor/coverage-map` endpoint takes an optional
+  `recipe` query param and applies it before colouring; the editor passes the
+  debounced recipe and keys the query on just the geometry ops (`geometryOpsKey`) so
+  a tone tweak doesn't refetch. The caption drops the "uncropped frame" disclaimer.
+  Engine + one endpoint param + frontend; additive/upgrade-safe (older clients omit
+  `recipe` → today's raw full-frame overlay). Tested: engine (crop reshapes + keeps
+  NaN, tone/disabled ops are no-ops, rotate NaN-corners), webapp (a crop recipe
+  yields a strictly smaller coverage PNG), Vitest (`geometryOpsKey` 3 cases + the
+  overlay passes the recipe and the caption no longer disclaims). (v0.69.20, this
+  run — Builder)
+
+- **Fix flaky frontend CI at the root: raise vitest `testTimeout` above
+  `asyncUtilTimeout`** — three `Editor.test.tsx` tests kept reddening `main`'s
+  frontend CI ("Test timed out in 5000ms") on *unrelated* merges (took down the
+  push CI for #79). Root cause: v0.69.6 raised Testing Library's `asyncUtilTimeout`
+  to 10000ms so `waitFor`/`findBy*` could ride out a slow-CI debounce/re-fetch
+  settle, but vitest's per-test `testTimeout` was left at its 5000ms default — so a
+  10s async retry was *killed at 5s* before it could ever succeed; the raised
+  async ceiling was dead. Set `testTimeout`/`hookTimeout` to 30000ms (comfortably
+  above the async ceiling) in `vite.config.ts` and raised `asyncUtilTimeout` to
+  20000ms after a full local parallel run starved the heavy Editor worker to a
+  10534ms `waitFor`; the settle it waits on is sub-second when scheduled, so the
+  headroom covers scheduling starvation without slowing passing tests (the retry
+  stops early on success — verified: two back-to-back full runs 378/378, duration
+  unchanged). Also wrapped one post-error "Star mask" caption assertion in
+  `waitFor` (it's torn down a render tick after the error message, so the bare
+  synchronous check raced the suppression under load). Test-infra only; no product
+  code or assertion weakened. (v0.69.19, this run — Builder)
+
+- **Gamma suggestion names the goal it solves for (not just a bare number)** — the
+  data-driven midtone button (v0.66.0) read "From your image (midtones 1.6)"; like
+  the sharpen/denoise buttons that name *why* (FWHM, noise σ), it now reads "From
+  your image (midtones 1.6 — lands the sky at ~25% grey)", so the number has visible
+  provenance and the beginner sees it's brightening the typical tone to a target, not
+  a magic value. The target grey is served honestly from the engine constant
+  (`GAMMA_TARGET`, the value `suggest_levels_gamma` actually solves for) as a new
+  optional `gamma_target` field on the `levels-suggestion` payload, so the label
+  can't drift from the maths. Engine constant + one API field + label; additive/
+  upgrade-safe (older clients ignore the field, fall back to the bare label).
+  Tested: webapp (`gamma_target` present iff a gamma is suggested and equals the
+  constant), Vitest (the gamma button names "~25% grey"). (v0.69.18, this run —
+  Builder)
+
+- **"Edited" dot on tuned op rows in the pipeline list** — after Auto-process or a
+  preset drops a dozen ops in, a user couldn't tell at a glance which ops they'd
+  tuned vs which sat at stock defaults. Each `OpList` row whose params differ from
+  the op's schema defaults now shows a small grape "•" with an "Edited — one or
+  more settings differ from this op's defaults." tooltip. Driven by a pure
+  `opModified` helper (mirrors the `isDefault` comparison in `OpParamPanel`:
+  missing/null = default, stale keys ignored, structured curve params compared by
+  value). Frontend-only, additive, advisory. Vitest: helper (8 cases) + OpList
+  (dot shows only on the tuned row, absent when all at defaults). (v0.69.17, this
+  run — Builder)
+
+- **Editable numeric readout beside every editor slider** — the editor rendered
+  each bounded param (`StackOptionControl` `preferSlider`) as a slider with a
+  *dimmed, read-only* value, so a user who knew the exact value they wanted
+  (gamma 1.35, PSF σ 1.8, black 0.07) could only approximate it by dragging — hard
+  to hit precisely on a touch/trackpad. The readout is now a small editable
+  `NumberInput` sharing the field's value/min/max/step (right-aligned, no spinner,
+  clamp-on-blur, int fields round), so coarse dragging and exact typing both work
+  and stay in sync. Respects `disabled`; feeds the same `onChange` (so drag/undo
+  coalescing is unchanged). Frontend-only, additive, no default change; only the
+  editor uses `preferSlider` (the Stack/Settings forms already had number inputs).
+  Vitest: readout shows the current value, typing emits the number, int rounds,
+  empty is ignored. (v0.69.16, this run — Builder)
+
+- **Fix (a11y): editor curve points are keyboard-operable** — the last open
+  editor bug. The Curves op's control points were drag-only SVG circles, so a
+  keyboard user couldn't add, move, or remove a curve point. Each point is now a
+  focusable `role="slider"` (`tabIndex=0`, descriptive `aria-label` +
+  `aria-valuetext`): arrow keys nudge it (Shift = coarse step), Delete/Backspace
+  removes an interior point, and a new keyboard-accessible "add point" button
+  inserts a point in the widest gap (on the current curve) and focuses it. Pure
+  `nudgeCurvePoint` / `removeCurvePoint` / `addCurvePointInLargestGap` helpers
+  (all reusing the existing ordering-safe `moveCurvePoint`) drive it; the mouse
+  drag/double-click paths are unchanged. Frontend-only, additive. Vitest: helper
+  suite (nudge clamps + endpoint-x-lock + no-mutate; remove keeps endpoints; add
+  in-largest-gap incl. identity) + a widget suite (points are focusable sliders,
+  ArrowUp/Shift-Arrow nudge, Delete removes, endpoint x stays locked, the button
+  adds a mid point). (v0.69.15, this run — Builder)
+
+- **Fix: trim-crop preview rectangle misaligned on a letterboxed preview** — the
+  dashed "proposed crop" overlay mapped fractional bounds to percentages of the
+  *container*, but the preview `<img>` is width-100% capped at 62vh with
+  `objectFit: contain`, so on a portrait frame / short window it pillarboxes
+  inside its element and the rectangle landed offset/mis-scaled vs the visible
+  image. The preview image now lives in an *image box* wrapper sized to the shown
+  image's exact content box (a new pure `previewBoxStyle` helper gives the box the
+  image's own aspect ratio — from the already-reported `proxy_width`/`proxy_height`
+  — and caps its width so the aspect-preserved height never exceeds 62vh, so there's
+  no letterbox), and the proposed-crop rectangle is drawn inside that box, so its
+  percentage bounds line up in every framing. Falls back to plain full-width when
+  the proxy dims aren't loaded yet (old behaviour). Frontend-only, additive.
+  Vitest: `previewBoxStyle` (fallback / portrait aspect+width-cap / custom
+  max-height); existing trim-preview Editor tests still green. (v0.69.14, this
+  run — Builder)
+
+- **Fix: deconvolution's live preview silently understated the export on large
+  stacks — now captioned honestly** — the top editor bug. On a heavily-decimated
+  preview proxy (a ≤1500 px view of a wide mosaic/drizzle, `proxy_scale` ≥ ~4)
+  the proxy-corrected PSF `max(0.4, scaled_px(psf_sigma))` collapses to the floor
+  and Richardson-Lucy's near-delta 3×3 kernel barely acts, so the preview showed
+  a fraction of the star-sharpening the full-res export applies — a preview↔export
+  mismatch with *no notice* to the user. The sub-pixel blur genuinely isn't
+  representable on the decimated grid (no PSF tweak recovers it), so instead of
+  silently misleading we now surface an honest advisory: a pure
+  `deconv_understates_on_proxy(psf_sigma, proxy_scale)` engine helper (shared with
+  the backend and the `_DECONV_PSF_FLOOR` constant it keys on) flags exactly the
+  floored case; the histogram endpoint reports `deconv_preview_understates` for any
+  enabled Deconvolution op that collapses on the current proxy; and the editor
+  shows a dimmed "preview understates the effect — the export applies it at full
+  strength" caption under the preview. Engine + one endpoint field + frontend;
+  additive/upgrade-safe (older clients ignore the new field). Tested: engine
+  (the flag matches a *measured* weak preview — <½ the export's effect — and the
+  rule's boundary cases incl. degenerate inputs), webapp (the flag fires only for
+  an enabled, collapsing deconv op on a decimated proxy), Vitest (caption helper
+  3 cases). (v0.69.13, this run — Builder)
+
+- **Fix: editor overlay-zoom mislabel + keyboard access gaps (a11y)** — three
+  editor a11y fixes. (1) The zoom lightbox titled whatever was shown as "edited"
+  unless Compare was on, so zooming the Star-mask/Coverage overlay mislabelled the
+  overlay as "edited"; the title now reads from the active overlay's own label
+  ("Star mask"/"Coverage map"/"Original"), falling back to "edited" only when no
+  overlay is up. (2) The Curves "reset" control was a bare `<Text onClick>` (not
+  focusable, no role) → now a real `<Anchor component="button">`. (3) `OpList` rows
+  were click-only `<Paper>` divs, so selecting an op to edit was impossible by
+  keyboard; rows are now `role="button" tabIndex=0 aria-pressed` and activate on
+  Enter/Space (without hijacking a focused inner switch/arrow/✕). Frontend-only,
+  additive. Vitest: new OpList a11y suite (focusable rows, Enter/Space selects,
+  aria-pressed) + an Editor test that the lightbox titles from the overlay, not
+  "edited". Remaining gap (mouse-only curve points) filed as an a11y follow-up.
+  (v0.69.12, this run — Builder)
+
+- **Fix: background/gradient op failures now surface in the editor (were a silent
+  no-op / colour-shift)** — `remove_final_gradient` swallowed its Background2D fit
+  failure and returned the input, and `subtract_background` skipped a failed channel
+  and continued — so the v0.61.11 "surface failed ops" contract never saw the bg
+  ops' likeliest real failure, and a per-channel skip could subtract from some
+  channels but not others (colour cast) with no notice. Both functions grew an
+  opt-in `errors` collector: the stack path leaves it `None` (unchanged best-effort
+  skip-and-continue), but the editor wrappers (`seestack/edit/ops/background.py`)
+  pass a collector and `raise` when it's non-empty, so `apply_recipe` surfaces the
+  failure in the existing preview/export error UI — and a per-channel failure is now
+  all-or-nothing (return the input unchanged rather than a partial, colour-shifting
+  subtract). Engine + editor-wrapper, additive/upgrade-safe. Regression tests: a
+  monkeypatched-to-fail Background2D makes every editor bg op (both modes) raise and
+  the error reach `apply_recipe`'s collector, while the stack path stays
+  non-raising. (v0.69.11, this run — Builder)
+
+- **Fix flaky `detail.sharpen` NaN test (route unsharp mask around skimage)** — the
+  `detail.sharpen` op called scikit-image's `unsharp_mask(..., channel_axis=-1)` on
+  `float32`, which on some scikit-image/scipy builds intermittently returned
+  uninitialised finite garbage (`7.7e37`, denormals) or a stray NaN in the *covered*
+  region — reddening `main`'s CI (took down PR #66) via
+  `test_detail_ops_preserve_nan_on_partial_coverage[detail.sharpen-params1]` in
+  full-suite order. Replaced it with a deterministic per-channel unsharp mask in
+  pure numpy/scipy (`sharp = img + amount·(img − gaussian_filter(img, sigma,
+  mode="nearest"))`), which fully initialises the output and matches skimage's
+  effect. Stress-tested 200× (zero garbage). Engine-only, additive; the effect is
+  unchanged for users. Updated the proxy-scale parity test to capture the Gaussian
+  sigma instead of the (now-unused) `unsharp_mask` radius. (v0.69.10, this run — Builder)
+
+- **Fix: "Use data defaults" toolbar and the per-param "✓ already set" indicator
+  now agree** — `applyDataDrivenDefaults`/`countDataDrivenDefaults` compared the
+  current value to the suggestion with strict `!==`, while the per-param "From your
+  data" button uses `matchesSuggestion` (half-step tolerance) — so a value within
+  half a step of the suggestion (slider lands on 1.4, suggestion 1.36) read "✓
+  already set" on the param yet the toolbar still offered "Use data defaults"; the
+  count also included *disabled* ops. Both functions now share a `wouldChange`
+  helper that uses `matchesSuggestion` with each param's step (threaded into the
+  suggestion from the op schema) and skips disabled ops, so the toolbar count, the
+  apply action, and the per-param indicator are consistent. Frontend-only,
+  additive. Vitest: added within-half-step-is-already-set and disabled-op-skipped
+  cases to the existing helper suite. (v0.69.9, this run — Builder)
+
+- **Fix: star-mask overlay now reflects the display-space image the ops gate on
+  (was computed on the raw linear proxy)** — the "Star mask" trust overlay ran
+  `star_mask` on the *linear* proxy, but `stars.reduce`/`stars.boost_nebula` (both
+  `stage="nonlinear"`) gate on the **stretched** image at their pipeline position,
+  where faint stars pop out of the noise — so the overlay drastically
+  under-represented what the ops actually touch (faint stars simply weren't shown).
+  `edit_star_mask` now accepts the current `recipe` + selected star-op `uid`,
+  applies the recipe up to (but not including) that op via a generalized
+  `_recipe_before_uid(..., drop_ids=("stars.reduce","stars.boost_nebula"))`, and
+  masks the resulting display-space image (empty recipe → the pipeline's default
+  asinh stretch, matching the ops). Falls back to the linear proxy when no recipe
+  is passed (old clients). Same run also **debounces** the overlay: `maskSizePx`
+  and the recipe are now debounced and in the query key, so dragging "Star size"
+  no longer fires a `star_mask` render per tick. Engine/webapp + frontend;
+  additive/upgrade-safe (new optional query params, response unchanged). Tested:
+  webapp (a stretched recipe marks ≥2.5× more faint-star mask weight than the
+  linear render; recipe+uid stops before the selected op) + Vitest
+  (`editStarMaskUrl` carries size/recipe/uid; the overlay passes the recipe with no
+  uid when no star op is selected). (v0.69.8, this run — Builder)
+
+- **Fix: one slider/curve drag no longer floods (and evicts) the editor's undo
+  history** — every editor slider tick and every curve pointer-move went through
+  the history-capturing `setOps`, so a single drag pushed dozens of entries and a
+  couple of long drags evicted all earlier edits (added ops, Auto-process) past the
+  100-entry cap; Ctrl+Z then undid one sub-pixel of a drag instead of the whole
+  edit. `useUndoable.set` now takes an optional `coalesceKey`: consecutive sets
+  sharing a key update in place *without* a new history entry, so a continuous drag
+  collapses to one undoable step. `OpParamPanel` passes a per-param key
+  (`param:<key>`, namespaced by op uid in `Editor.setParams`) for the continuous
+  slider/curve controls and *omits* it for discrete button edits (reset,
+  suggestions), so each of those stays its own step. Different params and different
+  ops never merge (distinct keys); a keyed set right after an undo starts a fresh
+  entry. Frontend-only, additive; no API/behaviour change beyond history grouping.
+  Vitest: `useUndoable` coalescing (4 cases: collapse-a-drag / no-merge-across-keys
+  / discrete-keyless / fresh-after-undo) + `OpParamPanel` (slider carries
+  `param:amount`, buttons are single-arg keyless). (v0.69.7, this run — Builder)
+
+- **Fix flaky frontend CI (Editor Levels "From your image" / "Auto levels" tests)** —
+  these tests click a data-driven button and `waitFor` it to flip to its
+  already-applied (disabled + ✓) state, which only settles after a debounced recipe
+  re-render / re-fetched suggestion. Testing Library's default 1000ms async timeout
+  was too tight for the slower CI runner, so the suite passed locally (332/332) but
+  reddened `main`'s CI on unrelated merges (#74, #75). Raised `asyncUtilTimeout` to
+  5000ms globally in `src/test/setup.ts` — no assertion changed, only how long
+  `waitFor`/`findBy*` retry. Restores the CI safety net. (v0.69.6, this run)
+
+- **Editor recipe with a non-mapping `params` no longer 500s** — a recipe body
+  whose op carried `params` as a list/string/number (a malformed client body or a
+  hand-built recipe) hit `dict(o.get("params"))` in `recipe_from_dict`, which
+  raised `ValueError`/`TypeError` — an **unhandled 500** in `PUT …/editor/recipe`
+  and `POST /api/editor/presets`, and a failed export/PNG/batch job. Reproduced via
+  the real API (TestClient) with `params: ["x","y","z"]` → 500. `recipe_from_dict`
+  now coerces any non-mapping `params` to `{}`, so `validate_ops` fills each key
+  from the op's schema defaults (the op is kept, not dropped). Same
+  input-validation-hardening class as the v0.69.0 stack/frames 500 fixes.
+  Engine-only, additive/upgrade-safe. Regression test: a non-mapping `params`
+  (list/str/int/None) keeps the op at its defaults instead of raising. (v0.69.5,
+  this run — Scout)
+
+- **One-click "Reset points" on the Levels op header** — the Levels header had
+  "Auto levels" to *set* data-driven points but no matching one-click to *undo* a
+  bad manual drag back to the neutral identity (only per-param reset icons). Added
+  a "Reset points" header action (next to "Auto levels") that restores black=0,
+  white=1, gamma=1 in one click, dimmed when already neutral — a clean escape hatch
+  symmetric with Auto for a beginner who over-dragged. Pure `levelsReset` helpers
+  (`levelsAtIdentity`/`resetLevelsPoints`) drive it; frontend-only, additive.
+  Vitest: helper (identity/moved/preserve-other-keys/no-mutate) + an Editor test
+  that clicking Reset returns an over-dragged op to neutral (button dims).
+  (v0.69.4, this run)
+
+- **Data-driven midtone (gamma) point for the Levels op** — the Levels suggestion
+  (v0.62.0) + "Auto levels" (v0.64.0) set the black/white points from the histogram
+  but left the **gamma** (midtone) slider — the control that most affects perceived
+  brightness — at 1.0 for a beginner to hand-guess. A new pure
+  `suggest_levels_gamma` helper solves `x_m**(1/γ)=target` for the image's median
+  tone after the black/white remap (lands the typical tone at a pleasant 0.25 grey),
+  returned as an optional `gamma` on the `levels-suggestion` payload. "Auto levels"
+  now applies all three at once and a "From your image (midtones …)" per-param button
+  appears on the gamma slider (only when a meaningful lift exists). NaN-aware,
+  clamped to the op's 0.1–5.0 range, `None` when the median already sits at/above
+  target or the range is degenerate. Engine + endpoint + frontend; additive/
+  upgrade-safe (older clients ignore the new field). Tested: engine helper (5 cases:
+  dark-median lift lands near target / bright-median no-lift / degenerate range /
+  too-few-pixels / clamp+round), webapp (payload carries `gamma`), Vitest (one Auto
+  levels click leaves all three per-param buttons ✓/disabled). (v0.66.0, this run)
+
+- **Friendly labels on the last jargon-bare editor dropdown (denoise Method)** — the
+  Noise-reduction op's Method enum was the only editor dropdown still showing raw
+  engine ids ("wavelet" / "tv" / "bilateral"); every other enum already had friendly
+  `option_labels`. Added them ("Wavelet (recommended)" / "Total-variation" /
+  "Bilateral"), surfaced automatically in the op panel via the descriptor. Also added
+  a drift-guard test asserting *every* editor enum param carries friendly labels for
+  *all* its options, so a future enum op can't ship bare ids. Metadata + test only,
+  additive. (v0.65.1, this run)
+
+- **Show the Levels black/white points as guides on the histogram** — while setting
+  the Levels op's black/white points a beginner couldn't see *where* on the tonal
+  range they land (relative to the sky peak / the highlights they clip). When a
+  `tone.levels` op is selected, the editor histogram now overlays two solid vertical
+  guides ("B"/"W") at the current black/white points, plus faint dashed blue markers
+  at the data-driven suggestion (only where it differs from the current value), with
+  a one-line caption explaining them. Pure, testable `levelsHistGuides` helper drives
+  it; the `Histogram` component grew an optional `guides` prop. Frontend-only,
+  additive, advisory. Vitest: helper (5 cases: none/non-Levels/current-only/
+  suggestion-diff/both-diff) + an Editor test that the caption appears only once the
+  Levels op is selected. (v0.65.0, this run)
+
+- **Single-click "Auto levels" on the Levels op** — the data-driven Levels buttons
+  (v0.62.0) were per-point, so auto-levelling a beginner's image took *two* clicks
+  (black, then white). The Levels op-panel header now shows one "Auto levels
+  (black–white)" button that applies *both* suggested points at once, from the same
+  already-fetched `levels-suggestion` payload — so the common case is a single
+  click. The per-param "From your image" buttons stay for fine control (and read as
+  already-applied ✓ once Auto levels sets them). Frontend-only, additive; reuses the
+  existing endpoint + `setParams`. Vitest: one click leaves both per-param buttons
+  disabled/✓ (proving black *and* white were set together). (v0.64.0, this run)
+
+- **Editor: accurate data-driven value labels (Levels buttons + Auto's crossfaded
+  sharpen strength)** — two small honesty fixes on data-driven readouts. (1) The new
+  Levels "From your image" buttons each set only their *own* point, but both showed
+  "From your image (black X, white Y)", implying each sets both; each now names just
+  the value it applies ("black X" / "white Y"). (2) Now that the Auto crossfade
+  (v0.63.0) eases the sharpen *amount* below its full 0.5 on noisier stacks, the
+  "Tuned to your data" note surfaces that strength alongside the radius ("sharpen
+  radius 1.4 px (strength 0.3)") when reduced — so the note reflects the crossfade's
+  new adaptivity. Frontend-only, additive. Vitest updated (distinct Levels labels;
+  the eased-sharpen value phrase; full-strength case unchanged). (v0.63.1, this run)
+
+- **Smooth the Auto recipe's noisy/clean cliff (denoise ↔ sharpen crossfade)** —
+  `auto_recipe` treated `analyze_proxy`'s `noisy` verdict as a hard boolean
+  (`sky_sigma > 0.02`), so a stack just over the line got denoise and *no* sharpen
+  while one just under got sharpen and *no* denoise — two near-identical stacks
+  producing visibly different one-click results. The two now *crossfade* across a
+  band around the old threshold (`_noise_fraction`, 0.012–0.028): denoise strength
+  (still data-driven from the measured noise) fades in and the sharpen amount fades
+  out as σ rises, so a mildly-noisy stack gets a light touch of *both*. The clean
+  end (sharpen only) and very-noisy end (denoise only) are unchanged, and an
+  unmeasurable image falls back to sharpen-only as before. Auto is an explicit
+  button, so no default flips. Engine-only, additive. Tested: `_noise_fraction`
+  endpoints + monotonicity, and that a mid-band stack carries both ops with denoise
+  rising / sharpen falling across the band; existing adapts-to-noise and
+  strength-scaling tests still green. (v0.63.0, this run)
+
+- **One-click "From your image" black/white points for the Levels op** — the Levels
+  op made a beginner hand-guess a black point and a white point, when the natural
+  values come straight from the image's own histogram. The Levels param panel now
+  offers a data-driven "From your image (black X, white Y)" button on both the
+  black and white sliders (mirroring the sharpen/denoise/star-size buttons), driven
+  by a new pure `seestack/edit/levels.py:suggest_levels_points` helper (p1 of the
+  finite sky → black, p99.5 → white, NaN-aware, clamped, and returns `None` when the
+  range would collapse — the v0.61.12 degenerate case) and a `…/editor/levels-suggestion`
+  endpoint that measures the percentiles on the display-space image *entering* that
+  op (all prior ops applied, so the values are correct post-stretch; falls back to
+  dropping the Levels op(s) when the uid is stale). Engine + one endpoint + frontend;
+  additive/upgrade-safe. Tested: engine helper (5 cases), webapp (valid pair on a
+  stretched image + unknown-uid fallback), Vitest (the black button shows the
+  measured value and reads as applied after a click). (v0.62.0, this run)
+
+- **Test the PNG-render path also surfaces failed ops** — coverage follow-up to the
+  v0.61.11 export-error surfacing: added a webapp test that a full-res PNG render
+  (the download path, `submit_editor_png`) with a monkeypatched-to-fail op reports
+  the failure in its job `op_errors`, matching the export-run path already covered.
+  Test-only. (v0.61.14, this run)
+
+- **Warn about a degenerate Levels op (empty black↔white range)** — companion to
+  the v0.61.12 engine guard: since a Levels op with `white ≤ black` is now silently
+  treated as identity, the pipeline panel shows an orange advisory ("A Levels op has
+  its white point at or below its black point, so its range is empty — it does
+  nothing.") with a one-click "Reset the black & white points" that restores the
+  0..1 range — so the guard doesn't leave the user staring at a control that
+  quietly does nothing (mirrors the double-stretch advisory). Pure
+  `degenerateLevelsUids` helper drives it; frontend-only, additive. Vitest: helper
+  (5 cases: white<black / white==black / healthy / disabled / non-Levels) + an
+  Editor test that the warning shows and clicking the fix clears it. (v0.61.13,
+  this run)
+
+- **Guard the Levels op against a degenerate (white ≤ black) range** — the Levels
+  op's black-point and white-point are independent 0..1 sliders, so a beginner can
+  drag the white point down to or below the black point. That collapses the range
+  (`rng` was floored to `1e-6`) and hard-thresholds every pixel to pure black/white
+  — silently binarising the picture with no error, the same class of foot-gun as
+  the single-point Curves case (v0.61.10). `_levels` now returns the input
+  unchanged (identity) when `white - black < 1e-3`, so a mis-set slider can't
+  destroy the image. Engine-only, additive/upgrade-safe. Regression test covers the
+  inverted (white < black) and equal (white == black) cases (identity + NaN border
+  preserved). (v0.61.12, this run)
+
+- **Surface failed ops on export, not just in the live preview** — the preview /
+  histogram paths collect per-op failures into `errors` and show them under the
+  image, but the full-res export path (`_render_recipe_fullres`) only *logged* a
+  failed op and dropped it silently, so an op that fails on the full-res data (but
+  worked on the proxy, or vice versa) changed the exported look with no notice.
+  `_render_recipe_fullres` now appends each failure (same `label: Type: msg` format
+  as the preview) to an `errors` list threaded into both the export-run and PNG job
+  results as `op_errors`; the editor polls the job and shows an orange "N operations
+  failed and were skipped in the exported image: …" notification (pure
+  `opErrorsMessage` helper) on both the export and full-res-PNG paths. Reuses the
+  best-effort try/except; additive/upgrade-safe (new result field). Tested: webapp
+  (a monkeypatched-to-fail op surfaces in the export job's `op_errors`; a clean
+  recipe reports `[]`) + Vitest helper (4 cases). (v0.61.11, this run)
+
+- **Fix stale/misleading maintainer comments & docstrings** — three inaccuracies a
+  future maintainer would trust: the `edit_coverage_map` endpoint docstring still
+  said "Grayscale … white = most frames" though it renders a viridis heatmap
+  (yellow = most); the CurvesWidget top comment said "click empty space to add a
+  point" when adding is bound to double-click (the visible help text was already
+  correct); and the registry docstring claimed `apply_recipe` is "the source of
+  truth for ordering" when it executes ops in recipe order and does **not** reorder
+  by stage. Corrected all three. Comment/docstring-only, no behaviour change.
+  (housekeeping, this run)
+
+- **Guard the Curves op against a degenerate (blank-the-image) curve** — a tone
+  curve with a single control point (or all-equal x) makes `np.interp` return a
+  constant, blanking the whole image to a flat tone. The CurvesWidget can't produce
+  that (endpoints are locked), but a hand-built or `base64`-encoded recipe / preset
+  could, with no error. `_curves` now returns the input unchanged (identity) when
+  the curve has fewer than two points spanning a range of x, so a degenerate recipe
+  can't silently destroy the picture. Engine-only, additive. Regression test covers
+  the one-point and flat-x cases (identity + NaN preserved). (v0.61.10, this run)
+
+- **Expose the Rotate op's `expand` control (was a dead read)** — `geometry.rotate`
+  read `params.get("expand", True)` but never registered an `expand` param, so the
+  reshape-vs-crop behaviour was uncontrollable: every rotated export always grew
+  the canvas with black corners, with no way to keep the original size. Registered
+  an `expand` bool param (default True = current behaviour, surfaced automatically
+  in the op panel via the descriptor), so a user can now turn it off to keep the
+  frame size and let the rotated corners fall outside. Engine-only, additive/
+  upgrade-safe (default preserves old behaviour). Regression test asserts the param
+  is exposed and actually toggles the output canvas size. (v0.61.9, this run)
+
+- **Warn about a redundant second Stretch (double-stretch bug)** — `apply_recipe`
+  marks the pipeline stretched on *every* `is_stretch` op and never dedupes, so two
+  enabled Stretch ops both run — the second re-stretches already display-space data
+  and washes the image out (flat/dark). A beginner hits it by running Auto-process
+  or a preset (both include a stretch) then clicking "Add operation → Stretch" to
+  "tune" it, with no warning. The pipeline panel now shows an orange advisory when
+  more than one Stretch is enabled, with a one-click "Disable the extra stretch(es)"
+  that keeps only the first (via a pure `extraEnabledStretchUids` helper). Advisory
+  + one-click, frontend-only, additive. Vitest: helper (4 cases: single/multi/
+  disabled/first-enabled) + an Editor test that the warning shows and clicking the
+  fix clears it. (v0.61.8, this run)
+
+- **Show the proposed trim over the coverage heatmap** — when the user opened the
+  "Trim border" preview (v0.61.4) the dashed crop drew over whatever overlay
+  happened to be up (usually the plain edited image), so you couldn't see that it
+  lands on the well-covered interior. Entering trim preview now auto-shows the
+  coverage heatmap (v0.61.3) on a mosaic (remembering the prior overlay state so
+  Cancel/Apply restores it), and the two top-left captions are de-conflicted: the
+  generic overlay label is suppressed during trim preview and the crop caption
+  reads "Proposed crop over coverage — keeps the central W% × H%". Frontend-only,
+  additive, advisory. Vitest: entering trim preview flips the overlay to "Hide
+  coverage" + the over-coverage caption, and Cancel restores it. (v0.61.7, this run)
+
+- **Show render progress for the full-res PNG download** — "Download full-res PNG"
+  polls the render job to completion but only spun the button, so on a large mosaic
+  (the slowest editor action) it read as "stuck" with no signal it was working. The
+  editor now shows a live "Rendering — NN%" line under the button while the job
+  polls, from the job's `phase`/`done`/`total` via a pure `pngProgressLabel` helper
+  (percentage when the total is known, phase name otherwise). Frontend-only,
+  additive. Vitest: helper (percent / clamp / phase-fallback / blank / null) + an
+  Editor test that the progress line shows while the job polls. (v0.61.6, this run)
+
+- **Note the coverage overlay is for the uncropped frame when a crop is applied** —
+  the coverage-map overlay (v0.61.0) renders the run's *raw* full-frame coverage
+  sibling, so once a `geometry.crop`/rotate/resize op is in the recipe (very likely
+  now that "Trim border" adds one) the overlay no longer lines up with the reshaped
+  preview — the coverage looked larger/offset vs the cropped image with no
+  explanation. The overlay label now reads "Coverage map — shown for the uncropped
+  frame" whenever an enabled geometry op is present, via a pure `hasEnabledGeometryOp`
+  helper. Honest, additive, frontend-only. Vitest: helper (enabled/disabled/
+  non-geometry) + the Editor caption with a crop in the recipe. (v0.61.5, this run)
+
+- **Preview the "Trim border" rectangle before committing** — the one-click "Trim
+  border" (v0.60.0) applied a `geometry.crop` immediately, so a user who didn't like
+  the auto-crop had to undo. "Trim border" now first draws the *proposed* crop as a
+  dashed magenta outline over the preview (with the area outside dimmed and a
+  "Proposed crop — keeps the central W% × H%" caption), and the toolbar shows
+  **Apply crop** / **Cancel** — nothing changes until Apply, which commits the Crop
+  op and selects it (as before). Fractional `trim-suggestion` bounds map straight to
+  image-space percentages via a pure `trimRectStyle`/`trimKeptLabel` helper. Builds
+  trust in the auto-crop and avoids an undo round-trip. Frontend-only, additive.
+  Vitest: helpers (pct mapping + kept-label) and the Editor preview→Apply flow
+  (dashed caption shows, no Crop op until Apply). (v0.61.4, this run)
+
+- **Colour heatmap + legend for the coverage overlay** — the coverage-map overlay
+  (v0.61.0) rendered grayscale, which read slowly and looked much like the star
+  mask. A new pure engine `seestack/render/colormap.py` (viridis LUT, no matplotlib
+  dependency) now colours the normalized coverage — dark blue = fewest frames →
+  yellow = most — so the gradient is legible at a glance and visually distinct from
+  the grayscale star mask. The editor adds a small "fewer ↔ more frames" gradient
+  legend under the preview whenever the coverage overlay is up. Engine + one
+  endpoint + frontend; purely cosmetic/additive (PNG shape unchanged: still a
+  same-size image, now RGB). Tested: engine colormap (LUT endpoints, brightness
+  monotonicity, NaN/out-of-range clamp), Vitest asserts the legend caption shows
+  with the overlay. (v0.61.3, this run)
+
+- **Fix a flaky Stack-form vitest ("does not suggest min/max reject when already
+  on")** — the test waited only for the schema-driven "Min/max rejection" *label*
+  before asserting the streak nudge was absent, but the nudge is suppressed by the
+  `getStackDefaults` value (`min_max_reject: true`) which resolves in a *separate*
+  query — so between the two queries the switch reads off and the nudge shows
+  transiently, racing the negative assertion (it took down main's CI on the prior
+  merge, though the code was fine). Now it waits for the switch to actually read
+  *checked* (defaults applied) before asserting the nudge is gone — same assertion,
+  no race. Test-only; keeps CI reliable. (v0.61.2, this run)
+
+- **"Trim border" selects the new Crop op + reports the kept fraction** — polish on
+  the v0.60.0 trim feature: applying "Trim border" now selects the resulting
+  `geometry.crop` op (so its adjustable bounds panel opens immediately — making
+  clear it's a normal op the user can fine-tune or remove, not a baked-in change)
+  and the confirmation names how much is kept ("keeps the central 78% × 85%") for
+  trust. Frontend-only, additive; Vitest asserts the crop op is selected after the
+  trim. (v0.61.1, this run)
+
+- **Coverage-map overlay in the editor (mosaic trust/explain)** — a Seestar
+  mosaic's ragged edges, the "Trim border" crop (v0.60.0) and the "Coverage
+  leveling" op all act on the per-pixel frame-coverage map, but the user had no
+  way to *see* it. A `…/editor/coverage-map` endpoint renders the run's coverage
+  sibling (strided to the preview proxy so it lines up with the shown image) as a
+  grayscale PNG — white where the most frames overlap, black at the uncovered
+  edges/gaps — and the editor adds a "Coverage" overlay toggle (next to Star mask)
+  shown **only on a mosaic** (`is_mosaic`), mutually exclusive with the other
+  overlays. So a beginner can look at exactly what "Trim border" and "Coverage
+  leveling" are addressing. 404 (no button) on a single-field stack. Engine +
+  one endpoint + frontend; additive/upgrade-safe. Tested: webapp (PNG on a
+  mosaic / 404 without a sibling), Vitest (button shows + toggles on a mosaic,
+  hidden on single-field). (v0.61.0, this run)
+
+- **One-click "Trim to well-covered area" for mosaics** — a Seestar mosaic's union
+  canvas has ragged, low-coverage edges (single-frame corners, NaN gaps) that look
+  messy and are noisier than the well-covered interior, and trimming them by hand
+  means fiddling four fractional crop sliders. A new pure `largest_covered_rect`
+  engine helper finds the largest axis-aligned rectangle whose pixels are all well
+  covered (coverage ≥ a fraction of the peak; NaN counts as uncovered) via the
+  classic O(h·w) maximal-rectangle sweep, returning fractional bounds or `None`
+  when there's nothing worth trimming (uniform/single-field coverage, or an
+  already-full-frame result). A `…/editor/trim-suggestion` endpoint strides the
+  run's coverage sibling down (≤512 px) and runs it, offered **only** on a mosaic
+  (`coverage_max > coverage_min`); the editor shows a "Trim border" button that
+  sets/updates a `geometry.crop` op to that rectangle (pure `applyTrimCrop` helper —
+  updates an existing crop in place rather than stacking duplicates). Off-by-default
+  risk nil (explicit button; the crop op is visible and removable). Engine + one
+  endpoint + frontend; additive/upgrade-safe (no on-disk change). Tested: engine
+  helper (7 cases: uniform/none/ragged-interior/NaN-hole/full-frame/clamp), webapp
+  (mosaic crop / single-field no-op / missing sibling), Vitest (helper 5 cases +
+  Editor: button shows on a mosaic and adds a Crop op, hidden on single-field).
+  (v0.60.0, this run)
+
+- **Highlight/shadow clipping warning in the editor** — over-stretching is the
+  classic beginner mistake: push the stretch/levels too far and star/nebula cores
+  blow out to pure white or the sky crushes to pure black, losing detail
+  irreversibly on export. The editor's live histogram clips values into [0, 1], so
+  a pure `clippingCaption` helper measures the fraction of pixels piled in the top
+  bin (blown white) and bottom bin (crushed black) across r/g/b and, above tuned
+  thresholds (highlights 2% — reliable/most-damaging; shadows 35% — conservative to
+  avoid nagging on legitimately dark skies), shows a subtle orange caption under the
+  preview ("Highlights are clipping — about 4% of pixels are pure white. Ease the
+  stretch or lower the white point…"). Advisory only, changes nothing; teaches good
+  stretch discipline on the priority-1 editor. Pure helper Vitest-covered (7 cases:
+  thresholds each side, both-clip, worst-channel, null-safety) + an Editor wiring
+  test; frontend-only, additive. (v0.59.4, this run)
+
+- **Explain the editor's TIFF export mode** — the Export panel's "TIFF" dropdown
+  offered the raw values "linear" / "autostretch" with no explanation, so a
+  beginner couldn't tell which to pick or that it only affects the .tiff file. It
+  now shows friendly labels ("Linear" / "Auto-stretched") and an info-tooltip on
+  the label explaining Linear keeps raw unstretched data for editing elsewhere,
+  Auto-stretched bakes in a display stretch so the file looks right when opened
+  directly, and the FITS/PNG outputs are unaffected. The stored values are
+  unchanged (still "linear"/"autostretch"), so the export API is untouched.
+  Copy/label-only, frontend, additive. (v0.59.3, this run)
+
+- **Built-in presets prepend Coverage leveling on a mosaic** — a built-in preset
+  (Galaxy / Nebula / Star cluster) carries a fixed op list that can't know whether
+  *this* stack is a mosaic, so applying one on a Seestar mosaic left the panel steps
+  in. Applying a **built-in** preset now prepends a `background.level_coverage` pass
+  (the same one Auto-process adds, v0.59.0) when the run is a mosaic — reusing the
+  histogram's `is_mosaic` flag (v0.59.1) — on top of the existing data-driven size
+  seeding, so a built-in preset lands both sized to your data and mosaic-aware.
+  Single-field stacks and **user-saved** presets are unchanged (applied exactly as
+  tuned). Pure `prependCoverageLeveling` helper (no-op when not a mosaic, op absent,
+  or a leveling pass is already present, so re-applying never duplicates);
+  frontend-only, additive. Vitest-covered (helper: 5 cases; editor: preset apply on
+  a mosaic leads with the pass). (v0.59.2, this run)
+
+- **Tell the user when "Coverage leveling" will do nothing** — the op only
+  equalises panels on a multi-coverage mosaic; on a single-field stack (uniform
+  coverage) it's a deliberate no-op, so a beginner who added it saw no effect and
+  no explanation. The histogram endpoint now reports `is_mosaic` (the run's
+  `coverage_max > coverage_min`), and when the `background.level_coverage` op is
+  selected on a non-mosaic run the editor shows a subtle grey "No effect on this
+  stack — it's a single-field image… this op equalises mosaic panels" note, so the
+  control explains its own applicability instead of silently doing nothing. Pairs
+  with the v0.59.0 auto-add-for-mosaics autonomy change. One additive API field +
+  frontend; upgrade-safe. Tested: webapp asserts `is_mosaic` on the histogram;
+  Vitest asserts the note shows on a single-field run and is absent on a mosaic.
+  (v0.59.1, this run)
+
+- **Auto-add Coverage leveling to the Auto recipe for mosaics** — now that the
+  "Coverage leveling" op works (v0.58.6), one-click Auto-process detects a mosaic
+  (the run row's `coverage_max > coverage_min`, i.e. uneven panel overlap) and
+  prepends `background.level_coverage` on linear data — before the gradient fit and
+  the stretch — so a Seestar mosaic gets flat, step-free panels without the user
+  ever discovering the op exists. A single-field stack (uniform coverage) and an
+  unknown span leave the recipe unchanged (the pass would be a no-op there anyway).
+  The run's coverage span is threaded into `auto_recipe` (mirroring how
+  `median_fwhm` is already threaded for the sharpen radius). Auto is an explicit
+  button, so no default flips. Engine + one endpoint thread, additive/upgrade-safe.
+  Tested: mosaic prepends & orders the pass before gradient/stretch; single-field
+  and unknown span omit it. (v0.59.0, this run)
+
+- **Fix: "Coverage leveling" editor op was a permanent silent no-op** — the
+  Background-group "Coverage leveling" control (equalises sky across mosaic panels
+  with different frame coverage — a core Seestar mosaic case) read `ctx.coverage`,
+  but `EditContext.coverage` was *never* populated anywhere in production (preview,
+  histogram, or export), so the op returned its input unchanged for every user: a
+  guaranteed dead control. Each stack run already writes a sibling
+  `{basename}_coverage.fits`; a new `load_coverage` helper reads it (striding it to
+  the proxy step so the preview lines up with the full-res export), and the export
+  (`_render_recipe_fullres`), preview and histogram paths now feed it into
+  `EditContext.coverage`. Added a shape-mismatch guard so a prior geometry op
+  (crop/resize) makes the op skip cleanly instead of crashing the render. Engine +
+  webapp wiring, additive/upgrade-safe (no on-disk change; None → the existing
+  no-op for single-field images). Tested: `load_coverage` load/stride/None, the
+  webapp `_proxy_coverage` wiring, and the new shape-guard. (v0.58.6, this run)
+
+- **Fix: star-mask overlay ignored the op's star size (always the default 4 px)** —
+  the editor's "Star mask" overlay exists so a beginner can see what the star ops
+  (`stars.reduce` / `stars.boost_nebula`) treat as stars while tuning "Star size",
+  and the endpoint already accepts a matching `size_px` — but the frontend never
+  passed it and the query key had no size, so raising Star size never moved the
+  overlay: it silently misrepresented what the op would gate. The overlay is now
+  sized from the *selected* star op (`2·size` for reduce, `size` for boost-nebula,
+  matching the ops' own gate) via a pure `starMaskSizePx` helper, and the size is in
+  the query key so it refetches on change; a non-star (or no) selection falls back
+  to the endpoint default. Helper Vitest-covered (5 cases) + the overlay wiring
+  test; frontend-only, additive. (v0.58.5, this run)
+
+- **Fix: star-reduction over-shrank stars in the live preview vs export** — the
+  `stars.reduce` op scaled its star-mask *gate* for the decimated preview proxy
+  (via `star_mask(..., ctx)`) but built its grey-erosion footprint from the raw
+  full-res `size`, so on a big image (`proxy_scale`≈4) the footprint covered ~4×
+  more scene in the preview than the export delivered — the preview pulled star
+  cores down harder than the exported result, a WYSIWYG/parity violation (the same
+  class of bug fixed for sharpen/denoise/background in v0.56.19/v0.57.1). The
+  footprint now shrinks by `ctx.scaled_px(size)` exactly like the mask, a no-op on
+  export so the exported image is byte-for-byte unchanged. Engine-only, additive;
+  monkeypatched-footprint test proves the erosion side-length shrinks 9→5→3 as
+  proxy_scale goes 1→2→4. (v0.58.4, this run)
+
+- **Auto-suggest the min/max reject count (k) from the streaked-frame count** — with
+  min/max reject on, the default k=1 drops only the single worst extreme per pixel, so
+  a session with several satellite/plane trails leaves the rest in the result. The
+  Stack form now shows a blue advisory when ≥2 accepted frames are streaked and the
+  current k is below the streak count, suggesting `k = min(N_streaked, 5,
+  ⌊(n−1)/2⌋)` (capped so it never over-shoots the frame budget and trips the
+  too-high warning) with a one-click "Set k = N". Reuses the per-frame streak QC;
+  suggestion-only, frontend-only, additive. Vitest-covered (suggests at 3 streaks,
+  caps at the frame budget, no-fire for a single streak). (v0.58.3, this run)
+
+- **Warn when the min/max reject k is too aggressive for the frame count** — the
+  top/bottom-k trim (v0.58.0) applies its full k-drop only where a pixel is covered
+  by ≥ 2k+1 frames, silently degrading to a single min/max drop below that. The
+  Stack form now shows a yellow advisory (mirroring the small-stack min/max nudge)
+  when `min_max_reject` is on with `min_max_reject_count>1` and `2·k+1 >
+  accepted+solved`, explaining it needs at least `2k+1` frames per pixel and will
+  mostly fall back to a single drop, with a one-click "Lower k to N" that sets k to
+  the largest value the stack can fully apply (`⌊(n−1)/2⌋`). Reuses the frame-count
+  the form already has; advisory-only, frontend-only, additive. Vitest-covered
+  (fires at k=3/6-frames, one-click lower, no-fire at k=3/8-frames). (v0.58.2,
+  this run)
+
+- **Show the k-count in the rejection badge for a top/bottom-k trim** — follow-on to
+  v0.58.0: the `RejectionBadge` on History/Gallery/Compare cards derives the combine
+  method from a run's stored options, so a stack combined with `min_max_reject_count>1`
+  now reads "min-max ×3" (with a tooltip explaining it dropped the 3 highest and
+  lowest per pixel) instead of a bare "min-max", while the default single drop and
+  old runs (no count stored) still read "min-max". Reuses the already-serialised
+  option; Vitest-covered (×3 label + default/explicit-1 stays plain); frontend-only,
+  additive. (v0.58.1, this run)
+
+- **Top/bottom-k trimmed-mean reject** — generalised `MinMaxRejectAccumulator` to
+  drop the *k* smallest and *k* largest per pixel via an opt-in
+  `StackOptions.min_max_reject_count` (default 1 = exactly today's single min/max
+  drop), so multiple satellite/plane trails crossing one pixel across a session
+  (k=3 → up to 3 trails) are removed where a single-extreme drop left two behind.
+  Stays single-pass and memory-bounded: k sorted min-planes and k max-planes
+  (`2 + 2k` canvas planes) updated by a vectorised insertion (min/max bubble), the
+  full k-trim applied only where `count ≥ 2k+1` (the two sides are then disjoint
+  with a middle), degrading to the proven single min/max drop for `3 ≤ count < 2k+1`
+  and a plain mean below 3 — so k=1 is byte-identical to before. `_estimate_peak_bytes`
+  / the memory guard now charge the extra `2k` planes (`_min_max_reject_arrays`) so a
+  big k can't slip past the OOM guard. Descriptor-driven Stack-form control
+  (advanced, `depends_on=min_max_reject`, bounds 1–5) surfaces it automatically.
+  Unit-tested (k=3 trim / three-trail kill / <2k+1 degrade / NaN+tie / windowed /
+  k=1-identity), guard-tested (k=3 refused where k=1 fit), and end-to-end. Additive/
+  upgrade-safe (new field defaults 1). (v0.58.0, this run)
+
+- **"slower preview" chip in the Add-operation menu** — the `heavy` spec hint
+  (v0.57.17) was only consumed by the preview debounce; now the Add-operation menu
+  (both the curated Common section and the full grouped list) shows a small "slower
+  preview" chip next to each heavy op (Deconvolution / Noise reduction), so a
+  beginner knows *before* adding the op why its live preview will update after a
+  beat rather than instantly — setting the expectation up-front instead of leaving
+  them wondering if it's stuck. Reuses the already-threaded `heavy` field via a
+  shared `SlowPreviewChip`; Vitest-covered (chip shown in the menu); frontend-only,
+  additive. (v0.57.22, this run)
+
+- **Retire the now-dead "export only" preview scaffolding → "slower preview"** —
+  since v0.57.0 *every* editor op is `proxy_safe=True`, so the OpList "export only"
+  badge and the selected-op "The live preview doesn't show this effect" note (both
+  gated on `!proxy_safe`) were unreachable and, worse, stale (they'd lie if an op
+  were ever re-marked non-proxy-safe). Repointed both at the live `heavy` spec hint
+  (v0.57.17): the row now shows a "slower preview" chip and the note explains the
+  preview updates *after a short pause* (matching the adaptive debounce) rather than
+  falsely claiming the effect never shows. Accurate copy, one fewer foot-gun on the
+  priority-1 editor. Vitest case repointed (badge + note); frontend-only, additive.
+  (v0.57.21, this run)
+
+- **NaN-preservation regression tests for the spatial detail ops** — the
+  denoise / sharpen / deconvolve ops run on a NaN-filled copy (skimage can't
+  tolerate NaN) and restore the uncovered border via `_with_nan_filled`; that
+  fragile fill→process→restore contract had no direct guard (the same class of
+  gap that let the hot-pixel op regress). Added a parametrized
+  `test_detail_ops_preserve_nan_on_partial_coverage` asserting each keeps an
+  uncovered mosaic border NaN and never leaks NaN into (or a filled value out of)
+  the covered region. Test-only; confirmed all three already correct. (v0.57.20,
+  this run)
+
+- **Fix: hot-pixel editor op silently did nothing on mosaic (NaN) images** — the
+  editor's `detail.hot_pixels` op called `suppress_hot_cold_pixels` directly, which
+  derives its outlier threshold from the median of the whole-image residual; with
+  any uncovered (NaN) pixel that median is NaN, so the threshold went NaN, every
+  `|residual| > NaN` comparison was False, and the op became a silent no-op on
+  *every* mosaic/partial-coverage stack (a Seestar owner adding hot-pixel removal
+  to a mosaic edit got nothing, with no error). Wrapped it in the same
+  `_with_nan_filled` helper the other detail ops (denoise/sharpen/deconvolve) use,
+  so it fills NaN with the finite median, suppresses on the clean array, and
+  restores NaN — now it removes hot pixels on mosaics *and* preserves the uncovered
+  border. Engine-only, editor-scoped (the shared stack-path function is untouched);
+  regression test covers mosaic-NaN + fully-covered. (v0.57.19, this run)
+
+- **Show Auto's chosen data-driven values in the "What Auto-process did" note** —
+  the note listed *which* ops Auto ran but not the *values* it picked from your
+  data, which is exactly where Auto's adaptivity lives. A pure `autoValueSentence`
+  helper reads the built recipe's op params directly (no new API) and adds a second
+  line — "Tuned to your data: sky level 0.2, saturation 1.1×, sharpen radius 1.4 px"
+  — for the STF sky level, denoise strength, saturation and sharpen radius, skipping
+  any op whose value isn't present so it degrades gracefully. Turns "it did
+  something" into "it did *this, because of my data*". Vitest-covered (7 helper
+  cases + the Editor note-wiring test asserts the values line); frontend-only,
+  additive. (v0.57.18, this run)
+
+- **Adaptive live-preview debounce for heavy editor ops** — dragging a slider
+  while an expensive op (deconvolution, wavelet denoise) is in the pipeline still
+  kicked a full proxy render on every 250 ms debounce step, so several slow
+  intermediate frames rendered before the value you landed on. Ops now carry a
+  `heavy` spec hint (set on `detail.denoise` / `detail.deconvolve`, threaded to the
+  frontend via the ops schema), and a pure `previewDebounceMs(ops, specs)` helper
+  stretches the editor's preview debounce to 600 ms whenever an *enabled* heavy op
+  is present — so only the value you settle on renders — while light-only recipes
+  keep the snappy 250 ms. Vitest-covered (6 cases incl. disabled-op and
+  missing-`heavy` graceful degrade) + a backend assertion that the schema exposes
+  `heavy`. Additive/upgrade-safe (new optional field defaults false). (v0.57.17,
+  this run)
+
+- **Data-driven saturation in the one-click Auto recipe** — Auto's final
+  saturation boost was a fixed `1.2` for every stack, but chroma noise scales with
+  the boost, so on a noisy Seestar stack that fixed lift just amplified colour
+  speckle. Auto now scales the saturation to the measured background noise
+  (`analyze_proxy`'s `sky_sigma`) — a clean stack gets the full `1.25` lift, a
+  noisy one eases down toward `1.05` — with a neutral `1.2` fallback when the proxy
+  can't be measured. Completes the "adapt every knob to the data" pattern already
+  applied to Auto's denoise strength, sharpen radius and STF target. Engine-only,
+  additive; Auto is an explicit button so no default flips. Test asserts the boost
+  is gentler on a noisy stack than a clean one and falls back to 1.2. (v0.57.15,
+  this run)
+
+- **"Your data" context chip in the editor header** — the four data-driven
+  suggestion buttons quote their measured value inline ("FWHM 3.2px"), but there
+  was no single place a user could see what the editor measured about *this* stack.
+  A small dimmed chip under the title ("Measured: stars ≈ 3.2 px FWHM · background
+  noise σ 0.021") — built from the already-fetched psf/sharpen/star-size (`fwhm_px`)
+  and denoise (`noise_sigma`) queries via pure `coalesceFwhm` / `measuredContextText`
+  helpers — gives the data-driven buttons visible provenance and builds trust,
+  shown (with an explanatory tooltip) only when at least one measure is available.
+  Pure helpers Vitest-covered (8 cases) + an Editor render test; frontend-only,
+  additive. (v0.57.14, this run)
+
+- **Keep the old preview + "Updating…" badge while re-rendering (editor
+  responsiveness)** — on every (debounced) edit the live-preview query key changes,
+  so react-query dropped `preview.data` to `undefined` and the panel flashed to a
+  black `<Loader>` before the new render arrived — a jarring blink on every slider
+  drag, and no signal that a render was underway. Added `placeholderData:
+  keepPreviousData` so the previous render stays visible while the next one loads,
+  plus a small "Updating…" overlay badge (shown only when a render is in flight and
+  an image is already up) so the momentarily-stale image reads as "refreshing", not
+  "stuck". Pairs with this run's superseded-render abort. Vitest-covered (the old
+  image persists and the badge appears while a render pends). Frontend-only,
+  additive. (v0.57.16, this run)
+
+- **Cancel superseded live-preview renders (editor responsiveness)** — the live
+  preview refetches on every debounced param change, but the four blob `fetch`
+  queries (preview, base, star-mask, without-op) and the histogram query never
+  passed react-query's `AbortSignal`, so while a user dragged a slider on a heavy
+  op each stale render ran to completion server-side and the newest result queued
+  behind them — the named "heavy ops on the proxy can lag" hold-out of the
+  live-preview item. Threaded the query `signal` into every `fetch(url, { signal })`
+  and into `api.getHistogram(..., signal)` (which already accepted a `RequestInit`
+  via `req`), so a superseded request aborts the moment the recipe changes, cutting
+  proxy render backlog and latency. Vitest-covered (the preview fetch is called with
+  an `AbortSignal`). Frontend-only, additive, no API change. (v0.57.13, this run)
+
+- **Direct pixel-transform + NaN-safety tests for the tone/colour editor ops** —
+  `seestack/edit/ops/tone.py`'s ops (SCNR, saturation, white balance, curves,
+  levels) had no dedicated pixel-level test: the engine test only exercised a full
+  recipe end-to-end, so each op's own param-forwarding and NaN handling was
+  unguarded. Added `tests/test_edit_tone_ops.py` (11 cases) asserting each does the
+  transform its params ask for (SCNR caps excess green to the R/B neutral and never
+  *adds* green; saturation spreads channels around luminance with a true identity
+  at 1.0; white balance applies per-channel gain; curves/levels identity + midtone
+  lift) **and** leaves an uncovered NaN border as NaN — closing a coverage gap on
+  the priority-1 editor and locking in the "gaps never become a black wedge"
+  invariant. Confirmed all five are already correct; test-only, no code change.
+  (v0.57.12, this run)
+
+- **Built-in presets land sized to your data** — the built-in editor presets
+  (Galaxy / Nebula / Star cluster) carried *generic* default sizes for their
+  data-scalable ops (Galaxy's sharpen `radius=2.0`, Star-cluster's `stars.reduce
+  size=2`), the same fixed guesses the one-click Auto recipe already outgrew.
+  Applying a **built-in** preset now seeds those data-driven params (sharpen
+  radius, star size) from this target's own median star FWHM via the same
+  `applyDataDrivenDefaults` helper as the "Use data defaults" toolbar action, so a
+  preset lands sized to what you actually shot. **User-saved** presets are applied
+  exactly as the user tuned them (a new `source` arg on `PresetMenu.onApply`
+  distinguishes the two). Reuses the already-fetched suggestion queries;
+  frontend-only, additive. Vitest-covered end-to-end (applying the Galaxy preset
+  seeds its sharpen radius to the measured value). (v0.57.11, this run)
+
+- **"Apply data-driven defaults" one-click on the editor** — a user hand-building
+  a recipe previously had to open each of the four suggestion-carrying ops
+  (Deconvolution, Noise reduction, Sharpen, Star reduction) and click its "From
+  your data" button individually. The editor toolbar now shows a single "Use data
+  defaults (N)" button that seeds every *present* op's data-driven param (PSF σ,
+  denoise strength, sharpen radius, star size) from the already-fetched
+  suggestions in one click. It's shown only when at least one present op still
+  diverges from its measured value (so it never nags once everything's applied),
+  and N counts how many ops would change. Pure `applyDataDrivenDefaults` /
+  `countDataDrivenDefaults` helpers (no mutation) drive it; Vitest-covered (helper:
+  8 cases; editor: button appears, applying it makes it disappear). Frontend-only,
+  additive, explicit-button (off by nothing). (v0.57.10, this run)
+
+- **Dim the "From your data" suggestion button when the param already matches** —
+  the editor's four data-driven suggestion buttons (PSF σ, sharpen radius, denoise
+  strength, star size) always looked clickable, so while tuning a user couldn't
+  tell whether the current value *was* the suggestion or had diverged. The
+  `OpParamPanel` suggestion button now dims/disables and prefixes a "✓" (with an
+  "already set to the value measured from your data" tooltip) when the param's
+  current value already equals the suggested value within half the control's step,
+  via a pure `matchesSuggestion` helper — so the button doubles as an "am I
+  optimal?" indicator. Vitest-covered (helper: 5 cases; panel: disabled+✓ state);
+  frontend-only, additive. (v0.57.9, this run)
+
+- **Complete + enforce plain-language help on every editor control** — finished the
+  help sweep by adding hints to the last bare params (geometry crop/rotate/resize,
+  manual white-balance R/G/B gains, coverage-leveling σ), so *every* editor slider
+  now shows a one-line explanation. The help-coverage test now asserts this as an
+  invariant — every param must carry help except the curve-editor widget (which has
+  op-level help) — so a future op can't ship a bare, unexplained control.
+  Metadata + test only, additive. (v0.57.8, this run)
+
+- **Plain-language help on the remaining jargon-bare editor sliders** — v0.56.17
+  gave the detail/levels ops per-param help, but the commonly-used tone/star/
+  background sliders still showed *no* hint under the control: `tone.saturation`
+  amount, `tone.scnr` amount, `tone.color_calibrate` mode, `stars.reduce`
+  amount/size, `stars.boost_nebula` amount, and `background.subtract` /
+  `final_gradient` box_size/σ/dilate/mode. Added a one-line plain-language hint to
+  each (what it does + a sensible starting point), plus friendly `option_labels`
+  for the two background `mode` enums so the dropdowns read "Per channel" /
+  "Luminance" instead of raw ids — surfaced automatically in the op param panel via
+  the already-threaded `help`/`option_labels` fields. Metadata-only, additive; the
+  help-coverage test now asserts every one of these params carries a hint.
+  (v0.57.7, this run)
+
+- **Data-driven sharpen radius in the one-click Auto recipe** — when Auto-process
+  sharpens a clean stack it used a *fixed* `radius=2.0`, the same for a tight-star
+  and a bloated-star image, even though v0.57.4 already ships the exact FWHM→radius
+  conversion (radius ≈ the star's Gaussian σ) behind the editor's sharpen-from-stars
+  button. The auto endpoint now threads the target's `median_fwhm()` into
+  `auto_recipe`, which sizes the auto sharpen radius to the target's *own* stars
+  (clamped to the op's 0.5–10 step/range), falling back to the neutral 2.0 when no
+  frame carries an FWHM — so the one-click result sharpens the right detail scale
+  instead of guessing. Test asserts the auto sharpen radius tracks the FWHM and
+  falls back to 2.0; engine + one endpoint thread, additive/upgrade-safe.
+  (v0.57.6, this run)
+
+- **Star-size-from-stars suggestion for the star-reduce op** — the `stars.reduce`
+  op's `size` param is a physical star-scale in px a beginner can't reason about,
+  and QC already measures exactly that as the median star FWHM. A new
+  `GET …/editor/star-size-suggestion` endpoint maps the target's median FWHM to an
+  integer `size` (rounded, clamped to the op's 1–8 range), and the Star reduction
+  op's param panel offers a one-click "From your stars (size X, FWHM Ypx)" button —
+  the fourth data-driven button, mirroring the PSF-, sharpen- and denoise-from-data
+  suggestions exactly. Backend tested (median/clamp/none cases); additive/
+  upgrade-safe. (v0.57.5, this run)
+
+- **Sharpen-radius-from-stars suggestion** — the editor's Sharpen op made the user
+  hand-guess a radius, when the natural detail scale to enhance is the star's own
+  blur, which QC already measures. A new `GET …/editor/sharpen-suggestion` endpoint
+  converts the target's median star FWHM to a Gaussian σ (the same
+  `FWHM/2·√(2·ln2)` the deconvolution PSF button uses), clamped to the op's
+  0.5–10 slider range and rounded to its 0.5 step, and the Sharpen op's param panel
+  offers a one-click "From your stars (radius X, FWHM Ypx)" button — mirroring the
+  PSF-from-stars and denoise-from-image buttons. Also folds in a small polish: the
+  editor's zoom lightbox title now carries the "preview is downscaled" note, since
+  zoom is exactly where the proxy resolution surprises users. Backend tested
+  (median/clamp/none cases); additive/upgrade-safe. (v0.57.4, this run)
+
+- **Data-driven denoise strength in the one-click Auto recipe** — when Auto-process
+  decides a stack is noisy it added a wavelet denoise at a *fixed* `strength=0.5`,
+  the same for a barely-grainy stack and a very noisy one. It now scales that
+  strength to the actual measured background noise via the existing
+  `suggest_denoise_strength` estimator (the same one behind the editor's "From your
+  image" one-click), so a mildly-noisy result gets a lighter touch and a very noisy
+  one a firmer cut — with a neutral 0.5 fallback when the proxy can't be measured.
+  Makes the one-click Auto result adapt to the data instead of guessing. Test
+  asserts the auto denoise strength rises with noise level; engine-only, additive.
+  (v0.57.3, this run)
+
+- **"Preview is downscaled" hint in the editor** — the live preview always runs on
+  a ≤1500 px proxy of what may be a 150 MP mosaic, so fine detail reads differently
+  than the exported full-res image (even now that spatial ops are proxy-corrected).
+  The histogram response now carries the proxy geometry (`proxy_scale`,
+  `proxy_width/height`), and a pure `previewScaleCaption` helper turns it into a
+  small dimmed caption under the preview ("Preview shown at 1500 px — export renders
+  at full resolution (4.0× larger)."), shown only when the proxy is meaningfully
+  downscaled (>1.05×) so small stacks that fit the proxy budget aren't nagged. Sets
+  the right expectation and heads off "why does my export look different?"
+  confusion. Pure helper Vitest-covered (5 cases); one additive API field.
+  (v0.57.2, this run)
+
+- **Preview↔export parity for the background ops** — v0.56.19 corrected the spatial
+  *detail* ops for the decimated preview proxy, but `background.subtract` /
+  `background.final_gradient` still fed full-resolution pixel measures (`box_size`,
+  `dilate_px`) straight through, so their gradient mesh was estimated at a coarser
+  physical scale in the preview than in the full-res export. A new `_scaled_box`
+  helper divides those px measures by `EditContext.scaled_px()` (a no-op on the
+  export, so the exported result is byte-for-byte unchanged), floored so
+  `Background2D` still gets a sane box with a few cells across the small proxy —
+  and `for_image_size` floors `subtract`'s box further so the mesh always tiles.
+  As a bonus this also makes `final_gradient` behave better on the proxy (a 256 px
+  box on a ≤1500 px proxy previously left barely one mesh cell). Monkeypatched-arg
+  tests prove box_size (and final-gradient's dilate_px) shrink 1×→2×→4× with
+  proxy_scale while the export stays at the param value. Engine-only, additive.
+  (v0.57.1, this run)
+
+- **Auto-process note clears when the recipe changes** — follow-up to v0.56.18's
+  "What Auto-process did" note: it previously persisted (until dismissed) even
+  after the user edited the pipeline, so it could describe ops that were no longer
+  there. The editor now records the recipe signature right after Auto runs and
+  drops the note the moment the pipeline diverges from it (manual edit, undo,
+  redo), so it only ever describes the current auto result. Frontend-only;
+  Vitest-covered (removing the auto op hides the note). (v0.56.20, this run)
+
+- **Preview↔export parity for spatial detail ops** — the live preview runs on a
+  striding-decimated proxy (≤1500 px), but the sharpen radius, bilateral-denoise
+  spatial extent, etc. are in *full-resolution* pixels and ignored `proxy_scale`,
+  so on a big image a `radius=2px` sharpen covered `proxy_scale`× more of the
+  proxy than of the full-res export — the preview over-sharpened/over-smoothed
+  relative to what you actually got. Added `EditContext.scaled_px()` (divides a
+  full-res pixel measure by `proxy_scale`, no-op on the export where scale=1) and
+  applied it to `detail.sharpen`'s radius and `detail.denoise`'s bilateral
+  `sigma_spatial`, so the preview now sharpens/smooths the same physical detail as
+  the export. Deconvolution is preview-skipped (`proxy_safe=False`) so it was
+  already export-only. Unit-tested: `scaled_px` scaling + a monkeypatched-radius
+  test proving the sharpen radius shrinks 4→2→1 as proxy_scale goes 1→2→4.
+  Engine-only, additive, export output unchanged. (v0.56.19, this run)
+
+- **Explain what Auto-process did** — after Auto-process builds a recipe the user
+  saw a pipeline of op names but no sense of *why* those ops, so the one-click
+  result was a black box. A new pure `autoSummarySentence` helper turns the built
+  recipe's *enabled* ops into a plain-language sentence via a phrase map keyed by
+  op id ("Flattened the background, balanced the colour, applied a natural stretch,
+  removed the green cast, boosted colour saturation, then sharpened detail."),
+  falling back to the registry label for any unmapped op. The Editor shows it in a
+  dismissible violet "What Auto-process did" note after Auto runs. Builds trust in
+  the one-click path and teaches the recommended order. Pure helper unit-tested
+  (9 cases) + an Editor wiring test; frontend-only, additive. (v0.56.18, this run)
+
+- **Per-op "Reset to defaults" (already shipped)** — the backlog listed this as an
+  Idea, but it was in fact already implemented (in `0c333bd`): the selected-op
+  param panel carries both a per-param reset icon and a "Reset op" button that
+  restore each param to its spec default. Moved to Shipped to correct the record;
+  no code change. (housekeeping, this run)
+
+- **Plain-language help on the jargon-heavy editor ops** — several detail/tone ops
+  spoke in astro-jargon a beginner can't decode ("Wavelet / bilateral / TV
+  denoise", "Unsharp mask", "Black/white point + gamma") and their sliders (denoise
+  method/strength, sharpen amount/radius, deconvolve iterations/PSF, hot-pixel σ,
+  levels black/white/gamma) carried *no* per-param help at all. Rewrote the op help
+  in plain language (what it does + when to use it) and added a one-line hint to
+  each of those sliders — surfaced automatically in the Add-operation menu and the
+  op param panel via the already-threaded `help` field. Also relabelled the
+  cryptic "PSF σ (px)" → "Blur width (px)" and "σ" → "Threshold (σ)". Metadata-only,
+  additive; a test asserts every op has help and the key detail/levels params now
+  carry hints. (v0.56.17, this run)
+
+- **Per-op "without this op" preview compare** — the editor's Compare button shows
+  the whole recipe vs the raw base, but while tuning one op a user wants to see
+  *just that op's* contribution. The selected op's panel now carries a "Without
+  this op" toggle that renders the full recipe with only that op bypassed (reusing
+  the existing preview path with a modified recipe), overlaying a "Without: <op>"
+  label so the isolated op's effect is obvious. Mutually exclusive with the
+  Compare/Star-mask overlays and resets when the selection changes, so each op
+  starts from "showing with". Vitest-covered (toggle flips label + button state);
+  frontend-only, additive. (v0.56.16, this run)
+
+- **Progressive disclosure of the "Add operation" menu** — the menu listed all ~19
+  editor ops flat across four groups, so a beginner opening it was faced with every
+  knob at once and no hint which few matter. The menu now leads with a curated
+  **Common** section (Stretch, Curves, Saturation, SCNR, Noise reduction, Sharpen,
+  Background subtract) and tucks the full grouped list behind a **More operations**
+  toggle (collapsed by default, `closeMenuOnClick={false}` so expanding it keeps the
+  menu open). The common list is restricted to ops the engine actually exposes, so
+  it degrades gracefully if an op id changes. Vitest-covered (Common shown, a
+  non-common op hidden until "More operations" is expanded); frontend-only.
+  (v0.56.15, this run)
+
+- **Auto-place a newly-added op on the correct side of the stretch** — adding an op
+  from the menu appended it at the end of the pipeline, so a linear op (background,
+  colour cal, denoise) added after the stretch immediately tripped the v0.56.10
+  "should be before the stretch" caution the user then had to Fix. A new pure
+  `insertOnCorrectSide` helper now inserts a freshly-added op on its correct side of
+  the *enabled* stretch by default — linear just before, nonlinear just after,
+  `any`-stage (and anything added with no enabled stretch) still appended at the
+  end exactly as before — so the common add-then-tune flow never lands on the wrong
+  side. Reuses the same side/stretch logic as `moveToCorrectSide`; unit-tested
+  (5 cases: linear-before, nonlinear-after, any-appends, no-stretch-appends,
+  empty-pipeline); frontend-only. (v0.56.14, this run)
+
+- **"No stretch step" nudge in the editor pipeline** — if a recipe has ops but no
+  *enabled* Stretch op, the pipeline silently auto-inserts a default asinh stretch
+  at the end so the preview isn't black — but the user's tone/colour ops then run
+  on un-stretched (linear) data and the result looks wrong, with no explanation.
+  The pipeline panel now shows a subtle yellow advisory in that case, with a
+  one-click "Add stretch" (or "Enable stretch" when a bypassed one exists) so a
+  beginner gets an explicit, controllable stretch. Complements this run's
+  stage-conflict warning. Pure `hasEnabledStretch` helper, unit-tested;
+  frontend-only, advisory. (v0.56.13, this run)
+
+- **Friendly names for enum dropdowns (editor + Stack/Settings forms)** — enum
+  params rendered their raw internal values ("asinh", "stf", "gray_star", "gaia",
+  "per_channel", "luminance", "average", "maximum") in the Select dropdowns, jargon
+  a beginner can't decode. Added an optional additive `option_labels` (value →
+  display name) to the shared param descriptor (`EditParam` + `StackOptionField`),
+  threaded through the editor-ops and stack-options schema endpoints, and rendered
+  by the shared `StackOptionControl` (falls back to the raw value for any option
+  without a mapping). Populated it for the Stretch curve (Asinh (manual) / Auto
+  (STF)), SCNR protect, editor + stack colour-calibration mode, and background /
+  final-gradient mode. Upgrade-safe: new optional field defaults null; recipes and
+  configs store values, not labels, so nothing changes on disk. Vitest-covered
+  (friendly label shown + raw-value fallback). (v0.56.12, this run)
+
+- **Grey out stretch params that don't apply to the chosen curve** — the Stretch op
+  exposes both the Asinh knobs (Strength, Black point) and the STF knob (STF sky
+  level), but only one set does anything for a given `mode`, so a beginner drags a
+  slider that silently has no effect. `depends_on` (the descriptor gating already
+  used across the Stack/Settings/editor forms) gained an optional `key=value` form
+  so a field can depend on a *specific* enum choice, not just a boolean; the Asinh
+  params now declare `depends_on="mode=asinh"` and STF sky level `depends_on="mode=stf"`,
+  so the irrelevant ones grey out as the user switches curve. STF sky level was also
+  promoted from Advanced to the main params so STF mode always shows its one active
+  control, and each param got a clearer help line. Backward-compatible: a bare
+  `depends_on` key stays a truthiness check, so every existing boolean dependency is
+  unchanged. Pure `dependencyMet` helper unit-tested (bare-key, `key=value`,
+  stringify) + a render test that the STF slider disables in Asinh mode. Frontend +
+  metadata-only. (v0.56.11, this run)
+
+- **Stage-conflict caution + one-click fix in the editor OpList** — ops declare a
+  `stage` (linear / nonlinear / any), and the pipeline runs them across a single
+  stretch boundary, but the op list lets a user drag e.g. a background-gradient
+  (linear) op below the stretch, where it silently operates on display-space data
+  and misbehaves. Each op row now shows a subtle orange caution ("should be
+  before/after the stretch", with an explanatory tooltip) when an *enabled* op
+  sits on the wrong side of the *enabled* stretch, plus a one-click "Fix" that
+  repositions it to the correct side (linear → just before the stretch, nonlinear
+  → just after). Pure, unit-tested `stageConflicts` / `moveToCorrectSide` helpers
+  (10 cases: both sides, `any`-stage neutrality, disabled-op / no-stretch
+  no-ops); frontend-only, advisory. (v0.56.10, this run)
+
+- **Combine-method facet on the Gallery** — a "All / Drizzle / Min-max / σ-clip /
+  Mean" `SegmentedControl` (shown only when the set is *mixed* — >1 distinct
+  method present — mirroring the calibration filter chip) that isolates e.g. every
+  drizzled result across every target. A new pure `combineMethodKey` helper
+  (coarse key with the engine's precedence: drizzle > min/max > σ-clip > mean;
+  null for editor/channel-combine runs) drives both the facet options and the pure
+  `filterByMethod`. Unit-tested (key precedence + filter) plus render tests for the
+  mixed-vs-uniform gating and narrowing. Frontend-only, additive. (v0.56.8, this run)
+
+- **One-click "Turn on min/max rejection" on the Stack-form nudge** — the
+  small-stack streaked-frame hint (v0.56.2) told the user min/max reject is the
+  right tool but made them hunt for the toggle in Advanced options. The advisory
+  now carries a one-click "Turn on min/max rejection" button that flips
+  `min_max_reject` on (mirroring the calibration "Use recommended" one-click), so
+  a beginner acts on the advice without knowing where the knob lives; the nudge
+  self-dismisses once it's on. Frontend-only, additive. Vitest-covered.
+  (v0.56.7, this run)
+
+- **Gentle green-cast removal in the one-click Auto recipe** — an OSC Seestar
+  stack almost always carries a residual green cast (the Bayer green is the
+  strongest channel), which every built-in nebula preset already fixes with SCNR
+  but the `Auto-process` recipe skipped. Auto now appends a gentle
+  `tone.scnr` (amount 0.7) after the STF stretch and *before* the saturation
+  boost, so the boost lifts real colour instead of amplifying the green. SCNR is
+  monotone (it can only cap green above the R/B neutral, never invent colour), so
+  it's safe on galaxies/clusters too. Auto-process is an explicit button (not a
+  silent upgrade default) and saved recipes are untouched — upgrade-safe. Test
+  asserts SCNR presence + ordering. (v0.56.6, this run)
+
+- **Guided empty-pipeline nudge in the editor** — a first-timer opening the editor
+  with no saved recipe saw only "No operations yet" with no hint of the one-click
+  path. The empty pipeline now shows a grape guided nudge explaining what
+  Auto-process does (background & colour balance, natural stretch, gentle
+  denoise/sharpen) with its own Auto-process button, so a beginner gets a good
+  starting point in one click instead of guessing which op to add first. Reuses
+  the existing `auto` mutation; frontend-only, additive. Vitest-covered.
+  (v0.56.9, this run)
+
+- **"Export only" flag for preview-approximate editor ops** — the Deconvolution op
+  is `proxy_safe=False`, so it's silently skipped in the fast live preview: a user
+  would add it, drag its PSF σ / iterations sliders and see *no change*, which reads
+  as a broken control. The editor now surfaces this: each non-`proxy_safe` op row
+  carries a grape "export only" badge (with a tooltip), and selecting such an op
+  shows an explanatory note ("The live preview doesn't show this effect — it's
+  heavy, so it only runs when you Export or Download full-res PNG"). Reuses the
+  `proxy_safe` field already carried on the ops schema; frontend-only, additive.
+  Vitest-covered (badge + note). (v0.56.5, this run)
+
+- **Plain-language "Combined:" line in the History Info panel** — the Info panel
+  showed the raw `STACKER` FITS card ("min-max-reject", "sigma-clip", "mean",
+  "drizzle") — engine jargon a beginner won't recognise. It now also renders a
+  friendly "Combined: Min/max (extremes) rejection — drops the highest and lowest
+  value at each pixel" line (alongside the existing Integration / Quality-weighted
+  / Processing lines), derived from the STACKER card via a pure, case-insensitive
+  `combineMethodLabel` helper (returns null for channel-combine / unknown methods,
+  so the line is simply omitted). Unit-tested + a render assertion. Frontend-only,
+  additive. (v0.56.4, this run)
+
+- **Combine-method badge in the Compare view** — the `RejectionBadge` (v0.56.1)
+  now also appears on each panel of the A/B Compare view, so when a user compares
+  two stacks of one target to answer "did changing the rejection method help?"
+  they can see each side's method ("σ-clip κ3" vs "min-max") at a glance next to
+  the noise verdict. Reuses the gallery `options` the Compare view already
+  fetches; frontend-only, additive. (v0.56.3, this run)
+
+- **Min/max-reject nudge on the Stack form for small streaked stacks** — below
+  ~11 frames κ-σ mathematically can't reject a lone satellite/plane trail (a
+  single outlier's deviation stays within κ·σ of the mean), which is exactly the
+  regime this run's min/max reject handles. The Stack form now shows a
+  plain-language hint suggesting "Min/max rejection" when a small stack (3 ≤
+  accepted+solved < 11, non-drizzle) carries streaked frames and min/max reject
+  isn't already on — superseding the generic "turn on sigma clipping" streak
+  warning in that regime (where that advice doesn't actually work). Also fixed a
+  pre-existing advisory gap: the streak-no-rejection warning's `rejectionOn`
+  didn't count min/max reject as per-pixel rejection, so it wrongly fired when
+  only min/max reject was enabled. Frontend-only, advisory. (v0.56.2, this run)
+
+- **Rejection-method badge on History/Gallery cards** — a stack can be combined
+  one of four ways (mean / σ-clip / min-max reject / drizzle), recorded in the
+  run's stored options. A shared, tooltip'd violet `RejectionBadge` now shows the
+  *effective* combine method ("min-max" / "σ-clip κ3" / "drizzle ×2", nothing for
+  a plain mean) on both Gallery and History cards, honouring the engine's method
+  precedence (drizzle > min-max > σ-clip). The Gallery's `highlightBadges` dropped
+  its ad-hoc σ-clip/drizzle chips in favour of the dedicated badge (which also
+  covers min-max and carries a plain-language tooltip); History gained a new
+  additive `options` field on `StackRunOut` (parsed from the run's `options_json`)
+  to derive it. Pure `rejectionBadge` helper unit-tested (precedence, kappa/scale
+  formatting, editor/channel-combine → null) plus backend tests that the
+  stack-runs list exposes options. Frontend + one additive API field;
+  upgrade-safe. (v0.56.1, this run)
+
+- **Min/max (extremes) rejection for small stacks** — the order-statistic fix
+  for a lone satellite/plane trail below ~11 frames that κ-σ mathematically can't
+  reject (a lone outlier's deviation stays below κ for n<11). A new single-pass,
+  NaN-aware `MinMaxRejectAccumulator` tracks per-pixel sum/count/min/max and
+  outputs `(sum − min − max)/(count − 2)` for count≥3 (plain mean below that), so
+  it drops exactly one per-pixel min and max before averaging — tie-safe (a
+  saturated core shared by several frames only loses one contribution) and
+  memory-bounded (four canvas planes, one pass, within the existing peak-array
+  budget). Wired as an opt-in `StackOptions.min_max_reject` (default off, takes
+  precedence over κ-σ on the standard path; descriptor-driven so it surfaces on
+  the Stack form automatically) and stamped into the `STACKER` provenance card.
+  Unit-tested (drop/tie/NaN/low-coverage/windowed) + end-to-end. Additive/
+  upgrade-safe. (v0.56.0, this run)
+
+- **Capped exponential backoff for Seestar reconnects** — the poll loop
+  re-`connect()`ed a dropped scope on every cycle (default a few seconds) with no
+  backoff, so a scope that's genuinely gone got hammered indefinitely. Each ip now
+  carries a consecutive-failure count and a monotonic "next attempt" time; a
+  failed reconnect grows the delay `base·2^(fails-1)` up to a 300 s cap, a
+  successful one clears it (so a brief Wi-Fi blip still recovers fast), and the
+  device surfaces a "reconnecting…" state (orange badge) for the dashboard.
+  Reconnect logic factored into a testable `_poll_reconnect` + a pure
+  `_reconnect_delay_s`, unit-tested with an injected clock (no hardware).
+  Additive/upgrade-safe (new optional device field). (v0.55.5, this run)
+
+- **"You have calibration masters but aren't using them" nudge on the Stack
+  form** — the single most common beginner mistake is stacking uncalibrated even
+  though the library holds a matching master. When `calibration-suggestions`
+  returns a recommended dark/flat/bias *and* no calibration selector is set yet,
+  the Stack form now shows a prominent teal advisory ("You have a matching master
+  dark + flat in your library, but this stack isn't calibrated — calibrating
+  removes amp glow, dust shadows and vignetting…") with the same one-click "Use
+  recommended". Once any selector is set it falls back to the existing subtle
+  hint, so it never badgers a user already engaging with calibration. Advisory
+  only, within-target, frontend-only. (v0.55.4, this run)
+
+- **Calibration-status filter chip on the Gallery** — building on the searchable
+  `calstat` column (v0.55.2), the Gallery gained an "All / Calibrated /
+  Uncalibrated" `SegmentedControl` (shown only when the set is *mixed* — some
+  calibrated, some not — so it's never a no-op chip) that isolates the
+  uncalibrated stacks worth re-running without typing. Pure, non-mutating
+  `filterByCalibration`/`isCalibrated` helpers, unit-tested plus a render test
+  for the mixed-vs-uniform gating. Frontend-only, additive. (v0.55.3, this run)
+
+- **Gallery search matches calibration status** — building on this run's
+  `calstat` column, the Gallery free-text search now also matches a run's
+  calibration status, so typing "flat" surfaces every flat-calibrated stack and
+  "dark" the dark-calibrated ones across every target — handy for finding your
+  properly-calibrated results. Extracted the inline filter into a pure,
+  non-mutating `filterGallery` helper (matches label + target + filename +
+  calstat) and unit-tested it. Frontend-only, additive. (v0.55.2, this run)
+
+- **Seestar reconnect hygiene (fd-leak fix)** — the manager's poll loop
+  re-`connect()`s a disconnected client every cycle, but `SeestarClient.connect()`
+  overwrote `self._sock` without closing the dead one or clearing the in-flight
+  `_pending` replies the dropped link left behind — so a flaky Wi-Fi link to the
+  scope leaked a file descriptor (and a stranded pending reply) on every
+  reconnect. `connect()` now runs a shared `_teardown_locked()` (extracted from
+  `disconnect()`) before opening a fresh socket, closing the stale fd and waking
+  any waiter with "disconnected". Unit-tested with injected stale state (no
+  hardware). (v0.55.1, this run)
+
+- **Calibration chip on History/Gallery cards** — a stack now records which
+  calibration masters were applied to its lights in a new additive
+  `stack_runs.calstat` column (schema v6→v7 migration; "dark+flat", "bias+flat",
+  "flat", …, NULL when uncalibrated / for old runs), mirroring the `CALSTAT` FITS
+  card the engine already stamps but read from the run record so no per-card FITS
+  read is needed. `StackRunOut` and the gallery response carry it, and a shared
+  teal `CalibrationBadge` shows a small "dark+flat" chip (with a plain-language
+  tooltip) on History and Gallery cards — so a user sees at a glance whether a
+  stack was calibrated, useful when comparing a calibrated vs uncalibrated run.
+  Additive/upgrade-safe. (v0.55.0, this run)
+
+- **Per-target noise-σ trend sparkline** — the History page now shows a small
+  "Noise trend" card (a reusable inline-SVG `Sparkline`) plotting each measured
+  stack's background-noise σ oldest→newest, so a user sees the *trajectory* (are
+  my results getting cleaner as I add nights?) at a glance, not just the last
+  hop — teal + "Cleaner than your first" when trending down, orange + "Noisier"
+  when up. Shown only with ≥2 measured runs. Pure `noiseTrendSeries` /
+  `sparklinePoints` helpers, tested; reuses the recorded `noise_sigma`;
+  within-target, frontend-only. (v0.52.1, this run)
+
+- **Recommend a master bias for the bias+flat (no-dark) workflow** — completes
+  the v0.53.0 bias feature. `recommend_masters` now also ranks bias masters
+  (exposure-independent, so matched on gain/temp like a flat) and returns a
+  `bias_master_id`; the endpoint passes it through, and the Stack form badges the
+  best bias "★ recommended" and includes it in the "Use recommended" one-click —
+  but only when *no* dark is recommended (a dark already carries the bias, so the
+  engine would ignore it). So the no-dark calibration path is now as guided as
+  dark+flat. Additive/upgrade-safe. (v0.54.0, this run)
+
+- **Record which calibration masters were applied in the FITS header** — a
+  calibrated stack didn't self-document its calibration (only the log said so).
+  `run_stack` now stamps a `CALSTAT` provenance card recording the masters
+  actually applied to the lights ("dark+flat", "bias+flat", "flat", …), threaded
+  from `CalibrationMasters.describe()` into `_build_output_header_meta`, and the
+  run Info panel surfaces it (added to `_INFO_CARDS`). Omitted when nothing was
+  applied. Additive/upgrade-safe; extends the existing STACKER/COLORTYP
+  provenance pattern. (v0.53.1, this run)
+
+- **Bias-only calibration for lights when no dark is chosen** (bias slice (a))
+  — master bias frames could be built but were never applied to lights.
+  `CalibrationMasters.load` now takes a `bias_path`; `apply_raw` subtracts the
+  bias as the readout pedestal — `(light − bias) / flat` — but **only when no
+  master dark is set** (a dark already contains the bias, so both would
+  double-subtract it: the bias is loaded but inert when a dark is present).
+  Threaded end-to-end: `StackOptions.bias_path` (+ `NON_FORM_KEYS`),
+  `resolve_master_paths` returns a 4th bias path, the stack router resolves a
+  `bias_master_id` server-side and the reuse-settings endpoint reverse-maps it,
+  and the Stack form gained a "Master bias (no dark)" selector with a caution
+  when a dark is also picked. Additive/upgrade-safe (new optional field,
+  default None). Slice (b) — dark exposure-scaling — filed above. (v0.53.0,
+  this run)
+
+- **"Compare with previous run" action on the History page** — the Compare view
+  (v0.51.0) was reachable only from the Gallery's multi-select, but the most
+  common comparison is two stacks of the *same* target ("did adding subs /
+  changing κ actually help?"). Each History card (all but the oldest run) now
+  carries a grape "Compare" button that deep-links into the existing
+  `/compare?a=…&b=…` route against the chronologically previous run — the
+  Compare view resolves both refs from the gallery, so no backend change. Pure
+  `previousRunId` (walks the newest-first list, null for the oldest/unknown) and
+  `historyCompareHref` helpers, tested; frontend-only, additive. (v0.52.0, this run)
+
+- **"Which stack is cleaner" verdict in the Compare view** — when both compared
+  stacks carry a measured noise σ, the Compare page now shows a plain-language
+  banner ("B has 20% lower background noise — it's the cleaner stack"), turning
+  the A/B comparison into a concrete answer for the "did this setting change
+  help?" question. Pure `noiseComparison` helper (guards missing/zero/equal σ);
+  frontend-only, additive. (v0.51.2, this run)
+
+- **Configurable job-history retention** — the job-history cap (how many finished
+  jobs the in-memory map keeps, and at ~10× how many rows `jobs.sqlite` retains)
+  was a hard-coded 200; it's now a `job_history_limit` setting (default 200,
+  bounds 10–100000) surfaced on the Settings page and threaded into the
+  `JobManager` at startup. A settings change applies to the running manager
+  immediately (no restart). Additive/upgrade-safe: the default equals the old
+  constant, so an existing install keeps exactly as much history as before.
+  (v0.51.1, this run)
+
+- **Compare-two-stacks web view** — a new `/compare?a=<safe>:<run>&b=<safe>:<run>`
+  route (bookmarkable) shows two stacks **side by side** or as a **blink**
+  comparator (auto-alternates the two images in one frame at ~0.7 s, with
+  play/pause + manual flip) so a subtle difference — less noise, a cleaned
+  satellite trail, sharper stars — pops out. Each panel carries the target,
+  settings-relevant metadata and the noise readout. Launched from the Gallery's
+  existing multi-select: selecting exactly two images reveals a "Compare" action.
+  Reuses the gallery query + preview URLs (no new endpoint); handles a
+  deleted/missing run gracefully. Pure `parseRef`/`compareHref` helpers tested;
+  frontend-only, additive. (v0.51.0, this run)
+
+- **Noise-improvement readout vs the previous stack** — each History card now
+  shows its background-noise σ as a delta against the same target's *previous*
+  measured stack ("−18% noise vs your last stack", teal for cleaner / orange for
+  a regression / dimmed when ≈unchanged), so a user tuning settings or adding
+  subs sees at a glance whether the change actually helped — trial-and-error
+  becomes feedback. Pure `noiseDeltas` helper walks the runs oldest→newest so
+  "previous" is chronological (independent of the display sort) and guards a
+  zero baseline; runs with no earlier measured σ get no readout. Reuses the
+  recorded `noise_sigma`; frontend-only, additive. (v0.50.0, this run)
+
+- **Newest/Cleanest sort on the Gallery** — extends the History-page noise sort
+  (v0.49.0) to the Gallery, where runs span every target: a `SegmentedControl`
+  (shown only with >1 image and at least one measured σ) reorders cards by
+  ascending `noise_sigma`, keeping unmeasured (pre-v0.48) runs last — a global
+  "show me my cleanest results" that reuses the recorded σ (normalized so it's
+  comparable across gain/exposure). Pure `sortGallery` helper; frontend-only,
+  additive. (v0.49.1, this run)
+
+- **Newest/Cleanest sort on the History page** — completes the noise series: the
+  History view gained a Newest/Cleanest `SegmentedControl` (shown only with >1 run
+  and at least one measured σ) that reorders the run cards by ascending
+  `noise_sigma`, keeping unmeasured (pre-v0.48) runs last — so a user with many
+  stacks of one target can jump straight to the least-noisy result rather than
+  eyeballing every card. Pure `sortRuns` helper; frontend-only, additive.
+  (v0.49.0, this run)
+
+- **Stamp the background-noise σ into the master FITS header** — extends the
+  v0.48.0 noise readout: `run_stack` now measures the finished stack's noise σ
+  *once* and records it both as a `BKGSIGMA` FITS provenance card (so Siril/
+  PixInsight/APP see how clean the result is) and in the run record (previously
+  computed twice), and the run Info panel surfaces the card. Additive/upgrade-
+  safe; extends the existing STACKMTD/DECONPSF provenance pattern. (v0.48.1,
+  this run)
+
+- **Per-stack noise-floor readout + "cleanest stack" badge** — `run_stack` now
+  records each stack's normalized background-noise σ (reusing
+  `seestack/edit/noise.estimate_noise_sigma` on the finished image) in a new
+  additive `stack_runs.noise_sigma` column (schema v5→v6 migration; old runs stay
+  NULL). `StackRunOut` and the gallery response carry it; History and Gallery
+  cards show a small "Noise 0.021" readout (lower = cleaner, with a plain-language
+  tooltip), and the History page (all runs of one target) flags the single
+  lowest-noise run with a teal "Cleanest" badge — but only when ≥2 runs carry a
+  measured σ, so a lone stack is never singled out. Turns "which looks less noisy"
+  into a number. Additive/upgrade-safe; within-target comparison only. (v0.48.0,
+  this run)
+
+- **Editor processing chain in the History Info panel** — the run Info endpoint
+  (`GET …/stack-runs/{id}/info`) now parses the `AstroStack: op.id(args)` FITS
+  `HISTORY` cards an editor export writes (v0.46.0) into a friendly, ordered
+  `processing` list (op id + registry label), and the History Info panel shows
+  "Processing: Stretch → Noise reduction → Sharpen" — so a user sees how a run
+  was edited without opening the FITS in Siril. Unknown op ids fall back to the
+  raw id; non-AstroStack HISTORY cards are ignored; plain stacks report an empty
+  chain. Additive/upgrade-safe (just a header read + new response field).
+  (v0.47.0, this run)
+
+- **Full editor-recipe HISTORY provenance in exported FITS** — an editor export
+  previously recorded only the op *count* (`STACKMTD="editor recipe (N ops)"`).
+  The derived `master.fits` now also carries one FITS `HISTORY` card per enabled
+  op with its key params (e.g. `AstroStack: detail.denoise(method=wavelet,
+  strength=0.5)`) — the canonical provenance mechanism that Siril/PixInsight/APP
+  display — so an edited export self-documents its full processing chain.
+  `_merge_header_meta` gained list-valued `HISTORY` (appends commentary cards)
+  support; disabled/long-structured params are skipped and each card is clamped
+  to the 72-char limit. Additive/upgrade-safe. (v0.46.0, this run)
+
+- **Code-split the frontend vendor bundle** — the eager app bundle was one
+  720 kB `index` chunk (React + Mantine + TanStack + all routes). A `manualChunks`
+  split in `vite.config.ts` peels the rarely-changing vendors into `react`
+  (65 kB), `mantine` (461 kB) and `query` (41 kB) chunks, dropping the main app
+  chunk to ~153 kB — so no eager chunk trips the 500 kB warning and vendors stay
+  cached across app deploys. The only remaining large chunks are the already
+  lazy-loaded Sky/aladin atlas (loaded only on the Sky page). Build-config only.
+  (v0.45.1, this run)
+
+- **"From your image" denoise-strength suggestion** — the editor's noise-
+  reduction op made the user hand-tune a 0..1 strength knob. A new engine module
+  (`seestack/edit/noise.py`) estimates the run's background noise σ robustly
+  (MAD of adjacent-pixel differences, normalized to the image's own p0.5..p99.5
+  signal range so it's comparable across gain/exposure) and maps it linearly to
+  a starting strength (clamped to the op's 0.1..1.0 range, rounded to its 0.05
+  step). Pure-numpy so it never depends on PyWavelets. Exposed via
+  `GET …/editor/denoise-suggestion` and offered as a one-click "From your image
+  (strength X)" button on `detail.denoise`, reusing the generic `suggestions`
+  prop (v0.43.0). Additive/upgrade-safe. (v0.45.0, this run)
+
+- **Record the deconvolution PSF σ in the exported FITS header** — when an
+  editor recipe includes an enabled `detail.deconvolve` op, the derived
+  `master.fits` now carries a `DECONPSF` card recording the Gaussian PSF σ (px)
+  actually used (a single float, or comma-joined when several deconvolutions ran
+  in order), and the History Info panel surfaces it (added to `_INFO_CARDS`). So
+  a sharpened export self-documents in Siril/PixInsight/APP whether and how hard
+  it was deconvolved, extending the existing STACKMTD/EDITFROM provenance
+  pattern. Additive/upgrade-safe. (v0.44.0, this run)
+
+- **PSF-from-stars for editor deconvolution** — the deconvolution op made the
+  user hand-guess a Gaussian PSF σ. A new `GET …/editor/psf-suggestion`
+  endpoint derives it from `Project.median_fwhm()` (median FWHM of accepted
+  frames, already measured by QC): σ = FWHM / (2·√(2·ln2)), clamped to the op's
+  0.5–5.0 slider range, null when no frame carries an FWHM. The editor's op
+  param panel gained a generic, reusable `suggestions` prop; for
+  `detail.deconvolve` it renders a one-click "From your stars (σ≈X, FWHM Ypx)"
+  button that sets `psf_sigma`. Additive/upgrade-safe. (v0.43.0, this run)
+
+- **Auto-grade hint on the Stack form** — the Stack form now calls the
+  `frames/auto-grade` preview endpoint (only once there are ≥10 accepted frames,
+  matching the grader's robust-stats floor) and, when it flags some accepted
+  frames as likely quality outliers, shows a yellow advisory ("Auto-grade thinks
+  N of your M accepted frames look like quality outliers …") with a "Review
+  Auto-grade" button linking back to the Target page — so a user about to stack
+  junk is pointed at the one-click cleanup. Advisory only; nothing is rejected
+  from the Stack form. (v0.42.2, this run)
+
+- **Nudge quality weighting when frame quality varies a lot** — the Stack form
+  now shows an advisory when the frames that would be stacked (accepted +
+  solved) show a wide *robust* spread — interquartile spread (p75−p25)/median ≥
+  0.3 in FWHM or ≥ 0.4 in star count — but `quality_weighted` is off, because a
+  mixed-quality set is exactly where down-weighting the worst subs helps and a
+  uniform set barely changes. Needs ≥8 frames; IQR/median is scale-free and
+  outlier-robust so a couple of bad subs don't trigger it. Client-side,
+  within-target, advisory only; reuses the metrics already fetched for the
+  transparency hint. (v0.42.1, this run)
+
+- **"N trailed frames" badge on the Target view** — mirrors the "N streaked"
+  badge for star *shape*. A shared `trailed_frame_ids` helper flags accepted
+  frames whose `eccentricity_median` is *both* a strong within-target outlier
+  (> median + 3·MAD) *and* above a 0.6 absolute floor of noticeably elongated
+  stars (needs ≥5 measured frames, so a tiny set is never nuked) — a
+  bad-tracking/wind/bumped-mount night. The Target view shows a yellow
+  "N trailed" badge (computed client-side with the identical criterion) with a
+  one-click "Reject all" that calls a new `reject_trailed` bulk action
+  (reason `bulk:trailed`, wired into the existing one-click undo). Reuses
+  existing plumbing; additive/upgrade-safe. (v0.42.0, this run)
+
+- **Auto-grade: automatic, explained frame-quality grading** — the QC layer
+  measured five per-sub quality metrics but (streaks aside) nothing acted on
+  them; picking "reject worst N% by metric X" needs exactly the judgment a
+  beginner lacks. A new engine module (`seestack/qc/grading.py`) grades a
+  target's accepted frames with robust one-sided modified z-scores
+  (median/MAD, meanAD fallback; log-domain for the multiplicative metrics —
+  star count, sky, transparency; linear for FWHM/eccentricity) and only flags
+  frames that are *also* practically worse (≥25% softer FWHM, ≥1.5× brighter
+  sky, ≥30% star/transparency loss, +0.15 eccentricity), each with a
+  plain-language reason ("far fewer stars than typical (25 vs 400) — likely
+  cloud"). Safety rails: ≥10 measured frames per metric, ≤25% of frames ever
+  recommended (worst-by-z kept), user-graded frames never touched, machine
+  rejections don't set `user_override` (reason `auto:grade:<metric>`).
+  Exposed as `GET/POST …/frames/auto-grade[/apply]` (apply recomputes
+  server-side and returns `changed_ids` for the shared one-click undo), a
+  preview-first modal on the Target page, and an opt-in
+  `auto_grade_frames`(+`auto_grade_sensitivity`) setting that grades
+  hands-off after QC in the watcher pipeline and manual QC+solve. Also fixed a
+  pre-existing staleness bug the undo flow exposed: manual accept/reject and
+  bulk frame actions never refreshed the registry's accepted counts. Additive/
+  upgrade-safe; default off. (v0.41.0, manual/frame-auto-grading)
+
+- **Plain-language hints on the Target metric columns** — the FWHM, Stars, Ecc.
+  and Sky column headers now carry the same dotted-underline hint tooltip that
+  only Transparency had, each explaining in one sentence what the metric means
+  and which direction is better (e.g. "Ecc. — median star elongation: 0 = round,
+  closer to 1 = trailed; flags tracking error/wind. Lower is better."). Removes a
+  layer of jargon for a beginner scanning their subs. Frontend-only.
+  (v0.40.1, this run)
+
+- **Transparency-night badge on History/Gallery cards** — completes the
+  transparency series. `run_stack` now records each run's transparency verdict
+  (`median transparency of the stacked frames ÷ the target's p90 clear-sky
+  baseline`) in a new additive `stack_runs.transparency_ratio` column (schema
+  v4→v5 migration; old runs stay NULL), mirroring the Stack-form pre-run hint's
+  within-target normalisation. `StackRunOut` and the gallery response carry it,
+  and a shared `HazyNightBadge` shows a small orange "Hazy night" badge (with a
+  "% below clearest nights" tooltip) on History and Gallery cards when the ratio
+  is below 0.6 — so a user browsing past stacks sees which were shot through
+  haze at a glance, no reopening. Additive/upgrade-safe. (v0.40.0, this run)
+
+- **Surface the quality-weighting summary in the run Info panel** — a
+  quality-weighted stack now stamps its `WeightingStats` onto the master FITS
+  header (`WGTMODE`/`WGTNDOWN`/`WGTMIN`/`WGTMAX`/`WGTMED`), and the run Info
+  endpoint parses those into a friendly `weighting` object so the History Info
+  panel shows "Quality-weighted · N frames down-weighted · weights 0.31–1.00
+  (median 0.72)". Lets a user trust the (off-by-default) weighting did something
+  and gauge how aggressive it was, with no extra storage — just header cards,
+  matching the existing provenance pattern. Added `n_downweighted` to
+  `WeightingStats`. (v0.39.0, this run)
+
+- **Eccentricity factor in quality weighting** — `compute_frame_weights` gained a
+  fifth `ecc_factor` (`clip(median_ecc / frame_ecc, min_weight, 1.0)`), so with
+  quality-weighting on, frames whose stars are more *elongated* than the run's
+  median (tracking error / wind / a mount bump) pull less into the average, while
+  rounder-than-median frames cap at the neutral 1.0. Captures star *shape* where
+  the FWHM factor captures *size*, so the two aren't redundant. Guards
+  `frame_ecc == 0` (perfectly round = best case) against divide-by-zero and only
+  applies when the run's median eccentricity is itself measurable. Additive;
+  gated by the off-by-default `quality_weighted`. (v0.38.0, this run)
+
+- **Library search matches notes + persistent filter view** — the Library
+  free-text search now also matches a target's `notes` (not just name/tags), and
+  the whole view (search text, sort, active tag chips) is persisted to
+  localStorage so a user with a big library keeps their filters when they open a
+  target and come back, or reload. Defensively guarded so a disabled/broken
+  store never breaks the page. Frontend-only. (v0.37.0, this run)
+
+- **Transparency-night hint on the Stack form** — completes the transparency
+  weighting pair (v0.36.0). The Stack form now shows an advisory when the median
+  transparency of the frames that would be stacked (accepted + solved) sits well
+  below (<60% of) this target's clear-sky baseline — the 90th percentile of
+  transparency across all frames that carry a score — so a user knows the stack
+  was shot through haze/thin cloud even if they didn't reject those subs, and is
+  pointed at quality weighting or rejecting the hazy subs. Client-side,
+  within-target normalisation; advisory only. (v0.36.1, this run)
+
+- **Weight the stack by frame transparency** — `compute_frame_weights` gained a
+  fourth `transparency_factor` (`frame_transparency / median_transparency`,
+  clipped to `[min_weight, 1.0]`), so with quality-weighting on, hazy/thin-cloud
+  subs (whose bright stars dimmed) pull less into the average while clear frames
+  cap at the neutral factor. Normalised against the median of the frames being
+  stacked (within one target), because the raw score isn't comparable across
+  gain/exposure. Frames without a transparency score keep the neutral factor.
+  Additive; gated by the existing (off-by-default) `quality_weighted` flag.
+  (v0.36.0, this run)
+
+- **Inline reject-reason chip on rejected frame rows** — rejected rows in the
+  Target table were only dimmed; each now carries a small muted plain-language
+  reason chip (with a raw-reason tooltip) so a user scanning the table sees *why
+  each specific frame* was dropped, not just the aggregate. `rejectReasonLabel`
+  was extended to cover the remaining persisted reason forms (`auto:*`,
+  `qc_error:*`, `solve_failed:*`), which also improves the existing reject-reason
+  breakdown hover-card. Frontend-only. (v0.35.1, this run)
+
+- **"Reject worst by transparency" bulk action** — building on this run's
+  `transparency_score`, the `reject_worst` `BulkFrameAction` metric enum and the
+  Target view's "Reject worst by" dropdown now include Transparency. Because
+  higher transparency is *better*, the worst = the *lowest* scores, so the
+  engine's "higher is better" flag set was extended (`star_count` +
+  `transparency_score`). A user can now drop their haziest subs in one gesture.
+  (v0.35.0, this run)
+
+- **Editor undo/redo keyboard shortcuts** — the editor's undo/redo buttons now
+  have keyboard equivalents: Cmd/Ctrl+Z undoes an op-pipeline change, Cmd/Ctrl+
+  Shift+Z (or Ctrl+Y) redoes. Skipped while a text field is focused so editing
+  the output name / curve inputs isn't hijacked, and the button tooltips now show
+  the shortcut. Frontend-only; reuses the existing `useUndoable` history.
+  (v0.34.1, this run)
+
+- **Star-mask preview toggle in the editor** — a new
+  `GET …/editor/star-mask` endpoint renders the soft `[0,1]` mask that gates the
+  star ops (`stars.reduce` / `boost_nebula`) as a grayscale PNG on the live
+  proxy (`size_px`/`grow` query params, clamped). The Editor gained a grape
+  "Star mask" toggle next to Compare that overlays the mask (white = treated as a
+  star) with a "Star mask" label, so a user can *see* what the editor considers a
+  star vs background/nebula before dialling in star reduction. Additive;
+  no-store, proxy-only. (v0.34.0, this run)
+
+- **Compute the dead `transparency_score` frame metric** — the column has been
+  in the schema and `FrameRow` since day one but was never populated. QC now
+  computes it as the median instrumental flux of a frame's brightest ~10 stars
+  (via `median_star_flux`): haze/thin cloud dims all stars, so the bright ones
+  (which stay detected on clear *and* hazy nights) fade measurably, while using
+  only the brightest avoids the confounder where a hazy frame loses its faint
+  stars and inflates the survivors' median. Wired through
+  `apply_qc_result_to_db`, exposed on `FrameOut` (+ sortable), and shown as a new
+  "Transp." column (with a plain-language header tooltip) on the Target view — an
+  imager can now sort to find their haziest subs. Relative within a target; not
+  an absolute magnitude. Follow-up (weighting + grader hint) filed above.
+  Additive/upgrade-safe. (v0.33.0, this run)
+
+- **Undo the last bulk reject + reject-reason breakdown on the Target view** —
+  two related approachability wins. `/frames/bulk` now returns `changed_ids`, so
+  after a `reject_worst`/`reject_streaked` cut the Target view shows a one-click
+  "Undo" that re-accepts exactly those ids (reuses the `accept` bulk action).
+  And a new `GET /frames/reject-summary` (server-side `Project.reject_reason_counts`,
+  NULL-reason bucketed as `user`) powers a "N rejected" badge with a hover-card
+  breakdown by reason (QC: FWHM, Streaked (bulk), Manual, …) so a beginner sees
+  *why* frames were dropped and can spot a dominant failure mode. Purely additive;
+  the summary query is gated on there being rejected frames. (v0.32.0, this run)
+
+- **Calibration mosaic-edge NaN/coverage audit** — completes the NaN/coverage
+  audit series (channel combine v0.16.1, mono single-frame v0.22.1, mono
+  mosaic-edge v0.28.1). Added a regression test that stacks two dark/flat-
+  *calibrated* frames with only partial footprint overlap onto a union canvas
+  and asserts the uncovered margin stays NaN — calibration (dark subtract + flat
+  divide) never fabricates a zero wedge where there's no coverage — while
+  coverage is genuine (0..2) and the interior stays finite. Confirms the
+  calibration path already handles partial coverage correctly; no code change.
+  (v0.31.1, this run)
+
+- **Suggest the reference canvas when a non-drizzle mosaic is over budget** —
+  the drizzle-off mirror of the v0.28.0 drizzle-scale suggestion. `stack-estimate`
+  now returns `suggested_reference_canvas`: when drizzle is off and the union
+  mosaic canvas alone blows the memory budget but the smaller reference-frame
+  canvas would fit, the Stack form's over-budget alert offers a one-click "Use
+  the reference canvas instead" that sets `mosaic_canvas=reference`. Turns the
+  other over-budget refusal into a usable path. (v0.31.0, this run)
+
+- **Warn when the stack budget exceeds available RAM** — `/api/system` now
+  reports `memory.total_gb`/`available_gb` (from `/proc/meminfo`), and the
+  Settings page shows an advisory Alert when `max_stack_memory_gb` is set higher
+  than the box's currently-available RAM — a footgun that re-opens the OOM door
+  the guard exists to close. Advisory only; the value is still honoured.
+  Additive/upgrade-safe. (v0.30.1, this run)
+
+- **One-click "reject all streaked frames"** — the "N streaked" badge on the
+  Target view now carries a "Reject all" action (with a confirm) that rejects
+  every accepted frame flagged `streak_detected` in one gesture, via a new
+  `reject_streaked` `BulkFrameAction` (reject reason `bulk:streaked`,
+  `user_override` set). For users who'd rather drop the streaked subs than rely
+  on per-pixel rejection. Reuses the existing flag + bulk plumbing; additive.
+  (v0.30.0, this run)
+
+- **De-flake `Editor.test.tsx`** — `main`'s CI was intermittently red on the
+  editor "loads the saved recipe" test: it gated `waitFor` on the static "Add
+  operation" toolbar button (which renders before the async saved-recipe query
+  resolves) and then checked the recipe op "Stretch" synchronously, so it raced
+  on slower CI. Now it awaits the recipe-dependent text via `findByText`.
+  Test-only. (v0.29.1, this run)
+
+- **Stack memory budget as a Setting** — a new `max_stack_memory_gb` setting
+  (default None = auto ~70% of RAM, clamped 0.5–1024 GB) lets the user view/raise/
+  lower the per-stack working-memory cap from Settings instead of editing
+  container env. Threaded into `run_stack`/`estimate_stack` via a
+  `memory_budget_gb` param, so both the pre-run estimate and the in-run guard
+  honour it. Precedence: the `ASTROSTACK_MAX_STACK_GB` env override still wins,
+  then the setting, then auto. Additive/upgrade-safe (new optional field).
+  (v0.29.0, this run)
+
+- **Mono mosaic-edge NaN/coverage audit** — added a regression test that stacks
+  two mono frames whose sky footprints only partially overlap onto a union
+  canvas and asserts the uncovered margin stays NaN (never zero-filled into a
+  black wedge that would drag downstream reductions toward zero), coverage is
+  genuine (min 0, max 2), and the output stays pure luminance. Confirms the mono
+  path already handles partial coverage correctly; no code change. (v0.28.1,
+  this run)
+
+- **Suggest a fitting drizzle scale when over budget** — the `stack-estimate`
+  endpoint now returns `suggested_drizzle_scale`: when a drizzle run would blow the
+  memory budget, the engine computes the largest scale (on a 0.1 grid, < the
+  requested one) whose peak still fits, and the Stack form's over-budget alert
+  offers a one-click "Use drizzle ×N instead" that fills it in. Turns a hard
+  refusal into a usable path. None when drizzle is off, the run already fits, or
+  even ×1.0 exceeds. (v0.28.0, this run)
+
+- **Streaked-frame count badge on the Target view** — an orange "N streaked" badge
+  next to the accepted count shows how many *accepted* frames still carry a
+  satellite/plane trail (`streak_detected`), with a tooltip explaining that
+  sigma-clip / drizzle outlier rejection can clean the trail while keeping the
+  frame — so with "keep streaked frames" on, the user sees at a glance what
+  per-pixel rejection needs to handle. Reuses the existing flag; frontend-only.
+  (v0.27.1, this run)
+
+- **Frame count / mosaic flag inline in the Stack estimate** — the pre-run sizing
+  line now leads with "N accepted, solved frames · mosaic canvas · output W×H ·
+  ~X GB peak memory", so the user confirms *what* is about to be stacked (count +
+  mosaic-vs-reference) alongside the sizing, reusing `n_frames`/`is_mosaic` the
+  `stack-estimate` endpoint already returned. Frontend-only. (v0.27.1, this run)
+
+- **Reclaim streaked subs** — new opt-in `keep_streaked_frames` setting (default
+  off). QC still detects satellite/plane trails, but with this on it *flags* the
+  frame instead of auto-rejecting it, so a stack with per-pixel rejection
+  (sigma-clip or drizzle rejection) removes just the streak while keeping the
+  frame's ~99% good signal — valuable on big stacks. Threaded through
+  `run_qc_and_solve(auto_reject_streaks=…)` and both webapp QC paths; a Settings
+  toggle exposes it, and the Stack form warns when accepted streaked frames would
+  be stacked *without* rejection (the footgun). User overrides are never
+  clobbered. Additive/upgrade-safe (new setting defaults off). (v0.27.0, this run)
+
+- **Large-stack sigma-kappa hint** — completes the sigma-clip guidance pair. The
+  low-frame "don't clip under ~5" caution shipped in v0.22.0; now, when a stack
+  has ≥200 accepted frames and κ is at/above the default 3, the Stack form
+  suggests nudging κ down (~2.5) because the per-pixel spread is very well
+  measured and a tighter clip safely rejects more satellites/planes/cosmic rays.
+  Advisory only. (v0.26.1, this run)
+
+- **Show/search run labels in the Gallery** — the gallery response now carries
+  each run's `notes` label, so the Gallery card shows it (in violet, above the
+  metadata line) and a new search box filters cards by label + target name +
+  output filename. A user can finally find "best RGB v2" across every target
+  without opening each History page. Purely additive (new response field, new
+  UI). (v0.26.0, this run)
+
+- **Drizzle memory estimate in the Stack form** — subsumed by the pre-run stack
+  estimate below: the "~X GB peak memory" line covers drizzle scales directly, so
+  the standalone "drizzle memory estimate" idea is done. (v0.25.0, this run)
+
+- **Pre-run stack estimate endpoint** — new `GET /targets/{safe}/stack-estimate`
+  (`drizzle`/`drizzle_scale`/`drizzle_reject`/`mosaic_canvas` query params) does a
+  dry-run sizing: picks the reference, computes the reference-vs-union canvas the
+  way `run_stack` does, and returns the output dimensions + estimated peak memory
+  and the server budget, flagging `would_exceed`. The peak-memory maths is
+  factored into a shared `_estimate_peak_bytes` so the warning can never disagree
+  with the in-run `_guard_stack_memory`. The Stack form shows a live "Output
+  canvas W×H · ~X GB peak memory" line and turns it into a red "over budget, run
+  will be refused" alert when it would OOM — so a big drizzle/mosaic canvas is
+  caught *before* the user hits Stack, not after. (v0.25.0, this run)
+
+- **Outlier-safe drizzle** — new opt-in `drizzle_reject`: two-pass κ-σ
+  rejection for the drizzle path (pass 1 drizzles values + squares for
+  per-output-pixel contribution statistics, pass 2 zero-weights contributions
+  outside mean ± κ·σ). Removes satellites/plane trails/cosmic rays that
+  single-pass drizzle kept forever, without eating star cores under dither
+  (output-space statistics cancel PSF-gradient systematics; verified to <2%
+  star photometry). Plus drizzle parity/memory fixes shipped alongside:
+  hot-pixel suppression and quality weights were silently ignored on the
+  drizzle path, NaN input pixels were injected as zeros, and the unused
+  drizzle context bitmask grew a full-canvas int32 plane per 32 frames with a
+  full re-copy each time (tens of GB + quadratic copying on 5k+ sub stacks —
+  now disabled). Memory guard charges the rejection pass; Stack form gained
+  the toggle + a "sigma-clip doesn't cover drizzle" hint. (v0.24.0, this run)
+
+- **Editable notes/label on History cards** — the long-standing `notes` column
+  finally has a UI: a new `PATCH /api/targets/{safe}/stack-runs/{id}` (trims
+  whitespace, empty → null, capped at 500 chars) plus `Project.set_stack_run_notes`.
+  Each History card shows an inline pencil-edit label ("best RGB v2", "cloudy
+  night") so users can annotate and later recognise runs. Additive/upgrade-safe.
+  (v0.23.0, this run)
+
+- **Mono single-frame edge test** — verified the mono stack path on a
+  one-frame, sigma-clip-on stack: coverage tops at 1, the single-coverage
+  pixels stay finite (no spurious clip-to-NaN), and the output stays grayscale.
+  Closes the single-frame half of the mono NaN/coverage audit. (v0.22.1, this run)
+
+- **Low-frame sigma-clip caution** — the Stack form now shows an inline caution
+  when sigma-clip rejection is enabled but fewer than ~5 accepted, plate-solved
+  frames exist ("you only have 3 accepted, solved frames … it can reject real
+  signal as an outlier — consider turning it off"). Removes a knob a beginner
+  can't reason about; advisory only, the setting still stands. (v0.22.0, this run)
+
+- **Integration time inline on History cards + Reuse settings from Gallery** —
+  `StackRunOut` now carries `total_exposure_s`, so each History card shows the
+  friendly "2.3 h"/"42 min" integration on its metadata line without opening the
+  Info panel (matching the Gallery). The Gallery response gained a `reusable`
+  flag (false for editor-recipe/channel-combine runs), and Gallery cards now
+  offer the same "Reuse settings" action as History, opening the Stack form
+  pre-filled via `?from=<runId>`. (v0.21.0, this run)
+
+- **Fix red CI (pytest-qt import crash)** — CI had been failing on every merge:
+  the `pytest-qt` plugin imports Qt at configure time and died on the runner's
+  missing `libEGL.so.1`, aborting the whole run before any test executed (the 3
+  GUI test *files* were ignored, but the plugin still loaded). Added
+  `-p no:pytest-qt` to the CI pytest command so the headless suite runs green,
+  matching the documented local fallback. No app-code change. (this run)
+
+- **Integration time on Gallery cards** — stack runs now record their effective
+  integration time (median sub × frames combined) via a new additive
+  `total_exposure_s` column (schema v3→v4 migration; old runs stay NULL). The
+  gallery response exposes it and each card shows a friendly "2.3 h"/"42 min"
+  next to the frame count — no per-card FITS read, so it scales. Extracted the
+  shared `formatIntegration` helper to `frontend/src/format.ts`. (v0.20.0, this run)
+
+- **Reuse stack settings from a previous run** — new
+  `GET /stack-runs/{id}/options` returns a run's settings as a form-ready payload
+  (knobs kept, `output_name` dropped so a rerun can't clobber the old output,
+  calibration paths reverse-mapped to master ids). `StackRunOut` gained a
+  `reusable` flag (false for editor/channel-combine runs); History cards show a
+  "Reuse settings" button on reusable runs that opens the Stack form pre-filled
+  via `?from=<id>`. Repeatability without re-deriving knobs. (v0.19.0, this run)
+
+- **Warn on a mismatched calibration master pick** — the Stack form now shows an
+  inline caution when a chosen dark's exposure is far (>25%) from the target's
+  subs ("this dark was shot at 120 s but your subs are 30 s") and when a chosen
+  flat-dark's exposure doesn't match the selected flat. Purely advisory — the
+  pick is still honoured. Complements the recommender so a wrong pick doesn't
+  silently degrade the stack. (v0.18.3, this run)
+
+- **Auto-suggest a matching flat-dark** — `recommend_masters` now also returns
+  `flat_dark_master_id`: the dark whose exposure best matches the *recommended
+  flat* (flat-darks calibrate the flat, not the lights), gated so a wildly
+  mismatched dark (e.g. 300 s for a 2 s flat) is never suggested. The Stack
+  form's flat-dark selector badges it "★ recommended" and the one-click "Use
+  recommended" now fills it in too. (v0.18.2, this run)
+
+- **Drizzle flux-scale fix** — `DrizzleStacker.result()` no longer divides the
+  already-averaged `out_img` by `out_wht` (the STScI drizzle library keeps
+  `out_img` as a running weighted *average*, not a sum). The old double-normalise
+  deflated drizzle brightness by ~N (the frame count) and threw an "overflow in
+  divide" warning; drizzle at `scale=1, pixfrac=1` now conserves surface
+  brightness and matches the weighted-mean path. Tightened the parity test from
+  order-of-magnitude to <2× and added a multi-frame flux-conservation unit test.
+  (v0.18.1, this run)
+
+- **Auto-suggest calibration masters** — new `recommend_masters` ranks the
+  library's dark/flat masters against a target's median frame exposure/gain/temp
+  (darks match on exposure+gain+temp; flats are exposure-independent, matched on
+  gain+temp), exposed via `GET /api/targets/{safe}/calibration-suggestions`. The
+  Stack form badges the best-matching dark/flat with "★ recommended" and offers a
+  one-click "Use recommended" — a beginner no longer needs to know which master
+  goes with which lights. Advisory only; nothing is auto-applied. (v0.18.0, this run)
+
+- **Stack info panel** — new `GET /stack-runs/{id}/info` reads the provenance
+  cards from a run's `master.fits` (OBJECT, NFRAMES/NCOMBINE, EXPOSURE, EXPTOTAL,
+  DATE-OBS/END, STACKER/STACKMTD, COLORTYP, EDITFROM…) and an "Info" toggle on
+  each History card shows them, led by a friendly integration-time line
+  ("Integration: 2.3 h · 840 subs"). No new storage — just a header read.
+  (v0.17.0, this run)
+
+- `run_stack` edge-case tests — single accepted frame (degenerate stack, coverage
+  tops at 1, finite output), all-frames-rejected (raises cleanly instead of
+  garbage), and a drizzle-vs-sigma-clip order-of-magnitude parity guard. The
+  parity test surfaced a real drizzle flux-scale discrepancy, now filed as its own
+  backlog item. (v0.16.3, this run)
+
+- Editor-export provenance — the derived `master.fits` from an editor recipe now
+  carries the source integration cards (OBJECT/NFRAMES/EXPOSURE/EXPTOTAL/COLORTYP/
+  DATE-OBS/END) forward and records `STACKMTD="editor recipe (N ops)"` + `EDITFROM`
+  (source run id), so an edited export self-documents in Siril/PixInsight/APP.
+  (v0.16.2, this run)
+
+- Channel-combine provenance — the LRGB/RGB combined FITS now carries
+  `NCOMBINE` (source stacks) and `STACKMTD` ("channel-combine (RGB)"), matching
+  the stack-export provenance headers. (v0.16.1, this run)
+
+- Accessibility sweep — added `aria-label` to the remaining icon-only
+  `ActionIcon` buttons (frame accept/reject, delete calibration master, delete
+  preset) so they have accessible names for screen readers, plus a test
+  asserting the delete-master button is reachable by name. (v0.16.1, this run)
+
+- Channel-combine NaN fix — LRGB pixels covered in G/B/L but uncovered in a
+  colour channel now become cleanly uncovered (NaN) instead of `[NaN, 0, 0]`
+  (which zeroed real G/B signal at mosaic edges). Added NaN/coverage +
+  single-pixel edge tests. (v0.16.1, this run)
+
+- **Flat-dark support** — a master flat can now be dark-subtracted before
+  normalising (`CalibrationMasters.load` gains `flat_dark_path`,
+  `StackOptions.flat_dark_path`, server-resolved from a `flat_dark_master_id`).
+  Removes the flat's dark-current/bias pedestal for a more correct flat; opt-in
+  via a new Flat-dark selector on the Stack page. (v0.16.0, this run)
+
+- **Dashboard stats caching** — `GET /api/stats` no longer re-opens every target's
+  SQLite on each poll. The expensive per-target roll-up is cached on the app,
+  keyed by a cheap registry signature (per-target activity stamp + latest preview)
+  so a completed stack refreshes it promptly, with a 30 s TTL backstop.
+  (v0.15.1, this run)
+
+- **Settings backup & restore** — `GET /api/settings/export` downloads a portable
+  JSON backup and `POST /api/settings/import` restores it; secrets and
+  host-specific paths (data root, incoming/library, ASTAP path) are excluded so a
+  backup is safe to share and restores on any install. Backup & restore panel on
+  the Settings page. (v0.15.0, this run)
+
+- **FITS output provenance headers** — `master.fits` now records OBJECT (target),
+  NFRAMES, EXPOSURE (per-sub), EXPTOTAL (integration time), STACKER (method) and
+  COLORTYP so the scientific output self-documents for Siril/PixInsight/APP.
+  Additive `header_meta` arg on `write_stack_outputs`; defensive card merge.
+  (v0.14.0, this run)
+
+- CI safety net (`.github/workflows/ci.yml`) — full Python + frontend suites run
+  on every PR and push to `main`; independent check on autonomous self-merges.
+
+- **Autonomous run (agent, this session):** security fixes — Seestar `goto`
+  RA/Dec bounds validation, closed a quick-look-preview gap in the
+  `output_name` sanitizer (`_save_quick_look` built its own unsanitized
+  filename), `react-router`/`form-data` CVE patches (`npm audit fix`) —
+  plus `lucky_fraction` bounds validation, confirm+error-surfacing on
+  stack-run deletion (`History.tsx`), job-cancel error feedback and a
+  Logs-download filter bug (`Jobs.tsx`/`Logs.tsx`). Reconciled with a
+  concurrent autonomous run that independently fixed the `bayer`
+  path-traversal and `output_name` sanitizer issues and its own take on
+  the `History.tsx` delete confirmation — merged rather than duplicated.
+
+- **Autonomous run #1 (agent):** security + reliability/operability hardening +
+  frontend error states — `output_name` sanitizer, `bayer` param validation, 404s
+  for unknown targets, settings bounds (pydantic `Field` ge/le + 422), jobs-list
+  clamp, shared `QueryError` component across 7 routes, editor-op pixel tests.
+  (PR #28)
+
+- Mono stacking + LRGB/RGB channel combine — `StackOptions.mono`, `channel_combine`,
+  combine job/endpoint, Channel combine page. (v0.12.0, `9485e28`)
+
+- Star-mask-aware local edits — `edit/starmask.py`, mask-gated `stars.reduce`,
+  new `stars.boost_nebula`. (v0.11.0, `d33c7c9`)
+
+---
+
+## Cut from the working list on 2026-09-08 (backlog-readiness run, closing D4) — 47 shipped or closed entries, verbatim
+
+Nothing below is open work. Each block is the entry exactly as it stood in `IMPROVEMENTS.md` at v0.388.0;
+where a headline names an open residue, that residue is either superseded (noted in the heading) or on the
+owner's one-sitting list in `IMPROVEMENTS.md` → "Needs owner sign-off".
+
+### D4 — closed 2026-09-08 by the backlog-readiness run (the cut this block is the record of)
+
+- **⚪ D4 — the working list still hides shipped work in plain sight** *(third audit, counted)*. Across the
+  priority sections: **36 shipped-but-unstruck entries and 63 closed records**; sweep blockquotes still inside
+  "Bugs" despite the three-file rule; and **"Features that serve real workflows" has zero ready entries against
+  17 shipped ones**, with four bullets describing one readiness card. Of **178 open-shaped entries only 18 are
+  genuinely ready to build** — one in five is already shipped, one in three is a closed record. Builders now
+  catch the duplicates at triage (five recorded catches since the split), which costs each run its opening
+  minutes. **One Scout run of mechanical work**: cut the 36 shipped and 63 closed entries to `SHIPPED.md`, move
+  the sweep blockquotes to `PROCESS-NOTES.md`, and leave "Bugs" holding only the sky-atlas rotation bug
+  *(D1 and D2, which this used to name alongside it, shipped 2026-09-08 as v0.382.4 / v0.382.5)*. That roughly
+  halves the working list again.
+  *(D3 — the re-aimed Scout rotation living only in the hand-pasted prompt, so all four subsequent runs swept
+  the area it marks closed — is **already fixed**: the rotation was moved into the `AGENTS.md` Scout bullet on
+  2026-09-07, which is a file the Scout actually reads.)*
+
+### v0.374.0 — "Save as defaults" stores what you changed
+
+- ✅ **v0.374.0 — "Save as defaults" stores what you changed, not a snapshot of the form**
+  (`walkaway.stack_defaults_delta` + `routers/stack._unsaved_stack_options`). Closes shapes (b) *and*
+  (c) of the v0.372.0 entry — a switch the owner flips globally now reaches a target that once pressed
+  Save, existing full-snapshot blobs are left alone, and the rejection keys stay pinned by *presence*
+  so `auto_reject_on_unattended` remains the only way the chain overrules a saved method. Full entry in
+  [`SHIPPED.md`](SHIPPED.md).
+  ✅ **v0.374.1** — and the note's own sentence, which v0.374.0 had just made an overstatement, is scoped
+  to the rows it names (`Stack.tsx`).
+
+### the half the v0.323.1 rejection-reach fix could not reach (struck)
+
+- ~~**NEW IDEA (Builder 2026-09-02, the half the v0.323.1 rejection-reach fix could not reach) — the same blind
+  κ-σ runs on the *walk-away* path, where there is no form to warn on.**~~ — **CLOSED: (a) shipped v0.335.0, (b) v0.337.0/.1, and the surface it needed shipped v0.334.1. Header struck 2026-09-06** because the ✅ blocks that say so sit ~90 lines below it, so every triage pass read this as live work. *(Pillar: autonomy + image quality —
+  PRIORITY 2/4; size S for the advisory, **do NOT blind-flip the default**; confidence: traced, mechanism the
+  same as the shipped fix's.)* v0.323.1 makes the Stack form say when the configured rejection cannot remove a
+  lone satellite trail (κ-σ dispatches from 4 subs but is blind until `kappa_min_frames` = 11 at κ=3). **The
+  unattended chain reaches nobody with that sentence.** `webapp/pipeline.py`'s `auto` rejection injection is
+  applied *"only when the user has expressed no rejection choice (no `auto_reject`/`sigma_clip`/
+  `min_max_reject` key in the merged options)"* — which is right, and it means an owner who once saved
+  `sigma_clip: true` into a per-target default or into global `default_stack_options` gets plain κ-σ on
+  **every** walk-away stack, silently reaching nothing on every night thinner than 11 subs. `stackhealth`'s
+  `rejection_blind` note does catch it afterwards, on the finished picture, so this is not invisible — but it
+  is only ever said *after* the picture is made, and the fix ("re-stack with Auto outlier removal on") is a
+  manual round trip on a path whose whole point is that nobody is there.
+  **Do not "fix" it by overriding their saved choice** — that is a default flip on the on-by-default hot path
+  changing pixels for someone who took control of the setting, which is exactly the trade AGENTS.md §1 refuses
+  and which the 3-frame entry under "Image quality" already declined for the same reason. **The shippable
+  shapes, in order:** (a) surface it *before* the night rather than after — the Target page already knows the
+  target's saved defaults and its accepted count, so `rejection_reach` (now public, `seestack/stack/stacker.py`)
+  can answer it there with the same one-click "Turn on Auto outlier removal" the Stack form now offers;
+  (b) if it is ever to change behaviour, make it a **new opt-in setting**, defaulted off, not a widening of the
+  existing `auto` guard. **Grep first:** the session-recap and "How's my stack?" surfaces may already be the
+  right home, and a third place asking this question is the mistake this class keeps making.
+
+  > **✅ THE GREP WAS DONE, AND IT FOUND A BUG RATHER THAN A HOME (Builder 2026-09-03, v0.334.1, branch
+  > `claude/sweet-babbage-ef4v1l`) — the Target page was ALREADY answering this question, and answering it
+  > wrongly. Half of (a) is therefore shipped; read this before building the rest.**
+  > The entry's own "grep first" instruction is what turned this up, and it is the reason the instruction is
+  > there. The Target page's **streaked-frames badge** (`frontend/src/routes/Target.tsx`, fires whenever
+  > `streakedAccepted > 0`) carried the tooltip *"Stack with **sigma-clip** or drizzle outlier rejection to
+  > remove the trail while keeping the frame"* — which names the one method that is **mathematically blind to
+  > a lone trail** below `kappa_min_frames` (11 at the default κ=3). So an owner with a handful of streaked
+  > subs, or *any* mosaic panel thinner than 11, was pointed by an on-by-default surface straight at the
+  > setting that would clip nothing — the same defect as the filed entry, one surface earlier in the workflow
+  > and stated as advice rather than merely left unsaid.
+  > **Fixed by naming Auto instead of a method:** the tooltip now reads *"Stack with **Auto outlier removal**
+  > to take the trail out while keeping the frame — it picks a method that works at your stack's depth."*
+  > That is honest at *every* depth without needing a number: `_resolve_auto_reject` picks min/max below the
+  > κ-σ floor (min/max removes an extreme from 3 frames up) and κ-σ once the stack is deep enough, so the
+  > advice cannot go stale the way a named method does. No behaviour change, no default flipped — the wrong
+  > *sentence* was the whole bug. **Test:** `Target.test.tsx` pins the presence of "Auto outlier removal"
+  > **and the absence of "sigma-clip"**, so nobody re-adds a method name; verified to fail on the pre-fix
+  > wording before it passed on the new one.
+
+  > **✅ (b) SHIPPED TOO — v0.337.0 (Builder 2026-09-03, branch `claude/sweet-babbage-76t8i3`), which closes
+  > this entry.** The new opt-in setting **`auto_reject_on_unattended`** — *"Let AstroStack pick outlier
+  > removal on hands-off stacks"*, **off by default** — lets the walk-away chain choose the method even for a
+  > target whose saved defaults name one. Built exactly as the entry demanded: **a new setting, not a widening
+  > of the existing "nobody chose" guard**, so with it off every built option blob is byte-for-byte what it is
+  > today and no pixel on the live install moves.
+  >
+  > **One line in `walkaway.apply_unattended_rejection`,** which is where it has to be — the Target page's
+  > outlook and the Stack form's save clause resolve through that same function, so they cannot drift from
+  > what the job does. When the override fires, the superseded `sigma_clip`/`min_max_reject` keys are
+  > **dropped** rather than left beside `auto_reject`: `_resolve_auto_reject` would overwrite both from the
+  > frame count regardless (so no pixel moves either way), but everything *downstream* then reads the live
+  > answer — concretely, `_stack_target`'s quality-weighting guard, which skips weighting when the options ask
+  > for rank-based min/max, no longer suppresses it for a run that is now free to resolve to κ-σ. Pinned.
+  >
+  > **The three surfaces stay honest, which is the half that is easy to miss.** With the setting on, the app is
+  > choosing again, so `/rejection-outlook` reports the app's pick and `user_chose` goes `False` — and both the
+  > Target-page note and the v0.336.0 save clause, which gate on `user_chose`, correctly fall silent instead of
+  > warning about a setting no longer in force. A test drives exactly that transition on one 6-sub target:
+  > sigma-clip / `reaches: false` / user's, then min-max-reject / `reaches: true` / the app's.
+  >
+  > **Deliberately NOT bundled into Walk-away mode** (pinned by a test): that switch turns the unattended
+  > pipeline *on*, and overruling a method the owner deliberately saved is a different kind of decision. It
+  > stays its own choice.
+  >
+  > **Upgrade-safe (§9):** one additive `Settings` field defaulting `False`; an old `config.json` without the
+  > key loads and reads off (pinned); no schema, on-disk, API-shape or default change; the interactive Stack
+  > form and reprocess-all are untouched by construction — neither passes the flag.
+  >
+  > **Tests (+17 Python, +3 vitest).** `tests/webapp/test_auto_reject_on_unattended.py` (+14): the option-blob
+  > rule (off is byte-for-byte today's; on supersedes a saved κ-σ, a saved min/max and an explicit *no*
+  > rejection; on changes nothing for a target that never chose; the `drizzle_reject` gate untouched either
+  > way), the setting itself (defaults off, round-trips, an old config upgrades to off), the outlook
+  > transition, and the wiring — a hands-off stack of a target that saved a method is built **identically** to
+  > one whose owner never chose (asserted as an identity, because `sigma_clip`'s own engine default is `True`
+  > and a field-by-field check would read as "the pick survived"), while a manual Stack-form run keeps exactly
+  > what was picked. `Settings.test.tsx` (+3): off for a fresh install, reads a saved value back, and not in
+  > `WALK_AWAY_KEYS`.
+  >
+  > **✅ AND ITS DISCOVERABILITY — v0.337.1, same branch.** A setting nobody can find is a setting nobody has,
+  > and the beginner this is for will never go looking through Settings for a switch by name. The Target
+  > page's rejection-outlook note — the one surface that already describes exactly the problem the setting
+  > solves — now offers **two** ways out: *"Change how this target stacks"* (the Stack form, the narrow
+  > answer) and *"Let AstroStack choose on every hands-off stack"*, linking to `settingsLink("automation")`,
+  > which is the one a walk-away owner actually wants because it covers every target at once.
+  > **It needs no gate**, which is the neat part: the note only speaks when the method is the user's own, and
+  > turning the setting on hands the choice back to the app — so on an install that already has it,
+  > `user_chose` is false and the whole note is silent. The link is typed through `settingsSections.ts`, so a
+  > renamed section is a compile error rather than a link landing on the wrong tab. **Test (+1):** the second
+  > link exists and resolves to `/settings/automation`.
+  > **Deliberately not done:** the same pointer on the v0.336.0 save clause. That clause is a transient
+  > notification, and a link inside a toast the user may not catch is worse than the note that stays on the
+  > page they are already reading.
+  > **What is still open from (a):** the *depth-aware* half — actually calling `rejection_reach` on the
+  > target's saved defaults and its accepted count, so the page can say "your saved setting will not reach
+  > this" with the one-click fix, rather than giving advice that is merely always-correct. That still wants
+  > the estimate on the Target page and a placement decision inside the existing notice grouping (§1's
+  > standing IA priority — **not** one more always-on banner), which is why it was not bundled into a copy
+  > fix. **Size is now S–M rather than M:** the surface exists, and it is the streaked badge.
+
+  > **✅ SHIPPED — the depth-aware half of (a), i.e. the whole of this entry (Builder, v0.335.0, branch
+  > `claude/sweet-babbage-2mtrwu`).** `GET /api/targets/{safe}/rejection-outlook` resolves the options the
+  > *unattended* chain will actually stack this target with and asks the engine's own `rejection_reach`,
+  > sized by `estimate_stack`'s `panel_depth` rather than the target's frame count. A `RejectionOutlookNote`
+  > in the Target page's existing `NoticeBoard` (a `warning`, **not** a new always-on banner) then says so in
+  > plain language, with a link to the form where the setting lives.
+  >
+  > **The entry's "do not overrule their saved choice" is honoured literally: nothing writes anything.** The
+  > endpoint is read-only, the note is advisory, and no default is flipped — option (b) (a new opt-in setting)
+  > stays unbuilt because it turned out not to be needed: *saying* the thing is the whole fix, since the owner
+  > can already change it on a form they own.
+  >
+  > **One definition, not a second copy — which is the part worth carrying forward.** The chain's merge and
+  > its two "the user chose nothing" injections moved into a new pure `webapp/walkaway.py`
+  > (`parse_saved_stack_defaults`, `rejection_choice_expressed`, `apply_unattended_rejection`), and
+  > `pipeline._stack_target` now *calls* them. So the sentence on the page and the options the job runs
+  > cannot describe different stacks; a test asserts the endpoint's resolved method against the chain's own
+  > merge rather than against a restatement of the rule. The `drizzle_reject` injection moved with it (from
+  > after the `quality_weighted` block to beside its sibling) — checked to be behaviour-identical, since
+  > `quality_weighted`'s guard reads `min_max_reject`/`drizzle` and never `drizzle_reject`.
+  >
+  > **Gated three ways, because this is the page the owner already calls busy.** It speaks only when subs on
+  > this target *actually* carry a trail (`streak_detected`, the same evidence the badge fires on — and the
+  > query is not even issued otherwise), only when the method is the **user's own** saved choice (when the
+  > chain picked it, it picked one that works, and saying so would be noise), and only when it genuinely
+  > cannot reach. A drizzled run is silent too: its two-pass rejection is settled by the memory budget at run
+  > time, which a pure pre-run answer cannot know.
+  >
+  > **Upgrade-safe (§9):** one new read-only endpoint, one new pure module, one new client method, one notice
+  > inside an existing board. No config key, no schema, no on-disk change, no default flipped, no existing
+  > response shape touched. A never-solved target answers `reaches: null` (a 200 with no verdict, not a 422 a
+  > page would render as an error); an older backend or a failed fetch renders nothing.
+  >
+  > **Tests (+9 Python, +17 vitest).** `tests/webapp/test_rejection_outlook.py` — the 6-sub saved-κ-σ case
+  > that names 11, the same target deep enough to reach, the no-saved-choice auto pick, **a four-panel mosaic
+  > 5 deep whose 20 frames would have read "reaches" and whose pixels do not**, the single-field `panel_depth`
+  > of `null`, the nothing-solved silence, a malformed meta row degrading like the job does, agreement with
+  > the chain's own merge, and that asking the question writes nothing and starts no job.
+  > `rejectionOutlookNote.test.ts` (+9) pins the copy and all five silences; `RejectionOutlookNote.test.tsx`
+  > (+4) the render, the link, and that no request is made with no trail; `Target.test.tsx` (+2) that the note
+  > reaches the real page's notes area and stays away without one.
+
+### v0.374.2 — the Stack form's `rejectionOn` is gone
+
+- ✅ **v0.374.2 — the Stack form's `rejectionOn` is gone; the streaked-frames caution asks the engine
+  "can anything remove this?"** (`streakRejectionAdvice` + `rejection_reach.best_available`). Building it
+  found the hand-written predicate was not merely coarse but *wrong* on a 1–2 sub stack — it read as "no
+  per-pixel rejection enabled" with sigma clipping already ticked, and offered a button to turn on the
+  setting that was on and could not have worked. Full entry in [`SHIPPED.md`](SHIPPED.md).
+
+### v0.322.2 — "this picture was made by …"
+
+- **✅ SHIPPED (Builder, v0.322.2, branch `claude/wizardly-feynman-qw8j45`) — ~~"this picture was made by an
+  older AstroStack": offer to re-make a target's newest stack when it is measurably behind, naming what it
+  would gain.~~** Built to the entry's three rules — it names a **gain, never a version**; it never appears
+  unless a re-stack could actually deliver that gain; and it only ever **offers** (re-stacking is hours of NAS
+  CPU, and §9 says new behaviour is opt-in). New `seestack/restackgain.py` + `GET
+  /api/targets/{safe}/restack-gain` + a self-hiding `RestackGainNote` in the Target page's existing
+  `NoticeBoard`.
+
+  **The scope call the entry's care point (a) forces, and it is the whole design.** "Compute the gain from the
+  *run*, not from a version comparison" is easy to say and it **rules out most of the gain list**, because
+  NULL-ness alone is ambiguous: `stack_fwhm_px` is NULL both for a run predating the column *and* for one with
+  too few stars to fit, and nothing at the run level can tell those apart. Promising sharpness a re-stack might
+  then not measure is exactly the "newer is better" hand-wave the entry bans, so **the sharpness gain is
+  deliberately not offered** — only the date one is, because it is the one whose deliverability is *checkable*:
+  the missing window is fixable only if the target's own accepted subs carry capture times **now**, and that is
+  a fact about the frames, not about a release. `MIN_DATABLE_SHARE = 0.5` on top, because one datable sub in
+  five hundred *would* record a window — a single-night one, misdescribing a picture made of five.
+
+  **Two gains, one story, at different resolutions:** no capture window at all (the picture's date is the day
+  it was stacked, everywhere) and — for the in-between run — a window but no night count, so a caption can name
+  two dates but never say "over four nights". The note says which, quotes the cost in the only unit that
+  matters (`n_frames_ready` subs to re-combine, against the `n_frames_used` behind the current picture), and
+  reassures that nothing is replaced: the existing picture stays in the target's history.
+
+  **The "grep before building" check, answered — no fourth restack surface.** `reprocess-status` +
+  Settings' reprocess card are **library-wide and version-based**, i.e. precisely the reason the entry says is
+  not actionable for a beginner; the Target page's "N new subs since your last stack" note is per-target but
+  for a different, more pressing reason. So this note **stands down entirely while that one speaks**
+  (`newSubsSinceStack > 0`), since its restack fixes the dates too — pinned by a test. It sits at
+  `advisory`, so it can never take a warning's inline slot.
+
+  **Upgrade-safe (§9):** one new read-only endpoint, one new pure module, no schema/config/on-disk/API-shape
+  change and no default flipped; the frontend types the payload optional, so an older backend renders nothing.
+  It never starts a stack by itself.
+
+  **Tests: +8 engine (`tests/test_restackgain.py`), +6 endpoint
+  (`tests/webapp/test_target_restack_gain.py`), +5 component (`RestackGainNote.test.tsx`), +2 page
+  (`Target.test.tsx`).** The honesty cases are the point: undatable subs, a minority of datable subs, an
+  editor export standing in for the picture, and the stand-down beside the new-subs note.
+
+  **Left open, deliberately:** the *sharpness* gain above (it needs a way to tell "the column didn't exist"
+  from "not measurable", which no run-level check can supply), and any library-wide roll-up of this — the
+  per-target note is where a beginner is standing when they look at the picture that is wrong.
+
+    *(Original spec follows.)* **"this picture was made by an
+    older AstroStack": offer to re-make a target's newest stack when it is measurably behind, naming what it would
+    gain.** *(Pillar: autonomy + trust — PRIORITY 2–3; size M; **the nudge must name a concrete gain, never
+    "newer is better"**.)* The audit above established something the backlog had been assuming away: **most of
+    what an old run is missing cannot be healed from disk.** `seam_residual` could be (and now is);
+    `coverage_thin_frac` could be (v0.320.3); but the capture window, the night count and the run's own star size
+    cannot — the first two because nothing on disk records *which frames that run used*, the third because it is a
+    fresh measurement. So the owner's back catalogue will read **"Stacked 30 Aug 2026"** instead of *"Shot over 4
+    nights, 15–18 Nov 2024"* on its captions, nameplates, share sheets, Gallery cards, History rows and Sky
+    footprints **forever**, and nothing anywhere tells them the one thing that would fix it: press Stack again.
+    **The signal already exists** — every run records `engine_version`, and the NULL-ness of each later column is
+    itself the list of what is missing. **Shape:** a self-hiding note (in the Target page's existing
+    `NoticeBoard`, per the standing IA priority — *not* a tenth banner) on a target whose newest genuine stack is
+    missing things a re-stack would supply, worded as the gain rather than the version: *"This picture was made
+    before AstroStack recorded when your subs were shot, so it can't say what night it's from. Stacking it again
+    would fix that — and it'd use the newer alignment."* One button, reusing the existing stack path; **never
+    auto-restack** (it is hours of CPU on a NAS, and §9 says new behaviour is opt-in).
+    **Care, and why it is M not S:** (a) the honest gain list has to be computed from the *run*, not from a
+    version comparison — "your version is old" is not a reason a beginner can act on, and a version table would go
+    stale the moment anyone edits it; (b) it must not fire on a target that has no new frames and a perfectly good
+    picture unless the gain is real; and (c) it wants a cost estimate beside it (`estimate_stack` already exists),
+    because "stack 5,000 subs again" is not a one-click decision on the owner's box. **Grep before building:**
+    `ReprocessCard` / "Reprocess everything" in Settings, the `outdated targets` badge, and `RestackNote` — one of
+    them may already be the right home, and a fourth restack surface would be exactly the feature-piling the
+    owner's "extremely busy" priority warns against.
+
+### v0.318.1 + v0.318.3 — both halves measured and fixed
+
+- **✅ CLOSED — BOTH HALVES MEASURED AND FIXED (v0.318.1 chroma, v0.318.3 geometry); kept for its method, not
+  as work. Un-starred 2026-09-06** — it still read `⭐ QA LEAD`, which §11 tells every triage pass to take
+  *first*, months after its own text said the last candidate was fixed. **Do not re-run this sweep**; apply its
+  generative test to *new* code instead. ~~The Auto preset picker's four scene fractions are thresholded above a
+  **noise-aware** floor, so they are a monotone function of how deep the stack is.~~** *(Pillar: image quality +
+  trust — PRIORITY 2–4; size M — one measurement session, then a fix only if it moves. Confidence: mechanism
+  read, **not** measured. Filed as a lead, not a bug.)* The lead's own list named "the auto-grade / auto-edit
+  strength pickers that read a fraction of *affected* pixels" as the half a `np.percentile` grep cannot see.
+  This is that half, and the site is `seestack/edit/presets.py::classify_scene`.
+
+  **The mechanism.** It normalises the frame to its own 0.5/99.5 percentiles, measures the sky and the sky's
+  MAD, and calls anything above `thr = sky + max(0.06, 6·sky_sigma)` "signal". Every downstream cue —
+  `sig_frac`, `ext_frac`, `pt_frac`, `star_share` — is a *count of pixels above that threshold*, and
+  `sky_sigma` falls as 1/√N. So on a shallow stack `thr` is set by the noise term and only bright structure
+  clears it; on the owner's 500-sub stack the 0.06 floor takes over and faint nebulosity that was under the
+  noise now counts as extended signal. `ext_frac` therefore **grows with depth on the same sky**, and it is
+  compared against hard constants (`≤ 0.012` → cluster, `≥ 0.06` → nebula, `0.004…0.05` → galaxy). A galaxy
+  that classifies as a galaxy at 16 subs can cross into "nebula" at 300 — and the class picks the **preset the
+  one-click Auto edit applies**, so this is a picture-changing decision, not a chip.
+
+  **Do it the lead's way, and measure before touching anything.** Stack one synthetic scene at 16 / 64 / 300
+  subs, print `cues` at each depth, and look for monotonicity — exactly the method that found the tint bug and
+  (independently, on `main`) the seam-residual bug, which is now **two confirmed instances of this class in two
+  days**. **Care, and why this is filed rather than fixed:** the thresholds are on the on-by-default hot path,
+  and AGENTS.md §1 forbids a blind flip. If it does move, the honest fix is the same shape both confirmed
+  instances took — make the *threshold* depth-invariant (the 0.06 floor already is; it is the `6·sky_sigma`
+  term and the percentile normalisation that are not) rather than re-tuning the constants against one scene.
+
+  **🔎 MEASURED, WITHIN THE HOUR, AND IT MOVES — but not through the cue this entry names.** *(Builder
+  2026-08-30, branch `claude/compassionate-galileo-cwqy3x`; **fixed as v0.318.1**, see the entry at the top of
+  "Bugs (fix these first)".)* Swept exactly as filed — one unchanging scene at 4 / 16 / 64 / 128 / 300 / 800
+  subs, printing every cue — and the verdict really does flip with depth: a scene the classifier called
+  **nebula** at 4 and 16 subs went to **no class at all** at 64+, and a second scene did the reverse. So the
+  hypothesis is confirmed. **The driver is `chroma`, not `ext_frac`**, and the mechanism is a different (and
+  simpler) one than this entry predicts: `_extended_chroma` took the median of the **per-pixel**
+  `(max−min)/mean`, and R/G/B carry *independent* noise, so on a grey pixel that quantity is ~1.7σ of pure
+  grain. A completely colourless field measured **0.118 at 4 subs → 0.010 at 800** — i.e. a thin stack of a
+  grey object cleared the `chroma >= 0.06` nebula bar on noise alone. The fix needed **no threshold flip**:
+  averaging each channel over a 7 px box inside the region before measuring makes the statistic measure what
+  its own docstring always claimed (the colour of the *region*), leaves a clean image's answer within a few
+  percent, and is depth-invariant by construction — a real red nebula reads 0.596–0.600 across the whole σ
+  sweep while its colourless twin reads 0.002–0.021.
+  **`ext_frac` — this entry's own candidate — was measured too and is a real but *second-order* effect,
+  deliberately left alone.** It does grow with depth (0.058 → 0.111 on one scene), for exactly the reason
+  filed, and on the scenes swept it never on its own moved a verdict across a class boundary; the colour cue
+  got there first every time. Fixing it *would* mean the blind threshold flip AGENTS.md §1 forbids, since the
+  0.06/0.012/0.05 constants were calibrated against the depth-varying measure. **Left open as the remaining
+  half of this lead**, now with the chroma noise removed from underneath it so a future measurement sees the
+  geometry alone.
+
+  **✅ THAT REMAINING HALF IS NOW MEASURED AND FIXED — and with the colour cue out of the way it turned out to
+  move *further* than the chroma one did, and to flip a verdict on its own.** *(Builder 2026-08-30, branch
+  `claude/compassionate-galileo-go263h`; **shipped as v0.318.3**.)* Swept exactly as the entry asked — one
+  unchanging synthetic scene at 4 / 16 / 64 / 128 / 300 / 800 subs (σ = 0.10/√N), printing every cue. On a
+  small galaxy `ext_frac` ran **0.0121 at 4 subs → 0.0254 at 800, a 2.1× swing**, and on a slightly larger one
+  it walked the verdict clean across the `≤ 0.05` galaxy ceiling: **galaxy at 4 and 16 subs, no class at all at
+  64+** — i.e. the deeper the owner's stack got, the *worse* the suggestion. `star_share` was worse still
+  (0.252 → 0.008 on one scene).
+  **The predicted mechanism was only half of it.** The entry named the threshold's `6·sky_sigma` term, and that
+  is real — on the galaxy scene it put `thr` at `sky+0.188` on a thin stack against `sky+0.06` on a deep one,
+  so faint structure simply did not clear the bar. But the **opening's erosion** is the second, unfiled half: a
+  min over 49 samples is biased ≈2.5σ low, so on a thin stack it *depresses the diffuse image* — shrinking
+  `ext_frac` and, because `point_sig = signal & ~ext_sig`, handing the object's own skirt to `pt_frac` as if it
+  were stars. That is why `star_share` drifted 30× on a field with a fixed number of stars in it.
+  **The fix needed no threshold flip either** — same shape as the chroma one, and now sharing its rationale:
+  every geometry cue is measured on a **locally averaged** copy of the luminance (`_GEOM_SMOOTH_PX = 3`), which
+  kills both mechanisms at once (the noise term falls under its own 0.06 floor, and the erosion has almost no
+  grain left to bite on). Measured after: the small galaxy reads **0.0217 → 0.0255 (±8 %)** and is called a
+  galaxy at every depth; the larger scene gives **one** verdict across the whole sweep. The four constants are
+  untouched, and every deep/clean verdict — the reference answer, since that end was already converged — is
+  unchanged.
+  **The cost, stated plainly:** a 3 px box widens a star's above-threshold footprint, so a *clean* star cluster's
+  `pt_frac` reads 0.095 where it read 0.068. Nothing turns on that — the gate is `pt_frac >= 0.0025`, three
+  decades below, and the discriminating cues (`star_share` 1.000, `ext_frac` 0.000) are unmoved — but it is the
+  one number a clean image reports differently, so it is recorded rather than buried. **5 px was measured too
+  and rejected**: it smears a dense star field into 0.0068 of fake *extended* signal and gives a colourless
+  cluster a chroma reading, which is the failure mode the 7 px opening exists to prevent.
+  **Tests (+3 in `tests/test_target_classify.py`, 2 fail before):** the cue-level invariance across the depth
+  sweep (±20 % of the deep answer), the verdict-level regression (a galaxy is a galaxy at every depth, and the
+  bigger scene gives one answer rather than two), and the no-regression guard that the averaging did not blur a
+  cluster into nebulosity.
+
+### v0.319.1 — all four shapes swept, one live instance
+
+- **✅ CLOSED — ALL FOUR SHAPES SWEPT, ONE LIVE INSTANCE (v0.319.1), NO SECOND SITE; kept for its generative
+  test, not as work. Un-starred 2026-09-06** (see the note on the entry above — a closed ⭐ is a triage trap).
+  ~~Sweep every judgement made against a "best so far", because a best-so-far is a record and a record only ever
+  moves one way.~~** *(Pillar:
+  trust + friendliness — PRIORITY 3; size S per candidate — this one is *cheap*, because the arithmetic decides
+  it before any measurement. Confidence: the shape is proven, the remaining sites are not yet found.)*
+  This is a **sibling of the "normalises against its own subset" lead, along a different axis**: not "how much
+  data went into this *stack*", but **how many entries are in the *history* the statistic looks back over**.
+  `min`/`max` over a growing history is monotone in the length of that history by construction, so any
+  *comparison* against it — "softer than your best", "worse than your best", "not as good as usual" — gets
+  easier to trip the longer the owner uses the app, on data that never changed. The confirmed instance
+  (v0.319.1) drifted from 14 % to 79 % false-positive rate across a project's life.
+  **The test that identifies a candidate, without running anything:** is the baseline an **extremum** of a set
+  that *grows with use*, and is something **judged** against it? If both, it is a bug — the extremum's
+  distribution has no fixed point. If the extremum is merely *reported* ("your sharpest night", "your best
+  picture", a personal record), it is fine and must stay a min/max: that is what "best" means. The v0.319.1 fix
+  is the template — the two uses had been sharing one variable, and only the *judging* one moved.
+  **A grep over `= min(` / `= max(` in `seestack/`, `webapp/` and `frontend/src` did not turn up a second
+  live site** (the near-misses are all bounds-clamping, or records that are correctly just reported —
+  `activity_calendar`'s longest streak, `sky_quality`'s dominant setting). **So the value here is in the
+  places a grep can't see:** a *client-side* comparison against `Math.min(...history)` in a React component, a
+  baseline built by sorting and taking `[0]`, an SQL `MIN()`/`ORDER BY … LIMIT 1`, or a "personal best" phrase
+  in copy whose number comes from somewhere else. Those are the four shapes worth an hour.
+
+  **⚪ ALL FOUR SHAPES SWEPT — NO SECOND LIVE SITE (Builder 2026-08-31, branch
+  `claude/wizardly-feynman-isps6l`). Recorded so nobody spends the hour again; re-open only with a *new* shape,
+  not by re-running these.** Every hit, and why it is not the bug:
+  - **`Math.min(...)`/`Math.max(...)` over a history, client-side.** Six non-test hits, all **chart scaling**
+    (`focusTrend.sparklinePoints`, `transparencyTrend`, `Sparkline`, `skyline`'s tallest) — a plot's own axis
+    range, judged against nothing.
+  - **A baseline built by sorting and taking `[0]`.** Nothing takes `[0]` of a sorted history as a yardstick.
+    The near-misses sort for *display order* (`Gallery.sortGallery`'s "cleanest first", `Library`'s sorts) or
+    compute a **median** (`softStars.median`, `clearNights`, `Target`/`Stack`'s local median helpers).
+  - **SQL `MIN()` / `ORDER BY … LIMIT 1`.** Five hits total, none a baseline: one `MIN(timestamp_utc)` for a
+    target's first-light date (a *fact*), the rest plain newest-first listings and the jobs-table prune.
+  - **"Personal best" copy whose number comes from elsewhere.** The two live sites are the pair the v0.319.1
+    fix already separated, and they are on the right side of the line: `sharpestYet` is a record **reported**
+    (a positive beat — it must stay a min, that is what "sharpest yet" means), and `softerThanUsual` — the one
+    that **judges** — is already a **median of the priors**. `focusChips` composes exactly those two per
+    history row, so it inherits both.
+  What this leaves is the lead's own conclusion, now tested rather than assumed: **the class had one live
+  instance and it is fixed.** The generative test in this entry is still the right one to apply to *new* code —
+  it costs nothing at review time — but a repository-wide re-sweep is spent.
+
+### v0.308.0 — "North up" as a way of saving
+
+- **✅ SHIPPED (Builder, v0.308.0, branch `claude/compassionate-galileo-1bqxek`) — ~~let "North up" be a way to
+  *look* at a picture, not only a way to overwrite it.~~** First surface built: the Target page's picture, in
+  the viewer you get by clicking it. *(Pillar: enjoy + trust — PRIORITY 3.)*
+
+  **What shipped.** `…/annotations` gained one additive field, `north_up_deg` — how far a `?north_up=true`
+  render would *actually* turn this run, taken from `applied_north_up_deg`, the helper that already owns the
+  threshold-and-snap rules, so it can never disagree with what the renderer does. `null` when the turn would do
+  nothing (no usable WCS, or a sub-threshold correction), which is the whole point: **a toggle that visibly
+  changes nothing is worse than no toggle**, so the control is only offered where the picture would move.
+
+  Frontend: a shared `components/NorthUpViewToggle.tsx` (the toggle plus the two `localStorage` accessors),
+  wired into `LatestPictureCard`'s `ImageLightbox` through the `toolbarExtra` prop that already existed for
+  exactly this. Off by default; remembered per **viewer**, not on the run, because it is a viewing preference
+  and not a fact about the picture. Storage that throws (a private window, a browser blocking site data) is
+  swallowed — the toggle still works for the session, it just isn't remembered.
+
+  **Everything the viewer hands over follows what's on screen** — the preview, the JPEG behind Share, and the
+  full-res PNG all take the same `north_up`, so a picture someone downloaded *because they liked how it looked*
+  arrives that way. The **FITS deliberately does not**: the raw data stays WCS-aligned. Nothing is written; the
+  bytes on disk are untouched, exactly as before.
+
+  **The entry's two cautions, answered rather than inherited.** Putting the control in the *lightbox* rather
+  than on the card means neither bites: the lightbox draws a plain `<img>` with no pins, scale bar or compass to
+  mis-place, and no rejection tint to fall out of register. The card's own thumbnail keeps its stored
+  orientation and its labels, so `cantPlaceMarks` is untouched. A run whose preview a past **Adjust → Save**
+  already baked North-up gets no toggle at all — it is already turned, and asking again is a no-op.
+
+  **Deliberately one surface, not four.** The Target hero's header row already carries three controls and a
+  fourth wraps badly on the phone the owner reads this on (the reason v0.293.0 kept that row to one toggle), so
+  this went where there is room and where you actually want it. The Gallery lightbox and Compare are the same
+  two lines each — filed as a follow-on below rather than done blind.
+
+  **Upgrade-safe (§9):** one additive response field; an older frontend ignores it and an older backend omitting
+  it reads as "no toggle". No config, schema, on-disk, default or API-shape change, and no new request on an
+  ordinary page load (the annotations fetch that answers this is the one the labels already made, now also
+  enabled when the picture is opened big).
+
+  **Tests (+7; 3 of the 3 Python ones fail before):** `tests/webapp/test_stack_annotations.py` — a real turned
+  field's angle pinned **against `applied_north_up_deg` itself** rather than re-derived from a CD matrix, a
+  field already sitting North-up reporting `null`, and a run with no WCS reporting `null` beside its existing
+  no-rose/no-bar assertions (the fixture grew a `dec_sign` so both orientations are real headers, since the
+  original axis-aligned one is North-*down* on screen — 180° — which is why it can't stand in for "already
+  oriented"). `LatestPictureCard.test.tsx` — no toggle before the picture is opened and none on a run with
+  nothing to turn; the turn switching the shown bytes and both downloads while the FITS stays put; the
+  preference written per viewer and cleared again; and no toggle on a picture a past save already turned.
+
+  **~~Follow-on left open:~~ ✅ BOTH SURFACES ARE NOW DONE — the Gallery lightbox already had it (see
+  `Gallery.tsx`'s `viewingCanNorthUp`), and **Compare shipped as v0.359.0**, which turned out to be more than
+  "the same two lines".** *(The rejection
+  tint's own `north_up`, which this entry left open "if a surface ever wants both at once", **shipped in the
+  same hour** as v0.308.2 — see the entry directly below. So a surface that wants both can now have them.)*
+
+  **What Compare needed that the other two didn't (Builder, v0.359.0, branch `claude/sweet-babbage-adbaed`).**
+  On a single picture the question is "would the turn visibly do something?". On a *pair* it is "would the
+  turn leave the two agreeing?", and that is a different predicate. The Seestar is alt-az, so two nights on
+  one object land at different field rotations — which is exactly why **Split** and **Blink** can be hard to
+  read: you are scrubbing between two pictures of the same sky that don't line up. So the turn applies to
+  **both** sides at once, and the pure `compareNorthUpOffer(a, b)` offers it only when at least one side has
+  a rotation to apply *and* neither side is a run with no usable orientation at all (`directions` null). Turn
+  one side of a pair whose other side can't turn and the two agree *less*; that case now stands down
+  entirely. Everything else is the shared control (`NorthUpViewToggle`, the same `localStorage` key, off by
+  default) and the shared cache key (`["annotations", safe, run_id]`, `staleTime: Infinity`), so a picture
+  opened in the Gallery lightbox has already answered this. Two requests on a two-picture page, which is why
+  it doesn't inherit the Gallery's wait-until-opened gate. Nothing is written; the bytes on disk are
+  untouched. Tests: +11 `Compare.test.tsx` (5 on the pure helper, 6 driving the page).
+
+  **⚠️ PROCESS NOTE — THE SEVENTH CONCURRENT-DUPLICATE COLLISION (Builder 2026-08-30, branch
+  `claude/compassionate-galileo-q6uois`), and the first one that claiming-by-site could not have stopped.**
+  Two Builders built this item in the same hour. Both did the thing the six earlier notes prescribe: claimed it
+  in the run's **first** commit, **named the sites**, and pushed inside a minute. It didn't help, and the reason
+  is worth writing down rather than adding an eighth "claim harder": **a claim is only visible to an agent who
+  fetches after it lands.** Both runs started from the same `origin/main`, both fetched at the start, and the
+  two claims were pushed minutes apart — so each fetched *before* the other's claim existed and neither saw
+  anything. AGENTS.md §11's "re-fetch before starting **each** task" is the rule that would have caught it, and
+  the loser of this race had already read that line: it re-fetched between its two tasks, but this item was
+  **task two of two**, started before the winner's claim was pushed. The honest conclusion is that
+  claim-then-push has a floor of roughly one fetch interval and **items sized under an hour will keep
+  colliding**; the mitigation that actually pays is the one this run used at merge time — **read the winner's
+  diff before re-applying anything, take their design where it is at least as good, and re-apply only what is
+  genuinely missing** (here: a test file). Do not spend another run hardening the claim protocol.
+
+  Original spec, for the record:
+
+    *(Pillar: enjoy + trust — PRIORITY 3; size S–M;
+    read-only, off by default.)* Until this run, the only way to see one of your pictures oriented like every
+    reference photo of the object was History → Adjust → tick → **Save**, which rewrites the stored preview and
+    (until v0.305.0) could cost a processed run its look. That is a destructive answer to a purely visual
+    question. `GET …/stack-runs/{id}/preview?north_up=true` now turns the *saved bytes* on the way out and
+    changes nothing on disk (v0.306.2 built it for the Adjust panel), so any surface that shows a picture could
+    offer the same tick as a **view** control: the Target hero (`LatestPictureCard`), the Gallery lightbox, the
+    Compare view. **Shape:** one shared toggle component reading the run's `north_up_deg` from the annotations /
+    suggestion it already fetches, remembered per viewer in `localStorage` (not on the run — this is a viewing
+    preference, not a fact about the picture). **Cautions, both already solved once in `History.tsx` and worth
+    copying rather than re-deriving:** object pins, the scale bar and the compass are measured on the un-rotated
+    FITS grid, so a turned view must hide them (`cantPlaceMarks`); and the rejection tint is sized to the stored
+    bytes *as they sit on disk*, so it must step aside too — unless the follow-on below is built first. Do **not**
+    make it the default: the saved orientation is what the owner chose.
+
+> **⚠️ PROCESS NOTE — COLLISION NUMBER EIGHT (Builder 2026-08-30, branch
+> `claude/compassionate-galileo-e1p1x8`).** I built this same Gallery item concurrently with the
+> `…-x2nj2o` Builder and **stood mine down wholesale at merge time; theirs is what ships**, and it is the
+> better answer for a reason worth keeping: I hit the identical "GalleryItem doesn't carry
+> `preview_north_up_deg`" wall and solved it by **adding that field to the item**; they solved it by making
+> `…/annotations`'s `north_up_deg` *honest* (`remaining_north_up_deg`), which fixes the same wrongness for
+> every future caller instead of teaching one more surface to work around it. Nothing of mine was re-applied
+> — their five `Gallery.test.tsx` tests cover everything my four did, and `NorthUpViewToggle.test.tsx`
+> (v0.308.2) already pins the preference read my one non-duplicate test exercised through the page.
+> **What the claim discipline cannot fix, stated plainly for the next run:** both of us claimed in our
+> first commit, by site, and pushed immediately — the same as collisions six and seven — and it did not help,
+> because we were *both already working* when the other's claim landed. The only thing that would have caught
+> it is **re-fetching `origin/main` immediately before starting each task** (AGENTS.md §11 says so; I fetched
+> before task 1 and before task 3, and their work landed in between), *and* reading the log rather than only
+> the backlog: their claim commit `c8fb278` was on `origin/main` 12 minutes before I started this task. The
+> cheap habit that would actually have worked: **`git log --oneline origin/main -10` as part of picking each
+> task**, not just `git fetch`. This item was an XS follow-on filed the same morning — exactly the shape two
+> Builders pick simultaneously.
+
+### closed — swept three times; every candidate measured
+
+- **✅ CLOSED — SWEPT THREE TIMES; every candidate it listed is measured, and the three confirmed instances
+  are fixed (v0.313.1, v0.318.1, v0.319.1). Kept for its method and its "flat on one scene is not cleared"
+  correction, not as work. Un-starred 2026-09-06** (see the note two entries above). ~~Sweep every statistic that
+  normalises against its own *non-empty* or *selected* subset, because that subset stops being the signal as the
+  library grows.~~** *(Pillar: trust + image quality — PRIORITY 3–4. Size: M per sweep. This is the same bug class
+  as the four position-dependent-metric sites (v0.270.2 / v0.271.0 / v0.272.1 / v0.304.1) — a statistic that is
+  right on the input the author had and wrong on the owner's — but along a **different axis**: not *where* on the
+  canvas, but *how much data went in*.)*
+
+  **The shape, from the one confirmed instance.** `rejection_overlay_png` normalised its alpha by the 90th
+  percentile of the map's **non-empty** pixels. On a 16-sub stack the non-empty set is mostly satellite trail, so
+  the scale is the trail and the picture reads correctly. On a 64-sub stack the non-empty set is 31 % of the
+  canvas and is mostly *noise floor*, so the scale became the floor and the tint washed 94 % of the frame. The
+  author's mental model — "the pixels that were touched are the interesting ones" — is a **monotone function of
+  the sub count**, and it inverted somewhere between 16 and 64 subs. Nothing in the code said so, and the
+  docstring asserted the opposite.
+
+  **Why this axis is worth its own sweep.** Every synthetic fixture in this repo stacks a handful of frames;
+  the owner stacks 500–800. Any statistic whose meaning depends on *how much of the input is non-trivial* is
+  therefore untested in the regime it actually runs in. Candidates to check, each by measuring the statistic at
+  16 / 64 / 300 subs on the same scene rather than by reading the code:
+  `np.percentile(x[mask], …)` anywhere the mask is data-dependent (grep `[hit]`, `[mask]`, `[sel]`, `> 0]`);
+  the auto-grade and auto-edit strength pickers that read a fraction of "affected" pixels; `stackhealth`'s
+  verdicts; the star-mask coverage fraction; and anything keyed off `REJFRAC` (which is *per sample* and so
+  stays small, while the map's coverage does not — the two are routinely conflated).
+  **Method that worked:** stack the same scene at several sub counts, print the statistic, and look for
+  monotonicity. It took one afternoon and found a wrong-picture bug on the first candidate.
+
+  **🔎 SWEPT ONCE (Builder 2026-08-30, branch `claude/compassionate-galileo-p5irbc`) — one bug found and
+  fixed, four candidates cleared. Read this before running the sweep again; it says what is already done.**
+  Method as filed: real `run_stack` runs of one dithered synthetic field at **8 / 32 / 128** subs, printing
+  each candidate statistic, plus a pure-array two-panel mosaic at **4 … 256 subs a panel** where the sweep
+  needed depths a real stack would take an hour to reach.
+  **Found and fixed → `seam_residual`** (v0.313.1, entry at the top of "Bugs"): a `max − min` over per-level
+  sky modes charges the estimates' own noise to the seam, and a dithered deep mosaic's coverage ramp supplies
+  dozens of thin, low-coverage levels whose noise *grows* relative to the shrinking yardstick. 0.27 → 1.56
+  between 4 and 128 subs a panel, on a canvas with identical panels. **This is the same axis the lead
+  predicted, and it was on the second candidate.**
+  **Cleared — measured, not read, and monotone in nothing that matters:**
+  `analyze_proxy`'s `sky_sigma` and the `_noise_fraction` crossfade behind one-click Auto (0.0022 → 0.0009 →
+  0.00046 across 8/32/128 — it falls as 1/√N exactly as it should, and Auto stays on the clean/sharpen end at
+  every depth); `classify_target`'s cues, which are the "fraction of affected pixels" pickers the lead named
+  (`sig_frac` 0.0142/0.0142/0.0148, `ext_frac` 0.0106/0.0104/0.0104, `star_share` 0.255/0.270/0.299 — flat, and
+  the verdict stays `None` throughout); the **star-mask coverage fraction** (0.00304/0.00304/0.00305 — the
+  99.9th-percentile normalisation is scale-free in the sub count); and **`REJFRAC`** (0.0039 → 0.0065), which
+  rises slightly with depth because κ-σ's noise-tail clip rate is *per sample* and more samples land per pixel
+  — bounded, honest, and well inside the 0.05 %–8 % band `stackhealth` speaks in.
+  **One thing found and NOT fixed, filed on its own below** (it is advisory copy, not a wrong picture): the
+  `coverage_min / coverage_max` ratio behind `stackhealth`'s ragged-border note. See the entry under
+  "Friendliness".
+  **Left for the next sweep** (candidates from the lead that this run did not reach): ~~the auto-*edit* strength
+  pickers downstream of `suggest_denoise_strength` on a genuinely noisy deep stack (this scene's Auto never
+  left the clean end, so the denoise branch was never exercised at depth)~~ — **swept and CLEARED, see below** —
+  and `_fwhm_quality_drift` / `best_frame` along this axis (they were swept along the *position* axis and
+  cleared, which says nothing here).
+
+  **🔎 SWEPT AGAIN (Builder 2026-08-30, branch `claude/compassionate-galileo-cwqy3x`) — the auto-EDIT strength
+  pickers are CLEARED; a *third* confirmed instance of the class turned up alongside them and is fixed as
+  v0.318.1** (the target classifier's colour cue — entry at the top of "Bugs (fix these first)").
+  **Cleared — measured with the denoise branch genuinely exercised this time**, on a scene noisy enough that
+  Auto starts saturated and works its way down (1 → 800 subs, one unchanging sky, noise scaled 1/√N):
+  `sky_sigma` 0.0968 → 0.0064, `_noise_fraction` 1.0 → 0.0, `suggest_denoise_strength` 1.0 → 0.2,
+  `detail.denoise` 0.6 → 0.0, `detail.chroma_denoise` 0.5 → 0.0, `detail.sharpen` 0.0 → 0.5, saturation
+  1.05 → 1.21. Every one is monotone **in the direction it should be** — deeper stack, less denoise, more
+  sharpen — with no inversion and no plateau, and the crossfade's two ends land where `_NOISE_LO`/`_NOISE_HI`
+  say they should. The denoise branch is exercised at every depth from 1 to 64, which is what the previous
+  sweep could not say.
+  **One caveat worth recording rather than fixing:** `estimate_noise_sigma` normalises by the image's own
+  0.5–99.5 percentile range, and on a **structure-free** field that range *is* the noise — so the ratio is a
+  fixed point (≈0.194 for Gaussian noise) and stays there however deep you stack. Measured: a blank field reads
+  0.194 at 1 sub and 0.194 at 800. It is **not** filed as a bug because the resulting action is right (a frame
+  that is nothing but noise should be denoised hard) and because a real OSC frame always carries stars that set
+  the percentile. Worth knowing if anyone ever reads that σ as an absolute noise figure rather than a fraction
+  of the visible range — it is the latter, and its docstring says so.
+
+  **🔎 SWEPT A THIRD TIME (Builder 2026-08-30, branch `claude/compassionate-galileo-go263h`) — the last
+  candidate this lead named is a CONFIRMED instance, and it is the worst-behaved one yet.**
+  `_fwhm_quality_drift` and the Nights card's "soft" verdict both compared a night against the **minimum** over
+  the other nights' medians, and a minimum over N samples falls without limit as N grows: on unchanging seeing
+  the share of ordinary nights flagged ran **13.7 % at one prior night → 68 % at twenty → 79 % at forty**.
+  Fixed as **v0.319.1** (entry at the top of "Bugs (fix these first)") with the same no-threshold-flip shape as
+  the other four. **That closes every candidate this lead listed.**
+
+  **⚠️ CORRECTION to the first sweep's "cleared" list, worth more than the finding itself.** That sweep reported
+  `classify_target`'s cues as *flat* (`ext_frac` 0.0106/0.0104/0.0104 at 8/32/128 subs) and cleared them. They
+  are not flat: swept on a different scene at 4…800 subs, `ext_frac` moved **2.1×** and flipped a verdict
+  (v0.318.3). Both measurements are correct — the first scene's threshold was already floor-governed
+  (`6·sky_sigma` under the 0.06 floor) at 8 subs, so there was no depth dependence left to see, and its verdict
+  was `None` at every depth so nothing could visibly flip. **The lesson for the next sweep of any candidate:**
+  "measured and flat on one scene at 8/32/128" is not "cleared". This axis needs (a) a scene whose verdict is
+  *near a class boundary*, since a statistic can drift a long way inside one class and change nothing, and (b) a
+  **thin** end — 4–16 subs — because the mechanisms here (a noise-scaled threshold, an erosion's noise bias) are
+  the ones that vanish by 32 subs and are invisible above it. Two of the three confirmed instances would have
+  been missed by a sweep that started at 8.
+
+### v0.359.0 — `compareNorthUpOffer` + `NorthUpViewToggle` on Compare
+
+- **✅ SHIPPED — v0.359.0 (`compareNorthUpOffer` + `NorthUpViewToggle` in `frontend/src/routes/Compare.tsx`),
+  which turns **both** pictures at once and offers the control only when the turn would leave both North-up
+  (at least one side has a rotation to apply, and neither is a run with no usable orientation — the
+  `directions`-is-null solved-ness signal point (3) below asked for). Struck 2026-09-06 by a Builder that
+  read this entry as open, opened `Compare.tsx` to start it, and found `CompareSideOrientation` already
+  there. Original entry kept for provenance:** ~~**NEW IDEA (Builder 2026-08-30, the half v0.309.0 checked
+  and deliberately did NOT ship) — the Compare view
+  is not a lightbox, and North-up there needs a decision, not a copy-paste.** *(Pillar: enjoy + trust —
+  PRIORITY 3; size S; read-only.)* The v0.308.0 follow-on assumed Compare "uses the same lightbox"; it does
+  not. `routes/Compare.tsx` draws bare `<img>` elements inside a drag-to-reveal wipe (and a side-by-side grid),
+  so there is no `toolbarExtra` to hang a toggle from and no single picture to turn. **The real question is
+  what a turned comparison should mean:** two runs of one target can carry *different* corrections (a mosaic
+  re-framed between sessions is the realistic case), so turning each by its own angle slides two
+  differently-oriented pictures against each other under one wipe line — which is worse than not offering it.
+  **The honest shapes, pick one:** (a) offer the turn only when both runs report the *same* `north_up_deg`
+  (within the renderer's own threshold), which is the overwhelmingly common case and is checkable from the two
+  `…/annotations` responses; or (b) turn both by the *A* run's angle and say so, which keeps the wipe line
+  meaningful but mis-orients B. Do **not** ship (c) "turn each by its own angle" — that is the one that looks
+  fine in a screenshot and is wrong in use. The server half is already built (`?north_up=true` on the preview),
+  so this is a frontend decision plus two fetches.
+
+  **⚠️ Builder 2026-08-30 (branch `claude/compassionate-galileo-6jgh4j`) — sized it while shipping the same
+  control on the Gallery/Target lightboxes (v0.312.0), and stood down. Read this before picking it up; the
+  argument against (c) above is not as settled as it reads.**
+  **(1) The stated reason to reject (c) is backwards.** "Turning each by its own angle slides two differently-
+  oriented pictures against each other" — but two runs carrying *different* corrections are differently
+  oriented **before** the turn, and turning each by its own remainder is precisely what makes them agree.
+  Post-turn both are North-up, i.e. in the *same* orientation as each other, which is better under a wipe than
+  the untouched state, not worse. **(2) The real cost of (c) is geometric, not angular, and the entry doesn't
+  name it:** the turn is an `expand=True` rotate, so the output canvas grows by an angle-dependent factor; two
+  pictures turned by different angles come back with different aspect ratios and, under `objectFit: contain` in
+  one fixed box, at different *scales*. That is the mismatch a wipe would show. So (c) is wrong for a reason
+  worth measuring (how much does the scale differ for a realistic angle spread?) rather than for the reason
+  given. **(3) Shape (a) is harder than "checkable from the two `…/annotations` responses" suggests:** that
+  field is the **remainder** and is `null` both for a picture that is already North-up *and* for a run with no
+  usable WCS. Reading `null` as 0° silently offers the turn on an unsolved run and then misaligns the pair —
+  exactly the failure (a) exists to avoid. A solved-ness signal has to come from somewhere else on the response
+  (`directions`/`scale_bar` are null without a WCS) before (a) is honest.
+  **Nothing here is blocking** — it is a genuinely shippable S once (3) is wired — it just isn't the
+  copy-paste the surrounding entries make it look like, and the next agent should not take the (c) verdict on
+  trust.~~
+
+### v0.378.0 + v0.381.0 — the skipped folder can be brought in, and waits on the Library page
+
+- **✅ SHIPPED as answer (a) — v0.378.0 (`scanner.target_name_for_folder` + `scan_and_organize(single_target=…)`,
+  and the "Bring this folder in anyway" button it exists for). Full entry in [`SHIPPED.md`](SHIPPED.md).**
+  ~~`root` on `POST /api/scan` is a "rescan just this folder" shortcut that doesn't actually work.~~
+  **The one slice left open is the entry's own named prize — a *"Re-scan just this target"* button — and the run
+  that shipped the endpoint sized it and DOWN-weighted it.** The page doesn't know which folder a target's subs
+  came from; deriving it server-side from the frames' `source_path` needs a decision about a target whose frames
+  span two folders (real on this library). And with `auto_ingest` on, the watcher already brings a night's subs in
+  unprompted — so the button saves a tree walk rather than enabling anything. A power-user shortcut, not a
+  beginner capability: do not rate it above a genuine friendliness item. (S, autonomy — PRIORITY 2–3.)
+
+- ~~**LEAD, NOT FINISHED (Builder 2026-09-07, filed while shipping v0.378.0) — the skipped-folder finding lives
+  only in a scan job's summary, which scrolls away.**~~ — **SHIPPED v0.381.0** as
+  `webapp/skipped_folders.py` + `GET /api/targets/skipped-folders` + `SkippedFoldersCard`, and the "schema
+  decision" turned out not to need one (the registry's existing `library_meta` key/value table). Entry, and
+  the answer to "what stops a standing card nagging after the owner acts", in [`SHIPPED.md`](SHIPPED.md).
+
+### v0.304.4 — the first zoom clip on a run
+
+- **✅ SHIPPED (Builder, v0.304.4, branch `claude/compassionate-galileo-ezix3s`) — ~~the *first* zoom clip on a
+  target is a silent wait.~~** Fixed as filed, but with the **fetch-to-blob** half rather than the
+  `…/zoom-clip/info` half: `info` says whether a clip is *possible*, which the menu already knows from
+  `has_preview` — it never warms the cache, so it would have added a request without shortening the wait. New
+  shared `frontend/src/components/DownloadMenuItem.tsx` fetches the file itself, holds the menu open
+  (`closeMenuOnClick={false}` — otherwise the spinner unmounts with the menu on the very click that starts it)
+  with a `Loader` and a "Building your clip — a few seconds the first time" line, then hands the blob to the
+  browser. Both call sites (History card menu, Target page menu) use it.
+
+  **Two things the blob path would have quietly broken, and how they're handled.** (1) A plain `<a download>`
+  lets the server's `Content-Disposition` name the file, and the clip is a **WEBP *or* an APNG** depending on
+  what Pillow can encode — so a hardcoded extension would mislabel half the downloads. `filenameFromDisposition`
+  (pure, unit-tested, RFC 5987 aware) reads the server's name and falls back to the caller's only when there
+  isn't one. (2) A browser with no `fetch`/`createObjectURL` renders **exactly today's plain link** — the
+  enhancement can only add feedback, never take the download away. That fallback is what jsdom exercises, so
+  `History.test.tsx`'s existing href/download assertion still passes and now says which path it is pinning.
+
+  **Tests (+9 in `frontend/src/components/DownloadMenuItem.test.tsx`):** the old-browser fallback, the building
+  line appearing *with the menu still open*, the server-named and fallback filenames, and a failed build
+  explaining itself instead of leaving the spinner spinning.
+
+  Original spec, for the record:
+
+  *(Pillar:
+  friendliness — PRIORITY 3; size S; frontend-only in its cheapest form.)* The **Zoom clip** menu item is an
+  `<a download>` straight at `…/zoom-clip`, which is what makes it free to offer (no info request per card,
+  no state) — but the first tap for a run builds ~24 LANCZOS crops and encodes an animated WEBP before a byte
+  comes back. On a NAS that is a second or three of *nothing*: no spinner, no progress, and a browser that
+  shows a download only once it starts. Every later tap is a file read, so this is a first-use-only problem —
+  which is exactly the kind that reads as "broken" and gets clicked three times. **Cheapest honest fix:** the
+  `…/zoom-clip/info` endpoint already exists and is cheap; have the menu (or the card, on open) fire it once
+  and turn the item into a button showing a `Loader` while the fetch is in flight, falling back to today's
+  plain link when the browser has no `fetch`-to-blob path. **Don't** pre-build clips at stack time to dodge
+  this — that would spend CPU on every run for an artefact most are never asked for, which is exactly why it
+  was built lazily.
+
+### v0.304.0 — both halves
+
+- **✅ SHIPPED — BOTH HALVES (Builder, v0.304.0, branch `claude/compassionate-galileo-fj2p70`) — ~~keep the
+  screen awake on the live page, and cover a night that shot more than one target.~~** Shipped exactly as
+  filed, including the "reuse that exact helper, don't write a second one" instruction.
+
+  **(a) Keep-awake.** `useKeepAwake` was lifted out of `routes/ShowAndTell.tsx` into
+  `frontend/src/useKeepAwake.ts` **verbatim** — same guards, same `visibilitychange` re-request, same
+  nothing-persisted posture — and both pages now import the one definition. `/live` holds it on
+  `!!live.data?.active`, so a finished night lets the phone sleep rather than draining a battery on a page
+  with nothing left to watch.
+
+  **(b) The other targets from the same night.** One dimmed line under the card, rendered only when it is
+  true: `alsoActiveTonight(targets, currentSafe)` (pure, in `live/liveSession.ts`) takes the targets whose
+  `last_activity_utc` sits within `SAME_NIGHT_HOURS = 14` **either side** of the one on screen, newest first,
+  capped at 3 — and each is a link that sets `?target=`, i.e. the picker's own action. Zero extra requests: it
+  reads the target list the page already loaded. Deliberately *not* the multi-target dashboard the idea warned
+  against.
+
+  **One honest deviation from the filed copy:** the line says *"Also shot around the same time: NGC 7000"*
+  rather than *"NGC 7000 got 40 subs earlier tonight"*. The sub count for **that window** isn't on the target
+  list (`n_frames` is the target's all-time total), so quoting one would have meant either a second request
+  per neighbour or a number that is quietly wrong. The window is symmetric for the same reason it is honest:
+  pinning `?target=` to an earlier target must still find the ones shot *after* it.
+
+  **Tests (+9):** 5 pure (`alsoActiveTonight` ordering, the exclusions — last week, the current target, a null
+  and an unparseable stamp — the window boundary just inside and just outside, the cap, and the four
+  nothing-to-say cases) and 4 on the page (the lock taken while capturing and released on unmount, *not* taken
+  on a finished night, the neighbour named and last week's session not, and no line at all for a
+  single-target night). `ShowAndTell`'s existing wake-lock tests were left untouched and still pass against
+  the extracted helper, which is the point of extracting rather than copying.
+
+  Original spec, for the record:
+
+  - **NEW IDEA (Builder 2026-08-29, the two follow-ons "Tonight, live" v0.298.0 deliberately left out) — keep the
+    screen awake on the live page, and cover a night that shot more than one target.** *(Pillar: understand +
+    enjoy — PRIORITY 3; size S each; both frontend-only, no new data.)*
+    (a) **Keep-awake.** `/live` is the second page in the app designed to be *left open* — outdoors, on a phone,
+    for hours — and it is the one where the screen sleeping actually costs something (you walk over to check and
+    it's black). v0.296.6 already shipped a wake-lock for the slideshow; **grep for it and reuse that exact
+    helper**, don't write a second one, and hold the lock only while the session reads `active` so a finished
+    night releases it. Same fail-soft posture: a browser without the Wake Lock API simply doesn't get it.
+    (b) **A night that shot two targets shows only one.** The page opens on whichever target's frames arrived
+    most recently, which is right — but a Seestar that re-points mid-night (or a mosaic split across panels)
+    leaves the earlier target invisible unless the reader knows to use the picker. Cheapest honest fix: one line
+    under the card naming the *other* targets that also got subs inside the same window ("NGC 7000 got 40 subs
+    earlier tonight"), each a link that sets `?target=`. `last_activity_utc` on the target list already carries
+    everything needed, so this stays a zero-extra-request change. **Don't** turn it into a full multi-target
+    dashboard — the page's value is that it answers two questions about *one* night at a glance.
+
+### the v0.283.0 nudge follow-on (struck)
+
+- ~~**NEW IDEA (Builder 2026-08-27, spotted while independently building the same nudge) — the v0.283.0
+  grainier-restack note states its gap as a percentage, which stops reading as a quantity past a doubling.**~~
+  — **SHIPPED v0.374.10** (Builder 2026-09-07, branch `claude/sweet-babbage-mg8isx`), to the entry's own
+  shape and with both branches pinned. `format.formatMoreThan(percentMore)` returns
+  `{amount, joiner}` — `{"about 50% more", "than"}` inside the band, `{"about 25.0× as much", "as"}` above
+  `GRAIN_MULTIPLE_ABOVE_PERCENT` (200 %, i.e. a tripling) — because the phrasing change moves the
+  **preposition** too (*more grain **than** yours* vs *as much grain **as** yours*), and leaving that to each
+  caller is how a sentence goes wrong. It refuses a non-finite, zero or negative gap rather than rendering
+  `NaN` at a beginner. The endpoint is untouched: `percent_grainier` still reports the same integer, so this is
+  phrasing only, and 200 % itself still reads as a percentage (the crossover is *above* the threshold, pinned
+  either side). Only the *grainier* note needed it — `percent_cleaner` is a fraction **less**, so it is bounded
+  below 100 % by construction and never gets silly. Tests: +5 `format.test.ts`, +2
+  `GrainierNewestNote.test.tsx` (the runaway gap reads as a multiple and the raw percentage is gone; the
+  ordinary band is unchanged).
+
+  *(Original entry: pillar friendliness / trust — PRIORITY 3. Size: XS — one expression and one test in
+  `GrainierNewestNote.tsx`.)* `percent_grainier` is honest at any size, but the copy prints it raw: a manual
+  restack of a handful of subs against a 500-sub master gives *"about 2400 % more background grain"*, which is
+  arithmetically right and reads as a bug — exactly the wrong impression for a note whose whole job is to make
+  the app look trustworthy when the picture got worse. Past ~200 %, say it the way anyone would out loud:
+  *"about 25.0× as much background grain as your 14 May one"*. Purely phrasing — the endpoint keeps reporting
+  the same number, and the ordinary band (which is where nearly every real firing lands, since the bar is
+  ~17.6 %) is unchanged. **Care:** pin both branches, and pin that the ordinary band still reads as a percent.
+
+### the "Share your sky" poster follow-on (struck)
+
+- ~~**NEW IDEA (Builder 2026-07-30, follow-on to the "Share your sky" poster v0.223.0) — let the recap say *what* you
+  shot, not only how much.**~~ — **SHIPPED v0.227.0** (Builder 2026-07-30, branch `claude/relaxed-turing-zajzay`).
+  The poster and its caption carried the quantities and the biggest project; they now also name the rest of what you
+  pointed at — **"Also shot: M 42, NGC 7000 and 5 more"** — which is the part a friend actually reads. Exactly one
+  line, as the entry asked: `recap_other_targets_line` (`seestack/recap.py`) spells out up to **three** names and
+  counts the remainder from the real target total (`n_targets`), not the capped list it was handed, so it stays
+  honest on a library with hundreds of targets. It deliberately **excludes** the biggest project, which has its own
+  line right above it, so the two never repeat a name, and it returns `""` on a one-target library — keeping the
+  poster's self-hiding contract (one target must not read as a boast about one target). Blank/duplicate names from a
+  hand-edited registry are dropped rather than printing a dangling comma, and the line is pure ASCII because Pillow's
+  built-in font has no em dash (the same constraint the biggest-project line documents).
+  **Where the names come from:** `summarize_library` (`seestack/library_summary.py`) gained an additive
+  `imaged_ranked` — *every* imaged target ranked by integration. `heroes` couldn't answer "what did I shoot?"
+  because it is narrowed to targets with a preview on disk, so a target still waiting to be stacked was invisible
+  to it. `webapp/routers/stats.py` drops the biggest project off the front of that ranking and passes the next few
+  as `other_target_names`; `GET /api/recap` gains an additive `also_shot` field, and the caption gains the same
+  clause (lower-cased mid-sentence). No frontend work was needed — the "Share your sky" card renders the caption
+  verbatim and the poster is server-rendered — so the shareable output gained the names without gaining clutter.
+  **Tests (+14):** `tests/test_recap.py` (+9 — the sentence forms, the three-name cap with an honest remainder,
+  self-hide on one target, blank/duplicate names, no negative remainder, ASCII-only, the caption clause, the
+  unchanged one-target caption, and the poster still rendering), `tests/test_library_summary.py` (+3 —
+  `imaged_ranked` includes a not-yet-stacked target, respects the cap, empty on an untouched library),
+  `tests/webapp/test_recap.py` (+2 — the endpoint names the other target and never the biggest one; empty on an
+  empty library). Upgrade-safe: additive dataclass field with a default, additive response field, no
+  config/DB/on-disk/API-breaking change; a library with one target gets byte-for-byte the old caption.
+  **Still open (the entry's other two slices):** an explicit this-year vs all-time toggle (`window_months` is
+  already on the payload, it just has no UI), and baking the poster through `submit_editor_share`.
+  *(Original idea kept below for provenance.)* *(Friendliness / enjoy + share — PRIORITY 3; size S–M.)* The poster now carries the
+  quantities (nights, integration, targets, subs) and the biggest project, which is the honest core — but the thing
+  a beginner most wants to point at is the *names*: "M 31, M 42, the Pleiades and 5 more". `summarize_library`
+  already ranks every imaged target by integration, so a "what you pointed at" line is a couple of fields away, and
+  `objectinfo.py` could add the filed "favourite constellation" stat from the same rows. Two further slices the
+  shipped version deliberately left: an explicit **this-year vs all-time** toggle (the night count is already a
+  trailing window — `window_months` is on the payload and plumbed through the endpoint, it just has no UI), and
+  baking the poster through the existing `submit_editor_share` path so it lands in the same place as a shared
+  picture. **Care:** the poster's whole virtue is that it's uncluttered — add *one* line, not a table, and keep the
+  self-hiding contract (a library with one target must not read as a boast about one target).
+
+### Background-mesh box floor — gate answered, measured and closed 2026-09-03 (do not build the advisory)
+
+- **Background-mesh box floor (`_scaled_box` `minimum=16`) is the one pixel-scale divergence with
+  no honest advisory.** *(Traced, Builder editor-parity audit 2026-07-16; low confidence it's a
+  visible defect — arguably a defensible tradeoff.)* `seestack/edit/ops/background.py::_scaled_box`
+  floors the proxy-scaled box/mesh size at 16 px so `Background2D` still tiles the small proxy. On a
+  heavily decimated proxy (a ~150 MP mosaic → `proxy_scale≈10`) even the default `box_size=128` scales
+  to `round(128/10)=13`, floored up to 16 = 160 full-res-equivalent px, so the preview's sky mesh is
+  ~25% coarser than the export's (which fits 128). Unlike the deconv/star-reduce sub-pixel floors —
+  which *surface* the divergence to the user via `deconv_understates_on_proxy` /
+  `star_reduce_overstates_on_proxy` — this one is silent. Effect is subtle (both are broad meshes) and
+  only bites at high decimation, so it's low priority; if confirmed visible on a real large mosaic, add
+  a sibling honest-advisory note (`bg_mesh_coarser_on_proxy`) rather than changing the floor (a smaller
+  floor risks a degenerate proxy mesh). (S, editor/parity-honesty — PRIORITY 1.) Found by an
+  adversarial editor preview↔export parity audit (which otherwise traced clean).
+  **Sibling sweep — negative result, recorded so nobody re-treads it (Builder 2026-08-06, done while
+  fixing the heavy-stride coverage-leveling floor, v0.237.2).** Every proxy-scaled pixel measure in
+  `edit/ops/` was re-read looking for the *same class* of defect as the one just fixed — a floor that
+  inverts at heavy stride and changes **whether an op acts on a region at all**, rather than merely by
+  how much. All of them are strength/sharpness floors: `background.subtract`/`remove_final_gradient`'s
+  `box_size` (this entry — a coarser mesh, still fitted), the `dilate_px`/`dilate_object_mask_px` floors
+  (`minimum=0` — a smaller halo, deliberately allowed to vanish), `detail.unsharp`'s `radius`,
+  `detail.chroma_denoise`'s radius, `detail.deconvolve`'s `_DECONV_PSF_FLOOR` and `stars.reduce`'s 1-px
+  footprint (the latter two already carry the `deconv_understates_on_proxy` /
+  `star_reduce_overstates_on_proxy` advisories), and `geometry`'s degenerate-crop test (already decided
+  in full-res px). None of them can drop a region out of the op's scope the way the coverage-leveling
+  floor did. **So this entry is the only remaining pixel-scale divergence, and it stays gated on real-data
+  confirmation as filed.**
+
+  **⚪ GATE ANSWERED — MEASURED AND CLOSED; DO NOT BUILD THE ADVISORY (Builder 2026-09-03, branch
+  `claude/sweet-babbage-f00hj6`).** The entry's own condition was *"if confirmed visible on a real large
+  mosaic, add a sibling honest-advisory note"*. It was measured instead of argued, and the answer is that the
+  **floor is not what the divergence is made of** — so an advisory naming it would attribute an inherent
+  proxy limit to a tuning choice, which is a *less* honest caption than saying nothing.
+
+  **The measurement.** A 4000² scene decimated ×10 (the same `proxy_scale` a ~150 MP mosaic gets), sky =
+  0.12 with a linear + curved light-pollution gradient and a residual vignette, 600 stars, noise σ = 0.002.
+  Three subtractions: the export (`box_size=128` at full res), the preview as it is today
+  (`_scaled_box` → **16**), and the preview at the parity value the floor overrides (**13**). Residual sky
+  flatness after subtraction, and the preview's distance from the decimated export:
+
+  | | sky residual σ | vs. export, mean abs | vs. export, p0.5–p99.5 |
+  |---|---|---|---|
+  | export, box 128 @ full res | 0.00211 | — | — |
+  | preview, box **16** (today, floored) | 0.00235 | 0.00039 | 0.00433 (2.2 σ) |
+  | preview, box **13** (parity, unfloored) | 0.00220 | 0.00029 | 0.00275 (1.4 σ) |
+
+  **What that says.** The floor costs **0.00015** of extra sky residual — 7 % of one noise σ, on a sky sitting
+  at 0.12, i.e. about a **tenth of a percent** of the background level. And the preview differs from the
+  export by 1.4 σ *even at exact parity*: most of the gap is decimation itself (a strided proxy is a
+  different image), not the mesh size. Removing the floor entirely would close roughly a third of an already
+  sub-visible difference, while risking the degenerate proxy mesh the floor exists to prevent.
+
+  **One negative result worth keeping, because it was the near miss.** A first pass used a scene carrying
+  200-px-wavelength sinusoids — right between the two mesh sizes — and it *did* manufacture a difference
+  (mean abs 0.00192 floored vs 0.00143 at parity, a 34 % gap). Real light pollution and vignetting have no
+  structure at that scale in a 12,000-px canvas. **A fixture not shaped like the owner's sky manufactures
+  bugs as readily as it hides them** — the same lesson the A1 stand-down recorded, arrived at from the other
+  end. Re-run with an honest sky, the structured scene's *floor* effect vanishes into the noise anyway
+  (0.00092 vs 0.00088) because neither mesh can follow structure that fine.
+
+  **So the entry is closed as a non-defect, not deferred.** If a future run wants to reopen it, the bar is a
+  real large-mosaic frame where the *floored* preview and the export disagree by more than the parity
+  preview does — not a synthetic scene, and not the arithmetic (160 vs 128) on its own, which is real and
+  turns out not to matter.
+
+  **↳ THE STAND-DOWN EXTENDED TO THE *SMALL* BOX SIZES IT NEVER MEASURED, AND IT HOLDS (Builder 2026-09-04,
+  branch `claude/sweet-babbage-73i7y6`). The advisory was built, then measured, then reverted — recorded here
+  so the third run doesn't re-walk it.** The 2026-09-03 measurement above only tested the **default** box
+  (128) at `proxy_scale` 10, i.e. a **1.25× coarsening**. But the ops' own minimums are far smaller —
+  `background.subtract` allows 32, `final_gradient` 64 — and at box 32 on a step-8 proxy the floor makes the
+  preview's mesh **4× coarser** than the export's, which is a different regime, not the same claim. It was
+  worth checking, and the checking is what closed it:
+  * **On a structured sky it looks damning.** A 2400² scene carrying a `w/6`-period blotchy term (400 px
+    wavelength — 2.5–12× the mesh, so *not* the "right between the two mesh sizes" pathology the stand-down
+    above warns about) gave, as the 1–99 % spread of `preview − export` over a 0.20 sky:
+    box 32/step 8 → **17.3 % floored vs 4.8 % at parity (3.6× excess)**; 48/6 → 11.4 vs 2.7 (4.2×);
+    64/8 → 10.6 vs 3.1 (3.5×); 32/4 → 9.6 vs 1.9 (5.1×). At the default 128/10 it agreed with the
+    stand-down (6.0 vs 4.3, 1.38×) — which is exactly why the entry above, measuring only there, could not
+    see this.
+  * **On an honest sky it collapses.** Re-run with *only* the structure real light pollution and vignetting
+    carry — a linear ramp, one broad half-cycle term across the whole canvas, a smooth radial vignette,
+    600 stars, σ = 0.002 on a 0.12 sky — the same cases give (0.5–99.5 % spread, in noise σ):
+    32/8 → **2.6 σ floored vs 1.7 σ at parity (1.57×)**; 64/8 → 2.2 vs 1.3 (1.70×); 48/6 → 1.6 vs 1.1 (1.44×);
+    32/4 → 1.1 vs 0.9 (1.19×); 128/10 → 1.9 vs 1.5 (1.22×). Adding a faint extended object moves nothing
+    (worst case 2.01×), and the "a tight mesh eats the nebula in the export while the preview doesn't"
+    hypothesis measures at **+0.4 σ** over the object's own footprint — 9 % of its amplitude, at the most
+    extreme box/step pair either op allows.
+  * **So the 4× coarsening is not 4× worse; it is ~1.6× worse, and the ~1.2–1.7× band is what the
+    2026-09-03 run already measured and already declined.** The extra factor in the first sweep was the
+    fixture, again — the third time this file has recorded a scene manufacturing an editor bug (A1, the
+    200-px sinusoid above, and now this). **Do not reopen without real mosaic pixels**, and if you do,
+    measure at box 32 *and* 128: the two regimes are close enough that one number stands for both.
+
+### v0.338.0 — the junk-target cleanup
+
+- **✅ SHIPPED (Builder, v0.338.0, branch `claude/sweet-babbage-f00hj6`) — ~~give the *junk-target cleanup
+  nudge* the same filename evidence the ingest reject just learned, so a pre-convention library's leftover
+  output targets stop hiding behind a frame count.~~** Built to the filed shape, including both of its "do
+  nots", and the one design question the entry did not raise turned out to be the whole of the work.
+
+  **What shipped.** `classify_seestar_junk_target` (`seestack/io/scanner.py`) now accepts a count *above*
+  `junk_output_frame_cap` when **every** registered frame is named like the device's own picture —
+  `_all_frames_are_seestar_output`, a thin `all(...)` over the single definition
+  `seestack.io.project.is_seestar_output_filename` that A7 made public for exactly this, so there is no second
+  spelling of "is this the device's own picture?" to drift. The `<T>_sub/`-sibling-on-disk requirement is
+  untouched: the filenames only ever *add* to it, never replace it. So the owner's `M 3` — 22 on-device
+  outputs, one per session, sitting in the bare folder beside `M 3_sub/` — is offered for cleanup for the
+  first time, as are `M 101` (11) and `M 13` (9), and so is the mosaic shape that outgrows even the looser
+  32-frame cap.
+
+  **The design question the entry didn't ask: the filenames are only knowable by opening the project, and the
+  cap was what stopped that happening.** `junk_verdict` (`webapp/library_hygiene.py`) short-circuits on
+  `n_frames > junk_output_frame_cap` precisely so a 5,477-sub target is never read on a Library poll — so
+  "let the count cap go" cannot mean "read everything". It is now two separate limits with two separate jobs:
+  `junk_output_frame_cap` still says *when the count settles it alone*, and a new
+  `junk_output_examine_cap()` (512 — four panels across 128 sessions, an order of magnitude above the
+  owner's worst folder and an order below a real target) says *when it is worth opening a project to look at
+  the filenames at all*. Reading one column of a few hundred rows is free; the ceiling is what keeps it that
+  way, and a test spies on `Library.open_target` to prove a target above it is never opened.
+
+  **The copy counts what it is offering to delete.** "Stacking it just reproduces that one lower-resolution
+  frame" is simply false about twenty-two of them, and a nudge that miscounts what it proposes to remove is
+  one the owner is right not to trust — so there is now a third phrasing beside the single-field and mosaic
+  ones: *"the Seestar's own stacked image from each session (22 of them, all named “Stacked…”)"*.
+
+  **Conservative exactly where the entry said to be.** The bar is **every** frame, not a majority: one
+  `Light_*.fit` in the folder and the count cap decides instead, because this offers a *deletion* where the
+  ingest reject merely declines to register (reversible, nothing lost). `StackedByMe.fit` does not match —
+  the strictness A7 built into the predicate for the on-by-default ingest path is inherited here for free.
+
+  **Upgrade-safe (§9):** no config key, no schema, no on-disk change, no API shape change, no default flipped,
+  nothing deleted automatically (the nudge still requires the user's confirmation, and removal takes only the
+  registry target — a test asserts the raw `_sub/` folder and the output folder are both still on disk after
+  it). `junk_output_frame_cap` keeps its exact behaviour and its callers.
+
+  **Tests (+8; 3 of them fail before).** `tests/test_scanner.py` (+6): the owner's 22-output `M 3` shape and
+  the 60-image mosaic pile (both fail before), plus four guards that must pass *both* ways — one real
+  `Light_*` sub among the outputs, no `_sub` sibling on disk, a `StackedByMe*` folder, and the examine cap's
+  own bounds. `tests/webapp/test_cleanup_suggestions.py` (+2): the endpoint end to end on `M 3` beside a
+  900-sub `NGC 7000` that has *everything* the output case has except the filenames (fails before), including
+  the delete-and-the-nudge-clears loop; and the cost guard, which asserts a target one frame above the
+  ceiling never has its project opened.
+
+  *(Original entry follows.)*
+
+  Original spec, for the record — **this is done**; it is indented so a triage pass can see that by shape:
+
+  - **NEW IDEA (Builder 2026-09-02, the reach the A7 fix left open) — give the *junk-target cleanup nudge* the
+    same filename evidence the ingest reject just learned, so a pre-convention library's leftover output targets
+    stop hiding behind a frame count.** *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size: S.)* A7
+    (v0.327.7) taught the on-ingest reject to recognise the device's own picture by its **name**
+    (`Stacked*.fit` vs `Light_*.fit`) rather than by how many of them a folder holds, because "the output folder
+    holds one image" is true per *session* and false per folder. `classify_seestar_junk_target`
+    (`seestack/io/scanner.py`) — the read-only classifier behind the "we found some leftover folders" cleanup
+    card — still gates purely on count: `junk_output_frame_cap()` allows 2 for a single field and 32 for a
+    mosaic (v0.319.3, sized from the owner's real 11- and 7-frame mosaic leftovers). A target holding a
+    *season* of on-device outputs sails past both caps and is never offered for cleanup, which is exactly the
+    shape A7 found on the owner's `M 3`. **Shape:** where every frame in the candidate target is named like
+    on-device output, treat that as the positive evidence and let the count cap go; where the names are mixed or
+    `Light_*`, keep today's cap unchanged. The existing "the `<T>_sub/` sibling really is on disk" requirement
+    stays — this only ever *adds* confidence, and cleanup is a confirmed action, never automatic. **Reuse, do
+    not re-derive:** `seestack.io.project._is_seestar_output_filename` is the single definition; a second copy is
+    the copy that eventually disagrees, which is the mistake `junk_output_frame_cap` was itself created to undo
+    (the webapp used to carry its own `_MAX_CLEANUP_FRAMES`). **Care:** this offers a *deletion* to the user, so
+    the bar is higher than the ingest reject's (which is reversible and deletes nothing) — require *every* frame
+    to match, not a majority.
+
+### auto-detect the Seestar's calibration-frame folders (struck)
+
+- ~~**NEW IDEA (Scout 2026-08-26 #6) — auto-detect the Seestar's calibration-frame folders sitting in
+  `incoming/` and offer a one-click "Build master darks".**~~ — **SHIPPED v0.366.0** as
+  `seestack/calibrate/discover.py` + `GET /api/calibration/incoming` + `IncomingCalibrationCard`, built on the
+  `IMAGETYP` half of the gate rather than a naming guess. Entry, measurements and the "what happens on a camera
+  that writes no card" answer in [`SHIPPED.md`](SHIPPED.md).
+
+### the v0.183.0 minimum-frames guard follow-up (struck)
+
+- ~~**IMPROVEMENT IDEA (Builder 2026-07-23, follow-up to the v0.183.0 minimum-frames guard) — make the walk-away
+  auto-stack's "held for more located subs" state VISIBLE to a beginner.**~~ — **BOTH HALVES SHIPPED** (Target page
+  v0.184.0; **Jobs page v0.184.4**, Builder 2026-07-23, branch `claude/pensive-faraday-rxd30t`). The `pipeline`
+  (scan) job had no result renderer at all — a walk-away scan showed a bare "done". Added a pure, tested
+  `pipelineSummary(r)` helper (`Jobs.tsx`) that turns the scan summary into a plain-language line — *"Imported N new
+  frames · auto-stacked M targets · finished K into pictures · held J for more subs · E couldn't finish"* — and a
+  `pipeline` branch in `JobResultActions` that renders it plus a blue info Alert listing each held-back target
+  (linked to its Target page) with *"F of your subs located so far — needs K"*, mirroring the Target-page copy, and a
+  "View in Gallery" button when the pass finished pictures. Display-only, no behaviour/config/DB/API change.
+  Regression: `Jobs.test.tsx` (+6 — five `pipelineSummary` unit cases incl. singularisation, failure-count across
+  both passes, and malformed-held-entry tolerance; one render test asserting the held-target alert + link).
+  _(Original idea kept below for provenance.)_ *(Friendliness pillar, PRIORITY 3; size S–M; frontend-only, additive.)*
+  **Why:** v0.183.0 stops
+  the hands-off auto-stack from publishing 1–2 frame single-frame speckle by holding a thin target back
+  (`auto_stack_held_thin` in the scan job summary) until enough subs plate-solve. That fixes the *wrong-result* half,
+  but the held-back state was silent in the UI — a beginner who turned Auto-stack on and saw no picture had to infer
+  why. **(a) Target page — SHIPPED v0.184.0** (Builder, branch `claude/pensive-faraday-sioj6f`): the Target route now
+  fetches `/api/settings` and, when Auto-stack is on, the target has no healthy stack, its solved+accepted count is
+  below `auto_stack_min_frames`, and unsolved subs remain, shows a blue info Alert — *"Auto-stack is waiting for more
+  of your subs to be located … Only N of your accepted subs have been located … it will stack automatically once at
+  least K subs are located — run Plate Solve to locate more, or use Stack / Process this target to make one now
+  anyway."* Regression: `Target.test.tsx` (+2 — the waiting note fires on a 2-of-202-solved target with Auto-stack on;
+  hidden when Auto-stack is off). **(b) Jobs page — STILL OPEN:** the auto pipeline/scan job summary already carries
+  `auto_stacked` / `auto_stack_skipped` / `auto_stack_held_thin`, but the frontend renders *none* of them, so a
+  walk-away scan is still an opaque "done". A small `pipeline`-job result renderer ("Auto-stacked M targets · held N
+  for more subs · skipped K") would make the hands-off pass legible. **Sane default:** display-only, no behaviour
+  change. **Feasibility:** clears the beginner bar and is additive/reversible.
+
+### global "plate-solving isn't set up" + sibling-sub hint (both struck)
+
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — raise a *global, cross-target* "plate-solving isn't set up"
+  readiness banner on the Dashboard when the star **database** is missing, not only the per-target banner.**~~
+  — **ALREADY SHIPPED; struck 2026-09-06 after a Builder sized it as open work and found it built.** The entry
+  assumed the only cross-target signal available was a roll-up of `solve_failed:no star database` frame reasons.
+  It never needed one: `frontend/src/components/dashboard/astapReadiness.ts` classifies
+  `GET /api/system`'s `astap.star_db_found` directly and returns `{ready: false, kind: "database"}`, which
+  `routes/Dashboard.tsx` renders as its readiness banner (dismissal keyed to `astapReadinessSignature`, so
+  dismissing "ASTAP missing" does not suppress a later "database missing"). That is strictly better than the
+  filed shape — it fires on a brand-new install with **no targets at all**, which a frame-reason roll-up
+  cannot, and it is the case the entry itself called out. Nothing here is open.
+- ~~**IMPROVEMENT IDEA (Scout 2026-07-23) — feed a *sibling sub's* solved centre as the plate-solve hint for the
+  target's still-unsolved subs (a cheap, safe attack on the ⭐⭐ thin-stack root cause).**~~ — **SHIPPED v0.180.0
+  (slices a+b)** (Builder 2026-07-23, branch `claude/pensive-faraday-5krkz5`). Added the pure helper
+  `seestack/solve/runner.py::fallback_solve_hint(solved_frames) -> (ra, dec) | None` — a robust RA-wrap-safe median
+  (reusing `circular_median_ra_deg`) of the already-solved frames' centres — and wired it into `build_solve_arglist`:
+  in one pass it collects the target's solved centres, and for any still-unsolved frame that lacks a usable FITS-header
+  hint it offers that sibling centre with a tight `SIBLING_HINT_RADIUS_DEG = 5.0` search radius (capped at the
+  configured blind radius so a user who tightened it is never widened). Strictly a *search-localisation* fill-in:
+  ASTAP still verifies the star pattern, so a slightly-off hint can only fail (as today), never fabricate a solution;
+  a frame that already carried a header hint — or `use_hint=False` (blind solve) — is byte-for-byte unchanged. Lifts
+  the solved-frame count on the exact faint/sparse-star fields the ⭐⭐ thin-stack bug is about. Tests:
+  `tests/test_solve_hints.py` (+4 — helper: empty/one/median/RA-wrap; arglist: a header-hint-less frame borrows the
+  sibling centre at the tight radius while a header-hinted frame keeps its own hint+30°, `use_hint=False` stays blind,
+  no-sibling stays blind). Upgrade-safe: no config/DB-schema/API-shape/default change (a new module constant + helper
+  + wider hint-fill in an existing function). **Slice (c) still open** (filed as its own idea below): a *second solve
+  pass* that retries first-round blind failures — including header-hinted frames — with the sibling hint at the tight
+  radius, which is what reaches the owner's exact header-hint-present-but-still-failing case. *(Original idea kept
+  below for provenance.)* **What prompts it:** the ⭐⭐ top bug is a *thin stack* because
+  on a faint / sparse-star field ASTAP fails to solve most subs, and `run_stack` combines only accepted **and**
+  solved frames. Today `build_solve_arglist` (`seestack/solve/runner.py:96`) threads only each frame's **own FITS
+  header hint** (`ra_hint_deg`/`dec_hint_deg` from `info.ra_target_deg`) into ASTAP; when that hint is absent or the
+  blind search still fails, nothing narrows the search — and a tighter, correct search radius is exactly what turns
+  an ASTAP timeout/failure into a solve on a star-poor field. **The insight:** a Seestar holds one pointing for a
+  whole target, so **once *any* sub on the target has solved, we know where the scope is aimed** — that solved
+  centre (`ra_center_deg`/`dec_center_deg`, already stored per frame) is a far better, tighter hint for the *other*
+  subs than a missing/loose header hint. **Feature:** when building the solve arglist, if ≥1 frame on the target is
+  already solved, compute a robust centre of the solved frames (median RA/Dec — RA-wrap-safe via the existing
+  `unwrap_ra_deg`) and use it as the fallback hint (with a **tighter** `search_radius_deg`) for any frame lacking a
+  usable header hint — or optionally as a *second-pass* retry for frames that failed a first blind solve. This is
+  strictly a **search-localisation** change: ASTAP still verifies the star pattern, so a wrong hint can't create a
+  false solution (it just fails, as today) — meaning it can only *add* solves, never corrupt one. Directly lifts the
+  solved-frame count on the exact faint fields the ⭐⭐ bug is about, so more real subs reach the accumulator and the
+  noise averages down. **Feasibility:** all inputs exist (solved centres are in the DB; `unwrap_ra_deg` +
+  circular-mean helpers already live in `reference.py`/`mosaic.py`); the core is a pure
+  `fallback_solve_hint(solved_frames) -> (ra, dec) | None` + a tighter-radius arg, unit-testable on synthetic frame
+  rows (RA-wrap case, no-solved-frames → None, one-solved → its centre). Additive/opt-safe: only *fills in* a hint
+  where there wasn't a better one and/or drives an extra retry pass; a frame that already solved is untouched; no
+  config/DB-schema/API-shape/default change. **Builder slices:** (a) pure hint helper + tests; (b) wire it into
+  `build_solve_arglist` (fallback hint + a config-defaulted tighter fallback radius) with a fail-before/pass-after
+  test that a header-hint-less frame is offered the sibling centre once a sibling has solved; (c, follow-on) a
+  second solve pass that retries first-round failures with the sibling hint. Serves autonomy (fewer manual
+  re-shoots / "why is my stack noise?") and image quality (deeper real stacks). *(No existing entry covers this — the
+  "stack-then-solve" bootstrap below integrates first then solves the *deep image*; this instead reuses a
+  neighbour's existing per-sub solution to localise the remaining per-sub solves, and the two compose.)*
+
+### Adaptive Auto (v0.159.0 slice (a), v0.169.0 slice (b), struck 2026-09-06 as delivered) — three copies of one entry
+
+- **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
+  auto-processed image (no ML runtime, fully offline/private).** — **slice (b) per-object-type
+  profiles SHIPPED v0.169.0** (Builder 2026-07-22, branch `claude/pensive-faraday-a8m4u2`). The
+  taste profile now keeps, alongside its global set, an optional **per-archetype override** for
+  galaxy / nebula / cluster, so a "brighter core" taste learned on galaxies no longer also
+  brightens a star cluster. **Engine** (`seestack/edit/auto_prefs.py`): the profile grows an
+  additive `by_type` map (old flat profiles with no `by_type` read as "global-only", so they
+  behave byte-for-byte as before — regression-pinned); `record_feedback`/`apply_profile`/
+  `describe_profile`/`is_neutral` gain an optional `object_type`; a new pure
+  `effective_biases(profile, object_type)` merges the global set with the per-type override
+  (type wins per-parameter, falls back to global). `auto_recipe` self-classifies its own proxy
+  (`classify_target`, which already existed for the preset-suggestion chip) and passes the
+  archetype through, so **both** the interactive `…/editor/auto` and the unattended
+  "Process target" chain apply the right per-type taste with no extra plumbing. **Webapp**
+  (`webapp/routers/editor.py`): the feedback POST accepts optional `safe`/`run_id`; when present
+  it best-effort-classifies that run (unclassifiable ⇒ global, never sinks the feedback) and
+  records into the archetype bucket, returning a note scoped to it ("… for your galaxies …").
+  A new read-only `GET /api/targets/{safe}/stack-runs/{run_id}/editor/auto-preferences` serves
+  the profile scoped to that run's archetype so the editor's "why Auto shifted" note reflects the
+  target being edited *on load*, not only after the next tap. **Frontend:** `AutoFeedback` takes
+  `safe`/`runId`, queries the run-scoped profile, and carries the run context on each cue.
+  Upgrade-safe/additive: no config/DB/API-shape/default change; a never-configured library and
+  every existing flat profile are unchanged. Tests: `tests/test_auto_prefs.py` (+7: type routing,
+  type-overrides-global, global-applies-to-all, walk-back, archetype note, old-flat upgrade,
+  garbage/unknown-type coercion), `tests/webapp/test_editor.py` (+1: feedback scoped to a
+  monkeypatched archetype — bucket not global, run Auto reflects it), `AutoFeedback.test.tsx`
+  (+1 scoped + updated global assertion). **Remaining slices for a future run:** the two other
+  parts of (b) — ~~a **"highlights/core clipped" cue** (still needs a stretch highlight-knee
+  param)~~ **SHIPPED v0.237.0 (see below)** and ~~**recency decay**~~ **SHIPPED v0.369.0
+  (`auto_prefs.DECAY_DAYS` / `_faded` / `steps_faded` / `fade_note`, entry in
+  [`SHIPPED.md`](SHIPPED.md))** — so **slice (b) is now complete**. The only slice left is
+  **(c)**, an optional light statistical fit (numpy/scikit, no NN) — and that one is *optional
+  later* by the original spec, not queued work.
+  Original slice-(a) write-up kept for provenance below.
+- **⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
+  auto-processed image (no ML runtime, fully offline/private).** — **slice (a) SHIPPED
+  v0.159.0** (Builder 2026-07-22, branch `claude/pensive-faraday-jwvd6c`). Implemented
+  the ask end-to-end with **no neural net, no model download, no external API** (pure
+  numpy over the params `auto_recipe` already computes). **Engine:** new pure module
+  `seestack/edit/auto_prefs.py` — a per-library profile of **bounded, signed biases**
+  keyed by nine plain-language cues (too dark/bright, too soft/over-sharpened, too
+  noisy/over-smoothed, colours too weak/strong, too green). Each cue nudges one of five
+  data-driven Auto parameters (`target_bg`, `saturation`, sharpen amount, denoise
+  strength, SCNR amount) by a small step, a bounded signed accumulator that saturates at
+  ±`MAX_STEPS` (3) so it can never run away, and the opposite cue walks it back toward
+  neutral. `auto_recipe` gained an optional `prefs` arg that applies the profile *on top
+  of* the measured values, each **re-clamped to a safe range** — so it stays data-driven,
+  just shifted toward the owner's taste. An empty/absent profile ⇒ today's Auto
+  **byte-for-byte** (regression-pinned), so a never-configured library is unchanged.
+  `describe_profile` yields the plain-language "why" note. **Webapp:** `editor.py` meta
+  key `editor_auto_preferences` + a §9-safe loader (garbled store → neutral, never
+  raises) + three endpoints modelled on the default-recipe CRUD — `GET
+  /api/editor/auto-preferences`, `POST …/feedback` (records one cue; unknown cue → 422,
+  store untouched), `DELETE …` (reset). The profile is threaded into
+  `build_auto_recipe_for_run`, so **both** the interactive `…/editor/auto` endpoint **and**
+  the unattended "Process target" auto-edit chain (`webapp/pipeline.py`) apply the owner's
+  taste. **Frontend:** `AutoFeedback` component (one-tap chips + why-note + Reset) mounted
+  in the editor's "What Auto-process did" alert; tapping a chip records feedback and
+  immediately re-runs Auto so the shift shows on the preview. Transparent + reversible
+  (the why-note + one-click Reset). Tests: `tests/test_auto_prefs.py` (accumulator bounds,
+  opposite-cue walk-back, safe-range clamp, garbage tolerance, byte-for-byte default,
+  recipe integration), `tests/webapp/test_editor.py` (+4: unset neutral, feedback records/
+  persists/resets, unknown cue 422, feedback shifts the served Auto recipe),
+  `frontend/.../AutoFeedback.test.tsx` (+3). Upgrade-safe: additive nullable library-meta
+  blob, no schema/config/API-shape/default change; Auto is neutral until the owner gives
+  feedback. **Remaining slices for a future run:** **(b)** per-object-type profiles
+  (galaxy/nebula/cluster — the classifier already exists) — **SHIPPED v0.169.0, see the
+  top note** — its recency-decay (**SHIPPED v0.369.0**) and "highlights/core clipped"-cue
+  (**SHIPPED v0.237.0**) sub-parts are now done too; **(c)**
+  *optional later* a light statistical fit (numpy/scikit, no NN). Original spec kept for provenance:
+- ~~**⭐ OWNER-REQUESTED — Adaptive Auto: learn the owner's taste from feedback on the
+  auto-processed image (no ML runtime, fully offline/private).**~~ — **THE ASK IS DELIVERED; struck 2026-09-06.** This is the *original spec*, kept for provenance, and it is the third copy of the header in this section — the two above it carry the shipped records. Slice **(a)** shipped v0.159.0, **(b)** v0.169.0 + v0.369.0 (recency decay) + v0.369.3; grep `auto_prefs` / `/api/editor/auto-preferences` before reading a word below as open. Only the spec's own *"optional later"* slice (c) — a statistical image-features→bias fit — was never built, and it was filed as optional. The owner wants to
+  give feedback on the Auto result and have it get better at *their* taste over
+  time. Key insight: `auto_recipe` (`seestack/edit/presets.py`) is already
+  **data-driven** — it computes each parameter from the image (stretch `target_bg`,
+  denoise strength, sharpen radius, SCNR, saturation…). So this needs **no neural
+  net, no model download, no external API** (all of which would hit §9/§10 and send
+  the owner's images off the NAS). Instead, turn feedback into **bounded nudges to
+  those existing parameters**, stored as a personal profile. **This DEEPENS the Auto
+  result — it must live on the existing Auto/editor result, not as a new page/card
+  (see §1 "Depth over surface").** Design:
+  - **Feedback UI on the Auto result:** a thumbs-up plus a few plain-language
+    directional cues — "too dark / too bright", "highlights/core clipped", "too soft
+    / over-sharpened", "colour off / too green", "too flat / more punch", "too noisy
+    / over-smoothed". One click each; no jargon.
+  - **Each cue maps to a small, bounded bias** on the matching Auto parameter (e.g.
+    "too dark" → +step on `target_bg`; "core clipped" → stronger highlight knee;
+    "over-sharpened" → −sharpen amount; "too green" → +SCNR). Accumulate biases into
+    a per-library **`auto_preferences` profile** (EMA / clamped accumulator so recent
+    feedback weighs more and nothing can runaway).
+  - **Apply the profile on top of the data-driven values** on the next Auto run,
+    each parameter **clamped to its safe range** — still data-driven, just shifted
+    toward the owner's taste. An empty profile = today's Auto, byte-for-byte.
+  - **Transparent + reversible (a §1 trust value):** show a plain-language note
+    ("Auto is running a bit brighter for you because you marked 3 recent results too
+    dark") and a one-click **"Reset my Auto preferences."** Never drift silently.
+  Guardrails: no new/heavy/networked dependency (pure numpy over params already
+  computed); additive/upgrade-safe (a new nullable `auto_preferences` JSON in library
+  meta — old libraries read as empty = unchanged); private (images never leave the
+  NAS); off/neutral until the owner actually gives feedback. Beginner bar: clearly
+  yes ("tell it what you didn't like, it improves"). Slices: **(a)** feedback chips +
+  bounded per-library profile + `auto_recipe` applying it + reset + why-note (the
+  ask); **(b)** per-object-type profiles (galaxy/nebula/cluster — the classifier
+  already exists — so a "brighter core" taste for galaxies doesn't over-brighten a
+  cluster) + recency decay; **(c)** *optional later* a light statistical fit (image
+  features → preferred bias) — still numpy/scikit (already deps), **no neural net** —
+  with a strict no-regression parity test. Relates to and supersedes the "Personal
+  default recipe" idea. (L; slice (a) is the shippable M — autonomy/editor,
+  PRIORITY 1/2)
+
+### "Walk-away mode" (struck) + "Reprocess everything" (all slices shipped)
+
+- ~~**NEW (Scout 2026-07-21) — "Walk-away mode": one Settings toggle that turns on the whole unattended
+  bundle, instead of five buried advanced switches.**~~ — **SHIPPED v0.140.0** (Builder 2026-07-21, branch
+  `claude/pensive-faraday-i5lui7`). Added a single prominent **"Walk-away mode"** Switch at the top of the
+  Settings → *Automatic pipeline* section, above the individual toggles, with a plain-language description
+  ("stack each target automatically, use your saved calibration masters, drop obviously-bad subs, skip a
+  batch that looks like two different targets, and finish the picture for you"). Flipping it **on** sets the
+  bundle of five existing opt-ins (`auto_stack`, `auto_edit_on_autostack`, `auto_bind_calibration`,
+  `auto_grade_frames`, `mixed_pointing_guard`) true; **off** clears them; and the master switch's own state
+  is *derived* — it reads "on" exactly when all five are on, so it always mirrors reality even if the user
+  fine-tunes an individual switch below (each stays editable). **Maximally upgrade-safe:** pure frontend
+  convenience over the *existing* settings — **no new persisted field, no backend change, no default flip**
+  (an upgraded install with these untouched behaves exactly as today). Implemented as three pure, exported
+  helpers in `Settings.tsx` (`WALK_AWAY_KEYS`, `walkAwayEnabled(form)`, `withWalkAway(form, on)`) wired to a
+  Mantine `Switch`; the helpers carry the logic so it's unit-tested directly. Tests: `Settings.test.tsx`
+  ("Walk-away mode" describe — off unless all five on / on exactly when all five on / turning it on sets the
+  five without touching unrelated settings and doesn't mutate the input / turning it off clears the five /
+  the bundle is exactly those five keys). Beginner bar ✔ (collapses five expert decisions into one explained
+  yes/no; reversible; individual switches still available). *(Follow-up left for a future run: the optional
+  first-run nudge — "Want AstroStack to do it all automatically? Turn on Walk-away mode" — was not built this
+  slice; file/pick it up separately.)*
+- **⭐ OWNER-REQUESTED — "Reprocess everything" — ALL SLICES SHIPPED: (a) v0.74.0,
+  (c) v0.76.0–0.77.0, (b) v0.83.0.** The stacking engine keeps improving (better rejection /
+  alignment / calibration, bug fixes), but each target's existing stack was produced
+  by whatever engine version was current when it ran — so after an upgrade the *final
+  images stay stale* unless the user restacks each target by hand. **Slice (a)
+  shipped v0.74.0:** a confirm-gated "Reprocess all targets" action on the Settings
+  page + a `POST /api/reprocess-all` endpoint enqueue one serial `reprocess_all` job
+  that restacks **every** target, reusing each target's last genuine stack run's
+  settings (falling back to its saved defaults / global auto-defaults). It's
+  non-destructive (each restack is a *new* `stack_runs` row alongside the old output)
+  and memory-safe (per-target stacks run serially inside the one job), with
+  between-target + within-target cancel and per-target failure isolation. **Remaining
+  slices for a future run:** _(none — slice (b) shipped v0.83.0: an optional off-by-default
+  `deep_rescan` flag on `POST /api/reprocess-all` re-runs QC / plate-solve / auto-grade over
+  each target's existing frames before its restack, so a reprocess after an upgrade picks up
+  QC/solve/grading improvements too, not just the stacker's. Best-effort per target, honours
+  manual accept/reject (`user_override`), skips the rescan for `stale_only`-skipped targets.
+  Settings → "Also re-run QC, plate-solving & grading first" toggle.)_ **Slice (c) shipped:**
+  every stack run records
+  the producing app version (`engine_version` column, schema 8→9, v0.76.0, surfaced
+  on the History card as "made with vX"), and the reprocess action now has an
+  **"only outdated targets"** toggle (v0.77.0, default on) — a `stale_only` flag on
+  `POST /api/reprocess-all` that skips targets whose newest *genuine* stack was
+  already made on the current version, so a large library isn't reprocessed
+  wholesale. A **proactive "N targets are out of date" nudge** (Settings nav badge +
+  Reprocess-panel Alert, backed by `GET /api/reprocess-status`) shipped v0.81.5, so the
+  user is told to reprocess after an upgrade instead of having to remember. What remains is
+  a nicety only: a richer dedicated N/total batch progress card (the Jobs summary already
+  reports "restacked N/M — K already up to date"). (S remaining — polish only,
+  autonomy/image-quality)
+
+### Auto-pick the object preset (v0.94.0) + one-click "process this target" (v0.85.0/v0.86.0) — residue: auto-*applying* the classified preset is gated on real-data validation (now in the owner's list)
+
+- **Auto-pick the object preset from the image** — **first (safer) slice SHIPPED v0.94.0**
+  (see Shipped): the classifier now runs and surfaces as a one-click *preset suggestion* chip in
+  the editor (a wrong guess costs a click, not an image) — Auto's output is unchanged. Auto-process
+  builds one general recipe, but the built-in presets (galaxy / nebula / cluster) are meaningfully
+  different (per-channel vs luminance gradient, star reduction, saturation). **Remaining (higher-bar)
+  slice:** actually *seed Auto* from the classified preset's structure instead of the fixed op list,
+  keeping the general recipe as the low-confidence fallback. That changes the most-used one-click path
+  on a live install, so it should wait until the shipped suggestion chip has gathered real-world signal
+  (which classifications the owner accepts on real galaxy/nebula/cluster Seestar stacks) and the
+  classifier is validated against real data, not just synthetic archetypes. (M, autonomy/editor)
+  _(~~Follow-up idea, spotted shipping v0.94.0: the preset-suggestion chip only shows on an
+  **empty** pipeline, so a user who clicks Auto straight away never learns their image was
+  classified. Add one dimmed line to the "What Auto-process did" note.~~ — **shipped v0.94.2**
+  (see Shipped). A new pure `presetSuggestionSentence` helper turns the (already-fetched,
+  always-enabled) `…/editor/preset-suggestion` payload into one dimmed informational line —
+  "Your image looks like a Star cluster — its preset is another good starting point to compare."
+  — rendered inside the "What Auto-process did" Alert. Purely informational (no button, never
+  implies Auto's recipe was wrong), hidden whenever the classifier declined (`preset_id`/`label`
+  null), and it surfaces exactly the same already-shipped classification the empty-pipeline chip
+  does, so it carries no new classifier-accuracy exposure. Frontend-only, additive.)_
+  _(Still open for the Scout once signal exists: log which suggestions the owner accepts vs
+  dismisses, to inform the graduation-to-seeding call.)_
+  _(Builder note 2026-07-08: a fresh dogfood re-confirmed the current general Auto recipe is
+  healthy and well-tuned (single-field: preview↔export parity 0.00%, median grey 0.24, balanced
+  R/G/B), so the bar for **changing what Auto emits** is high — a confident classifier really does
+  need validating against **real** galaxy/nebula/cluster Seestar stacks, not just synthetic fields,
+  before it touches the most-used one-click path on a live install. A **lower-risk first slice worth
+  considering**: keep Auto's output unchanged and instead surface the classification as a one-click
+  **preset suggestion** — e.g. a dimmed "This looks like a star cluster — try the Star-cluster
+  preset?" chip in the editor (and/or a line in the existing "Why these steps?" note) that the user
+  can accept or ignore. A mis-pick then costs a wrong *suggestion*, not a worse *image*, so it can
+  ship and gather real-world signal (which classifications the owner accepts) before graduating to
+  actually seeding Auto. Same cheap cues (extended-vs-point-source fraction, colour spread) computed
+  in `analyze_proxy`; additive; testable on the classifier in isolation.)_
+- **One-click "process this target"** — **core chain shipped v0.85.0** (see Shipped).
+  A prominent "Process target" button on the Target page (+ `POST
+  /api/targets/{safe}/process` → `process_target` job) now runs QC → plate-solve →
+  auto-grade (when enabled) → stack in a single job, using the target's saved stack
+  defaults, so the user reaches a finished master with no form to fill. Additive,
+  opt-in, non-destructive (a new run alongside any existing), and independent of the
+  global `auto_*` toggles. The stack step is skipped with a clear reason when nothing
+  is plate-solved yet. **Remaining slice — SHIPPED v0.86.0** (see Shipped): the Process
+  job now chains an *auto-edit* onto the fresh master — it persists the one-click Auto
+  recipe as the run's editor recipe (so the editor opens on the finished *picture*, not a
+  flat linear master) and re-renders the run's History/Target thumbnail through it. Runs
+  only for the explicit Process action (existing manual/auto stacks untouched), best-effort
+  (a failure never fails the Process job), and fully reversible in the editor (Reset/undo).
+- Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
+  so the user rarely needs to touch the Stack form. (S–M, autonomy)
+  _(Progress: the Stack form already carries a rich set of data-driven nudges
+  (calibration picks, sigma/min-max frame-count guards, streak→min-max-k, transparency
+  → quality-weight, transparency-spread → photometric-normalize, auto-grade drop-outliers,
+  memory sizing). As of v0.84.6 every one of them is now one-click. A proactive **drizzle**
+  nudge shipped v0.87.0 (see Shipped): on a large single-field set (≥200 accepted, solved
+  frames — matching the field help's "200+ dithered frames") whose drizzle-*on* dry-run sizing
+  fits the memory budget, the Stack form now suggests Drizzle with a one-click "Turn on
+  Drizzle", so a beginner sitting on thousands of subs reaches the biggest resolution win
+  without hunting the advanced knobs — gated on a feasibility estimate so it never nudges
+  toward an OOM-refused run. Remaining genuine gaps a future run could pick up, each needing a
+  careful classifier: **lucky_fraction** from FWHM spread (contentious — it drops signal, so
+  weigh against quality-weighting); a background/gradient flatten nudge from a measured sky
+  gradient.)_
+
+### auto-enable dark exposure-scaling + recipe carry-over (both struck)
+
+- ~~**⭐ Auto-enable *dark exposure-scaling* in the unattended chains when the best dark matches gain/temp but
+  not exposure (and a bias is present).**~~ — **shipped v0.103.12** (see Shipped). `auto_bind_master_paths` now
+  recovers an exposure-mismatched dark that confidently matches gain/temperature by binding `dark_path` +
+  `bias_path` + `scale_dark_to_light=True` when a confident master bias is available and both the dark's and
+  the subs' exposures are known — the unattended equivalent of the Stack form's "select your master bias and
+  scale the dark" nudge. It beats the bias-only fallback (recovers the thermal signal a bare bias can't) and
+  leaves the stack dark-uncalibrated exactly as today when no confident bias exists. Gated behind the existing
+  off-by-default `auto_bind_calibration` setting; the engine already scales (`bias + (dark − bias)·t_light/t_dark`)
+  and stamps `DARKSCAL` provenance. Regression tests: `test_auto_bind_scales_exposure_mismatched_dark_via_bias`,
+  `test_auto_bind_no_dark_scaling_without_a_bias`, `test_auto_bind_no_scaling_when_dark_gain_mismatched`, and an
+  end-to-end `test_reprocess_all_auto_binds_scaled_dark_with_bias`. Original write-up kept below. The companion
+  friendliness slice (a more specific "you have a dark at a different exposure — add a master bias to reuse it"
+  History line) is still open — filed as its own idea below. (S–M, autonomy/image-quality) *(Scout-filed 2026-07-10, traced.)*
+  The interactive Stack form already nudges this: when a dark's exposure is mismatched, no bias is chosen,
+  and the library holds a bias, it offers a one-click "Select your master bias and scale the dark"
+  (`scale_dark_to_light`, v0.82.2) that recovers a usable dark via `bias + (dark − bias)·(t_light/t_dark)`.
+  But the **unattended** binder (`auto_bind_master_paths`) has no equivalent: it binds the dark **only** when
+  the exposure matches within 25% (`_AUTO_BIND_EXP_MISMATCH_FRAC`) and otherwise leaves the walk-away stack
+  **dark-uncalibrated entirely** — even when a same-gain/temp dark **and** a matching bias are both sitting
+  in the library and scaling would give a correct dark. So the beginner who built a 30 s dark library once
+  and now shoots 10 s subs, then drops them and walks away, silently loses dark calibration (thermal signal +
+  amp glow) — the single biggest OSC image-quality lever after stacking — while the interactive user one
+  folder over gets it. This is the exact "interactive form has the feature, the unattended path doesn't"
+  shape the v0.99.0 auto-bind itself and the v0.103.6/v0.103.10 confidence gates all closed. **Shape:** when
+  the recommended dark fails only the *exposure* gate but confidently matches gain/temperature, and a
+  confident bias is available with both exposures known, bind `dark_path` + `bias_path` and set
+  `scale_dark_to_light=True` (the engine already scales correctly and stamps `DARKSCAL` provenance, which the
+  History Info panel already renders). Leave uncalibrated exactly as today when the bias or an exposure is
+  missing (neutral fallback). Gated behind the existing off-by-default `auto_bind_calibration` setting, so
+  it's opt-in and never changes a live install's default; purely local; testable on `auto_bind_master_paths`
+  in isolation (mismatched-exposure dark + matching bias → dark_path+bias_path+scale set; no bias → still
+  uncalibrated). Companion friendliness slice: when a stack came out dark-uncalibrated *because* the only
+  dark was an exposure mismatch (not "no dark at all"), the History "No calibration masters were applied"
+  line (v0.103.7) could say specifically "you have a dark at a different exposure — add a master bias to
+  reuse it" — more actionable than the generic message.
+- ~~**"Apply my last edit to the newest stack" — recipe carry-over across re-stacks.**~~
+  — **shipped v0.75.0** (see Shipped). When a re-stacked run opens with no saved edit,
+  the empty-pipeline nudge now offers a one-click "Use my previous edit (N)" that copies
+  the newest *other* edited run's recipe onto this run (server-validated on load, applied
+  as a single undoable step, not persisted unless Saved). The related "personal default
+  recipe" idea (a target-independent default) is still open below.
+
+### Friendliness (PRIORITY 3)
+
+### v0.293.0 + v0.294.0 — both halves
+
+- **✅ SHIPPED — BOTH HALVES (Builder, v0.293.0 + v0.294.0, branch `claude/compassionate-galileo-60dqir`) —
+  ~~the downloaded picture carries a scale bar *and* a North/East rose, but the app's own on-screen overlay
+  shows only the bar, and only on the History page.~~**
+
+  **Half (a) — the rose on screen (v0.294.0), built exactly as filed.** `sky_directions` now rides the
+  `…/annotations` response as an additive `directions: {north_deg, east_deg} | null` (the same helper the baked
+  JPEG calls, so screen and file cannot disagree — the API hands the frontend the engine's numbers rather than
+  letting it re-derive an orientation from a CD-matrix sign, which is the convention hazard the sky-atlas
+  overlay is still gated on). A pure `compassLayout(directions, boxW, boxH)` sits beside `scaleBarLayout` in
+  `AnnotatedImage.tsx`, converting the engine's convention (degrees CCW from screen-right, screen-up positive)
+  into CSS vectors — negating y, the sign error that would silently draw the sky upside down — and sizing the
+  arms off the box's **short** side so a wide mosaic and a square crop get proportionally the same rose. The
+  rose renders top-right, opposite the bar's bottom-left, so they can never collide; the baked version puts
+  both along the top only because its bottom edge is the caption zone.
+  **It rides the existing Scale toggle rather than adding a third**, and that toggle is now named **"Scale &
+  compass"** — they are one question ("how big, and which way up?"), the file has drawn them as a pair since
+  v0.284.0, and a third menu item on the busiest card in the app is exactly what the standing IA priority says
+  not to do. Still **off by default**, as the entry's Care note requires.
+
+  **One deliberate departure from the filed spec.** The spec asks for the arms to be *turned* by the applied
+  rotation when the North-up toggle is on. They are **hidden** instead — the rose obeys the same
+  `cantPlaceMarks` rule the pins and bar already do (a rotation a past save baked in, or a render whose
+  geometry can't be reconciled), which is the honest, already-tested behaviour, and the note beside the picture
+  now names the compass alongside them. Turning the rose to match a *live* Adjust render would need the render's
+  angle client-side, which the browser does not have; a crop needs no composition at all, since trimming a
+  border turns nothing. Filed as a follow-on below rather than guessed at.
+
+  **Half (b) — on the Target page (v0.293.0).** The object labels shipped there first, under a "What's in it?"
+  toggle on `LatestPictureCard` — see the full entry under "Features that serve real workflows". The card
+  deliberately keeps **one** toggle: a second ("Scale & compass") would put four controls in that header row,
+  which wraps badly on the phone the owner reads this on. Filed as a follow-on.
+
+  **Upgrade-safe (§9):** one additive, optional response field (an older frontend ignores it; an older backend
+  omitting it reads as "no rose"), no schema/config/on-disk change, no default flip. **Tests: +11** — 8 vitest
+  in `AnnotatedImage.test.tsx` (`compassLayout`: North-up straight up with East to the left, a rotated field
+  turning both arms, a mirrored field drawn mirrored because that is what the WCS says, short-side arm sizing,
+  the four nothing-to-place cases, a non-finite angle refused rather than drawing a NaN arm; plus the component
+  rendering with and without the rose), 1 in `History.test.tsx` (the renamed pair-toggle and its fetch), and 2
+  in `tests/webapp/test_stack_annotations.py` (the field's values pinned **against the engine helper itself**,
+  so this asserts parity rather than re-deriving the geometry; and `null` for a run with no WCS).
+
+  **Follow-ons deliberately left open:** (i) turn the rose by the live/baked rotation instead of hiding it —
+  needs the applied angle on the client, which is a server-side number today; (ii) put the "Scale & compass"
+  pair on the Target page's picture card once that header row can carry another control.
+
+  Original spec, for the record:
+
+  **~~NEW IDEA (Builder 2026-08-27)~~** *(Pillar: understand + friendliness — PRIORITY
+  3. Size: S–M. Confidence: certain — I built the baked half this run and read the overlay to match it.)*
+  **Two halves, either shippable alone.** (a) *The rose on screen.* `AnnotatedImage.tsx` already draws the
+  scale bar over a contain-fit preview via the pure `scaleBarLayout`; the compass needs the same treatment —
+  a pure `compassLayout(directions, …)` beside it and two short arms in the opposite corner. The **directions
+  already exist server-side** (`seestack.skymarks.sky_directions`, ground-truthed against astropy); the only
+  backend work is adding them to the `…/annotations` response beside `scale_bar` (additive, `null` for a run
+  with no usable WCS), which the History page already fetches. Note the one subtlety the baked version had to
+  solve: when the North-up toggle is on, the on-screen picture is rotated, so the arms must be turned by the
+  same angle (`seestack.render.orient.applied_rotation_deg`) — the existing code path already knows the angle.
+  (b) *On the Target page.* The overlay is wired only into History's picture card; the **Target page's latest
+  picture** — the screen a beginner lands on after a stack — offers neither the scale bar nor the object
+  labels, even though both are one query away and the Target page already fetches far more than this. Reuse
+  `AnnotatedImage` there behind the same quiet toggles History uses, inside the existing grouping rather than
+  as another always-on card (the standing IA priority). **Care:** keep both marks *off* by default on screen
+  exactly as they are today — this is about making them available and consistent, not about decorating the
+  picture for everyone.
+
+### found by dogfooding the phone editor (struck)
+
+- ~~**FOUND BY DOGFOODING (Builder 2026-08-17, seen in the phone Editor screenshot of a real running build;
+  REPRODUCED) — the editor, the app's priority-1 screen, titled itself with the raw filesystem-safe name.**~~ —
+  **FIXED v0.264.7** (Builder 2026-08-17, branch `claude/serene-goldberg-x7wijx`). *(Friendliness — PRIORITY 1/3;
+  cosmetic severity, but it is the heading of the screen where a beginner turns a stack into a picture, and it
+  reads like a path rather than their target.)*
+  **The symptom, screenshotted:** the editor opened on **"Editor — Sample_Orion_Nebula_M42"** while the Library
+  card, the Target page, the Stack form and the Gallery all call the same target **"Sample: Orion Nebula (M42)"**.
+  On a phone the underscored name also wraps the title onto two lines.
+  **The cause, and why it was two screens not one:** `Editor.tsx` and `History.tsx` work entirely off the `safe`
+  route param and never fetched the target at all, so `safe` was the only name they had. `Stack.tsx` — the third
+  screen under the same target — already did it right (`target.data?.name ?? safe`), which is exactly the shape
+  used here, so this is the established pattern applied to the two screens that missed it.
+  **The fix:** both pages now run the same `["target", safe]` query every other target screen uses, so arriving
+  from the Target page is a **cache hit rather than a fetch**, and each falls back to `safe` if it fails — the
+  name is a nicety, never a dependency, and neither page blocks or errors on it. The editor's lightbox caption
+  (`"<name> — edited"`) was the third raw-`safe` render and goes through the same value. Frontend-only: no API,
+  schema, config, on-disk or default change; no route, control or card added or removed.
+  **Tests (+4, `Editor.test.tsx` +2 and `History.test.tsx` +2, one fail-before in each file):** the real page
+  titles itself with the target's name and *not* with `M_42`, and a target that can't be loaded still opens the
+  page under its safe name.
+
+### ⭐⭐ the information-architecture overhaul, slices (a)–(e) all shipped (v0.255.0 → v0.26x) — AGENTS.md §1 carries the standing rule and now points here for the slices
+
+- **⭐⭐ OWNER-REQUESTED (2026-08-08) — INFORMATION-ARCHITECTURE OVERHAUL: the pages are "extremely busy"; you have
+  to scroll a long way past ~30 stacked things to reach the actual content.** *(PRIORITY 3 friendliness, and the
+  owner's top UX complaint about the live build. A standing, MULTI-RUN effort — one page per run, see the slicing
+  below. Size L overall, M per slice.)*
+
+  **🚫 THE HARD CONSTRAINT — NOTHING MAY BE REMOVED.** The owner was explicit: *"don't get rid of features — just
+  move them to a more organized layout."* No feature, card, badge, note, control or route may be deleted, and
+  nothing may become unreachable or undiscoverable. This is **pure information architecture**: same capability,
+  better arrangement. If a slice can only hit its numbers by dropping something, the slice is wrong — regroup
+  instead. (An agent that "simplifies" by deleting a card has failed this item.)
+
+  **Measured on `main` @ v0.254.1 — the owner is not exaggerating:**
+  - **`routes/Target.tsx` is the worst offender: 1481 lines, ~28 distinct imported UI components, 17
+    `Card`/`Paper`/`Alert` blocks.** Its vertical order is: header → **~15 consecutive `Alert`/note/badge blocks
+    (lines ~745–956)** → preview/stack → **9 full analysis cards stacked one below another (lines ~1192–1294:
+    `SessionRecap`, `Nights`, `FocusTrend`, `TransparencyTrend`, `StackHealth`, `DeepeningReel`, `NextSession`,
+    `BestMonths`, `MoonInterference`)** → **the frames table — the actual data — does not begin until line ~1339
+    of 1481.** That is the "30 things at the top" and the long scroll, literally.
+  - **`routes/Dashboard.tsx`: ~28 component references.** Second worst.
+  - **The sidebar is a flat list of 15 destinations** with no grouping.
+  - Cause is honest feature accretion: nearly every shipped feature added one more always-on card or banner, and
+    no run has ever owned the *sum*.
+
+  **✅ ADDING NEW PAGES IS EXPLICITLY ALLOWED AND OFTEN THE RIGHT ANSWER (owner, 2026-08-08):** *"even if they
+  need to add pages, that is fine. I just want the organization to be clean, simplistic, and make sense."* So do
+  **not** feel obliged to cram everything back into one screen with tabs and disclosures — **splitting an
+  overloaded page across several focused pages is a first-class option**, and usually reads cleaner than a dense
+  page with four tab strips. Prefer **nested routes** for this (e.g. `/library/<target>` stays the picture +
+  frames, with `/library/<target>/insights` or `…/planning` carrying the analysis cards): a sub-route is
+  URL-addressable, bookmarkable, back-button-friendly and shareable, which a tab's internal state is not. A tab
+  strip that *drives* sub-routes is a good middle ground — it looks like tabs, behaves like pages.
+  **The bar the owner set is "clean, simplistic, and makes sense"**, so judge every arrangement by: could a
+  beginner *predict* which page a given thing lives on, from its name alone? **Counter-caution — don't
+  over-fragment.** Twenty thin pages is just clutter moved into the nav. Each page should have **one purpose you
+  can name in two or three words**, and reaching anything routine should take **at most one click from where you
+  already are**. If a split would strand something the user needs *while looking at something else*, keep them
+  together. When you add a page, add it to the grouped nav (slice d) in the same run, so nothing is orphaned.
+
+  **Direction (the Builder should exercise judgement, but hit these shapes):**
+  1. **Collapse the banner wall into one prioritised "needs your attention" area.** Rank the ~15 alerts by
+     severity (blocking error > warning > advisory > congratulatory), **show the top 1–2 inline, and put the rest
+     behind a single "N more notes" disclosure** that is open-able in one click. Congratulatory/"nice job" notes
+     (`SharpestYetBadge`, praise alerts) should never outrank a real warning for the inline slot.
+  2. **Group the 9 stacked analysis cards instead of stacking them.** Either **tabs** (suggested split:
+     *Overview* — recap/nights · *Quality* — focus/transparency/stack-health · *Planning* — next session/best
+     months/moon · *Story* — deepening reel) **or a responsive multi-column grid**. Tabs cut scroll hardest;
+     a grid is the lower-risk change. Pick one and be consistent across pages.
+  3. **Put what the user came for at the top.** On a target that means the picture and the frames table; the
+     analysis belongs below or behind a tab. Aim for **the primary content visible without scrolling** on a
+     1080p desktop window.
+  4. **Group the sidebar** into a few labelled sections (e.g. *Capture · Pictures · Planning · System*) —
+     15 flat links is its own kind of busy. No route removed.
+  5. **Then apply the same pass to `Dashboard.tsx`**, reusing whatever grouping primitive slice 2 lands on.
+
+  **Slice it — do NOT attempt all of this in one run.** Suggested order, one per run, each independently
+  shippable and revertible: (a) Target banner-wall consolidation → (b) Target analysis-card grouping → (c) Target
+  content-order/above-the-fold → (d) sidebar grouping → (e) Dashboard. Ship and let the owner react between
+  slices; his reaction to (a) and (b) should inform the rest.
+
+  **✅ SLICE (a) SHIPPED — v0.255.0** (Builder 2026-08-13, branch `claude/serene-goldberg-2bpxcs`). The Target
+  page's banner wall is now one prioritised notes area. **Measured, as the acceptance criterion asks:** always-on
+  note blocks above the page's own title went **15 → at most 2**, plus one `"N more notes"` line; the other 13 are
+  **still mounted, still rendered, one click away** (nothing removed — the hard constraint). `Target.tsx` is 1512 →
+  1524 lines (+12: the win here is visual, not line count — the wall's JSX is unchanged, just re-homed into an
+  array), and the new shared `components/NoticeBoard.tsx` is 137 lines.
+  **The design decision worth knowing:** most of those notes are **self-hiding components that fetch their own
+  data** (`SkyBrightnessNote`, `SharpestYetBadge`, `StackNoiseBadge`, `CalibrationSkippedNote`,
+  `NextBestMoveBadge`, `IntegrationTrendBadge`…), so the page genuinely cannot know how many will speak up — and a
+  disclosure that promises *"2 more notes"* and opens onto nothing is worse than none. `NoticeBoard` therefore
+  **measures the DOM**: it renders every note, counts the ones that actually produced output (a `MutationObserver`
+  catches the ones that arrive late, since a child's own query resolving doesn't re-render the parent), shows the
+  top `inlineCount` by severity and hides the rest **with CSS rather than unmounting** — so expanding never
+  remounts or refetches anything, and a note that changes its mind is picked up automatically.
+  Severity is declared per note via the exported `NOTICE_PRIORITY` ladder (`blocking` > `warning` > `advisory` >
+  `info` > `praise`), so a congratulation can never take a warning's slot — the entry's explicit requirement. The
+  one note deliberately left **outside** the board is `SampleTourNote`: it *is* the first-run guidance the entry
+  says to preserve, and it self-hides off the sample demo anyway. The `mixedRejected`/`mixedPointings` ternary pair
+  was split into two independently-ranked notes that keep their exact mutual exclusion.
+  **This is the reusable grouping primitive the entry asks for** — a later feature with something to say should add
+  a `Notice` with a priority instead of appending one more always-on banner. (Slice (b) reused its DOM-measuring
+  approach for the analysis cards; see `InsightTabs`.) **Tests (+8):**
+  `NoticeBoard.test.tsx` (+6 — severity ranking beats declaration order, one-click open/close, silent notes are not
+  counted, an all-silent board renders nothing at all, a late-arriving note is picked up, and nothing folds when
+  there is nothing to fold) and `Target.test.tsx` (+2 — the real page keeps its two urgent notes inline and folds
+  the third, and a lone note shows with no disclosure). All 66 pre-existing `Target.test.tsx` assertions pass
+  **unchanged** (hidden notes stay in the DOM), so nothing was rewritten to go green. Frontend-only: no API,
+  schema, config, on-disk or default change. **Next slice: (b) — group the 9 stacked analysis cards.**
+
+  **✅ SLICE (b) SHIPPED — v0.258.0** (Builder 2026-08-13, branch `claude/serene-goldberg-h9ki9i`). The nine
+  stacked analysis cards are now one tabbed area. **Measured, as the acceptance criterion asks:** analysis cards
+  rendered *always-on* between the picture and the frames table went **9 → 2** on first paint (the open group;
+  at most 3 for any group), plus one tab strip — the other six or seven are **still mounted, still one click
+  away** (nothing removed — the hard constraint). `Target.tsx` is 1531 → 1554 lines (+23; as with slice (a) the
+  win is vertical space, not line count), and the new shared `components/InsightTabs.tsx` is 118 lines.
+  **Tabs, not a grid** — the entry offered either, and tabs cut scroll hardest, which is the complaint. Groups:
+  *Overview* (last session · nights) · *Quality* (focus trend · transparency · stack health) · *Planning* (next
+  session · best months · Moon interference) · *Story* (the deepening reel) — exactly the split the entry
+  suggested. **Two cards were deliberately left inline, and that is the judgement call worth knowing:**
+  "Is it enough yet?" (the question the beginner came with — it is an answer, not analysis) and `FirstLookCard`
+  (first-run reassurance the cautions say to preserve, and it self-hides the moment a real picture exists).
+  **`InsightTabs` reuses `NoticeBoard`'s DOM-measuring trick, for the same reason:** most of these cards
+  self-hide on data they fetch themselves, so the page cannot know which will speak — and *a tab that opens onto
+  an empty panel is worse than no tab*. It renders every group, counts the ones that produced DOM (a
+  `MutationObserver` catches the late arrivals), and gives a tab only to those; a lone speaking group gets no tab
+  strip at all, and an all-silent board renders nothing. Panels stay mounted (`keepMounted`), so switching tabs
+  never remounts or refetches a card. Short labels on purpose: the owner reads this on a phone. **This is the
+  grouping primitive slice (e) should reuse on the Dashboard** — and a future analysis card should join a group
+  rather than become a tenth stacked card. **Tests (+9):** `InsightTabs.test.tsx` (+7 — one group on screen at a
+  time with the rest mounted, one-click switching, no tab for a silent group, no strip for a lone group, nothing
+  at all when every group is silent, a late-arriving card getting its tab back, and the chosen tab surviving a
+  re-render) and `Target.test.tsx` (+2 — the real page tabs its groups, and offers no empty tabs). All 69
+  pre-existing `Target.test.tsx` assertions pass **unchanged** (hidden panels stay in the DOM), so nothing was
+  rewritten to go green. Frontend-only: no API, schema, config, on-disk or default change.
+  **Next slice: (c) — content order / above the fold.**
+
+  **✅ SLICE (c) SHIPPED — v0.259.0** (Builder 2026-08-15, branch `claude/serene-goldberg-wa400h`). The Target page
+  now opens onto **what the user came for**, with everything that merely *describes* the target moved below it.
+  **Measured, as the acceptance criterion asks:** always-visible blocks between the page header and the primary
+  content went **3 → 0** (the catalog card, the insight tab strip and its open group all sat there; the readiness
+  card sat there too and now shares the hero row *beside* the picture rather than stacking above the table), and
+  the frames table now begins at render line **1319, down from 1369** (measured; an earlier draft of this
+  paragraph said "~140 lines earlier", which was wrong — the hero grid's own wrapper gives some of it back), and
+  what it displaced is the *tall* content: ~61 lines of always-on analysis JSX moved below the table, and the
+  readiness card moved beside the picture instead of above it. On a 1080p window the picture and the table's first
+  rows share the first screen. `Target.tsx` is 1554 → 1568 lines (+14), plus the new
+  `components/target/LatestPictureCard.tsx` (99 lines).
+  **The gap this slice exposed, and closed:** the entry says "put the picture and the frames table at the top" —
+  but the Target page **had no picture at all**. A beginner's finished image lived only on History or behind a
+  download menu, so the page about a target showed notes, analysis and a table of filenames and never the thing
+  they were making. `LatestPictureCard` puts the newest finished stack on the page, height-capped at 260 px on
+  purpose (so it cannot push the frames table off the fold), captioned with the three facts that identify it
+  (*"Stacked 14/08/2026 · 128 frames · 2 h 6 m of light"*), with **Edit this picture** / **All versions** links and
+  click-to-open in the **same zoomable `ImageLightbox`** — and therefore the same PNG/JPEG/full-res/FITS downloads
+  and OS share — the Gallery, History and editor already use. It self-hides before the first stack, where the
+  existing pre-stack `FirstLookCard` reassurance still speaks, unchanged.
+  **New order:** notes (slice a) → header → **hero: picture · "Is it enough yet?"** → frames table + frame preview
+  + notes → catalog card → insight tabs (slice b). Nothing was removed and nothing became a click further away
+  except by scrolling *down* instead of up. **Tests (+11):** `LatestPictureCard.test.tsx` (**new, +8** — the
+  caption's three facts, the singular "1 frame", a run with no recorded integration, an unparseable timestamp not
+  printing "Invalid Date", the editor/history routes, silence before the first picture and for a preview-less run,
+  and the lightbox opening) and `Target.test.tsx` (+3 — a `compareDocumentPosition` assertion that the picture
+  precedes the table which precedes both the insights and the catalog card, that readiness stays above the table,
+  that the *newest* run is the one shown, and that an unstacked target shows no picture card). All 71 pre-existing
+  `Target.test.tsx` assertions pass **unchanged**. Frontend-only: no API, schema, config, on-disk or default change.
+  **Next slice: (e) — the Dashboard.** *(Shipped v0.262.0 — see below.)*
+
+  **✅ SLICE (d) SHIPPED — v0.260.0** (Builder 2026-08-15, branch `claude/serene-goldberg-dglvf3`). The sidebar's
+  15 flat links are now four named groups plus the Dashboard. **Measured, as the acceptance criterion asks:**
+  unlabelled links in a single flat run went **15 → 0**; the longest run a beginner has to read to find something
+  went **15 → 4** (the biggest group); destinations **15 → 15** — *nothing removed*, and **nothing hidden**:
+  every link is still visible with **zero** clicks, because the headings only *label* the groups, they do not
+  collapse them. (Collapsible groups were considered and rejected: they'd trade the owner's "busy" complaint for a
+  worse one — a destination you can no longer see.) `App.tsx` is 192 → 191 lines, with the link list lifted into
+  the new `src/nav.tsx` (85 lines) so the sidebar's shape is data a test can read rather than JSX buried in the
+  layout.
+  **The groups, named so a beginner can predict which one a thing lives in:** *(lead, unlabelled)* Dashboard ·
+  **Your pictures** — Library, Gallery, My best pictures, Your sky so far · **Plan a night** — Tonight, Sky Map ·
+  **Capture & process** — Telescope, Moon & Sun, Calibration, Channel combine · **System** — Jobs, Storage, Logs,
+  Settings. The Settings link keeps its `OutdatedTargetsBadge`, the mobile drawer still closes on click, and
+  `isNavActive` highlighting is untouched. Each group is a real `role="group"` labelled by its heading, so a
+  screen-reader user gets the grouping too, not just a sighted one.
+  **Tests (+5, `src/nav.test.tsx`):** the frozen pre-slice flat list is checked link-for-link against
+  `NAV_LINKS` — so a future run that "tidies" a destination away fails immediately — plus no duplicate route, the
+  Dashboard staying `end`-matched (and no other link claiming it), the section shape (few groups, only the lead
+  one unlabelled, no heading over a single link, unique titles), and two render tests over the real `App`: every
+  one of the 15 links is present and visible with its correct `href`, and each named group holds exactly its own
+  links. Frontend-only: no route added or removed, no API, schema, config, on-disk or default change.
+
+  **✅ SLICE (e) SHIPPED — v0.262.0** (Builder 2026-08-16, branch `claude/serene-goldberg-tgh2g6`). The Dashboard
+  now opens onto **your pictures**, with everything that merely *describes* the library grouped behind three tabs.
+  **Measured, as the acceptance criterion asks:** always-on full-width cards a user had to scroll past before
+  reaching their pictures ("Recent stacks") went **8 → 0** (`PointHereTonightCard`, `LastNightCard`,
+  `VideoCapturesCard`, `ImagingCalendarCard`, `LibraryProgressCard`, `ContinueTonightCard`, `SuggestTargetsCard`,
+  `BestPicturesStrip` all sat there); cards rendered below the stat row on first paint went **8 stacked → at most
+  3** (the open tab group) plus one tab strip; the two setup alerts moved into one `NoticeBoard` above the title.
+  Destinations, cards and controls **15 → 15 — nothing removed** (the hard constraint): every card is still
+  mounted, still one click away. `Dashboard.tsx` is 299 → 334 lines (+35; as with every slice the win is vertical
+  space, not line count) and **no new component was written** — this slice is entirely the two primitives slices
+  (a) and (b) already built.
+  **New order:** notes → title → first-run guidance (`FirstImageCard`, `SampleImageCard`) → the six-tile stat row →
+  **Recent stacks** → `BestPicturesStrip` → insight tabs. On a 1080p window the stat row and the recent-stack
+  pictures share the first screen; previously the pictures were the *last* thing on the page, under eight cards.
+  **The groups, named so a beginner can predict where a thing lives:** *Tonight* (point here right now · continue
+  tonight · suggested targets) · *Recent* (last night · Moon & Sun videos waiting) · *Progress* (target progress ·
+  imaging calendar). *Tonight* leads because its cards are the actionable ones; when they are all silent (no
+  location set yet) the strip simply falls through to the first group that speaks.
+  **Two judgement calls worth knowing.** (1) `FirstImageCard` and `SampleImageCard` were deliberately left
+  **outside** both the board and the tabs — they are the first-run guidance the entry's cautions say to preserve,
+  they self-hide the moment the install is established, and burying a beginner's map behind a tab would trade the
+  busy complaint for a worse one. (2) `BestPicturesStrip` moved *down* to sit directly under the recent stacks
+  rather than into a tab: both are "your pictures", so they belong together above the analysis.
+  **The `NoticeBoard` is worth it even at two notes:** with `inlineCount=2` nothing folds today, so the visible
+  behaviour is unchanged — the point is that the Dashboard now has the same obvious home for a future warning that
+  the Target page has, instead of a ninth always-on banner. Both alerts keep their own close button and their
+  signature-keyed dismissal.
+  **Tests (+4, `Dashboard.test.tsx`):** the pictures precede the insights area (`compareDocumentPosition`) and the
+  analysis really is inside it; exactly the two speaking groups get a tab (a silent *Tonight* gets none), one group
+  is visible at a time, the other stays **mounted** (`not.toBeVisible()`, so nothing refetches on a switch), and a
+  click switches in one step; a lone speaking group gets no tab strip at all; and both setup warnings live in one
+  notes area above the title. All 8 pre-existing `Dashboard.test.tsx` assertions pass **unchanged** — including the
+  banner-dismissal test that reaches for the Mantine close button — so nothing was rewritten to go green.
+  Frontend-only: no API, schema, config, on-disk or default change; no route added or removed.
+  **All five named slices (a)–(e) are now shipped.** The entry stays open as the standing IA reference (the
+  primitives, the hard constraint and the acceptance measurement); the natural next candidates, *if the owner
+  reacts and wants more*, are the Library and Editor screens — but neither has been measured as "busy" the way
+  Target and Dashboard were, so **don't start one speculatively**.
+
+  **✅ SLICE (f) SHIPPED — v0.266.0** (Builder 2026-08-17, branch `claude/serene-goldberg-qhoaat`). Settings is now
+  one section per URL, and it is no longer the app's tallest page — it is one of its shortest.
+  **Measured on the same running build, with the same probe that found it** (`scripts/agent-dogfood.sh`, full-page
+  scroll height): **phone 5827 px → 1026 px** (≈6.8 phone screens → 1.6), **desktop 4606 px → 900 px** — i.e. the
+  whole page now fits inside a 1440×900 window with **no scroll at all**, and Settings has dropped out of the
+  probe's eight-tallest list entirely. Always-on full-width blocks below the system banner went **7 → 1**
+  (`Watched folders`); `Card`/`Paper`/`Alert` blocks rendered *visible* on first paint went **8 → 2** (the system
+  banner and the open section). Destinations, cards and controls **unchanged — nothing removed** (the hard
+  constraint): every setting is still mounted and now at most one click away, and each has its own address.
+  `Settings.tsx` is 891 → 967 lines (+76; as with every slice the win is vertical space, not line count), plus the
+  new `components/SectionTabs.tsx` (69) and `settingsSections.ts` (32).
+  **Nested routes, as the entry preferred — the deep links were the whole reason.** `/settings/<section>` is a real
+  route (`main.tsx`), so a section is bookmarkable, back-button-friendly and, crucially, *linkable*: the five inbound
+  "Fix in Settings" links now land on the section that holds the control they were sent for — the Dashboard's
+  folder warning on **Folders**, its ASTAP warning, the Target page's solve-failure note and a stack's health card
+  on **Plate solving**, and both of the Tonight planner's location prompts on **Observing site**. The entry warned
+  that a tab strip's one failure mode is landing a deep link on a hidden control; each of those is pinned by a test
+  that asserts the control is **visible**, not merely present. A bare `/settings` and an unknown section both fall
+  through to the first section, so an old bookmark still lands somewhere useful.
+  **The sections, named so a beginner can predict which one a thing is on:** *Folders* (data root, incoming,
+  library, watcher) · *Automation* (walk-away mode and the whole hands-off pipeline) · *Plate solving* (ASTAP, CPU
+  workers) · *Observing site* (lat/lon/elevation, minimum altitude, horizon mask) · *Stacking* (the automated
+  stacking defaults, memory budget) · *This device* (Seestar, ambient sound) · *Maintenance* (reprocess, job
+  history, backup & restore, access control). **The mis-filing the entry called out is fixed with it:** the
+  observing site, the ASTAP path, the stack memory budget and the job-history depth are no longer inside a card
+  called "Watched folders" — each is now under the name that predicts it.
+  **The judgement call worth knowing:** the system banner (data root · CPUs · ASTAP/star-DB badges · "Test solve on
+  a real frame") stays **outside** the tabs, always visible. It is status, not a setting — it is what the ASTAP
+  deep links exist to show — and hiding it behind one tab would make the page's own health answer conditional on
+  which section you happened to be reading.
+  **`SectionTabs` is the reusable primitive**, the URL-addressable sibling of `InsightTabs`: that one measures the
+  DOM because analysis cards self-hide, this one adds an address because settings never do. Panels stay
+  `keepMounted`, which matters more here than it did there — the sections share one edit buffer, so a half-typed
+  value survives a tab switch and any section's Save still sends the lot (pinned by a test that edits on *Folders*,
+  switches to *This device*, and asserts both fields in one PUT).
+  **Tests (+13):** `SectionTabs.test.tsx` (**new, +5** — one section visible with the rest mounted-but-hidden, every
+  section gets a tab, a click navigates to that section's URL, a bare base path and an unknown section both fall
+  back to the first) and `Settings.test.tsx` (+8 — the page's sections are exactly the ones the link module
+  exposes, one at a time with the others still in the DOM, the bare landing, the three deep links each landing on a
+  **visible** control, the four re-homed settings each under their new section, and the shared-buffer save). The
+  four pre-existing stacking-defaults tests now render through the real `/settings/:section` route instead of a
+  bare `<SettingsView/>`; every assertion in them is unchanged. All 176 frontend files / 2036 tests green, plus
+  `tsc --noEmit` and `vite build`. Frontend-only: no API, schema, config, on-disk or default change, and no route
+  removed — `/settings` still works exactly as it did.
+  **Next, only if the owner reacts and wants more:** the Library and Editor screens, which the measurement below
+  still says are *not* the wall — don't start one speculatively.
+
+  *(Original slice-(f) measurement and spec kept below for provenance.)*
+  **📏 SLICE (f) MEASURED — Settings is the app's tallest page by a factor of two, and no slice
+  has ever touched it (Builder 2026-08-17, measured on a real running build via `scripts/agent-dogfood.sh`).**
+  The entry above says the next candidates are "the Library and Editor screens — but neither has been measured as
+  'busy' the way Target and Dashboard were, so don't start one speculatively". **Measured now, on the full-page
+  screenshots, they are both the wrong answer — Settings is the offender:**
+  - **Settings: 5827 px tall on a 420 px phone (≈6.8 phone screens) and 4606 px on a 1440 px desktop (≈5 screens).**
+  - Target (post-slice-(c)): 2981 px phone / 1988 px desktop. Editor: 2575 / 1614. Dashboard (post-slice-(e)):
+    1757 / 1253. Stack: 1544 / 1249. **Settings is ~2× the next-tallest page on both widths.**
+  **The shape, read off `routes/Settings.tsx` (891 lines):** one system alert plus **7 always-on full-width blocks**
+  stacked one below another — *Watched folders · Ambient sound · Telescope (Seestar) · Automated stacking defaults ·
+  Reprocess everything (`Maintenance`) · Backup & restore · Access control* — and the first of those is itself a
+  monster carrying **six `Divider`-labelled sub-sections** (folders · Watcher · Automatic pipeline · Plate solving
+  & compute · Observing site · Stacking). That last point is a finding in its own right: a card titled **"Watched
+  folders" currently contains the observing site, the ASTAP path, the stack memory budget and the job-history
+  depth**, none of which a beginner would look for under that name — the entry's own test ("could a beginner
+  *predict* which page a given thing lives on, from its name alone?") fails here today.
+  **Suggested slice, reusing what already exists — no new primitive needed:** group the seven blocks with the same
+  `InsightTabs` slices (b)/(e) built, or split them across nested routes (`/settings/…`), keeping the first-run
+  essentials (the system alert, folders, plate solving) on the landing view and grouping the rest — e.g.
+  *Capture & pipeline* · *Stacking defaults* · *This device* (ambient sound, telescope) · *Maintenance & access*
+  (reprocess, backup, access control). Re-home the mis-filed sub-sections of "Watched folders" into the group whose
+  name predicts them while you are there. **The hard constraint still governs: nothing may be removed**, and every
+  setting must stay reachable — a setting you cannot find is worse than one you have to scroll to. **Care:**
+  `Settings.test.tsx` is large and several settings are cross-linked from elsewhere in the app ("Fix in Settings",
+  "Settings → Observing site", the `OutdatedTargetsBadge` on the nav link) — those deep links must still land on a
+  *visible* control, which is the one thing a tab strip can break. Prefer nested routes, or open the right tab from
+  the link's hash/param, and pin it with a test per inbound link. (M; PRIORITY 3.)
+
+  **Acceptance — state the before/after numbers in the commit,** so this is measured rather than asserted:
+  count of always-visible blocks above the primary content, total `Card`/`Paper`/`Alert` blocks rendered on
+  first paint, and route file length. A slice that doesn't move those numbers hasn't done the job.
+
+  **Cautions.** These pages carry the app's biggest test files (`Target.test.tsx` 1258 lines, `Editor.test.tsx`
+  2489) — **update the assertions to the new layout, never delete them to go green** (§10). Keep it
+  **mobile/responsive**: the owner reads these on a phone (that's why the share/scan-to-phone work exists), and a
+  tab strip must not overflow. **Preserve first-run guidance**: empty states, `SampleTourNote` and the "Your
+  first image" checklist are what orient a beginner — they may move, but a brand-new library must still be
+  walked through. Prefer a shared, reusable grouping component over per-page bespoke layout, so later features
+  have an obvious home to slot into instead of appending one more banner.
+
+### v0.340.0 — a drizzled mosaic's rejection report
+
+- **✅ SHIPPED (Builder, v0.340.0, branch `claude/sweet-babbage-5iozyk`) — ~~a drizzled mosaic can report that
+  outlier rejection ran when no pixel could be clipped.~~** Built as filed — "no change to any pixel, this is
+  the say-what-it-did half" — and the entry's premise was checked by **measurement** before a line was written,
+  which moved the threshold it should be reported against.
+
+  **What the sweep found, and it is not `_MIN_REJECT_NEFF`.** The entry names the pass's own 3.0 effective-count
+  floor as the honest quantity. It is the right *gate*, but it is not where the pass stops working: the clip is
+  a κ·σ test against statistics that still contain the outlier, exactly like the non-drizzle pass, so it is
+  blind until `kappa_min_frames` — 11 at the default κ=3 — and the 3.0 floor sits below that and never binds
+  first. Measured on a real drizzle stack (one sub carrying a bright block, the rest clean, at depths 4 → 12):
+  the block comes out at the **naive no-rejection average to a part in 1e-3** at every depth up to 10
+  (712.50 of a possible 712.50 at 8 subs), and vanishes at 11. Pinned as a sweep in
+  `tests/test_drizzle_reject.py`, so the number the three surfaces quote is a measurement rather than a reading
+  of the docstring.
+
+  **Four surfaces were saying "protected" about that stack, and every one of them is fixed.**
+  `rejection_reach`'s drizzle branch returned the *dispatch* gate (`n >= 4`) as if it were the reach — so it
+  answered `reaches: True, lone_outlier_min_frames: 4` for a 5-, 8- or 10-sub drizzled run, and for a 40-sub
+  four-panel mosaic ten deep on a spot. It now returns `kappa_min_frames(sigma_kappa)` sized by the same
+  per-pixel `depth` the κ-σ branch uses. Downstream, all three consumers had a `method === "drizzle" →
+  return null` line whose stated reason was that the memory budget settles the pass at run time: the Target
+  page's `rejectionOutlookNote`, the Stack form's `rejectionReachNudge`, and the *Save as defaults*
+  `savedRejectionClause`. **That reason only ever pointed one way** — a pass dropped for memory removes even
+  less — so silence was never the conservative choice. Each now has its own drizzle sentence, and
+  `stackhealth`'s `rejection_blind` note fires on a `drizzle-reject` run whose deepest pixel is under the
+  bound (it was excluded for no better reason than being a different code path).
+
+  **The cure differs, and getting that wrong would have been worse than silence.** `auto_reject` is a no-op
+  while drizzle is on (`_resolve_auto_reject` returns early), so every "turn on Auto outlier removal" line
+  would have been advice that changes nothing. The drizzle wording names the two things that do work — more
+  subs on that part of the sky, or re-stacking without drizzle — and `rejectionOutlookNote` carries a new
+  `unattendedChoiceHelps` flag so the *"Let AstroStack choose on every hands-off stack"* button is withheld
+  rather than offered as a fix it cannot be.
+
+  **Upgrade-safe (§9):** no pixel moves, no option, default, schema, on-disk path or response *shape* changes
+  — one existing response field (`lone_outlier_min_frames`) reports a different number for drizzled runs,
+  which is the fix. An older frontend reading it renders nothing new.
+
+  **Tests (+7 Python, +8 vitest; 2 Python and 4 vitest fail before).** `tests/test_rejection_reach.py`: the
+  κ bound across the whole 4→11 band, the mosaic sized on panel depth not frame count, a loosened κ moving it,
+  and the reach↔note agreement contract extended to the drizzle path. `tests/test_stackhealth.py`: the note
+  firing on a thin drizzled run and on the owner's shape (40 subs, 10 on a spot), staying silent once it is
+  deep enough, and — the guard that matters — min/max still untouched, since its drop is an order statistic,
+  not a κ·σ clip. `tests/test_drizzle_reject.py`: the depth sweep above. Frontend: a drizzle branch and a
+  reaches-true silence for each of the three note builders, plus the withheld button in
+  `RejectionOutlookNote.test.tsx`. The four "is silent on a drizzled run" tests were **rewritten, not
+  deleted** — each pinned the defect, and each now pins the honest answer plus the silence that replaces it.
+
+  **Left open, deliberately:** the entry's `DRZREJ*` **FITS provenance** half. The header cards are stamped
+  where no coverage plane is in scope, so writing the depth into them means plumbing it through the meta
+  builder — a real change to a hot-path function for a card no screen reads, when all four surfaces a person
+  actually looks at are now honest. Filed as an idea below rather than bundled in.
+
+  Original spec, for the record:
+
+  *(Pillar: image quality / trust — PRIORITY 4. Size: S.)* A6 fixed `auto_reject` reading a frame count where
+  the honest number is a panel's depth — but `_resolve_auto_reject` returns early when `options.drizzle` is
+  on, so none of it applies to a **drizzled** run, and the owner drizzles mosaics. Checked, and the pixels are
+  fine: `drizzle_path` gates its two-pass clip on the *per-output-pixel* effective count
+  (`_MIN_REJECT_NEFF = 3.0`), which is already the right quantity. What isn't fine is what the run then
+  **says**: `_afford_drizzle_reject`'s `n >= 4` reads the whole target's frame count, so a 2×2 mosaic three
+  subs deep takes the pass, stamps its provenance, and clips nothing anywhere — the same "it ran and rejected
+  0" that A6's health note now catches on the non-drizzle path. Its own module docstring already records the
+  reason ("below ~11 frames a κ=3 clip can't fire"), it just isn't wired to anything the user reads.
+  **Shape:** feed `auto_reject_depth` (or, better, the coverage plane the pass already computes) into the
+  `DRZREJ*` provenance and into `stackhealth`'s `rejection_blind` note, so a drizzled shallow mosaic gets the
+  same honest line as a non-drizzled one. No change to any pixel — this is the "say what it did" half.
+
+### min/max reject follow-ups (v0.56.0, v0.56.2, v0.58.0) — no remaining sub-items
+
+- Follow-ups to min/max reject (shipped v0.56.0). (Item (2), the Stack-form
+  small-stack hint, shipped v0.56.2; top/bottom-k trimmed-mean reject shipped
+  v0.58.0.) No remaining sub-items.
+
+### "Is my mosaic evenly filled?" — already shipped as v0.355.0 / v0.361.0 (struck)
+
+- ~~**NEW BEGINNER FEATURE (Scout 2026-09-07) — "Is my mosaic evenly filled?": a per-panel depth /
+  gap readout that tells a mosaic shooter where to point next.**~~ — **ALREADY SHIPPED, TWO DAYS BEFORE IT WAS
+  FILED; struck 2026-09-07 by the next Builder run so nobody builds it a second time.** The whole feature is
+  `seestack/mosaicmap.py` (**v0.355.0**, "Your mosaic, panel by panel") — `mosaic_depth_map` clusters the
+  target's accepted+solved subs with the very `pointings.pointing_groups` the entry says to reuse, lays the
+  panels out North-up/East-left, names the thin one, and returns the plain sentence; it is served by
+  `GET /api/targets/{safe}/mosaic-depth-map` (`MosaicDepthMapOut`) and drawn by
+  `frontend/src/components/target/mosaicMap.ts`. The "aim there next session" half is **v0.361.0**
+  (`mosaicmap.aim_hint` + `useMosaicAim`), already on the Dashboard's "point here tonight" card and Tonight's
+  worth-more-time list. The entry's own instruction — *"verify non-overlap first … grep before building"* — is
+  what catches this: `grep -rn mosaicmap` finds all of it in one call. **The lesson, not the item:** the idea
+  was filed by a Scout run on the same day, and the freshest entry in a section is the one a Builder trusts
+  most, so a stale *new* item costs more than a stale old one. Grep `docs/SHIPPED.md` for the key nouns before
+  filing, as the conventions at the top of this file already require.
+  Original spec, for the record:
+
+  *(Pillar: 2 autonomy + 3 friendliness,
+  with a 4 image-quality edge; size M.)* The owner is a **heavy mosaic user** (`<T>_mosaic_sub/`, AGENTS.md
+  §1) shooting big canvases over many nights — but nothing tells them, in plain language, whether the tiles
+  came out *even*. A mosaic whose corner panel is 12 subs deep while its body panels are 80 has one visibly
+  noisier patch, and the beginner has no way to see that until it is baked into the finished picture, nor any
+  guidance on which panel to add frames to on the next clear night. **What a beginner gets:** a small
+  per-target "Mosaic panels" readout (a card or a nested `/library/<target>/mosaic` route — new pages are
+  explicitly allowed, AGENTS.md §1 IA rule) showing each pointing group as a tile with its sub count / depth,
+  the thinnest panel called out ("Panel bottom-left is only 12 subs — its background will be grainier than the
+  rest; aim there next session for an even result"), and the overall spread ("your deepest panel has 6× the
+  frames of your thinnest"). Sane default: it only appears for a target the app already recognises as a mosaic
+  (≥2 sound pointing groups), and says nothing for a single field. **This is not the whole-sky coverage map**
+  (`/api/sky/coverage`, `Sky.tsx` — "what patches of sky have I imaged"): this is *one target's* panel balance
+  and a next-action nudge. **Reuse, don't reinvent (grep before building):** the per-panel clustering already
+  exists — `seestack.stack.pointings.pointing_groups` / `cluster_pointings` at `PANEL_LINK_DIST_DEG`, the same
+  split `auto_reject_depth`, the per-panel weighting/photometric medians, and per-panel auto-grade (v0.270.2)
+  all rely on — so the panel definition is settled and shared; the new work is aggregating each group's frame
+  count (accepted / solved / total) and rendering it. **Verify non-overlap first** with the existing footprint
+  view and the rejection-outlook `panel_depth` surfacing before starting; if a per-panel *count* is already
+  exposed anywhere, this becomes a thin presentation slice. Additive, read-only, off nobody's hot path.
+
+### "Your year under the stars" — all three slices
+
+- **✅ ALL THREE SLICES SHIPPED — ~~"Your year under the stars": a year-bounded recap of a season of
+  imaging.~~** (a)+(c) in v0.343.0 (Builder, branch `claude/sweet-babbage-l67sz2`), as composition over the
+  night fold the Dashboard heatmap already pays for. **(b) has shipped too** — corrected 2026-09-06 after a
+  Builder sized it as open work and found it done: `yearrecap.year_caption` + `yearrecap.draw_year_poster`
+  (over `recap.draw_poster`, so the year poster and the all-time one can't drift in look),
+  `GET /api/recap/year/{year}.jpg`, `api.yearPosterUrl` and `YearShareCard.tsx` with its own tests. **Nothing
+  here is open;** the whole entry is kept only as the record of how the fold was shared. Grep
+  `draw_year_poster` before reading any "still open" sentence below it.
+
+  **What shipped.** `seestack/yearrecap.py` (pure, offline, no `webapp` imports) folds
+  `activity_calendar.NightActivity` rows into one calendar year and answers the six questions the entry
+  named: nights out, light collected, targets imaged, **first lights** (targets whose *first ever* night
+  falls in that year — measured against the whole history, not the year's slice, or every target would be
+  "new" in the year you happen to be looking at), the **longest** night and the **sharpest** night.
+  `GET /api/recap/year/{year}` serves it; `/sky-so-far/{year}` renders it as a nested route under
+  "Your sky, so far", with a `YourYearCard` link in that page's existing flow — **no new nav entry and no new
+  always-on banner**, per the standing IA rule.
+
+  **One fold, one set of numbers — and one library walk fewer, not one more.** The expensive half of the
+  heatmap is opening every project and reading its frames; the windowing on top is arithmetic. So the router
+  now caches the **accumulator** (`_cached_night_acc`) rather than each finished calendar, and
+  `_cached_activity_calendar` finalizes over it. The year page, the Dashboard heatmap and the recap poster
+  therefore read the *same* nights — pinned by a test that the year's totals equal the heatmap's cells for the
+  same night — and asking for a different `months` window no longer re-walks the library either.
+  `activity_calendar.nights_from(acc, start=…, end=…)` is the one public conversion both slices go through, so
+  neither can invent a second definition of what a night's numbers are.
+
+  **Honest rather than complete, everywhere.** "Your longest night" needs ≥2 nights to be worth naming (on a
+  one-night year the longest night is *the* night wearing a rosette) — the same reasoning, and deliberately the
+  same threshold, as `sharpest_night`'s existing `SHARPEST_MIN_NIGHTS`; the sharpest night reuses
+  `activity_calendar.sharpest_night` outright rather than inventing a second definition of "the good night".
+  A clause the data can't support is **dropped, not zeroed** ("0 targets" reads as a bug, not a beginning),
+  and a year with nothing in it returns `has_anything=false` plus the years that *do* have data, so the page
+  offers them instead of a wall of zeros. The card and the page open on the **most recent year with nights**,
+  not the calendar year — clicking in on 3 January should land on the season you just finished.
+
+  **Upgrade-safe (§9):** one new engine module, one new public engine helper, one new read-only endpoint, one
+  new nested route, one new card. No config key, no schema, no on-disk change, no default flipped, no existing
+  response field or endpoint touched. The card self-hides against a backend that doesn't have the endpoint, so
+  an older/newer pairing degrades to today's page.
+
+  **Tests: +26 Python engine, +8 API, +29 vitest.** `tests/test_year_recap.py` pins the year boundary
+  (New Year's Eve and New Year's Day land in different years), first light against the whole history, both
+  standouts' silence rules and tie-breaks, the dropped-clause wording and all three empty-state messages.
+  `tests/webapp/test_year_recap.py` pins the endpoint against real project data: the year filter, the
+  first-light `safe` links, accepted-frames-only (a clouded-out night must not inflate the year), the 422 on a
+  bad year, and the heatmap-agreement invariant. Frontend: `yourYear.test.ts` (11) for the pure helpers,
+  `YourYear.test.tsx` (10) for the page and `YourYearCard.test.tsx` (5) for the entry card.
+
+  ~~**Slice (b) is still open**, deliberately: the best-of-year thumbnail + `sharecard.py` reuse for a
+  downloadable year poster and copy-paste caption.~~ — **SHIPPED; struck 2026-09-06** (this sentence outlived
+  its slice and sent a run at work already on `main`). The poster is `yearrecap.draw_year_poster` served by
+  `GET /api/recap/year/{year}.jpg`, the caption is `yearrecap.year_caption` carried on `YearRecapOut.caption`,
+  and both are surfaced by `frontend/src/components/YearShareCard.tsx`.
+
+  *(Original entry follows.)*
+
+  Original spec, for the record — **slices (a) and (c) are done**; it is indented so a triage pass can see
+  that by shape:
+  - **⭐ NEW BEGINNER FEATURE (Scout 2026-09-04) — "Your year under the stars": a year-bounded, shareable
+    recap of a season of imaging.** *(Pillar: friendliness / enjoy + share — PRIORITY 3. Size: M. Clears the
+    beginner bar: sane default (the current year, auto-computed from data the app already stores), plain
+    language, nothing pro/niche.)*
+
+    **The gap, checked before filing.** The app already has the two ends of the time axis but not the middle:
+    a *per-night* recap (`seestack/session_recap.py` → the "Last session" card and the by-breakfast poster) and
+    an *all-time* cumulative view (`Your sky, so far` → `/api/stats/*`, the life list, "Draw your skyline").
+    There is **no season-bounded story**: grepped `webapp/`, `frontend/src/` and the backlog for
+    `wrapped|year in review|annual|yearly|this year` — the only hits are the per-night recap and cache-window
+    plumbing, none of them a year view. A beginner who shot 30 nights across a winter has no single screen that
+    says "here's what *this year* looked like", and that is exactly the kind of milestone a non-expert wants to
+    look back on and post.
+
+    **What it is (one read-only page + one endpoint).** `GET /api/recap/year/{year}` folds the library's
+    existing per-target night/hour accounting (the same `capture_hours_json` / `stack_runs` reads the Dashboard
+    and "Your sky, so far" already walk, filtered to nights whose local date falls in `year`) into a small,
+    honest summary: **nights out**, **total integration hours**, **distinct targets**, **new targets first shot
+    this year** ("first light" moments), the **clearest night** (best median transparency / lowest sky), the
+    **longest single session**, and the **best picture of the year** (reuse `best_picture` ranking, scoped to
+    the year). A `/recap/{year}` route renders it as a single scrollable card with plain-language sentences
+    ("You were out under the stars on **31 nights** and collected **52 hours** of light on **9 targets**"), the
+    best-of-year thumbnail, and a one-click **Copy caption** / **Download share image (JPEG)** reusing the
+    existing share-card machinery (`seestack/sharecard.py`) so it lands social-ready with no typing.
+
+    **Why it clears the bar and serves §1.** It adds no expert surface — it is pure recall of what the beginner
+    already did, framed to enjoy and share (priority 3). Everything it needs is already stored, so it is
+    additive and offline. Sane default: opens on the most recent year with any data. Empty state: a year with
+    no nights says so kindly and offers the years that do have data.
+
+    **Slicing for one Builder run.** Slice (a): the endpoint + the six headline stats + a bare card (no share).
+    Slice (b): the best-of-year thumbnail + the share/caption reuse. Slice (c): "first light this year" target
+    chips linking to each target. Ship (a) first; it stands alone.
+
+    **Upgrade-safe by construction:** one new read-only router + one new route, both additive; no schema, no
+    config key, no on-disk change, no default flipped. Reads only columns that already exist. A test builds a
+    two-year synthetic library and pins that a year filter counts only that year's nights and that an empty year
+    degrades to the kind empty state.
+
+### v0.293.0 — "What's in my picture?" labels on the Target picture
+
+- **✅ SHIPPED (Builder, v0.293.0, branch `claude/compassionate-galileo-60dqir`) — ~~"What's in my picture?"
+  object labels only appear in History, where most beginners never look — surface them on the main Target
+  picture.~~** The first (main) half shipped exactly as the shape below asks, reuse-only: `LatestPictureCard`
+  now renders the picture through the existing `AnnotatedImage` instead of a bare `<Image>`, with a
+  **"What's in it?"** toggle beside "Edit this picture" that turns the named-object pins on. Off by default and
+  **lazily fetched** — the annotations query shares History's exact `["annotations", safe, run.id]` cache key,
+  so asking on one page warms the other and an ordinary Target load makes no extra request. The toggle is only
+  offered on a run that still has its FITS (the object pixels come off its WCS). Underneath, one line names
+  what was pinned — capped at six with "and N more" so the page the owner called "extremely busy" gains one
+  line, not a paragraph — or says plainly that nothing catalogued landed in the frame.
+
+  **Both cautions honoured, and the third the crop work since added.** The pins are measured on the run's
+  un-rotated, un-cropped FITS grid, so: a preview a past Adjust save baked a North-up rotation into, and one
+  whose geometry can't be reduced to a crop at all (`preview_geometry_unknown`), both **hide** the pins and say
+  why in plain language rather than mis-plot them; and a border trim the one-click auto-edit baked in composes
+  exactly through the existing `croppedAnnotationView`, so an object the trim removed drops out of the labels
+  and the readout rather than being pinned onto sky that is no longer in the picture.
+
+  **Upgrade-safe (§9):** frontend-only, no new endpoint, no config/schema/on-disk/API change, and the labels
+  are opt-in per visit. **Tests: +12 vitest** in `LatestPictureCard.test.tsx` — 3 pure
+  (`inThisPictureSentence`: friendly-name preference, the six-object cap + "and N more", the empty field) and 9
+  on the card (no request before the user asks; the names once asked; the empty-field wording; no toggle
+  without FITS; the North-up and unreconcilable-geometry refusals; the cropped-out object dropping; a failed
+  fetch saying so instead of showing a blank line; and putting the labels away again).
+
+  **The follow-on the spec names is deliberately still open** (filed as its own idea below): baking the labels
+  into the shared JPEG the way the nameplate and scale bar already bake, so the "here's what's in my shot"
+  version is the one a beginner posts. That is a server-side render change, not a reuse, and deserves its own
+  run.
+
+  Original spec, for the record:
+
+  **~~NEW IDEA (Scout 2026-08-27 #20)~~** *(Pillar:
+  understand + share, PRIORITY 3; size S; additive, reversible, no new deps. Confidence: traced — the
+  `AnnotatedImage` component and its `objectMarkerLayout` geometry already exist and are wired into exactly one
+  place, `frontend/src/routes/History.tsx:850`; grep found no other consumer.)* The app already has a complete,
+  tested "overlay named catalog objects on a finished stack" capability (`frontend/src/components/
+  AnnotatedImage.tsx`, driven by the field-objects the backend already computes) — but it lives only on the
+  History "Adjust" panel. A beginner who lands on the Target page, sees "Your picture", and never opens History
+  never discovers that their smudge is "the Running Man Nebula (NGC 1977)" or that the bright star is Rigel —
+  one of the most delightful, understand-it moments the app can offer, hidden behind a page they don't visit.
+  **Shape (small, reuse-only):** add a toggle-able "Label objects" overlay to the Target page's "Your picture"
+  card (the same `AnnotatedImage` component, same endpoint) — and, per the standing IA priority (AGENTS §1), put
+  it *inside* that existing card rather than as another always-on banner. A natural size-S follow-on: offer the
+  labelled version as a share export (bake the labels onto the JPEG the way the nameplate/scale bar already
+  bake), so the "here's what's in my shot" version is the one a beginner posts. **Cautions:** the labels are
+  placed from the stack's own WCS grid, so they must self-hide on an unsolved run and on a north-up-rotated
+  preview (History already hides them when `applyNorthUp` is on — mirror that). Reuse, don't re-implement, the
+  marker-layout geometry.
+
+### v0.360.0 — the one remaining link
+
+- **✅ SHIPPED — the one remaining link (Builder, v0.360.0, branch `claude/sweet-babbage-adbaed`).**
+  `CompareWithLastCard` renders exactly the size-S affordance this entry rescoped to and nothing else: one
+  *"Compare with my last one"* button on the Target page, pointing at the newest picture against the one
+  before it. It joins the **Story** tab beside `DeepeningReelCard` — which answers the same question as an
+  animation and self-hides on the same condition — so the page gains no always-on control (AGENTS.md §1's
+  standing IA priority). Two rules in the pure `pickCompareWithLast`, both about honesty rather than
+  convenience: a run with **no picture** is skipped (Compare would show it an empty panel), and an **editor
+  export** (`reusable === false`) is skipped, because pairing one with the stack it came from answers *"did my
+  edit change anything?"* — which the editor's own before/after already answers — not *"did another two nights
+  help?"*. `undefined` counts as genuine, so an older backend behaves as before. The URL itself moved into one
+  shared `sameTargetCompareHref`, which History's per-row **Compare** button now delegates to, so the two
+  surfaces cannot build different links to the same page. Frontend-only; no API, schema, config, on-disk or
+  default change. **Tests: +11** — 6 `compareWithLast.test.ts` (the pair, the two skips, the older-backend
+  case, the URL), 4 `CompareWithLastCard.test.tsx` (silent on a once-stacked target, the href, dating the two
+  sides by when the subs were *shot*), 1 `Target.test.tsx` (absent with one run, present and correct with two).
+  *(Original entry, for the record:)*
+
+  **~~MOSTLY ALREADY SHIPPED — what's left is one link, not a view~~ (rescoped from size M to size S by the
+  Builder 2026-08-27, branch `claude/compassionate-galileo-0d0lp8`, after doing the grep this entry asked
+  for).** The premise below — *"there is **no way** to put two of those runs beside each other"*, *"the web app
+  never got the equivalent"* — is **wrong as filed**. `/compare?a=<safe>:<id>&b=<safe>:<id>` is a full,
+  bookmarkable run-vs-run A/B route (`frontend/src/routes/Compare.tsx`) with a **drag-the-divider split
+  slider** (`components/editor/splitCompare.ts`), quantified per-side captions, and plain-language verdicts on
+  noise (`noiseComparison`) and panel flatness. The Gallery links into it from any two selected runs
+  (`routes/Gallery.tsx:618`), and **History already offers exactly the "this run vs the one before it" pairing
+  this entry describes**, per row (`historyCompareHref`, `History.tsx:1013`). **The only real gap** is that the
+  **Target page** has no shortcut into it, so a beginner who never opens History never discovers the
+  comparison at all. The remaining work is therefore a *size-S* affordance — one "Compare with my last one"
+  link on the Target page pointing at `historyCompareHref(safe, newestRunId, previousRunId)`, hidden when the
+  target has fewer than two runs with a preview — **not** the size-M new view described below. Whoever picks
+  it up should build that link and nothing else, and per the standing IA priority (AGENTS §1) put it inside an
+  existing group on that page rather than adding one more always-on control.
+
+  **Independently confirmed the same run (Builder 2026-08-27, branch `claude/compassionate-galileo-j38hmo`).**
+  I did this grep separately, before starting the feature, and reached the identical conclusion — the route,
+  the split slider, the captions and both entry points all exist, and the Target-page link is the only gap.
+  Two independent reads agreeing is about as settled as a "was this already built?" question gets: treat the
+  size-S link above as the whole of the remaining work.
+
+  Original spec, for the record (its "why" still reads true; its "there is no way to" does not):
+
+  *(Pillar: understand + enjoy +
+  trust, PRIORITY 3 (with a 4 flavour — it builds trust in the result); size M; fully offline, additive,
+  read-only — reuses the stack-run artifacts already on disk, no new deps, no schema/config change.)*
+  **Why (real friction).** A target accumulates **multiple finished stack-runs** over nights: every re-stack
+  archives the prior outputs to a timestamped basename (`_archive_existing_outputs` + `repoint_stack_runs`,
+  `stack/output.py` / `project.py`), so the run history is already there and browsable. But there is **no way to
+  put two of those runs beside each other** and see the difference. A beginner who shot three more nights and
+  re-stacked sees a *new* picture, but has nothing that answers *"is this actually better than last week's?"* —
+  the single most motivating question in the hobby. The app already has the trust primitives (StackNoiseBadge,
+  OneFrameVsStackCard, integration/grain trend badges) and an in-*editor* before/after Compare, but **no
+  finished-run vs finished-run A/B** — which AGENTS §4 explicitly names as a valued feature ("let users compare
+  before/after or A/B two stacks"). The old desktop era had a Qt compare dialog (`test_compare_dialog.py`); the
+  web app never got the equivalent.
+  **Shape (one view, sane default, no knobs).** On the Target page add a small "Compare" affordance that opens a
+  **drag-the-divider slider** (or a simple A|B fade) over two run previews: default **latest run vs the
+  previous run** (both already resolved server-side from the run history — no client paths, reuse the existing
+  per-run preview artifacts the gallery/target views already serve). A tiny caption under each side states its
+  integration ("4h 12m · 3 nights" vs "6h 40m · 5 nights") so the comparison is *quantified*, not just visual.
+  A dropdown lets the user pick any two of the target's runs, but the default pairing needs zero decisions.
+  Degrade cleanly: hide the affordance when a target has **fewer than two** finished runs (single-run OSC
+  targets simply never see it). **Beginner bar:** clears it — a non-expert instantly understands "compare my new
+  picture to the old one", it needs no configuration, and it directly serves understand/enjoy/trust without any
+  expert knob. **Cautions / guardrails:** read-only (only reads existing run-preview artifacts, never touches
+  `incoming/`, never re-renders or re-stacks); both previews must share the same display transform so the
+  comparison is honest (reuse each run's baked `_preview`, which already went through `_autostretch_for_export`
+  — don't re-stretch one side); align/scale the two previews to a common frame if their canvases differ (a later
+  deeper run may have a slightly different footprint) so the slider divider lines up. **Builder: grep first** —
+  confirm no run-vs-run compare route/component slipped in since this was filed, and that the run-history preview
+  artifacts are still individually addressable server-side.
+
+### v0.303.0 — the zoom clip, slices (a)+(b) — residue: the 9:16 portrait variant, only if someone wants it (now in the owner's list)
+
+- **✅ SHIPPED — SLICES (a)+(b) (Builder, v0.303.0, branch `claude/compassionate-galileo-fj2p70`) —
+  ~~"Reveal": a one-tap, share-ready *cinematic zoom* of your finished picture.~~** Shipped as **"Zoom clip"**
+  — renamed on purpose: "the reveal" already means the one-frame-vs-stack card everywhere in this codebase and
+  backlog, and a second feature under that name would make every future grep ambiguous.
+
+  **What shipped.** A new pure `seestack/render/zoomclip.py`: `build_zoom_frames(img, focus_xy, ...)` renders the
+  push-in (raised-cosine easing, index-derived — no clock, no RNG), `write_zoom_clip` encodes it with the same
+  animated-WEBP/APNG-fallback call the deepening reel uses, and `build_zoom_clip` wires the two together from a
+  preview's bytes. Two endpoints on the run — `…/zoom-clip/info` (lightweight, `available: false` rather than a
+  404, plus `centred_on_target` so the UI never implies a solve it doesn't have) and `…/zoom-clip` (builds,
+  caches, serves) — and one **Zoom clip** item in the Save/share menu on both History and the Target page, a
+  plain download link gated on the same `has_preview` the rest of the Share section is, so it costs no extra
+  request per card.
+
+  **Three decisions worth carrying forward:**
+  * **The way out is the way in, reversed.** The loop closes by construction (no seam to tune), only the
+    push-in half is ever rendered, and the hold at the far end is *one* frame with a long duration rather than
+    many identical ones — which is what keeps both the file and the peak memory small.
+  * **It never upscales.** `zoom_clip_size` caps the output at 640 px *and* at what the deepest frame actually
+    contains (`source / 1.8`), so a 1024-wide preview yields a 569 px clip that is sharp end to end rather than
+    a soft 1080 one. Same "never upsample" rule the wallpaper export follows.
+  * **The crop slides back inside the frame instead of hanging off it.** The deliberate consequence, pinned in
+    a test: an object right in the corner cannot be centred, and is left where it is rather than framed against
+    a black margin.
+
+  **Framed on the object, from the preview's own grid.** The focus point is the plate-solved target, and the
+  two things that put the stored preview on a different grid from the master — an auto-edit border trim and a
+  North-up turn a past "Adjust → Save" baked in — both have to be undone first. That logic already existed
+  inside the wallpaper endpoint, so it was lifted out as `_target_pixel_in_preview` and is now shared by both
+  (getting either half wrong re-centres the picture on empty sky). With no solve, `brightness_centroid` aims at
+  the picture's own brightest concentration; with neither, the centre.
+
+  **Sourced from the stored preview PNG**, like the wallpaper and share exports — the only rendering that is
+  right for *every* kind of run, an in-place "Process target" Auto edit included (its recipe is baked nowhere
+  else). Cached beside the outputs with a signature over those bytes plus the focus point, so a re-edited
+  picture rebuilds rather than serving yesterday's move, and the three artefacts are in `RUN_ARTEFACT_SUFFIXES`
+  so a re-stack archives them with the run instead of leaving a clip of a picture that no longer exists.
+
+  **Upgrade-safe (§9):** additive endpoints, one new engine module, three new `RUN_ARTEFACT_SUFFIXES` entries
+  (caches, rebuilt on demand). No config, schema, on-disk layout, default or API-shape change; nothing runs
+  unless the user asks for the file; `incoming/` untouched.
+
+  **Tests (+20):** 11 engine (easing pinned at both ends and monotonic; the never-upscale size rule at three
+  scales; the crop box centred, clamped, NaN-focus and sub-1 scale; the loop closing as the reverse of the
+  push-in; the far end measurably tighter; the camera travelling to an off-centre object *and* the corner case
+  above; the centroid finding a blob and giving up on a flat frame; a written clip's frame count and size; and
+  an unreadable preview being "no clip", not a crash) and 9 webapp/frontend (info offering + self-hiding + 404s;
+  the served animation looping; the move centred on the WCS-solved target; the cache reused and *rebuilt* when
+  the preview changes; the artefacts archiving with their run; and the menu item's href/`download` on a run
+  with a picture, absent on one without).
+
+  **Slice (c) — the 9:16 portrait variant — is deliberately not built**, and shouldn't be until someone wants
+  it: it needs a second crop rule and doubles the cache, for a shape only one platform needs.
+
+  Original spec, for the record:
+
+  - **✅ SHIPPED as the "Zoom clip" — v0.303.0 (`seestack/render/zoomclip.py::build_zoom_clip`, the
+    `…/zoom-clip` endpoints in `webapp/routers/stack.py`), with the "it's building" state in v0.304.3.
+    Struck 2026-09-06 by a Builder that read this entry as open and went looking for it. It shipped under a
+    different name, which is why "grep for Reveal" found nothing — grep `zoomclip` instead. Original spec kept
+    for provenance only:** ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #15) — "Reveal": a one-tap, share-ready
+    *cinematic zoom* of your
+    finished picture — a short looping clip that glides from the whole frame into the target and back out, so a
+    galaxy or nebula makes a scroll-stopping post instead of a still that's easy to swipe past.** *(Pillar: enjoy +
+    share, PRIORITY 3; size M; fully offline, additive, read-only — no new deps, no network, no schema/config
+    change.)*
+    **Why a beginner wants it.** After the app has done its job the owner has a genuinely beautiful frame, and the
+    *only* thing they want to do with it is show people. The app already exports it well as a still (share JPEG,
+    wallpaper, keepsake, recap poster) — but the platforms a Seestar beginner actually posts to (Instagram Reels,
+    TikTok, WhatsApp status) reward **motion**: a slow push-in on a spiral galaxy reads as "look what I made" in a
+    way a static image never does, and it's the format a non-expert has no tool to produce. A one-tap "Reveal"
+    turns the finished picture into that clip with zero craft required.
+    **What it is (and is deliberately NOT).** A short (~6 s) looping **Ken-Burns** animation of the *already
+    display-stretched* result: ease-in from the full field to a centred, ~2× crop on the target, hold a beat, ease
+    back out. That's it — no music, no text overlay, no multi-clip edit. It is **not** the existing "deepening"
+    reel (`render/deepening.py`, a *temporal* cross-run "getting deeper night after night" animation) nor the
+    in-stack "watch it appear" progress reel (`stacker.py` `_progress.webp`) — both show the stack *accumulating
+    over time*; Reveal is a purely **spatial** camera move over one finished frame, a different artefact answering
+    a different want (grepped 2026-08-27: no ken-burns / cinematic / zoom-reveal / pan feature filed or shipped —
+    the only "zoom" hit is the Gallery lightbox's manual pan/zoom, which is interactive viewing, not an export).
+    **Sane auto-default (no knobs).** The crop centre is the target: use the run WCS to project the catalogued
+    object's RA/Dec to pixels (the same `identify`/`objects_in_field`/scale-bar WCS path already read on the
+    result), falling back to the picture's brightness centroid (or plain image centre) when there's no solve — so
+    a beginner never frames anything. Fixed timing, fixed ~2× zoom, fixed easing. NaN/uncovered pixels render black
+    exactly like every other export.
+    **Reuses existing machinery — almost no new surface.** The frames are Pillow crops+resizes of the stored
+    display-space preview/FITS (no re-stretch — `already_display` semantics), and the encoder is the **same
+    animated-WEBP-with-APNG-fallback** path `render/deepening.py` and `stacker.py` already use
+    (`img.save(..., save_all=True, append_images=..., loop=0)`). The core is a pure, unit-testable
+    `render/reveal.py::build_reveal(rgb, focus_xy, *, seconds, zoom, size) -> list[PIL.Image]` (deterministic
+    keyframe schedule; assert frame count, that frame 0 ≈ full-frame and the mid frame is a tighter crop centred on
+    `focus_xy`, and that a NaN canvas stays finite/black). Cached beside the outputs as `{base}_reveal.webp`
+    (add to `RUN_ARTEFACT_SUFFIXES` so archive/delete already sweep it), served through the existing result/History
+    download menu next to Share/To-phone/Wallpaper.
+    **Guardrails/feasibility.** Additive and reversible; nothing on by default changes; incoming/ untouched;
+    offline and deterministic (no `Date.now`/RNG in the schedule — timing is index-derived), so it's fully
+    testable. Memory-bounded: one downscaled crop frame at a time, at share resolution (≤~1080 px long edge), never
+    the full 100-MP mosaic. **Builder slices:** (a) pure `build_reveal(...)` + unit tests; (b) wire the cached
+    `_reveal.webp` write into the output writer + `RUN_ARTEFACT_SUFFIXES` + a result-menu download button
+    (self-hiding until the file exists); (c) optional later — a portrait (9:16) variant for phone-native posting,
+    mirroring the existing wallpaper-aspect crops.~~ *(Slice (c), the portrait 9:16 variant, is the only part
+    of the spec that is genuinely unbuilt; it is marginal against the shipped clip, so it is not re-filed as an
+    open item.)*
+
+### "Scale & sky-compass" (struck)
+
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #12) — "Scale & sky-compass": an optional little scale bar (in
+  intuitive units) plus a North/East compass baked into a shared/exported picture, so a beginner's shot reads
+  like a real astrophoto — "this is how big it is and which way is up" — with zero knowledge required.**~~ —
+  **SHIPPED v0.284.1** (Builder 2026-08-27, branch `claude/compassionate-galileo-4a77og`). Slices **(a)+(b)+(c) in one run**.
+
+  **What shipped.** New `seestack/skymarks.py` — pure, offline, no `webapp` imports — draws an angular scale
+  bar and a North/East rose **onto** a finished picture (the canvas size is unchanged; these are marks *on* the
+  photograph, not a frame around it). `GET …/stack-runs/{id}/jpeg?scale=true` serves it, composing with
+  `north_up` **and** with `keepsake` (the marks are drawn first, so a keepsake mats an already-marked picture),
+  and it is one tap from the **Target** page's "Save / share" menu and the **History** card's menu — inside the
+  grouping the IA slice already built, so nothing new appears on either page.
+
+  **The Scout's grep was half right, and the half it missed is the point.** A scale bar *does* already exist —
+  `seestack/scalebar.py` picks a round rung, and `AnnotatedImage.tsx` draws it over the History preview. But
+  that overlay is **SVG in the browser**, so it does not travel with the file: the moment the beginner
+  downloads or shares the picture, the bar is gone. The compass genuinely did not exist anywhere. So this slice
+  is the *baking*, plus the rose — and it reuses `scale_bar_for` rather than re-deriving the ladder.
+
+  **Two decisions worth keeping.** (1) **The marks live along the top edge.** The bottom of a shared picture is
+  already the app's caption zone (the nameplate draws its footer bar there; the keepsake sets its caption
+  beneath), so marks anywhere along the bottom would mean one covering the other. Along the top they compose
+  with both. (2) **The directions are derived numerically from the WCS** — step North (Dec+) and East (RA+) from
+  the image centre and see which way the pixels move — exactly as `render/orient.north_up_rotation_deg` does.
+  Nothing hand-rolls a `CROTA`/`CD` sign, so the East/West mirror hazard the sky-atlas overlay is still gated on
+  cannot creep in here, and a mirrored field is drawn mirrored because that is what the WCS says. `orient.py`
+  grew one public `applied_rotation_deg()` (the snap-to-90° rule it already used privately) so the rose follows
+  the pixels a North-up rotate *actually* applied rather than the angle that was asked for.
+
+  **Found and fixed on the way — the tofu trap, one module further on.** `ScaleBar.label` uses the typographic
+  primes `′`/`″`, which are correct in HTML and render fine on screen — and which Pillow's bundled Aileron face
+  has **no glyph for**. Baking the on-screen label would have put a hollow `.notdef` box exactly where the
+  number goes, the same defect v0.282.1 fixed in the nameplate, on the same day it was fixed. `ScaleBar` grew an
+  `ascii_label` property (`30"` / `15'` / `2°` — the degree sign *is* in the face) which the baked bar uses;
+  it's a property, not a field, so `to_dict()` and the API response are unchanged. `test_skymarks.py` pins the
+  rule across **every rung of the ladder** rather than the one label, with the reference `.notdef` glyph
+  asserted non-empty so the check can't quietly degrade into one that always passes.
+
+  **Upgrade-safe (§9):** a new opt-in query flag on an existing endpoint, a new pure module, one additive
+  property, two menu items; no config, schema, on-disk, default or API-shape change, and a test pins that the
+  plain JPEG download is byte-for-byte unchanged without the flag. A run with no solved WCS draws nothing at
+  all — the same graceful no-op `north_up` already has.
+
+  **Tests: +21.** 15 engine (`tests/test_skymarks.py` — the compass checked against **astropy itself** as
+  ground truth at four field rotations, the flipped-parity field drawn the other way round, the pole case where
+  a naive North step runs past the pole *and* East would need 57° of RA, the no-WCS/degenerate paths, the
+  rotate-follows-the-pixels helper, bar placement/length/clamping, the dark halo that keeps marks readable on a
+  bright core, a tiny picture, non-RGB input, and the glyph rule), 3 API (`tests/webapp/test_stack_render.py` —
+  the marked download and its filename, the no-WCS no-op, and the compose-with-north-up-and-keepsake case that
+  proves the rose turned with the picture), 3 frontend (`stackRenderUrl.test.ts` + `Target.test.tsx`).
+
+  **Follow-ups left open (each S):** draw the same rose in the *in-app* `AnnotatedImage` overlay beside the bar
+  it already shows (so screen and file match completely), and offer the marked variant on the **share** path,
+  not just the download.
+
+  Original spec, for the record:
+
+    *(Pillar: enjoy / share + understand — PRIORITY 3. Size: S–M. Confidence the gap is real: grepped this run —
+    no scale-bar/compass overlay exists anywhere; `scale bar`/`compass` return nothing in code or backlog.)*
+    Every published astrophoto has a scale bar and a N/E rose; it's the single touch that makes a beginner's
+    picture look "proper" and quietly teaches them the sky. The app already knows both numbers exactly — the
+    finished stack stores its plate-solved output WCS (`stack_runs.wcs_json`), which carries the pixel scale (so a
+    bar of *N* pixels is a known angle) and the field rotation (so "up" on the sensor maps to a real sky
+    direction). Nothing surfaces either onto the picture.
+    **Why it's beginner-friendly, not a pro knob:** the bar is labelled in plain, intuitive units, defaulting to
+    the same "full-Moon widths" idiom the shipped *"How big is it, really?"* size-in-Moons feature (v0.277.0)
+    already uses — *"◄─── 1 full Moon ───►"* — with arcmin as a subtle secondary. The compass is a tiny N/E rose
+    in a corner. Both are **off by default on the raw picture** and only appear on an explicit *"Add scale &
+    compass"* export/share, so no existing surface changes and it can never clutter.
+    **Why it's cheap to build (all the machinery exists):**
+    * `seestack/annotate.py::objects_in_field` already turns a stack's output WCS + canvas size into pixel
+      positions (it's the "What's in this picture?" projector), and already tolerates a degenerate WCS by drawing
+      nothing — so the scale/compass module reuses the exact same WCS-in → pixel-overlay-out shape.
+      `astropy.wcs.utils.proj_plane_pixel_scales` (already used in `mosaic.py`) gives the arcsec/px; the CD-matrix
+      rotation gives the compass angle. `render/orient.py` already reasons about North-up orientation.
+    * compositing an overlay onto the finished PNG/JPEG is the montage/annotation pattern
+      (`seestack/montage.py`, the annotation renderer) — no new rendering stack.
+    **Slices (each a shippable Builder run):**
+    * **(a) engine (S):** a pure `scale_compass_overlay(wcs, shape, *, unit="moon"|"arcmin")` returning the bar
+      length in px + its label and the compass N/E angles (or `None` on a WCS with no usable scale/rotation).
+      Unit-testable on a synthetic WCS (known pixscale → known bar; known CROTA2 → known compass angle;
+      degenerate WCS → `None`). **Reuse the North-up rotation-sign work, and heed the open sky-atlas
+      `_tan_wcs` note in Bugs** — validate the compass direction against a real solved Seestar frame with known
+      field rotation before trusting the rotation sign (a synthetic can't settle ASTAP's CROTA2 sense).
+    * **(b) backend (S):** an export/share variant that composites (a) onto the stored preview
+      (`GET …/stack-runs/{id}/picture.jpg?annotate=scale`), 404/no-op when the run has no solved WCS. Additive,
+      read-only.
+    * **(c) frontend (S):** an "Add scale & compass" toggle in the existing Picture download / share menu
+      (`WallpaperMenu`/`SharePictureButton` neighbourhood), with a plain-language tooltip.
+    **Beginner-bar check:** instantly understood ("how big / which way is up"), needs zero config (auto-computed
+    from the solve, Moon-width default), plain-language, purely additive/offline, and it's the "enjoy/share +
+    understand" pillar — the finishing touch that makes a beginner proud to post their picture. Distinct from
+    size-in-Moons (a text stat, no overlay), North-up (rotates the whole image, no bar/rose), and the object
+    labels (identity, not scale/orientation).
+
+### "My life list" (struck)
+
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-27 #10) — "My life list": a Messier/catalog checklist that lights up
+  the famous objects you've already captured and shows the rest as a bucket list.**~~ — **SHIPPED v0.279.0**
+  (Builder 2026-08-27, branch `claude/compassionate-galileo-yw7tvl`). Slices **(a)+(b)+(c) all shipped in one
+  run** — the Scout was right that the machinery already existed, so splitting it would have shipped three
+  half-features instead of one working page.
+
+  **(a) Engine — new `seestack/lifelist.py`.** `catalog_capture_status(catalog, targets, *, radius_deg)` matches
+  every bundled object against the library's targets and returns `LifeListEntry` rows
+  (`catalog_id`, `name`, `type`, `con`, `ra/dec`, `size_arcmin`, `blurb`, `captured`, `safe_name`,
+  `target_name`, `sep_deg`), plus `life_list_summary()` for the counts and `is_messier()` for the split. Pure,
+  offline, duck-typed on the five target fields it reads, so it tests without a DB. **Three decisions worth
+  knowing:** the match radius is **0.35°** (`MATCH_RADIUS_DEG`) — a Seestar frame is ~1.3°×0.7°, so a match is
+  genuinely *in the picture*, and erring small is the right way round (claiming M65 when the owner pointed at
+  M66 next door would make the whole list untrustworthy, whereas a miss just leaves one tile grey). A target
+  counts only when **plate-solved *and* holding frames** — a registered-but-empty folder is not a capture, and
+  lighting its tile is a lie the owner would catch. When several targets sit near one object (the Seestar writes
+  a new folder per night, so three nights on M31 is three targets until merged) the **closest wins**, so the
+  collection says "got it", once. Sort is Messier-numeric then the rest, because a string sort puts M10 before
+  M9 and looks broken.
+
+  **(b) Backend — new `webapp/routers/lifelist.py`.** Read-only `GET /api/life-list` →
+  `{messier: [...], other: [...], counts: {messier_captured, messier_total, other_captured, other_total}}`.
+  Reads **only the target registry** — no project DB is opened, no network — so it is cheap enough to answer on
+  every visit and needed no `registry_cache` entry. Each captured item carries `thumbnail_url` only when the
+  preview file actually exists on disk (the same existence test `/api/targets` does for `has_preview`), so a
+  tile never hands the UI a URL that 404s.
+
+  **(c) Frontend — new `/life-list` route** (`routes/LifeList.tsx`), in the **"Your pictures"** nav group per
+  the standing IA priority (a new page, which the owner's brief explicitly allows; nothing was moved or
+  removed). A progress bar and a plain-language headline that has three voices — *"All 110 Messier objects are
+  still ahead of you"* / *"You've captured 42 of 110 — 68 to go"* / *"You've captured all 110… congratulations"*
+  — over a responsive tile grid: captured tiles at full strength showing their picture and linking to the
+  target, uncaptured ones dimmed with the catalog blurb on hover. An all / captured / still-to-shoot filter, and
+  a line explaining *why* a tile might still be grey ("a target still waiting to be located stays greyed out
+  until it's solved") so the one confusing case explains itself.
+
+  **Upgrade-safe (§9):** purely additive — a new engine module, a new read-only endpoint, a new route. No
+  config, schema, on-disk, existing-API or default change; nothing added to an existing screen; no hot-path
+  contact. It ships "on" because it *is* the feature (a new page nobody has to visit), the way Tonight, Best
+  pictures and Your sky so far did.
+
+  **Tests: +34.** 12 engine (`tests/test_lifelist.py` — radius boundary in/out, closest-of-several,
+  unsolved/empty target, RA-seam wrap, ordering incl. an unparseable id, and a pin that the real bundled catalog
+  yields M1…M110 exactly once), 12 API (`tests/webapp/test_life_list.py` — against a real Library: empty
+  library still lists all 110, capture lights up + links, missing preview file offers no thumbnail, unsolved and
+  frameless targets stay grey, three unmerged nights read as one capture, NGC/IC kept out of the Messier count,
+  and read-only-ness), 10 frontend (`routes/LifeList.test.tsx` — all three headline voices, both filters, the
+  link/no-link split, the grey-tile explanation, and the error state).
+
+  **One test edit, called out deliberately:** `nav.test.tsx`'s frozen-sidebar guard asserted the nav list
+  *equals* the pre-IA flat list, which encodes "the sidebar may never grow" — not the constraint it was written
+  for (the owner's "nothing may be **removed**", and their brief explicitly allows new pages). It is now a
+  **subset** assertion per frozen entry (a drop or rename still fails, and now names the missing entry), plus a
+  **new** test that an added destination may not reuse a frozen label — so the guard is strictly stronger about
+  shadowing while no longer forbidding growth.
+
+  **Follow-ups from the original spec, left open (each S):** the Dashboard stat ("42/110 Messier"), the
+  "one object away from all of Orion" nudge tied into the night planner, and an export/share of the completed
+  grid as a keepsake. Filed as a fresh idea below.
+
+  *(Original spec, kept for context.)* *(Pillar: friendliness /
+
+### "Print it" (struck)
+
+- ~~**NEW BEGINNER FEATURE (Scout 2026-08-26 #3) — "Print it": a print-ready export sized and DPI-tagged for a
+  frame on the wall.**~~ — **SHIPPED v0.286.0** (Builder 2026-08-27, branch
+  `claude/compassionate-galileo-t89lw9`) — **both filed slices, (a) and (b).** *(Pillar: enjoy + share —
+  PRIORITY 3.)*
+
+  **Sibling of "Framed keepsake" (v0.282.0), not a duplicate.** That one *mats and titles* a picture so its
+  story travels with the file; this one answers a different question — **how big can I print this, and will
+  it come out sharp?** — and produces a file sized to the paper and tagged with the DPI a lab reads. Neither
+  subsumes the other, and a natural follow-up is to let the print export take a keepsake mat.
+
+  **(a) The pure helper.** `seestack/printexport.py` — `print_options(width_px, height_px, min_dpi=150)`
+  returning **every** size the picture can print sharply, largest first, rather than the filed single
+  `build_print_export(..., size_name)`: the list *is* the menu, its head is the recommended default, and one
+  piece of arithmetic answers both "what can I offer?" and "is this choice honest?". Plus
+  `print_advice(options)` (one plain-language line) and `render_print(rgb, option)` (the Pillow image).
+
+  **The rule the whole feature rests on: never upscale.** Enlarging a 1000 px picture to 3000 px adds no
+  detail, it just makes the softness bigger — which is exactly the surprise a beginner gets from a lab today.
+  So a paper size qualifies only when `min(width_px / paper_w_in, height_px / paper_h_in) >= min_dpi`, the
+  point at which the fitted picture exactly fills the shorter dimension; the render then uses that DPI capped
+  at 300 (no consumer lab resolves more). A picture that clears nothing offers **nothing**, and says why
+  (*"another night or two of subs will get it there"*) rather than leaving an unexplained empty menu.
+
+  **Two things the spec left open, decided here.** Paper is **oriented to match the picture**, so a landscape
+  stack gets landscape paper and the letterbox bars are the aspect mismatch alone rather than the mismatch
+  plus a rotation. And the fit uses **LANCZOS**, not `deepening._fit_onto`'s BOX — the share JPEG's own
+  comment says BOX softens star cores, and softness is precisely what a print exposes.
+
+  **(b) The offer.** `GET .../editor/print-sizes` (sized from the run's own canvas, so no render and no FITS
+  read — a cropping recipe makes it slightly optimistic and the export re-checks against the real pixels),
+  `POST .../editor/print` and its download twin, mirroring the share endpoints exactly. In the editor's
+  "Export full resolution" panel: a size Select (pre-set to the biggest good print, labelled *"A4 · 240 DPI"*
+  — size first, because that is what a user picks), a **Download print file** button, and the advice line.
+  **The whole control self-hides** when nothing prints sharply, so nobody is tempted into a soft enlargement.
+  A size the picture can't fill is refused with advice, never quietly upscaled. The existing nameplate
+  checkbox composes, drawn at the print's own resolution.
+
+  **Upgrade-safe (§9):** one new engine module and three new additive endpoints; no config, schema, on-disk,
+  default or existing-response-shape change, and nothing is written outside the target's own `output/`.
+
+  **Tests (+17):** 11 in `tests/test_printexport.py` (a size qualifying *exactly* at the floor and not one
+  pixel below — pinned against real A4 inches, where a `<` vs `<=` slip would silently offer a soft print —
+  the largest-first order and the no-upscale invariant across every offer, the orientation rule, the 300 DPI
+  cap, a small picture offering only 6×4, a too-small one offering nothing with a kind explanation, the
+  degenerate-input refusals, the advice naming the size rather than the arithmetic, letterboxing without
+  distortion on a square-into-6×4 fit including the mono path, and NaN rendering black); 4 in
+  `tests/webapp/test_editor.py` (the offered list and its self-hiding, the 404, the downloaded file's canvas
+  *and* its DPI tag, and honouring a smaller size while refusing one that would print soft); and 2 in
+  `Editor.test.tsx`.
+
+  Original spec, for the record:
+
+    *(Pillar: enjoy + share — PRIORITY 3. Size: M.)* A beginner who finally gets a
+    picture they love wants to **print and hang it** — but every export today (PNG / full-res PNG / JPEG / TIFF)
+    is native-resolution with **no print sizing and no DPI metadata**, so it lands in a photo-print service at
+    whatever size the pixel count implies and often prints soft or tiny with no warning. Nothing bridges
+    "great picture on screen" → "nice print in my hands." **Verified genuinely new (grepped this run):** no
+    `print` / DPI / print-size feature exists in code or backlog; the closest neighbours are all *screen/share*
+    outputs (wallpaper, QR-to-phone, JPEG share, the montage/poster ideas) — none targets a physical print.
+    **Shape:** reuse the share-render pipeline. A pure helper `build_print_export(rgb, *, size_name, min_dpi=150)
+    -> (PIL.Image, dpi)` that (a) picks the **largest standard size** the picture's native resolution supports at
+    ≥ `min_dpi` (so the beginner is never asked to reason about DPI — the sane default just works), (b) fits the
+    picture onto that size's pixel canvas letterboxed on the app's dark NaN=black ground (reuse
+    `deepening._fit_onto`, which already preserves aspect without squashing), and (c) returns the image plus the
+    DPI to stamp into the file's metadata (`img.save(..., dpi=(d, d))`). A small **"Print"** entry in the editor's
+    "Save / share ▾" menu offers a couple of common sizes (e.g. 8×10 in / A4 / A3) with a one-line plain-language
+    note (*"Best print size for this picture: up to A4 at 200 DPI"*), self-hiding a size the resolution can't hit
+    at `min_dpi`. Optionally include the existing nameplate. **Beginner bar:** clears it cleanly — a non-expert
+    instantly understands "print it", the size is chosen for them, plain language, no expert knob; it removes work
+    (no guessing DPI in another app) — Method A/D. **Guardrails/feasibility:** offline, additive, read-only
+    (renders from the run/edit the app already produces, writes only the downloaded file — never `incoming/`);
+    pure helper → trivially unit-testable (native res → chosen size + DPI; a too-small picture self-hides the
+    bigger sizes; aspect preserved undistorted). **Slices —** (a) the pure `build_print_export` helper + size
+    table + tests (a shippable Builder run on its own); (b) wire it into the editor/History share menu (frontend).
+
+### a Moon/Sun still's JPEG (struck)
+
+- ~~**NEW IDEA (Builder 2026-08-07, spotted while adding the phone QR) — a Moon/Sun still has no JPEG at all, so
+  every "send this somewhere" path on it moves the full display PNG.**~~ — **CLOSED, NOT BUILT: measured, and the
+  number says it would be churn** (Builder 2026-08-07, branch `claude/elegant-bohr-dobfg3`). The entry's own care
+  note asked for the measurement first, so here it is: a full-frame stacked Moon still at **1920×1080** — the
+  Seestar's video size, i.e. the realistic ceiling — rendered through the shipping
+  `normalize_for_display` → `write_full_res_png` path, carrying the residual noise a 30-frame lucky stack leaves,
+  is **0.99 MB** as PNG against **0.09 MB** as the share JPEG (≈11×). The ratio is real, but the *absolute* size
+  is the number that decides it: **~1 MB is unremarkable** to pull over a LAN or hand to a phone, and the
+  suspicion behind this entry — that the PNG was too heavy to be the share path — is exactly what the
+  measurement disproves. Building it would cost a new on-disk artifact, a nullable field, a backfill path for
+  every existing still and a fourth download control, to save under a megabyte on a click a user makes once per
+  picture. **So the honest outcome is to strike it with the number**, per AGENTS.md §2 — and the thing it was
+  really wanted for (the share sheet, gated on the PNG's weight) shipped **without** it in v0.246.0, above.
+  Re-open only if Seestar captures ever get much larger than 1080p. *(Original spec kept below.)*
+  *(Friendliness / performance — PRIORITY 3; size S; **measure the file size first**.)* The stack path writes a share JPEG beside every deep-sky run
+  (`write_share_jpeg`) precisely because the PNG is the wrong thing to pull over a LAN or hand to a phone; the
+  video path writes only `stack.png` + `stack.tiff`. Nothing is broken today — the QR and the download both work —
+  but the beginner's most-used file is also the heaviest one. **Shape:** write a `stack.jpg` beside the pair at
+  stack time (and backfill it, as `ensure_framing_measured` backfills framing, the first time a result is served),
+  carry it as an additive nullable `jpeg_url`, and let the lightbox's existing PNG-or-JPEG menu and the phone QR
+  prefer it exactly as they already do for a stack run. **Care:** measure a real full-frame Moon PNG first — if it
+  is already small (a Moon still is mostly black sky, which PNG compresses well) this is churn, and the honest
+  outcome is to strike it with the number. Cropping already shrinks it further.
+
+### ⭐ space-ambient background music (struck)
+
+- ~~**⭐ OWNER-REQUESTED (2026-08-06) — optional "space ambient" background music in the web interface, off by
+  default, synthesised in the browser (no audio files).**~~ — **SHIPPED v0.239.0** (Builder 2026-08-06, branch
+  `claude/gallant-galileo-kdy4gc`). Built exactly to the filed spec, procedurally — **no audio file ships or is
+  fetched**, so nothing leaves the NAS, the image gains no binary asset, and a multi-hour session never hears a
+  loop point. Three layers into a shared convolver whose impulse response is a generated decaying noise burst,
+  then a master gain and a `DynamicsCompressorNode` as a safety limiter: (1) a four-voice detuned pad (root ·
+  fifth · octave · twelfth) through a lowpass swept by a 0.035 Hz LFO, each voice swelling on its own
+  37/43/53/61 s clock so they never re-align into a pulse; (2) a brown-noise "solar wind" bed under a slow
+  bandpass sweep; (3) a sparse pentatonic bell every 8–25 s, never on a grid, with a quiet inharmonic partner for
+  the metallic edge. The bed drifts between three related roots (A1/B1/D2) every 2–5 minutes.
+  **Behaviour:** default **off** and per-device — the opt-in and the volume live in `localStorage`
+  (`astrostack.ambient.*`), never in `config.json`, so there is no server setting, no config migration and
+  nothing to break on upgrade. A speaker button in the `AppShell` header is the one click to start or silence it;
+  a Settings card carries the volume and the plain-language explanation. The `AudioContext` is created and
+  resumed **only inside the click handler** (autoplay policy), and the button shows "on" only if that actually
+  succeeded — a blocked browser gets a yellow notification and the toggle stays off rather than lying. A
+  remembered opt-in doesn't autoplay after a reload; it waits for the first click or keypress anywhere in the app.
+  Switching off fades over 2.5 s and then **suspends** the context (not just mutes it), so a tab left open for
+  hours costs nothing, and a restart during the fade wins rather than being suspended out from under.
+  **Split for testability as specified:** all the sound-design decisions are pure (`ambient/voicing.ts`), the
+  node graph is a thin layer over them (`ambient/player.ts`) with injectable context/random/timers.
+  **Tests (+56):** `voicing.test.ts` (21 — chord intervals, detune, distinct swell periods, the gain never
+  reaching zero, bell gaps spanning 8–25 s off-grid, bells always pentatonic and clear of the pad, drift always
+  moving to a different root, the IR decaying and staying in [-1,1], brown noise normalised and genuinely dark),
+  `prefs.test.ts` (8 — off on a fresh install, round-trips, garbage/hand-edited values, and a disabled or full
+  store degrading instead of throwing), `player.test.ts` (17, against a hand-rolled `AudioContext` stub — resume
+  only from a start, graph built once, fade targets, suspend-not-mute, a restart winning mid-fade, a blocked
+  resume reporting failure, bells re-arming, and a **fail-before/pass-after** guard that a root drift doesn't tear
+  down the un-restartable noise-bed source), and `AmbientToggle.test.tsx` (10 — the silent fresh install, the
+  gesture-scoped start, the persisted opt-in cleared before the fade finishes, the blocked-audio path, the
+  gesture-gated resume after a reload, no sound without an opt-in, and both components rendering nothing where
+  Web Audio is unavailable). Frontend-only: zero backend, zero engine, zero schema, no default flipped.
+  *(Original spec kept below for provenance.)*
+  *(Enjoyment polish; size M.)* The owner spends long
+  stretches watching a stack run or browsing the gallery and wants the option of a quiet ambient soundbed while
+  they do. **Be honest about where this ranks: it is *enjoyment* polish, not a workflow feature — it must never
+  displace a bug or PRIORITY 1–4 work.** Pull it on a slow run, not ahead of the queue. It is, however, fully
+  self-contained (one frontend module + one toggle; zero backend, zero engine, zero schema), so it carries
+  essentially no risk to the imaging path.
+
+  **Generate the audio procedurally with the Web Audio API — do NOT ship or fetch an audio file.** This is the
+  load-bearing decision, for four reasons: (a) **licensing** — an agent must not pull a music file off the
+  internet, and we have no cleared track to bundle; (b) it keeps the Docker image and repo free of multi-MB
+  binary assets; (c) **nothing is downloaded at runtime** (the owner's box is offline-first — the existing rule
+  that nothing leaves the NAS applies here too); (d) a synthesised bed **never loops audibly**, which a short
+  bundled sample always does on a multi-hour session. All of it is a few hundred lines of TypeScript with no new
+  npm dependency.
+
+  **Sound design (aim for "drifting through space", not a melody).** Three layers into a shared reverb:
+  1. **Drone pad** — 3–4 oscillators (sine/triangle) on a root + fifth + octave, each detuned a few cents so they
+     beat slowly against each other, through a lowpass (~400–800 Hz) whose cutoff is driven by a very slow LFO
+     (0.02–0.05 Hz). Give each voice an independent slow amplitude swell (30–60 s) so the pad breathes instead of
+     sitting static.
+  2. **Noise bed** — low-level pink/brown noise through a slowly-sweeping bandpass: the "solar wind" texture that
+     stops the pad sounding like a test tone. Keep it well under the pad.
+  3. **Sparse bells** — a single FM/sine ping every 8–25 s (randomised, never on a grid) on a **pentatonic** scale
+     above the drone root, with a long decay. This is what makes it read as *space* rather than *hum*; it is also
+     the layer most easily overdone, so keep it sparse and quiet.
+
+  Feed everything through a **ConvolverNode whose impulse response is generated at runtime** (an exponentially
+  decaying noise burst, ~3–6 s — again, no asset needed) for the long tail, then a master gain and a
+  `DynamicsCompressorNode` as a safety limiter so no combination of voices can spike. Stay on one root, or drift
+  between 2–3 related roots over *minutes*.
+
+  **Behaviour and the traps that matter:**
+  - **Default OFF, opt-in, and remembered per device.** Unrequested audio from a web app is hostile — a fresh
+    install must be silent. Persist in `localStorage` (key `astrostack.ambient.*`), **not** in `webapp/config.py`:
+    music preference is inherently per-device (on in the lounge, off on the phone at 2 a.m.), and it keeps this
+    feature entirely off the server, with no config migration and nothing to break on upgrade.
+  - **Browser autoplay policy**: an `AudioContext` starts suspended and may only be resumed from inside a real
+    user-gesture handler. Create/resume it **in the toggle's click handler** — never on mount, or it silently
+    fails to start and the toggle lies about its state. Reflect the *actual* context state in the UI.
+  - **Suspend, don't just mute, when off.** A running graph with a convolver burns real CPU in a tab that may sit
+    open for hours. `suspend()` the context when toggled off (after the fade) and on `visibilitychange` if the
+    owner wants it to pause on a hidden tab — decide one behaviour and say which in the UI copy.
+  - **Fade in/out over ~2–3 s** via a gain ramp on every start/stop and volume change. A raw start or stop clicks
+    audibly. Never set gain to exactly 0 on an exponential ramp.
+  - **Placement**: a small speaker icon + tooltip in the `AppShell` header in `frontend/src/App.tsx` (next to
+    `ActiveJobsBadge`), plus a volume slider in Settings. One click to silence — no menu-diving.
+  - **Follow the `jobNotify.ts` precedent exactly** — it is the established pattern for a client-only, opt-in,
+    `localStorage`-persisted toggle read fresh at use time, and `SampleTourNote`/`MergeSuggestionsCard` show the
+    `astrostack.*` key convention and the defensive `localStorage` read (wrap in try/catch; a disabled/full store
+    must not crash the shell).
+  - **Testability**: keep the **scheduling and voicing logic pure** (which note fires when, at what gain, the
+    ramp targets) in its own module, separate from the code that touches `AudioContext` nodes. Unit-test the pure
+    half in vitest with a fake clock; test the toggle/persistence with a stubbed `AudioContext` (jsdom has no Web
+    Audio, so a minimal hand-rolled stub is required — assert `resume`/`suspend` are called, not that sound came
+    out). Do not attempt to assert on rendered audio.
+
+  **Explicit non-goals (do not gold-plate):** no user-uploaded music files (a reasonable *later* follow-up, but it
+  drags in upload/storage/format handling — file it separately if the owner asks); no per-page or per-target
+  themes; no sound *effects* on job completion (that is a different feature and the owner has not asked for it);
+  no visualiser. One bed, one toggle, one volume.
+
+### ⭐ "Stack video" (a) + slices (b)/(c) — residue: (b3) raw-OSC video only if a Seestar ever writes a Bayer video; drizzle-upscale under (c) deliberately unbuilt
+
+- ~~**⭐ OWNER-REQUESTED — "Stack video": lucky-imaging stack of the Seestar's Solar/
+  Lunar video captures.**~~ — **SLICE (a) SHIPPED v0.224.0** (Builder 2026-07-30, branch
+  `claude/relaxed-turing-31k4wp`). The owner's Moon/Sun videos were completely invisible in the app: the FITS scanner
+  skips `*_video/` folders by design, so a beginner with a lunar capture on their NAS had no way to turn it into a
+  picture. Now a **Moon & Sun** page (`/moon-sun`) lists every `*_video/` capture in the watched folder and turns one
+  into a single sharp still with one button.
+  **Engine — new self-contained `seestack/video/` package** (no deep-sky machinery reused: no plate-solve — a lunar
+  disk has no stars — no calibration masters, and emphatically *not* the auto STF/SCNR/gradient chain, which anchors
+  the **sky** at 6 % grey and would blow a disk that fills the frame to white):
+  * `ffmpeg.py` — `probe_video` (ffprobe → dimensions/frame count/fps, with a `duration × fps` fallback for
+    containers that omit `nb_frames`) and `iter_frames`, which pipes raw `rgb24` off ffmpeg's stdout and yields
+    **one frame at a time**. A minute of 1080p is ~1800 frames / ~11 GB of pixels, so nothing may buffer the video;
+    abandoning the generator kills the decoder in a `finally`, and stderr goes to `DEVNULL` rather than an undrained
+    pipe that could deadlock. Binaries are found on `PATH` or via `SEESTACK_FFMPEG_PATH`/`SEESTACK_FFPROBE_PATH`.
+  * `lucky.py` — **two streaming passes**: grade every frame (keeping only a scalar), then re-decode and stack the
+    keepers. Decoding twice is the cheap option — holding the best *N* frames would cost *N* frames of RAM and a
+    single pass can't know what "best" means yet — and it keeps the memory bound flat regardless of video length.
+    Sharpness is **mean squared Laplacian ÷ mean brightness²**: the normalisation is load-bearing, since a thin cloud
+    or the Seestar's auto-exposure changes the level between frames and an un-normalised Laplacian ranks the
+    *brightest* frames sharpest — exactly the wrong ones (regression:
+    `test_sharpness_is_not_fooled_by_a_brighter_exposure`). Keepers are aligned to the first kept frame by whole-frame
+    phase correlation (a disk is one big high-contrast object, so a global correlation beats anything star-based),
+    sub-pixel-shifted with `cval=np.nan` so a vacated edge is honest "no coverage" rather than a dark band, and
+    summed through the existing NaN-aware `WeightedSumAccumulator`. A shift beyond 15 % of the short edge is treated
+    as a failed correlation and the frame is left out (and *said* so, in the result's warnings). Long captures are
+    evenly sampled down to `max_frames` with a plain-language note.
+  * `discover.py` — finds `*_video/` folders (depth ≤ 2) holding a real video file, labels `Lunar_`/`Solar_` as
+    **"Moon"/"Sun"**, and mints a sanitised id. The FITS scanner's `_sub`/output folders are never claimed.
+  * `normalize_for_display` — the disk-appropriate render: a linear 1st→99.9th-percentile rescale (the high anchor is
+    a percentile, not the max, so one hot pixel can't crush the disk).
+  **Webapp:** `webapp/video.py` (job body + a self-contained result store at `<data_root>/video/<id>/` holding
+  `stack.png`, `stack.tiff`, `meta.json` — these captures never become library targets, so none of the per-target
+  project/DB machinery applies) and `webapp/routers/video.py` (`GET /api/videos`, `POST /api/videos/{id}/stack`,
+  `GET …/preview.png`, `GET …/download.tiff`). Captures are addressed by sanitised id and re-discovered server-side
+  every call — **no filesystem path ever comes from the client** — and the requested filename is matched against the
+  discovered basenames. `available: false` + a plain-language `hint` when ffmpeg is absent, so the page explains
+  itself instead of offering a button that can only fail.
+  **Frontend:** `MoonSun.tsx` at `/moon-sun` (nav "Moon & Sun") — one card per capture with the finished still, the
+  honest "stacked the sharpest N of M frames — about √N× cleaner than a single frame" summary, PNG + 16-bit TIFF
+  downloads, and the single real decision phrased as three presets ("Only the very best (15%)" / "Best few (30%) —
+  recommended" / "Half of them (50%)") rather than a raw percentage. `ffmpeg` added to `docker/Dockerfile` (the
+  owner pre-approved it — a plain offline codec, no runtime download, nothing leaves the box), to the CI workflow,
+  and to `scripts/agent-setup.sh`.
+  **Tests (+41):** `tests/test_video_lucky.py` (+20, driving real ffmpeg-encoded synthetic captures via a new
+  `tests/videosynth.py` — decode/stride identity across passes, the exposure-invariance regression, keeps-the-sharpest,
+  noise averages down, alignment recovers detail a drifting disk would smear, uncovered-≠-black, too-few-frames,
+  even-sampling note, progress/cancel, display render), `tests/test_video_discover.py` (+10), the webapp
+  `tests/webapp/test_video_api.py` (+11, including a crafted-id traversal attempt and a `file_name` escape attempt),
+  and `frontend/src/routes/MoonSun.test.tsx` (+10). Upgrade-safe: new module + new endpoints + a new opt-in data
+  sub-directory created on first use; no config/DB/API-shape/on-disk change and no default flipped.
+  **Follow-up fixed v0.225.1** (same run): the discovery walk originally capped how many directory entries it read
+  per folder, to bound the work done on a page poll. `os.scandir` returns entries in *filesystem* order, so that cap
+  decided **at random** whether a capture filed beside a few hundred sub-frames was found at all — it passed locally
+  and failed on CI, and on a live install it would have made a user's video appear or vanish by inode order. The cap
+  is gone (the listing is one streamed syscall either way; `scandir` still avoids stat-ing every sub-frame, which was
+  the real win). Tests replaced with the two deterministic properties that actually matter: a capture *is* found
+  beside 300 sub-frames, and the walk never stats a neighbouring target folder's frames.
+  **Still open — slice (b)/(c)** (filed as their own entry below): a keep-% fine-tune slider, per-frame colour/debayer
+  handling for raw OSC video, an optional final unsharp, disk crop/centre, a quality histogram, and drizzle-upscale.
+  *(Original spec kept below for provenance.)*
+
+- **Slices (b)/(c) of "Stack video" (follow-on to the shipped v0.224.0 slice (a)).** Deliberately left out of the
+  first slice, in rough value order: ~~**(b1)** show the *sharpness distribution* of the capture so the user can see
+  whether 15 % or 50 % is the right cut for *their* video (the engine already computes every frame's score — it just
+  isn't returned)~~ — **(b1) SHIPPED v0.241.0** (Builder 2026-08-06, branch `claude/gallant-galileo-gv2vcx`).
+  A **"How steady was your capture?"** panel now sits under every finished Moon/Sun still, built from the grading
+  pass's own per-frame scores — which the stack computed and then dropped on the floor. New pure engine module
+  `seestack/video/quality.py::sharpness_profile(scores, keep_percent)` returns (i) a 32-point **curve** of every
+  frame's sharpness, sorted sharpest-first and normalised to the best frame, (ii) the measured trade-off at each of
+  the three settings the UI offers — *"15% · 30 frames · 2.4× sharper · 6× cleaner"* — and (iii) a **suggested
+  setting** picked by a stated rule (*the most frames you can keep while staying within 5 % of the strictest
+  setting's contrast*), plus a one-sentence plain-language summary and a `steady`/`mixed`/`variable` seeing verdict.
+  **The measure is contrast, not the raw score:** `frame_sharpness` is a mean-*squared* Laplacian, so the module
+  works in √score, and it aggregates the kept set with a **mean** rather than a median — the stack is an average of
+  frames, so a soft frame let in by a looser setting genuinely costs detail and the number has to show it (a median
+  hid two soft frames behind three sharp ones and recommended keeping more than the capture could support; caught by
+  the API test on the 3-sharp-in-10 synthetic capture, which now correctly lands on 30 %).
+  `LuckyResult.scores` and `VideoStackMeta.scores` carry the scores through (both additive with defaults, and
+  `read_meta` already drops unknown/missing fields, so a `meta.json` written by v0.224–v0.240 still loads and simply
+  has no panel — pinned by a test that deletes the key). The profile is derived **per request** from the stored
+  scores, so a future improvement to the advice applies to stills that already exist. Frontend:
+  `VideoSharpnessCard` draws the curve on a **fixed 0..1 axis** — deliberately not the shared `Sparkline`, which
+  autoscales to a series' own min/max and would render a steady capture's 1 % spread as a dramatic cliff, telling
+  the beginner the exact opposite of the truth — marks where their cut fell, and offers a one-click *"Try 50%
+  instead"* that pre-selects the matching preset so "Stack again" re-runs at the suggested setting. Additive and
+  upgrade-safe: new optional API field, new engine module, no default flipped, nothing changed about any picture.
+  **Tests (+29):** `tests/test_video_quality.py` (+14), `tests/webapp/test_video_api.py` (+2, incl. the
+  scores-less-meta upgrade case), `tests/test_video_lucky.py` (+1), `VideoSharpnessCard.test.tsx` (+11, incl. the
+  fixed-axis honesty guard), `MoonSun.test.tsx` (+2). ~~Still open: **(b2)** an optional gentle final
+  unsharp/wavelet on the result (the editor can already sharpen, so this is convenience, not capability)~~ —
+  **(b2) SHIPPED v0.247.0** (Builder 2026-08-07, branch `claude/elegant-bohr-9kc2et`), and it turned out to be
+  **capability, not convenience**: the parenthetical was wrong. A Moon/Sun still is not a stack run, so it cannot
+  be opened in the editor at all (the v0.244.1 "Your first image" work established exactly that, which is why its
+  well-done line points a video user at the Gallery rather than the editor) — so before this, the picture a
+  beginner downloaded was simply the soft one, with no path to a sharp one anywhere in the app.
+  New pure engine module `seestack/video/detail.py`: `sharpen_still(rgb, amount)` is an unsharp mask in *display*
+  space (the picture `normalize_for_display` already rendered), with one knob — **how much** — and a fixed
+  `SHARPEN_SIGMA_PX = 1.1` radius. The radius is deliberately not exposed: lunar/solar detail lives at a pixel or
+  two and doesn't vary the way a deep-sky star profile does, so it would be a knob with one right answer, and a
+  tight radius is also what keeps the limb free of the dark halo that makes an over-cooked planetary image obvious.
+  Named strengths (`SHARPEN_PRESETS`: Off / Gentle 0.6 / Medium 1.2 / Strong 2.0, ceiling `SHARPEN_MAX = 2.0`) live
+  in the engine so the numbers and the words can't drift from the menu. NaN-aware as everywhere else: holes are
+  filled before the blur so a gap can't eat a ring of real picture around it, and come back as holes.
+  **Off by default at every layer** — the API field defaults to 0, `sharpen_still` returns its input array
+  *untouched* at 0, and the UI's default option is "Off" — so an omitted field reproduces the previous version's
+  picture byte-for-byte (pinned by a test that compares the saved PNG bytes). Sharpening runs on the whole frame
+  *before* any crop, so every pixel is sharpened against its real neighbours rather than a reflected crop edge, and
+  the framing is measured on the sharpened picture, which is the one on disk — so a crop offered at stack time and
+  a crop taken later from the saved artifacts see the same thing. `sharpen_amount` is recorded in `meta.json` and
+  served on `VideoResultOut` (additive, defaulted), and the card says *"Sharpening: Medium — surface detail lifted
+  after stacking"* so nobody wonders later why one Moon looks crisper than the last.
+  **Tests (+20):** `tests/test_video_detail.py` (new, +8 — off is byte-for-byte identity, detail rises with the
+  amount, output stays a writable 0–1 picture, a grey picture stays grey, the ceiling caps rather than honours,
+  holes stay holes and don't bleed, presets ordered Off→Strong, and the words for an off-menu amount),
+  `tests/webapp/test_video_api.py` (+5 — a sharpened still measurably carries more fine detail than the plain one
+  at the same size, an omitted field is byte-identical to an explicit zero, a silly amount is a 422, an older
+  `meta.json` reads as unsharpened, and sharpen composes with crop), `MoonSun.test.tsx` (+5). One test-harness
+  fix came with it: `frontend/src/test/setup.ts` now stubs `Element.scrollIntoView`, which jsdom doesn't implement
+  and Mantine's Combobox calls on a timer — without it *any* test that picks a `Select` option throws an unhandled
+  error after the test finishes. **Still open:** **(b3)** raw-OSC video handling (if a Seestar ever writes a Bayer video,
+  today's `rgb24` decode would need a debayer path — verify before building, the current captures are ordinary
+  colour video); ~~**(c)** disk crop/centre so the still isn't mostly black sky~~ — **CROP HALF SHIPPED v0.244.0**
+  (Builder 2026-08-06, branch `claude/gallant-galileo-syc60a`), leaving only **drizzle-upscale** open under (c).
+  Explicitly **not** wanted (pro territory, per the original spec): multi-point planetary alignment and derotation.
+  (S–M each, beginner-feature/workflow — PRIORITY 2/3.)
+
+  - **SHIPPED v0.244.0 — "Crop to the Moon": trim the empty sky around a Moon/Sun still.**
+    *(Beginner feature / friendliness — PRIORITY 3.)* The Seestar frames a lunar or solar capture generously, so
+    the finished still is mostly black rectangle with a small bright disk in it — the picture the owner downloads,
+    shares or sets as a wallpaper. New pure engine module `seestack/video/framing.py::measure_framing` locates the
+    disk on the *display-rendered* still (robust sky/peak percentiles → a threshold at 25 % of the way to the
+    disk level → row/column profiles with a ≥0.4 %-of-the-line floor so a hot pixel can't stretch the box), adds a
+    6 %-of-the-disk margin, and reports how much of the frame a crop would trim. `crop_to_disk` then *slices* —
+    it never touches a pixel, and the crop is applied **after** `normalize_for_display`, so the tone mapping still
+    measures the whole frame and cropping can only change what is in the picture, never how bright it is.
+    **It declines rather than guesses:** a disk that already fills the frame (a close-up Sun), a blank or
+    blown-out frame, a lone hot pixel, and any crop that would trim under 15 % of the frame all come back
+    "not worthwhile" and the picture is left exactly as it was — and if a crop *was* asked for, the run says why
+    in plain language instead of silently no-op-ing.
+    **Webapp:** `POST /api/videos/{id}/stack` gained `crop: bool = False` (opt-in, so an omitted field keeps the
+    picture a previous version produced), and the result carries `crop_applied` / `crop_available` /
+    `crop_trim_fraction` / `source_width` / `source_height`. The framing is measured on **every** stack whether or
+    not a crop was asked for, which is what lets a finished still say "about 78 % of this picture is empty sky" to
+    someone who didn't know to ask beforehand. **Frontend:** a plain-language "Crop to the Moon/Sun" checkbox on
+    the stack form, plus a one-click *"Crop it and stack again"* offer under a full-frame still — the same shape
+    as the shipped "Try 50% instead" nudge — and a line saying what a cropped still trimmed and what size it came
+    from. Upgrade-safe: new optional request field, additive response fields with neutral defaults, new optional
+    `meta.json` keys (a still stacked by v0.224–v0.243 reads as "not cropped, nothing to offer" — pinned by a
+    test that deletes them), no default flipped, no on-disk layout change.
+    **Tests (+22):** `tests/test_video_framing.py` (+12 — finds a realistic disk and keeps the whole limb, follows
+    an off-centre disk, crops pixels-identically, and declines on a frame-filling disk / blank / blown-out /
+    hot-pixel / NaN-uncovered / greyscale / tiny inputs), `tests/webapp/test_video_api.py` (+5 — a full-frame
+    still offers the crop, cropping trims the sky and the PNG *and* TIFF are both the cropped size with the disk
+    still in them, an omitted field changes nothing, an old `meta.json` reads as uncropped, and a frame-filling
+    disk says why it wasn't cropped), `MoonSun.test.tsx` (+5 groups covering the pure `subjectNoun` /
+    `cropSuggestion` / `cropNote` helpers, the one-click offer, the checkbox, and an older backend).
+
+  The owner shoots the Moon/Sun with the Seestar, which drops a **video file
+  (.mp4/.avi/.mov)** into a `Lunar_video/` / `Solar_video/` folder — currently the
+  scanner **skips** these (`_VIDEO_SUFFIX`, `seestack/io/scanner.py`). Give the owner
+  a one-click way to turn that video into a **single sharp Moon/Sun still** via
+  *lucky imaging* (grade frames by sharpness → keep the best → align on the disk →
+  stack). **Owner has approved bundling `ffmpeg` in the Docker image** for decoding
+  (a plain offline codec — add to `docker/Dockerfile`; decode via a subprocess
+  `ffmpeg` call, or PyAV — keep the Python deps light; no runtime download, nothing
+  leaves the box). This is a **separate pipeline from deep-sky `run_stack`** — build
+  it as its own module; do **NOT** reuse plate-solving (no stars on a lunar disk) or
+  the deep-sky auto-edit (STF/SCNR/gradient removal would wreck a bright disk).
+  Pipeline (new `seestack/video/` module):
+  1. **Recognise `*_video/` as a new "video" target kind** (route it here instead of
+     skipping; classify `Lunar_`/`Solar_` by prefix; a `Scenery_` video can be
+     skipped or handled generically). Reuse the existing `_VIDEO_SUFFIX`.
+  2. **Decode with ffmpeg, memory-bounded.** A video is potentially **thousands** of
+     frames — never load them all into RAM. Stream/decode, and cap or evenly sample
+     to a sane working count (e.g. ≤ a few thousand) with a `log()` note of what was
+     dropped. Respect the hot-path memory discipline (OOM history).
+  3. **Grade each frame by sharpness** (Laplacian / gradient / high-frequency-energy
+     variance) — seeing makes a few frames sharp and most soft — and **keep the best
+     N%** (a "keep %" like AutoStakkert; sensible default ~25–50%).
+  4. **Register the kept frames on the disk** by phase/cross-correlation (sub-pixel),
+     *not* star alignment — the full disk drifts/jitters frame to frame.
+  5. **Stack** (average or median) the aligned best frames → a high-SNR sharp still.
+     Handle the Seestar's colour: debayer if the frames are raw OSC, else take RGB
+     as-is. A gentle optional final unsharp/wavelet is fine but keep it light (the
+     editor can sharpen further).
+  6. **Output a normal image artifact** (FITS/TIFF/PNG) into History so it flows into
+     the editor/export like any result — **but with a lunar/solar-appropriate display
+     (simple normalize/gamma), NOT the deep-sky auto STF/SCNR/gradient chain.**
+  7. **UI:** a **"Stack video"** action on the video target (auto-offer it when a
+     `*_video/` target is present), with a keep-% control and progress; beginner-simple.
+  **Keep it SIMPLE (beginner scope):** full-disk alignment + best-frame stack is the
+  goal — a single crisp disk. Do **not** build multi-point planetary alignment,
+  drizzle, or derotation (pro territory, out of scope). Guardrails: the only new dep
+  is the owner-approved `ffmpeg` (offline, in the image); additive (new module + job
+  kind + UI, a new run/target "kind"; upgrade-safe — existing scans/targets
+  unaffected); memory-bounded; the video result must bypass the deep-sky auto-edit.
+  Slices: **(a)** core — recognise `*_video` → ffmpeg decode (capped) → sharpness
+  grade → keep-best → cross-correlation disk align → average stack → save still +
+  "Stack video" button (delivers the ask); **(b)** sub-pixel align, keep-% slider,
+  colour/debayer handling, optional final sharpen, progress + big-video sampling;
+  **(c)** disk crop/centre, quality histogram, drizzle-upscale. (L; slice (a) is the
+  shippable M — beginner-feature/workflow, PRIORITY 2/3.)
+
+> **Note (Scout 2026-07-24):** this section is now amply stocked (many ready, unbuilt beginner features below) and the
+> app's beginner surface is genuinely broad — planning (Tonight: moon/altitude/clouds/`suggest` new targets/
+> `next-session`/`best-months`), calendar export (`ics.py`), a "Last night" recap card, per-object info blurbs
+> (`objectinfo.py`), a scalebar, a captioned share JPEG ("nameplate"), Best-pictures/Compare, integration-readiness +
+> goals, Sky-so-far coverage, and a progress reel all already exist. Per AGENTS.md §2, I did **not** manufacture a
+> duplicate this run — I filed only the one genuinely-absent feature below (verified against the routes/routers), and
+> flag that future feature-ideation should first check this saturation rather than re-propose an existing capability.
+> **Confirmed still saturated (Scout 2026-07-24, `n1kcnj`):** re-checked every angle against the routes/components —
+> before/after reveal exists (`OneFrameVsStackCard`), the darks nudge exists (`StackHealthCard` "How's my stack?"),
+> annotation exists (`AnnotatedImage`), planning/recap/coaching/celebration all filed or built, and live capture is
+> explicitly de-scoped. The one genuinely-absent gap I found is the *actionable how-to* behind the existing darks
+> advice (filed immediately below) — the app tells beginners *that* darks help but never *how* to shoot them.
+
+### "Did it get better?" (v0.164.0 split slider) + the √N verdict (v0.153.0) — residue: a noise-delta *picture* only if the owner wants it (now in the owner's list)
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-21) — "Did it get better?": A/B compare two finished stacks of the same
+  target, side by side with a split slider.** **▶ SPLIT-SLIDER SLICE SHIPPED v0.164.0** (Builder 2026-07-22, branch
+  `claude/pensive-faraday-vsepvf`). The two-stack Compare view (`/compare?a=…&b=…`, reachable from the History run
+  card's **Compare** button, which auto-targets the chronologically-previous run) already shipped **Side by side**
+  and **Blink**; the one named gap in this idea — the *split slider* — is now a third **Split** mode on the same
+  view. It overlays stack A on top of stack B in one frame and clips A under a draggable vertical divider (left = A,
+  right = B), reusing the editor's already-tested `splitCompare` divider geometry (`splitFraction` / `splitClipLeft`
+  / `splitLeftPct`) and the exact pointer-drag pattern from `OneFrameVsStackCard`, so you scrub one line across the
+  picture to see precisely where a deeper/re-tuned stack pulls out faint detail or knocks down noise — the most
+  direct answer to "did my new stack get better?". A/B badges pin the two sides, a plain-language hint names both
+  stacks under the frame, and it falls back with guidance ("Split needs a preview image for both stacks. Try 'Side
+  by side'.") if either run has no preview. Frontend-only, additive, opt-in (a third segmented-control option;
+  nothing else changes); the existing which-is-cleaner noise verdict (`noiseComparison`) still shows above all three
+  modes. No backend/schema/config/API-shape/default change — reuses the same gallery-resolved preview URLs the other
+  two modes use. Tests: `Compare.test.tsx` (+2 — Split overlays A-over-B with the drag hint; no-preview fallback).
+  The remaining slice (b) — an optional plain-language √N noise-delta *number* — is already largely covered by the
+  shipped `noiseComparison` verdict; leave any richer per-run stat delta for a future run. Original spec kept for
+  provenance:
+  - _(orig)_ *(Friendliness / trust, PRIORITY 3; size M.)* **Why:** a beginner
+  who adds a second night and re-stacks, or reprocesses the same subs with different settings, has no easy way to
+  answer the one question that matters — *did the picture actually improve?* Today the History run cards list
+  runs with dates/sub-counts and thumbnails, but you can only look at one at a time and eyeball it from memory.
+  A dedicated compare lets them *see* the deeper stack pull out faint detail and knock down noise. The editor
+  already has a polished split-compare for *looks* (`splitCompare.ts` / `LookComparePicker.tsx`), but nothing
+  compares two **stack runs** — that's the gap. **Beginner bar:** clears it — it answers "is my new stack
+  better?" in plain terms, sane default (auto-pick the two newest *genuine* stack runs for the target), no expert
+  knobs. **Shape / slices —** **(a) frontend-only MVP (S–M):** on the Target/History view add a "Compare two
+  stacks" control that picks any two runs (default: the two newest) and shows their result PNGs in a split view
+  with a draggable divider — reuse the editor's `splitCompare` divider math and the existing per-run result-PNG
+  endpoint; a tiny caption strip under each side ("3 nights · 412 subs · 2026-07-18" vs "5 nights · 690 subs ·
+  2026-07-21") so the provenance is explicit. Off by default, opened on demand; no backend change if both runs
+  already expose a result PNG at the same display size. **(b) optional depth (M):** add a one-line plain-language
+  verdict from cheap, already-computed stats — e.g. "√N says ~1.3× less noise, from 1.6× more subs" using the
+  same honest-√N line already on the readiness card, or a background-RMS delta if both runs carry it — so the
+  beginner gets a *number*, not just a vibe. **Upgrade-safe:** read-only, additive, opt-in; reuses existing
+  run records + result PNGs, no schema/config/API-shape change (slice (a) may need zero new endpoints). Testable:
+  the split-divider math is pure (mirror `splitCompare.test.ts`); the run-pair picker defaults are unit-testable;
+  the verdict string is a pure function of two stat blobs. Natural companion to the shipped "Your target, night
+  after night" deepening reel (that *animates* the growth; this lets you *scrub* any two points directly).
+- **PARTLY SHIPPED (v0.153.0, Builder 2026-07-21, branch `claude/pensive-faraday-c2l3n1`) — the honest √N
+  diminishing-returns *verdict*, folded into the existing "Is it enough yet?" readiness card rather than a
+  second parallel card.** Chose to **deepen the existing card** over adding a whole new `IntegrationMeterCard`
+  because the readiness card already answers "should I keep shooting?" with a goal-fraction bar — a second card
+  answering the same question a different way would be clutter (against PRIORITY 3). New pure helper
+  `noiseReductionHint(exposureSeconds)` (`frontend/src/readiness.ts`): from the accumulated accepted integration
+  the card already loads (`total_exposure_s`), it computes how much a single extra clear hour would cut the
+  stack's background noise — `1 − √(T/(T+3600))` — and phrases it plainly with a steep/diminishing/plateau tail
+  (*"Another clear hour would cut background noise about 11% more — diminishing returns are setting in."*). It's
+  **goal-independent** (the physics doesn't care about the per-type goal), so it complements the goal verdict
+  instead of repeating it. Self-hides (returns null) with no integration yet, and once an extra hour rounds below
+  1% (~40 h+). Additive/read-only: no new card, endpoint, schema, config, or default change; the existing goal
+  verdict/bar/tests are untouched. Tests: `readiness.test.ts` (+4 — null-guards, the three regimes with pinned
+  percentages, the below-1% self-hide, and a monotonicity check) and `Target.test.tsx` (asserts the line renders
+  at 3 h → ~13%). **Slice left for a future run:** the full sparkline "you-are-here on the SNR-vs-subs curve"
+  visualization, if the owner wants the picture as well as the sentence — filed as the remaining part of this
+  item. Original spec kept below for provenance:
+
+### "Have I shot enough?" — the core value ships as `readiness.noiseReductionHint`
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #2) — "Have I shot enough?": a plain-language integration /
+  diminishing-returns meter on the target.** _(Builder 2026-07-22 curation note: **the core value already ships as
+  text** — `frontend/src/readiness.ts::noiseReductionHint` gives the honest √N "another clear hour would cut
+  background noise ~N% more — worth staying out / clean place to stop" verdict, and `integrationReadiness` gives
+  the goal-based "N h of ~M h — a solid start" line; both render on the Target page. Only the **visual** SNR-vs-subs
+  curve with a "you are here" marker is unbuilt, which is marginal polish over the shipped text. Deprioritised
+  accordingly — pick up only if a future run wants the visual, not as a fresh feature.)_
+  *(Beginner feature; PRIORITY 3 friendliness / trust; size S–M.)*
+  The single most common beginner question mid-session is *"is it worth staying up for more subs, or is this
+  target done?"* — and the app never answers it. Stack noise falls as **√N** (double the good subs → ~30% less
+  background noise, then steeply diminishing), so from just the **accepted-sub count** (which we already have on
+  every target) we can place the beginner on that curve and say, in plain words, whether more subs still pay off.
+  **Feature:** a small read-only card on the Target/History view: a compact SNR-vs-subs curve with a "you are
+  here" marker plus one honest verdict — e.g. *"228 good subs (~3.8 h). You're past the steep part of the curve:
+  another hour (~60 subs) would cut background noise only ~11% more — a clean stopping point."* or, for a thin
+  target, *"Only 34 good subs so far — you're on the steep part; each clear hour still buys a big noise drop.
+  Keep going for a much cleaner result."* Everything is derived from the count (× per-sub exposure for the hour
+  figure) — **pure `snr_gain(n_current, n_added)` = √((n+Δ)/n) arithmetic**, unit-testable against known ratios,
+  no new engine work, no new capture step, no schema/config change. **Distinct from** the shipped/ideated
+  reveals: the retrospective **noise-ratio badge** *measures* the finished stack's achieved σ-drop ("stacking
+  cut noise 15×"); the **noise trend** compares separate finished stacks; this is the **forward-looking "should I
+  keep shooting / did I shoot enough"** guide, the one a beginner consults *before* the next clear night to
+  decide whether to revisit the target — it answers *planning*, not *provenance*. **Beginner bar ✔:** one card,
+  zero knobs, sane default (auto-verdict from the count), plain language, actionable on the next clear night;
+  serves the trust + enjoy pillars and directly feeds the multi-night deepening arc the "night after night"
+  timelapse celebrates. **Guardrails:** additive/read-only, best-effort — hide the card when a target has too few
+  accepted subs to say anything useful (< ~20) or no exposure to convert to hours (drop the hour clause rather
+  than print blanks). **Builder slice:** (a) a pure `integrationAdvice(nAccepted, subExposureS)` helper returning
+  `{curvePoints, hereIndex, verdictText}` (unit-tested for steep / plateau / too-few cases); (b) an
+  `IntegrationMeterCard` (Mantine sparkline + verdict) mounted on Target, reusing the accepted-frame count the
+  page already loads — no new endpoint needed. Keeps the beginner-feature pipeline stocked.
+
+### the cached noise ratio (`_cached_noise_ratio`) + the "North up" view slice (v0.148.0, completed by v0.290.x/v0.308.0)
+
+- **NEW IDEA (Builder 2026-07-22, follow-on to the shipped "cut your noise ~N×" at-completion badge) — stamp/cache
+  the measured noise-reduction ratio on the run so repeat views don't re-measure it.** *(Autonomy / performance
+  polish; PRIORITY 2–4; size S–M.)* Now that `StackNoiseBadge` fetches `.../one-sub-vs-stack/noise` **eagerly** on
+  the Target page (once per load) and on each finished Jobs card — in addition to History's lazy reveal —
+  `_measure_noise_ratio` reloads the master FITS + a representative sub and re-computes σ **every time** the number
+  is shown. It's a pure function of the (immutable) finished stack + its reference sub, so the result never changes
+  once computed. **Idea:** compute it **once** — the cleanest place is at stack time (the master + accepted subs
+  are already in memory), stamping the ratio into the stack FITS header (e.g. `NOISERAT`, alongside the existing
+  provenance cards) and/or the run record, and have the endpoint return the stamped value when present and only
+  fall back to the live measurement for older runs that predate the stamp. That removes the repeated per-view FITS
+  reload (snappier Target/Jobs render, less disk churn on a NAS) while keeping the exact same number. **Upgrade-
+  safe:** additive — a new nullable header/field with a live-measure fallback, so old stacks keep working (they
+  just measure on demand as today) and no schema/API-shape/default change (the endpoint's `{ratio}` contract is
+  unchanged). **Testable:** a stamped run returns the header value without touching the sub; an unstamped (old) run
+  still measures live; the stamped value equals the live measurement for the same data. _(Spotted while wiring the
+  at-completion badge — the measurement is correct but now runs more often than it needs to.)_
+  **▶ The expensive half is FIXED — v0.229.6** (Builder 2026-08-04, branch `claude/relaxed-turing-15aq36`), and it
+  turned out to be worse than "re-measures too often": `_measure_noise_ratio` (`webapp/routers/stack.py`) did
+  `np.asarray(fits.getdata(path), dtype=np.float32)`, which materialises the **entire** master before taking its
+  1024² central crop. FITS is big-endian, so that dtype cast is a full copy *and* byte-swap of the whole canvas —
+  **measured 46 MB of resident memory for a 48 MB master, i.e. ~1.8 GB of transient allocation for a 150 MP mosaic**,
+  on an endpoint the Target page fetches on **every load** and every finished Jobs card fetches again, on the
+  RAM-capped NAS. It now opens the master `memmap=True`, slices the crop off the memory-mapped HDU and converts only
+  that (**measured 46 MB → 0 MB peak** on the same file), picking the first HDU carrying pixels so a file whose
+  primary is empty still reads exactly as `getdata` used to choose. The crop origin moved into a shared
+  `_crop_origin` helper so the windowed master read and the sub's in-memory crop cannot drift apart and start
+  measuring different parts of the field. Same pixels, same number — pinned by a parity test against the old
+  whole-array path on a master wider than the crop. Tests (`tests/webapp/test_one_sub_vs_stack.py`, +2, both
+  fail-before/pass-after): `test_noise_ratio_reads_only_the_central_crop_of_the_master` (monkeypatches
+  `fits.getdata` to raise, so the endpoint can only answer by slicing the memmap) and
+  `test_noise_ratio_is_unchanged_by_the_windowed_read`. No API/schema/config/default change.
+  ~~**Still open:** the caching half above~~ — **the caching half SHIPPED v0.268.1** (Builder 2026-08-18, branch
+  `claude/relaxed-franklin-i98kvb`), and the "worth doing only if a future run is already adding a `stack_runs`
+  column" caveat is answered by **not adding one**: the stamp is a `project_meta` row under a new
+  `NOISE_RATIO_META_PREFIX` (`webapp/routers/stack.py`), registered in `webapp/run_meta.py` so deleting the run
+  takes it with it — no schema change at all, so there is nothing to migrate and nothing to roll back.
+  **What a repeat view now costs: nothing.** The residual cost the note above measured was "a ~12 MB crop read
+  plus one sub" — and *the sub is the bigger half*: `load_seestar_raw` + `bilinear_debayer` at native
+  1080×1920 on every Target-page load and every finished Jobs card, off the NAS. Both are now skipped on a hit.
+  **The stamp is a cache, never a source of truth.** It carries a fingerprint of what it was measured *from* —
+  the master's `(mtime_ns, size)` and the id of the representative sub — so it can never be served stale. That
+  second half matters more than it looks: `_pick_reference_sub` picks the **sharpest accepted** frame, so
+  accepting or rejecting one changes which sub the comparison is against, and a run-id-only cache would keep
+  answering with the old sub's number. A `null` (a display-space export) is cached too — it is exactly as stable
+  as a number and costs the same FITS open to re-derive. Any mismatch, unparsable stamp, or unwritable project
+  simply measures, as today. **Upgrade-safe:** additive meta key with a live-measure fallback, so every existing
+  run keeps working unchanged; no config, DB-schema, on-disk, API-shape or default change (the endpoint's
+  `{ratio}` contract is untouched). **Tests (+5 in `tests/webapp/test_one_sub_vs_stack.py`, three fail-before):**
+  measured once and remembered (a second view never reopens the master or the sub), a `null` remembered too,
+  re-measured when the master is rewritten at the same path, re-measured when the representative sub is
+  rejected, and the stamp purged with the run.
+- **PARTLY SHIPPED (v0.148.0, Builder 2026-07-21, branch `claude/pensive-faraday-dvg3ul`) — "North up" view slice.**
+  Shipped the engine + the History **view** orientation: a **"Rotate so North is up"** toggle in the History
+  card's *Adjust* panel reorients the live render + the full-screen lightbox so celestial North points up (like
+  reference photos of the object), derived from the run's own WCS. **Engine:** `seestack/render/orient.py` —
+  `north_up_rotation_deg(wcs, w, h)` (asks the WCS where North points at the image centre and returns the CCW
+  PIL-rotate angle; `None` for no/degenerate WCS) + `rotate_image_north_up(rgb, angle)` (lossless `np.rot90`
+  snap within 1° of a 90° step; otherwise a bicubic `expand` rotate with **black** corners = the app's
+  uncovered/NaN convention). The **rotation sign** — the one thing that must be exactly right — is pinned by an
+  **end-to-end marker test** using `astropy` itself as ground truth (place a marker at the true-North sky
+  position via the WCS, rotate by the helper's angle, assert it lands top-centre), across 9 rotations incl. the
+  celestial RA-left parity, so it doesn't depend on the ASTAP-convention unknown the sky-atlas `_tan_wcs` item
+  is gated on. **Backend:** `render_stack_png(..., north_up=)` + `stack_north_up_deg(fits)`; the `render`
+  endpoint takes `north_up=`; `render-suggestion` returns `north_up_deg` (null unless a real >`NORTH_UP_MIN_DEG`
+  correction exists) so the UI only offers the toggle when it helps. **Frontend:** the Adjust-panel `Switch`
+  (self-hides when no correction), threaded into the render image + lightbox URLs. Additive/upgrade-safe:
+  read-only, off by default, no schema/config/API-shape/existing-default change. Tests: `tests/test_orient.py`
+  (+7 incl. the parametrised sign proof), `tests/webapp/test_north_up.py` (+3 — suggestion angle / render
+  reorients (canvas grows) / no-WCS no-op), `stackRenderUrl.test.ts` (+2), `History.test.tsx` (+2 — toggle
+  shows & threads `north_up=true` / hidden with no correction). **Deliberately NOT baked into the stored
+  preview or the canonical JPEG/PNG downloads** — the stored preview must stay WCS-aligned or the Sky-map
+  overlay (which places the preview via its grid WCS) would be mis-oriented; North-up is a view/download-time
+  orientation only. **Slice left for a future run (filed below in Ideas):** offer a North-up-oriented
+  *download/share* (the share JPEG path) so a beginner can post the oriented picture, and consider the editor
+  export surface (guarding the geometry-op WCS mismatch the Scout flagged). Original spec kept for provenance:
+  - **NEW BEGINNER FEATURE (Scout 2026-07-21 #9) — "North up": one-click orient the shared/exported image so
+    celestial North points up, the way every reference photo of the object is drawn.** A Seestar frames the sky
+    at whatever angle the mount happened to sit, so a beginner's finished picture often comes out rotated relative
+    to every catalog/Wikipedia image of the same object — which makes it look "off" and hard to compare, and is
+    the #1 thing that separates a snapshot from a "real" astrophoto. **The app already knows the exact rotation:**
+    the stacked `master.fits` carries the output WCS (the CD matrix), and the sky-map work already extracts a
+    `rotation_deg` from it (`webapp/routers/sky.py` / the `SkyImage` geometry helpers) — the North position angle
+    is `atan2(CD1_2, CD1_1)`-style trig on that same matrix, no plate-solve needed at view time. **Feature:** a
+    **"North up"** toggle on the share/download panel (and the History result view) that rotates the display image
+    by the stored North angle before it's written, so the shared JPEG/PNG comes out conventionally oriented. Reuse
+    the existing render path: `load_stack_rgb` → stretch → `PIL.Image.rotate(angle, expand=True, fillcolor=black)`
+    — the exposed corners fill with the **same black as uncovered/NaN pixels** (the app's existing convention), so
+    it looks intentional, not broken. **Sane default + honest behaviour to get right:** (1) show it only when the
+    run has a WCS *and* the correction is more than a couple of degrees (a near-North-up frame needs no rotation —
+    don't add interpolation blur or black corners for nothing); (2) when the angle is within ~1° of a multiple of
+    90°, snap to the exact 90° step so that common case is **lossless** (pure transpose/flip, no resample, no new
+    corners); (3) label it plainly — *"Rotate so North is up (like reference photos of this object)."* **Beginner
+    bar ✔:** one toggle, zero angles to type, a sane auto-detected default, plain language; it makes the shared
+    picture look "correct" and directly comparable to reference images — serves the *understand + enjoy + share*
+    pillars §1 calls out (`annotated results` / making a beginner's result feel legit). **Distinct from** the
+    nameplate (adds a caption), "Set as cover" (picks which image), and the sky-map overlay (places it on an atlas)
+    — this reorients the picture itself. **Well-grounded / low-risk:** the WCS + rotation extraction already exist
+    and are tested; the change is a render-time PIL rotate, read-only, touches nothing on disk permanently, no new
+    dep/network. **Guardrails:** additive/reversible (a render-time export option, off unless the toggle is on and
+    a meaningful correction exists), best-effort (no WCS or an un-parseable CD → hide the toggle, never a broken
+    render; a display-space editor export that lost its WCS simply doesn't offer it). Split for the Builder: (a) a
+    small pure helper `north_angle_deg(wcs)` + a `rotate_north_up(rgb, angle)` (with the 90°-snap lossless path)
+    in `render/` or `seestack/`, unit-tested against a known-orientation synthetic WCS pinning the **sign** (a
+    frame rotated +30° must rotate −30° back to North-up — the exact sign hazard the sky-map `_tan_wcs` item
+    flags, so pin it with a test); (b) wire the toggle into the share/download endpoint + the frontend panel,
+    reusing `write_share_jpeg`/`write_full_res_png`. _(M, split as above; PRIORITY 3 friendliness /
+    understand-enjoy-share — beginner feature; reuses the shipped WCS geometry + share-render infra, so low-risk.
+    Keeps the beginner-feature pipeline stocked.)_
+
+### "Night by night" — slices (a)+(b)+(c), v0.144.0
+
+- **NEW BEGINNER FEATURE (Scout 2026-07-21 #5) — "Night by night": a per-target breakdown of every
+  imaging night, so a beginner can see which nights were good and set a clouded-out night aside.** —
+  **SLICES (a)+(b)+(c) SHIPPED v0.144.0** (Builder 2026-07-21, branch `claude/pensive-faraday-enl8ut`).
+  New read-only **"Nights"** card on the Target page listing every capture night (newest first): date,
+  subs kept/total, integration, median FWHM, and a one-word verdict (**sharp / soft / hazy**) with a
+  gentle "sharpest" nod on the best night. **Backend:** pure `seestack/session_recap.py::nights_breakdown(project)`
+  reuses the shipped `_split_sessions` + `_session_median_fwhm` + `bucket_reject_reason` infra — a night is
+  "hazy" when ≥`NIGHT_HAZY_CLOUD_FRACTION` (40%) of its subs were set aside as cloudy, "soft" when its median
+  FWHM clears the *same* relative+absolute floors the cross-session drift nudge uses (so the two always agree),
+  "sharp" otherwise, and "" when too few measured to judge; the `_night_verdict` helper is unit-tested directly.
+  Read-only `GET /api/targets/{safe}/nights` → `list[NightSummaryOut]`. **Frontend:** `NightsCard` (renders only
+  when a target spans ≥2 nights — a single night is already the "Last session" card, so it never duplicates it),
+  with pure `formatNightDate` (tz-stable, reads the date off the ISO string) + `verdictBadge` helpers.
+  Beginner bar ✔ — plain-language, informational-only (never auto-rejects), directly helps spot a bad night.
+  Upgrade-safe/additive: one read-only endpoint + one card + one schema, no schema/config/API/default change.
+  Tests: `tests/test_session_recap.py` (+6 — empty, newest-first rollups, soft-vs-best + best nod, hazy cloud
+  precedence, no-verdict on thin data, pure `_night_verdict`), `tests/webapp/test_target_nights.py` (+3 —
+  default single night, two-nights newest-first, verdict+buckets serialisation), `NightsCard.test.tsx` (+7).
+  Python 1438 + tsc + vitest 951 + vite build green. **Slice (d) — the opt-in "set this night aside"
+  bulk reject + re-stack nudge — SHIPPED v0.171.0** (Builder 2026-07-23, branch `claude/pensive-faraday-m351es`).
+  Each night in the Nights card now carries an opt-in **"Set aside"** button (shown only when the night still has
+  kept subs to drop): it rejects that night's *accepted* subs so a beginner can drop a whole clouded-out / soft
+  night in one click and re-stack a cleaner picture. **Reversible by construction** — it sets the same `user`
+  reject a manual reject uses (`accept=False, user_override=True, reject_reason="user"` → the "set aside by you"
+  bucket), **never deletes**, and **never touches an already-rejected sub** (a cloudy/streak auto-reject keeps its
+  own reason), so a legitimately faint target's only nights can never be silently culled and any auto-reject
+  provenance survives. The touched `changed_ids` come back so the card shows a one-click **Undo** (a `bulk` accept
+  of exactly those ids, reusing the shipped/ tested mixed-pointing reject/undo pattern), and the success notice
+  nudges "Re-stack (Process target) to see the cleaner picture" (pointing at the existing one-click Process
+  button rather than auto-triggering a job). **Engine:** pure `session_recap.night_frame_ids(project, start_utc,
+  end_utc, *, accepted_only)` — a time-window match over the night's own bounds (sessions never overlap in time,
+  so it reproduces exactly the card's night without re-splitting). **Backend:** `POST
+  /api/targets/{safe}/frames/set-aside-night` (`NightSetAside{start_utc,end_utc}`), mirroring `bulk_frames`'
+  nested-close + read-only→503 + `refresh_target_stats` handling. **Frontend:** the NightsCard button/undo/re-stack
+  nudge + `api.setAsideNight`. Additive/upgrade-safe: opt-in, off-nothing, no schema/config/DB/API-shape/default
+  change (one new endpoint + one new request model). Tests: `test_session_recap.py` (+3 — one-night partition,
+  accepted-only skips rejected, unparseable-bounds→[]), `test_target_nights.py` (+3 — rejects only that night's
+  accepted subs, leaves already-rejected untouched, undoable via bulk-accept), `NightsCard.test.tsx` (+2 —
+  set-aside with the night's own bounds then undo via bulk-accept, no button for a fully-set-aside night).
+  Original spec:
+  The
+  §1 owner shoots one target across *many* nights (the Seestar writes a new folder per night). Today the
+  Target page has a **"Last session"** card (`session_recap`, one night) and the Library has a
+  library-wide recap — but there is **no per-target view of *all* the nights that went into this
+  picture**. A non-expert can't tell that (say) 3 of their 7 M31 nights were hazy and are dragging the
+  stack down, and has no easy way to drop a whole bad night — only per-frame QC, which is tedious across
+  thousands of subs. **Feature:** a **"Nights"** card/tab on the Target page listing each capture night
+  (date, sub count, kept vs set-aside, total integration, median FWHM + a plain-language one-word verdict
+  — "sharp" / "soft" / "hazy" derived from the metrics already stored), newest first, with a gentle
+  highlight on a night that's clearly worse than the target's own best. Optional one-click **"Set this
+  night aside"** that rejects that night's subs in bulk (reversible — it sets the same auto-reject the QC
+  path uses, preserving any `user_override`), then offers a re-stack, so a beginner can drop a clouded
+  night and immediately get a cleaner image. **Well-grounded / low-risk:** the hard part already exists —
+  `seestack/session_recap.py::_split_sessions` groups a target's frames into capture-time sessions
+  (6 h gap) and is already reused by the Last-session card and the cross-session drift nudge; frames carry
+  `timestamp_utc` + `exposure_s` + the QC metrics, indexed on `timestamp_utc`. So this is mostly a new
+  pure `nights_breakdown(project)` helper over the existing split + a read-only
+  `GET /api/targets/{safe}/nights` + a Target-page card. **Beginner bar ✔:** plain-language, one obvious
+  optional action, sane default (informational only unless they choose to set a night aside — never
+  auto-rejects), and it directly makes the picture better (drop the bad nights) with far less effort than
+  hand-culling subs. Serves autonomy (P2) + friendliness (P3) + image quality (P4). **Guardrails:**
+  "set aside" is user-confirmed and reversible (auto-reject, never delete; `user_override` preserved);
+  a legitimately faint target's *only* nights must never be auto-culled — the action is opt-in per night,
+  and the verdict is advisory, mirroring the deliberately-conservative drift nudge. Split for the Builder:
+  (a) pure `nights_breakdown(project)` helper + tests (per-night rollups over `_split_sessions`,
+  verdict thresholds reusing the existing FWHM-drift constants; empty/one-night/no-timestamp cases);
+  (b) read-only `GET /api/targets/{safe}/nights`; (c) a "Nights" Target-page card; (d) the optional
+  bulk "set this night aside" reject + re-stack wiring (its own commit — the only non-read-only slice).
+  _(M–L, split as above; PRIORITY 2–3, beginner feature — keeps the pipeline stocked; builds directly on
+  shipped `session_recap` infra so it's low-risk.)_
+
+### the 2026-07 beginner-feature block — bulk upload (v0.115.0, .zip v0.229.0), "Last night" (v0.112.0), "Is it enough yet?" (v0.111.0), share card (v0.114.0; the caption strip became the keepsake), ⭐ Tonight (v0.95.0/v0.96.0; (c) weather stays under sign-off), "What's in this picture?" (v0.141.0), "How's my stack?" (v0.120.0/v0.121.0; the highlight cue is in the owner's list), progress goals (v0.117.0), "Will it fit?" (v0.130.0) — residue worth knowing: an in-UI destination picker for uploads
+
+- **⭐ OWNER-REQUESTED — Bulk upload FITS through the web interface (no NAS share
+  needed).** — **SLICE (a) SHIPPED v0.115.0** (Builder 2026-07-13, branch
+  `claude/pensive-faraday-ug7r6s`). New `POST /api/upload` endpoint
+  (`webapp/routers/upload.py`) accepts a multipart FITS upload and lands each file in
+  `incoming/<target>/` (an optional, sanitised `target` form field; blank → the scanner's
+  `Unsorted` catch-all), then enqueues the ordinary `submit_pipeline` scan so ingest → QC →
+  solve runs exactly as for a NAS drop. All the required guardrails are honoured: files stream
+  to disk in 1 MiB chunks from a threadpool (never buffered whole in RAM — bounded for a
+  multi-GB upload); every name is reduced to a safe basename (`safe_component` strips a
+  `webkitdirectory` relative path / Windows backslashes / `..` traversal / NUL, and the target
+  dir is re-confirmed under `incoming/` — same traversal class as the SPA fix); only the
+  scanner's real FITS suffixes (`.fit/.fits/.fts`) are accepted, others rejected with a
+  plain-language reason; a per-file free-space check keeps a 256 MiB reserve (and an ENOSPC
+  mid-write is caught) rather than filling the NAS; each file streams to a `.part` sidecar
+  atomically renamed on completion, so a dropped connection never leaves a truncated FITS for
+  the watcher; and an already-present file is skipped (the scan's content dedup would drop it
+  anyway), enqueuing no scan when nothing new landed. Frontend: a reusable `UploadFits`
+  component (multi-select FITS via Mantine `FileButton`, optional target folder, client-side
+  non-FITS filter, plain-language result summary + "Watch progress" link) shown as a full card
+  in the Library empty state and a compact bar above a populated Library; new `api.uploadFits`
+  (bare `fetch` + `FormData` so the browser sets the multipart boundary). Uploads stay
+  **unauthenticated by default** exactly like the rest of the app (no default flip). Additive /
+  upgrade-safe: new endpoint + one component, no schema/config/API-shape/default change. Tests:
+  `tests/webapp/test_upload.py` (25 — `safe_component`/`is_fits_name`/`safe_target_dir` helpers +
+  endpoint: saves & scans, rejects non-FITS while keeping the good ones, strips a traversal
+  filename to a basename, skips an already-present file with no scan, 400s an invalid target),
+  `UploadFits.test.tsx` (helpers + the pick-filters-non-FITS → upload → summary flow). Python
+  (1210) + tsc + full vitest (761) + vite build all green. **Slices (b) robustness — per-file
+  progress, `webkitdirectory` folder-structure preservation, partial-upload cleanup — and (c)
+  nice-to-have — `.zip` unpack server-side, in-UI destination target picker — remain open for a
+  future run.**
+  _(Follow-up polish spotted shipping slice (a): the picker is a Mantine `FileButton`
+  (multi-select), not a true drag-and-drop **dropzone**. A `@mantine/dropzone` drop target
+  (drag a folder / files onto the Library) would match the filed "drag a folder" wording and
+  read as more obvious to a beginner — but it needs the `@mantine/dropzone` dep (check it's
+  already bundled before adding) and pairs naturally with slice (b)'s `webkitdirectory`
+  folder-structure preservation, so fold the two together. XS–S, frontend-only.)_
+  — **DRAG-AND-DROP DROPZONE SHIPPED v0.118.0** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-07rvx7`). Delivered the drop target **without** adding the
+  `@mantine/dropzone` dep (it isn't bundled, and a UI dep is avoidable here): `UploadFits`
+  now wraps its controls in a native HTML5 drop zone (dashed border that highlights blue on
+  drag-over, with a plain-language hint) and two new pure, exported helpers walk the drop —
+  `readEntryFiles(entry)` recurses a dropped **folder** depth-first via the FileSystem-entry
+  API (pumping the `DirectoryReader` until an empty batch, swallowing per-entry errors so one
+  unreadable file never sinks the drop), and `collectDroppedFiles(dataTransfer)` flattens all
+  dropped folders/files and falls back to `dataTransfer.files` when the entry API is absent.
+  Dropped files funnel through the same `onPick` FITS filter as the picker, so the existing
+  streaming/sanitising/dedup endpoint (slice a) is reused unchanged — this makes "drag a whole
+  Seestar target folder onto the Library" actually work, matching the card's existing "or a
+  whole folder" copy. Frontend-only, additive, no backend/schema/API/default change; drops are
+  ignored mid-upload. Tests: `UploadFits.test.tsx` (+5 — `readEntryFiles` single-file + nested
+  folder walk, `collectDroppedFiles` folder-flatten + files-fallback, and a component drop that
+  keeps only the FITS files). tsc + full vitest (776) + vite build green.
+  — **UPLOAD PROGRESS BAR SHIPPED v0.122.0** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-4qb5a3`). The slice-(b) "a beginner uploading 5 GB needs to see it
+  working" gap: the upload previously showed only a spinner with **no** progress at all — a
+  beginner sending several GB over the browser had no way to tell it was moving or stalled.
+  `api.uploadFits` now streams via `XMLHttpRequest` (fetch exposes no upload-progress event)
+  with an optional `onProgress(loaded, total)` callback wired to `xhr.upload.onprogress`; the
+  request body, multipart boundary, sanitising/streaming endpoint (slice a), and the thrown
+  `${status}: ${detail}` error shape are all unchanged, so it's a drop-in swap. `UploadFits`
+  renders a live Mantine `Progress` bar + a plain-language readout ("Uploading — 1.2 GB of
+  5.0 GB (24%)", then "Uploaded — processing on the server…" at 100% while the scan kicks off)
+  only while the upload is in flight. Two new pure, exported, unit-tested helpers do the
+  formatting — `uploadProgressPercent` (clamped 0..100, NaN/zero-total-safe) and
+  `uploadProgressLabel` (friendly B/KB/MB/GB units). Frontend-only, additive; no
+  backend/schema/API/default change. Tests: `UploadFits.test.tsx` (+3 — percent clamp/NaN-safety,
+  label unit formatting, and a component test that a mid-flight 25% report shows the live
+  readout and it clears once done). tsc + full vitest + vite build green. **Slice (b) remainder
+  — true *per-file* progress, `webkitdirectory` on the picker, partial-upload cleanup — and
+  slice (c) remain open.**
+  — **FOLDER PICKER (`webkitdirectory`) SHIPPED v0.134.0** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-rtfcye`): the slice-(b) "`webkitdirectory` on the picker" gap. `UploadFits`
+  already walked a folder *drop*, but a beginner who finds drag-drop awkward (a deep Finder folder, a
+  touchpad, a tablet) had only the multi-*file* picker — no way to pick a whole target folder by
+  clicking. Added a **"Choose a folder…"** button that drives a hidden native
+  `<input type="file" webkitdirectory multiple>` (Mantine's `FileButton` can't set `webkitdirectory`;
+  the attribute is set via a ref callback to avoid a non-standard JSX prop). A new pure, exported,
+  unit-tested `filesFromFolderInput(list)` helper preserves each file's `webkitRelativePath`
+  (`M31/night1/Light_001.fit`) as the File's name — **exactly like the folder drop already does** — so
+  the server's `safe_relname` flattening keeps same-basename subs from different session subfolders
+  distinct (Seestar restarts frame numbering each session) instead of one silently overwriting another.
+  Picked files funnel through the same `onPick` FITS filter and the unchanged streaming/sanitising
+  endpoint (slice a). Frontend-only, additive; no backend/schema/API/default change. Tests:
+  `UploadFits.test.tsx` (+3 — `filesFromFolderInput` preserves the relative subpath / falls back to the
+  bare name, and a component folder-pick that keeps only the FITS file with its relative path through to
+  the upload call). tsc + full vitest (882) + vite build green. *(Beginner bar ✔ — one obvious "pick my
+  Seestar folder" button, sane default, no new concepts.)* **Slice (b) remainder — true *per-file*
+  progress, partial-upload cleanup — and slice (c) remain open.**
+  — **FOLDER *STRUCTURE* PRESERVATION SHIPPED v0.228.0** (Builder 2026-07-30, branch
+  `claude/relaxed-turing-et05r3`): the last real slice-(b) gap, and a genuine correctness hole rather
+  than polish. Both folder paths (drop **and** the `webkitdirectory` picker) already carried each file's
+  relative path — but the server *flattened* it into one filename (`M 31_sub__Light_0001.fit`) and
+  landed every file in **one** directory. So the app's headline on-ramp — "drag a whole Seestar folder
+  in" — silently destroyed the very folder structure the ingest path depends on: the Seestar-aware
+  scanner (`<T>_sub` → target `<T>`, `<T>_mosaic_sub` → `<T> (mosaic)`, `*_video` skipped, a
+  whole-device `MyWorks/` container expanded) only fires on **real directories** under `incoming/`, so a
+  browser upload of several targets came in as **one giant `Unsorted` target** mixing every object's
+  subs — a stack of which is gibberish — where the identical files copied over an SMB share came in
+  correctly. **Server:** a new pure `safe_relpath(name)` (`webapp/routers/upload.py`) sanitises a
+  relative path *per segment* while keeping its directories (any `..`/NUL rejects the whole name;
+  empty/`.` segments dropped; capped at 6 components keeping the tail, since the target folder sits
+  right above the file), and `confined_dest(root, rel)` re-resolves every write under the destination —
+  which also catches an existing symlink inside `incoming/` redirecting a write outside. Gated on a new
+  **opt-in** `preserve_folders` form field (default **off**, so an older frontend and any existing
+  caller get byte-for-byte the previous flattened behaviour); the response gained an additive
+  `folders: []` listing the top-level folders written. **Frontend:** `api.uploadFits` takes a
+  `preserveFolders` flag and `UploadFits` sets it only when the pick actually carries folder paths — a
+  plain multi-file select posts exactly the body it always did. Two new pure helpers name the outcome
+  *before* the user commits: `pickedFolders(files)` and `folderPreserveNote(folders, target)` render
+  "Keeping your folders (“M 13_sub”, “M 31_sub”) so they come in as separate targets." (or "… inside
+  “MyWorks”." when a target folder was typed), and `uploadSummary` reports the folders the subs landed
+  in rather than a single destination. **Tests (+18):** `tests/webapp/test_upload.py` (+11 —
+  `safe_relpath` table incl. Windows separators / leading separator / empty-and-dot segments /
+  traversal, the depth cap keeping the tail, `confined_dest` refusing a symlink escape, the headline
+  two-folder upload landing as real directories with nothing flattened into the root, nesting under a
+  typed target, **the opt-out path unchanged** (upgrade safety), traversal still rejected with the flag
+  on, dedup on a re-upload, and an **end-to-end** run of the real `scan_and_organize` over what the
+  upload landed proving it produces the targets *M 31* and *M 13* and no `Unsorted`);
+  `UploadFits.test.tsx` (+7 — `pickedFolders` distinct/sorted and empty for a flat pick,
+  `folderPreserveNote` wording incl. the cap and the typed-target variant, `uploadSummary` naming the
+  folders and falling back on an older server's absent field, and two component tests that a folder drop
+  shows the note and asks the server to preserve while a plain pick does not). Additive and
+  upgrade-safe: new opt-in field + additive response key, no config/DB-schema/on-disk-layout change and
+  no existing default flipped. **Slice (b) remainder — true *per-file* progress, partial-upload
+  cleanup — and slice (c) remain open.**
+  <details><summary>Original write-up</summary>
+  Today the only way to get subs in is to drop Seestar target folders
+  into `incoming/` over an SMB/NFS share — which assumes the user can mount the NAS
+  share. A browser upload (drag a folder / multi-select files → progress bar →
+  done) removes that hurdle entirely and is the natural beginner on-ramp. **Reuse
+  the existing pipeline, don't fork it:** stream uploaded files into
+  `settings.resolved_incoming_dir` (`incoming/<target>/…`) and let the existing
+  watcher run ingest → QC → solve exactly as if they'd been dropped there (kick an
+  immediate incoming re-scan rather than waiting for the poll). Guardrails that
+  *must* be honoured (this is a file-writing endpoint on a live NAS):
+  - **Stream to disk; never buffer whole files in RAM** — "bulk" is potentially
+    thousands of subs / many GB. Chunked/streaming multipart, disk writes in a
+    threadpool so the event loop and the single job worker aren't blocked (memory
+    bounds / OOM history).
+  - **Sanitise every filename** — strip path separators, reject `..`/traversal
+    (same class as the recent SPA path-traversal fix), and confine every write
+    strictly under `incoming/`. Accept only FITS (`.fit`/`.fits`/`.fits.gz` + the
+    Seestar variants); reject anything else with a plain-language message.
+  - **Disk-space aware:** pre-check free space (reuse the storage read-out) and fail
+    with a clear "not enough room" message instead of silently filling the NAS.
+  - **Resilient:** show overall + per-file progress (a beginner uploading 5 GB needs
+    to see it working); on a dropped connection, clean up / quarantine partial files
+    so a half-written FITS is never ingested.
+  Slices: **(a)** core — multi-file streaming endpoint (sanitised, FITS-only,
+  size/space cap, threadpool writes) → lands in `incoming/<target>/` → triggers a
+  scan; a drag-drop / multi-select zone on the Library area with overall progress
+  (delivers the ask). **(b)** robustness — per-file progress, folder-structure
+  preservation (`webkitdirectory`), dedupe against already-ingested, partial-upload
+  cleanup. **(c)** nice-to-have — accept a `.zip` and unpack server-side; pick/create
+  the destination target in the UI. Beginner bar: clearly yes (removes the
+  mount-the-share step, one obvious action, sane defaults). Additive / upgrade-safe:
+  new endpoint + UI, no schema change, no default flip. Note: like the rest of the
+  app, uploads are **unauthenticated by default** (auth stays off) — consistent with
+  the current open-on-LAN model; do not change that default here. (L; slice (a) is
+  the shippable M — beginner-feature/workflow, PRIORITY 3/2)
+  </details>
+- **"Last night" session recap: a friendly, persistent summary of what a scan brought in and what
+  happened to it.** — **SLICE (a) SHIPPED v0.112.0** (Builder 2026-07-13, branch
+  `claude/pensive-faraday-b6ko10`). New pure/offline engine helper
+  `seestack/session_recap.py::session_recap(project)` aggregates the frames table into a friendly
+  `SessionRecap`: it isolates the **most recent capture session** by clustering frames on their capture
+  `timestamp_utc` (a night's subs are minutes apart; the gap to the previous night is hours — the trailing
+  run separated by >6 h is "last session", which groups a UTC-midnight-spanning night together and is
+  timezone-robust), then reports subs added, kept vs. set aside, Σ exposure this session, and the target's
+  **total** kept integration across all sessions. Reject reasons are collapsed into plain buckets
+  (`bucket_reject_reason`: `trailed` / `cloudy` / `soft` / `unreadable` / `set aside by you` / `other`)
+  so a beginner reads *"8 kept; 2 set aside (2 trailed)"* not `auto:grade:sky_adu_median`. New read-only
+  endpoint `GET /api/targets/{safe}/session-recap` (returns the recap or `null` when nothing is datable);
+  the Target page renders a small **"Last session"** card (`SessionRecapCard`) below the identify card —
+  a plain-language paragraph via a pure, testable `describeSession` helper (*"Last session added 10 subs
+  (…). 8 kept; 2 set aside (2 trailed). Total on this target: …"*) plus a "% kept" badge — shown only when
+  there's something to report. Additive/read-only throughout: no schema/config/DB/default change, fully
+  offline. Tests: `tests/test_session_recap.py` (7 — session isolation across two nights, single-session,
+  reject-bucket grouping, direct bucket mapping, trailing-`Z`/unparseable-timestamp handling, null-on-no-
+  dates), `tests/webapp/test_target_session_recap.py` (3 — endpoint incl. null + 404),
+  `SessionRecapCard.test.tsx` (6 — `describeRejects` ordering, `describeSession` phrasing incl. all-kept
+  and singular, card render + null). Python (1162) + tsc + full vitest (759) + vite build all green.
+  *(Scout-filed 2026-07-13; M, friendliness/autonomy — PRIORITY 2/3.)* **SLICE (b) SHIPPED v0.116.0**
+  (Builder 2026-07-14, branch `claude/pensive-faraday-qu4ex3`): a combined **"Last night"** Dashboard card
+  that answers *what did last night give me?* across every target you shot, not just one. A new pure engine
+  helper `session_recap.library_session_recap(targets)` (with a public `last_session_frames` trim helper)
+  merges each target's most-recent session onto one timeline and takes the trailing 6 h-gap cluster as "last
+  night" — using the identical session rule as the per-target recap — so two targets shot the same night
+  combine into one recap and a target *not* shot that night drops out. New read-only endpoint
+  `GET /api/last-night` (in `stats.py`, cached on the app between scans via the same registry-signature
+  pattern as `/api/stats`, and memory-bounded — each project is trimmed to its last session inside the loop,
+  never holding every target's full frame list at once). The Dashboard renders a small violet card below the
+  stat grid — plain-language paragraph via a pure `describeLibraryNight` helper (*"Last night you captured
+  240 subs across 2 targets (3 h 10 m). 228 kept; 12 set aside (10 cloudy, 2 trailed)."*) + a "% kept" badge
+  + per-target chips (biggest first) linking to each target, shown only for a multi-target night. Additive /
+  read-only throughout: no schema/config/DB/default/API-shape change, fully offline. Tests:
+  `tests/test_session_recap.py` (+4 — trim helper, none-when-empty, two-targets-same-night combine +
+  old-target-excluded + biggest-leads + merged buckets + span, single-target-latest-night-only),
+  `tests/webapp/test_last_night.py` (3 — null-empty, combine two targets, exclude a target not shot that
+  night), `LastNightCard.test.tsx` (6 — `describeLibraryNight` phrasing multi/single/singular, card render +
+  chips, single-target omits chips, null). **Slice (c) a one-click "(re)stack now" action remains open** —
+  though the Target page already carries "Process target" / "Restack" CTAs, so its marginal value is small.
+  <details><summary>Original idea</summary>
+  The north-star loop is *drop a night's subs, walk away, come back to a result* — but on
+  return today the only trace of what actually happened is the **transient** Jobs summary (gone once the
+  job scrolls off, and still fairly jargon-y) plus raw counts scattered across the Target/History pages.
+  A beginner's very first question is *"what did last night give me?"* Add a small, persistent **session
+  recap** the app shows on return: for the most recent ingest/scan (per target, or a combined
+  "last night" card on the Dashboard), one plain-language paragraph built entirely from data already on
+  disk — *"Last night you added **240 subs of M31 (3 h 10 m)**. 228 were kept; 12 were set aside (10
+  cloudy, 2 trailed). Your total on M31 is now **8.4 h** — enough for a clean image. Ready to
+  (re)stack?"* Pulls from: the frames table (new-since-last-scan count + Σ exposure), the QC
+  `reject_reason` tally (grouped into plain buckets — cloud / trailed / soft / other), the per-target
+  integration total, and the existing stale-target "restack?" signal. Distinct from the transient Jobs
+  summary (this persists and is written for a beginner), from the per-target *readiness verdict* (that's
+  a static "is this target done?" gauge; this is "here's what changed since you were last here"), and
+  from History (per-*run*, not per-*session*). Sane default: shows the latest session automatically,
+  no config. Additive/read-only — aggregation over existing DB rows + a nullable "last scan finished
+  at" marker (or derive from the newest frame `mtime`/job record), no schema break. Slices: (a) a pure
+  `session_recap(project)` helper + one Target-page card; (b) a combined "last night across all targets"
+  Dashboard card; (c) fold in a one-click "(re)stack now" action. Why it fits: turns the walk-away →
+  come-back moment from "hunt through pages to see what happened" into "one friendly card that tells me,
+  and points me at the next click."
+  </details>
+- **"Is it enough yet?": a per-target integration goal + plain-language readiness verdict.** —
+  **SLICE (a) SHIPPED v0.111.0** (Builder 2026-07-13, branch `claude/pensive-faraday-4u7fxt`). A new
+  pure/offline frontend helper `frontend/src/readiness.ts::integrationReadiness(exposureSeconds, type)`
+  maps a target's accepted-sub integration total against a **sane per-object-type goal** (Galaxy 6 h,
+  Nebula 4 h, Cluster 1.5 h, unknown/Other 4 h — the coarse buckets can't split bright-vs-faint nebula,
+  so Nebula sits mid-range), reusing the planner's `objectTypeBucket` for the lookup and the identify
+  card's catalog `type` for the object class. It returns a `fraction` (clamped 0..1 for a progress bar),
+  a four-step `level` (starting → solid → close → plenty), and a plain-language `verdict` built with the
+  existing `formatIntegration` so small amounts read "2 min of ~6 h …" rather than "0.0 h" — e.g.
+  *"3.0 h of ~6 h — a solid start — keep going to pull out fainter detail."* / *"8.0 h — plenty for a
+  clean image of this target."* The Target page renders a small **"Is it enough yet?"** card (goal
+  chip + coloured `Progress` bar + verdict) below the identify card, shown only once any light has been
+  collected (`total_exposure_s > 0`) — a **suggestion, never a gate** (nothing blocks stacking).
+  Frontend-only, additive, offline; no backend/schema/API/default change. Tests: `readiness.test.ts`
+  (null-on-no-integration, per-type goal scoring, the four levels, fraction clamp, unknown-type
+  fallback, verdict phrasing, colour map) + `Target.test.tsx` (card shows a verdict+bar for a galaxy /
+  stays hidden with no integration). **SLICE (b) SHIPPED v0.111.1** (same branch): a compact
+  `readinessRowHint(exposureSeconds, type)` helper turns the same readiness into a Tonight-planner
+  row badge on the "add more to what you're shooting" rows — "Nearly there" (close to the goal) /
+  "Plenty — try something new" (past it), and stays **silent** while a target is still worth topping
+  up (the row's integration figure already implies "keep going"), so the planner nudges a
+  well-integrated target toward starting something new. Frontend-only, additive; tests in
+  `readiness.test.ts` (hint fires only at close/plenty, null at 0) + `Tonight.test.tsx` (a
+  well-integrated library row shows the nudge, a barely-started one doesn't). tsc + full vitest (743)
+  + vite build all green. Both slices shipped. *(Scout-filed 2026-07-12; M, autonomy/friendliness —
+  PRIORITY 2/3.)*
+- **NEW (Scout 2026-07-12) — "Share card": a one-click, social-ready export with an optional caption
+  strip.** — **SLICE (a) SHIPPED v0.114.0** (Builder 2026-07-13, branch `claude/pensive-faraday-4lta1b`).
+  A new **"Download share image (JPEG)"** action in the editor's Export panel renders the *displayed*
+  (already-stretched) result to a social-sized JPEG (long edge ≤ 2048 px, LANCZOS downscale, quality 90)
+  — what image-sharing sites actually want, versus the existing full-res PNG of a 100+ MP mosaic — and
+  reveals a **copy-friendly caption blurb** built from the run's own metadata (*"M 42 · 3h 12m · 152 subs"*)
+  with a one-click Copy button. New pure engine pieces: `seestack/stack/output.py::write_share_jpeg`
+  (display-space RGB → downscaled JPEG, NaN→black) and `seestack/sharecard.py` (`format_duration` +
+  `share_blurb`, each part included only when it carries real info — no dangling separator, singular
+  "1 sub"). New job `submit_editor_share` (reuses `_render_recipe_fullres`, writes to the run's `output/`
+  dir, returns `jpeg_path`/`filename`/`blurb`/`op_errors`) + endpoints `POST …/editor/share` and
+  `GET …/editor/share/{job_id}` (mirrors the PNG download). Additive/upgrade-safe: new endpoints + one
+  button, no schema/config/API-shape/default change. Tests: `tests/test_sharecard.py` (7 — duration
+  buckets, blurb full/singular/omission, JPEG downscale + native-size + NaN-black),
+  `tests/webapp/test_editor.py` (share JPEG download + blurb + bad-job 404), `Editor.test.tsx` (caption
+  reveals + Copy button). Python (1185) + tsc + full vitest (758) + vite build all green. **Deferred to a
+  later slice (explicitly not shipped):** the *burned-in caption strip* overlay — a good-looking footer
+  needs a bundled TTF (Pillow's default bitmap font looks poor at 2048 px) and its own layout/placement
+  work; the plain JPEG + paste-able caption already delivers the core "how do I post this?" ask without the
+  typography risk. _(Scout-filed 2026-07-12; M, friendliness/workflow — PRIORITY 3; beginner bar ✔.)_
+  <details><summary>Original idea</summary>
+  Today's export gives a 16-bit linear TIFF (looks dark on its own —
+  correct for re-processing, wrong for posting) or a bare PNG; neither is share-ready or labelled. Add a
+  **"Share image"** action that renders the *displayed* (already-stretched) result to a JPEG/PNG sized for
+  social (long edge ~2048), with an **optional, off-by-default** caption strip burned into a footer/corner:
+  target name · total integration (e.g. "3.2 h") · capture date · a small "AstroStack" wordmark — all pulled
+  from data we already have on the run (`_build_output_header_meta`: target, `n_frames`, integration_s,
+  date). Default = caption **off** (byte-for-byte a plain JPEG of the current view, so it's trivially
+  upgrade-safe); toggling it on composites a tasteful overlay. Pure server-side render from the exported
+  image + header — Pillow is already a dep, no new packages, no network. Additive endpoint + one editor
+  button. Also surface a **copy-friendly text blurb** the user can paste alongside the image ("M31 · 3h12m ·
+  152×75s · 2026-07-11"), built from the same run metadata. Why it fits: the whole point of the pipeline is a
+  picture worth showing, and a beginner's very next step after "it looks great" is "how do I post this?" —
+  right now there's no good answer. Ship as one slice (JPEG + optional caption + copy blurb); a later slice
+  could offer a couple of caption placements/sizes. _(Absorbed the former duplicate "Share this image" entry,
+  Scout 2026-07-13.)_
+  </details>
+- **⭐ OWNER-REQUESTED — "Tonight" night planner: rank the best targets to shoot
+  tonight, showing what you've already captured vs. what you haven't.** A
+  pre-capture planning view that complements the post-capture stack/edit pipeline:
+  for tonight at the owner's site it lists deep-sky targets ranked by how
+  *observable* they actually are (rises high enough, clears the trees, away from
+  the moon, inside the dark window) and clearly separates **already-targeted**
+  objects (badged with how much integration you already have, so you can decide to
+  add more) from **not-yet-targeted** ones worth starting. Build it in slices, and
+  keep the astronomy core fully useful **offline** — only the weather enrichment
+  touches the network:
+  - ~~**(a) Offline astronomy core — the bulk of the value, no network.**~~ —
+    **SHIPPED v0.95.0** (see Shipped). A new engine module `seestack/nightplan.py`
+    (pure `astropy`, offline, deterministic) computes tonight's dark window
+    (astronomical −18° with nautical/civil fallbacks for short summer nights, and
+    `None` for polar day), and per candidate: max altitude, transit time, usable
+    minutes above a configurable min altitude, Moon separation + illumination → a
+    0–100 observability score. Candidate set = the user's library targets
+    ("already targeted", annotated with subs + integration) + a **bundled 110-object
+    Messier catalog** (`seestack/data/messier.json`, static, no network) with the
+    catalog copy of any already-targeted object deduped out. Observer location comes
+    from new opt-in `site_lat`/`site_lon`/`site_elevation_m` Settings, else it's read
+    best-effort from a solved frame's `SITELAT`/`SITELONG` FITS header (the Seestar
+    writes these, so it usually "just works"). `GET /api/plan/tonight` serves the
+    ranked plan; a new read-only **Tonight** page shows the dark window, Moon phase,
+    and two ranked tables ("add more to what you're shooting" vs "start something
+    new"). Additive/read-only throughout; new config fields default to unset (§9).
+  - ~~**(b) Horizon / tree-cover mask — local, small UI.**~~ — **SHIPPED v0.96.0**
+    (see Shipped). A new off-by-empty `horizon_profile` setting (a list of
+    `[azimuth_deg, min_altitude_deg]` points) lets the user map where trees /
+    buildings / the house block the low sky; `nightplan.HorizonProfile` interpolates
+    between the points (wrapping at 360°) and the planner now counts a target as
+    usable only while it clears **both** the numeric min-altitude floor *and* the
+    obstruction at its azimuth — so an object that transits high but only briefly
+    clears the trees ranks below one lower in an open part of the sky. `max_altitude`
+    stays the honest physical peak; an empty profile (the default) is byte-for-byte
+    the old flat-floor behaviour. Settings → Observing site gets a compact point
+    editor (azimuth + compass label + min altitude), and the Tonight page notes when
+    the mask shaped the windows (`horizon_active`). Additive, opt-in, upgrade-safe
+    (old config → empty mask), pure offline computation.
+  - **(c) Weather enrichment — OPTIONAL, needs owner sign-off (new outbound network
+    dependency).** Enrich the plan with tonight's cloud cover / seeing / transparency
+    from a weather/clear-sky API. This adds an **outbound network call**, which the
+    NAS network policy may block and which §9/§10 flag — so it must be **off by
+    default, behind a config toggle + user-supplied endpoint/key, degrade gracefully
+    to the offline plan on any failure, and is filed under Needs owner sign-off
+    before building** (confirm the specific API + that outbound is allowed). The
+    astronomy plan (a)+(b) must stand alone without it.
+  Additive and read-only throughout (never touches stacks/data); the catalog is a
+  static bundled file (no network, no heavy dependency); location/horizon are opt-in
+  with sane fallbacks. Overall L; **slice (a) shipped v0.95.0, slice (b) shipped
+  v0.96.0** — remaining: (c) the sign-off-gated weather enrichment. ~~A future slice
+  could also widen the bundled catalog beyond Messier (a curated Caldwell/NGC set).~~
+  — **catalog-widening shipped v0.97.0** (47 curated popular non-Messier NGC/IC targets
+  in `data/deepsky_popular.json`, concatenated by `load_catalog()`). Could still grow
+  further (a broader Caldwell/NGC/IC set, or a southern-sky pack) — the loader + scorer
+  handle any number of objects — but the current 157-object list already covers the
+  popular OSC targets, so only worth it if the owner wants more suggestions. (L, autonomy/workflow)
+- **NEW BEGINNER FEATURE (Scout 2026-07-21, reshaped from the old one-line "annotated sky overlay" idea) —
+  "What's in this picture?": label the catalog objects that fall inside a finished stack.** — **SLICES
+  (a)+(b)+(c) SHIPPED v0.141.0** (Builder 2026-07-21, branch `claude/pensive-faraday-d04mpi`). Delivered
+  the full first slice across engine + backend + frontend. **(a) engine:** new pure/offline
+  `seestack/annotate.py::objects_in_field(wcs, width_px, height_px, *, margin=0, catalog=None)` →
+  `list[FieldObject]` (catalog_id, name, type, ra/dec, x_px/y_px), vectorised world→pixel-projecting the
+  bundled deep-sky catalog and keeping only objects whose centre lands inside the frame (drops non-finite /
+  behind-projection points, so it's RA-seam and pole safe). **Correction to the filed premise:** the WCS is
+  **not** on `stack_runs` (no such column) — the stacker merges the canvas WCS into the master **FITS
+  header**, so a new `seestack/io/wcs_io.py::celestial_wcs_from_fits(path)` reads the 2-D celestial WCS +
+  dims from the run's FITS (guarding `has_celestial` so a header with no WCS yields `None`, not a silent
+  identity WCS). **(b) backend:** read-only `GET /api/targets/{safe}/stack-runs/{id}/annotations` →
+  `{width, height, objects[]}`, computed in a threadpool from the run's FITS header (empty `objects` when the
+  run has no FITS / no WCS — never 404s where the run exists; 404 only for an unknown run). **(c) frontend:**
+  a reusable `AnnotatedImage` component (with a pure, unit-tested `objectMarkerLayout` contain-fit/letterbox
+  helper so labels land exactly on the object at any box size, re-laid-out on resize via `ResizeObserver`)
+  overlaying small labelled markers, wired to an **"Identify"** toggle on each History run card (off by
+  default; lazily fetches only when asked; plain-language "Found N catalog objects" / "No catalog objects
+  fall inside this field" readout). Additive/upgrade-safe: one new engine module + one io helper + one
+  read-only endpoint + one component + a UI toggle — no schema/config/default/existing-API change. Tests:
+  `tests/test_annotate.py` (6 — centre→centre pixel, just-outside excluded + margin keeps it,
+  behind-projection dropped, RA-seam handled by the projection not naive RA math, None/empty-frame → [],
+  real-catalog-around-M31), `tests/webapp/test_stack_annotations.py` (3 — lists objects in the field from a
+  real WCS-headed master FITS, empty when the run has no WCS, 404 unknown run),
+  `AnnotatedImage.test.tsx` (7 — layout math incl. letterbox + off-image visibility + not-ready guards,
+  label fallback, bare vs shown render), `History.test.tsx` (+2 — Identify lazily fetches and shows the
+  found/none readout). Python + tsc + full vitest + vite build all green. **Slice (d) — a burned-in
+  labelled variant of the share JPEG — and extending the overlay to the Gallery lightbox (pan/zoom) and the
+  editor result surface remain open follow-ups.** *(Original write-up below.)*
+  <details><summary>Original idea</summary>
+  A beginner
+  who stacks a wide field (or a mosaic) captures more than the one object they aimed at — a nearby galaxy,
+  an NGC cluster, a named nebula — and has no idea what the other fuzzy blobs are. Because every stack
+  already stores its solved output WCS (`stack_runs.wcs_json`) and we already ship an **offline** deep-sky
+  catalog (`seestack/nightplan.load_catalog` — 157 Messier + popular NGC/IC, plus `objectinfo`'s
+  constellation map), we can compute exactly which catalog objects land inside the field and where, then
+  draw their names on the result. Pure, offline, additive; no network, no new dep (Pillow is already used
+  for the share JPEG). This is AGENTS.md §1's explicit "annotated results" beginner pillar. **Slices —**
+  **(a) engine (S):** a pure `seestack/annotate.py::objects_in_field(wcs, width_px, height_px, *, margin=0)`
+  that world→pixel-projects every catalog object and returns `[{catalog_id, name, type, x_px, y_px}]` for
+  those whose centre lands within the frame (drop off-canvas / behind-projection NaN ones); unit-test it
+  against a hand-built TAN WCS (object at field centre → centre pixel; object just outside → excluded; RA-seam
+  safe). **(b) backend (S):** read-only `GET /api/targets/{safe}/stack-runs/{id}/annotations` → the object
+  list computed from that run's `wcs_json` + the master's dims (empty list when the run has no WCS — never
+  404s where a preview exists). **(c) frontend (S–M):** an **"Identify objects"** toggle on the result
+  viewer (History card / Gallery lightbox / editor result), off by default, that overlays small labelled
+  markers (an SVG layer positioned over the `<img>` from the returned pixel coords, scaling with the preview)
+  — one obvious switch, plain names, no astro knowledge needed. **(d) optional nice-to-have (S):** a
+  burned-in labelled variant of the share JPEG for posting ("M 31, with M 32 & M 110 labelled"). Beginner
+  bar ✔ (turns "what are these blobs?" into named objects with one toggle; sane default off; offline;
+  reversible). Upgrade-safe: new read-only endpoint + one engine module + a UI toggle, no schema/config/
+  default/existing-API change. Ship (a)+(b)+(c) as the first Builder run; (d) later. *(M overall; slice (a)
+  is a clean S starting point — friendliness/workflow, PRIORITY 3; also feeds the night planner's
+  "plot tonight's targets" view, which can reuse `objects_in_field`.)*
+  </details>
+- **NEW BEGINNER FEATURE (Scout 2026-07-14) — "How's my stack?" plain-language health check on the
+  result.** — **SLICE (a) SHIPPED v0.120.0** (Builder 2026-07-14, branch `claude/pensive-faraday-g346o7`).
+  New pure/offline engine helper `seestack/stackhealth.py::stack_health(run, frames) -> list[HealthNote]`
+  reads cues already on disk — the run's `calstat` (→ "No darks or flats were applied … adding darks would cut
+  the background speckle"), `coverage_min/max` (→ ragged low-coverage border → **Trim border**, only when the
+  border is genuinely thin *and* the peak has ≥4 frames, so a flat single-field stack never trips it), the
+  frames' median `eccentricity_median` (→ "stars are a little elongated", gentle 0.6 floor), and the set-aside
+  subs bucketed via the shared `bucket_reject_reason` (→ reassuring "2 of 10 subs were set aside (mostly
+  trailed) — that's normal") — plus a positive summary ("solid stack — calibrated (dark+flat), round stars,
+  even coverage") and a guaranteed friendly fallback so the card always has something to say. Notes are ranked
+  **actionable-first**, reassurance/positive last; the card shows the top one or two. Deliberately **omits an
+  absolute noise verdict** — the project treats `noise_sigma` as having no absolute meaning (only within-target
+  relative; see `NoiseBadge`), so a "clean/noisy" label there would be fragile. New read-only endpoint
+  `GET /api/targets/{safe}/stack-health` (picks the newest *genuine* stack run via the shared
+  `_newest_genuine_stack_run`; returns `null` when the target has no stack yet). Frontend: a small
+  `StackHealthCard` (teal stethoscope, one line per note, gentle severity colour — never alarming) on the
+  Target page below the "Last session" card, self-hiding until there's a stack to grade. Strictly read-only,
+  never a gate. Additive/offline: no schema/config/DB/default/API-shape change, no new dependency. Tests:
+  `tests/test_stackhealth.py` (10 — calibrated positive, uncalibrated leads with the calibration action,
+  blank-calstat, ragged-border→trim, even-coverage/shallow-peak don't trip it, elongated stars, set-aside
+  reassurance with bucket, no-frames, actionable-before-reassurance ranking), `tests/webapp/
+  test_target_stack_health.py` (4 — null-without-stack, notes for a calibrated run, uncalibrated leads with the
+  action + coverage surfaced, 404), `StackHealthCard.test.tsx` (6 — `visibleNotes` cap, `noteColor`, renders
+  top notes, hides on null + empty). Python (1285) + tsc + full vitest (797) + vite build all green.
+  **Slice (b) — actionable notes + History surface — SHIPPED v0.121.0** (Builder 2026-07-14, branch
+  `claude/pensive-faraday-n1vlsg`). Two parts of slice (b) landed: (1) the health notes' `action` keys are now
+  **clickable one-click links** — a new pure `noteAction(action, safe, runId)` helper maps `trim_border` → the
+  editor on that run (`/targets/{safe}/edit/{runId}`, where Trim border lives) and `calibration` → the
+  Calibration page (build master darks/flats); the card renders the link under its note (reassurance/positive
+  notes have none), so a beginner goes straight from "what to fix" to the page that fixes it. (2) The card now
+  surfaces **per-run on the History page** (inside the run's expanded info panel) — the `GET
+  …/stack-health` endpoint took an optional backward-compatible `?run_id=` (no param = newest genuine, as
+  before; with it = that specific genuine run, skipping editor/combine runs), the `StackHealthCard` took an
+  optional `runId` prop, and it's rendered in each `RunCard` gated on `showInfo` so it only queries when the
+  user opens a run's details (no N background queries). Additive/read-only; no schema/config/default change, the
+  new query param is optional, and the Target-page card is unchanged. Tests: `StackHealthCard.test.tsx`
+  (`noteAction` mapping for trim_border/calibration/none + the rendered link), `test_target_stack_health.py`
+  (grades a specific run by id / newest by default / null for an unknown run_id), History suite still green.
+  **Slice (b) — editor result surface — SHIPPED v0.128.0** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-v69lo2`). The same `StackHealthCard` now renders on the **editor** result
+  surface (below the `ObjectInfoCard`, where a beginner is crafting/admiring the picture and most wants
+  "is this any good, and what next?"), reusing the shipped component + the `GET …/stack-health?run_id=`
+  endpoint (v0.121.0) to grade the exact run being edited. A new `inEditor` prop drops the redundant
+  `trim_border` **self-link** (that note would otherwise link back to the very editor page the user is on,
+  where the "Trim border" button already lives in the op list) — the note text still guides them to the
+  button, and the off-page `calibration` link is kept. Read-only, self-hides until there's a genuine stack
+  to grade; frontend-only, additive, no backend/schema/API/default change. Tests: `StackHealthCard.test.tsx`
+  (+2 — `noteAction` drops the trim_border self-link in-editor but keeps calibration; the card shows a
+  trim_border note's text without the link in editor mode) and `Editor.test.tsx` (+1 — the card surfaces on
+  the result, grades the edited run, and renders no self-link). tsc + full vitest + vite build green.
+  **Slice (b) remainder still open:** a highlight-clip cue (needs loading the stacked pixels + real-data
+  threshold tuning — filed as its own idea below, gated like the other pixel-threshold items). *(Scout-filed
+  2026-07-14; L overall; slice (a) shipped v0.120.0, slice (b) parts shipped v0.121.0 + v0.128.0. Pillars:
+  autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
+  <details><summary>Original idea</summary>
+  After a stack finishes, a beginner has no way to know whether the image is *good* or what one
+  thing would most improve it — the readiness card only speaks to *integration time*, not the actual pixels.
+  Add a small **"How's my stack?"** card (on the Target/History/editor result) that reads the finished stack
+  and, in plain language, says what's strong and the **single** highest-value next step. Reuse cues we
+  **already compute** — no new heavy analysis: the run's stamped `noise_sigma` (→ "clean" vs "a bit noisy —
+  more subs will smooth it"), `coverage_min/max` + `is_mosaic` (→ "ragged low-coverage border — Trim border,
+  or dither/frame more evenly"), the frames table's median FWHM/eccentricity (→ "some trailing — a few soft
+  subs were set aside" / "stars are a touch elongated"), whether any calibration was applied (`calstat` NULL →
+  "no darks/flats used — darks would cut the background speckle"), and a quick highlight-clip check on the
+  stacked pixels (→ "bright core is clipping — the editor's highlight rolloff will recover it"). Each cue maps
+  to **one** friendly sentence + at most one suggested action, and the card shows the *top* one or two, never a
+  wall of warnings. Strictly a **read-only suggestion, never a gate** (mirrors "Is it enough yet?"). Why it
+  fits the beginner bar: it turns the opaque "is this any good?" moment into concrete, sane guidance — the
+  exact hand-holding a non-expert wants after their first stack — with a plain-language explanation and no new
+  knobs. Ship in slices: **(a)** a pure engine helper `stack_health(run, frames) -> list[HealthNote]` (each
+  note = severity + plain sentence + optional action key) + a read-only endpoint + the card; **(b)** wire the
+  action links to the buttons that already do them (Trim border, open editor). Additive/offline; reuses stamped
+  fields + the frames table, no schema change, no new dependency. *(L overall; slice (a) is a shippable M.
+  Pillars: autonomy + friendliness + image-quality/trust — PRIORITY 2/3/4. Beginner bar ✔.)*
+  </details>
+- **NEW BEGINNER FEATURE — per-target progress & integration goals.** — **USER-SET GOAL
+  SLICE SHIPPED v0.117.0** (Builder 2026-07-14, branch `claude/pensive-faraday-b7jimp`). The
+  readiness card (v0.111.0) already showed accumulated integration against a sane
+  per-object-type goal (Galaxy 6 h, Nebula 4 h, Cluster 1.5 h) with a progress bar + verdict;
+  this adds the filed **optional user-set goal** ("I want 6 h on M31"). New endpoints
+  `GET`/`PUT /api/targets/{safe}/integration-goal` store the goal (total accepted exposure, s)
+  in the existing key/value `project_meta` table — **no schema migration**, so it's additive /
+  upgrade-safe by construction (an old project simply has the key absent → the per-type default
+  is used exactly as before). The goal is validated (positive) and clamped to a sane 1 min–1000 h
+  range; a stale/garbage stored value is treated as unset so a hand-edited project can't 500 the
+  card. `integrationReadiness(exposureSeconds, type, goalHoursOverride?)` now takes an optional
+  override (a positive number wins over the per-type default and marks `customGoal`); the Target
+  page's "Is it enough yet?" card shows an editable goal chip ("goal ~6 h ✎" → inline hours input
+  with Save / Reset) that reads "your goal" once set. Opt-in and fully reversible (Reset clears it
+  back to the default); a **suggestion, never a gate** (nothing blocks stacking). Tests:
+  `tests/webapp/test_target_integration_goal.py` (6 — default null, set+read-back, clear reverts,
+  clamp hi/lo, non-positive 422, unknown-target 404), `readiness.test.ts` (+3 — override wins,
+  ignores null/non-positive/NaN, default is non-custom), `Target.test.tsx` (+1 — a user goal
+  overrides the default and labels it "your goal"; the existing card assertion updated for the
+  editable chip). Python (1223) + tsc + full vitest (771) + vite build all green. *(Scout-filed
+  earlier; M, beginner-feature/workflow — PRIORITY 2/3; beginner bar ✔.)* The remaining
+  "N new subs since your last stack — restack?" nudge already shipped (v0.90.0), so this item's
+  novel surface is complete; a future run could add a **library-wide** goals overview if wanted.
+  - **LIBRARY-WIDE OVERVIEW SHIPPED v0.119.0** (Builder 2026-07-14, branch `claude/pensive-faraday-hss3td`).
+    The filed "library-wide goals overview" follow-up: a new **"Target progress"** Dashboard card showing,
+    at a glance and with zero config, how close *every* target is to a clean image — complementing the
+    per-target "Is it enough yet?" card (v0.111.0) and the Tonight planner (which needs a site location).
+    New read-only endpoint `GET /api/library-progress` (`webapp/routers/stats.py`) returns each
+    light-collected target's `{safe, name, total_exposure_s, object_type, goal_s}` — the object type
+    resolved **offline** from the library entry via `objectinfo.identify_object` (catalog loaded once, no
+    project open), the optional user-set goal read from the existing `project_meta` kv table (cheap
+    per-target read, cached on the app with the same registry-signature + 60 s TTL pattern as
+    `/api/last-night`). The **readiness verdict itself stays a single source of truth** in
+    `frontend/src/readiness.ts` — the new pure `libraryProgress.ts::rankLibraryProgress` reuses
+    `integrationReadiness` (honouring any user goal) and orders the list so in-progress targets lead
+    (nearest-to-goal first, to surface the ones worth finishing), then targets with plenty; a
+    `describeLibraryProgress` one-liner summarises it. The `LibraryProgressCard` renders a per-target
+    mini progress bar + integration figure (capped at 6 rows with a "+N more" pointer to the Library).
+    A goal is a **suggestion, never a gate** (nothing blocks stacking). Additive / read-only / offline
+    throughout: no schema/config/DB/default/API-shape change, upgrade-safe by construction (an old
+    project simply has no stored goal → the per-type default is used). Tests:
+    `tests/webapp/test_library_progress.py` (3 — empty library, lists targets with type, surfaces a
+    user goal), `libraryProgress.test.ts` (7 — ranking, drops zero-integration, goal override,
+    summary phrasing), `LibraryProgressCard.test.tsx` (3 — ordering + plenty badge, renders-nothing,
+    the cap). Python + tsc + full vitest (789) + vite build all green. *(Beginner bar ✔ — helps a
+    non-expert OSC owner decide which target to keep shooting, plain-language, sane defaults.)*
+    _(Follow-ups spotted shipping this: **(1)** ~~the endpoint already resolves each target's catalog object
+    type offline but the card doesn't surface it — showing a small "galaxy" / "nebula" label next to the
+    goal would teach a beginner *why* the goal is what it is (XS, frontend-only).~~ **SHIPPED v0.119.3**
+    (Builder 2026-07-14, branch `claude/pensive-faraday-2ruia6`). Each "Target progress" row now shows its
+    object type next to the goal figure — "galaxy · 2.1 h of ~6h" — via a new pure `libraryProgress.ts::
+    objectTypeLabel(bucket)` that maps the readiness `bucket` (already derived from the endpoint's
+    `object_type`) to a friendly word, returning null for the `Other`/unknown bucket so an unrecognised
+    target shows only the goal (no meaningless "other" prefix). Frontend-only, additive, no
+    backend/schema/API/default change. Tests: `libraryProgress.test.ts` (+2 — friendly word per bucket, null
+    for Other) + `LibraryProgressCard.test.tsx` (+1 — a galaxy row shows the label, an unknown-type row omits
+    it). tsc + full vitest + vite build green. **(2)** the Dashboard now opens every project up to **three** times per load (stats stack roll-up +
+    `/api/last-night` frames + `/api/library-progress` goal), each independently cached — on a large library
+    a single combined roll-up that opens each project **once** and returns all three would be measurably
+    cheaper; worth folding together only with a measurement (§3). Filed under Infra below.)_
+- **NEW BEGINNER FEATURE (Builder-filed 2026-07-16) — "Will it fit?" framing / field-of-view hint.**
+  — **SLICES (a)+(b) SHIPPED v0.130.0** (Builder 2026-07-16, branch `claude/pensive-faraday-yv0g2n`).
+  Delivered the "will it fit in one Seestar frame?" hint end-to-end from catalog data, off catalog
+  angular size (the solved-actual-field-size refinement and the Tonight-planner surfacing are left as
+  follow-ups — see below). **Engine:** new pure/offline `seestack/framing.py::framing_hint(size_arcmin)`
+  compares a target's major-axis size against the Seestar S50 single-frame field (`SEESTAR_FOV_LONG_ARCMIN`
+  = 77′, `SEESTAR_FOV_SHORT_ARCMIN` = 44′) and returns one of three plain-language verdicts —
+  `fits` ("fits comfortably in a single Seestar frame — no mosaic needed"), `tight` ("is about as wide as
+  a single Seestar frame — shoot it in mosaic mode to frame it with some margin"), `mosaic` ("is bigger
+  than the Seestar's single frame — shoot it in mosaic mode to capture all of it") — or `None` when no size
+  is known (never guesses). `CatalogObject` gained an optional nullable `size_arcmin`, parsed from a new
+  optional `size_arcmin` field on the bundled catalog JSONs; curated **major-axis sizes were authored for
+  118 of the 157 popular OSC targets** (73 Messier + 45 non-Messier) from standard catalog values, the rest
+  left sizeless (no hint). `ObjectInfo` now threads `size_arcmin` + the computed `framing`. **Webapp:**
+  `ObjectInfoOut` gained nullable `size_arcmin` + a nested `framing {level, text}`, populated by the
+  `/api/targets/{safe}/identify` router. **Frontend:** `ObjectInfoCard` (shown on Target, editor & History)
+  renders the framing sentence below the identity line — prefixed with the object's name, coloured as a
+  gentle mosaic nudge for the too-big cases (`framingSentence`/`framingColor` helpers). Additive /
+  upgrade-safe: new optional catalog field + two nullable API fields + one card line; no
+  schema/config/DB/default/API-shape change; old backends (no `framing`) render no hint. Tests:
+  `tests/test_framing.py` (10 — boundaries inclusive at both frame edges, None on unknown/≤0 size, custom
+  FoV overrides, popular-target verdicts, catalog sizes sane), `tests/test_objectinfo.py` (+2 — size+framing
+  threaded through / omitted when sizeless), `tests/webapp/test_target_identify.py` (+M42 mosaic verdict),
+  `ObjectInfoCard.test.tsx` (+3 — `framingSentence`/`framingColor` + card shows/omits the line). Python
+  (1332) + tsc + full vitest + vite build all green. **SLICE (c) SHIPPED v0.131.0** (Builder 2026-07-16,
+  same branch): the same framing hint now also nudges **pre-capture** on the **Tonight planner**. `PlannedTarget`
+  gained nullable `size_arcmin` + `framing`, populated for catalog candidates (library rows carry none — the
+  Target page already shows their hint, and a mosaic result confuses the single-frame verdict); they flow
+  through the plan endpoint's `asdict` serialization automatically. A new pure `tonight.ts::framingRowBadge`
+  turns the verdict into a compact table badge — **"Needs mosaic"** (orange) / **"Mosaic for margin"** (yellow)
+  with a full-sentence tooltip — rendered on each planner row, badging **only** the actionable `mosaic`/`tight`
+  cases (the reassuring `fits` stays silent so it never clutters the dense plan table). So a beginner scanning
+  tonight's suggestions sees "M31 → Needs mosaic" *before* pointing at it — catching the wasted-session mistake
+  the idea's north-star value targets. Frontend + engine only, additive; no schema/config/DB/default/API-shape
+  change. Tests: `tests/test_nightplan.py` (+1 — catalog rows carry the framing verdict), `tests/webapp/test_plan.py`
+  (+M31 mosaic verdict on the endpoint), `tonight.test.ts` (+2 — `framingRowBadge` badges only too-big verdicts
+  + tooltip), `Tonight.test.tsx` (+1 — an oversized catalog row shows the "Needs mosaic" badge). Full Python +
+  frontend suites + build green. **CATALOG NOW FULLY SIZED — v0.131.2** (Builder 2026-07-16, branch
+  `claude/pensive-faraday-6bwguj`): authored vetted major-axis `size_arcmin` for the **remaining 39 sizeless
+  catalog entries** (37 Messier: mostly the small Virgo/Coma galaxies M49/M58–M61/M84–M100/M105/M109, plus
+  globulars M19/M54/M55/M62/M69/M70/M72/M75/M79/M107, open clusters M18/M21/M26/M41, the double star M40 and
+  asterism M73; and 2 non-Messier nebulae IC 434 Horsehead + NGC 2024 Flame). All 37 Messier objects are
+  small (<44′), so they get a robust reassuring **"fits comfortably"** verdict that no plausible size
+  uncertainty flips; the two Orion nebulae were **web-verified** (IC 434 ~90′ major axis → correctly
+  **"needs mosaic"**, NGC 2024 30′×30′ → "fits"). So every one of the 157 catalog objects now surfaces a
+  framing line on the Target/editor/History `ObjectInfoCard` — removing the visible gap where M31/M45 showed
+  a "will it fit?" line but M87/M96 showed none. Additive data-only (new optional field values on existing
+  entries), no schema/config/API/default change; upgrade-safe by construction. Tests: `tests/test_framing.py`
+  (`test_every_catalog_object_now_carries_a_size` guards the catalog stays fully sized so a future addition
+  without a vetted size is caught), and `tests/test_objectinfo.py`'s no-size test rewritten to a synthetic
+  sizeless entry (the real catalog no longer has one). ~~**Follow-up still open:** (b′) on the Target page,
+  prefer a plate-solved frame's *actual* field size when available.~~ — **SHIPPED; struck 2026-09-06**, and
+  the reason it mattered was bigger than this entry knew: the constants here are the **S50's** 77′ × 44′,
+  while the owner has an **S30** (~128′ × 72′), so every verdict was a frame 1.66× too small on each edge.
+  `framing.FrameField` + `framing.frame_field_from_solve` + `webapp/frame_field.py` now derive the field from
+  the owner's own solved frames' `pixscale_arcsec` — exactly what AGENTS.md §1 "Owner facts" prescribes — and
+  the Target page's identify route and both Tonight-planner routes pass it. Grep `frame_field_from_solve`
+  before reading any "still open" sentence in this entry. _(Original idea kept below.)_
+  <details><summary>Original idea</summary>
+  (M, autonomy/friendliness — PRIORITY 2/3; beginner bar ✔.) A very common beginner surprise: the Seestar's
+  field of view is only ~1.3° across, but M31 (~3°), the Veil, the North America Nebula, the Pleiades, etc.
+  are *larger than one frame* — so a beginner who points at them gets a cropped result and doesn't know
+  they needed **mosaic mode**. A small, plain-language hint — "M31 is bigger than the Seestar's single
+  frame; shoot it in mosaic mode to capture it all" (or, for a small target, "fits comfortably in one
+  frame") — would remove that surprise on both the **Tonight planner** (pre-capture, next to a suggested
+  target) and the **Target page** (post-capture, explaining a cut-off object). It's offline and additive:
+  compare the target's angular size against the Seestar's known FoV and emit one of a few friendly verdicts.
+  **The real work / dependency is the data:** the bundled catalogs (`seestack/data/messier.json`,
+  `nightplan.load_catalog()`, `objectinfo`) currently carry **no angular-size field** — so this needs a
+  major-axis size (arcmin) added to the catalog JSONs (~157–267 objects), sourced/verified carefully (a
+  wrong size gives wrong advice). That data-authoring is the bulk of the effort and the main risk; the
+  logic + UI on top is small. **Slices:** (a) add a nullable `size_arcmin` to the catalog schema + a pure
+  `framingHint(size_arcmin, fov_arcmin)` helper + tests, populating sizes for the most-popular OSC targets
+  first (absent a size, no hint — never guess); (b) surface the hint on the Target page (using a
+  plate-solved frame's *actual* field size when available, catalog size otherwise); (c) surface it in the
+  Tonight planner. Feasibility: fully offline, no new dependency, additive/reversible; the size data must be
+  vetted before the hint graduates from "for known-size targets only". Serves the north-star "it just
+  works" by catching a mistake *before* a wasted session.
+  </details>
+
+### v0.372.1
+
+- **✅ SHIPPED v0.372.1 (Builder 2026-09-06, branch `claude/sweet-babbage-owcg4d`) — ~~give the display-space
+  tests one shared fixture that is *real* stretch output, and use it wherever a regression test reasons about
+  post-stretch pixels.~~** `tests/displayspace.py` now holds `real_stretched_stack`, `sky_truth`,
+  `clipped_fraction` and the guard-on-the-guard `assert_shadow_clip`; `test_edit_curve.py` reads them instead
+  of its own copy, and `test_edit_levels.py` gained the two real-fixture tests the entry's "migrate the tests
+  that hand-roll an approximation" clause asked for. **The migration turned up one measured fact worth
+  knowing, and it is not a bug:** on genuine `autostretch` output `suggest_levels_points` returns **black =
+  0.0**, because the 1st percentile it reads lands inside the stretch's own zero spike — the honest answer (the
+  shadows are already black), but *not* what the synthetic `_scene()` fixtures show (≈0.05–0.13), so anyone
+  reading those as a description of the live behaviour would be wrong. Both facts are now pinned by tests.
+  Sky-cast (`histogram.measure_sky_cast`) was probed on the same fixture and reads neutral to 0.0004 — cleared,
+  not migrated. Working in [`PROCESS-NOTES.md`](PROCESS-NOTES.md), 2026-09-06. *(Original entry follows.)*
+  *(Pillar: maintainability in service of correctness — size S; no behaviour change.)*
+  A1's headline was the bug; its sting was that **the regression test written for that exact defect in
+  v0.210.6 passed on a fixture that could not exhibit it** — `clip(sky + normal)`, which has no hard shadow
+  clip, so it never saw what `autostretch` actually produces. The test confirmed the fix's *model* of the bug
+  rather than the bug, and the defect survived underneath it for four months.
+  **Shape:** one helper in `tests/` — a linear OSC-like stack (sky + noise, an extended object, stars) put
+  through the app's own `autostretch`, with a known pure-background corner — plus, beside it, the guard the
+  A1 tests now lead with: **assert the fixture really does clip shadows to zero**, so a future change to the
+  stretch cannot silently turn the tests below it into no-ops. Then migrate the display-space tests that
+  currently hand-roll an approximation onto it. **Care:** this is not a licence to rewrite passing tests
+  wholesale — migrate a test only when it reasons about the low end or the histogram, and keep any fixture
+  that is deliberately synthetic (a degenerate/flat case) exactly as it is.
+
+### exercise the production-only SPA-serving path in tests (struck)
+
+- ~~**Exercise the production-only SPA-serving path in tests (test-coverage blind spot that hid a security bug).**~~
+  — **SHIPPED v0.118.1** (Builder 2026-07-14, branch `claude/pensive-faraday-07rvx7`). New
+  `tests/webapp/test_spa_serving_e2e.py` boots the **full** `create_app()` (routers + auth-gate middleware +
+  lifespan) over a materialised `webapp/static/` tree — a fixture mirroring `client` that patches
+  `main.STATIC_DIR` before `create_app()` so `_mount_spa` installs the real serving path — and asserts the
+  four prod-only behaviours the filed gap named: (a) `/` and an unknown client route return the SPA shell
+  through the whole stack (not the dev "Frontend not built" placeholder), plus a real asset serves via the
+  `/assets` StaticFiles mount and the API routes still win over the catch-all; (b)/(c) a percent-encoded
+  `../` traversal falls back to the shell (never the out-of-root secret) through the full middleware chain;
+  and (d) — the interaction no test previously covered — with **auth on**, unauthenticated `/`, a client
+  route, and `/assets/app.js` are all 401-challenged (and a traversal attempt never leaks pre-auth) while
+  correct credentials serve the content and `/api/health` stays open for the Docker healthcheck. Pure
+  test-only addition, no product change; closes the "only broken in the shipped image" structural blind spot
+  that let the v0.109.24 path-traversal reach production. 5 tests, green. *(Original write-up kept below.)*
+  <details><summary>Original write-up</summary>
+  *(Idea, Builder 2026-07-12 — surfaced while fixing the v0.109.24 path-traversal.)* The SPA fallback route +
+  `/assets` mount in `webapp/main.py::_mount_spa` are only registered when `webapp/static` exists — i.e. the
+  production Docker image, which builds the frontend into `webapp/static/`. The dev/test tree has no `static`
+  dir, so `_mount_spa` installs the harmless placeholder route and the real serving path was **never exercised
+  by any test** — which is exactly why an unauthenticated arbitrary-file-read in that handler went unnoticed
+  until an adversarial audit. The v0.109.24 fix added `tests/webapp/test_spa_static.py` (mounts `_mount_spa`
+  over a temp static tree), which closes the traversal-contract gap, but the *broader* structural gap remains:
+  no test boots the **full** `create_app()` with a built static dir, so prod-only wiring (the SPA mount, the
+  `/assets` StaticFiles mount, and — importantly — how the auth-gate middleware interacts with static asset
+  requests) is untested end-to-end. Add a small fixture that materialises a minimal `webapp/static/`
+  (`index.html` + `assets/`) and asserts: (a) `/` and a client route serve the shell; (b) a real asset serves;
+  (c) traversal is blocked; (d) with auth **on**, static/asset requests follow the intended allow/deny policy.
+  Cheap, additive, no product change; prevents a whole class of "only broken in the shipped image" regressions.
+  (S, infra/security — test coverage.)
+  </details>
 
 ---
 
