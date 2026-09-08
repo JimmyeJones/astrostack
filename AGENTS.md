@@ -155,7 +155,7 @@ links") long after slices (a)–(e) shipped 08-13→16.** Today `routes/Target.t
 re-measured at v0.338.1 puts the tallest page — still the Target page — at **3,014 px on a phone**, down
 from 14,584 px on the worst page before the slices. **So do NOT open a speculative IA slice**: two dogfood
 passes four days and ~80 versions apart agree that nothing is stacked badly and the worst page moved 21 px
-(see `docs/IMPROVEMENTS.md`, search **"DOGFOOD BASELINE"** for both measurements). What is still live is the
+(see `docs/PROCESS-NOTES.md`, search **"DOGFOOD BASELINE"** for the measurements — moved there 2026-09-08). What is still live is the
 *standing rule* below — when you add a feature, put it inside the existing grouping rather than appending
 one more always-on banner — plus the two named leftovers, the header row and the ten-item share menu.
 **The hard constraint is the owner's own: NOTHING MAY BE
@@ -169,8 +169,8 @@ just don't over-fragment — one nameable purpose per page, routine things ≤1 
 page ever needs another slice, take ONE per run**, state the before/after block counts in the commit, and
 let the owner react between slices — but measure first with `scripts/agent-dogfood.sh`, because the last
 two measurements both said not to. Full entry, measurements, slicing order and cautions:
-`docs/IMPROVEMENTS.md` → "Friendliness (PRIORITY 3)"; search it for **"DOGFOOD BASELINE"** and for the IA
-slices by name rather than reading from the top of the section. A verified bug still outranks it; feature-piling does not —
+the IA overhaul entry is archived in `docs/SHIPPED.md` (search **"INFORMATION-ARCHITECTURE OVERHAUL"**) and the
+baselines are in `docs/PROCESS-NOTES.md` (search **"DOGFOOD BASELINE"**) — both moved out of the working list 2026-09-08. A verified bug still outranks it; feature-piling does not —
 **prefer a slice of this over inventing another card**, and when you *do* add a feature, put it inside
 the new grouping rather than appending one more always-on banner.
 **Consolidation is not removal** *(added 2026-09-07)*. The owner's rule forbids *removing* a feature; it
