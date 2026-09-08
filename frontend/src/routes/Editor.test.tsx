@@ -1,7 +1,7 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, RouterProvider, createMemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorView } from "./Editor";
 import * as client from "../api/client";
@@ -111,18 +111,32 @@ describe("editor fixtures vs the engine spec", () => {
   });
 });
 
+// A *data* router, not `<MemoryRouter>`: the editor's unsaved-changes guard uses
+// `useBlocker`, which only exists on a data router — and `main.tsx` mounts one
+// (`createBrowserRouter`), so this is also the truer harness. The "Leave the
+// editor" link and the page it goes to are here so a test can actually navigate
+// away and see whether the guard steps in.
 function renderEditor(entry = "/targets/M_42/edit/3") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const router = createMemoryRouter([
+    {
+      path: "/targets/:safe/edit/:runId",
+      element: (
+        <>
+          <Link to="/library">Leave the editor</Link>
+          <EditorView />
+        </>
+      ),
+    },
+    { path: "/library", element: <div>Library page</div> },
+  ], { initialEntries: [entry] });
   return {
     qc,
+    router,
     ...render(
       <MantineProvider>
         <QueryClientProvider client={qc}>
-          <MemoryRouter initialEntries={[entry]}>
-            <Routes>
-              <Route path="/targets/:safe/edit/:runId" element={<EditorView />} />
-            </Routes>
-          </MemoryRouter>
+          <RouterProvider router={router} />
         </QueryClientProvider>
       </MantineProvider>,
     ),
@@ -3181,5 +3195,208 @@ describe("EditorView — \"does my colour look right?\"", () => {
     expect(await screen.findByText("Stretch")).toBeInTheDocument();
     expect(screen.queryByText(/nebulae like this/)).toBeNull();
     expect(screen.queryByText(/Colour looks right/)).toBeNull();
+  });
+});
+
+// The editor writes nothing on its own: a look lives in the browser until Save,
+// so leaving the page silently drops it. Before v0.392.0 there was no guard of
+// any kind (`useBlocker`/`beforeunload` appeared nowhere in the frontend). These
+// pin both halves of the deal — it asks about work you did, and it stays out of
+// the way about work you didn't.
+describe("EditorView — the unsaved-changes guard", () => {
+  const baseMocks = () => {
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+  };
+  /** A run whose saved recipe is one Stretch — the "opened on my own edit" case. */
+  const savedRecipeMocks = () => {
+    baseMocks();
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{ uid: "x1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } }],
+      base_run_id: 3,
+    });
+  };
+  /** A run with no saved recipe and no look of the user's own → Auto is seeded. */
+  const seededMocks = () => {
+    baseMocks();
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "previousRecipe").mockResolvedValue(
+      { run_id: null, ops: [], count: 0 });
+    vi.spyOn(client.api, "autoProcess").mockResolvedValue({
+      ops: [{ uid: "a1", id: "tone.stretch", enabled: true,
+              params: { mode: "stf", target_bg: 0.2 } }],
+      base_run_id: 3,
+    });
+  };
+  /** Add a Curves op — the smallest real edit the user can make. */
+  const addCurves = async () => {
+    fireEvent.click(screen.getByText("Add operation"));
+    fireEvent.click(await screen.findByText("Curves"));
+    // The op now shows in both the list and the open param panel, hence findAll.
+    await screen.findAllByText("Curves");
+  };
+  const leave = () => fireEvent.click(screen.getByText("Leave the editor"));
+
+  it("lets you walk away from a picture you haven't changed", async () => {
+    savedRecipeMocks();
+    renderEditor();
+    await screen.findByText("Stretch");
+
+    leave();
+
+    expect(await screen.findByText("Library page")).toBeInTheDocument();
+    expect(screen.queryByText("Keep this look?")).not.toBeInTheDocument();
+  });
+
+  it("asks before dropping a look you haven't saved, and takes 'leave' for an answer",
+    async () => {
+      savedRecipeMocks();
+      renderEditor();
+      await screen.findByText("Stretch");
+      await addCurves();
+
+      leave();
+
+      // Blocked: still in the editor, with the question asked in plain language.
+      expect(await screen.findByText("Keep this look?")).toBeInTheDocument();
+      expect(screen.getByText(/aren't kept\s+with it until you save/)).toBeInTheDocument();
+      expect(screen.queryByText("Library page")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
+      expect(await screen.findByText("Library page")).toBeInTheDocument();
+    });
+
+  it("keeps you — and the look — here when you choose to stay", async () => {
+    savedRecipeMocks();
+    renderEditor();
+    await screen.findByText("Stretch");
+    await addCurves();
+
+    leave();
+    fireEvent.click(await screen.findByRole("button", { name: "Stay here" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("Keep this look?")).not.toBeInTheDocument());
+    expect(screen.queryByText("Library page")).not.toBeInTheDocument();
+    // The edit itself is untouched.
+    expect(screen.getAllByText("Curves").length).toBeGreaterThan(0);
+  });
+
+  it("saves the look and then lets you go", async () => {
+    savedRecipeMocks();
+    const putRecipe = vi.spyOn(client.api, "putRecipe").mockResolvedValue({ ok: true });
+    renderEditor();
+    await screen.findByText("Stretch");
+    await addCurves();
+
+    leave();
+    fireEvent.click(await screen.findByRole("button", { name: "Save and leave" }));
+
+    await waitFor(() => expect(putRecipe).toHaveBeenCalledTimes(1));
+    expect(putRecipe.mock.calls[0][2].ops.map((o: { id: string }) => o.id))
+      .toEqual(["tone.stretch", "tone.curves"]);
+    expect(await screen.findByText("Library page")).toBeInTheDocument();
+  });
+
+  it("holds you here when that save fails, rather than losing the look anyway",
+    async () => {
+      savedRecipeMocks();
+      vi.spyOn(client.api, "putRecipe").mockRejectedValue(new Error("disk full"));
+      renderEditor();
+      await screen.findByText("Stretch");
+      await addCurves();
+
+      leave();
+      fireEvent.click(await screen.findByRole("button", { name: "Save and leave" }));
+
+      // Still asked, still here: navigating away after a failed save would drop
+      // exactly the work the button promised to keep.
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save and leave" })).toBeEnabled());
+      expect(screen.getByText("Keep this look?")).toBeInTheDocument();
+      expect(screen.queryByText("Library page")).not.toBeInTheDocument();
+    });
+
+  it("stops asking once the look has been saved from the toolbar", async () => {
+    savedRecipeMocks();
+    vi.spyOn(client.api, "putRecipe").mockResolvedValue({ ok: true });
+    renderEditor();
+    await screen.findByText("Stretch");
+    await addCurves();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(client.api.putRecipe).toHaveBeenCalled());
+
+    leave();
+    expect(await screen.findByText("Library page")).toBeInTheDocument();
+    expect(screen.queryByText("Keep this look?")).not.toBeInTheDocument();
+  });
+
+  it("stops asking once the look has been exported", async () => {
+    savedRecipeMocks();
+    vi.spyOn(client.api, "exportRun").mockResolvedValue({ job_id: "j1" });
+    vi.spyOn(client.api, "getJob").mockResolvedValue(
+      { id: "j1", kind: "edit_export", state: "done", result: {} } as never);
+    renderEditor();
+    await screen.findByText("Stretch");
+    await addCurves();
+
+    fireEvent.click(screen.getByRole("button", { name: /Export as new image/ }));
+    await waitFor(() => expect(client.api.exportRun).toHaveBeenCalled());
+
+    // The export notification invites a trip to History; nagging there would be
+    // nagging at someone who has just committed their look to a picture.
+    leave();
+    expect(await screen.findByText("Library page")).toBeInTheDocument();
+    expect(screen.queryByText("Keep this look?")).not.toBeInTheDocument();
+  });
+
+  it("never nags about the Auto-process it seeded for you", async () => {
+    seededMocks();
+    renderEditor();
+    // The seed has landed and is on screen.
+    await screen.findByText("What Auto-process did");
+
+    leave();
+
+    // Nobody asked for this look and the next open reproduces it for free, so
+    // stopping a beginner leaving a picture they never touched would be worse
+    // than no guard at all.
+    expect(await screen.findByText("Library page")).toBeInTheDocument();
+    expect(screen.queryByText("Keep this look?")).not.toBeInTheDocument();
+  });
+
+  it("does ask once you change the seeded look yourself", async () => {
+    seededMocks();
+    renderEditor();
+    await screen.findByText("What Auto-process did");
+    await addCurves();
+
+    leave();
+
+    expect(await screen.findByText("Keep this look?")).toBeInTheDocument();
+  });
+
+  it("asks the browser too, but only while there is something to lose", async () => {
+    savedRecipeMocks();
+    renderEditor();
+    await screen.findByText("Stretch");
+
+    // A pristine editor must never make a tab close ask.
+    const clean = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(clean);
+    expect(clean.defaultPrevented).toBe(false);
+
+    await addCurves();
+    const dirty = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirty);
+    expect(dirty.defaultPrevented).toBe(true);
   });
 });
