@@ -1,5 +1,5 @@
-import { Badge, Group, Paper, Stack, Text, ThemeIcon, Title } from "@mantine/core";
-import { IconConfetti } from "@tabler/icons-react";
+import { Anchor, Badge, Group, Paper, Stack, Text, ThemeIcon, Title } from "@mantine/core";
+import { IconCalendarPlus, IconConfetti } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
@@ -72,9 +72,24 @@ export function NearlyThereCard() {
               </Badge>
             ))}
           </Group>
-          <Text size="xs" c="dimmed">
-            <Link to="/life-list">See your whole life list</Link>
-          </Text>
+          <Group gap="md" wrap="wrap">
+            {/* One-tap "Add to calendar" for the object that would finish the
+                constellation — the same plain .ics download the "Try something
+                new tonight" card offers, so the nudge ends on an action rather
+                than on a sentence to remember. Only shown when there *is* a
+                tonight pick: without one the file would be a 404. */}
+            {tonight ? (
+              <Anchor href={api.nearlyThereIcsUrl()} download size="xs" fw={500}>
+                <Group gap={4} wrap="nowrap">
+                  <IconCalendarPlus size={13} />
+                  Add tonight to calendar
+                </Group>
+              </Anchor>
+            ) : null}
+            <Text size="xs" c="dimmed">
+              <Link to="/life-list">See your whole life list</Link>
+            </Text>
+          </Group>
         </Stack>
       </Group>
     </Paper>

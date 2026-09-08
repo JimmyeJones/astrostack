@@ -319,3 +319,87 @@ def test_a_mosaic_keeps_its_suffix_and_is_not_offered_its_own_name_back():
     # The suffixed name doesn't match the catalog by name (so a title *is*
     # found), but the suggestion is what the target is called already.
     assert suggested_target_rename("Orion Nebula (mosaic)", 83.822, -5.391) is None
+
+
+# --- a mosaic's union centre is not a pointed field ---------------------------
+
+
+def test_a_mosaic_is_offered_its_objects_name_from_the_union_centre():
+    """A 2×2 of M 42 stores the middle of the *union canvas*, which sits ~0.32°
+    off the nebula — outside the 0.25° cone that is right for a pointed field.
+    Measured on the bundled mosaic sample, whose centre really is 0.3223° from
+    M 42 (and 0.3663° from M 43, which is too small to claim anything)."""
+    from seestack.objectinfo import suggested_target_rename
+
+    ra, dec = 84.09141918039428, -5.569798737575981  # the sample's own centre
+    assert suggested_target_rename("Unsorted (mosaic)", ra, dec) == \
+        "Orion Nebula (mosaic)"
+    # …and a single field pointed at the very same spot is judged as before:
+    # the owner aimed there, so the cone is the honest question to ask.
+    assert suggested_target_rename("Unsorted", ra, dec) is None
+
+
+def test_the_extent_rule_never_claims_a_neighbour_it_only_claims_its_own_span():
+    """Widening for a mosaic must not become a bigger cone. An object only
+    claims a centre that lands inside *its own* extent, so the neighbour case
+    the title cone exists for (Stephan's Quintet beside NGC 7331, ~0.5°) is
+    still out of reach — for a mosaic exactly as for a single field."""
+    from seestack.objectinfo import suggested_target_rename
+
+    # NGC 7331 is 10′ across: half a degree away is another object's sky.
+    assert suggested_target_rename("Unsorted (mosaic)", 339.28, 34.42 + 0.5) is None
+    assert suggested_target_rename("Unsorted", 339.28, 34.42 + 0.5) is None
+
+
+def test_only_an_object_wider_than_the_cone_can_claim_a_centre_by_extent():
+    """The extent pass may only ever *add* an answer where the cone found none,
+    so anything the cone already covers is skipped outright — and an object with
+    no vetted size has no extent to fall back on."""
+    from seestack.nightplan import CatalogObject
+    from seestack.objectinfo import (
+        _TITLE_MATCH_DEG,
+        _extent_match_radius_deg,
+        _object_containing,
+    )
+
+    small = CatalogObject(
+        id="X1", name="Tiny", ra_deg=10.0, dec_deg=20.0, type="galaxy", con="And",
+        size_arcmin=20.0, size_minor_arcmin=None,
+    )
+    unsized = CatalogObject(
+        id="X2", name="Unsized", ra_deg=10.0, dec_deg=20.0, type="galaxy", con="And",
+        size_arcmin=None, size_minor_arcmin=None,
+    )
+    assert _extent_match_radius_deg(small) < _TITLE_MATCH_DEG
+    assert _extent_match_radius_deg(unsized) == 0.0
+    assert _object_containing(10.0, 20.0, (small, unsized)) is None
+
+
+def test_the_containment_radius_is_the_minor_axis_and_is_capped():
+    """No position angle is stored, so only the minor half-axis is a radius we
+    are sure lies inside the object whichever way it is turned — and a huge
+    future entry can never claim a whole region of sky."""
+    from seestack.nightplan import CatalogObject
+    from seestack.objectinfo import _EXTENT_MATCH_MAX_DEG, _extent_match_radius_deg
+
+    elongated = CatalogObject(
+        id="X3", name="Elongated", ra_deg=0.0, dec_deg=0.0, type="galaxy", con="And",
+        size_arcmin=178.0, size_minor_arcmin=63.0,
+    )
+    assert _extent_match_radius_deg(elongated) == 63.0 / 60.0 / 2.0
+    enormous = CatalogObject(
+        id="X4", name="Enormous", ra_deg=0.0, dec_deg=0.0, type="nebula", con="Ori",
+        size_arcmin=600.0, size_minor_arcmin=600.0,
+    )
+    assert _extent_match_radius_deg(enormous) == _EXTENT_MATCH_MAX_DEG
+
+
+def test_the_extent_rule_is_off_for_every_caller_that_does_not_ask_for_it():
+    """`confident_object_title` is what bakes a name into shared pixels, so the
+    wider rule is opt-in: the default answer is the 0.25° cone's, unchanged."""
+    from seestack.objectinfo import confident_object_title
+
+    ra, dec = 84.09141918039428, -5.569798737575981
+    assert confident_object_title("Unsorted", ra, dec) is None
+    assert confident_object_title("Unsorted", ra, dec, allow_extent_match=True) == \
+        "Orion Nebula"

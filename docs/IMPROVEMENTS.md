@@ -380,21 +380,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **LEAD, measured while shipping the v0.396.0 rename offer (Builder 2026-09-08) — a *mosaic* target is
-  usually too far off its own object to be offered a name, because the offer is gated on the union centre.**
-  *(Pillar: autonomy/friendliness — PRIORITY 2–3; size S; **do not "fix" this by widening the cone**.)*
-  `suggested_target_rename` uses `confident_object_title`'s 0.25° title-grade cone against
-  `TargetEntry.ra_deg/dec_deg`, which for a mosaic is the centre of the **union canvas**, not of the object.
-  Measured on the bundled 2×2 mosaic sample: its centre sits **0.31°** from M 42, so a folder-named mosaic
-  gets no offer at all while the single field of the same object gets one. That is the *safe* failure and is
-  why it shipped this way — but the owner is a heavy mosaic user, so the surface that helps him most is the
-  one that mostly stays quiet. **The honest shape, if it is ever worth doing, is not a bigger radius** (which
-  would start claiming neighbours for single fields too): it is to ask whether the solved centre falls
-  *inside the object's own extent* — the catalog already carries `size_arcmin`/`size_minor_arcmin`, and
-  `framing.py` already reasons in those units — so a 2×2 of M 42 qualifies on the object's 85′ span while a
-  neighbour 0.5° away still does not. Needs a real mosaic's centre offsets to validate the "inside its
-  extent" rule before it decides a name; the synthetic sample gives exactly one data point.
-
 - **NEW IDEA (Builder 2026-09-03, the cost the v0.335.0 endpoint knowingly accepted) — `/rejection-outlook`
   pays for a whole `estimate_stack` to learn two numbers.** *(Pillar: performance — size XS; **only if the
   note is ever un-gated**, see the entry two above.)* It needs the accepted+solved count and the mosaic's
@@ -652,19 +637,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   `webapp/video.py`**, and only if the field earns its keep: if nothing but a comment would read it, the
   dimension check is already the honest answer and this should be closed rather than built. Explicitly do
   **not** rewrite the four in-place operations around it.
-
-- **NEW IDEA (Builder 2026-08-27, the obvious next tap on the v0.280.0 "nearly there" card) — the constellation
-  nudge names the object that's up tonight but gives no way to act on it.** *(Pillar: friendliness /
-  autonomy — PRIORITY 3. Size: S.)* `GET /api/life-list/nearly-there` already returns the missing object's
-  `usable_start_utc` / `usable_end_utc`, and `/api/plan/suggest/{catalog_id}/calendar.ics` already renders a
-  one-tap "Add to calendar" `.ics` for a catalog object — but the two don't meet, so the card ends on a
-  sentence rather than an action. Wire the tonight pick's badge to the same `.ics` download the
-  `SuggestTargetsCard` offers (and/or a link into the Tonight table row for it). **Care before building:** the
-  `.ics` route is deliberately restricted to `_SHOWPIECE_IDS` (see `_catalog_object` — "a bogus id is a 404,
-  not a way to calendar arbitrary catalog rows"), and a missing object from a nearly-finished constellation is
-  often *not* a showpiece, so this needs either a second route scoped to "objects the nearly-there endpoint
-  actually returned" or a widening of that whitelist with the same care about arbitrary ids. Don't just remove
-  the check.
 
 - **NEW IDEA (Builder 2026-08-17, the one thing deliberately left out of "Finish them all" v0.265.0) — put a real
   byte figure in the batch-export confirmation, without making the Dashboard's note expensive.** *(Pillar:
@@ -1287,19 +1259,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   where it fires. To actually clean multi-trail pixels on a huge stack you'd need k>1 under **κ-σ** (a different
   change — κ-σ ignores min_max_reject_count entirely), or to raise the min/max→κ-σ crossover, both of which change
   the shipped v0.143.0 behaviour and need real-data justification. Left filed as a caution, not ready work.)_
-- **IMPROVEMENT IDEA (Scout 2026-08-26 #3, follow-up to the v0.272.1 label fix) — make the Lucky-imaging input
-  a *real* percent, not a raw fraction.** *(Pillar: friendliness — PRIORITY 3. Size: S, but frontend.)* v0.272.1
-  fixed the misleading "%" label by renaming the knob to "keep sharpest **fraction**", which is honest but still
-  asks a beginner to think in 0.05–1.0 while everywhere *else* in the app the same number is a percent (the
-  Gallery badge is "Lucky 50%"). The genuinely friendly end state is a **percent input** (5–100, step 5, default
-  100) that the control converts to/from the engine's `lucky_fraction` (0.05–1.0) at the boundary — the beginner
-  types "50" and it means 50%, matching the Gallery. **Why it wasn't done in v0.272.1:** the descriptor-driven
-  form (`StackOptionControl`) sends the raw number straight through, so a percent input needs either a per-field
-  `unit: "percent"`/scale hint the control honours on display *and* on submit (cleanest — generalises to any
-  future fraction knob) or a special-case, and a matching round-trip so a saved "50%" still persists
-  `lucky_fraction=0.5`. Keep the engine field and its (0, 1] contract untouched (upgrade-safe); this is purely a
-  presentation/units layer. Test the round-trip (UI 50 → stored 0.5 → UI 50) and that an old saved
-  `lucky_fraction` still renders as the right percent.
 - **Pre-flight "this batch looks like two targets" guard — catch mixed pointings *before* the
   walk-away stack wastes itself.** (S–M, autonomy/friendliness/trust) *(Scout-filed 2026-07-09, traced.)*
   **Interactive slice SHIPPED v0.101.0 (Target page) + v0.102.0 (Stack form):** the pre-flight detection +
@@ -2891,6 +2850,9 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.398.1** — PRIORITY 3 (friendliness), the Scout's 2026-08-26 #3 entry that v0.272.1 left open: **the Lucky-imaging knob is typed as the percent the finished picture is badged with.** It asked a beginner for 0.05–1.0 while the Gallery says "Lucky 50%". New optional `StackOptionField.unit` (`"percent"`, carried only by `lucky_fraction` today) makes `StackOptionControl` show and accept 0–100 with a `%` suffix — value, min, max and step scaled together, so the typed input and the editor slider speak one unit — while the engine field, its `(0, 1]` contract and the stored value are untouched; `show`/`store` are the identity for every other field. The round-trip rounds in both directions, so a stored 0.35 renders `35 %` and stores back exactly 0.35 rather than 0.35000000000000003. Tests +8, including the invariant that a `percent` unit may only sit on a float whose bounds really are a fraction. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.397.0** — PRIORITY 2–3 (autonomy/friendliness), the LEAD filed with the v0.396.0 rename offer: **a mosaic is offered its object's name.** The offer was gated on a 0.25° cone against the *union canvas* centre, so the bundled 2×2 sample sits 0.3223° from M 42 and got nothing while a single field of the same object got an offer — on the owner's own dominant shooting shape. Not fixed by a bigger radius (which would claim neighbours for single fields too) but by the object's **own extent**: `objectinfo._object_containing` accepts a centre inside the object's minor half-axis, capped at 1.5°, consulted **only** when the cone found nothing, and only for a mosaic-suffixed name (`confident_object_title(allow_extent_match=)` is off by default, so the shared-caption path is untouched). Measured over the whole real catalog before believing it: **exactly one** containment exists beyond the cone in all 157 objects (M 31 contains M 32, 0.403° against 0.525°). Tests +5, four fail-before. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.398.0** — NEW BEGINNER FEATURE, PRIORITY 3 (friendliness/plan): **"Add tonight to calendar" on the constellation nudge.** The "you're one object away from finishing Lyra, and M57 is usable until 02:10" card ended on a sentence; `GET /api/life-list/nearly-there/calendar.ics` now hands that window to the beginner's own calendar as a plain offline `.ics`. It **names no id** — it re-asks the endpoint the card read and calendars the object *it* picked — so the `_SHOWPIECE_IDS` guard the idea warned about is neither widened nor needed, and the file can never describe a different night from the card. The body comes from the new shared `plan.catalog_object_ics_response` (extracted from `get_suggest_ics`, takes an object and never an id), so the two reminders cannot drift. 404 rather than a blank calendar on every empty case. Tests +8. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.396.0** — NEW BEGINNER FEATURE (the last open slice of the Scout's 2026-08-27 #10 entry, and the **🛑 BLOCKED** premise it was stuck on): **a target still named after its folder can be renamed to what the plate solve says it is, in one click.** The identity card gains "this target is still named after its folder — call it *Crescent Nebula*?" (opt-in `allowRename`, Target page only), backed by new `Library.rename_target` (display name only — the safe name, folder, project and every stored path stay put) and `objectinfo.suggested_target_rename` (the **title-grade** 0.25° cone, not the card's looser one, because a rename outlives the session; silent when the stored name already identifies something). **The blocker was real and is now fixed:** the scanner resolves a folder *by display name*, so a rename would have made the next scan allocate `NGC_6888_SUB-<sha1>` — a second target, same sky. New additive nullable `targets.folder_name` (no `SCHEMA_VERSION` bump; the existing `_ensure_columns` self-heal adds it) is the alias row that entry asked for, and `_names_owning_safe` lets a folder answer to both names. A test caught the split live before the column existed. `scanner.preserve_mosaic_suffix` keeps a mosaic a mosaic. Tests +16. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.395.0** — PRIORITY 2 (autonomy) and the last step of the north star, the owner's 2026-09-08 answer to gate Q1 shipped **with its condition rather than after it**: **an unattended night now comes back as a picture, and any one target can be told to stop.** `Settings.auto_edit_on_autostack` ships `True` — fresh installs only, the same §9 argument as v0.391.0's (`SettingsStore` re-saves the whole model, so every install that has booted carries an explicit `false` and no migration may flip it). The owner said *"yes, but should be easy to override with manual settings"*, and the backlog's own note said not to ship the flip without it, so all three halves are here: new `webapp/auto_edit_pref` stores a **tri-state per target** in the existing `project_meta` kv table (no schema change) — `None` follows the setting, `True`/`False` override it — which `pipeline._wants_auto_edit_for` consults before finishing a fresh stack, so it survives the night rather than a page; `_auto_edit_process_run` now refuses to write over a recipe **the user** saved — which is not the same as "a recipe exists", since the pass legitimately re-runs over its own output, a distinction an existing test found rather than reasoning did; it is separated by the baked-look stamp the run already carries; and the control is a link under **any picture the app finished** (`StackRunOut.auto_edited`, one more meta read in a loop that already does three) rather than a standing switch on every target page — it writes an explicit `false` to turn off, and clears vs. sets `true` to turn on depending on which one would actually work. A garbled or hand-edited value reads as *unset*, never as "off". Settings copy names the fresh-install caveat and all three ways out. "Process target" is deliberately untouched — an explicit click has always auto-edited. Tests +19 (5 pref unit, 5 pipeline/API, 2 config-upgrade incl. a stored-`false` that asserts it *differs from the fresh default*, 5 card, 2 copy). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.394.0** — PRIORITY 3 (enjoy + share), slice (iii) of the life-list follow-ups filed 2026-08-27 and the last one open: **"My life list" becomes one shareable picture.** New pure engine module `seestack/lifelistcard.py` composes all 110 Messier squares in catalog order — your own picture cover-cropped into the ones you have, a faintly lit square for one captured but not stacked yet, a dim numbered square for the rest — under a strip saying how far along you are. **The empty squares are the point:** the montage wall (`/api/gallery/montage.jpg`) shows only the pictures you have, which makes it a gallery; a life list has to draw the whole list. Three drawing calls are deliberately the opposite of the wall's and are explained in the full entry (cover-crop not letterbox; its own label drawer, because `_draw_corner_label` clamps to 9 px on a 114 px tile and would make the captured ids smaller than the to-shoot ones; left-aligned catalog order, so the counting survives a short last row). `GET /api/life-list/grid.jpg` renders it on demand from the previews the app already keeps and writes nothing, resolving each picture through the shared `targets.current_picture_path` so the poster cannot disagree with the page it was shared from; it **404s until one object is captured**, which is exactly where the new self-hiding "Share my grid" button inside the page's existing header card stops being offered. Previews are downscaled to `TILE_SOURCE_MAX_PX` on the way in and each target is loaded once, so filling 110 squares is tens of megabytes, not hundreds. Additive: one module, one read-only GET, one button; no config, schema, on-disk, API-shape or default change. Tests +18 (13 engine, 5 endpoint, 2 vitest). Full entry in [`SHIPPED.md`](SHIPPED.md).
