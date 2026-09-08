@@ -2195,6 +2195,11 @@ export interface StackOptionField {
   option_labels?: Record<string, string> | null;
   help: string | null;
   depends_on: string | null;
+  // Display units, when the engine's own unit is not what a beginner should be
+  // typing. "percent" = the stored value is a fraction in (0, 1] that the form
+  // shows and accepts as 0–100 with a "%" suffix; the stored value is unchanged.
+  // Absent/null on every other field, which renders the raw number as before.
+  unit?: "percent" | null;
 }
 
 export interface SystemInfo {

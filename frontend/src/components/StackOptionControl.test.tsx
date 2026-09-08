@@ -1,7 +1,9 @@
 import { MantineProvider } from "@mantine/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { StackOptionControl } from "./StackOptionControl";
+import {
+  StackOptionControl, fractionFromPercent, percentFromFraction,
+} from "./StackOptionControl";
 import type { StackOptionField } from "../api/client";
 
 const wrap = (ui: React.ReactNode) => render(<MantineProvider>{ui}</MantineProvider>);
@@ -185,5 +187,72 @@ describe("HintLabel — the explanation has to be reachable without a mouse", ()
     );
     fireEvent.click(screen.getByRole("switch"));
     expect(onChange).toHaveBeenLastCalledWith(true);
+  });
+});
+
+
+describe("StackOptionControl percent-unit fields", () => {
+  // `lucky_fraction` is a fraction in (0, 1] in the engine and stays one; the
+  // form is the only place it should look like the "Lucky 50%" the Gallery
+  // badges the finished picture with.
+  const luckyField = (over: Partial<StackOptionField> = {}): StackOptionField =>
+    floatField({ key: "lucky_fraction", label: "Lucky imaging", default: 1.0,
+      min: 0.05, max: 1.0, step: 0.05, unit: "percent", ...over });
+
+  it("shows a stored fraction as the percent a beginner reads elsewhere", () => {
+    wrap(<StackOptionControl field={luckyField()} value={0.5} onChange={() => {}} />);
+    expect(screen.getByDisplayValue("50 %")).toBeInTheDocument();
+  });
+
+  it("stores the fraction the engine wants when a percent is typed", () => {
+    const onChange = vi.fn();
+    wrap(<StackOptionControl field={luckyField()} value={1.0} onChange={onChange} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "50" } });
+    expect(onChange).toHaveBeenLastCalledWith(0.5);
+  });
+
+  it("round-trips a value binary fractions would otherwise smear", () => {
+    // 0.35 * 100 is 35.000000000000004 in IEEE-754, so a naive conversion would
+    // render "35.000000000000004 %" and store it back as a different number.
+    expect(percentFromFraction(0.35)).toBe(35);
+    expect(fractionFromPercent(percentFromFraction(0.35))).toBe(0.35);
+    expect(fractionFromPercent(percentFromFraction(0.05))).toBe(0.05);
+    expect(fractionFromPercent(percentFromFraction(1))).toBe(1);
+  });
+
+  it("scales the bounds too, so the control cannot be off by 100x", () => {
+    // The slider is where the bounds are observable (Mantine's NumberInput
+    // clamps in JS rather than through min/max attributes), and it is the same
+    // scaled numbers both halves are handed.
+    wrap(
+      <StackOptionControl
+        field={luckyField()} value={0.5} onChange={() => {}} preferSlider
+      />,
+    );
+    const slider = screen.getByRole("slider");
+    expect(slider).toHaveAttribute("aria-valuemin", "5");
+    expect(slider).toHaveAttribute("aria-valuemax", "100");
+    expect(slider).toHaveAttribute("aria-valuenow", "50");
+  });
+
+  it("speaks percent on the slider readout as well as the typed input", () => {
+    const onChange = vi.fn();
+    wrap(
+      <StackOptionControl
+        field={luckyField()} value={0.5} onChange={onChange} preferSlider
+      />,
+    );
+    const input = screen.getByLabelText("Lucky imaging value") as HTMLInputElement;
+    expect(input.value).toBe("50 %");
+    fireEvent.change(input, { target: { value: "75" } });
+    expect(onChange).toHaveBeenLastCalledWith(0.75);
+  });
+
+  it("leaves every field without the hint exactly as it was", () => {
+    const onChange = vi.fn();
+    wrap(<StackOptionControl field={floatField()} value={1.35} onChange={onChange} />);
+    expect(screen.getByDisplayValue("1.35")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "2.4" } });
+    expect(onChange).toHaveBeenLastCalledWith(2.4);
   });
 });
