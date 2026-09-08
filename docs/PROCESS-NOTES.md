@@ -18,6 +18,51 @@ is a queue.
 
 ---
 
+## 2026-09-08 (Builder, branch `claude/sweet-babbage-wvv6ff`) — collision #13: two Builders built the overlap gain in the same hour, and the second threw its copy away
+
+**What happened.** This run took two tasks. The first — the Scout's "While you
+were asleep" digest — shipped as v0.388.0. The second was the READY size-L
+image-quality entry, cross-panel gain matching from the overlaps. It was
+implemented end to end: `seestack/stack/overlapgain.py`, the stacker pre-pass,
+a shared-sky fixture in `tests/synth.py`, 11 new tests, measured at **37.2 % →
+4.6 %** on a 0.6× hazy panel with the fitted gain ratio 1.669 against a true
+1.667. On the pre-merge `git fetch` it turned out that
+`claude/sweet-babbage-xm81q4` had merged **the same feature** as v0.387.0
+roughly an hour earlier — same module name, same function name, same
+measurement to within a rounding.
+
+**What was done about it.** The duplicate was **deleted, not merged and not
+"improved on"**. Their implementation is on `main`, green, and carries the one
+guard that matters most (`MIN_OVERLAP_CORRELATION`, a Pearson correlation across
+the overlap strip — a stronger form of the log-ratio scatter test this run's
+copy used, and arrived at the same way: by a fixture inventing a confident gain
+out of unrelated stars). Two of this run's choices differ — a 2 % neutral band
+so an even mosaic re-stacks bit-for-bit, and picking each panel's *typical* subs
+rather than its clearest — but both are unmeasured against theirs, and
+re-opening a shipped, tested pass to substitute untested preferences is exactly
+the churn §1 warns off. If either is ever wanted, it is a small change on top of
+what shipped, with a measurement; nothing was filed, because neither is a known
+defect.
+
+**Why the §11 rule did not catch it.** It was followed: `git fetch origin main`
++ `git log --oneline origin/main -30` grepped for the item's nouns, at the start
+of the run. The other run's work landed **during** the build — commit
+`68f48f8d` at 07:06, this run's task-2 was already underway — so the log was
+honest when it was read and stale before a line of the second task was written.
+That is the shape of every one of the thirteen: the fetch bounds *how early* a
+collision can be detected, not *whether* one happens.
+
+**The one thing that would have helped**, and it costs nothing: for a task the
+backlog sizes at **L**, re-fetch and re-grep once more *before writing code*,
+after the design read. This run spent ~40 minutes designing against the entry
+(reading `photometric.py`, `align_one`, the stacker hook) and never re-checked
+in that window — which is precisely when the other run's merge landed. The
+existing rule says "before starting each task"; on a long task the useful moment
+is later than that. Cheap, and it is the only lever a Builder has that does not
+require coordination it cannot do.
+
+---
+
 ## 2026-09-08 (Builder, branch `claude/sweet-babbage-xm81q4`) — the fixture that *looked* like a mosaic and let a new pass invent a 2.6× gain
 
 **One task this run** (v0.387.0, cross-panel gain matching in a mosaic's

@@ -4,7 +4,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  LastNightCard, describeEarlyStop, describeLibraryNight, lastNightLabel, roughDuration,
+  LastNightCard, describeEarlyStop, describeLibraryNight, describeNeedsLook,
+  describeNewPicture, describeOvernightWork, lastNightLabel, roughDuration,
 } from "./LastNightCard";
 import type { LibrarySessionRecap, TargetNight } from "../api/client";
 import * as client from "../api/client";
@@ -214,5 +215,122 @@ describe("LastNightCard early-stop line", () => {
     renderCard();
     await waitFor(() => expect(screen.getByText(/Last night/)).toBeInTheDocument());
     expect(screen.queryByTestId("last-night-early-stop")).toBeNull();
+  });
+});
+
+describe("describeNewPicture", () => {
+  const pic = {
+    name: "M 42", safe: "M_42", run_id: 7,
+    when_utc: "2026-07-09T04:00:00+00:00", n_frames: 120, previous_frames: 78,
+  };
+
+  it("says how much deeper the new picture is than the one it replaced", () => {
+    expect(describeNewPicture(pic)).toBe(
+      "M 42 — 120 subs, deeper than the 78 it had before");
+  });
+
+  it("says 'first picture' rather than comparing against nothing", () => {
+    expect(describeNewPicture({ ...pic, previous_frames: null })).toBe(
+      "M 42 — its first picture, from 120 subs");
+    expect(describeNewPicture({ ...pic, previous_frames: undefined })).toContain(
+      "its first picture");
+  });
+
+  it("never claims 'deeper' for a re-stack that used the same subs or fewer", () => {
+    // A re-stack after some subs were set aside is a *new* picture, but it is
+    // not a deeper one, and saying so would be a lie the owner can measure.
+    expect(describeNewPicture({ ...pic, n_frames: 78 })).toBe("M 42 — 78 subs");
+    expect(describeNewPicture({ ...pic, n_frames: 60 })).toBe("M 42 — 60 subs");
+  });
+
+  it("uses the singular for a one-sub picture", () => {
+    expect(describeNewPicture({ ...pic, n_frames: 1, previous_frames: null }))
+      .toContain("from 1 sub");
+  });
+});
+
+describe("describeOvernightWork", () => {
+  const pic = {
+    name: "M 42", safe: "M_42", run_id: 7,
+    when_utc: "2026-07-09T04:00:00+00:00", n_frames: 120, previous_frames: 78,
+  };
+
+  it("is null when the app made nothing — the card stays as it was", () => {
+    expect(describeOvernightWork([])).toBeNull();
+  });
+
+  it("counts the pictures, singular and plural", () => {
+    expect(describeOvernightWork([pic])).toBe(
+      "While you were away, AstroStack made a new picture.");
+    expect(describeOvernightWork([pic, { ...pic, safe: "M_31", run_id: 8 }])).toBe(
+      "While you were away, AstroStack made 2 new pictures.");
+  });
+});
+
+describe("describeNeedsLook", () => {
+  it("words a missing-files hold as something outside the app to go and check", () => {
+    const text = describeNeedsLook({
+      name: "NGC 7000", safe: "NGC_7000", kind: "missing_files",
+      n_frames: 271, n_other: 516,
+    });
+    expect(text).toContain("NGC 7000 is waiting");
+    expect(text).toContain("516 of its subs had no file on disk");
+    // The reassurance matters: the app kept the good picture rather than
+    // publishing a thinner one over it.
+    expect(text).toContain("existing picture was kept");
+    expect(text).toContain("drive");
+  });
+
+  it("words a thin hold as patience, not a problem", () => {
+    const text = describeNeedsLook({
+      name: "NGC 7000", safe: "NGC_7000", kind: "too_thin",
+      n_frames: 3, n_other: 8,
+    });
+    expect(text).toContain("only 3 of its subs are located");
+    expect(text).toContain("needs 8");
+    expect(text).toContain("stack itself once more subs come in");
+    expect(text).not.toContain("drive");
+  });
+});
+
+describe("LastNightCard overnight digest", () => {
+  const pic = {
+    name: "M 42", safe: "M_42", run_id: 7,
+    when_utc: "2026-07-09T04:00:00+00:00", n_frames: 120, previous_frames: 78,
+  };
+
+  it("lists each picture the app made, linked to that target's history", async () => {
+    vi.spyOn(client.api, "getLastNight").mockResolvedValue(recap({
+      since_utc: "2026-07-08T21:00:00+00:00", new_pictures: [pic],
+    }));
+    renderCard();
+    const block = await screen.findByTestId("last-night-new-pictures");
+    expect(block.textContent).toContain("AstroStack made a new picture");
+    expect(block.textContent).toContain("deeper than the 78 it had before");
+    expect(screen.getByRole("link", { name: /M 42 — 120 subs/ }))
+      .toHaveAttribute("href", "/targets/M_42/history");
+  });
+
+  it("explains a held target where the news is, linked to it", async () => {
+    vi.spyOn(client.api, "getLastNight").mockResolvedValue(recap({
+      needs_look: [{ name: "NGC 7000", safe: "NGC_7000", kind: "missing_files",
+        n_frames: 271, n_other: 516 }],
+    }));
+    renderCard();
+    const line = await screen.findByTestId("last-night-needs-look-missing_files");
+    expect(line.textContent).toContain("NGC 7000 is waiting");
+    expect(screen.getByRole("link", { name: /NGC 7000 is waiting/ }))
+      .toHaveAttribute("href", "/targets/NGC_7000");
+  });
+
+  it("adds nothing on a night the app did nothing, or against an older backend", async () => {
+    // The owner's live settings have auto-stack off: this is the ordinary case,
+    // and the card must look exactly as it did before the digest existed.
+    vi.spyOn(client.api, "getLastNight").mockResolvedValue(recap());
+    renderCard();
+    await waitFor(() => expect(screen.getByText(/Last night/)).toBeInTheDocument());
+    expect(screen.queryByTestId("last-night-new-pictures")).toBeNull();
+    expect(screen.queryByTestId("last-night-needs-look-missing_files")).toBeNull();
+    expect(screen.queryByTestId("last-night-needs-look-too_thin")).toBeNull();
   });
 });

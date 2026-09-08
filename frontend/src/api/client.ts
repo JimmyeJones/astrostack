@@ -850,6 +850,41 @@ export interface LibrarySessionRecap {
    *  which self-hides before the owner wakes up. Absent on an ordinary night
    *  and on an older backend, so every read site must tolerate `undefined`. */
   early_stop?: EarlyStop | null;
+  /** The window the two lists below cover: the first sub of the night being
+   *  recapped. Everything the pipeline finished after it happened while nobody
+   *  was watching. Absent on an older backend. */
+  since_utc?: string | null;
+  /** Pictures the app produced inside that window, newest first, one per
+   *  target. Empty on a night nothing was stacked (auto-stack off, or held). */
+  new_pictures?: NewPicture[];
+  /** Targets the newest hands-off scan deliberately held back. Self-clearing —
+   *  it reports the newest scan only. */
+  needs_look?: NeedsLook[];
+}
+
+/** One picture the app made while the owner was away. */
+export interface NewPicture {
+  name: string;
+  safe: string;
+  run_id: number;
+  when_utc: string;
+  n_frames: number;
+  /** What that target's previous picture was made of, or null when this is its
+   *  first — so "deeper than before" is only ever said when it's true. */
+  previous_frames?: number | null;
+}
+
+/** One target the newest hands-off scan held back, and why. */
+export interface NeedsLook {
+  name: string;
+  safe: string;
+  /** `missing_files` — subs with no file on disk (a storage problem the app
+   *  cannot fix itself); `too_thin` — too few located subs to publish yet. */
+  kind: string;
+  /** Subs the hold could actually have used. */
+  n_frames: number;
+  /** Subs that were missing, or the minimum the setting asks for. */
+  n_other: number;
 }
 
 export interface EarlyStop {

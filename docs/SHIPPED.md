@@ -14,6 +14,84 @@ Newest first.
 
 ---
 
+## v0.388.0 — 2026-09-08 — "While you were asleep": the Last-night card says what the app *did*, not only what the sky gave
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-wvv6ff`.)** The beginner
+feature filed by the Scout on 2026-09-08 — a cross-target overnight digest —
+built as the entry itself instructed: *"verify first that the Dashboard doesn't
+already fold most of this … if it mostly does, this shrinks to a filter on what
+is there."* It mostly does, so it did.
+
+**What was already there, and what was missing.** `GET /api/last-night` +
+`LastNightCard` already answer the *capture* half across every target — how many
+subs came in, how many were kept, why the rest were set aside, and whether one
+target stopped notably early. What nothing answered was the other half of the
+question a walk-away owner wakes up with: **did the app make me a picture, and
+is anything stuck?** A new stack appeared as one more unremarked tile in the
+"Recent stacks" strip, which looks identical whether it was made overnight or
+last March; and a target the auto-stack *held* back was explained only on the
+Jobs page, a screen a beginner has no reason to open (the per-target
+`/autostack-hold` note is on the Target page, which they only reach by already
+suspecting that target).
+
+**Shipped as a consolidation, not a new card** (AGENTS.md §1 — *"prefer a
+consolidation over a new card, every time"*; the third audit counted six new
+always-on cards firing on the owner's real library). The two facts are folded
+into the recap that is already on the screen:
+
+* `webapp/overnight.py` — pure aggregation, unit-testable without a library, a
+  job manager or a request. `new_pictures_since(runs, since_utc)` returns **one
+  line per target**, not per run: a night that scanned twice made one new
+  picture as far as the owner is concerned, and each line carries
+  `previous_frames` — the frame count of the picture it replaced — so the card
+  can say *deeper than before* only when that is true. `needs_a_look(summary)`
+  reads the holds the scan already records (`auto_stack_held_unreadable`,
+  `auto_stack_held_thin`), missing-files first because that is the one kind the
+  app cannot resolve on its own. `newest_scan_summary(jobs)` reads the **newest
+  finished scan only**, so a hold the next scan resolved stops being news with
+  no state of its own to go stale — the same self-clearing discipline
+  `/api/targets/{safe}/autostack-hold` already applies.
+* Stamps are compared with `seestack.activity_calendar.parse_utc`, never as
+  strings: the app writes UTC in two shapes (`…Z` from the job manager, a full
+  offset from the stacker) and `"…21:00:00Z" < "…21:00:00+00:00"`
+  lexicographically, which would have dropped a picture made minutes after the
+  window opened. Pinned by a test.
+* `RecentStack.is_genuine` (additive, default `True`) marks a row as an actual
+  integration rather than an editor export or channel combine, through the
+  **shared** `webapp.pipeline._stack_options_from_run_json` predicate rather
+  than a fourth hand-rolled copy — the three that were hand-mirrored did
+  eventually disagree (v0.338.1). Without it, exporting a finished edit would
+  read as the app having made a second picture overnight.
+* `_rollup_stacks_cached` extracts the app-level cache `/api/stats` already
+  owned, so the digest reads the roll-up the Dashboard's stat tiles are already
+  paying for. A second hand-rolled cache would have meant two walks over every
+  project in one paint — and two signatures that could disagree about which
+  stacks exist. The roll-up is skipped entirely when there is no datable night,
+  so an empty library still answers `null` without opening a project.
+* `LastNightCard` gains three pure, tested wording helpers
+  (`describeNewPicture`, `describeOvernightWork`, `describeNeedsLook`) and
+  renders them under its existing paragraph. A *missing-files* hold is worded as
+  something outside the app to go and check ("worth checking the drive with your
+  subs on it is connected") and coloured; a *thin* hold is worded as patience
+  ("it will stack itself once more subs come in"), because the two read very
+  differently to a beginner and must not sound alike.
+
+**Off by default in the only sense that applies:** both lists are empty on a
+night the app did nothing, which is the owner's live configuration
+(`auto_stack` off) — the card then renders exactly what it rendered before, and
+a test pins that. Additive response fields with defaults, so an older frontend
+ignores them and an older backend leaves the new lines simply absent. No config,
+schema, on-disk, API-shape or default change.
+
+**Tests:** +17 Python (`tests/webapp/test_overnight_digest.py` — the window cut,
+one-line-per-target, the editor-export exclusion, the mixed-stamp-shape
+comparison, hold precedence and de-duplication, a junk summary from an older
+build, plus the wire shape and the "nothing to report" case through
+`GET /api/last-night`) and +13 frontend (`LastNightCard.test.tsx` — every
+wording branch, both rendered lines with their links, and the unchanged card).
+
+---
+
 ## v0.387.0 — 2026-09-08 — a mosaic panel shot through haze is lifted to match its neighbours, from the sky they share
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-xm81q4`.)** The READY
