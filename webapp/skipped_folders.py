@@ -69,6 +69,13 @@ class SkippedFolder:
     path: str          # the folder, absolute, as the scan named it
     n_files: int       # FITS files inside it
     n_unvouched: int   # of those, files not named like the device's own picture
+    #: Which rule skipped it — ``"device_output"`` (a bare ``<T>/`` beside a
+    #: ``<T>_sub/``) or ``"temp_folder"`` (another program's scratch directory,
+    #: by name). The card cannot describe both with one sentence, and describing
+    #: a temp folder as "your Seestar's own finished picture" would be a plain
+    #: untruth. Defaulted so a value remembered by an older build reads as the
+    #: only case that build could produce.
+    reason: str = "device_output"
 
 
 def encode_skipped_folders(records: list[SkippedFolder]) -> str:
@@ -79,7 +86,8 @@ def encode_skipped_folders(records: list[SkippedFolder]) -> str:
     ordered = sorted(records, key=lambda r: (-r.n_unvouched, r.name))
     return json.dumps([
         {"name": r.name, "path": r.path,
-         "n_files": r.n_files, "n_unvouched": r.n_unvouched}
+         "n_files": r.n_files, "n_unvouched": r.n_unvouched,
+         "reason": r.reason}
         for r in ordered[:MAX_REMEMBERED]
     ])
 
@@ -113,11 +121,19 @@ def decode_skipped_folders(raw: str | None) -> list[SkippedFolder]:
             n_unvouched = int(item.get("n_unvouched") or 0)
         except (TypeError, ValueError):
             continue
-        if n_unvouched <= 0:
+        raw_reason = item.get("reason")
+        reason = raw_reason if raw_reason in ("device_output", "temp_folder") \
+            else "device_output"
+        # A device-output skip earns its line by holding files the device's
+        # naming can't vouch for; a temp folder earns it by being a guess about
+        # another program's directory, so it is reported whatever is inside it
+        # (and reporting it is what makes it recoverable — see the card).
+        if n_unvouched <= 0 and reason != "temp_folder":
             continue
         out.append(SkippedFolder(
             name=name, path=path,
             n_files=max(n_files, n_unvouched), n_unvouched=n_unvouched,
+            reason=reason,
         ))
     return out
 
