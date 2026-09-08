@@ -175,8 +175,10 @@ slices by name rather than reading from the top of the section. A verified bug s
 the new grouping rather than appending one more always-on banner.
 **Consolidation is not removal** *(added 2026-09-07)*. The owner's rule forbids *removing* a feature; it
 does **not** forbid merging two surfaces that answer the same question into one, provided every destination
-stays reachable in one click. **Prefer a consolidation over a new card, every time.** Concretely: the Target
-page's save/share menu has **12** items and History's has **19**, implemented twice; six new always-on cards
+stays reachable in one click. **Prefer a consolidation over a new card, every time.** Concretely: ~~the Target
+page's save/share menu has **12** items and History's has **19**, implemented twice~~ *(done — v0.385.0 folded
+both into one `SavePictureMenu` component, item set the union of the two, nothing removed; don't re-pick it)*;
+six new always-on cards
 now fire on the owner's real library; the phone Target page reached **3,853 px** on three nights of real data.
 
 **📜 HISTORICAL (was "⚡ IMMEDIATE PRIORITY", 2026-07-30; demoted 2026-09-03 because it
@@ -622,6 +624,18 @@ the repo.
 > the page sweep — the editor drive still runs). Everything lands in a
 > scratch dir, never the repo. Whatever it finds still needs a real regression
 > test in the suite — it is a finder, not a test.
+>
+> **On any run making an Auto/editor claim, add `--mosaic`** *(v0.386.0)*. §1
+> judges those claims on a tiled mosaic at the owner's scale, never on the
+> 6-frame single field — and until now the tooling could not produce one, so
+> every "dogfood CLEAN" recorded here was still measured on the field. `--mosaic`
+> loads and stacks a second, generated sample: four overlapping panels of one
+> shared sky, uneven depth (6/6/6/3), one panel shot through haze, and a ragged
+> union canvas that is genuinely ~5 % uncovered — so the surfaces gated on NaN
+> "no coverage" are finally in front of a browser. It prints the trim Auto would
+> apply to that canvas (**above ~15 % is a bug, not a ragged edge**) and writes
+> its shots to `$SHOTS/mosaic/`, leaving the field sample's page-height baselines
+> alone. Combine with `--editor` to drive the editor on the *mosaic* run.
 >
 > **On any run that touches the editor, add `--editor`.** The pass above only
 > *photographs* the editor, in the one state it opens in — priority 1 is the

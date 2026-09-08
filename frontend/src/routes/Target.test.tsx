@@ -226,11 +226,14 @@ describe("TargetView latest-picture download", () => {
     renderTarget();
 
     // The "Save / share" control is a menu trigger; opening it offers full-res,
-    // preview, and JPEG (mkRun has a FITS, so a full-res PNG is offered).
+    // preview, and JPEG (mkRun has a FITS, so a full-res PNG is offered). The
+    // items are named the way the History card names them — a short label with
+    // one dimmed line of help under it — since both pages render the same
+    // `SavePictureMenu` (v0.385.0).
     await openSaveShare();
-    const full = await screen.findByText("Full-res PNG (native size)");
-    const png = screen.getByText("Quick preview PNG (up to 1024px)");
-    const jpeg = screen.getByText("JPEG (smaller — best for sharing)");
+    const full = await screen.findByRole("menuitem", { name: /^Full-res PNG/ });
+    const png = screen.getByRole("menuitem", { name: /^PNG/ });
+    const jpeg = screen.getByRole("menuitem", { name: /^JPEG/ });
     expect(full.closest("a")).toHaveAttribute(
       "href", client.api.stackFullResPngUrl("M_42", 9));
     expect(png.closest("a")).toHaveAttribute(
@@ -424,9 +427,14 @@ describe("TargetView hero action row grouping", () => {
     renderTarget();
     await openSaveShare();
 
-    expect(await screen.findByText("Full-res PNG (native size)")).toBeInTheDocument();
-    expect(screen.getByText("Quick preview PNG (up to 1024px)")).toBeInTheDocument();
-    expect(screen.getByText("JPEG (smaller — best for sharing)")).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: /^Full-res PNG/ }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^PNG/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^JPEG/ })).toBeInTheDocument();
+    // The three the hero used to be missing while the History card had them —
+    // the drift that `SavePictureMenu` exists to end.
+    expect(screen.getByRole("menuitem", { name: /^FITS/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^Copy caption/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Share picture" })).toBeInTheDocument();
     expect(screen.getByText("To phone")).toBeInTheDocument();
     for (const aspect of ["Phone", "Desktop", "Square"]) {
@@ -2277,7 +2285,7 @@ describe("TargetView honours the pinned cover", () => {
     expect(edit).toHaveAttribute("href", "/targets/M_42/edit/3");
 
     await openSaveShare();
-    const jpeg = await screen.findByText("JPEG (smaller — best for sharing)");
+    const jpeg = await screen.findByRole("menuitem", { name: /^JPEG/ });
     expect(jpeg.closest("a")).toHaveAttribute(
       "href", client.api.stackArtifactUrl("M_42", 3, "jpeg"));
   });
