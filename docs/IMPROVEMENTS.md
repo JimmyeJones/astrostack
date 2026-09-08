@@ -2072,24 +2072,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   ratio is a median over thousands of coarse cells, so 3 subs a panel would cost little accuracy — not
   threads. **Measure on real subs; the synthetic ones are 480×320 and prove nothing about this.**
 
-- **IDEA (Scout 2026-08-26 #2, follow-on to the front-of-queue `photometric_normalize`-for-mosaic Builder item)
-  — once photometric normalization auto-enables for mosaics, weigh doing the same measurement for a
-  *single-field* target stacked across nights of **mixed transparency** (one hazy night + one clear night).**
-  *(Pillar: image quality — PRIORITY 4. Size: S–M. **The mosaic item it waits on shipped as v0.387.0**, so
-  this is unblocked — but still measured, not a blind flip.)* The mosaic item corrects a hazy *panel*'s multiplicative dimming; the same mechanism
-  (`compute_photometric_scales` gain-matching by `transparency_score`, folded into the `1/s²` combine weight)
-  would gain-match a hazy *night*'s subs up to a clear night's on an ordinary single-target stack, which the
-  walk-away chain builds constantly as a beginner revisits one object. **Honest caveat that bounds the value:**
-  quality weighting (which the auto chain already enables) *down-weights* a hazy sub by `1/s²` today, so it
-  already does most of the SNR-optimal thing — the residual photometric normalization would add is mainly
-  **consistency of the combined signal level** (and cleaner behaviour where a night's transparency varies
-  within the stack), not a large noise win. So this is worth a **measurement** (a synthetic single-field target,
-  half its subs dimmed multiplicatively, star-flux step across the two sub-populations with vs. without
-  normalization) to decide whether the marginal gain justifies enabling it outside mosaics — file the numbers,
-  don't assume. `compute_photometric_scales` already self-neutralises when no usable transparency scores exist,
-  so the no-data path is safe either way. **Prereq:** the mosaic item's coverage-map interaction is already
-  handled by v0.270.4's `{base}_framecov.fits`, so the single-field extension inherits that safety for free.
-
 - **NOTE for the "bisect the v0.158→v0.220 colour chain on a synthetic mosaic" follow-up above (Builder
   2026-08-05).** That entry asks a future run to measure "the visible plateau/edge structure" across a panel
   boundary with SCNR / the per-frame flatten / `remove_final_gradient` individually disabled — and warns that the
@@ -2453,62 +2435,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   (c) **Constellation lines at the backdrop radius.** The star backdrop is a bare point cloud at r=420; the
   offline Sky viewer's recognisable-star labelling is the precedent. Only worth it if a constellation-line
   dataset is already bundled — check before scoping, and do **not** add one as a dependency for this.
-
-- **NEW BEGINNER FEATURE (Scout 2026-08-26 #4) — "Does my colour look right?": an object-aware colour sanity
-  nudge on the finished picture.** *(Pillar: understand + trust / image quality — PRIORITY 3–4. Size: M.)*
-  **⚠️ BLOCKED ON DATA — Builder 2026-08-29 sized this against the real catalog and stood down; read this
-  before picking it up.** The spec's premise is that "the bundled catalogs carry a `type` field
-  (galaxy / **emission nebula** / cluster / …)". **They don't carry the distinction the feature turns on.**
-  Measured this run — `collections.Counter(o.type for o in load_catalog())` over all 157 bundled entries:
-  `galaxy 51, globular cluster 31, open cluster 30, nebula 28, planetary nebula 10, supernova remnant 4,
-  star cloud 1, double star 1, asterism 1`. There is **one** flat `nebula` bucket; emission (red-pink Hα) and
-  reflection (blue) are not separable, and they are the two families whose expectations *disagree*. The other
-  path the spec offers — `seestack/post/target_id.py`'s SIMBAD codes, which *do* split `HII` / `RNe` / `EmO` —
-  needs `astroquery` and a **network** lookup, which this app is deliberately offline for (`target_id`
-  degrades to "unknown target" without it), so it can't be the gate on a walk-away install.
-  **So the only way to build it as filed is to hand-curate an emission/reflection flag onto the 28 `nebula`
-  entries from an agent's own recall — and this is the one feature where that is the wrong move**, because its
-  own Care note is *"a single wrong 'your colour is off' on a genuinely fine picture is worse than ten correct
-  reassurances are good"*, and the awkward cases are exactly the famous ones (M20 is emission **and**
-  reflection; M45's nebulosity is reflection-blue; M78 is blue) — i.e. the objects a beginner shoots first.
-  **If it is picked up, the shippable order is:** (1) add a vetted `nebula_class` (`emission`/`reflection`/
-  `both`/`unknown`) to the catalog data, defaulting to `unknown` → silence, with the same
-  agrees-with-its-own-blurb cross-check the v0.276.0 `distance_ly` curation used as its evidence; (2) only
-  then the hue helper and the card line, with `both`/`unknown` never nudging. Step (1) is a data task with a
-  real correctness bar, not a code task — size it as such.
-  A beginner who stacks and auto-edits an emission nebula has **no way to tell whether the colour came out
-  right** — is that grey-green M42 a bad white balance they should fix, or just what it looks like? The app
-  already *knows the object class*: the bundled catalogs carry a `type` field (galaxy / emission nebula /
-  cluster / …) and `seestack/post/target_id.py` already classifies the solved target (emission nebula, etc.),
-  so once a run is plate-solved we know what family it is. It can therefore say, in one plain line on the
-  result/History object-info card, whether the finished picture's dominant colour matches what that family
-  usually shows — and, when it clearly doesn't, nudge toward the existing one-click fix. **Verified genuinely
-  new (grepped this run):** nothing compares a picture's colour against an expected class today — the closest
-  code is the editor's *sky-cast* readout (neutral-background check) and SCNR (green removal), neither of which
-  knows or uses the object type.
-  **Shape:** a pure helper `colour_expectation(object_type, rgb_or_hue) -> ColourNote | None` that (a) maps the
-  handful of confident families to an expected dominant hue — emission/HII nebula → red-pink (Hα), reflection
-  nebula → blue, galaxy/cluster/most else → *no confident expectation* → return `None`; (b) measures the
-  finished picture's dominant hue on the **object** pixels (reuse the editor's existing object-mask + the
-  sky-cast/hue machinery — measure the *stretched, post-SCNR display* image, never the linear stack, since raw
-  OSC is green-heavy by construction); and (c) returns either a reassuring *"The colour looks right for an
-  emission nebula — a warm red-pink glow"* or a gentle, actionable *"Emission nebulae like this usually glow
-  red-pink; yours is coming out green-grey. Try the SCNR (green removal) step, or press Auto-process."* — never
-  the word "wrong". **Beginner bar:** clears it cleanly — a non-expert instantly understands "does my colour
-  look right?", it's phrased in plain language, ships with a sane default (self-hides unless the class has a
-  confident expectation *and* the deviation clears a comfortable margin), points at a one-click fix, and is not a
-  pro knob. **Guardrails against false-nagging (the whole risk):** only the two or three families with a genuinely
-  confident, class-wide expectation ever trigger; require a *strong* deviation (well past ordinary OSC
-  variation) before nudging; measure only the stretched display image so linear green-dominance can't trip it;
-  and default the whole card to the reassuring/absent state, so an honest picture is never told it's off.
-  **Feasibility:** offline, additive, read-only (renders from data the app already has — the solved type + the
-  picture it already displays), pure helper → unit-testable (emission nebula + red picture → reassure; emission
-  nebula + green picture → nudge; galaxy / unknown type → `None`; a mild green tint within margin → reassure,
-  not nag). **Slices —** (a) the pure `colour_expectation` helper + the family→hue table + tests (a shippable
-  Builder run on its own); (b) wire the object mask + display-hue measurement + render the line on the existing
-  object-info card (frontend, gated on presence). **Care:** this must earn a beginner's *trust*, so bias hard
-  toward silence — a single wrong "your colour is off" on a genuinely fine picture is worse than ten correct
-  reassurances are good.
 
 - **NEW IDEA (Builder 2026-08-06, same run) — a beginner can crop the Moon, but there is no way to crop anything
   else.** *(Friendliness — PRIORITY 3; size M; **think before building**.)* The framing crop is disk-shaped by
@@ -3225,6 +3151,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.389.1** — CLOSED BY MEASUREMENT (the Scout's 2026-08-26 #2 idea, unblocked by v0.387.0): **`photometric_normalize` stays off outside a mosaic — star-core SNR gains only +0.16 % on the realistic single-field case with quality weighting on** (+0.39 / +1.22 / +3.33 % as the haze gets extreme; +0.00 % and bit-identical when there is nothing to correct). On a single field every pixel gets the *same* subs, so the spatial step that makes the pass valuable on a mosaic is structurally absent and all it can change is the combine weight — which quality weighting's `transparency_factor` already approximates. Not a default flip on the hot path. **The first fixture inverted the answer to −9.7 %** by scaling the sky noise along with the signal; haze dims the stars, not the sky glow. `tests/test_photometric_single_field.py` (+2) pins the bit-identity and the never-hurts direction. No code changed. Full entry, table and fixture warning in [`SHIPPED.md`](SHIPPED.md).
+- **v0.389.0** — NEW BEGINNER FEATURE (the Scout's 2026-08-26 #4 entry, unblocked by doing the data task its 2026-08-29 stand-down laid out): **"does my colour look right?" — the finished picture's colour, checked against what that object actually looks like.** A vetted `nebula_class` (`emission` / `reflection` / `both` / `unknown`) is curated onto all 28 bundled `type: "nebula"` entries and nothing else, pinned by the blurb cross-check v0.276.0's `distance_ly` pass used (22/2/3/1). `edit/histogram.py::measure_object_colour` is the sibling of `measure_sky_cast` on the *object* population — sky-subtracted, star-core-trimmed, read off the stretched display image — and `seestack/colourcheck.py::colour_expectation` is the pure join to one line, or `None`. **Built to stay quiet:** only two families speak, a nudge needs 3× the lead a reassurance does, there is a dead band of silence between them, `both`/`unknown`/planetary/SNR never speak, and the word "wrong" never appears. A test, not reasoning, caught the σ estimator: a lower-half MAD called 34 % of a pure-noise frame "object"; `median − p15.87` puts it back at ~2 %. Surfaced as the editor histogram's `colour_check` beside the sky-cast line, plus `ObjectInfoOut.nebula_class`. Tests +27. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.388.0** — NEW BEGINNER FEATURE (the Scout's 2026-09-08 "While you were asleep" entry, built as it instructed — the Dashboard *did* already fold most of it, so it shipped as a consolidation rather than a card): **the "Last night" card now says what the app *did* with the night, not only what the sky gave.** New pure `webapp/overnight.py` — `new_pictures_since` (one line per target, newest first, each carrying the frame count of the picture it replaced so "deeper than the 78 it had before" is only said when true) and `needs_a_look` / `newest_scan_summary` (the holds the scan already records — `auto_stack_held_unreadable` missing-files first, then `auto_stack_held_thin` — read from the **newest finished scan only**, so a resolved hold stops being news with no state to go stale). Stamps compared with `activity_calendar.parse_utc`, never as strings (the app writes UTC in two shapes). Additive `RecentStack.is_genuine`, set through the *shared* `pipeline._stack_options_from_run_json` predicate, keeps an editor export from reading as a second picture; `_rollup_stacks_cached` extracts the cache `/api/stats` already owned so the digest costs no second walk over every project. `LastNightCard` gains three pure wording helpers — a missing-files hold reads as something outside the app to go and check, a thin hold as patience. Both lists are empty on a night nothing was stacked (the owner's live `auto_stack` off), so the card renders exactly as before. Tests +17 Python / +13 frontend. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.387.0** — PRIORITY 4 (image quality, and the only ready one that reaches a heavy mosaic user), the READY entry left open by v0.271.0: **a mosaic panel shot entirely through haze is lifted to match its neighbours, measured in the sky the panels share.** New `seestack/stack/overlapgain.py::compute_overlap_gain_scales` runs as a pre-pass at stack setup — each panel's clearest few subs through the stack's own `align.align_one`, block-meaned to a ~400 px coarse map, a median signal ratio per overlapping pair, then one log-scale per panel by least squares, normalised to a median of 1.0 and clamped to `[1/2, 2]`, multiplied into the `{frame_id: scale}` map the accumulators already consume. **NOT `transparency_score`** — v0.271.0 removed that comparison after measuring a 2.23× panel-gain error, because it cannot tell "hazy panel" from "emptier patch of sky". **Measured: the star-flux step across the join goes 38.6 % → 2.3 % on a 0.6× hazy panel, and the recovered scales are 0.774/1.291 = 1.667 = 1/0.6.** The guard that makes it safe on by default was found by a test, not by reasoning: overlapping *footprints* only mean two WCS agree, so on a fixture whose panels overlap while holding unrelated stars the first implementation invented a 2.6× gain — a Pearson correlation across the strip (`MIN_OVERLAP_CORRELATION`) refuses that and cannot be fooled by a gain, which is exactly what correlation is blind to. Every other uncertainty resolves to "change nothing" too: too few shared/signal cells, a ratio outside the clamp, a fit whose pairs disagree, or any exception → `None` → today's stack byte for byte. Provenance stamped as `PANG*` and surfaced as History's "Mosaic panels matched to each other · N panels · brightness lo–hi× · measured in N overlaps". Tests +15 engine / +2 API / +3 vitest; `test_a_wholly_hazy_panel_is_deliberately_left_alone` deliberately rewritten (its fixture cannot carry the new claim). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.386.2** — PRIORITY 3 (friendliness), Scout dogfood find on the **mosaic** target: **the "Is it enough yet?" goal chip printed a mosaic's per-panel-scaled goal as a raw float — `goal ~14.526171875 h (3.63-field mosaic)`.** The verdict sentence beside it already rounded via `readiness.ts::fmtGoal` ("~14.5 h"), but `Target.tsx` printed `readiness.goalHours` unrounded in the chip, so the two disagreed and the chip read like a bug. `fmtGoal` is now exported and used for the chip too (whole number as-is, else one decimal). Frontend-only, one-line behaviour change; verified by the `--mosaic` dogfood screenshot. Tests +1 fail-before (`Target.test.tsx`, a 3.63-field nebula mosaic → `goal ~14.5 h`, and the raw float absent). No config/schema/API/default change.

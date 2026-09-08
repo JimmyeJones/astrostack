@@ -210,6 +210,12 @@ class CatalogObject:
     # drives the "how far did you see?" line (:mod:`seestack.lighttravel`).
     # ``None`` for an entry without a vetted distance (we never guess one).
     distance_ly: float | None = None
+    # Only meaningful when ``type == "nebula"``: which family the glow belongs to
+    # — ``"emission"`` (Hα red-pink), ``"reflection"`` (dust-lit blue),
+    # ``"both"``, or ``"unknown"``. Drives the "does my colour look right?"
+    # sanity note (:mod:`seestack.colourcheck`); ``""`` everywhere else, and
+    # ``both``/``unknown`` deliberately produce no verdict at all.
+    nebula_class: str = ""
 
 
 @dataclass
@@ -384,6 +390,7 @@ def _load_catalog_file(path: Path) -> list[CatalogObject]:
             blurb=o.get("blurb", ""),
             distance_ly=(float(o["distance_ly"]) if o.get("distance_ly") is not None
                          else None),
+            nebula_class=str(o.get("nebula_class", "") or ""),
         )
         for o in raw["objects"]
     ]

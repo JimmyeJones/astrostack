@@ -1994,6 +1994,21 @@ export function EditorView() {
                 ) : null}
               </Group>
             ) : null}
+            {/* "Does my colour look right?" — the same finished image, measured
+                on the *object* pixels and compared against what this object's
+                catalog family actually looks like. The backend returns a line
+                only for a confidently-classified emission/reflection nebula whose
+                colour is clearly right or clearly wrong, so this is absent on
+                almost every picture by design. Read-only advisory. */}
+            {hist.data?.colour_check ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c={hist.data.colour_check.ok ? "dimmed" : "orange"}>
+                  {hist.data.colour_check.text}
+                </Text>
+              </Group>
+            ) : null}
             {hist.data?.errors?.length ? (
               <Alert color="orange" icon={<IconAlertTriangle size={16} />} mt="xs" py={6}>
                 <Text size="xs">
