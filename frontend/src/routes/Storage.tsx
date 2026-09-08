@@ -9,6 +9,7 @@ import { useState } from "react";
 import { api, type TargetStorage } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { sanitizeKeep } from "../components/pruneKeep";
+import { incomingCopyNote } from "../components/incomingCopyNote";
 import { storageHeadroom } from "../components/storageHeadroom";
 import { formatDiskSize } from "../format";
 
@@ -200,6 +201,7 @@ export function StorageView() {
     nightlyBytes: data.disk.nightly_bytes ?? null,
     reclaimableCacheBytes: data.cache_bytes,
   });
+  const incomingNote = incomingCopyNote(data, gb);
 
   return (
     <Stack maw={900}>
@@ -250,8 +252,13 @@ export function StorageView() {
         Nothing here touches your incoming folder. AstroStack only ever <b>reads</b> your original
         subs and copies them — it never moves, deletes or changes a file you dropped in, so
         clearing everything on this page still leaves you able to rebuild your whole library from
-        them. Tidying up that folder is yours to do, and worth having a backup of.
+        them. Tidying up that folder is yours to do.
       </Text>
+      {/* …and the other half of that truth, which the aside above only hinted at:
+          those originals are the only copy there is. Same place, same size, one
+          sentence — driven by the numbers so it reads as a fact about *your*
+          library rather than generic advice. Self-hides on a fresh install. */}
+      {incomingNote ? <Text size="sm">{incomingNote}</Text> : null}
 
       {(data.exports_bytes ?? 0) > 0
         ? <PreparedDownloadRow bytes={data.exports_bytes ?? 0} />
