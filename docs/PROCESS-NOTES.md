@@ -81,6 +81,42 @@ A cache whose whole value is *hit rate* needs at least one test that measures th
 hit through the real entry point; a unit test can only prove it is correct when
 it hits.
 
+**Late in the run a 🔴🔴 landed on `main` and took over, which is the right
+order.** The third external audit filed D1 — Auto cropping every mosaic to its
+panel overlaps — while this run's own work was in its pre-merge suite. A verified
+wrong-result bug on the owner's primary workflow outranks a finished-but-unmerged
+improvement, so: merge what is green, then take the bug. Claiming it took one
+commit and one push *before* reading the code, because two runs picking a fresh
+🔴🔴 in the same hour is exactly the collision the claim board exists for.
+
+**The thing worth carrying forward from D1 is not the fix, it is the fixtures.**
+The rule was wrong for mosaics from the first version of the module, and three
+audits and twenty clean sweeps missed it. The fix itself is one function. But
+**six tests shared a fixture that called a 62 %-of-canvas region a "thin
+single-frame fringe"** — and a large region at a lower depth is not a fringe, it
+is a shallower panel. Every one of those tests passed *because* it asserted the
+bug. So the bug was not merely untested; it was **pinned**. When a fix makes
+several existing tests fail at once, read their fixtures before touching either:
+the question "is this test protecting behaviour, or encoding the defect?" is
+answerable, and here the answer was written in the fixture's own comment
+contradicting its own numbers.
+
+**Two smaller notes from the same fix.** A statistic that reads a *distribution*
+needs an absolute floor as well as a fractional one — on a map of a few dozen
+covered pixels, "8 % of the pixels" rounds down to "one pixel is a plateau", which
+is a statement about the sample size and not about the picture; the floor is what
+let every small and legacy map keep exactly today's behaviour. And the property
+worth *testing* was not the fix but its blast radius: the new reference is always
+at or below the peak, so the mask can only grow — the worst case is leaving fringe
+in, never trimming a panel away. That one test is what makes the change safe to
+merge unattended.
+
+**A harness trap that cost a few minutes.** `git stash` before `git merge
+origin/main` on a branch with uncommitted work does exactly what it says and the
+merge then reports success over a tree missing your changes; the tell was the
+file-changed notices. `git stash pop` after the merge restored it, but the safer
+order is to commit first and merge second.
+
 **One idea closed with a number instead of an argument.** *"Make the difficulty
 split data-driven"* wanted magnitudes added to the bundled catalogs because
 curation "doesn't scale". Running the real resolver over the real catalog:
