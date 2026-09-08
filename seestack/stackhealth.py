@@ -44,8 +44,8 @@ _ECC_ELONGATED = 0.6
 _UNSOLVED_MIN_ACCEPTED = 8
 _UNSOLVED_NOTE_FRACTION = 0.30  # ≥30% of accepted subs unlocated → worth surfacing
 
-# A pixel is "thin coverage" when far fewer frames overlap it than the
-# best-covered region — under a quarter of the peak frame count, the ratio
+# A pixel is "thin coverage" when far fewer frames overlap it than one panel of
+# this picture holds — under a quarter of the panel depth, the ratio
 # :func:`seestack.stack.stacker.coverage_thin_fraction` measures the share with.
 # Needs a few frames at the peak for any of it to mean anything.
 _COVERAGE_MIN_PEAK = 4
@@ -56,10 +56,26 @@ _COVERAGE_MIN_PEAK = 4
 # "1/N ≤ 0.25", which every dithered stack of ≥4 subs passes — and every mosaic,
 # whose canvas corners are uncovered, so ``coverage_min`` is 0. Measured on real
 # ``run_stack`` output: a ±6 px-dithered single field is 0.2–0.6 % thin at 8, 32
-# and 128 subs (stable in N, where the old ratio ran 0.00 → 0.03 → 0.06), an even
-# three-panel mosaic is 0.0 %, and a genuinely lopsided 12/1/1 mosaic is 62 %. The
-# 5 % floor sits an order of magnitude above the honest cases and two below the
-# ragged one.
+# and 128 subs (stable in N, where the old ratio ran 0.00 → 0.03 → 0.06), and an
+# even three-panel mosaic is 0.0 %.
+#
+# **That calibration was fixture-shaped, and the share it judged was measured
+# against the wrong reference until v0.389.2** — the coverage map's *peak*, which
+# on a mosaic is where panels overlap. Nothing here moved (the floor is still
+# 5 %); the number it reads did. Measured on the shapes the owner actually
+# shoots, before → after: the app's own 2x2 sample at 6/6/6/3 subs 22 % → 0.0 %,
+# a 3x3 with 8 % weight jitter 69 % → 0.0 %, a 3x3 at uneven 20–45 subs 47 % →
+# 0.0 %, a 12x8 raster at uneven 15–45 subs 64 % → 0.0 %, the same with jitter
+# 74 % → 0.0 %, a 1x2 at 400 vs 100 subs 47 % → 0.0 %. Each of those fired this
+# note and offered a "Trim border" that keeps the entire canvas, i.e. does
+# nothing about what the note described. The single-field control is unchanged to
+# the digit — the two references are the same number there.
+#
+# A mosaic panel genuinely thinner than its neighbours (the lopsided 12/1/1 this
+# floor was also calibrated on) is therefore no longer *this* note's business,
+# and never was: it is not a border to crop but a place to point the scope next,
+# which the mosaic depth-map card says with a *where*. Do not answer a quiet
+# mosaic by lowering this floor — that would bring back the false alarm above.
 _COVERAGE_THIN_SHARE = 0.05
 
 # …and a canvas has enough *empty* (never-covered) area to be worth explaining
@@ -523,15 +539,21 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # back to the old test: it fired on every stack the app has ever made, so
     # keeping it for old runs would mean knowingly repeating a false alarm. Those
     # runs get the note back the next time they are stacked.
+    # The share is measured against **one panel's** depth, which is the same
+    # reference the "Trim border" this note offers keeps down to — so when the
+    # note fires the action genuinely helps, and when the trim would keep the
+    # whole canvas the note stays quiet. A run stamped under the older
+    # peak-referenced rule is re-derived by ``coverage_backfill`` on the read that
+    # grades it, and drops to None (silent) when its map is gone.
     thin_share = run.coverage_thin_frac
     if (thin_share is not None and run.coverage_max >= _COVERAGE_MIN_PEAK
             and thin_share >= _COVERAGE_THIN_SHARE):
         scored.append((20, HealthNote(
             kind="coverage",
             severity="info",
-            message=(f"About {thin_share * 100:.0f}% of this picture has "
-                     "far fewer frames than the best-covered part, so it's "
-                     "noisier and uneven there. Trim border gives a clean, even "
+            message=(f"About {thin_share * 100:.0f}% of this picture is a thin "
+                     "edge — far fewer frames landed there than on the rest, so "
+                     "it's noisier and uneven. Trim border gives a clean, even "
                      "rectangle."),
             action="trim_border",
         )))
@@ -603,25 +625,48 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # count, so nothing there changes. (Runs predating the honest per-pixel frame
     # count fall back to a weighted coverage, which understates — the direction
     # that offers an info note, never one that hides a real problem.)
+    # …and ``coverage_max`` is still not the number a *mosaic* is blind at. It is
+    # the deepest single pixel, which on a tiled mosaic is the corner where four
+    # panels meet: a 2x2 mosaic three subs deep presents a peak of 12 to a test
+    # whose answer, over nearly the whole canvas, is 3 — so the note stayed silent
+    # on a night-one mosaic where κ-σ could not clip anywhere a beginner is
+    # looking. ``coverage_median_depth`` is the honest number and, unlike a panel
+    # depth, it is *provable*: half the picture is at or below it by construction,
+    # which is exactly what the wording below then claims. Runs recorded before
+    # that column existed (and the min/max path, which has no median) report None
+    # and keep today's peak test to the letter.
     n_combined = run.n_frames_used
     peak_depth = (min(n_combined, run.coverage_max)
                   if run.coverage_max and run.coverage_max > 0 else n_combined)
+    half_depth = (min(n_combined, int(run.coverage_median_depth))
+                  if run.coverage_median_depth and run.coverage_median_depth > 0
+                  else None)
     blind_mode = (run.rejection_mode or "").strip()
     if blind_mode in ("sigma-clip", "drizzle-reject") and n_combined >= 1:
         from seestack.stack.stacker import kappa_min_frames
 
         need = kappa_min_frames(_run_sigma_kappa(run.options_json))
-        if peak_depth < need:
+        # Two claims, strongest first: the peak below the floor means κ-σ could
+        # not clip *anywhere*; the median below it means it could not clip over
+        # at least half the picture. Both are provable from the run's own map.
+        half_blind = (peak_depth >= need and half_depth is not None
+                      and half_depth < need)
+        if peak_depth < need or half_blind:
             # Name the count the user can actually act on. On a mosaic that is
             # not the target's frame count — saying "with only 12 subs" about a
             # 12-frame mosaic reads as nonsense next to a 12-sub badge — so say
             # how deep any one spot is instead, which is the number that has to
             # grow before κ-σ can bite.
-            deep = (f"With only {n_combined} sub{'s' if n_combined != 1 else ''}"
-                    if peak_depth >= n_combined else
-                    f"With no more than {peak_depth} sub"
-                    f"{'s' if peak_depth != 1 else ''} overlapping at any one "
-                    "spot in this picture")
+            if half_blind:
+                deep = (f"Over at least half of this picture no more than "
+                        f"{half_depth} sub{'s' if half_depth != 1 else ''} "
+                        "overlap")
+            else:
+                deep = (f"With only {n_combined} sub{'s' if n_combined != 1 else ''}"
+                        if peak_depth >= n_combined else
+                        f"With no more than {peak_depth} sub"
+                        f"{'s' if peak_depth != 1 else ''} overlapping at any one "
+                        "spot in this picture")
             # Same measurement, two cures. Sigma clipping has a one-switch fix;
             # a drizzled run does not, because Auto outlier removal cannot
             # override drizzle — so name the two things that would actually
@@ -641,7 +686,8 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
                 kind="rejection_blind",
                 severity="info",
                 message=(f"{deep}, "
-                         f"{what} couldn't drop anything — it "
+                         f"{what} couldn't drop anything"
+                         f"{' there' if half_blind else ''} — it "
                          f"needs about {need} frames before a passing satellite or "
                          f"cosmic-ray hit stands out enough to clip. {cure}"),
                 action="restack",

@@ -87,68 +87,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > the target of any "see above" / "see below" in the entries below that no longer resolves
 > here.
 
-- **🟠 VERIFIED (backlog-readiness run 2026-09-08, reproduced on the app's own mosaic sample and on four raster
-  shapes) — "How's my stack?" tells a mosaic owner that up to three-quarters of his picture is a "ragged
-  border" and offers a Trim that would keep all of it: `coverage_thin_fraction` still measures "thin" against
-  the coverage map's PEAK, the exact mechanism D1 just removed from the trim.** *(Same class as D1; found by
-  asking what else measures coverage against the peak. Severity: a wrong, contradictory note on the owner's
-  primary workflow, with a wrong action attached; not a wrong picture. Confidence: **reproduced** with the real
-  functions — numbers below. Size S–M. Checked `docs/SHIPPED.md` for "coverage_thin_fraction" /
-  "_COVERAGE_THIN_SHARE": v0.320.2 introduced the share, v0.377.0 added the companion `uncovered` note and the
-  backfill; neither re-examined the reference.)*
-  **What the owner sees.** Stack the shipped 2×2 mosaic sample (`load_sample(shape="mosaic")`, panels 6/6/6/3
-  subs) and read its health notes: *"About 25% of this picture has far fewer frames than the best-covered part,
-  so it's noisier and uneven there. Trim border gives a clean, even rectangle."* — directly above *"The panels
-  of this mosaic evened out"*. The 25 % is the **3-sub panel**, whole; it is not a border, and post-D1 "Trim
-  border" on that run keeps **92 %** of the canvas (`_trim_rect_for_run` → `(0.022, 0.033, 0.987, 0.987)`), so
-  the offered action does nothing about what the note describes.
-  **The rule.** `seestack/stack/stacker.py::coverage_thin_fraction` (~2094): `count((cov > 0) & (cov < 0.25 ·
-  peak)) / count(cov > 0)`, stamped into `stack_runs.coverage_thin_frac` at stack time (~3471) and backfilled
-  for old runs by `seestack/coverage_backfill.py::backfill_coverage_shares`. On a single field the peak is the
-  interior. On a mosaic the peak is where **four panels meet**, so a quarter of it is *one panel's depth* — and
-  every panel even slightly below the mean, or any panel thinner than the rest, reads "thin" wholesale.
-  `_COVERAGE_THIN_SHARE = 0.05` in `seestack/stackhealth.py` (~63) was calibrated on *"an even three-panel
-  mosaic is 0.0 %"* — a shape with no four-way corner and no weight jitter — which is the fixture-shaped
-  assumption behind this, the same way D1's six tests pinned the bug in a fixture.
-  **Measured with the real functions** (`well_covered_mask` / `largest_covered_rect` post-D1, then
-  `coverage_thin_fraction` on the same map):
-  | shape | D1-fixed trim keeps | thin share reported |
-  |---|---|---|
-  | 2×2 sample, 6/6/6/3 subs (stacked, walk-away options) | 92 % | **25 %** |
-  | 3×3 equal 30 subs + 8 % weight jitter (quality weighting on) | 100 % | **58 %** |
-  | 3×3 uneven 20–45 subs (a multi-night mosaic) | 100 % | **48 %** |
-  | 12×8 raster, uneven 15–45 subs | 100 % | **68 %** |
-  | 12×8 raster, uneven + 8 % jitter | 100 % | **75 %** |
-  | 1×2, 400 vs 100 subs | 100 % | **46 %** |
-  | single field + dithered fringe (control) | trims the fringe | 0.2–0.6 % (unchanged, correct) |
-  Every mosaic row fires the note (`≥ 5 %`) and offers `trim_border`.
-  **Two more consumers of the same number, lower severity, fix in the same pass.** (1) `stackhealth.py` ~607:
-  the κ-σ reach note takes `peak_depth = min(n_combined, run.coverage_max)`; on a mosaic the four-way corner is
-  deep while every panel interior is shallow, so the note stays **silent** on a night-one mosaic whose panels
-  are all below `kappa_min_frames` (the comment there claims the opposite direction). Silent, not false — but
-  the number it should use is the panel depth. (2) `seestack/edit/coverage_trim.py::coverage_is_mosaic`
-  (`MOSAIC_LEVEL_MIN_FRAC = 0.08`, two levels each ≥ 8 % of the covered area) returns **False** for a 3×3 at
-  5 % overlap and for a 12×8 raster with uneven depth (no single level reaches 8 %); it is only the fallback
-  for runs recorded before the stacker persisted `is_mosaic`, so it matters for the owner's *older* runs only —
-  say so in the fix rather than widening it. Also while there: `seestack/render/thumbnail.py:730` still says
-  `stack_detail_mask` uses "the same 'at least min_frac of the **peak**' rule" — a comment lag the Scout noted.
-  **Fix direction.** Measure "thin" against the same reference D1 adopted — `coverage_trim.panel_coverage_level`
-  (the thinnest real panel plateau; on a single field it *is* the peak, so that path is byte-identical) — i.e.
-  `cov < ratio · panel_level`, and make the note say the true thing when it does fire: a **panel** that is
-  thinner than the others is not a border to trim, it is a place to point next — the depth map already knows
-  which one (`seestack/mosaicmap.py::mosaic_depth_map` → the thinnest panel, `aim_hint`), so on a mosaic the
-  note should defer to it (or stay silent and let the `mosaic-depth-map` card speak) rather than offer
-  `trim_border`. Keep the note's ragged-fringe meaning for the single field. **Do not** raise
-  `_COVERAGE_THIN_SHARE` to hide it — that would also hide the genuine lopsided 12/1/1 case it was calibrated
-  on. Old runs carry the wrong stamped number: extend `backfill_coverage_shares` the way v0.377.0 did (re-derive
-  both shares from the coverage map when the stored value predates the fix — a `coverage_shares_version` meta or
-  the run's `engine_version`), so the owner's existing mosaics stop showing the note without a re-stack.
-  **Tests (fail before / pass after).** `tests/test_stack_pipeline.py` or a new `tests/test_coverage_thin.py`:
-  the seven shapes in the table — every mosaic row `< 0.02` thin after, the single-field control unchanged to
-  the digit, the lopsided 12/1/1 case still `> 0.05`; `tests/test_stackhealth.py`: the mosaic sample's run
-  gets no `coverage` note and no `trim_border` action, and the κ-σ note fires on a 2×2 with 3-sub panels and a
-  12-deep corner; `tests/test_coverage_backfill.py`: a run stamped with the old number is re-derived on open.
-
 - **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** ~~No validator
   stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
   resolves inside the raw tree — *not* the owner's current state, but one settings edit away)~~ *(shipped
@@ -3151,6 +3089,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.389.2** — BUG FIX (the 🟠 VERIFIED entry filed 2026-09-08, with its two named companions): **"thin coverage" is measured against a *panel's* depth, not the coverage map's peak — the same mistake D1 removed from the trim.** `coverage_thin_fraction` now references `coverage_trim.panel_coverage_level`, so "How's my stack?" can no longer tell a mosaic owner that 22–74 % of his picture is a ragged border while offering a "Trim border" that keeps the whole canvas (measured on seven shapes: the 2x2 sample 22 % → 0.0 %, a 12x8 raster with uneven depth and weight jitter 74 % → 0.0 %; the single field unchanged to the digit, since the panel level *is* its peak). The level comes off a strided sample capped at 2 M pixels, because `panel_coverage_level` sorts a float64 copy and this runs at stack time on the full canvas. Old runs heal without a re-stack: two additive columns (`coverage_shares_version`, `coverage_median_depth`, no `SCHEMA_VERSION` bump) let `backfill_coverage_shares` **re-derive** a stale share off the map the run already wrote — a single-field run is never marked stale, and a stale mosaic whose map is gone goes quiet in memory only, never losing the row. The κ-σ reach note gains the provable half of A6: `coverage_median_depth` fires it on a mosaic whose panels are shallow but whose four-way corner cleared the threshold, worded as the half of the picture it can prove. `coverage_is_mosaic`'s dense-raster false negative is documented, deliberately **not** widened (legacy-fallback only). Tests +26. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.389.1** — CLOSED BY MEASUREMENT (the Scout's 2026-08-26 #2 idea, unblocked by v0.387.0): **`photometric_normalize` stays off outside a mosaic — star-core SNR gains only +0.16 % on the realistic single-field case with quality weighting on** (+0.39 / +1.22 / +3.33 % as the haze gets extreme; +0.00 % and bit-identical when there is nothing to correct). On a single field every pixel gets the *same* subs, so the spatial step that makes the pass valuable on a mosaic is structurally absent and all it can change is the combine weight — which quality weighting's `transparency_factor` already approximates. Not a default flip on the hot path. **The first fixture inverted the answer to −9.7 %** by scaling the sky noise along with the signal; haze dims the stars, not the sky glow. `tests/test_photometric_single_field.py` (+2) pins the bit-identity and the never-hurts direction. No code changed. Full entry, table and fixture warning in [`SHIPPED.md`](SHIPPED.md).
 - **v0.389.0** — NEW BEGINNER FEATURE (the Scout's 2026-08-26 #4 entry, unblocked by doing the data task its 2026-08-29 stand-down laid out): **"does my colour look right?" — the finished picture's colour, checked against what that object actually looks like.** A vetted `nebula_class` (`emission` / `reflection` / `both` / `unknown`) is curated onto all 28 bundled `type: "nebula"` entries and nothing else, pinned by the blurb cross-check v0.276.0's `distance_ly` pass used (22/2/3/1). `edit/histogram.py::measure_object_colour` is the sibling of `measure_sky_cast` on the *object* population — sky-subtracted, star-core-trimmed, read off the stretched display image — and `seestack/colourcheck.py::colour_expectation` is the pure join to one line, or `None`. **Built to stay quiet:** only two families speak, a nudge needs 3× the lead a reassurance does, there is a dead band of silence between them, `both`/`unknown`/planetary/SNR never speak, and the word "wrong" never appears. A test, not reasoning, caught the σ estimator: a lower-half MAD called 34 % of a pure-noise frame "object"; `median − p15.87` puts it back at ~2 %. Surfaced as the editor histogram's `colour_check` beside the sky-cast line, plus `ObjectInfoOut.nebula_class`. Tests +27. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.388.0** — NEW BEGINNER FEATURE (the Scout's 2026-09-08 "While you were asleep" entry, built as it instructed — the Dashboard *did* already fold most of it, so it shipped as a consolidation rather than a card): **the "Last night" card now says what the app *did* with the night, not only what the sky gave.** New pure `webapp/overnight.py` — `new_pictures_since` (one line per target, newest first, each carrying the frame count of the picture it replaced so "deeper than the 78 it had before" is only said when true) and `needs_a_look` / `newest_scan_summary` (the holds the scan already records — `auto_stack_held_unreadable` missing-files first, then `auto_stack_held_thin` — read from the **newest finished scan only**, so a resolved hold stops being news with no state to go stale). Stamps compared with `activity_calendar.parse_utc`, never as strings (the app writes UTC in two shapes). Additive `RecentStack.is_genuine`, set through the *shared* `pipeline._stack_options_from_run_json` predicate, keeps an editor export from reading as a second picture; `_rollup_stacks_cached` extracts the cache `/api/stats` already owned so the digest costs no second walk over every project. `LastNightCard` gains three pure wording helpers — a missing-files hold reads as something outside the app to go and check, a thin hold as patience. Both lists are empty on a night nothing was stacked (the owner's live `auto_stack` off), so the card renders exactly as before. Tests +17 Python / +13 frontend. Full entry in [`SHIPPED.md`](SHIPPED.md).
