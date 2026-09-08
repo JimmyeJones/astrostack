@@ -14,6 +14,54 @@ Newest first.
 
 ---
 
+## v0.383.1 — 2026-09-08 — a Sun or Moon video stack stops debayering the frames it is about to throw away
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-5fx14v`.)** The wait, not the
+picture: the stacked result is bit-identical either way.
+
+**What it was.** `seestack/video/ffmpeg.py::iter_frames` demosaics a raw (CFA)
+capture as it decodes — correct, and the fix for the owner's "fine mesh" over a
+stacked Sun (v0.347.0) — but it is the expensive part: **~340–375 ms a frame** on
+his real 4,487-frame 1080×1920 solar file. `lucky.stack_video` decodes the capture
+**twice**: pass 1 grades every frame's sharpness, pass 2 keeps the sharpest
+`keep_percent` and averages them. Pass 2's loop was
+`for i, frame in enumerate(iter_frames(...)): if i not in keep_idx: continue` —
+so the demosaic had already been paid by the time the frame was discarded. At the
+default keep percentage that is most of pass 2's ~11 minutes spent preparing
+frames nothing would look at.
+
+**The fix.** `iter_frames` takes `wanted: Collection[int] | None = None`. A frame
+whose index is not in `wanted` is still decoded — the byte framing demands that,
+and the decode command, stride, truncated-tail handling and `finally` kill are
+untouched — but is **not demosaiced**, and is yielded as **`None`**. Yielded, not
+skipped, so the caller's `enumerate` still lines up with the `keep_idx` its own
+first pass built; and `None` rather than the raw array, because an un-demosaiced
+mosaic looks enough like a picture that a caller would eventually stack one.
+`stack_video` passes `wanted=keep_idx` and its loop becomes `if frame is None:
+continue`. Pass 1 is deliberately untouched: it measures sharpness on the colour
+frame's luma, and a raw checkerboard would swamp the Laplacian.
+
+**The one trap.** `_channels_agree` — the measurement that decides a `pal8` stream
+really is a sensor mosaic and not a colourised palette — latched on the *first*
+frame, which under `wanted` may be one nobody asked for. It now latches on the
+first frame off the wire regardless of `wanted` (the test is two array compares;
+only the demosaic is worth skipping), so a capture whose first frame is discarded
+still debayers the kept ones.
+
+**Tests** (+5). `tests/test_video_cfa_mosaic.py`: `stack_video` on a real
+ffmpeg-encoded `pal8` capture calls `_demosaic_frame` **18** times — `n_graded`
+(12) + `n_kept` (6) — where it was 24 (**fails before**); the stacked image is
+`np.array_equal` to the same capture stacked with the old eager decode
+(monkeypatched back in, so the pin is against the real prior behaviour rather than
+a golden array); a kept frame is debayered even when frame 0 is discarded.
+`tests/test_video_lucky.py`: `wanted` yields `None` at exactly the unwanted
+indices and the real frames elsewhere, and its indices are the *strided* stream's,
+which is the numbering `keep_idx` lives in.
+
+Engine-only; no config, schema, API-shape, on-disk or default change.
+
+---
+
 ## v0.383.0 — 2026-09-08 — the Storage page says, with your own numbers, that the subs in `incoming/` are the only copy
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-niew4h`.)** The READY entry
