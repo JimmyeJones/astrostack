@@ -378,6 +378,21 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **LEAD, measured while shipping the v0.395.0 rename offer (Builder 2026-09-08) — a *mosaic* target is
+  usually too far off its own object to be offered a name, because the offer is gated on the union centre.**
+  *(Pillar: autonomy/friendliness — PRIORITY 2–3; size S; **do not "fix" this by widening the cone**.)*
+  `suggested_target_rename` uses `confident_object_title`'s 0.25° title-grade cone against
+  `TargetEntry.ra_deg/dec_deg`, which for a mosaic is the centre of the **union canvas**, not of the object.
+  Measured on the bundled 2×2 mosaic sample: its centre sits **0.31°** from M 42, so a folder-named mosaic
+  gets no offer at all while the single field of the same object gets one. That is the *safe* failure and is
+  why it shipped this way — but the owner is a heavy mosaic user, so the surface that helps him most is the
+  one that mostly stays quiet. **The honest shape, if it is ever worth doing, is not a bigger radius** (which
+  would start claiming neighbours for single fields too): it is to ask whether the solved centre falls
+  *inside the object's own extent* — the catalog already carries `size_arcmin`/`size_minor_arcmin`, and
+  `framing.py` already reasons in those units — so a 2×2 of M 42 qualifies on the object's 85′ span while a
+  neighbour 0.5° away still does not. Needs a real mosaic's centre offsets to validate the "inside its
+  extent" rule before it decides a name; the synthetic sample gives exactly one data point.
+
 - **NEW IDEA (Builder 2026-09-03, the cost the v0.335.0 endpoint knowingly accepted) — `/rejection-outlook`
   pays for a whole `estimate_stack` to learn two numbers.** *(Pillar: performance — size XS; **only if the
   note is ever un-gated**, see the entry two above.)* It needs the accepted+solved count and the mosaic's
