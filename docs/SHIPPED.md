@@ -14,6 +14,132 @@ Newest first.
 
 ---
 
+## v0.390.0 — 2026-09-08 — SHIPPED: the editor opens on the good picture, not on a nudge to press one button (`Editor.tsx` first-open Auto seed)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-ldlc6c`.)** The ⭐ READY —
+GATE OPEN entry the owner approved on 2026-09-07, taken in the order he fixed
+(D1 → this → the `auto_stack` flip).
+
+**What changed.** A beginner opening a picture that has never been edited used to
+get the flat default stretch and a grape nudge — *"New to this? Let Auto-process
+build a good starting recipe…"* — and the good picture was one click away, the
+one click a beginner does not know to make. The editor now makes it: on a run
+with **no saved recipe**, first open runs `…/editor/auto` (plus its best-effort
+analysis) and opens on that result, with the usual "What Auto-process did" note
+and a violet *"Started you off with Auto-process — Undo to see the plain stack."*
+
+**Three cases, decided once, in this order** (`Editor.tsx`, the seed effect,
+which now lives below the mutations because it drives one):
+1. the run has a saved recipe → open on it, byte-for-byte as before;
+2. it has none, but the user has a look of **their own** on offer — the previous
+   run's edit, or their saved default — → open empty with the nudge, so those
+   one-click buttons keep winning. **This is wider than the entry asked for and
+   deliberately so:** the entry named only `prevRecipe`, but both of those
+   buttons live *inside* the nudge an Auto seed replaces, so seeding past the
+   saved default would have removed a feature (AGENTS.md §1's hard constraint);
+3. neither → seed with Auto.
+
+Nothing is seeded until the decision is made — `seeded` gates every preview and
+histogram query, so a seed-then-reseed would render the plain stack and flash.
+
+**Why it is safe to do unasked.** It fires only where `ops.length === 0`, so it
+can never overwrite an edit; `resetOps([])` then `setOps(built)` puts it exactly
+**one Undo** from the plain stack (and the `resetOps` matters — navigating from
+another run leaves that run's recipe in `ops` until the seed clears it); nothing
+is persisted without a Save, and `build_auto_recipe_for_run` still never
+persists; `seedKey` is the **empty** recipe, because that is what the run opened
+with. A failed Auto call falls through to today's empty pipeline plus nudge with
+**no** red error — a user who asked for nothing must not be shown a failure. It
+is a separate `autoSeed` mutation rather than a flag on the button's, so it
+cannot claim the button's wording or its error handling; the two share
+`fetchAuto` and a new `applyAutoResult` so they cannot drift.
+
+**The gate, re-measured rather than trusted.** The entry's bar is that the seeded
+first view of the **mosaic** sample keeps ≥ 90 % of the canvas. Stacked fresh
+(`load_sample(shape="mosaic")`, 6/6/6/3 subs, walk-away options) and read through
+`routers/editor._trim_rect_for_run`: `(0.022, 0.0325, 0.9868, 0.987)` —
+**92.1 % kept**, the ragged edge only. `autoCropArg` is `undefined` on an
+untouched editor, i.e. "use the library's saved setting", which is what the
+button sends and what the seed must not guess at.
+
+**Tests** (`Editor.test.tsx`, +6 net): the seed runs without a click and exactly
+once; it is one Undo from the plain stack *and its nudge*; a failed seed shows
+the nudge and no error; a saved recipe is never touched; the previous-run edit
+and the saved default each stand it down. The old *"nudges a first-timer with an
+empty pipeline toward Auto-process"* pinned the first view this change is about
+— **rewritten deliberately**, into the seeded view plus the nudge on the two
+paths that still show it, never weakened. One classification test lost its click
+for the same reason.
+
+**One thing the entry asked for that does not exist:** it says a seed should
+trigger "the unsaved-changes guard". The editor has no navigation guard — no
+`useBlocker`, `usePrompt` or `beforeunload` anywhere in `frontend/src` — so there
+was nothing to hook. `seedKey` is set to the empty recipe, which is the signature
+such a guard would need; building the guard itself is separate work and is filed
+back under Ideas.
+
+Frontend-only. No config, schema, API-shape or on-disk change; the default flip
+is the owner's own decision, recorded 2026-09-07.
+
+---
+
+### The entry as it was filed
+
+- **⭐ READY — GATE OPEN (D1 shipped as v0.382.4; verified on the mosaic sample 2026-09-08). ✅ APPROVED BY
+  THE OWNER 2026-09-07: auto-seed the editor with the Auto recipe on first open, on by default.** *(Pillar:
+  editor — PRIORITY 1; size M, frontend plus one endpoint check; take this **before** the `auto_stack` flip
+  under "Autonomy" — the order the owner fixed is D1 → this → auto-stack. Re-checked against the current code
+  by the backlog-readiness run 2026-09-08: every anchor below still holds. Checked `docs/SHIPPED.md` /
+  `PROCESS-NOTES.md` for "auto-seed" / "seeded": the 2026-07-04 prototype is on no branch (only `main` exists
+  on the remote), so this is a rebuild from the sites below, not a merge.)*
+  **Why the gate is open, verified rather than assumed.** The seed *is* `…/editor/auto`, and before D1 that
+  recipe ended, on any mosaic, in a `geometry.crop` keeping as little as 4 % of the canvas. On the shipped 2×2
+  mosaic sample (`webapp/sample_data.load_sample(shape="mosaic")`, 6/6/6/3 subs, one hazy panel), stacked with
+  the walk-away options and read through `routers/editor._trim_rect_for_run`, Auto's crop is now
+  `(0.022, 0.033, 0.987, 0.987)` — **92.1 % of the canvas kept**, the ragged edge only. The Scout's
+  `agent-dogfood.sh --mosaic --editor` pass the same day measured the same 7.9 % trim through the browser.
+  `coverage_trim.panel_coverage_level` also holds on a 3×3 at 5 % overlap and a 12×8 raster with uneven,
+  weight-jittered panel depths (100 % kept on all of them). The seeded first view of a mosaic is therefore the
+  whole picture, which is what the gate was for.
+  **The problem, in the owner's terms.** A beginner opens a picture in the editor for the first time and gets
+  the flat default stretch plus a grape-coloured nudge ("New to this? Let Auto-process build…"). The good
+  picture is one click away, and the click is the one a beginner doesn't know to make.
+  **Code sites.** `frontend/src/routes/Editor.tsx`: `saved = useQuery(["recipe", safe, rid], api.getRecipe)`
+  (~130) and `savedIsEmpty` (~137); the seed effect `if (saved.data && !seeded) { resetOps(ops0);
+  setSeedKey(JSON.stringify(ops0)); setSeeded(true) }` (~296) — **this is the place**; the `auto` mutation
+  (~721: `api.autoProcess(safe, rid, autoCropArg)` + `api.autoAnalysis(...)`, then `setOps(built)`,
+  `setAutoSummary` / `setAutoValues` / `setAutoCause`, `setAutoKey`); the empty-pipeline nudge (~2149,
+  `ops.length === 0`); `prevRecipe` (~138, the previous run's saved edit offered as a carry-over);
+  `hooks/useUndoable.ts` (`resetOps` clears history, `setOps` pushes a step). `frontend/src/api/client.ts::
+  autoProcess`. `webapp/routers/editor.py::build_auto_recipe_for_run` — returns the recipe and **never persists
+  it**; keep it that way.
+  **Shape.** In the seed effect: when `saved.data` resolves with `ops.length === 0` **and** `prevRecipe` has
+  nothing to offer (`count === 0` — the carry-over of a previous edit is the better seed and must keep
+  winning), call `api.autoProcess` + `api.autoAnalysis` once, hold the editor on its existing loader until they
+  resolve (the preview queries are already gated on `seeded`), then `resetOps([])` followed by `setOps(built)`
+  so the seed is **one Undo away from the empty recipe**; set the three Auto sentences and `autoKey` exactly as
+  the button does (so "What Auto-process did" shows and drops when the recipe diverges); set `seedKey` to the
+  **empty** recipe so the unsaved-changes guard treats the seed as unsaved work — it is: nothing is persisted
+  unless the user presses Save, a saved recipe is never overwritten because the seed only fires on
+  `ops.length === 0`, and a silent leave would drop a look the beginner just saw while the hero keeps showing
+  the plain stack. On a failed Auto call fall through to today's empty pipeline plus nudge — never block the
+  editor on it; the nudge also stays for a user who Undoes the seed. One notification: *"Started you off with
+  Auto-process — Undo to see the plain stack."* **Not a setting**: the owner said on by default.
+  **Traps.** (1) `autoCropArg` is `undefined` on an untouched editor (= the saved `auto_crop_border`) — pass it
+  the way the button does. (2) `Editor.test.tsx` "nudges a first-timer with an empty pipeline toward
+  Auto-process" (~1069) pins the *current* first view; **rewrite it deliberately** to assert the seeded view and
+  the nudge on the failure path — never weaken it. (3) `scripts/dogfood_editor.mjs` (`--editor`) adds every op
+  onto whatever recipe it opens on; a seeded recipe changes its baseline — run `agent-dogfood.sh --mosaic
+  --editor` and record the numbers. (4) The verification above is the bar: the seeded first view of the
+  **mosaic** sample must keep ≥ 90 % of the canvas; a `--editor` drive on the 6-frame field alone does not count.
+  **Tests** (`Editor.test.tsx`): opening a run with an empty saved recipe calls `autoProcess` once and shows its
+  ops plus "What Auto-process did" (**fails today**); a run with a saved recipe never calls it; a run with a
+  previous-run recipe on offer is not auto-seeded (the carry-over button still shows); Undo after the seed gives
+  an empty pipeline; Save persists the seeded ops; an `autoProcess` failure shows the old nudge and no error
+  modal; leaving after a seed triggers the unsaved-changes guard.
+
+---
+
 ## v0.389.2 — 2026-09-08 — FIXED: "thin coverage" is measured against a panel's depth, not the map's peak (`coverage_thin_fraction`, `coverage_median_depth`, `coverage_shares_version`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-ldlc6c`.)** The 🟠 VERIFIED bug
