@@ -18,6 +18,57 @@ is a queue.
 
 ---
 
+## 2026-09-08 (Builder, branch `claude/sweet-babbage-91fx05`) — dogfood CLEAN on both samples with `--editor --mosaic`; and the fixture inverted an engine measurement for the fourth time
+
+**Dogfood record (CLEAN).** `scripts/agent-dogfood.sh --editor --mosaic`, run
+because this run touched the editor and AGENTS.md §7 asks for both flags then.
+Page probe: **nothing overflowing, no console errors**, tallest page still the
+phone Target page at **3,040 px** (3,014 px at v0.338.1 — 26 px, i.e. noise, and
+this run added no always-on surface). Mosaic trim: **Auto would cut 7.9 % of the
+canvas**, unchanged from the v0.386.0 baseline and well under the ~15 % that
+would be D1-shaped. Editor drive: **stopped after 4 of 21 ops** (Stretch, Curves,
+Saturation, SCNR — each re-rendered the live preview with no console error and no
+failed request), because it turns out to cost **~3.5 minutes per op** on this
+container and the flag's own comment ("a few minutes") badly understates that:
+21 ops × 2 samples is ≈ 2.5 hours, which does not fit inside a run that also owes
+`main` a full suite. **Budget for that if you use `--editor`** — either run it as
+the whole of a run's verification, or expect to truncate it. What the four ops
+did establish is that nothing about the drive is broken and the preview loop is
+healthy; the untouched 17 are covered by the 3,396-test frontend suite.
+
+**End-to-end check of what this run shipped, on the running app** (worth
+recording because the *silence* is the feature's designed default and is
+indistinguishable from "it never runs"): `/identify` on the field sample returns
+`nebula_class: "emission"`, the histogram endpoint carries the `colour_check`
+key, and `measure_object_colour` on both real proxies returns `measured: True`
+with `balance` **+0.004** (mosaic) and **−0.005** (field). Those land inside the
+deliberate dead band, so the note correctly says nothing — the bundled samples'
+stars are grey by construction, so there is no confident colour claim to make
+about them. Anyone wanting to *see* the line rendered needs a picture with real
+colour; the wiring is proved by the API probe plus the monkeypatched webapp
+tests, not by the sample.
+
+**The lesson worth keeping, and it is the fourth recording of it.** The
+single-field photometric measurement (v0.389.1) came out at a consistent
+**−9.7 % SNR** — a clean, reproducible, four-configuration result saying the pass
+actively hurts — and it was **entirely the fixture**. Hazing a sub with
+`sky + (pixel - sky) * factor` scales the sky *noise* by the factor too, because
+noise rides on that same difference; every hazy sub came out proportionally
+quieter, so after gain-matching all frames had identical signal *and* identical
+noise and the correct `1/s²` combine weight became the wrong weight. Hazing the
+**stars only** flipped the sign to **+0.16 … +3.33 %**, and the unweighted
+extreme then landed within 0.1 % of the closed-form inverse-variance prediction —
+which is what said the second fixture was the right one.
+
+This file already records three of these (A1's scene, the 200-px sinusoid, and
+the background-mesh floor's structured sky). What is new here is the *tell*: the
+first result disagreed with a closed-form prediction and the run went looking for
+why. **Work out what the answer should be before running the fixture.** A
+measurement with no prediction to disagree with cannot catch its own fixture, and
+a wrong fixture does not look wrong — it looks like a finding.
+
+---
+
 ## 2026-09-08 (Builder, branch `claude/sweet-babbage-wvv6ff`) — collision #13: two Builders built the overlap gain in the same hour, and the second threw its copy away
 
 **What happened.** This run took two tasks. The first — the Scout's "While you
