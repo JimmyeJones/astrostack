@@ -14,6 +14,7 @@ from seestack.io.ingest import find_fits_files
 from seestack.io.library import Library
 from seestack.io.project import REJECT_REASON_SEESTAR_OUTPUT, FrameRow, Project
 from seestack.io.scanner import (
+    ScanResult,
     SkippedOutputFolder,
     _apply_seestar_convention,
     _ingest_into_target,
@@ -152,6 +153,86 @@ def test_apply_seestar_convention_sibling_skip_fires_for_true_sibling():
     )
     # M31_sub -> "M31"; the sibling bare "M31" output is skipped.
     assert [n for n, _ in units] == ["M31"]
+
+
+def test_apply_seestar_convention_skips_another_programs_working_folder():
+    """``batch_stack_tmp`` has no ``_sub`` sibling, so before v0.393.0 it fell
+    through to "ingest unchanged" and became a junk target of another stacking
+    program's half-finished intermediates. Owner-decided 2026-09-08: skip it at
+    scan time. Fails before — the folder came back as a unit."""
+    units = _apply_seestar_convention(_fake("M 31_sub", "batch_stack_tmp"))
+    assert [n for n, _ in units] == ["M 31"]
+
+
+def test_the_skipped_working_folder_is_reported_so_it_can_be_brought_back():
+    """A silent skip is not recoverable: the report is where the "bring it in"
+    button lives. So the folder lands in ``skipped_out`` labelled with the rule
+    that skipped it — a temp folder is not "your Seestar's own picture", and one
+    sentence cannot honestly describe both."""
+    skipped: list[SkippedOutputFolder] = []
+    _apply_seestar_convention(
+        [("batch_stack_tmp", [Path("/inc/batch_stack_tmp/a.fit"),
+                              Path("/inc/batch_stack_tmp/b.fit")])],
+        parents=["/inc"], skipped_out=skipped,
+    )
+    assert len(skipped) == 1
+    assert skipped[0].name == "batch_stack_tmp"
+    assert skipped[0].reason == "temp_folder"
+    assert skipped[0].n_files == 2
+
+
+def test_a_working_folder_is_reported_even_when_it_holds_only_device_pictures():
+    """The device-output skip can be *certain* it is right, so it stays quiet
+    when every file is accounted for. A name-pattern skip is a guess about
+    another program's folder, so it is always mentioned — otherwise a folder
+    that happens to share the name could never be brought back in from the UI.
+    Fails before: ``unvouched_skips`` filtered on ``n_unvouched > 0`` alone."""
+    result = ScanResult(root="/inc")
+    result.skipped_output_folders.append(SkippedOutputFolder(
+        name="batch_stack_tmp", parent="/inc", n_files=3, n_device_output=3,
+        reason="temp_folder"))
+    result.skipped_output_folders.append(SkippedOutputFolder(
+        name="M 31", parent="/inc", n_files=3, n_device_output=3))
+    assert [s.name for s in result.unvouched_skips] == ["batch_stack_tmp"]
+
+
+def test_the_working_folder_skip_is_exact_names_not_a_pattern():
+    """AGENTS.md §1: no blind guessing on the on-by-default ingest path. A real
+    folder someone named badly must still ingest."""
+    units = _apply_seestar_convention(
+        _fake("NGC 7000_tmp", "batch_stack_tmp2", "My batch_stack_tmp"))
+    assert [n for n, _ in units] == [
+        "NGC 7000_tmp", "batch_stack_tmp2", "My batch_stack_tmp"]
+
+
+def test_the_working_folder_skip_is_case_insensitive_like_every_other_name_test():
+    units = _apply_seestar_convention(_fake("Batch_Stack_TMP", "M 42"))
+    assert [n for n, _ in units] == ["M 42"]
+
+
+def test_a_scoped_scan_still_brings_the_working_folder_in(tmp_path):
+    """The owner's condition on saying yes: *"the owner must be able to ingest
+    it anyway if a future folder happens to share the name"*. The report's
+    "bring it in" posts the folder back as a scoped scan, and that path takes the
+    folder as the unit without consulting its name — so the override needs no
+    special case, but it does need pinning."""
+    inc = tmp_path / "incoming"
+    scratch = inc / "batch_stack_tmp"
+    scratch.mkdir(parents=True)
+    for i in range(2):
+        write_seestar_fits(scratch / f"Light_{i:03d}.fit", seed=i)
+    lib = Library.open_or_create(tmp_path / "lib")
+    try:
+        # The ordinary whole-incoming scan walks past it now...
+        scan = scan_and_organize(lib, inc, copy_to_cache=False)
+        assert [t.name for t in scan.targets] == []
+        assert [s.name for s in scan.unvouched_skips] == ["batch_stack_tmp"]
+        # ...and pointing a scan at the folder itself still brings it in.
+        scoped = scan_and_organize(
+            lib, scratch, copy_to_cache=False, single_target=True)
+        assert [t.n_frames_added for t in scoped.targets] == [2]
+    finally:
+        lib.close()
 
 
 def test_classify_junk_video_by_target_name():

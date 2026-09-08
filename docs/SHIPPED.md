@@ -14,7 +14,7 @@ Newest first.
 
 ---
 
-## v0.393.0 — 2026-09-08 — PRIORITY 3 (enjoy + share): the life list becomes one shareable picture (`seestack/lifelistcard.py`, `GET /api/life-list/grid.jpg`)
+## v0.394.0 — 2026-09-08 — PRIORITY 3 (enjoy + share): the life list becomes one shareable picture (`seestack/lifelistcard.py`, `GET /api/life-list/grid.jpg`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-9wjrt9`. Slice (iii) of the
 life-list follow-ups filed 2026-08-27 — the last one open; (i) shipped v0.373.0
@@ -145,6 +145,88 @@ href/download and copy, and the offer hidden on a fresh install).
   * **(iii) Share the grid.** The existing share-card machinery (`ShareYourSkyCard` / `sharePictureText`)
     renders a keepsake; a "my Messier grid so far" image is the same shape and is the single most
     shareable artefact the app could produce. Largest of the three; do it last.
+
+---
+
+## v0.393.0 — 2026-09-08 — the owner's Q5 answer, shipped: another program's working folder is skipped at scan time (`scanner._apply_seestar_convention`, `components/skippedFolderCopy.ts`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-lso4r6`. The one open entry in
+"Bugs (fix these first)" that nobody could start, because it was a judgement call
+on the on-by-default ingest path — answered by the owner the same day:
+*"skip folders named `batch_stack_tmp` at scan time? → YES, skip."*)**
+
+**What it does.** `batch_stack_tmp` is another stacking program's scratch
+directory, present in the owner's real `\\TRUENAS\astro` listing and confirmed not
+created by this app. It has no `_sub` sibling, so it fell through
+`_apply_seestar_convention`'s "any other bare folder → ingest unchanged" and
+became a target of somebody else's half-finished intermediates. It is now skipped,
+by **exact name** against the existing `_TEMP_FOLDER_NAMES` — the entry's own
+condition, so the scan-time rule and the v0.319.6 *cleanup* verdict cannot
+disagree, and a real folder someone merely named badly (`NGC 7000_tmp`,
+`batch_stack_tmp2`) still ingests.
+
+**Not silent — and that is the load-bearing half.** A skip nobody is told about
+cannot be undone from the UI, which is exactly why this was filed rather than
+blind-added ("skipping is not reversible from the UI the way a nudge is"). So a
+temp-folder skip lands in `ScanResult.unvouched_skips` **whatever its files are
+named**, unlike the device-output skip beside it:
+
+- the device-output rule can be *certain* it is right — the device names its own
+  pictures — so staying quiet when every file is accounted for is honest;
+- a name-pattern guess about **another program's** folder cannot be certain, and
+  the report is where the one-click "bring it in" button lives.
+
+**The override needed no new code, but it did need pinning.** The report posts the
+folder back as a *scoped* `POST /api/scan`, and `_scan_one_folder` takes the folder
+as the unit without consulting its name at all — that is its documented meaning
+("the caller is overriding a skip, so the folder's *name* has already stopped
+meaning what it means everywhere else"), not a special case for this rule. Two
+tests pin it, one at the engine and one through the API, because a rule that
+cannot be overridden is a different feature from the one the owner agreed to.
+
+**The copy, which is where the real work was.** Both surfaces that describe a
+skipped folder — the Jobs page's per-scan alert and the Library's standing
+`SkippedFoldersCard` — said only one thing: *"a folder named the same as one of
+your `_sub` folders is normally the finished picture your Seestar made on the
+scope"*. Said of a scratch directory that is a plain untruth. New
+`frontend/src/components/skippedFolderCopy.ts` owns the wording for both (the
+`fullres.ts` / `removed.ts` pattern), and the two surfaces keep **different**
+titles on purpose: the Jobs alert reports what a scan did, while the card answers
+*"are some of my subs missing from my pictures?"* — the right question for the old
+rule and the wrong one for this one, where nothing of the owner's is missing at
+all. Every device-output sentence is unchanged to the character.
+
+**Upgrade-safe (§9).** One additive, defaulted `reason` on
+`SkippedOutputFolder`, on the remembered JSON record, and on `SkippedFolderOut`.
+A record written by an older build, an older backend that sends no field, and an
+unrecognised future value all read as `device_output` — the only case that build
+could produce — rather than being dropped or mislabelled. No schema bump, no
+on-disk change, no endpoint removed or renamed. Nothing under `incoming/` is
+touched: this makes the scanner read *less*, never write (§10). A library that
+already ingested such a folder keeps it, and the existing v0.319.6 cleanup nudge
+still offers to remove it — nothing is deleted on upgrade.
+
+**Tests (+18).** Engine (6): the folder is skipped; it is reported with its
+reason; it is reported even when it holds only device pictures (fail-before:
+`unvouched_skips` filtered on `n_unvouched > 0` alone); exact names not a pattern;
+case-insensitive like every other name test; and a scoped scan still brings it in.
+Webapp (4): the reason on the wire and in the remembered record, the bring-it-in
+round trip going quiet afterwards, and both upgrade directions of the defaulted
+field. Frontend (8): the pure copy module, plus one Jobs case and two card cases
+asserting the scratch directory is no longer described as the Seestar's own
+picture while the device-output wording is untouched. Five of the six engine tests
+and both webapp behaviour tests fail before.
+
+**The entry as filed, for the record:**
+
+- **🟡 OPEN, THE OTHER HALF OF THE ENTRY ABOVE — a scan-time skip for another program's temp folder.**
+  `batch_stack_tmp` has no `_sub` sibling, so it still *ingests* (as of v0.319.6 it is merely offered for
+  cleanup afterwards). *(Severity: low — one junk tile, now self-clearing via the nudge. Confidence: HIGH,
+  from the owner's real `tree`.)* **Deliberately left for a decision rather than blind-added:** a scan-time
+  name blocklist is a judgement call on the on-by-default ingest hot path, and skipping is not reversible from
+  the UI the way a nudge is. If it is ever built it must reuse `_TEMP_FOLDER_NAMES` rather than inventing a
+  second list. Size XS — but the *caution*, not the code, is why it is still here. Low value now that the
+  nudge clears the tile in one click.
 
 ---
 
