@@ -14,6 +14,181 @@ Newest first.
 
 ---
 
+## v0.387.0 — 2026-09-08 — a mosaic panel shot through haze is lifted to match its neighbours, from the sky they share
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-xm81q4`.)** The READY
+image-quality entry sharpened by the 2026-09-07 readiness run and left open by
+v0.271.0 — the only ready image-quality item that reaches a heavy mosaic user.
+
+**The problem, in the owner's terms.** One panel of his mosaic was shot on a
+hazier night than the rest. It comes out uniformly dimmer, and the finished
+picture shows it as a darker tile with a step along the join.
+`photometric_normalize` (auto-on for mosaics since v0.271.0) cannot fix it: it
+gain-matches each sub against **its own panel's** median, and a panel whose subs
+are *all* hazy is its own median. `level_by_coverage` and the final gradient pass
+cannot either — they remove *additive* sky offsets, and haze is multiplicative on
+the signal. `tests/test_photometric_mosaic_auto.py` pinned that gap by name.
+
+**The signal that can: the overlap.** Adjacent panels image the *same* sky where
+they overlap, so the ratio of sky-subtracted signal there — panel A over panel B —
+is an honest, pointing-independent gain ratio. That is deliberately **not**
+`transparency_score`, which v0.271.0 removed for comparing panels after measuring
+a **2.23× relative panel gain error** on two identically-exposed panels whose only
+difference was their star fields.
+
+**What shipped.** New `seestack/stack/overlapgain.py::compute_overlap_gain_scales`
+runs as a cheap pre-pass at stack setup, gated on `is_mosaic_canvas` and on
+`pointings.pointing_groups` splitting soundly — the same gate the photometric,
+weighting and grading paths already share:
+
+1. Each panel's clearest few subs (`MAX_FRAMES_PER_PANEL = 5`, ranked by
+   `transparency_score` **within** the panel) go through the stack's own
+   `align.align_one` with the run's calibration/background/hot-pixel options
+   bound, so the pre-pass measures the pixels the stack will actually combine.
+2. Each aligned window is **block-meaned** into a coarse per-panel luminance map
+   (`_TARGET_LONG_EDGE_PX = 400`; a 3494×2470 nine-panel canvas costs ~1 MB a
+   panel, so the stack's memory bound is untouched). Block means, not a coarse
+   reprojection — a star *sampled* at a coarse grid point is a lottery.
+3. Per pair: prove the strip is the same sky, subtract each side's own robust
+   sky, keep cells above 4σ on **both** sides, take the median ratio.
+4. One log-scale per panel by least squares over the pair graph, normalised so
+   the **median panel scale is 1.0** (overall brightness does not move) and
+   clamped to `[1/2, 2]`. The scale multiplies into the same `{frame_id: scale}`
+   map the accumulators already consume, so nothing downstream changed.
+
+**The guard that makes it safe to leave on — found by a test, not by reasoning.**
+Overlapping *footprints* only mean two WCS solutions claim the same patch; a
+mis-solved panel claims a patch it never pointed at. Run against
+`test_photometric_mosaic_auto`'s fixture (which draws a fresh star field per
+frame, so its panels overlap while holding unrelated stars) the first
+implementation measured **2.6×** between two equally-exposed panels and applied a
+28 % step — the manufactured panel grid this pass exists to prevent. A Pearson
+correlation across the shared strip (`MIN_OVERLAP_CORRELATION = 0.5`) settles it
+and **cannot be fooled by the thing being measured**: correlation is blind to
+gain, so a genuinely hazy panel still passes while unrelated sky does not.
+
+**Fail neutral, never fail guessy**, at every step: a pair with too few shared or
+signal cells is dropped, a pair that doesn't correlate is dropped, a pair whose
+ratio is outside the clamp is dropped rather than clamped (a panel is not
+credibly 5× its neighbour), a panel that loses every pair keeps 1.0 (lstsq's
+minimum-norm solution gives each connected component its own gauge), a fit whose
+pairs disagree by >1.25× stands the whole pass down, and any exception logs and
+returns `None` — the stacker then applies nothing, i.e. today's behaviour byte for
+byte. Panels that already agree to within 0.1 % carry no scale map at all.
+
+**Measured, on a fixture that can carry the claim.** The existing mosaic fixture
+cannot: its panels' overlap holds unrelated stars. So `tests/synth.py` gained
+`star_catalog` + `make_shared_sky_field` (the test-side twin of what
+`webapp.sample_data` shipped for the mosaic sample in v0.386.0), and
+`tests/test_overlap_panel_gain.py` builds panels as windows onto **one** catalog.
+With panel 2 at 0.6× signal: the star-flux step across the join is **38.6 %
+before and 2.3 % after**, and the measured panel scales are 0.774 / 1.291 — a
+ratio of 1.667, i.e. 1/0.6 to three figures. Measured on *signal*, never on
+`SEAMRES` (which measures a sky step and reads ~0 either way).
+
+**Confirmed on a fixture this change did not write.** Stacking the mosaic sample
+that shipped in v0.386.0 — four panels, one of them deliberately shot "through
+haze" at ×0.85 signal on a +8 % sky — the pass measured **six** overlap pairs
+(the diagonals included, so the loop-consistency check had something to check and
+dropped nothing) and recovered panel scales of **[0.999, 1.174]**. The exact lift
+that panel needs is 1/0.85 = 1.176.
+
+**Provenance, because nobody ticked a box.** `PANGAIN`/`PANGNPAN`/`PANGNPAR`/
+`PANGMIN`/`PANGMAX` are stamped on the master, parsed by
+`GET /api/targets/{safe}/stack-runs/{id}/info` into a `panel_gain` object kept
+**separate** from `photometric` (different measurement, different evidence), and
+rendered by `History.panelGainSummaryText` as *"Mosaic panels matched to each
+other · 4 panels · brightness 0.86–1.31× · measured in 4 overlaps"* — it says
+where the evidence came from, so a beginner can see it was measured.
+
+**Upgrade-safe (§9):** one new engine module, one new `StackOptions` field
+(`panel_gain_match`, with a form descriptor so the drift test passes), five new
+FITS keys, one additive response field, one new frontend line. Read only on a
+mosaic canvas — a single-field stack ignores the option entirely. No config key,
+no schema, no on-disk change, no existing default flipped, no response field
+renamed. An old run record with no `panel_gain_match` key takes the dataclass
+default; an old master with no `PANG*` cards reads as "the panels were left as
+shot", which is what they were.
+
+**Tests: +15 engine (`tests/test_overlap_panel_gain.py`), +2 API, +3 vitest.** The
+hazy-panel before/after fails on `main`. `test_a_wholly_hazy_panel_is_deliberately_left_alone`
+was rewritten as `test_transparency_scores_alone_never_reach_across_the_join` — it
+pinned the behaviour this entry changes, and its fixture cannot carry the new
+claim, so it now switches the overlap pass off explicitly and pins what it can:
+on transparency scores alone, a whole hazy panel is left exactly as it was shot.
+
+**Original backlog entry, for the record:**
+
+- **READY (sharpened by the backlog-readiness run 2026-09-07; originally Builder 2026-08-26, left open by
+  v0.271.0) — a panel shot entirely through haze stays dim in the finished mosaic: match each panel's *gain*
+  to its neighbours from the sky they share in the overlaps, never from `transparency_score`.** *(Pillar: image
+  quality — PRIORITY 4, and the only ready image-quality item that reaches a heavy mosaic user. Size **L** — a
+  new engine module, a pre-pass in `run_stack`, a synthetic 2×2 fixture and one deliberate test rewrite; one
+  run for a Builder who reads this whole entry first, not a half-run. Confidence: the *problem* is measured
+  (v0.271.0's 2.23× number below); the shape has been checked against the code sites named, not built.
+  Checked `docs/SHIPPED.md` and this file for "overlap" / "panel gain" / "pscales" / "photometric": v0.271.0
+  (per-panel photometric normalisation), v0.304.1 (per-session *additive* panel levelling in the recap) and
+  v0.377.0 (the uncovered-fraction note) are the neighbours; none measures a cross-panel gain.)*
+  **The problem, in the owner's terms.** One panel of his mosaic was shot on a hazier night than the rest. It
+  comes out uniformly dimmer, and the finished picture shows it as a darker tile. `photometric_normalize` (auto
+  on for mosaics since v0.271.0) can't fix it: it gain-matches each sub **against its own panel's median**, and
+  a panel whose subs are *all* hazy is its own median. `level_by_coverage` / `final_gradient` can't either: they
+  remove *additive* sky offsets, and haze is *multiplicative* on the signal.
+  `tests/test_photometric_mosaic_auto.py::test_a_wholly_hazy_panel_is_deliberately_left_alone` pins today's
+  behaviour by name.
+  **⚠ Do NOT "fix" this by comparing panels' `transparency_score`.** That is what v0.271.0 removed, with a
+  measured **2.23× relative panel gain error** on two identically-exposed panels whose only difference was their
+  star fields: `transparency_score` is the median flux of a frame's brightest stars, so it measures where the
+  scope pointed as much as the sky. It cannot tell "hazy panel" from "emptier patch of sky", and it never will.
+  **The signal that can: the overlap.** Adjacent Seestar mosaic panels overlap, and in the overlap both panels
+  image *the same sky* — so the ratio of sky-subtracted signal there, panel A over panel B, is an honest,
+  pointing-independent gain ratio.
+  **Code sites.** `seestack/stack/stacker.py` ~2448–2475: `pscales, pstats = compute_photometric_scales(frames,
+  group_by_pointing=is_mosaic_canvas)` — the `{frame_id: scale}` map every accumulator already consumes
+  (`photometric_scales=pscales` at six call sites; `combine_weights_with_photometric` folds `1/s²` into the
+  weights), so **the plumbing from a per-frame scale down to the pixels exists and needs no change**.
+  `seestack/stack/photometric.py::compute_photometric_scales` / `_pointing_references` (panel labels via
+  `pointings.pointing_groups`). `seestack/stack/align.py::align_one(fits_path, bayer, src_wcs_text,
+  dst_wcs_text, dst_shape, background_options=…)` — load → calibrate → debayer → background → reproject one
+  frame, **windowed**, onto whatever destination WCS it is handed. `seestack/stack/mosaic.py::
+  compute_mosaic_canvas` → `CanvasResult` (the canvas WCS + shape). The per-panel labels `stacker.py` ~2523
+  already derives for the reference-patch refinement (`panel_labels = pointing_groups(…,
+  min_members=REFINE_PANEL_MIN_FRAMES)`).
+  **Shape: a cheap pre-pass, not a change to the accumulate.** New `seestack/stack/overlapgain.py::
+  compute_overlap_gain_scales(frames_by_panel, canvas_wcs_text, canvas_shape, *, downsample=8, max_ratio=2.0,
+  min_shared_px, max_frames_per_panel=5, …) -> dict[int, float] | None` (panel label → scale; `None` = "could
+  not measure, apply nothing"). (1) Per panel, take its **clearest few** subs by `transparency_score` *within
+  the panel* (the comparison v0.271.0 made sound) and run each through `align_one` pointed at a **1/8-scale**
+  copy of the canvas WCS (`crpix/8`, `cdelt×8`, built the way `compute_mosaic_canvas` builds the output WCS) —
+  so the pre-pass sees the same calibrated, background-flattened pixels the stack will — block-meaning into a
+  per-panel low-res sum/count. For a 9-panel 3494×2470 canvas that is 9 × (437×309×3 float32) ≈ 15 MB, so the
+  stack path's memory bound (§6) is untouched. (2) For each pair of panels with ≥ `min_shared_px` low-res
+  pixels covered by both: subtract each panel's own robust sky (median of its covered low-res pixels — small,
+  since `align_one` already flattened it), keep pixels whose signal is above `k·σ` of that sky in **both**
+  panels (stars and nebulosity; sky-only pixels give a noise ratio), take the median per-pixel ratio → `g_AB`.
+  (3) Solve `log s` per panel by least squares over the pair graph; a panel with no measurable pair gets
+  `s = 1`; normalise so the **median panel scale is 1.0** (overall brightness unchanged); clamp to `[1/max_ratio,
+  max_ratio]`. (4) In the stacker, **multiply** each panel's scale into `pscales[frame_id]` for every frame of
+  that panel (a frame with no entry gets the panel scale alone), and record `n_panels_gain_matched` + the
+  min/max panel scale in `pstats` so the run's provenance and health note can say it. Gate the whole pre-pass on
+  `is_mosaic_canvas` and on `pointing_groups` splitting soundly (≥ 2 panels each carrying `min_members`),
+  exactly as v0.271.0 gates.
+  **Fail neutral, never fail guessy** — a wrong cross-panel gain *is* the panel-grid failure the owner reported
+  for months. A pair with too few shared signal pixels, a ratio outside the clamp, or a fit residual above a
+  stated tolerance drops that pair; a panel that loses every pair is `1.0`; any exception in the pre-pass logs
+  and returns `None` — today's behaviour, byte for byte.
+  **Tests.** `tests/test_photometric_mosaic_auto.py` (its 2×2 fixture: 4 panels × N subs with real overlap):
+  stack a mosaic whose one panel's subs are all multiplied by **0.6** — the finished canvas's **seam step on
+  signal** (mean of a nebula patch spanning the seam, one side vs the other) is ≥ 30 % today and **≤ 5 %
+  after** (**fails today**); the same mosaic with equal panels gives every scale within 1 % of 1.0 (the neutral
+  case must not drift); a 1×2 mosaic with **no** overlap returns `None` and the stack is byte-identical to
+  `main`; a single-field target never enters the pre-pass; the clamp holds at an implausible 5× panel.
+  **Rewrite `test_a_wholly_hazy_panel_is_deliberately_left_alone` deliberately** (it pins the behaviour this
+  entry changes) into the 0.6× test above, and say so in the commit. Measure before/after with the seam
+  residual **on signal**, not `SEAMRES` (which measures *sky* steps and reads 0.0 either way).
+
+---
+
 ## v0.386.1 — 2026-09-08 — the full-res PNG stops holding five copies of the picture
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-113tio`.)** The READY entry

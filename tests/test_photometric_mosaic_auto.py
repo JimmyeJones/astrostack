@@ -196,8 +196,8 @@ def test_haze_within_a_panel_is_gain_matched_out(tmp_path, monkeypatch):
     assert _panel_step(after.fits_path) < 0.10
 
 
-def test_a_wholly_hazy_panel_is_deliberately_left_alone(tmp_path):
-    """The half that is NOT corrected, and must not be — read this before
+def test_transparency_scores_alone_never_reach_across_the_join(tmp_path):
+    """What ``transparency_score`` must NOT be used for — read this before
     "fixing" it.
 
     When an *entire* panel was shot through haze, the only evidence
@@ -210,15 +210,22 @@ def test_a_wholly_hazy_panel_is_deliberately_left_alone(tmp_path):
     manufacturing the panel grid the pass exists to prevent. So v0.276.0
     normalises each panel against itself only, and this step stays.
 
-    Doing it properly needs the panel **overlaps**, where both panels image the
-    same stars and the ratio is honest evidence — filed in
-    ``docs/IMPROVEMENTS.md`` → Ideas → "Image quality". Until then, leaving a
-    hazy panel dim is the safe error: it is what the data actually recorded.
+    **The wholly-hazy panel IS corrected now** — from the panel *overlaps*, where
+    both panels image the same stars and the ratio is honest evidence
+    (:mod:`seestack.stack.overlapgain`; the before/after is
+    ``tests/test_overlap_panel_gain.py``). It cannot be measured *here*: this
+    fixture draws a fresh star field per frame, so the two panels' footprints
+    overlap on the canvas while holding unrelated stars — a thing no plate solve
+    can produce. So the overlap pass is switched off explicitly rather than left
+    to decline by luck, and what stays pinned is the claim this fixture can
+    actually carry: on transparency scores alone, a whole hazy panel is left
+    exactly as it was shot.
     """
     proj = _hazy_mosaic_project(tmp_path)
     try:
         res = run_stack(proj, StackOptions(
-            output_name="whole", max_workers=1, sigma_clip=False))
+            output_name="whole", max_workers=1, sigma_clip=False,
+            panel_gain_match=False))
     finally:
         proj.close()
 
