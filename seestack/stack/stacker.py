@@ -53,6 +53,9 @@ from seestack.stack.align import (
     REF_PATCH_MIN_COVERAGE, align_one, extract_reference_patch,
 )
 from seestack.stack.output import _sanitize_basename, pack_unit
+from seestack.stack.overlapgain import (
+    OverlapGainStats, compute_overlap_gain_scales,
+)
 from seestack.stack.pointings import (
     PANEL_LINK_DIST_DEG,
     cluster_pointings,
@@ -488,6 +491,13 @@ class StackOptions:
     # ``transparency_score``, bounded, neutral fallback, off by default.
     # Independent of (and composes with) ``quality_weighted``.
     photometric_normalize: bool = False
+    # Cross-panel gain matching for a **mosaic**, measured in the panel overlaps
+    # (``seestack.stack.overlapgain``). The pass above can only match a panel
+    # against itself, so a panel shot entirely through haze stays dim; this one
+    # matches it to its neighbours using the sky they share. Read only on a
+    # mosaic canvas — a single-field stack ignores it entirely — and it stands
+    # itself down (changing nothing) whenever the overlap evidence is thin.
+    panel_gain_match: bool = True
     # Lucky imaging: keep only the top X% of frames by FWHM. 1.0 = keep all.
     lucky_fraction: float = 1.0
     # Final-stack gradient removal with object masking (post-stack pass).
@@ -1765,6 +1775,7 @@ def _build_output_header_meta(
     calibration: "Any | None" = None,
     pstats: PhotometricStats | None = None,
     photometric_auto: bool = False,
+    gstats: OverlapGainStats | None = None,
     rstats: "RejectionStats | None" = None,
     weights_applied: bool = True,
     n_roughly_aligned: int = 0,
@@ -1933,6 +1944,16 @@ def _build_output_header_meta(
         if pstats.n_pointing_groups:
             meta["PHOTPANL"] = (int(pstats.n_pointing_groups),
                                 "panels normalized against themselves")
+    # Cross-panel gain provenance, stamped independently of PHOT* because it is a
+    # different measurement on a different piece of evidence: PHOT* come from
+    # each sub's own transparency score, these from the sky adjacent panels
+    # share. A mosaic can get either, both or neither.
+    if gstats is not None:
+        meta["PANGAIN"] = ("overlap", "cross-panel gain matching mode")
+        meta["PANGNPAN"] = (int(gstats.n_panels), "panels gain-matched")
+        meta["PANGNPAR"] = (int(gstats.n_pairs), "overlap pairs measured")
+        meta["PANGMIN"] = (round(float(gstats.min_scale), 3), "min panel scale")
+        meta["PANGMAX"] = (round(float(gstats.max_scale), 3), "max panel scale")
     # Rejection provenance: how much the κ-σ pass actually clipped, so the user
     # can trust the rejection removed transient outliers (satellites/planes)
     # without over-clipping real signal. Stamped whenever a rejection pass ran
@@ -2145,6 +2166,95 @@ def uncovered_fraction(cov_2d: np.ndarray) -> float | None:
 # panel below this floor keeps the target-wide reference patch, i.e. exactly
 # today's behaviour (refined if it overlaps that patch, skipped if it doesn't).
 REFINE_PANEL_MIN_FRAMES = 2
+
+# Frames a panel needs before its overlap is worth measuring a gain from. Two is
+# enough to average a little read noise out of the shared strip, and it is the
+# same floor the per-panel refine patches use — a panel too thin for one is too
+# thin for the other.
+PANEL_GAIN_MIN_FRAMES = 2
+
+
+def _apply_overlap_panel_gain(
+    frames: list[FrameRow],
+    pscales: dict[int, float] | None,
+    *,
+    dst_wcs_text: str,
+    dst_shape: tuple[int, int],
+    options: StackOptions,
+    calibration: CalibrationMasters | None,
+) -> tuple[dict[int, float] | None, OverlapGainStats | None]:
+    """Fold a mosaic's overlap-measured **panel** gains into the per-frame scales.
+
+    ``photometric`` matches each sub against its own panel, which by construction
+    cannot lift a panel that was *entirely* shot through haze. The overlaps can:
+    where two panels share sky they image the same stars, so the ratio there is
+    honest evidence of a gain difference (see :mod:`seestack.stack.overlapgain`).
+
+    Returns ``(scales, stats)`` — the scale map with each panel's gain multiplied
+    into every one of its frames, and what was measured. Returns
+    ``(pscales, None)`` unchanged whenever the mosaic doesn't split soundly into
+    panels or the overlaps can't be measured, so a stack that can't be improved
+    is byte-for-byte the stack it is today.
+    """
+    # The same soundness gate the photometric / weighting / grading paths use, so
+    # "is this a mosaic with real panels?" means exactly one thing in the engine.
+    panel_labels = pointing_groups(
+        [(f.ra_center_deg, f.dec_center_deg) for f in frames],
+        min_members=PANEL_GAIN_MIN_FRAMES,
+    )
+    if panel_labels is None:
+        return pscales, None
+    by_label: dict[int, list[FrameRow]] = {}
+    for frame, label in zip(frames, panel_labels, strict=True):
+        if label >= 0:
+            by_label.setdefault(label, []).append(frame)
+
+    def align_frame(frame: FrameRow, wcs_text: str, shape: tuple[int, int]):  # noqa: ANN202
+        # The stack's own aligner with the run's options bound, so the gains are
+        # measured on the calibrated, hot-pixel-cleaned, background-flattened
+        # pixels that will actually be combined — not on a second, different
+        # rendering of the same subs.
+        return align_one(
+            fits_path=str(readable_frame_path(frame) or ""),
+            bayer_pattern=frame.bayer_pattern,
+            src_wcs_text=frame.wcs_json,
+            dst_wcs_text=wcs_text,
+            dst_shape=shape,
+            background_options=options.background_options(),
+            use_gpu=options.use_gpu,
+            suppress_hot_pixels=options.suppress_hot_pixels,
+            hot_pixel_sigma=options.hot_pixel_sigma,
+            calibration=calibration,
+            mono=options.mono,
+        )
+
+    measured = compute_overlap_gain_scales(
+        by_label, dst_wcs_text, dst_shape, align_frame=align_frame)
+    if measured is None:
+        return pscales, None
+    panel_scales, gstats = measured
+    if all(abs(s - 1.0) <= 1e-3 for s in panel_scales.values()):
+        # Nothing to correct — the panels already agree. Don't carry a no-op.
+        log.info("Overlap panel gain: %d panels already agree to within 0.1%% "
+                 "— nothing applied", gstats.n_panels)
+        return pscales, None
+
+    out = dict(pscales or {})
+    for label, panel_scale in panel_scales.items():
+        for frame in by_label.get(label, ()):
+            if frame.id is None:
+                continue
+            out[frame.id] = float(out.get(frame.id, 1.0) * panel_scale)
+    # Every other frame (an unsolved sub, or one in a group too thin to measure)
+    # keeps whatever scale it already had — never a guessed panel gain.
+    for frame in frames:
+        if frame.id is not None:
+            out.setdefault(frame.id, 1.0)
+    log.info(
+        "Overlap panel gain: %d panel(s) matched from %d overlap pair(s), "
+        "scales [%.3f, %.3f]",
+        gstats.n_panels, gstats.n_pairs, gstats.min_scale, gstats.max_scale)
+    return out, gstats
 
 
 def _build_refine_patch(
@@ -2470,6 +2580,21 @@ def run_stack(
         if pstats.n_scaled == 0:
             pscales = None
             photometric_auto = False
+
+    # …and the half ``transparency_score`` structurally cannot do: match one
+    # panel's *gain* to the next. The pass above deliberately compares each panel
+    # only against itself, so a panel whose subs were **all** shot through haze
+    # is its own reference and stays dim — a visibly darker tile with a step
+    # along the join. The only honest evidence for a cross-panel gain is the
+    # overlap, where both panels image the same sky; ``overlapgain`` measures it
+    # there and returns ``None`` for every case where the evidence is thin. Its
+    # panel scale multiplies into the same ``{frame_id: scale}`` map the
+    # accumulators already consume, so nothing downstream changes.
+    gstats: OverlapGainStats | None = None
+    if is_mosaic_canvas and options.panel_gain_match and dst_wcs_text:
+        pscales, gstats = _apply_overlap_panel_gain(
+            frames, pscales, dst_wcs_text=dst_wcs_text, dst_shape=dst_shape,
+            options=options, calibration=calibration)
 
     # Inverse-variance combine weight: gain-matching a hazy frame up by ``s``
     # amplifies its noise by ``s`` too, so the *weighted-sum* combine down-weights
@@ -3244,6 +3369,7 @@ def run_stack(
     header_meta = _build_output_header_meta(project, frames, eff, n_used, wstats,
                                             calibration=calibration, pstats=pstats,
                                             photometric_auto=photometric_auto,
+                                            gstats=gstats,
                                             rstats=rej_stats,
                                             weights_applied=weights_applied,
                                             n_roughly_aligned=n_roughly,

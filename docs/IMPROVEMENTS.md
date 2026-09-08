@@ -4884,74 +4884,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   settings change — so a historical baseline needs either a gain/exposure guard or a fallback to today's
   within-session levelling. Fail back to the current behaviour whenever it can't be established; never guess.
 
-- **READY (sharpened by the backlog-readiness run 2026-09-07; originally Builder 2026-08-26, left open by
-  v0.271.0) — a panel shot entirely through haze stays dim in the finished mosaic: match each panel's *gain*
-  to its neighbours from the sky they share in the overlaps, never from `transparency_score`.** *(Pillar: image
-  quality — PRIORITY 4, and the only ready image-quality item that reaches a heavy mosaic user. Size **L** — a
-  new engine module, a pre-pass in `run_stack`, a synthetic 2×2 fixture and one deliberate test rewrite; one
-  run for a Builder who reads this whole entry first, not a half-run. Confidence: the *problem* is measured
-  (v0.271.0's 2.23× number below); the shape has been checked against the code sites named, not built.
-  Checked `docs/SHIPPED.md` and this file for "overlap" / "panel gain" / "pscales" / "photometric": v0.271.0
-  (per-panel photometric normalisation), v0.304.1 (per-session *additive* panel levelling in the recap) and
-  v0.377.0 (the uncovered-fraction note) are the neighbours; none measures a cross-panel gain.)*
-  **The problem, in the owner's terms.** One panel of his mosaic was shot on a hazier night than the rest. It
-  comes out uniformly dimmer, and the finished picture shows it as a darker tile. `photometric_normalize` (auto
-  on for mosaics since v0.271.0) can't fix it: it gain-matches each sub **against its own panel's median**, and
-  a panel whose subs are *all* hazy is its own median. `level_by_coverage` / `final_gradient` can't either: they
-  remove *additive* sky offsets, and haze is *multiplicative* on the signal.
-  `tests/test_photometric_mosaic_auto.py::test_a_wholly_hazy_panel_is_deliberately_left_alone` pins today's
-  behaviour by name.
-  **⚠ Do NOT "fix" this by comparing panels' `transparency_score`.** That is what v0.271.0 removed, with a
-  measured **2.23× relative panel gain error** on two identically-exposed panels whose only difference was their
-  star fields: `transparency_score` is the median flux of a frame's brightest stars, so it measures where the
-  scope pointed as much as the sky. It cannot tell "hazy panel" from "emptier patch of sky", and it never will.
-  **The signal that can: the overlap.** Adjacent Seestar mosaic panels overlap, and in the overlap both panels
-  image *the same sky* — so the ratio of sky-subtracted signal there, panel A over panel B, is an honest,
-  pointing-independent gain ratio.
-  **Code sites.** `seestack/stack/stacker.py` ~2448–2475: `pscales, pstats = compute_photometric_scales(frames,
-  group_by_pointing=is_mosaic_canvas)` — the `{frame_id: scale}` map every accumulator already consumes
-  (`photometric_scales=pscales` at six call sites; `combine_weights_with_photometric` folds `1/s²` into the
-  weights), so **the plumbing from a per-frame scale down to the pixels exists and needs no change**.
-  `seestack/stack/photometric.py::compute_photometric_scales` / `_pointing_references` (panel labels via
-  `pointings.pointing_groups`). `seestack/stack/align.py::align_one(fits_path, bayer, src_wcs_text,
-  dst_wcs_text, dst_shape, background_options=…)` — load → calibrate → debayer → background → reproject one
-  frame, **windowed**, onto whatever destination WCS it is handed. `seestack/stack/mosaic.py::
-  compute_mosaic_canvas` → `CanvasResult` (the canvas WCS + shape). The per-panel labels `stacker.py` ~2523
-  already derives for the reference-patch refinement (`panel_labels = pointing_groups(…,
-  min_members=REFINE_PANEL_MIN_FRAMES)`).
-  **Shape: a cheap pre-pass, not a change to the accumulate.** New `seestack/stack/overlapgain.py::
-  compute_overlap_gain_scales(frames_by_panel, canvas_wcs_text, canvas_shape, *, downsample=8, max_ratio=2.0,
-  min_shared_px, max_frames_per_panel=5, …) -> dict[int, float] | None` (panel label → scale; `None` = "could
-  not measure, apply nothing"). (1) Per panel, take its **clearest few** subs by `transparency_score` *within
-  the panel* (the comparison v0.271.0 made sound) and run each through `align_one` pointed at a **1/8-scale**
-  copy of the canvas WCS (`crpix/8`, `cdelt×8`, built the way `compute_mosaic_canvas` builds the output WCS) —
-  so the pre-pass sees the same calibrated, background-flattened pixels the stack will — block-meaning into a
-  per-panel low-res sum/count. For a 9-panel 3494×2470 canvas that is 9 × (437×309×3 float32) ≈ 15 MB, so the
-  stack path's memory bound (§6) is untouched. (2) For each pair of panels with ≥ `min_shared_px` low-res
-  pixels covered by both: subtract each panel's own robust sky (median of its covered low-res pixels — small,
-  since `align_one` already flattened it), keep pixels whose signal is above `k·σ` of that sky in **both**
-  panels (stars and nebulosity; sky-only pixels give a noise ratio), take the median per-pixel ratio → `g_AB`.
-  (3) Solve `log s` per panel by least squares over the pair graph; a panel with no measurable pair gets
-  `s = 1`; normalise so the **median panel scale is 1.0** (overall brightness unchanged); clamp to `[1/max_ratio,
-  max_ratio]`. (4) In the stacker, **multiply** each panel's scale into `pscales[frame_id]` for every frame of
-  that panel (a frame with no entry gets the panel scale alone), and record `n_panels_gain_matched` + the
-  min/max panel scale in `pstats` so the run's provenance and health note can say it. Gate the whole pre-pass on
-  `is_mosaic_canvas` and on `pointing_groups` splitting soundly (≥ 2 panels each carrying `min_members`),
-  exactly as v0.271.0 gates.
-  **Fail neutral, never fail guessy** — a wrong cross-panel gain *is* the panel-grid failure the owner reported
-  for months. A pair with too few shared signal pixels, a ratio outside the clamp, or a fit residual above a
-  stated tolerance drops that pair; a panel that loses every pair is `1.0`; any exception in the pre-pass logs
-  and returns `None` — today's behaviour, byte for byte.
-  **Tests.** `tests/test_photometric_mosaic_auto.py` (its 2×2 fixture: 4 panels × N subs with real overlap):
-  stack a mosaic whose one panel's subs are all multiplied by **0.6** — the finished canvas's **seam step on
-  signal** (mean of a nebula patch spanning the seam, one side vs the other) is ≥ 30 % today and **≤ 5 %
-  after** (**fails today**); the same mosaic with equal panels gives every scale within 1 % of 1.0 (the neutral
-  case must not drift); a 1×2 mosaic with **no** overlap returns `None` and the stack is byte-identical to
-  `main`; a single-field target never enters the pre-pass; the clamp holds at an implausible 5× panel.
-  **Rewrite `test_a_wholly_hazy_panel_is_deliberately_left_alone` deliberately** (it pins the behaviour this
-  entry changes) into the 0.6× test above, and say so in the commit. Measure before/after with the seam
-  residual **on signal**, not `SEAMRES` (which measures *sky* steps and reads 0.0 either way).
-
 - **IDEA (Scout 2026-08-26 #2, follow-on to the front-of-queue `photometric_normalize`-for-mosaic Builder item)
   — once photometric normalization auto-enables for mosaics, weigh doing the same measurement for a
   *single-field* target stacked across nights of **mixed transparency** (one hazy night + one clear night).**
@@ -8279,6 +8211,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.387.0** — PRIORITY 4 (image quality, and the only ready one that reaches a heavy mosaic user), the READY entry left open by v0.271.0: **a mosaic panel shot entirely through haze is lifted to match its neighbours, measured in the sky the panels share.** New `seestack/stack/overlapgain.py::compute_overlap_gain_scales` runs as a pre-pass at stack setup — each panel's clearest few subs through the stack's own `align.align_one`, block-meaned to a ~400 px coarse map, a median signal ratio per overlapping pair, then one log-scale per panel by least squares, normalised to a median of 1.0 and clamped to `[1/2, 2]`, multiplied into the `{frame_id: scale}` map the accumulators already consume. **NOT `transparency_score`** — v0.271.0 removed that comparison after measuring a 2.23× panel-gain error, because it cannot tell "hazy panel" from "emptier patch of sky". **Measured: the star-flux step across the join goes 38.6 % → 2.3 % on a 0.6× hazy panel, and the recovered scales are 0.774/1.291 = 1.667 = 1/0.6.** The guard that makes it safe on by default was found by a test, not by reasoning: overlapping *footprints* only mean two WCS agree, so on a fixture whose panels overlap while holding unrelated stars the first implementation invented a 2.6× gain — a Pearson correlation across the strip (`MIN_OVERLAP_CORRELATION`) refuses that and cannot be fooled by a gain, which is exactly what correlation is blind to. Every other uncertainty resolves to "change nothing" too: too few shared/signal cells, a ratio outside the clamp, a fit whose pairs disagree, or any exception → `None` → today's stack byte for byte. Provenance stamped as `PANG*` and surfaced as History's "Mosaic panels matched to each other · N panels · brightness lo–hi× · measured in N overlaps". Tests +9 engine / +2 API / +3 vitest; `test_a_wholly_hazy_panel_is_deliberately_left_alone` deliberately rewritten (its fixture cannot carry the new claim). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.386.1** — PRIORITY 3 (robustness on the RAM-capped NAS), the READY entry filed 2026-09-07: **the "Full-res PNG" download — and the "Full-size versions" archive that renders every target through the same call — stops holding about five copies of the picture at once.** `render_preview_png_full_res` owns every array it touches and never reads them again, so it now consumes rather than copies: `autostretch(copy=False)` (new opt-in flag; the default still copies for every other caller), an in-place normalise (`np.subtract/np.divide(out=img)` — that one line used to allocate two more full-size temporaries at once), `del rgb`, `nan_to_num(copy=False)`, `clip(out=)` and `pack_unit(copy=False)`. **Measured with `tracemalloc`, not estimated: 5.00× the decimated array before, 3.83× after** — ≈ 520 MB → ≈ 400 MB on the owner's 3494×2470 mosaic, ≈ 2.9 GB → ≈ 2.2 GB at the 8000 px cap, on a button a beginner presses to print while a stack job may be holding its own canvases. **Bit-parity, and pinned as such:** a new test renders linear, display-space and Adjust-stretched masters through an independent out-of-place copy of the old path and asserts the PNG bytes are identical. The robust percentile is left exact (a strided sample would move pixels), so what remains is the stretch's own working set. Tests +2, the ratio one failing before at 5.00×. Engine-only. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.386.0** — the READY infra entry filed 2026-09-07: **`scripts/agent-dogfood.sh --mosaic` — a second, opt-in sample target shaped like the owner's shooting, so an Auto/editor claim can finally be checked on a mosaic.** `webapp/sample_data.load_sample(lib, shape="mosaic")` builds a separate target from **one shared star catalog**: 2×2 panels stepping 82 % of a frame (so overlaps hold the *same* stars), per-panel pointing jitter, uneven depth (6/6/6/3) and one panel shot through haze (×0.85 signal on a +8 % sky). Measured on the real thing: a 907×615 union canvas, **4.8 % genuinely uncovered**, coverage plateaus at 3/6/12/21, `coverage_is_mosaic` True and four `pointing_groups` panels — every one of which is structurally invisible on the single-field sample, which is how D1 survived twenty sweeps. The script loads it, stacks it, prints the trim Auto would apply (**7.9 %** today; above ~15 % is D1-shaped) and probes/edits it into `$SHOTS/mosaic/` so the field sample's page-height baselines are untouched. Default unchanged everywhere: the Dashboard button, `POST /api/sample` with no body, and the field sample's generated pixels are **bit-identical** (verified against the old implementation). Tests +7. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.385.0** — PRIORITY 3 (friendliness), the READY entry filed 2026-09-07: **the "Save / share" menu was built twice and the two copies disagreed — now one `SavePictureMenu` component serves the Target page's hero and every History run card.** The item set is the *union* of the two (the hero gains FITS, TIFF and "Copy caption"; the History card gains "Share the keepsake"), the wording is History's label-plus-hint idiom on both, and the North-up / nameplate toggles still reach exactly the JPEG-family downloads they did. Nothing removed, no new surface, no page height changed (the menu is closed by default). Frontend-only; tests +7 new component cases, two Target assertions that fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).
