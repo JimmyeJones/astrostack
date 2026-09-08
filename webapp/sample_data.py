@@ -304,7 +304,7 @@ def _mosaic_layout() -> tuple[list[_MosaicPanel], tuple[int, int]]:
     step_y = int(round(_HEIGHT * _MOSAIC_STEP_FRAC))
     raw = [
         (col * step_x + jx, row * step_y + jy)
-        for (col, row), (jx, jy) in zip(_MOSAIC_GRID, _MOSAIC_JITTER_PX)
+        for (col, row), (jx, jy) in zip(_MOSAIC_GRID, _MOSAIC_JITTER_PX, strict=True)
     ]
     min_x = min(x for x, _ in raw)
     min_y = min(y for _, y in raw)
@@ -502,7 +502,9 @@ def _load_mosaic_sample(lib: Library) -> SampleStatus:
         run_qc_and_solve(proj, run_qc=True, run_solve=False, serial=True)
 
         frames = sorted(proj.iter_frames(), key=lambda f: f.source_path)
-        for frame, (panel, shift) in zip(frames, plan):
+        # Non-strict, like the single-field loop above: a sub that failed to
+        # ingest must leave the rest pairing correctly, not raise.
+        for frame, (panel, shift) in zip(frames, plan, strict=False):
             if frame.id is None:
                 continue
             ra, dec = _frame_center_deg(shift, origin=panel.origin, window=window)

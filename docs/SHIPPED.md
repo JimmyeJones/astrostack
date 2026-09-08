@@ -14,6 +14,49 @@ Newest first.
 
 ---
 
+## v0.386.1 — 2026-09-08 — the full-res PNG stops holding five copies of the picture
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-113tio`.)** The READY entry
+filed by the 2026-09-07 backlog-readiness run — the one it said to take last,
+because no felt complaint is on record and the ceiling is simply cheap to lower.
+
+**The count, re-measured.** `render_preview_png_full_res` owns every array it
+touches (`load_stack_rgb` hands it a fresh one, nothing else can see it) and
+never reads them again — but it copied at every step: the stretch copied its
+input, normalised it **out-of-place** (`img = (img - lo) / (hi - lo)` holds two
+more full-size temporaries at that instant), then the caller allocated again for
+`nan_to_num`, again for `clip`, and twice more inside `pack_unit`'s
+`rint(arr * 255)`. On this repo's fixture that peaked at **5.00×** the decimated
+array; the entry's own reading of the code said "about four".
+
+**What shipped.** `autostretch` and `_autostretch_for_export` take `copy: bool =
+True`; `pack_unit` takes the same flag. The full-res render passes `copy=False`
+to both, normalises in place, `del`s the source once the stretch returns, and
+uses `nan_to_num(copy=False)` + `np.clip(out=…)`. Every other caller keeps the
+default and its array untouched. Measured after: **3.83×** — ≈ 520 MB → ≈ 400 MB
+on the owner's 3494×2470 mosaic, ≈ 2.9 GB → ≈ 2.2 GB at the 8000 px cap, on a
+button a beginner presses to print and on the archive that runs *every* target
+through the same call, possibly while a stack job holds its own canvases.
+
+**What was deliberately left.** The robust 99.5th percentile that sets the
+normalisation ceiling stays exact — a strided sample would move pixels, and this
+is a bit-parity change (it is the single largest remaining transient, ~1.26×).
+So are the zeroed output array and the per-channel covered-pixel temporaries:
+both are the stretch's own working set, not copying, and reworking the channel
+loop to shave ~0.2× would risk the very pixels this change proves it doesn't
+touch.
+
+**Tests** (`tests/test_full_res_png.py`, +2). `test_the_in_place_full_res_render_
+is_byte_identical` renders a linear, a display-space and an Adjust-stretched
+master and compares the PNG bytes against an **independent** out-of-place
+reference written the old way in the test file — so "identical" means the same
+arithmetic, not merely self-consistent. `test_full_res_render_no_longer_holds_
+five_copies_of_the_picture` pins the peak ratio under `tracemalloc` (NumPy
+reports its allocations to it): 5.00× before, 3.83× after, threshold 4.4× with
+room either side. Engine-only: no config, schema, on-disk, API or default change.
+
+---
+
 ## v0.386.0 — 2026-09-08 — `--mosaic`: a sample shaped like the owner's shooting, so a mosaic claim can be checked
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-113tio`.)** The READY infra
