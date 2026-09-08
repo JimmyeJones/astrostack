@@ -14,6 +14,68 @@ Newest first.
 
 ---
 
+## v0.398.1 — 2026-09-08 — the Lucky-imaging knob is typed as the percent the picture is badged with (`StackOptionField.unit`, `StackOptionControl.percentFromFraction`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-yzhopm`. The Scout's
+2026-08-26 #3 entry, the follow-up v0.272.1 deliberately left open. Original at
+the foot.)**
+
+**The gap.** v0.272.1 fixed a *misleading* label by renaming the knob to "keep
+sharpest **fraction**" — honest, but it still asked a beginner to think in
+0.05–1.0 while everywhere else in the app the same number is a percent: the
+Gallery badges the finished picture **"Lucky 50%"**. So the one place you *set*
+it was the one place it was not a percentage.
+
+**The fix is a units layer at the form boundary, not a new field.**
+`StackOptionField` gains an optional `unit`, and `lucky_fraction` is the first
+(and today only) field to carry `"percent"`. `StackOptionControl` then shows and
+accepts 0–100 with a `%` suffix — **value, min, max and step all scaled
+together**, so the typed input and the editor's slider speak one unit and neither
+can be off by 100×. The engine field, its `(0, 1]` contract, the stored value and
+every descriptor without the hint are untouched: `show`/`store` are the identity
+for every other field, which is why this generalises to the next fraction knob
+instead of special-casing this one.
+
+**The round-trip is exact, not nearly exact.** `0.35 × 100` is
+`35.000000000000004` in IEEE-754, so both directions round
+(`percentFromFraction` / `fractionFromPercent`) — a saved recipe that stored 0.35
+renders as `35 %` and stores back as exactly `0.35`, which a test pins for 0.05,
+0.35 and 1.0.
+
+**Upgrade-safe (§9):** one additive, defaulted response field; an older frontend
+ignores it and renders the raw fraction exactly as before, an older backend
+omitting it lands on the same path. No config, schema, on-disk, default or
+engine change — a stack run started before and after this reads the identical
+`lucky_fraction`.
+
+**Copy follows the input:** the help text no longer says "this is a fraction, not
+a percentage" but *"Type how much to keep: 100 = keep all, 75 = keep the sharpest
+three-quarters, 50 = the sharpest half"*, and names the badge it matches. The
+label keeps no `%` of its own, so the v0.272.1 drift guard
+(`test_fractional_fields_do_not_label_themselves_as_percentages`) still holds
+unweakened over every field, this one included.
+
+**Tests (+8):** `StackOptionControl.test.tsx` (+6 — a stored 0.5 shown as `50 %`;
+typing 50 storing 0.5; the binary-fraction round-trip; the bounds scaled on the
+slider, where they are observable; the slider readout speaking percent too; and a
+field *without* the hint behaving byte-for-byte as before) and
+`tests/webapp/test_schema_drift.py` (+2 — the invariant that `unit: "percent"`
+may only sit on a float whose bounds really are a fraction, so a future
+descriptor cannot put it on a field that is already 0–100 and make every typed
+value 100× wrong on the stacking hot path; and `lucky_fraction`'s own bounds and
+default pinned against the dataclass).
+
+  *Original entry, for the record: "make the Lucky-imaging input a **real**
+  percent, not a raw fraction… the genuinely friendly end state is a percent
+  input (5–100, step 5, default 100) that the control converts to/from the
+  engine's `lucky_fraction` (0.05–1.0) at the boundary… needs either a per-field
+  `unit: "percent"`/scale hint the control honours on display *and* on submit
+  (cleanest — generalises to any future fraction knob) or a special-case, and a
+  matching round-trip so a saved '50%' still persists `lucky_fraction=0.5`." The
+  first option, and the round-trip is the test that made it worth writing.*
+
+---
+
 ## v0.397.0 — 2026-09-08 — a mosaic is offered its object's name (`objectinfo._object_containing`, `_extent_match_radius_deg`, `confident_object_title(allow_extent_match=)`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-yzhopm`. The LEAD filed by the
