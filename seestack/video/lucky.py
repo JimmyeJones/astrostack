@@ -384,10 +384,16 @@ def stack_video(
     max_shift = max(2.0, _MAX_SHIFT_FRACTION * min(vinfo.height, vinfo.width))
     done = 0
     for i, frame in enumerate(
+        # ``wanted=keep_idx`` hands back ``None`` for the frames this pass is
+        # about to discard, which is what stops the decoder demosaicing them: on
+        # a CFA (solar/lunar) capture that is ~350 ms a frame, and at the default
+        # keep percentage most of pass 2 used to be spent debayering frames it
+        # threw away one line later. The frames it *does* keep are decoded and
+        # demosaiced exactly as before, so the stacked result is unchanged.
         iter_frames(src, stride=stride, width=vinfo.width, height=vinfo.height,
-                    pix_fmt=vinfo.pix_fmt)
+                    pix_fmt=vinfo.pix_fmt, wanted=keep_idx)
     ):
-        if i not in keep_idx:
+        if frame is None:
             continue
         if should_cancel is not None and should_cancel():
             raise VideoStackCancelled("cancelled while stacking frames")

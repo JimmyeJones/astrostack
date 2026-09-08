@@ -19,7 +19,7 @@ import logging
 import os
 import shutil
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -215,7 +215,8 @@ def iter_frames(
     width: int | None = None,
     height: int | None = None,
     pix_fmt: str | None = None,
-) -> Iterator[np.ndarray]:
+    wanted: Collection[int] | None = None,
+) -> Iterator[np.ndarray | None]:
     """Stream a capture's frames as ``(H, W, 3)`` uint8 RGB arrays.
 
     One frame is materialised at a time — the generator reads exactly
@@ -233,6 +234,17 @@ def iter_frames(
     ``width``/``height``/``pix_fmt`` may be passed to skip a redundant probe;
     the dimensions must match the stream or the byte framing is wrong (so pass
     them only from a :func:`probe_video` result for the same file).
+
+    ``wanted`` names the yielded indices the caller will actually *use* (the
+    same index its own ``enumerate`` sees). A frame outside it is decoded — the
+    byte framing demands that — but not demosaiced, and is yielded as **None**
+    rather than skipped, so the caller's ``enumerate`` still lines up with an
+    index set it computed on an earlier pass. ``None``, not the raw array: an
+    un-demosaiced mosaic looks enough like a picture that a future caller would
+    eventually stack one by mistake. This is what stops the lucky stack's second
+    pass paying ~350 ms of demosaic per frame for the frames it is about to
+    discard (a two-thirds saving on a 4,487-frame solar capture at the default
+    keep percentage); the result is bit-identical either way.
 
     **A single-channel source is debayered here**, once, so every consumer
     downstream sees the same ``(H, W, 3)`` picture and nothing can demosaic
@@ -284,6 +296,7 @@ def iter_frames(
     )
     try:
         assert proc.stdout is not None
+        index = -1
         while True:
             buf = proc.stdout.read(frame_bytes)
             if not buf:
@@ -296,7 +309,15 @@ def iter_frames(
             # Copy off the pipe buffer: ``frombuffer`` views immutable bytes, so
             # the array would be read-only and blow up on any in-place caller.
             frame = np.frombuffer(buf, dtype=np.uint8).reshape(height, width, 3).copy()
+            index += 1
+            keep = wanted is None or index in wanted
             if mosaic_source:
+                # Latch the "is this really a mosaic" decision on the first frame
+                # off the wire whatever ``wanted`` says: the evidence is the same
+                # in every frame, and deferring it to the first *kept* frame would
+                # make the answer depend on which frames a caller happened to
+                # want. The test is cheap (two array compares); only the demosaic
+                # itself is worth skipping.
                 if demosaic is None:
                     demosaic = _channels_agree(frame)
                     if not demosaic:
@@ -305,9 +326,9 @@ def iter_frames(
                             "alone rather than demosaicing a picture",
                             Path(path).name, pix_fmt,
                         )
-                if demosaic:
+                if demosaic and keep:
                     frame = _demosaic_frame(frame)
-            yield frame
+            yield frame if keep else None
     finally:
         if proc.poll() is None:
             proc.kill()
