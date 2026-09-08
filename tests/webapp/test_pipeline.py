@@ -515,6 +515,9 @@ def test_the_scan_reports_a_skipped_folder_it_cannot_account_for(client, data_ro
     assert skip == {
         "name": "NGC 6888", "n_files": 4, "n_unrecognised": 4,
         "path": str(data_root / "incoming" / "NGC 6888"),
+        # Which rule skipped it — this is the bare-``<T>``-beside-``<T>_sub``
+        # one, not the temp-folder skip added in v0.393.0.
+        "reason": "device_output",
     }
     # Reported, not acted on: the folder is still skipped and still on disk.
     safes = {t["safe_name"] for t in client.get("/api/targets").json()}

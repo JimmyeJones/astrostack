@@ -145,12 +145,25 @@ class SkippedOutputFolder:
     the skip is uncontroversial and nothing needs saying; when it does not, the
     scan has quietly passed over frames it cannot vouch for, and :attr:`n_unvouched`
     is how many.
+
+    ``reason`` says **which** rule skipped it, because the two do not mean the
+    same thing to a reader and one sentence cannot serve both:
+
+    * ``"device_output"`` — the original case above: a bare ``<T>/`` beside a
+      ``<T>_sub/``. The rule is about *this* device's own output.
+    * ``"temp_folder"`` — the folder's name is another program's scratch
+      directory (:data:`_TEMP_FOLDER_NAMES`). Owner-decided 2026-09-08; see
+      :func:`_apply_seestar_convention`.
+
+    Defaulted, so every existing construction and every reader that does not care
+    is untouched.
     """
 
     name: str                 # the bare folder's name, as it is on disk
     parent: str               # its parent-directory key (the scan root, or a container)
     n_files: int              # FITS files in it
     n_device_output: int      # of those, files named like the device's own picture
+    reason: str = "device_output"   # "device_output" | "temp_folder"
 
     @property
     def n_unvouched(self) -> int:
@@ -215,6 +228,30 @@ def _apply_seestar_convention(
             continue
         if low.endswith((_MOSAIC_SUB_SUFFIX, _SUB_SUFFIX)):
             units.append((target_name_for_folder(name), files))
+            continue
+        # Another program's scratch directory, by exact name. It has no "_sub"
+        # sibling, so without this it falls through to "ingest unchanged" and
+        # becomes a junk target of somebody else's half-finished intermediates —
+        # the owner has one in his real share listing. **Owner-decided
+        # 2026-09-08** ("skip folders named batch_stack_tmp at scan time → YES"),
+        # which is why a name-based skip on the on-by-default ingest path is
+        # acceptable here at all; it was deliberately not blind-added before.
+        # Reported rather than silent (it lands in ``unvouched_skips`` whatever
+        # its files are named), and recoverable: the report's own "bring it in"
+        # posts the folder back as a *scoped* scan, and that path takes the
+        # folder as the unit without consulting its name at all — which is the
+        # documented meaning of a scoped scan, not a special case for this rule.
+        if low in _TEMP_FOLDER_NAMES:
+            if skipped_out is not None:
+                skipped_out.append(SkippedOutputFolder(
+                    name=name,
+                    parent=parent,
+                    n_files=len(files),
+                    n_device_output=sum(
+                        1 for f in files if is_seestar_output_filename(str(f))
+                    ),
+                    reason="temp_folder",
+                ))
             continue
         # A bare folder: skip it only when its raw-sub sibling (same parent) is
         # present (then it's the Seestar's own output). Otherwise ingest it.
@@ -748,8 +785,16 @@ class ScanResult:
         designed and is not worth a word. This is the subset worth telling the
         user about — and on a healthy Seestar library it is empty, which is the
         point: the report is silent until something is actually unexplained.
+
+        A ``temp_folder`` skip always qualifies, however its files are named. The
+        device-output skip can be *certain* it is right (the device names its own
+        pictures), so staying quiet when every file is accounted for is honest;
+        a name-pattern skip is a guess about **another program's** folder, so the
+        owner is told every time — which is also what makes it recoverable, since
+        the report is where the "bring it in" button lives.
         """
-        return [s for s in self.skipped_output_folders if s.n_unvouched > 0]
+        return [s for s in self.skipped_output_folders
+                if s.n_unvouched > 0 or s.reason == "temp_folder"]
 
     @property
     def total_found(self) -> int:
@@ -860,6 +905,15 @@ def scan_and_organize(
     units = _apply_seestar_convention(
         subdirs_with_fits, parents, result.skipped_output_folders)
     for skip in result.unvouched_skips:
+        if skip.reason == "temp_folder":
+            log.warning(
+                "Skipped %r (%d file(s)) — that is another stacking program's "
+                "working folder, not one of your capture folders, so it is not "
+                "ingested as a target. Nothing was changed on disk; scan that "
+                "folder directly if you do want its frames.",
+                skip.name, skip.n_files,
+            )
+            continue
         log.warning(
             "Skipped %r (%d file(s)) — a %r folder sits beside it, so the "
             "convention reads it as the Seestar's own finished picture. But %d "
