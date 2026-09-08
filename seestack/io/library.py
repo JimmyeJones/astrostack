@@ -574,8 +574,12 @@ class Library:
         wanted = preserve_mosaic_suffix(entry.name, wanted)
         if wanted == entry.name:
             return entry
+        # Both columns, because :meth:`find_target` resolves ``name OR safe_name``:
+        # a target renamed to another one's *folder* name would answer to that
+        # folder's URL and could shadow it outright.
         clash = self._conn.execute(
-            "SELECT id FROM targets WHERE name = ? AND id != ?", (wanted, entry.id),
+            "SELECT id FROM targets WHERE (name = ? OR safe_name = ?) AND id != ?",
+            (wanted, wanted, entry.id),
         ).fetchone()
         if clash is not None:
             raise ValueError(f"another target is already called '{wanted}'")
