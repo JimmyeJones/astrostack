@@ -14,6 +14,65 @@ Newest first.
 
 ---
 
+## v0.385.0 — 2026-09-08 — one "Save / share" menu, shared by the Target hero and every History card
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-113tio`.)** The READY entry
+filed by the 2026-09-07 backlog-readiness run, built to its spec. The same
+picture offered a different set of things to do with it depending on which page
+the owner was standing on: the Target page's hero menu had **no "Copy caption",
+no FITS and no TIFF**; the History card's had all three but **no "Share the
+keepsake"**; the same file was named differently on each ("JPEG (smaller — best
+for sharing)" vs "JPEG" plus a dimmed hint); and each page carried its own
+`MENU_HINT` constant, its own `mah={420}` scroll cap and its own copy of the
+QR-ownership comment. Every item added since v0.267.0 had to be added twice or
+landed on one page only — which is how the drift happened.
+
+**What shipped.** New `frontend/src/components/SavePictureMenu.tsx` renders the
+whole menu (trigger + dropdown) from one props object; `routes/Target.tsx` and
+`routes/History.tsx` render it and their inline copies are gone. The item set is
+the **union**, in one order on both pages: Full-res PNG · PNG · JPEG · Framed
+keepsake · With scale & compass · FITS · TIFF | share · share the keepsake · to
+phone · copy caption · zoom clip | the three wallpapers. **Consolidation is not
+removal** (AGENTS.md §1): no page lost an action, the number of distinct
+destinations went *up* on both, and every one is still one click away. The
+wording is History's label-plus-hint idiom throughout (the one v0.267.0 chose);
+the pieces are the ones that already existed — `SharePictureButton`,
+`DownloadMenuItem`, `WallpaperMenuItems`, `sharePictureText`, `keepsakeFilename`,
+`fullResPngHint`, `tiffDownloadHint`, `postCaption`, `storedPreviewScaleBar` — so
+this is a regrouping, not a re-derivation.
+
+**The traps the entry named, all honoured.** The QR modal stays owned by the
+*page* (the component takes `onToPhone` and renders no modal — a menu closes on
+click and would unmount a popover it owned). Target still passes its
+`captureLabel` — the night the subs were *shot*, never the day the stack ran — so
+the hero's share sheet keeps the date v0.293.0 fixed. The North-up / nameplate
+toggles are per-card view state on History and don't exist on the hero, so they
+arrive as props and reach the JPEG family exactly as before: the plain JPEG takes
+both, the keepsake takes North-up but ignores the nameplate (it carries its own
+caption), "with scale & compass" adds the marks to the same turn, the bare PNG
+takes neither, and each is pinned per flag by a test. History's second "About
+this stack" menu (per-card *view* toggles, different state) and `ImageLightbox`'s
+download toolbar were left alone, as the entry says.
+
+**Behaviour deltas, deliberate and small.** The hero gains FITS, TIFF and "Copy
+caption"; the History card gains "Share the keepsake". The preview PNG's hint now
+says "the best this run has" when there is no FITS behind it, which is what the
+Target page's old "PNG (best quality)" label meant and what History's
+"Quick preview" hint got wrong for such a run.
+
+**Tests.** New `SavePictureMenu.test.tsx` (+7): the union renders for a full run;
+FITS/TIFF hide when absent and the no-FITS hint changes; a run with no files
+renders no menu at all; each `href` carries the right positional flags with and
+without the toggles; `onToPhone` fires and no dialog is rendered; "Copy caption"
+writes a caption built from the run and its catalog identity. Two
+`Target.test.tsx` assertions **fail before** (the hero's menu offering FITS and
+"Copy caption"), and the three wording assertions were updated one-for-one, never
+loosened. Full frontend suite 3,377 passed / 242 files, `tsc --noEmit` clean,
+`vite build` clean; the Python suite is untouched by this change and green.
+Frontend-only: no config, schema, API-shape or default change.
+
+---
+
 ## v0.384.0 — 2026-09-08 — the share of a processed run comes off the master, once, and is cached beside the run
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-5fx14v`.)** The READY entry

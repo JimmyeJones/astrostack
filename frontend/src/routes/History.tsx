@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import {
   ActionIcon, Alert, Badge, Button, Card, Center, Group, Loader, Menu, SegmentedControl,
   SimpleGrid, Slider, Stack, Switch, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconCheck, IconChevronDown, IconClipboardText, IconCopy, IconDeviceFloppy, IconDeviceMobile, IconDownload, IconGitCompare, IconInfoCircle, IconPencil, IconPhotoDown, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconVideo, IconX } from "@tabler/icons-react";
+import { IconAdjustments, IconCheck, IconChevronDown, IconCopy, IconDeviceFloppy, IconGitCompare, IconInfoCircle, IconPencil, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting, type StackDrizzleDegraded } from "../api/client";
@@ -35,26 +34,15 @@ import { describeFieldObjects } from "../components/fieldObjectList";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { ProgressReelCard } from "../components/ProgressReelCard";
 import { OneFrameVsStackCard } from "../components/OneFrameVsStackCard";
-import { SharePictureButton } from "../components/SharePictureButton";
 import { ScanToPhoneModal } from "../components/ScanToPhoneButton";
 import { SampleTourNote } from "../components/SampleTourNote";
-import { WallpaperMenuItems } from "../components/WallpaperMenu";
 import { sharePictureText } from "../share";
-import { fullResPngHint } from "../fullres";
 import { removedOverlayCaption } from "../removed";
-import { tiffDownloadHint } from "../tiffDownload";
 import { Sparkline } from "../components/Sparkline";
-import { DownloadMenuItem } from "../components/DownloadMenuItem";
+import { MENU_HINT, SavePictureMenu } from "../components/SavePictureMenu";
 import { sameTargetCompareHref } from "../compareWithLast";
 
 export type RunSort = "newest" | "cleanest";
-
-// The one-line "what this does" under a menu item's name — the wording that used
-// to live in each button's hover tooltip, now readable without hovering (which a
-// phone can't do anyway).
-const MENU_HINT: CSSProperties = {
-  display: "block", fontSize: "0.72rem", opacity: 0.6, whiteSpace: "normal",
-};
 
 // Order runs for display. "newest" preserves the API's timestamp-DESC order;
 // "cleanest" puts the lowest-noise runs first, with runs that carry no measured
@@ -841,7 +829,6 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   const [black, setBlack] = useState(DEFAULT_BLACK);
   const [cacheBust, setCacheBust] = useState(0);
   const [light, setLight] = useState(false);
-  const [copyingCaption, setCopyingCaption] = useState(false);
   // The "To phone" QR. It lives on the card rather than inside the Save / share
   // menu item that opens it, because the menu closes on click — a popover owned
   // by the item would be unmounted with the dropdown before it could be read.
@@ -981,60 +968,6 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   // with its underscore, pasted under their photo. Declared here, above both
   // caption builders, rather than beside the share buttons that came later.
   const shareName = (targetName ?? "").trim() || safe;
-
-  // "Copy caption" — one correct, friendly sentence to paste wherever the user
-  // is sharing (chat, socials). Built purely from facts the app already knows:
-  // the target's catalog identity, this run's frame count / integration / date,
-  // and the scale bar. The scale clause needs the run's WCS (the same annotations
-  // fetch that Identify/Scale use), so ensure it's loaded first — reusing the
-  // cached result when the user already toggled Identify/Scale — then degrade
-  // gracefully (drop the scale clause) if it can't be read.
-  const copyCaption = async () => {
-    setCopyingCaption(true);
-    try {
-      // The caption describes the *stored preview* — the picture being shared —
-      // so it takes that picture's own bar, not the full canvas's.
-      let scaleBar = storedPreviewScaleBar(annotations.data, run);
-      if (run.has_fits && !annotations.data) {
-        try {
-          const data = await qc.fetchQuery({
-            queryKey: ["annotations", safe, run.id],
-            queryFn: () => api.stackAnnotations(safe, run.id),
-            staleTime: Infinity,
-          });
-          scaleBar = storedPreviewScaleBar(data, run);
-        } catch {
-          scaleBar = null;  // no WCS / read failed → caption omits the scale clause
-        }
-      }
-      const text = postCaption({
-        name: identity?.name,
-        catalogId: identity?.id,
-        type: identity?.type,
-        nFrames: run.n_frames_used,
-        integrationS: run.total_exposure_s,
-        captureNightStart: run.capture_night_start,
-        captureNightEnd: run.capture_night_end,
-        captureNights: run.capture_nights,
-        scaleBar,
-        fallbackName: shareName,
-      });
-      try {
-        await navigator.clipboard.writeText(text);
-        notifications.show({
-          message: "Caption copied — paste it wherever you're sharing.", color: "teal",
-        });
-      } catch {
-        // Clipboard blocked (insecure context / permissions) — show the caption
-        // so the user can still select and copy it by hand.
-        notifications.show({
-          title: "Copy this caption", message: text, color: "blue", autoClose: false,
-        });
-      }
-    } finally {
-      setCopyingCaption(false);
-    }
-  };
 
   // A best-effort caption to pre-fill the OS share sheet / lightbox share, so a
   // shared picture arrives with its words — the same accurate sentence as "Copy
@@ -1420,163 +1353,26 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           {/* Everything you can *do with the file* lives behind one menu. The
               card used to lay all fifteen of these out as buttons, four rows
               deep, per run — so a target with eight stacks was a wall of
-              chrome. Nothing was removed: every item below is the control that
-              used to be a button, with its own wording and behaviour. */}
-          {(run.has_preview || run.has_fits || run.has_tiff) && (
-            <Menu shadow="md" width={260} position="bottom-start">
-              <Menu.Target>
-                <Button
-                  size="xs" variant="light"
-                  leftSection={<IconDownload size={14} />}
-                  rightSection={<IconChevronDown size={14} />}
-                >
-                  Save / share
-                </Button>
-              </Menu.Target>
-              {/* Twelve items with a line of help each is taller than the space
-                  under a card halfway down a laptop screen — measured in a real
-                  browser, where the dropdown flipped upwards and lost its first
-                  item off the top. Capping it scrolls instead of clipping, the
-                  same way the Gallery's preset menu does. */}
-              <Menu.Dropdown mah={420} style={{ overflowY: "auto" }}>
-                <Menu.Label>Download</Menu.Label>
-                {run.has_preview && (
-                  <Menu.Item
-                    leftSection={<IconPhotoDown size={16} />}
-                    component="a" href={api.stackArtifactUrl(safe, run.id, "preview")}
-                  >
-                    PNG
-                    <span style={MENU_HINT}>Quick preview, up to 1024 px wide</span>
-                  </Menu.Item>
-                )}
-                {run.has_fits && (
-                  <Menu.Item
-                    leftSection={<IconPhotoDown size={16} />}
-                    component="a" href={api.stackFullResPngUrl(safe, run.id, applyNorthUp)}
-                  >
-                    Full-res PNG
-                    <span style={MENU_HINT}>
-                      {fullResPngHint(run.canvas_w, run.canvas_h)}
-                    </span>
-                  </Menu.Item>
-                )}
-                {run.has_preview && (
-                  <Menu.Item
-                    leftSection={<IconPhotoDown size={16} />}
-                    component="a"
-                    href={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
-                  >
-                    JPEG
-                    <span style={MENU_HINT}>
-                      {applyNorthUp ? "North up — smaller, best for sharing" : "Smaller — best for sharing"}
-                    </span>
-                  </Menu.Item>
-                )}
-                {run.has_preview && (
-                  /* The framed variant: matted on a dark card with this run's
-                     name, date and total exposure set *beneath* the picture. It
-                     carries its own caption, so it ignores the nameplate toggle
-                     above rather than captioning the same facts twice. */
-                  <Menu.Item
-                    leftSection={<IconPhotoDown size={16} />}
-                    component="a"
-                    href={api.stackArtifactUrl(
-                      safe, run.id, "jpeg", applyNorthUp, false, true)}
-                  >
-                    Framed keepsake
-                    <span style={MENU_HINT}>
-                      Its name, date and exposure printed on the picture
-                    </span>
-                  </Menu.Item>
-                )}
-                {run.has_preview && (
-                  /* The scale bar and compass this page already draws *on
-                     screen*, baked into the downloaded pixels — a browser
-                     overlay doesn't travel with the file. Follows the North-up
-                     toggle, so the rose points where the saved picture does. */
-                  <Menu.Item
-                    leftSection={<IconPhotoDown size={16} />}
-                    component="a"
-                    href={api.stackArtifactUrl(
-                      safe, run.id, "jpeg", applyNorthUp, false, false, true)}
-                  >
-                    With scale &amp; compass
-                    <span style={MENU_HINT}>
-                      How big it is and which way is North, printed on the picture
-                    </span>
-                  </Menu.Item>
-                )}
-                {run.has_fits && (
-                  <Menu.Item
-                    leftSection={<IconDownload size={16} />}
-                    component="a" href={api.stackArtifactUrl(safe, run.id, "fits")}
-                  >
-                    FITS
-                    <span style={MENU_HINT}>Raw data — for re-processing, not sharing</span>
-                  </Menu.Item>
-                )}
-                {run.has_tiff && (
-                  <Menu.Item
-                    leftSection={<IconDownload size={16} />}
-                    component="a" href={api.stackArtifactUrl(safe, run.id, "tiff")}
-                  >
-                    TIFF
-                    <span style={MENU_HINT}>{tiffDownloadHint(run.options)}</span>
-                  </Menu.Item>
-                )}
-                {run.has_preview && (
-                  <>
-                    <Menu.Divider />
-                    <Menu.Label>Share</Menu.Label>
-                    <SharePictureButton
-                      asMenuItem
-                      url={api.stackArtifactUrl(safe, run.id, "jpeg", applyNorthUp, nameplate)}
-                      {...sharePictureText(
-                        shareName,
-                        formatCaptureNights(
-                          run.capture_night_start, run.capture_night_end),
-                      )}
-                      text={shareCaption}
-                    />
-                    {/* The QR opens in a modal owned by the card, not a popover
-                        owned by this item — a menu closes on click, which would
-                        unmount its own popover with it. */}
-                    <Menu.Item
-                      leftSection={<IconDeviceMobile size={16} />}
-                      onClick={() => setToPhone(true)}
-                    >
-                      To phone
-                      <span style={MENU_HINT}>Scan a QR to open it on your phone</span>
-                    </Menu.Item>
-                    <Menu.Item
-                      leftSection={copyingCaption
-                        ? <Loader size={14} />
-                        : <IconClipboardText size={16} />}
-                      onClick={copyCaption}
-                    >
-                      Copy caption
-                      <span style={MENU_HINT}>A ready-to-post sentence about this picture</span>
-                    </Menu.Item>
-                    {/* Motion, for the places a still gets swiped past. Built and
-                        cached server-side from this run's own preview, so it costs
-                        no extra request to offer: every run with a picture has one. */}
-                    <DownloadMenuItem
-                      icon={<IconVideo size={16} />}
-                      url={api.stackZoomClipUrl(safe, run.id)}
-                      filename={`${run.output_basename || "stack"}_zoom.webp`}
-                      label="Zoom clip"
-                      hint="A few seconds gliding into your target — for posting"
-                      busyHint="Building your clip — a few seconds the first time"
-                      errorMessage="Couldn't build a zoom clip for this run."
-                      hintStyle={MENU_HINT}
-                    />
-                    <Menu.Divider />
-                    <WallpaperMenuItems safe={safe} runId={run.id} />
-                  </>
-                )}
-              </Menu.Dropdown>
-            </Menu>
-          )}
+              chrome. Nothing was removed. The menu itself is now the shared
+              `SavePictureMenu` (v0.385.0), so this card and the Target page's
+              hero offer the same picture the same set of things — they had
+              drifted apart, each missing items the other had. This card is the
+              one with the North-up / nameplate toggles, and they still reach
+              every JPEG-family download exactly as before. */}
+          <SavePictureMenu
+            safe={safe}
+            run={run}
+            shareName={shareName}
+            captureLabel={formatCaptureNights(
+              run.capture_night_start, run.capture_night_end)}
+            shareCaption={shareCaption}
+            identity={identity}
+            northUp={applyNorthUp}
+            nameplate={nameplate}
+            onToPhone={() => setToPhone(true)}
+            size="xs"
+            iconSize={14}
+          />
           {/* And everything that tells you *about* the picture — or changes how
               this card shows it — lives behind the second. */}
           {(run.has_fits || run.has_preview) && (
