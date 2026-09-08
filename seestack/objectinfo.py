@@ -189,6 +189,57 @@ def identify_object(
 #: safely out of reach.
 _TITLE_MATCH_DEG = 0.25
 
+#: Ceiling on the containment radius :func:`_extent_match_radius_deg` derives, so
+#: a future catalog entry with a huge span (Barnard's Loop is ~10° across) can
+#: never claim a field that merely lies in the same region of sky. The largest
+#: object in the bundled catalog asks for 1.25°, so this bounds nothing today.
+_EXTENT_MATCH_MAX_DEG = 1.5
+
+
+def _extent_match_radius_deg(obj: CatalogObject) -> float:
+    """How far from ``obj``'s centre a canvas centre can sit and still be *on* it.
+
+    Half the object's **minor** axis, not its major one: the catalog stores no
+    position angle, so the minor half-axis is the only radius we are sure lies
+    inside the object whichever way it is turned. Falls back to the major axis
+    when the catalog has no minor one, and returns ``0.0`` for anything with no
+    vetted size — which the callers read as "no extent to fall back on".
+    """
+    span = obj.size_minor_arcmin or obj.size_arcmin
+    try:
+        span = float(span)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(span) or span <= 0:
+        return 0.0
+    return min(span / 60.0 / 2.0, _EXTENT_MATCH_MAX_DEG)
+
+
+def _object_containing(
+    ra: float, dec: float, cat: tuple[CatalogObject, ...],
+) -> CatalogObject | None:
+    """The catalog object whose own extent contains ``ra``/``dec``, or ``None``.
+
+    Only objects bigger than the :data:`_TITLE_MATCH_DEG` cone are considered —
+    anything smaller is already answered by the cone, and this must never
+    *narrow* that answer. Ties break on the smallest sep÷radius (the object the
+    point sits most centrally inside, i.e. the more specific one), then on the
+    smaller object, then on the catalog id, so the answer is deterministic.
+    """
+    best: CatalogObject | None = None
+    best_key: tuple[float, float, str] | None = None
+    for obj in cat:
+        radius = _extent_match_radius_deg(obj)
+        if radius <= _TITLE_MATCH_DEG:
+            continue
+        sep = _angular_sep_deg(ra, dec, obj.ra_deg, obj.dec_deg)
+        if sep >= radius:
+            continue
+        key = (sep / radius, radius, obj.id or "")
+        if best_key is None or key < best_key:
+            best, best_key = obj, key
+    return best
+
 
 def confident_object_title(
     name: str | None,
@@ -196,6 +247,7 @@ def confident_object_title(
     dec_deg: float | None = None,
     *,
     catalog: tuple[CatalogObject, ...] | None = None,
+    allow_extent_match: bool = False,
 ) -> str | None:
     """A catalog title for a picture whose stored ``name`` says nothing useful.
 
@@ -213,6 +265,14 @@ def confident_object_title(
       disagrees with the coordinates.
     * The cone is :data:`_TITLE_MATCH_DEG`, not the card's wider
       :data:`_CONE_MATCH_DEG`, because this name gets baked into shared pixels.
+
+    ``allow_extent_match`` is for a centre that is **not** a pointed field: a
+    mosaic's stored centre is the middle of the *union canvas*, which a 0.25°
+    cone judges as if the owner had aimed there. With it on, an object whose own
+    catalog extent contains the centre also counts (:func:`_object_containing`)
+    — a 2×2 of M 42 qualifies on the nebula's own span, while a neighbour half a
+    degree away still does not. Off by default, and only ever consulted **after**
+    the cone finds nothing, so every existing caller's answer is unchanged.
 
     Returns the object's common name, falling back to its designation, or
     ``None`` when there is nothing confident to say.
@@ -237,6 +297,8 @@ def confident_object_title(
         sep = _angular_sep_deg(ra, dec, obj.ra_deg, obj.dec_deg)
         if sep < best_sep:
             best, best_sep = obj, sep
+    if best is None and allow_extent_match:
+        best = _object_containing(ra, dec, cat)
     if best is None:
         return None
     title = (best.name or "").strip() or (best.id or "").strip()
@@ -267,10 +329,21 @@ def suggested_target_rename(
     mosaic target keeps its " (mosaic)" suffix, since renaming edits the display
     name and never what was shot. The caller only ever *offers* this; nothing in
     the app renames a target on its own.
-    """
-    from seestack.io.scanner import preserve_mosaic_suffix
 
-    title = confident_object_title(current_name, ra_deg, dec_deg, catalog=catalog)
+    **A mosaic is measured against the object, not against a cone.** Its stored
+    centre is the middle of the union canvas, so a 2×2 of M 42 sits ~0.3° off the
+    nebula and a 0.25° cone — right for a pointed field — says nothing about the
+    very shooting style this owner uses most. So for a target whose name carries
+    the mosaic suffix (:func:`~seestack.io.scanner.is_mosaic_target_name`, the
+    module's own definition of mosaic-ness), an object whose *own extent*
+    contains that centre counts too. A single field is judged exactly as before.
+    """
+    from seestack.io.scanner import is_mosaic_target_name, preserve_mosaic_suffix
+
+    title = confident_object_title(
+        current_name, ra_deg, dec_deg, catalog=catalog,
+        allow_extent_match=is_mosaic_target_name(current_name or ""),
+    )
     if not title:
         return None
     suggestion = preserve_mosaic_suffix((current_name or "").strip(), title)
