@@ -229,3 +229,81 @@ def test_the_counts_route_is_read_only(client, data_root):
     client.get("/api/life-list/counts")
 
     assert client.get("/api/targets").json() == before
+
+
+# ---- "My Messier grid" — the list as one shareable picture ----------------
+
+
+def _real_preview(path, colour=(0, 180, 0)) -> str:
+    """A decodable PNG where the other tests only need a file to exist."""
+    from PIL import Image
+
+    Image.new("RGB", (200, 150), colour).save(path)
+    return str(path)
+
+
+def test_an_empty_library_has_no_grid_to_share(client, data_root):
+    """A wall of grey squares is a picture of Messier's catalogue, not of your
+    sky — so the offer self-hides on a fresh install rather than 200-ing."""
+    r = client.get("/api/life-list/grid.jpg")
+
+    assert r.status_code == 404
+    assert "Capture one" in r.json()["detail"]
+
+
+def test_one_capture_is_enough_to_get_a_grid(client, data_root, tmp_path):
+    _register(data_root, "M 31", 10.685, 41.269,
+              preview=_real_preview(tmp_path / "m31.png"))
+
+    r = client.get("/api/life-list/grid.jpg")
+
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+    assert 'filename="my-messier-grid.jpg"' in r.headers["content-disposition"]
+
+
+def test_the_grid_draws_the_capture_and_leaves_the_rest_of_the_list_to_shoot(
+    client, data_root, tmp_path,
+):
+    """The picture goes in M31's square and the other 109 stay dim — a grid that
+    showed only what you have would just be the gallery."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    _register(data_root, "M 31", 10.685, 41.269,
+              preview=_real_preview(tmp_path / "m31.png", (0, 180, 0)))
+
+    img = np.asarray(
+        Image.open(io.BytesIO(client.get("/api/life-list/grid.jpg").content)).convert("RGB"))
+
+    # JPEG is lossy, so ask whether the green is there at all rather than for an
+    # exact triple: M31 is the only square that could have put it there.
+    green = (img[:, :, 1].astype(int) - img[:, :, 0].astype(int) > 80).sum()
+    assert green > 1000
+    # …and it is *one* square out of 110, not the poster: the rest of the list
+    # is still drawn, dim, which is what makes this a life list and not a
+    # gallery. One square is ~0.9 % of the canvas.
+    assert green < img.shape[0] * img.shape[1] * 0.02
+
+
+def test_a_capture_the_disk_lost_still_gets_its_square(client, data_root, tmp_path):
+    """An unreadable preview costs one square's picture, never the poster — the
+    same best-effort per tile the montage wall makes."""
+    _register(data_root, "M 31", 10.685, 41.269, preview=str(tmp_path / "gone.png"))
+
+    assert client.get("/api/life-list/grid.jpg").status_code == 200
+
+
+def test_the_grid_is_read_only(client, data_root, tmp_path):
+    """Rendered on demand from the previews the app already keeps: nothing is
+    written to the library, exactly like the recap poster and the montage wall."""
+    _register(data_root, "M 31", 10.685, 41.269,
+              preview=_real_preview(tmp_path / "m31.png"))
+    before = client.get("/api/targets").json()
+
+    client.get("/api/life-list/grid.jpg")
+    client.get("/api/life-list/grid.jpg")
+
+    assert client.get("/api/targets").json() == before

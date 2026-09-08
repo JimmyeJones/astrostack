@@ -5,6 +5,9 @@ popular NGC/IC) with each object marked captured or not, matched against the
 library's plate-solved target centres, plus the counts for the plain-language
 header.
 
+``GET /api/life-list/grid.jpg`` renders that same list as one shareable poster —
+the squares you have filled with your own pictures, the rest still to shoot.
+
 Everything about it is read-only and offline: the catalog ships with the app,
 and the match reads only the target registry — no project DB is opened and no
 network is touched, so it is cheap enough to answer on every page load.
@@ -18,6 +21,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -280,4 +284,102 @@ def get_life_list(request: Request) -> LifeListResponse:
         messier=[_item(e, previews) for e in entries if is_messier(e.catalog_id)],
         other=[_item(e, previews) for e in entries if not is_messier(e.catalog_id)],
         counts=LifeListCounts(**life_list_summary(entries)),
+    )
+
+
+@router.get("/api/life-list/grid.jpg")
+def get_life_list_grid(request: Request):
+    """Download "My Messier grid" — the whole life list as one shareable JPEG.
+
+    The page above shows the same thing, but only to whoever is looking at the
+    app. This is the version you can post: all 110 Messier squares in catalog
+    order, your own picture in the ones you have and a dim numbered square in the
+    ones you haven't, under a strip saying how far along you are. The empty
+    squares are deliberately drawn — they are what makes it a life list rather
+    than a gallery.
+
+    Rendered on demand from the previews the app already keeps, exactly like the
+    montage wall (``/api/gallery/montage.jpg``) and the recap poster
+    (``/api/recap.jpg``): nothing is written to the library and no project is
+    modified. 404s until at least one object is captured, so the offer can
+    self-hide on a fresh install rather than handing someone a wall of grey.
+    """
+    import io
+
+    from fastapi.responses import Response
+    from PIL import Image
+
+    from seestack.lifelistcard import (
+        TILE_SOURCE_MAX_PX,
+        GridCell,
+        build_life_list_grid,
+        grid_subtitle,
+        grid_title,
+    )
+    from seestack.stack.output import save_display_jpeg
+
+    # Package-private helper, shared rather than re-implemented so the grid shows
+    # the same picture the life-list tile does: a pinned cover wins, else the
+    # newest stack's preview, else the newest run that still has one.
+    from webapp.routers.targets import current_picture_path
+
+    lib = deps.open_library(request)
+    try:
+        targets = list(lib.list_targets())
+        entries = [e for e in catalog_capture_status(load_catalog(), targets)
+                   if is_messier(e.catalog_id)]
+        # Resolve a picture only for the targets that actually hold a captured
+        # object, and only once each — several Messier objects can match the same
+        # target (a mosaic across M65/M66), and a Seestar owner's library has far
+        # more targets than the list has squares.
+        wanted = {e.safe_name for e in entries if e.captured and e.safe_name}
+        paths: dict[str, Path | None] = {}
+        for t in targets:
+            if t.safe_name in wanted:
+                paths[t.safe_name] = current_picture_path(lib, t)
+    finally:
+        lib.close()
+
+    # Load each picture once, downscaled on the way in. A full library fills 110
+    # squares, and holding 110 full previews (a megabyte-plus of pixels each) to
+    # build one poster is exactly the kind of peak this app's RAM-capped NAS
+    # cannot afford — the tile is ~114 px, so anything past TILE_SOURCE_MAX_PX is
+    # thrown away by the cover-crop anyway.
+    loaded: dict[str, Any] = {}
+    for safe, path in paths.items():
+        if path is None:
+            continue
+        try:
+            with Image.open(path) as img:
+                small = img.convert("RGB")
+                small.thumbnail((TILE_SOURCE_MAX_PX, TILE_SOURCE_MAX_PX), Image.BOX)
+                loaded[safe] = small
+        except Exception:  # noqa: BLE001 — a bad preview must not sink the grid
+            continue
+
+    cells = [
+        GridCell(
+            label=e.catalog_id,
+            captured=e.captured,
+            image=(loaded.get(e.safe_name) if e.captured and e.safe_name else None),
+        )
+        for e in entries
+    ]
+    counts = life_list_summary(entries)
+    n_captured, n_total = counts["messier_captured"], counts["messier_total"]
+    image = build_life_list_grid(
+        cells,
+        title=grid_title(n_captured, n_total),
+        subtitle=grid_subtitle(n_captured, n_total),
+    )
+    if image is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Capture one of the Messier objects and your grid is ready to share.")
+    buf = io.BytesIO()
+    save_display_jpeg(image, buf, quality=92)
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/jpeg",
+        headers={"Content-Disposition": 'attachment; filename="my-messier-grid.jpg"'},
     )
