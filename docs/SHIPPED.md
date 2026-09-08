@@ -14,6 +14,95 @@ Newest first.
 
 ---
 
+## v0.397.0 — 2026-09-08 — a mosaic is offered its object's name (`objectinfo._object_containing`, `_extent_match_radius_deg`, `confident_object_title(allow_extent_match=)`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-yzhopm`. The LEAD filed by the
+run that shipped the v0.396.0 rename offer, measured but deliberately not fixed
+there. Original entry kept verbatim at the foot.)**
+
+**The gap, in the owner's own shooting shape.** The "this target is still named
+after its folder — call it *Orion Nebula*?" offer is gated on
+`confident_object_title`'s 0.25° title-grade cone against the target's stored
+centre. For a **mosaic** that centre is the middle of the *union canvas*, not of
+a pointed field — so the bundled 2×2 sample sits **0.3223°** from M 42 and gets
+no offer at all, while a single field of the same object gets one. The owner is a
+heavy mosaic user (AGENTS.md §1), so the surface that helps him most was the one
+that mostly stayed quiet.
+
+**The fix is the object's own extent, not a bigger cone.** Widening the radius
+would start claiming neighbours for single fields too, which is exactly what the
+0.25° cone exists to prevent (Stephan's Quintet beside NGC 7331, ~0.5°). Instead,
+for a target whose name carries the mosaic suffix — `is_mosaic_target_name`, this
+module's own definition of mosaic-ness, already used two lines away by
+`preserve_mosaic_suffix` — an object whose **own extent contains the centre**
+counts as well. A 2×2 of M 42 qualifies on the nebula's 60′ minor span; a
+neighbour half a degree away still does not, because a 10′ galaxy has no extent
+to claim with.
+
+**Three things keep it from becoming a wider cone:**
+
+* **It only ever runs after the cone finds nothing** (`confident_object_title`
+  consults `_object_containing` only when `best is None`), so it can add an
+  answer where there was silence and can never change one that already existed.
+* **`allow_extent_match` is off by default.** `confident_object_title` is what
+  bakes a name into shared pixels, and `webapp/pipeline.py`'s caption path calls
+  it unchanged. Only `suggested_target_rename` turns it on, and only for a mosaic
+  name.
+* **The radius is the *minor* half-axis, capped at `_EXTENT_MATCH_MAX_DEG` =
+  1.5°.** The catalog stores no position angle, so the minor half-axis is the
+  only radius we are sure lies inside the object whichever way it is turned; the
+  cap means a future catalog entry with a huge span (Barnard's Loop is ~10°
+  across) can never claim a whole region of sky. The largest object in the
+  bundled catalog asks for 1.25°, so the cap binds nothing today.
+
+**Measured before believing it, over the whole real catalog.** Every one of the
+157 bundled objects was tested against every other's centre: **exactly one**
+containment exists beyond the 0.25° cone — M 31 contains M 32's centre (0.403°,
+against M 31's 0.525° radius), i.e. the satellite galaxy that really is inside
+Andromeda. So the ambiguity this rule could in principle create does not exist in
+practice, and where it does the answer is defensible. Ties break on the smallest
+sep÷radius (the object the point sits most centrally inside), then the smaller
+object, then the catalog id, so the answer is deterministic rather than
+catalog-order-dependent.
+
+**On the real sample, not a synthetic point:** the bundled mosaic sample's stored
+centre (84.09142, −5.56980) is 0.3223° from M 42 and 0.3663° from M 43. It now
+offers **"Orion Nebula (mosaic)"** — M 43 loses not on distance but because at
+20′ it is smaller than the cone and is skipped outright by the extent pass. A
+single field pointed at the very same spot is still offered nothing: the owner
+aimed there, so the cone is the honest question to ask.
+
+**Upgrade-safe (§9):** one keyword argument defaulting to today's behaviour; no
+config, schema, on-disk, API-shape or default change, and nothing renames
+anything — the caller only ever *offers*.
+
+**Tests (+5, four failing before):** `tests/test_objectinfo.py` — the sample's own
+centre offered its object's name as a mosaic and nothing as a single field; the
+neighbour case (0.5° from NGC 7331) still silent **both** ways, so the widening
+is not a wider cone; only objects bigger than the cone can claim by extent and an
+unsized object has no extent at all; the radius is the minor axis and is capped;
+and `confident_object_title`'s default answer unchanged for every caller that
+does not ask.
+
+**What was deliberately left alone:** the caption path in `webapp/pipeline.py`
+(it bakes a name into shared pixels, and its own guard — the stored name must
+identify nothing — already covers the case a mosaic reaches), and
+`identify_object`'s wider 0.75° card cone, which already speaks for these mosaics.
+
+  *Original LEAD, for the record: "a mosaic target is usually too far off its own
+  object to be offered a name, because the offer is gated on the union centre…
+  the honest shape, if it is ever worth doing, is not a bigger radius (which
+  would start claiming neighbours for single fields too): it is to ask whether
+  the solved centre falls inside the object's own extent — the catalog already
+  carries `size_arcmin`/`size_minor_arcmin`… Needs a real mosaic's centre offsets
+  to validate the 'inside its extent' rule before it decides a name; the
+  synthetic sample gives exactly one data point." The gate is answered by the
+  whole-catalog containment measurement above: the rule is geometric containment,
+  not a tuned threshold, and the one place it could be ambiguous was enumerated
+  rather than assumed.*
+
+---
+
 ## v0.396.0 — 2026-09-08 — NEW BEGINNER FEATURE: "this target is still named after its folder — call it what it is?" (`Library.rename_target`, `objectinfo.suggested_target_rename`, `targets.folder_name`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-e506ni`. The last open slice
