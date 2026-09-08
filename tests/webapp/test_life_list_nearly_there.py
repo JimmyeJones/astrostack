@@ -112,3 +112,87 @@ def test_the_plain_life_list_is_unchanged(client, data_root):
     """The new route sits beside `/api/life-list`, it doesn't shadow it."""
     body = client.get("/api/life-list").json()
     assert body["counts"]["messier_total"] == 110
+
+
+# --- `GET /api/life-list/nearly-there/calendar.ics` ---------------------------
+#
+# The nudge knows what to point at and when it is up; without this it ended on a
+# sentence the beginner had to remember. M57 is not a showpiece the suggestion
+# card's `.ics` route would serve, which is the whole reason this route exists.
+
+
+def test_the_tonight_pick_can_be_added_to_a_calendar(client, data_root):
+    _register(data_root, "M 56", *M56)
+    client.put("/api/settings", json=LONDON)
+
+    r = client.get("/api/life-list/nearly-there/calendar.ics",
+                   params={"when": SUMMER_NIGHT})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/calendar")
+    assert "M57-next-session.ics" in r.headers["content-disposition"]
+    body = r.text
+    assert "BEGIN:VCALENDAR" in body and "BEGIN:VEVENT" in body
+    # The event is about the object the card names, in plain language.
+    assert "Ring Nebula" in body
+
+
+def test_the_calendar_is_for_the_object_the_card_picked_not_an_id_we_were_given(
+        client, data_root):
+    """The route takes no id at all: it re-asks the same endpoint the card read,
+    so the file cannot describe a different object or a different night — and
+    there is no way to calendar an arbitrary catalog row through it."""
+    _register(data_root, "M 56", *M56)
+    client.put("/api/settings", json=LONDON)
+
+    card = client.get("/api/life-list/nearly-there",
+                      params={"when": SUMMER_NIGHT}).json()
+    ics = client.get("/api/life-list/nearly-there/calendar.ics",
+                     params={"when": SUMMER_NIGHT}).text
+    assert card["tonight_catalog_id"] == "M57"
+    assert f"UID:{card['tonight_catalog_id']}-" in ics
+    # And there is no id-shaped variant of the route to reach instead — asked of
+    # the app's own schema rather than of a URL, since an unknown path under a
+    # built frontend is the SPA's index page, not a 404.
+    paths = client.get("/openapi.json").json()["paths"]
+    assert "/api/life-list/nearly-there/calendar.ics" in paths
+    assert not [p for p in paths
+                if p.startswith("/api/life-list/nearly-there/{")]
+
+
+def test_the_missing_object_is_often_one_the_suggestion_route_will_not_serve(
+        client, data_root):
+    """Why this route exists at all, as a fact rather than a comment: a
+    nearly-finished constellation's missing object comes from the *whole*
+    bundled catalog, while `/api/plan/suggest/{id}/calendar.ics` is deliberately
+    restricted to the showpiece whitelist. Reusing that route would have meant
+    widening the guard that stops arbitrary catalog rows being calendared."""
+    from seestack.nightplan import _SHOWPIECE_IDS, load_catalog
+
+    catalog_ids = {obj.id for obj in load_catalog()}
+    assert not catalog_ids <= set(_SHOWPIECE_IDS)
+
+
+def test_nothing_up_tonight_is_a_404_not_a_blank_calendar(client, data_root):
+    _register(data_root, "M 56", *M56)
+    client.put("/api/settings", json=LONDON)
+
+    r = client.get("/api/life-list/nearly-there/calendar.ics",
+                   params={"when": WINTER_EVENING})
+    assert r.status_code == 404
+
+
+def test_no_location_and_no_nearly_finished_constellation_are_both_404s(
+        client, data_root):
+    # Nothing captured at all: no constellation is close.
+    assert client.get("/api/life-list/nearly-there/calendar.ics").status_code == 404
+    # Close, but no site to work out a window from.
+    _register(data_root, "M 56", *M56)
+    assert client.get("/api/life-list/nearly-there/calendar.ics").status_code == 404
+
+
+def test_a_bad_when_is_rejected_by_the_calendar_route_too(client, data_root):
+    _register(data_root, "M 56", *M56)
+    client.put("/api/settings", json=LONDON)
+    r = client.get("/api/life-list/nearly-there/calendar.ics",
+                   params={"when": "not-a-time"})
+    assert r.status_code == 422

@@ -103,6 +103,65 @@ identify nothing — already covers the case a mosaic reaches), and
 
 ---
 
+## v0.398.0 — 2026-09-08 — NEW BEGINNER FEATURE: "add tonight to calendar" for the object that would finish a constellation (`lifelist.get_nearly_there_ics`, `plan.catalog_object_ics_response`)
+
+**(Builder 2026-09-08. The 2026-08-27 idea "the constellation nudge names the
+object that's up tonight but gives no way to act on it". Original entry kept at
+the foot.)**
+
+**The gap.** The "You're one object away from finishing Lyra — M57 is well placed
+tonight, usable until 02:10" card ended on a *sentence*. Everything needed to act
+on it already existed on both sides — the endpoint returns the pick's
+`usable_start_utc`/`usable_end_utc`, and the planner already renders a one-tap
+`.ics` for a catalog object — but the two never met, so the beginner had to
+remember the night themselves.
+
+**Why a new route rather than reusing the suggestion one.** The idea's own care
+note was the design: `/api/plan/suggest/{catalog_id}/calendar.ics` is deliberately
+restricted to `_SHOWPIECE_IDS` ("a bogus id is a 404, not a way to calendar
+arbitrary catalog rows"), and a nearly-finished constellation's missing object is
+drawn from the *whole* bundled catalog. Rather than widen that guard, the new
+route **names no id at all**: `GET /api/life-list/nearly-there/calendar.ics`
+re-asks the same endpoint the card read and calendars the object *it* picked. So
+there is nothing arbitrary to address, no whitelist to loosen, and the file can
+never describe a different object or a different night from the card.
+
+**One reminder, not two.** The `.ics` body itself is built by the new shared
+`plan.catalog_object_ics_response`, extracted verbatim from `get_suggest_ics`, so
+the suggestion card's reminder and this one cannot drift into two different
+descriptions of the same night. It takes an **object, never an id** — which rows
+are addressable stays each caller's own decision, and is not something the helper
+can be talked into widening.
+
+**Never a blank calendar:** 404 when no constellation is close, when nothing of it
+is up tonight, when no observing location is known, or when there is no upcoming
+window; 422 on a bad `when`, like its sibling. The card shows the link only when
+there *is* a tonight pick, so the 404 is a backstop rather than a path a user can
+click into.
+
+**Offline, additive, and off nothing:** a plain `.ics` download the OS calendar
+imports — no account, no network (AGENTS.md §1), no settings, no schema. One new
+read-only route and one new anchor on an existing self-hiding card; nothing was
+removed and no always-on surface was added.
+
+**Tests (+8):** `tests/webapp/test_life_list_nearly_there.py` (+6 — the download
+served as `text/calendar` with the object's name in plain language; the event's
+UID matching the id the card reported *and* no id-shaped variant of the route
+existing; a winter evening with nothing up as a 404; no-location and
+nothing-close as 404s; a bad `when` as 422; and the premise itself pinned as a
+fact — the bundled catalog is **not** a subset of `_SHOWPIECE_IDS`, which is why
+the route exists) and `NearlyThereCard.test.tsx` (+2 — the link's href and
+`download` attribute, and no link at all when there is no tonight pick).
+
+  *Original idea, for the record: "the constellation nudge names the object
+  that's up tonight but gives no way to act on it… Care before building: the
+  `.ics` route is deliberately restricted to `_SHOWPIECE_IDS`… so this needs
+  either a second route scoped to 'objects the nearly-there endpoint actually
+  returned' or a widening of that whitelist with the same care about arbitrary
+  ids. Don't just remove the check." — the first option, taken literally.*
+
+---
+
 ## v0.396.0 — 2026-09-08 — NEW BEGINNER FEATURE: "this target is still named after its folder — call it what it is?" (`Library.rename_target`, `objectinfo.suggested_target_rename`, `targets.folder_name`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-e506ni`. The last open slice
