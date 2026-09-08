@@ -76,7 +76,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **Q1 — `auto_edit_on_autostack`: the per-target override + the default flip** (Builder, branch
+  `claude/sweet-babbage-lso4r6`, claimed 2026-09-08 18:4x UTC). The owner answered this gate today
+  ("yes, but should be easy to override with manual settings"), so it is startable for the first time.
+  Shipping the two halves the answer names *together*, because the backlog's own note says "do not ship
+  the default flip without it": a per-target opt-out stored in `project_meta` that the unattended pass
+  honours, a guard so a hand-saved recipe is never overwritten, then `Settings.auto_edit_on_autostack`
+  defaulting True for fresh installs only (the v0.391.0 argument — an existing `config.json` carries an
+  explicit `false` and no migration may flip it).
 
 ## Bugs (fix these first)
 
