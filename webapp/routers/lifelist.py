@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from seestack.lifelist import catalog_capture_status, is_messier, life_list_summary
@@ -133,6 +133,22 @@ class NearlyThereOut(BaseModel):
     location_source: str = "none"
 
 
+def _reference_time(when: str | None) -> datetime:
+    """The UTC instant a "tonight" question is asked about — now, or ``when``.
+
+    Shared by the nudge and its calendar download so the two cannot answer about
+    different nights, and so a bad timestamp is a 422 from both rather than a
+    silently ignored parameter. A naive timestamp is read as UTC, matching the
+    planner's own routes."""
+    if not when:
+        return datetime.now(timezone.utc)
+    try:
+        start = datetime.fromisoformat(when)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
+    return start if start.tzinfo is not None else start.replace(tzinfo=timezone.utc)
+
+
 @router.get("/api/life-list/nearly-there", response_model=NearlyThereOut | None)
 def get_nearly_there(
     request: Request,
@@ -171,14 +187,7 @@ def get_nearly_there(
     if not candidates:
         return None
 
-    start = datetime.now(timezone.utc)
-    if when:
-        try:
-            start = datetime.fromisoformat(when)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
+    start = _reference_time(when)
 
     settings = deps.get_settings(request)
     observer, location_source = _resolve_observer(request, settings)
@@ -235,6 +244,44 @@ def get_nearly_there(
         tonight_catalog_id=(best.id if best is not None else None),
         location_source=location_source,
     )
+
+
+@router.get("/api/life-list/nearly-there/calendar.ics")
+def get_nearly_there_ics(
+    request: Request,
+    when: str | None = Query(default=None,
+                             description="ISO-8601 UTC reference; defaults to now"),
+) -> Response:
+    """One-tap "Add to calendar" for the object that would finish a constellation.
+
+    The nudge above already knows *what* to point at and *when* it is up, and
+    then ended on a sentence: the beginner had to remember it themselves. This
+    hands the same window to their own calendar as a plain ``.ics`` download —
+    no account, no network, the same file the "Try something new tonight" card
+    offers for a showpiece.
+
+    **It names no id.** The window is rendered for the object *this endpoint
+    itself* picked as tonight's, re-asked at download time, so there is no way to
+    calendar an arbitrary catalog row and no whitelist to widen (the suggestion
+    route's ``_SHOWPIECE_IDS`` guard exists for exactly that reason, and a
+    constellation's missing object is often not a showpiece). It also means the
+    file can never describe a different night from the card.
+
+    404s when no constellation is close, when nothing of it is up tonight, when
+    no observing location is known, or when there is no upcoming window — so the
+    download is never a blank calendar.
+    """
+    from webapp.routers.plan import catalog_object_ics_response
+
+    near = get_nearly_there(request, when=when)
+    if near is None or not near.tonight_catalog_id:
+        raise HTTPException(status_code=404, detail="Nothing to add tonight")
+
+    obj = next((o for o in load_catalog() if o.id == near.tonight_catalog_id), None)
+    if obj is None:  # the pick came from this same catalog, so this cannot fire
+        raise HTTPException(status_code=404, detail="Unknown target")
+
+    return catalog_object_ics_response(request, obj, _reference_time(when))
 
 
 @router.get("/api/life-list/counts", response_model=LifeListCounts)

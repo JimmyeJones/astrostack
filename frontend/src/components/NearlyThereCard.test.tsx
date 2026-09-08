@@ -102,4 +102,34 @@ describe("NearlyThereCard", () => {
     await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(screen.queryByTestId("nearly-there-card")).toBeNull();
   });
+
+  it("offers the tonight pick as a one-tap calendar download", async () => {
+    vi.spyOn(client.api, "nearlyThere").mockResolvedValue({
+      con: "Lyr", constellation: "Lyra", captured: 1, total: 2,
+      missing: [RING], tonight_catalog_id: "M57", location_source: "settings",
+    });
+    renderCard();
+
+    const link = await screen.findByText(/Add tonight to calendar/);
+    const anchor = link.closest("a");
+    expect(anchor).not.toBeNull();
+    // No id in the URL: the server calendars the object it picked, so the file
+    // can never describe a different night from the card.
+    expect(anchor).toHaveAttribute("href", "/api/life-list/nearly-there/calendar.ics");
+    expect(anchor).toHaveAttribute("download");
+  });
+
+  it("offers no calendar link when there is nothing up to add", async () => {
+    vi.spyOn(client.api, "nearlyThere").mockResolvedValue({
+      con: "Lyr", constellation: "Lyra", captured: 1, total: 2,
+      missing: [{ ...RING, max_altitude_deg: null, minutes_above_min_alt: null,
+                  usable_start_utc: null, usable_end_utc: null }],
+      tonight_catalog_id: null, location_source: "settings",
+    });
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("nearly-there-card")).toBeInTheDocument());
+    expect(screen.queryByText(/Add tonight to calendar/)).toBeNull();
+  });
 });

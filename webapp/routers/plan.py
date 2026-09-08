@@ -1028,8 +1028,6 @@ def get_suggest_ics(
     calendar" the new target the discovery card recommended. Read-only and offline,
     mirroring the per-target ``.ics``. 404s on an unknown/non-showpiece id or when
     there's no upcoming window, so the file is never blank."""
-    settings = deps.get_settings(request)
-
     start = datetime.now(timezone.utc)
     if when:
         try:
@@ -1043,6 +1041,28 @@ def get_suggest_ics(
     if obj is None:
         raise HTTPException(status_code=404, detail="Unknown target")
 
+    return catalog_object_ics_response(request, obj, start, min_alt=min_alt)
+
+
+def catalog_object_ics_response(
+    request: Request, obj: Any, start: datetime, *, min_alt: int | None = None,
+) -> Response:
+    """One catalog object's next few observing windows, as a downloadable ``.ics``.
+
+    Shared by every "Add to calendar" that points at a *catalog* object rather
+    than a target the user already has — the discovery card's suggestion above,
+    and the life list's "you're one away from finishing Orion" nudge — so the two
+    cannot drift into two different reminders for the same night.
+
+    **Takes an object, never an id.** Which catalog rows are addressable is each
+    caller's own decision (the suggestion route allows only showpieces; the life
+    list route names no id at all and calendars the object *it* picked), and that
+    is deliberately not something this helper can be talked into widening.
+
+    404s when there is no observing site or no upcoming window, so the file is
+    never blank. Read-only and offline, like everything else in the planner.
+    """
+    settings = deps.get_settings(request)
     observer, _ = _resolve_observer(request, settings)
     min_altitude = min_alt if min_alt is not None else int(settings.min_target_altitude_deg)
     if observer is None:

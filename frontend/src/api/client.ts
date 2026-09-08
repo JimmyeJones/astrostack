@@ -3452,6 +3452,11 @@ export const api = {
   // preview stat that decides their thumbnail URLs.
   lifeListCounts: () => req<LifeListCounts>("/api/life-list/counts"),
   nearlyThere: () => req<NearlyThere | null>("/api/life-list/nearly-there"),
+  // Download URL for tonight's window on the object that would finish a
+  // constellation, as a .ics calendar file. No id in the URL on purpose — the
+  // server calendars the object it picked, so the file can never describe a
+  // different night from the card.
+  nearlyThereIcsUrl: () => `/api/life-list/nearly-there/calendar.ics`,
   // Download URL for "my Messier grid" — the whole life list as one shareable
   // JPEG, your pictures in the squares you have and dim numbered squares in the
   // ones you haven't. A href/download like the montage and the recap poster:
