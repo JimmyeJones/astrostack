@@ -13,6 +13,7 @@ import contextlib
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -401,6 +402,7 @@ def _pipeline_body(
             skipped: list[str] = []
             held_thin: list[dict[str, Any]] = []
             held_unreadable: list[dict[str, Any]] = []
+            held_settling: list[dict[str, Any]] = []
             healed: list[dict[str, Any]] = []
             mixed_skipped: list[str] = []
             legacy_skipped: list[str] = []
@@ -485,6 +487,17 @@ def _pipeline_body(
                         # files come back, instead of stamping the data
                         # "covered" and stranding the degraded result.
                         held_unreadable.append(unread_hold)
+                        continue
+                    settle_hold = _auto_stack_settle_hold(
+                        lib, safe, settings.auto_stack_settle_min)
+                    if settle_hold is not None:
+                        # Subs are still arriving for this target. Stacking now
+                        # would re-stack every night it has, publish a picture of
+                        # a night that is not over, and be superseded by the next
+                        # poll. Hold *without* marking the attempt — same
+                        # discipline as the two holds above — so the first scan
+                        # after the subs stop stacks it once, on the whole night.
+                        held_settling.append(settle_hold)
                         continue
                     if settings.mixed_pointing_guard and _mixed_pointing_check(
                             lib, safe) is not None:
@@ -574,6 +587,8 @@ def _pipeline_body(
                 summary["auto_stack_held_thin"] = held_thin
             if held_unreadable:
                 summary["auto_stack_held_unreadable"] = held_unreadable
+            if held_settling:
+                summary["auto_stack_held_settling"] = held_settling
             if healed:
                 summary["auto_stack_healed"] = healed
             if mixed_skipped:
@@ -2476,6 +2491,72 @@ def _auto_stack_readability_hold(
     return {
         "target": safe, "offered": offered, "readable": readable,
         "unreadable": unreadable, "prior_best": prior_max, "reason": reason,
+    }
+
+
+# How long a target must go without a new sub before the hands-off chain will
+# stack it, when the setting leaves it to us. Twenty minutes is comfortably
+# longer than the poll that delivers each batch (``watch_poll_interval_s``
+# defaults to 300 s) and shorter than a meridian-flip pause, so it settles
+# *between* sessions without stranding one that is merely paused. Named, rather
+# than inline, because the sentence above is the whole justification for the
+# number — and it is only a *default*: a user with a slower poll than this window
+# raises the setting.
+AUTO_STACK_SETTLE_DEFAULT_MIN = 20
+
+
+def _auto_stack_settle_hold(
+        lib: Library, safe: str, settle_min: int,
+        now: float | None = None) -> dict[str, Any] | None:
+    """Why a walk-away stack of ``safe`` should wait for the night to settle, or
+    ``None``.
+
+    ``_auto_stack_frame_count`` fires whenever more solved subs exist than the
+    last stack covered — and nothing between it and the stack asks whether subs
+    are still *arriving*. On a night spent shooting one target that means: a poll
+    delivers a batch, the scan solves it, the app re-stacks the **whole** target
+    (every night's subs, thousands of them on this owner's), and by the time that
+    finishes the next poll has delivered more, so it does it again. The
+    single-worker job manager serialises them, so the box spends the night
+    re-stacking, and the target's newest picture keeps being replaced by a picture
+    of a night that is not over. None of that is what "drop subs in, walk away,
+    come back to a great image" means.
+
+    So: hold while the newest accepted sub is younger than the settle window. The
+    caller holds **without** marking the attempt, exactly like the thin and
+    readability holds, so the stack happens on the first scan after the subs stop
+    — delayed, never stranded, and never skipped.
+
+    Returns ``None`` — i.e. stack now — when the window is 0 (today's behaviour,
+    byte for byte), when the target has no sub time at all to judge by (a library
+    predating the fingerprint columns must not be held on a fact it cannot
+    supply), and when the newest sub is already older than the window. Only the
+    unattended chain calls this: the Stack form and "Process target" stack
+    whatever the user explicitly asks for.
+    """
+    if settle_min <= 0:
+        return None
+    proj = lib.open_target(safe)
+    try:
+        newest = proj.newest_accepted_sub_time()
+    finally:
+        proj.close()
+    if newest is None:
+        return None
+    now = time.time() if now is None else now
+    quiet_s = now - float(newest)
+    window_s = settle_min * 60
+    # A clock skew that puts the newest sub in the *future* (a NAS whose clock
+    # runs ahead — the same skew the watcher's own age gate can meet) reads as
+    # "0 minutes quiet", which holds the target for one window rather than
+    # forever: the window is measured from the file's time, so the next scan
+    # after it passes stacks. Never treat it as a reason to hold indefinitely.
+    if quiet_s >= window_s:
+        return None
+    return {
+        "target": safe,
+        "quiet_min": max(0, int(quiet_s // 60)),
+        "settle_min": settle_min,
     }
 
 

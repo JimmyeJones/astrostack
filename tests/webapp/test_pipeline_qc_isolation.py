@@ -30,7 +30,7 @@ def test_qc_target_failure_isolated_and_autostack_still_runs(solved_library, mon
     # Fully-unattended config: QC on, auto-stack on (the "just works" path).
     settings = Settings(
         data_root=str(solved_library), auto_ingest=False, auto_qc=True,
-        auto_solve=False, auto_stack=True,
+        auto_solve=False, auto_stack=True, auto_stack_settle_min=0,
     )
 
     qc_calls: list[str] = []
@@ -129,7 +129,7 @@ def test_autostack_precheck_failure_isolated_and_batch_continues(solved_library,
     """
     settings = Settings(
         data_root=str(solved_library), auto_ingest=False, auto_qc=False,
-        auto_solve=False, auto_stack=True,
+        auto_solve=False, auto_stack=True, auto_stack_settle_min=0,
     )
 
     seen: list[str] = []
@@ -179,7 +179,7 @@ def test_autostack_precheck_cancel_during_target_is_classified_cancelled(
     error, by the auto-stack except's cancel re-check."""
     settings = Settings(
         data_root=str(solved_library), auto_ingest=False, auto_qc=False,
-        auto_solve=False, auto_stack=True,
+        auto_solve=False, auto_stack=True, auto_stack_settle_min=0,
     )
 
     job = Job(kind="pipeline")

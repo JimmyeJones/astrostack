@@ -47,7 +47,7 @@ def test_pipeline_auto_stack_cancel_is_classified_cancelled(solved_library):
     # first cancel check and must surface the cancelled sentinel.
     settings = Settings(
         data_root=str(solved_library), auto_ingest=False, auto_qc=False,
-        auto_solve=False, auto_stack=True,
+        auto_solve=False, auto_stack=True, auto_stack_settle_min=0,
     )
     lib = Library.open_or_create(solved_library / "library")
     try:
@@ -65,7 +65,7 @@ def test_pipeline_mid_stack_cancel_is_classified_cancelled(solved_library, monke
     # the loop breaks — the summary must still carry the top-level sentinel.
     settings = Settings(
         data_root=str(solved_library), auto_ingest=False, auto_qc=False,
-        auto_solve=False, auto_stack=True,
+        auto_solve=False, auto_stack=True, auto_stack_settle_min=0,
     )
 
     def fake_run_stack(proj, opts, *, progress=None, cancel=None,

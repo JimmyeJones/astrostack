@@ -14,6 +14,143 @@ Newest first.
 
 ---
 
+## v0.390.1 — 2026-09-08 — SHIPPED: hold a target the sky is still filling (`pipeline._auto_stack_settle_hold`, `auto_stack_settle_min`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-ldlc6c`.)** The READY entry
+filed the same day by re-reading the walk-away chain for the `auto_stack` flip —
+and the prerequisite that flip is gated on ("in the same run or before it"), so
+the flip is now unblocked.
+
+**What was wrong.** `_auto_stack_frame_count` fires whenever more solved subs
+exist than the last stack covered, and *nothing* between it and `_stack_target`
+asked whether subs were still arriving. So on a night spent shooting one target:
+a poll (`watch_poll_interval_s`, 5 min) delivers a batch, the scan solves it, the
+app re-stacks the **whole** target — every night's subs, up to the owner's 5,477
+— and by the time that finishes the next poll has delivered more, so it does it
+again. The single-worker `JobManager` serialises them, so the box spends the
+night re-stacking and the target's "newest picture" keeps being replaced by a
+picture of a night that is not over. That is not what "drop subs in, walk away,
+come back to a great image" means.
+
+**The fix.** One additive setting, `auto_stack_settle_min` (default 20, `ge=0`,
+0 = today's behaviour byte for byte), and one hold in the walk-away loop beside
+the two that already live there: while the newest accepted sub is younger than
+the window, hold — **without stamping the attempt marker**, exactly like the
+thin-frames and readability holds, so the target stacks on the first scan after
+the subs stop. Delayed, never stranded, never skipped. Reported as
+`auto_stack_held_settling` with how long the target has been quiet.
+
+`AUTO_STACK_SETTLE_DEFAULT_MIN = 20` is a named constant carrying its own
+justification: **longer than any poll interval, shorter than a meridian-flip
+pause**, so it settles between sessions without stranding one that is merely
+paused. A test pins the setting's default to the constant so the two cannot
+drift.
+
+**Where the time comes from.** New pure
+`Project.newest_accepted_sub_time()` — two `MAX()`s, never a `FrameRow`, because
+the scan asks this of *every* target on every poll and this owner's targets carry
+thousands of subs. It prefers `source_mtime` (the sub's own file time, stamped at
+ingest — "when did this land here?", which is what a settle window is about) and
+falls back to `timestamp_utc` for rows predating the fingerprint columns. The
+fallback is wrong only in the harmless direction: a sub shot long ago and copied
+in today reads as *old*, so the target stacks sooner, never later. `None` — a
+library that can answer neither — means stack, never wait.
+
+**Clock skew cannot strand a target,** unlike an absolute age gate: a source
+filesystem running ahead reads as "0 minutes quiet" and costs the window plus the
+skew, then passes, because the window is measured from the file's own stamp. Both
+halves are pinned by a test.
+
+**On the default being 20 rather than 0.** This is the one place this change is
+not literally byte-for-byte on an upgrade, and it is deliberate. It only affects
+an install with `auto_stack` **on** — which the owner's is not, which is exactly
+why the entry said to land it *before* his switch goes on — and it only ever
+makes the unattended chain *wait*: nothing is skipped, the manual Stack form and
+"Process target" are untouched, and 0 restores the old cadence exactly. The
+alternative, defaulting it off, would mean the owner has to find and set a
+setting to get the behaviour the feature exists for, which is the opposite of
+priority 2.
+
+**The entry's "second face" is covered by the same hold, not separately.** It
+also noted that `auto_stack_min_frames` is counted *per target*, so night one of
+a mosaic could publish a one-panel "mosaic" off three located subs. With the
+settle window the first unattended stack of a night happens 20 minutes after the
+**last** sub lands, by which point the panel count is the night's, not the first
+poll's. No second mechanism was added for it.
+
+**Tests.** New `tests/webapp/test_autostack_settle.py` (+7): a target whose
+newest sub is 2 minutes old is held with the new status and **no marker** (fails
+before — it stacked), and stacks on the next scan 30 minutes later; a 0 window
+reproduces today's behaviour; a library with no sub times at all is never held;
+the `DATE-OBS` fallback reads a back-catalogue as old; the hold reports the quiet
+minutes; the future-stamp case; the constant matches the setting default.
+`test_config_upgrade.py` gains the new field, including the 0 escape hatch.
+`Settings.test.tsx` (+3) covers the control, its disabled state and its hint,
+and `Jobs.test.tsx` (+1) the summary line.
+
+**Visible where the other two holds already are.** A beginner watching Jobs on a
+night of shooting would otherwise read "Imported 60 new frames." with no picture
+and nothing saying why. The scan summary now carries
+`auto_stack_held_settling`, `pipelineSummary` reports "waiting on N still being
+shot", and the Jobs page renders the same alert shape the thin and unreadable
+holds use — naming each target, how long since its last sub, and that nothing is
+skipped. It is deliberately **not** added to `overnight.needs_a_look`: a target
+still being shot is not something to go and look at.
+**Seventeen existing auto-stack tests, across five files, set
+`auto_stack_settle_min=0` explicitly** — their fixtures write subs seconds before
+the assertion, so under the new rule every one of their targets is legitimately
+"still being shot". They are about other things; none was loosened, and the
+shared `_settings` helpers say why.
+
+---
+
+### The entry as it was filed
+
+- **READY (backlog-readiness run 2026-09-08, found by re-reading the walk-away chain for the `auto_stack`
+  flip) — once auto-stack is on, a target that is *still being shot* is re-stacked in full after every scan
+  that brings new subs: hold a target until it has gone quiet.** *(Pillar: autonomy — PRIORITY 2; size S–M;
+  backend only, one additive setting. Confidence: traced — `_auto_stack_frame_count` (`webapp/pipeline.py`
+  ~2334) fires whenever "more accepted+solved frames exist than the last stack covered", and nothing between it
+  and `_stack_target` asks whether subs are still arriving; the third audit's end-to-end run had 160 subs in
+  total and could not feel this. Checked `docs/SHIPPED.md` and this file for "settle" / "quiet" /
+  "still shooting" / "cadence": `watch_quiet_period_s` settles a *file*, never a *target*; nothing else.)*
+  **The problem, in the owner's terms.** He turns Auto-stack on and shoots a 12-panel mosaic for six hours.
+  The watcher's poll (`watch_poll_interval_s`, 300 s) delivers a batch of new subs, the scan solves them, and
+  `_auto_stack_frame_count` says "new solved frames" — so the app stacks the **whole target** (every night's
+  subs, up to his 5,477) and, with auto-edit on, edits it. By the time that finishes the next poll has
+  delivered more, so it stacks the whole target again. The single-worker `JobManager` serialises them, so the
+  NAS spends the night re-stacking, and the Target page's "newest picture" flips every hour to a picture of a
+  night that is not over. A second face of the same gap: `auto_stack_min_frames` (3 located subs) is counted
+  **per target**, so on night one of a mosaic the first three located subs of the first panel are enough to
+  publish a one-panel "mosaic" as the target's picture. Both are exactly what "drop files in, walk away, come
+  back to a great image" is not.
+  **Code sites.** `webapp/pipeline.py`: the walk-away batch (~399 `if settings.auto_stack:` … the per-target
+  loop that calls `_auto_stack_frame_count(lib, safe)` ~444 and holds on `auto_stack_min_frames` ~462 *without*
+  stamping the attempt marker — the hold shape to copy); `_auto_stack_frame_count` (~2334);
+  `_auto_stack_readability_hold` (~2434, the other hold, and the one whose "held, not stamped, retried next scan"
+  semantics this must share). `seestack/io/project.py` — `frames.source_mtime` (the sub's own file time, set at
+  ingest/refresh) and `date_obs`; `webapp/config.py` (`watch_quiet_period_s`, `watch_poll_interval_s`,
+  `auto_stack_min_frames`). `frontend/src/routes/Settings.tsx` ~712–721 (the Auto-stack group).
+  **Shape.** One additive setting, `auto_stack_settle_min: int = 20` (`ge=0`; 0 = today's behaviour), and one
+  hold in the walk-away loop beside the two that exist: if the target's newest accepted sub (`max(source_mtime)`,
+  falling back to `date_obs`) is younger than the settle window, **hold** — status *"still receiving subs
+  (last one N min ago) — will stack once the night has settled"*, no attempt marker, retried on the next scan
+  exactly like the min-frames hold. The manual Stack form and "Process target" are never held. Twenty minutes
+  is longer than any poll and shorter than a meridian-flip pause; make it a named constant with that sentence
+  beside it. Optional second half, only if the first proves insufficient on real data: a per-target minimum
+  interval between unattended stacks. **Not** a debounce inside the watcher — the watcher settles files, and a
+  target keeps receiving files all night.
+  **Upgrade-safe (§9):** a new setting with a default; behaviour changes only on installs with `auto_stack`
+  on, which today is no install the owner runs (his is off) — the honest time to land it is *before* his
+  switch goes on, which is why it sits beside the flip.
+  **Tests** (`tests/webapp/test_autostack_hold.py`, the existing hold tests are the template): a target whose
+  newest sub is 2 min old is held with the new status and no marker (**fails today** — it stacks); the same
+  target 30 min later stacks; `auto_stack_settle_min = 0` reproduces today's behaviour byte-for-byte; a
+  target with no `source_mtime` on any row (pre-fingerprint rows) is not held; "Process target" on a held
+  target stacks immediately.
+
+---
+
 ## v0.390.0 — 2026-09-08 — SHIPPED: the editor opens on the good picture, not on a nudge to press one button (`Editor.tsx` first-open Auto seed)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-ldlc6c`.)** The ⭐ READY —

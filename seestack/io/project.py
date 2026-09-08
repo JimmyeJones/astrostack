@@ -1146,6 +1146,46 @@ class Project:
             )
         ]
 
+    def newest_accepted_sub_time(self) -> float | None:
+        """When the most recent accepted sub arrived, as a POSIX timestamp — or
+        ``None`` when nothing accepted carries a time.
+
+        The one question "is this target still being shot?" needs, and the whole
+        of it: two ``MAX()``s over an indexed-free but narrow scan, never a
+        ``FrameRow``, because the walk-away scan asks it of **every** target on
+        every poll and this owner's targets carry thousands of subs each.
+
+        Prefers ``source_mtime`` — the sub's own file time, stamped at ingest —
+        because it answers "when did this land here?", which is what a settle
+        window is about, and it is set for every frame ingested since the
+        fingerprint columns arrived. Falls back to ``timestamp_utc`` (the frame's
+        ``DATE-OBS``) for rows that predate them, which is close enough for the
+        same question and wrong only in the harmless direction (a sub shot long
+        ago and copied in today reads as old, so the target stacks *sooner*).
+        Both are ignored where NULL, so a library with neither simply has no
+        opinion and every caller must treat ``None`` as "don't hold".
+        """
+        assert self._conn is not None
+        row = self._conn.execute(
+            "SELECT MAX(source_mtime) FROM frames WHERE accept = 1"
+        ).fetchone()
+        newest = row[0] if row else None
+        if newest is not None:
+            return float(newest)
+        row = self._conn.execute(
+            "SELECT MAX(timestamp_utc) FROM frames "
+            "WHERE accept = 1 AND timestamp_utc IS NOT NULL AND timestamp_utc != ''"
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        # Local import: `activity_calendar` is a leaf module (stdlib only), and
+        # keeping it out of this module's import list keeps `project` free of
+        # anything it does not need to open a database.
+        from seestack.activity_calendar import parse_utc
+
+        parsed = parse_utc(str(row[0]))
+        return None if parsed is None else parsed.timestamp()
+
     def source_paths(self) -> list[str]:
         """Every registered frame's ``source_path``, in id order.
 
