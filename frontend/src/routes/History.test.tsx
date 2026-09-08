@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote, removedOverlayCaption, derivedFromNote } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, panelGainSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote, removedOverlayCaption, derivedFromNote } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import { FULL_RES_PNG_MAX_LONG_EDGE } from "../fullres";
@@ -1420,6 +1420,31 @@ describe("photometricSummaryText", () => {
     expect(
       photometricSummaryText({ mode: "transparency", n_adjusted: 2, n_panels: 0 }),
     ).toBe("Photometrically normalized · 2 frames gain-matched");
+  });
+});
+
+describe("panelGainSummaryText", () => {
+  it("returns null when the run didn't match its panels", () => {
+    expect(panelGainSummaryText(null)).toBeNull();
+    expect(panelGainSummaryText(undefined)).toBeNull();
+  });
+  it("says how many panels moved, by how much, and where it was measured", () => {
+    expect(
+      panelGainSummaryText({ mode: "overlap", n_panels: 4, n_pairs: 4, min: 0.86, max: 1.31 }),
+    ).toBe(
+      "Mosaic panels matched to each other · 4 panels · brightness 0.86–1.31× · " +
+        "measured in 4 overlaps",
+    );
+  });
+  it("singularises one panel and one overlap", () => {
+    expect(panelGainSummaryText({ mode: "overlap", n_panels: 1, n_pairs: 1 })).toBe(
+      "Mosaic panels matched to each other · 1 panel · measured in 1 overlap",
+    );
+  });
+  it("tolerates a master that carries only the mode", () => {
+    expect(panelGainSummaryText({ mode: "overlap" })).toBe(
+      "Mosaic panels matched to each other",
+    );
   });
 });
 

@@ -907,6 +907,49 @@ def test_stack_info_photometric_absent_for_unnormalized_stack(client, solved_lib
     assert body["photometric"] is None
 
 
+def test_stack_info_surfaces_cross_panel_gain_matching(client, solved_library):
+    """A mosaic that matched its panels to each other through their overlaps
+    stamps PANG* cards. They are parsed separately from the PHOT* ones because
+    they answer a different question on different evidence — a user reading
+    "gain-matched" needs to know whether anything reached across a join."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["PANGAIN"] = "overlap"
+                hdul[0].header["PANGNPAN"] = 4
+                hdul[0].header["PANGNPAR"] = 4
+                hdul[0].header["PANGMIN"] = 0.86
+                hdul[0].header["PANGMAX"] = 1.31
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    g = body["panel_gain"]
+    assert g == {"mode": "overlap", "n_panels": 4, "n_pairs": 4,
+                 "min": 0.86, "max": 1.31}
+    # …and the two summaries stay independent: this run gain-matched panels
+    # without normalising any individual sub.
+    assert body["photometric"] is None
+
+
+def test_stack_info_panel_gain_absent_when_the_panels_were_left_as_shot(
+        client, solved_library):
+    """No PANG* cards — a single field, a mosaic whose overlaps said nothing, or
+    any master written before the feature — reads as "nothing reached across a
+    join", never as a claim that it did."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["panel_gain"] is None
+
+
 def test_stack_info_surfaces_dark_scaling_summary(client, solved_library):
     """A stack that scaled its dark to the subs' exposure stamps DARKSCAL/DARK*EXP
     cards; the info endpoint parses them into a friendly summary the panel shows."""

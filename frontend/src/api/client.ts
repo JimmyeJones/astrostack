@@ -1406,6 +1406,20 @@ export interface StackPhotometricSummary {
   n_panels?: number;
 }
 
+// Cross-panel gain matching, measured in a mosaic's panel overlaps. Separate
+// from StackPhotometricSummary because it answers a different question on
+// different evidence: that one gain-matches each sub to its own panel, this one
+// matches whole panels to each other through the sky they share. Absent on
+// single-field runs, on mosaics whose overlaps couldn't be measured, and on
+// every master written before the feature.
+export interface StackPanelGainSummary {
+  mode: string;
+  n_panels?: number;
+  n_pairs?: number;
+  min?: number;
+  max?: number;
+}
+
 export interface StackDarkScalingSummary {
   mode: string;
   dark_exposure?: number;
@@ -1660,6 +1674,7 @@ export interface StackRunInfo {
   weighting: StackWeightingSummary | null;
   weighting_skipped?: StackWeightingSkipped | null;
   photometric?: StackPhotometricSummary | null;
+  panel_gain?: StackPanelGainSummary | null;
   dark_scaling?: StackDarkScalingSummary | null;
   // How many broken photosites the (off-by-default) "repair hot/dead pixels
   // from the dark" option fixed in every sub. Present only when the repair ran

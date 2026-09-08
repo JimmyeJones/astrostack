@@ -176,7 +176,7 @@ class NeedsLookOut(BaseModel):
 
 class LastNightResponse(BaseModel):
     """The library's most recent capture night, combined across targets — and,
-    since v0.387.0, what the walk-away pipeline then did with it (see
+    since v0.388.0, what the walk-away pipeline then did with it (see
     :mod:`webapp.overnight`)."""
 
     n_targets: int
@@ -804,7 +804,7 @@ def get_last_night(request: Request) -> LastNightResponse | None:
     ``early_stop`` both counts it twice toward "enough nights to have a habit"
     and dilutes the median with a bedtime that is not when the night ended.
 
-    Since v0.387.0 the card also carries the **other half of the morning
+    Since v0.388.0 the card also carries the **other half of the morning
     question** — not what the sky gave, but what the app *did* with it while
     nobody was watching: the pictures it produced since the night's first sub
     (``new_pictures``) and the targets the hands-off scan deliberately held back

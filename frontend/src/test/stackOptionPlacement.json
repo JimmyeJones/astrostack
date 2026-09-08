@@ -109,6 +109,11 @@
     "group": "simple",
     "type": "str"
   },
+  "panel_gain_match": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  },
   "photometric_normalize": {
     "depends_on": null,
     "group": "advanced",
