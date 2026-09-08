@@ -14,6 +14,73 @@ Newest first.
 
 ---
 
+## v0.384.0 — 2026-09-08 — the share of a processed run comes off the master, once, and is cached beside the run
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-5fx14v`.)** The READY entry
+filed by the 2026-09-07 backlog-readiness run, built to its spec — the open half
+v0.310.0 / v0.311.0 recorded when they shipped the native-resolution share for
+*linear* runs only.
+
+**Two halves, one cause.** `_native_picture_source` returned `None` for any run
+whose preview is display-space — i.e. every "Process target", every "Reprocess
+everything", and every walk-away run once `auto_edit_on_autostack` is on: **his
+main path**. For those runs the JPEG, framed keepsake, scale & compass, "share",
+"share the keepsake" and all three wallpapers were re-encodes of the 1024 px
+preview: soft on the phone he reads this app on, softer on a desktop. And for a
+*linear* run it **did** render — on every single request, with no cache and no
+validator, so each of those nine taps re-read the master (104 MB on his
+3494×2470 mosaic) off the NAS and re-stretched it in the request threadpool.
+
+**What ships.**
+
+- `_build_or_get_share_source(run, recipe_json, long_edge)` renders through
+  **`pipeline.render_run_full_res_png`** — the one function that decides *which*
+  full-resolution render a finished run means (the saved recipe for a
+  display-space run, the asinh curve a History "Adjust" saved, the STF otherwise)
+  — so the share, the Full-res PNG button and the pictures archive can never be
+  three different pictures of one run. Its result is cached beside the master as
+  `<basename>_share.png` with a `<basename>_share.sig` validator, modelled line
+  for line on the zoom clip: signature = `v1 | preview stamp | master stamp |
+  sha1(recipe) | long edge | app version`, written `.tmp`-then-renamed so a
+  concurrent request never reads a half-written file.
+- **One render serves every caller.** `_share_source_long_edge` takes the largest
+  of `SHARE_JPEG_MAX_LONG_EDGE` and each wallpaper preset's need, capped at the
+  canvas; the share JPEG then decimates the decoded PNG with `Image.BOX`
+  (`_decimate_png`) — milliseconds, and never a second FITS read.
+- `"share_png"` / `"share_sig"` are registered in `RUN_ARTEFACT_SUFFIXES`, so the
+  delete and prune paths take them with the run. That matters more here than for
+  the clip: this file is tens of megabytes on a mosaic.
+- `_run_recipe_json` is the recipe read both endpoints now do (only they have the
+  project open), in one place so the wallpaper and the share cannot disagree
+  about what a "Process target" picture is.
+
+**What still declines, and why.** A preview a past "Adjust → North up → Save"
+turned (the master is on the un-rotated grid); a preview showing only part of the
+canvas (an auto-crop trim — the render is of the whole canvas); a run with no
+readable master, or one whose canvas is no bigger than its preview. **And a
+display-space run with no saved recipe**, which is the honest version of the
+decline this entry removes: without the recipe, rendering the linear master hands
+back the *un-edited* picture. The two existing tests that read as "a processed run
+falls back" were pinning exactly that case without saying so; they are renamed to
+say it, in this commit, with their assertions unchanged.
+
+**Tests** (+8, four fail-before). `test_share_native_resolution.py`: a
+display-space run **with** its recipe is served at canvas size, not 400 px
+(**fails before**); one render serves JPEG + keepsake + wallpaper (spy on
+`render_run_full_res_png`: called **once**, **fails before** — it was three);
+the cache rebuilds when the recipe changes and when the preview is rewritten, and
+the rebuilt share is different bytes; the two cache files land beside the master
+under their registered suffixes with no `.tmp` left behind, and a run delete
+removes them. `test_wallpaper.py`: a processed run with a recipe gets more than
+the preview's height. The existing purge test already walks every registered
+suffix, so it covers the new pair for free.
+
+Upgrade-safe: two additive files under `output/` with registered suffixes (an
+older image rolling back simply ignores them); no config, schema, on-disk layout,
+API-shape or default change.
+
+---
+
 ## v0.383.1 — 2026-09-08 — a Sun or Moon video stack stops debayering the frames it is about to throw away
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-5fx14v`.)** The wait, not the

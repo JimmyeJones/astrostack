@@ -5722,73 +5722,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   dot for a target with a known RA/Dec but no placeable picture ("you have been here"); worth checking
   whether the shipped map drops those silently, and if so, filing it. Nothing else mine had is worth porting.
 
-- **READY (backlog-readiness run 2026-09-07) — the picture he shares of an auto-processed run is still the
-  1024 px preview, and every share of a plain run re-reads the master: render the share source once per run
-  and cache it beside the run's other derived files.** *(Pillar: get / enjoy / share — PRIORITY 3, plus a felt
-  cost on the NAS; size M; backend only. Confidence: traced in `webapp/routers/stack.py` and
-  `webapp/pipeline.py`, both quoted below. Checked `docs/SHIPPED.md` and this file: v0.310.0 / v0.311.0 shipped
-  the native-resolution share for *linear* runs and **declined display-space runs on purpose**, recording
-  "render once and cache it" as the open half (that entry is now archived in `SHIPPED.md`); v0.376.2 added
-  `ETag`s to the Sky map, not to these endpoints; the zoom clip (v0.303.0) is the only cached share artefact.
-  Nothing has built the cache.)*
-  **The problem, in the owner's terms — two halves, one cause.** **(a)** `stack._native_picture_source` (~3725)
-  returns `None` for any run whose preview is display-space (`_preview_is_display_space`), i.e. every "Process
-  target", "Reprocess everything" and — once `auto_edit_on_autostack` is on — every walk-away run: **his main
-  path**. For those runs JPEG, framed keepsake, scale & compass, "share", "share the keepsake" and all three
-  wallpapers are re-encodes of the 1024 px preview: soft on the phone he reads this app on, softer on a 1440p
-  screen, and exactly what v0.311.0 fixed for the runs he uses least. **(b)** For a linear run it *does* render
-  — `render_preview_png_full_res(fits_path, max_long_edge=…)` — on **every request**, with no cache and no
-  validator: each tap on any of those nine items re-reads the master (104 MB on his 3494×2470 mosaic) off the
-  NAS and re-stretches it in the request threadpool, and the wallpaper and the share JPEG each render their own
-  copy at their own size.
-  **Code sites.** `webapp/routers/stack.py`: `_native_picture_source` (the decline list and the render);
-  `download_wallpaper` (~3795, calls it with `wallpaper_source_long_edge(...)`); `download_stack_run` for
-  `kind == "jpeg"` (~3914, calls it with `SHARE_JPEG_MAX_LONG_EDGE = 2560`); `_build_or_get_zoom_clip` /
-  `_zoom_clip_signature` (~2145–2195 — **the cache pattern to copy**: a sidecar `.sig` beside the artefact,
-  rebuilt when the signature moves); `_file_stamp` (~1109). `webapp/pipeline.py::render_run_full_res_png(run,
-  recipe_json, *, north_up, max_long_edge)` (~1694) — **the one place that already decides which render a run
-  means** (the saved recipe for a display-space run, the saved asinh curve for an Adjust save, the STF
-  otherwise; used by the Full-res PNG button *and* the pictures archive so the two cannot differ).
-  `seestack/stack/output.py::RUN_ARTEFACT_SUFFIXES` (~738) — every per-run file the delete / purge / re-stack
-  archive paths know about; the zoom clip's `_zoom.webp` / `_zoom.sig` are registered there and travel with the
-  run. `seestack/wallpaper.py::WALLPAPER_MAX_SOURCE_LONG_EDGE = 6000` and `wallpaper_source_long_edge`.
-  **Shape.** (1) New `_build_or_get_share_source(run, recipe_json) -> bytes | None` in `stack.py`, modelled
-  line for line on `_build_or_get_zoom_clip`: cache file `<output_basename>_share.png` + `<basename>_share.sig`
-  in the run's output dir; signature `v1 | _file_stamp(preview) | _file_stamp(fits) | sha1(recipe_json or "") |
-  long_edge | webapp.__version__`; on a miss, render through **`pipeline.render_run_full_res_png(run,
-  recipe_json, max_long_edge=long_edge)`** and write `.tmp`-then-rename. (2) **One cached render serves both
-  callers:** `long_edge = min(canvas long edge, max(SHARE_JPEG_MAX_LONG_EDGE, wallpaper_source_long_edge(…) for
-  each `WALLPAPER_PRESETS` entry))` — the wallpaper's desktop need can exceed 2560 (its cap is 6000), and the
-  share JPEG then decimates the decoded cache PNG with `Image.BOX`, which is milliseconds and never a FITS read.
-  On the owner's canvases this is a ~3500 px PNG of roughly 15–25 MB per run: say so, and register it so it is
-  purged with the run. (3) Register `"share_png": "_share.png"` and `"share_sig": "_share.sig"` in
-  `RUN_ARTEFACT_SUFFIXES` (`tests/webapp/test_run_purge.py::test_every_per_run_meta_prefix_is_registered` and
-  `test_a_real_stack_write_leaves_nothing_the_delete_path_cannot_find` exist to catch a forgotten suffix). (4)
-  `_native_picture_source` keeps its **crop** and **baked-North-up** declines (a trimmed preview and a preview a
-  past save turned are still not the canvas), keeps the cheap "canvas ≤ preview" gate, and **drops** the
-  display-space decline — the recipe render is what makes that case right. Both endpoints then read the cache
-  instead of rendering. The recipe render (`_render_recipe_fullres` → `_load_full_rgb_wcs`, native then
-  decimated) is the same path the Full-res PNG button already takes, so no new memory ceiling is introduced —
-  but it is a multi-second render on a NAS, which is exactly why it is cached and why it must stay in the
-  threadpool (the endpoints are sync `def`, so FastAPI already does that — do not make them `async`).
-  **Traps.** (1) The scale bar is measured against the picture the marks are drawn on
-  (`_unrotated_preview_width`; the v0.311.0 spy test) — the source swap must stay *before* that measurement, as
-  it is now. (2) `tests/webapp/test_share_native_resolution.py::test_share_jpeg_falls_back_to_the_preview_for_a_processed_run`
-  and `tests/webapp/test_wallpaper.py::test_wallpaper_falls_back_to_the_preview_for_a_processed_run` pin the
-  **decline this entry removes** — rewrite them to assert the opposite, deliberately and in the same commit,
-  and say so; do not leave them passing by accident. (3) A History "Adjust → Save" rewrites the preview (its
-  mtime moves); a recipe save changes `recipe_json`; both are in the signature — pin each. (4) The two new files
-  are plain files under `output/` with registered suffixes, like the zoom clip: no schema, no config, and an
-  older Docker image rolling back ignores them. (5) Nothing here touches `incoming/` (§10) — the cache lives in
-  the target's own tree.
-  **Tests.** `test_share_native_resolution.py` / `test_wallpaper.py`: a **display-space** run's JPEG and
-  wallpaper come off the master at share size through the saved recipe (**fails today** — the current tests
-  assert the fallback); the second request renders nothing (spy on `render_run_full_res_png`: called **once**
-  across JPEG + keepsake + wallpaper for one run); the cache rebuilds after the preview is rewritten and after
-  the recipe changes; a linear run's bytes are unchanged from today's render (same renderer, same size).
-  `test_run_purge.py`: deleting a run removes `_share.png` / `_share.sig`; the registered-suffix test passes.
-  Upgrade-safe: additive files only; no config, schema or API-shape change.
-
 - **✅ SHIPPED (Builder, v0.293.0, branch `claude/compassionate-galileo-60dqir`) — ~~"What's in my picture?"
   object labels only appear in History, where most beginners never look — surface them on the main Target
   picture.~~** The first (main) half shipped exactly as the shape below asks, reuse-only: `LatestPictureCard`
@@ -8479,6 +8412,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.384.0** — PRIORITY 3 (get / enjoy / share), the READY entry filed 2026-09-07: **the picture he shares of a "Process target" run comes off the master instead of the 1024 px preview — and every share of any run stops re-reading that master.** `_native_picture_source` declined every display-space run (his main path: "Process target", "Reprocess everything", and every walk-away run once `auto_edit_on_autostack` is on), so its JPEG, keepsake, scale-&-compass, share and all three wallpapers were re-encodes of a 1024 px preview; and for a *linear* run it re-rendered the master on **every** request — 104 MB off the NAS per tap on his mosaic, nine taps to a run. New `_build_or_get_share_source` renders once through `pipeline.render_run_full_res_png` (the one place that decides which render a finished run *means*, so the share, the Full-res PNG button and the pictures archive cannot drift) and caches it beside the run as `<basename>_share.png` + `_share.sig`, modelled on the zoom clip: signature = preview stamp | master stamp | recipe hash | size | app version, written `.tmp`-then-renamed. One render at the largest size any hand-out needs serves them all; the share JPEG decimates the decoded cache (`Image.BOX`), never a second FITS read. Both files are registered in `RUN_ARTEFACT_SUFFIXES`, so they are deleted and pruned with the run. **A display-space run with no saved recipe still declines** — the plain render of its linear master is the *un-edited* picture — as do the baked-North-up and cropped-preview cases, unchanged. Tests +8, four fail-before; the two existing tests that pinned the old blanket decline now pin the recipe-less case they were really about, renamed in the same commit. Additive files only; no config, schema, API-shape or default change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.383.1** — PRIORITY 3 (friendliness — a felt wait on a beginner feature): **a Sun or Moon video stack stops debayering the frames it is about to throw away.** `video/ffmpeg.iter_frames` demosaics a raw (CFA) capture once per decoded frame — ~350 ms a frame on the owner's 4,487-frame solar file — and `lucky.stack_video`'s second pass paid it for *every* frame before dropping all but `keep_percent` of them one line later, so roughly a third of a half-hour stack was debayering discards. `iter_frames` now takes `wanted: Collection[int] | None`; a frame outside it is still decoded (the byte framing demands it) but not demosaiced, and is yielded as **`None`** rather than skipped — so the caller's `enumerate` still lines up with the `keep_idx` pass 1 built, and no caller can ever mistake an un-demosaiced mosaic for a picture. Pass 1 is untouched (it grades on the colour frame's luma). The "is this really a mosaic" latch stays on the **first frame off the wire**, wanted or not, so a capture whose first frame is discarded still debayers correctly. Tests +5: the demosaic count is `n_graded + n_kept` (18, where it was 24) on a real ffmpeg-encoded `pal8` capture, and the stacked image is `array_equal` to the same run with the old eager decode — this is a skip, not a change. Engine-only.
 - **v0.383.0** — PRIORITY 3 (trust / friendliness), the READY entry filed 2026-09-07: **the Storage page says, with the owner's own numbers, that the subs in `incoming/` are the only copy there is.** The largest risk to his pictures is not a bug in this app — his raws live in `incoming/` and nowhere else, `copy_to_cache` is off so the app holds no copy, and nothing said so; the page's closing aside called the folder "worth having a backup of" in the same breath as "you can rebuild your whole library from them". That aside is now one plain sentence built from his data: *"Your 8,542 subs (44 GB) in incoming/ are the only copy AstroStack knows of. It reads them where they are and never writes there, and it keeps no copy of its own — nothing this app does backs them up. Keep a copy somewhere else."* With `copy_to_cache` on it says instead that the cache copies are working files "Clear caches" deletes — not a backup. **The numbers come from the `frames` rows, never from the folder:** new pure `Project.source_frames_under(prefix)` sums `source_size_bytes` over rows whose `source_path` has that literal prefix (`substr`, no LIKE escaping; trailing separator so `incoming2/` can't match), called inside the per-target `try` `get_storage` already opens — so answering never walks, opens or `stat`s anything under `incoming/` (AGENTS.md §10), pinned by a test that makes those calls fatal *and* proves the trap armed first. Rows predating `source_size_bytes` are reported separately, so the figure is honestly "at least". Four additive response fields with defaults + `frontend/src/components/incomingCopyNote.ts` (pure, takes the page's own byte formatter). Nothing removed; no new card. Tests +11, two fail-before; `tsc`/`vitest`/`vite build` clean. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.382.5** — 🟡 PRIORITY 3 (friendliness / trust), the third audit's **D2**: **the "installing ASTAP's star database helps" note stops firing at a night that is merely still being solved.** A scan ingests every new sub *before* any is solved, and `seestack/stackhealth.py`'s `unsolved` note counted every accepted sub with no `wcs_json` as a plate-solve failure — so mid-pipeline, on a healthy night, it announced *"Only 36 of 120 subs could be located"* and pointed the owner at a setup problem that does not exist, for as long as the solve took. Both terms now count only frames whose solve has actually **run**: new pure `_solve_was_tried` reads the `reject_reason='solve_failed:…'` mark a failed solve leaves (a failure deliberately does not touch `accept`), which is the same predicate `Project.solve_failure_reasons` already uses, so the note and the reject breakdown cannot disagree. Side effect worth having: the ratio a beginner reads is now the true failure rate rather than one diluted by the queue — 6 located / 6 failed / 300 pending reads *"6 of 12"*, not *"6 of 312"*. Conservative by design (a frame keeping a concrete `qc_error` reason reads as untried — undercounting keeps the note quiet, overcounting is the bug). Engine + copy only; no config, schema, on-disk, API or default change. Tests +2 fail-before, plus four existing fixtures given the mark a real failed solve leaves. Full entry in [`SHIPPED.md`](SHIPPED.md).
