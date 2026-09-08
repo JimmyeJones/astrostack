@@ -272,6 +272,139 @@ def test_auto_edit_on_autostack_finishes_the_picture(client, solved_library):
     assert any(o["id"] == "tone.stretch" for o in saved_ops)
 
 
+def test_a_target_can_be_left_out_of_the_unattended_auto_edit(
+    client, solved_library,
+):
+    """The owner made "easy to override with manual settings" a condition of
+    auto-editing being on at all, and a library-wide switch is not an override
+    for *one* target. Fails before: nothing consulted the target.
+
+    Stored per target, so it survives the next night rather than lasting until
+    the page is closed — which is the whole point of the condition."""
+    client.put("/api/settings",
+               json={"auto_stack": True, "auto_edit_on_autostack": True,
+                     "auto_stack_settle_min": 0})
+    r = client.put("/api/targets/M_42/auto-edit", json={"auto_edit": False})
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "auto_edit": False, "library_default": True, "effective": False}
+
+    _run_scan(client)
+    runs = client.get("/api/targets/M_42/stack-runs").json()
+    assert runs, "the stack itself must still happen — only the finishing is off"
+    rid = runs[0]["id"]
+    recipe = client.get(
+        f"/api/targets/M_42/stack-runs/{rid}/editor/recipe").json()
+    assert [o for o in recipe["ops"] if o.get("enabled", True)] == []
+    assert runs[0]["auto_edited"] is False
+    # …and only this target: the library's other target is finished as usual, so
+    # the override is an override and not a global off switch.
+    other = client.get("/api/targets/NGC_7000/stack-runs").json()
+    assert other and other[0]["auto_edited"] is True
+
+
+def test_one_target_can_opt_in_while_the_library_setting_is_off(
+    client, solved_library,
+):
+    """The override is a genuine tri-state, not a mute button: with the library
+    setting off, a target the owner asked for still comes back finished."""
+    client.put("/api/settings",
+               json={"auto_stack": True, "auto_edit_on_autostack": False,
+                     "auto_stack_settle_min": 0})
+    r = client.put("/api/targets/M_42/auto-edit", json={"auto_edit": True})
+    assert r.json() == {
+        "auto_edit": True, "library_default": False, "effective": True}
+
+    body = _run_scan(client)
+    assert body["result"].get("auto_edited", 0) >= 1
+    runs = client.get("/api/targets/M_42/stack-runs").json()
+    rid = runs[0]["id"]
+    recipe = client.get(
+        f"/api/targets/M_42/stack-runs/{rid}/editor/recipe").json()
+    assert any(o["id"] == "tone.stretch"
+               for o in recipe["ops"] if o.get("enabled", True))
+    # …and the run says the app finished it, which is what puts the "leave this
+    # target's pictures to me" link under a picture nobody asked for.
+    assert runs[0]["auto_edited"] is True
+
+
+def test_clearing_the_override_goes_back_to_following_the_setting(
+    client, solved_library,
+):
+    """Clearing writes no value at all, so a later change to the library setting
+    still reaches this target — the reason the tri-state deletes rather than
+    storing whatever the setting happened to say."""
+    assert client.get("/api/targets/M_42/auto-edit").json()["auto_edit"] is None
+    client.put("/api/targets/M_42/auto-edit", json={"auto_edit": False})
+    assert client.get("/api/targets/M_42/auto-edit").json()["auto_edit"] is False
+    client.put("/api/targets/M_42/auto-edit", json={"auto_edit": None})
+    got = client.get("/api/targets/M_42/auto-edit").json()
+    assert got["auto_edit"] is None
+    assert got["effective"] == got["library_default"]
+
+
+def test_the_unattended_pass_never_writes_over_a_saved_edit(
+    client, solved_library,
+):
+    """A condition of the owner's yes. Structurally the unattended pass only ever
+    meets a run written moments ago, but a guarantee that rests on call-site
+    reasoning is one refactor from being false — so the guard is in the function
+    and this is what proves it."""
+    from seestack.io.library import Library
+    from webapp.pipeline import _auto_edit_process_run
+
+    client.put("/api/settings",
+               json={"auto_stack": True, "auto_edit_on_autostack": False,
+                     "auto_stack_settle_min": 0})
+    _run_scan(client)
+    runs = client.get("/api/targets/M_42/stack-runs").json()
+    assert runs
+    rid = runs[0]["id"]
+    # A look the user saved by hand.
+    mine = {"ops": [{"uid": "u1", "id": "tone.curves", "enabled": True,
+                     "params": {"points": [[0, 0], [0.5, 0.7], [1, 1]]}}],
+            "base_run_id": rid}
+    assert client.put(
+        f"/api/targets/M_42/stack-runs/{rid}/editor/recipe",
+        json=mine).status_code == 200
+
+    lib = Library.open_or_create(Path(solved_library) / "library")
+    try:
+        assert _auto_edit_process_run(lib, "M_42", rid) is None
+    finally:
+        lib.close()
+    back = client.get(
+        f"/api/targets/M_42/stack-runs/{rid}/editor/recipe").json()
+    assert [o["id"] for o in back["ops"] if o.get("enabled", True)] == ["tone.curves"]
+
+
+def test_the_pass_may_still_redo_its_own_previous_result(client, solved_library):
+    """The other half of the guard, and the reason it is not "is there a recipe?".
+
+    This function legitimately re-runs over its **own** output — a re-render with
+    a different `auto_crop`, "Reprocess everything" — so a blunt "a recipe exists,
+    stand down" turns those into no-ops. (It did: it broke
+    `test_re_rendering_without_a_trim_clears_a_recorded_crop`, which is how the
+    distinction was found rather than reasoned about.) What separates the two is
+    the look this pass stamps beside the run: unchanged ⇒ ours to redo, changed or
+    unstamped ⇒ the user's."""
+    from seestack.io.library import Library
+    from webapp.pipeline import _auto_edit_process_run
+
+    client.put("/api/settings",
+               json={"auto_stack": True, "auto_edit_on_autostack": True,
+                     "auto_stack_settle_min": 0})
+    _run_scan(client)
+    rid = client.get("/api/targets/M_42/stack-runs").json()[0]["id"]
+
+    lib = Library.open_or_create(Path(solved_library) / "library")
+    try:
+        # Second pass over the run it just finished: allowed.
+        assert _auto_edit_process_run(lib, "M_42", rid) is not None
+    finally:
+        lib.close()
+
+
 def test_auto_edited_run_matches_the_reveal_and_hides_the_stretch_suggestion(
     client, solved_library,
 ):
