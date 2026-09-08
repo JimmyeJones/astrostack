@@ -18,6 +18,63 @@ is a queue.
 
 ---
 
+## 2026-09-08 (later still) — Builder run (branch `claude/sweet-babbage-9wjrt9`): the life-list share grid, a version collision with a concurrent run, and a second clean dogfood pass
+
+**The run.** Baseline green before any change (**5,284 passed / 2 skipped**, full
+suite headless, 28:54). Shipped **v0.394.0** — "My life list" as one shareable
+picture (`seestack/lifelistcard.py`, `GET /api/life-list/grid.jpg`), the last open
+slice of the 2026-08-27 life-list follow-ups; write-up in
+[`SHIPPED.md`](SHIPPED.md). Then a §2 dogfood pass, recorded here because it found
+nothing.
+
+**Collision #14 — caught, and it cost nothing, because it was caught at the right
+moment.** `origin/main` moved from `71c0419` to `359e6f5` *while the post-change
+suite was running*, and the other run had shipped its own **v0.393.0**
+(`batch_stack_tmp` skipped at scan time). Two different changes would have shared
+one version number if the bump had been treated as settled at task start. §11's
+rule did exactly what it exists for: the number was re-chosen **at merge time,
+from the latest `main`** (0.393.0 → 0.394.0), and the `IMPROVEMENTS.md` /
+`SHIPPED.md` conflicts were resolved as a **union** with both entries kept. The
+full suite was then re-run on the merged tree (**5,312 passed / 2 skipped**,
+28:43) rather than trusting the clean auto-merge — the other run had touched
+`scanner.py` and `webapp/pipeline.py`. Nothing was lost either way; this is the
+first collision in the diary where the two runs picked genuinely different items
+and only the *version line* collided.
+
+**Verified in a running app, not only in jsdom.** The new poster was fetched from
+the live dogfood install (`GET /api/life-list/grid.jpg`, 200, 215 KB): M42 and M43
+— both matched by the sample's own solved centre — carry the picture, the other
+108 squares are drawn dim, and the strip reads *"My Messier list · 2 of 110
+captured"*. The "Share my grid" button renders inside the existing header card at
+1440 px **and** wraps cleanly at 420 px.
+
+**Dogfood: CLEAN on all four probes** (`scripts/agent-dogfood.sh --mosaic --editor`,
+then `--empty`), on a head ~80 versions past the last recorded pass:
+
+- **Field sample** — nothing overflowing, no console errors. Tallest page
+  `[phone] /life-list` at **3,094 px** (the Target page, the historic worst, is
+  3,040 px).
+- **Mosaic sample** — **Auto would trim 7.9 %** of the union canvas, comfortably
+  under the ~15 % that §1 calls a bug (unchanged from the 2026-09-07 measurement,
+  so v0.391.1's trim fix has not drifted). Nothing overflowing, no console errors.
+  Tallest `[phone] /targets/<mosaic>` at 3,369 px.
+- **Editor drive, both samples** — all **21** ops added one at a time, every one
+  re-rendering the live preview with no console error and no failed request, then
+  Undo and Redo. Clean on the field run *and* on the mosaic run.
+- **First-run (`--empty`)** — nothing overflowing, no console errors. `/sky` again
+  never reaches network-idle and is probed anyway (already recorded 2026-09-08,
+  still not a defect). Tallest `[phone] /life-list` at 2,779 px.
+
+**So the backlog is genuinely thin, and this run did not manufacture a third
+task.** The "Bugs (fix these first)" section holds no startable entry: what is
+left there is gated on data no agent has (a real cloudy night's subs, a real
+solved frame with field rotation), deliberately stood down with the measurement
+recorded, or filed-not-built with the reasoning attached — and the one entry a
+run *could* have started, the `batch_stack_tmp` skip, was taken by the concurrent
+run above. Two tasks, both finished, main left green.
+
+---
+
 ## 2026-09-08 (later) — Builder run (branch `claude/sweet-babbage-lso4r6`): the editor's unsaved-changes guard, and a dogfood pass that finally ran the editor drive to the end on both samples
 
 **The run.** Baseline green before any change (**5,284 passed / 2 skipped**, full

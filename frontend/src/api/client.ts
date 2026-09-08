@@ -3443,6 +3443,11 @@ export const api = {
   // preview stat that decides their thumbnail URLs.
   lifeListCounts: () => req<LifeListCounts>("/api/life-list/counts"),
   nearlyThere: () => req<NearlyThere | null>("/api/life-list/nearly-there"),
+  // Download URL for "my Messier grid" — the whole life list as one shareable
+  // JPEG, your pictures in the squares you have and dim numbered squares in the
+  // ones you haven't. A href/download like the montage and the recap poster:
+  // the browser saves the image, and the server writes nothing.
+  lifeListGridUrl: () => "/api/life-list/grid.jpg",
 
   // wishlist — the objects the owner saved for themselves. Each toggle returns
   // the whole new list, so the star's answer *is* the refreshed state.

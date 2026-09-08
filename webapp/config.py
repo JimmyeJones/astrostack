@@ -137,7 +137,7 @@ class Settings(BaseModel):
     # per target — a failed auto-edit never sinks the stack. Requires
     # ``auto_stack``.
     #
-    # **Default True since v0.394.0 — the last step of "drop subs in, walk away,
+    # **Default True since v0.395.0 — the last step of "drop subs in, walk away,
     # come back to a great image".** Without it the picture the unattended chain
     # publishes is a flat linear master, and the auto-seed (v0.390.0) only helps
     # someone who opens the editor. The owner approved it on 2026-09-08 — *"yes,
