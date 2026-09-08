@@ -79,6 +79,47 @@ feature can only confirm the author's own model; one written earlier, elsewhere,
 for something else, is evidence.
 
 ---
+## 2026-09-08 (Scout, branch `claude/admiring-brahmagupta-luiss8`) — mosaic Auto/editor + coverage-trim + ASTAP filesystem re-audit CLEAN; one verified friendliness bug found and fixed (the goal chip)
+
+**Baseline.** Fresh `source scripts/agent-setup.sh`; stacking+calibrate subset green
+(`-k "stack or accumul or align or mosaic or drizzle or calibrat or reject or weight or coverage"`:
+**1776 passed / 2 skipped**). Ran the priority-1 dogfood the right way this time —
+`scripts/agent-dogfood.sh --mosaic --editor`, which stacks a real 2×2 mosaic sample and drives the editor
+on the **mosaic** run, not the 6-frame field.
+
+**Dogfood verdict — the mosaic Auto/editor path is healthy.** Mosaic detected (`coverage_is_mosaic` True,
+four pointing groups); **Auto would trim 7.9 %** of the union canvas (well under the ~15 % D1 threshold); the
+Target/edit/stack pages show nothing overflowing and **no console errors**; every one of the 21 editor ops
+re-rendered its live preview with no failed request on both the single-field *and* the mosaic run (the mosaic
+drive's tail `page.waitForTimeout: … browser has been closed` is the harness's own 900 s teardown, not an app
+error — every op that ran before it re-rendered cleanly). This is the first recorded dogfood that drove the
+editor on a mosaic; it agrees with the code-level D1/D2 hardening (v0.382.4/.5).
+
+**The one find — fixed this run (v0.386.2).** The "Is it enough yet?" chip printed a mosaic's per-panel-scaled
+goal **unrounded**: `goal ~14.526171875 h (3.63-field mosaic)`, while the verdict sentence beside it already
+rounded via `readiness.ts::fmtGoal` ("~14.5 h"). `Target.tsx:1451` bypassed `fmtGoal`. Exported `fmtGoal` and
+used it for the chip; regression test in `Target.test.tsx`. Frontend-only.
+
+**Adversarial re-audits that came back clean (read the code, not just the tests):**
+- `seestack/edit/coverage_trim.py` — `panel_coverage_level` / `well_covered_mask` (the D1 fix): the
+  per-panel-vs-peak reference is correct; the fractional-bounds return keeps the trim scale-independent between
+  the strided trim map and the preview proxy grid. No bug.
+- `webapp/pipeline.py` walk-away thresholds — `_auto_stack_readability_hold` compares total readable vs
+  `prior_max` (n_frames_used across runs); total-to-total, conservative on a mosaic (a vanished panel drops
+  readable below prior_max → holds). No per-panel/peak confusion. No bug.
+- `seestack/solve/astap.py` — filesystem side effects: solves a `shutil.copy2` scratch copy inside a
+  `TemporaryDirectory`, never points ASTAP at the source, reads `.wcs`/`.ini` before teardown. Guardrail-safe
+  (never touches `incoming/`). No bug.
+- Editor preview↔export parity (the A2 family) — every pixel-unit param scales by `ctx.proxy_scale`
+  (`background._scaled_box`, `detail`'s scaled `sigma_spatial`/unsharp knee, `stars`' `scaled_px` footprint and
+  `starmask.star_mask`'s internal `size_px/scale`, `geometry.crop_bounds`' full-res degenerate test). No bug.
+- The recent `render/thumbnail.render_preview_png_full_res` consume-in-place change (v0.386.1) reads correctly;
+  its byte-parity test pins it. No bug.
+
+**Minor doc-inaccuracy noted, not filed as a bug (cosmetic):** `seestack/render/thumbnail.py:730` still says
+`stack_detail_mask` uses "the same 'at least min_frac of the **peak**' rule" — but `well_covered_mask` now
+measures against **one panel** (`panel_coverage_level`), not the peak (the D1 fix). A comment lag, not a code
+defect; worth a one-line correction next time thumbnail.py is touched.
 
 ## 2026-09-08 (Builder, branch `claude/sweet-babbage-5fx14v`) — collision twelve **and** thirteen, in one run, against one other run — and the timing that made it unavoidable
 
