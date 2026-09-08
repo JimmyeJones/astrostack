@@ -47,6 +47,34 @@ describe("StorageView", () => {
     expect(note.textContent).toMatch(/never moves, deletes or changes a file you dropped in/i);
   });
 
+  it("says, with your own numbers, that the subs in incoming/ are the only copy", async () => {
+    // The largest risk to a beginner's pictures is not this app: their raws live
+    // in incoming/ and nowhere else, and the page used to say only that the
+    // folder was "worth having a backup of" — generic advice under a sentence
+    // promising the library could be rebuilt from those very files.
+    vi.spyOn(client.api, "getStorage").mockResolvedValue(mkStorage({
+      incoming_frames: 8542,
+      incoming_bytes: 44 * 1024 ** 3,
+      incoming_unsized_frames: 0,
+      incoming_copied: false,
+    }));
+
+    renderStorage();
+    await waitFor(() => expect(screen.getByText("Storage")).toBeInTheDocument());
+
+    const note = screen.getByText(/are the only copy AstroStack knows of/i);
+    expect(note.textContent).toContain("8,542 subs");
+    expect(note.textContent).toContain("44.00 GB");
+    expect(note.textContent).toMatch(/Keep a copy somewhere else/i);
+  });
+
+  it("self-hides that sentence on a fresh install", async () => {
+    vi.spyOn(client.api, "getStorage").mockResolvedValue(mkStorage());
+    renderStorage();
+    await waitFor(() => expect(screen.getByText("Storage")).toBeInTheDocument());
+    expect(screen.queryByText(/only copy AstroStack knows of/i)).not.toBeInTheDocument();
+  });
+
   it("states the free disk once, in the same unit as the headroom note", async () => {
     // Found by dogfooding: the header read "23 GB free on disk" (the server's
     // decimal free_gb) directly above "21 GB free — not enough imaging history

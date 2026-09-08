@@ -14,6 +14,74 @@ Newest first.
 
 ---
 
+## v0.383.0 — 2026-09-08 — the Storage page says, with your own numbers, that the subs in `incoming/` are the only copy
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-niew4h`.)** The READY entry
+filed by the 2026-09-07 backlog-readiness run, built to its spec.
+
+**What it was.** The single largest risk to this owner's pictures is not a bug in
+this app: his thousands of raw subs live in `incoming/` and nowhere else (Owner
+Facts; AGENTS.md §10), `copy_to_cache` is off so the app holds no copy of them,
+and **nothing in the app said so**. The Storage page's closing paragraph said the
+folder was *"worth having a backup of"* — a dimmed generic aside, under the cache
+table, in the same sentence as *"clearing everything on this page still leaves you
+able to rebuild your whole library from them"*. A beginner reads that as
+"AstroStack has me covered".
+
+**What ships.** The same place, the same size, one sentence — driven by his own
+numbers so it reads as a fact about *his* library rather than advice:
+
+> Your 8,542 subs (44 GB) in incoming/ are the only copy AstroStack knows of. It
+> reads them where they are and never writes there, and it keeps no copy of its
+> own — nothing this app does backs them up. Keep a copy somewhere else.
+
+With `copy_to_cache` **on**, the middle clause becomes *"It reads them from there,
+and the copies in your cache are working files that Clear caches deletes — not a
+backup"*, because "the app has copies" and "the app has a backup" are not the same
+thing and the page is the only place that can say which. Rows ingested before
+`source_size_bytes` existed carry no size, so the total is a **floor** and the
+sentence says *"at least 44 GB"*; when no row has a size the size is dropped
+rather than under-reported. Self-hides on a fresh install and against an older
+backend.
+
+**How the numbers are got — this is the whole design.** `incoming/` is strictly
+read-only and holds the only copy of everything, so the honest way to report on it
+is **not to touch it**. New pure `Project.source_frames_under(prefix)` returns
+`(n_frames, known_bytes, unsized_frames)` from the `frames` rows the app already
+wrote (`source_size_bytes` is the source file's `st_size` at ingest/refresh),
+matched with `substr(source_path, 1, ?) = ?` — a literal prefix, so there is no
+`%`/`_` to escape — and `get_storage` calls it inside the per-target `try` it
+already opens each project in. **Nothing walks, opens or `stat`s the folder.** The
+prefix carries a trailing separator, or a sibling `incoming2/` would match.
+
+`StorageResponse` gains four additive fields with defaults (`incoming_frames`,
+`incoming_bytes`, `incoming_unsized_frames`, `incoming_copied`); the frontend's
+`StorageInfo` marks all four optional, so an older backend and an older frontend
+both keep working. New pure `frontend/src/components/incomingCopyNote.ts` builds
+the sentence and takes the page's *own* byte formatter, so its "44.00 GB" matches
+every other figure on the screen exactly.
+
+**Nothing was removed.** The existing "Nothing here touches your incoming folder"
+paragraph stays word-for-word except for the trailing *"and worth having a backup
+of"*, which this replaces with the real thing; its `Storage.test.tsx` case is
+untouched and still passes. No new card, no new page height beyond the one
+sentence.
+
+**Tests +11.** Backend (`tests/webapp/test_storage.py`): the counts and the byte
+sum against the fixture library's real on-disk sizes (**fails today — key
+absent**); a NULL size counted separately; `copy_to_cache` flipping the flag; zero
+on a fresh install; and the §10 pin — `os.stat`/`listdir`/`scandir`/`open` are
+made **fatal** under the incoming root while the endpoint answers, and the trap is
+proved armed on a real file first so the test cannot pass for the wrong reason.
+Frontend: 6 cases on the pure sentence (numbers, "at least", no-size, cache-copy
+wording, self-hide, singular) plus 2 on the page. `tsc --noEmit`, `vitest run`
+(3,370 tests) and `vite build` all clean.
+
+**Upgrade-safe:** additive response fields with defaults, no schema change (the
+column it reads has existed for a long time), no on-disk change, no default flip.
+
+---
+
 ## v0.382.5 — 2026-09-08 — D2: the "installing ASTAP's star database helps" note stops firing at a night that is merely still being solved
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-niew4h`.)** The third external
