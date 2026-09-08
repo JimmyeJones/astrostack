@@ -19,8 +19,8 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from seestack.edit.coverage_trim import coverage_is_mosaic, largest_covered_rect
 from seestack.colourcheck import colour_expectation
+from seestack.edit.coverage_trim import coverage_is_mosaic, largest_covered_rect
 from seestack.edit.histogram import (
     compute_histogram,
     measure_object_colour,
