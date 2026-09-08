@@ -14,6 +14,8 @@ from webapp.goals import GOAL_META_KEY, MAX_GOAL_S, MIN_GOAL_S, read_goal_s
 from webapp.registry_cache import invalidate_registry_cache
 from webapp.schemas import (
     AngularSizeOut,
+    AutoEditPrefOut,
+    AutoEditPrefPatch,
     AutoStackHoldOut,
     BackgroundModeHintOut,
     BestFrameOut,
@@ -1353,6 +1355,54 @@ def set_integration_goal(
     finally:
         proj.close()
         lib.close()
+
+
+@router.get("/{safe}/auto-edit", response_model=AutoEditPrefOut)
+def get_auto_edit_pref(safe: str, request: Request) -> AutoEditPrefOut:
+    """Whether the unattended walk-away pass finishes this target's new stacks
+    into a picture: the per-target override (``null`` = follow the library
+    setting), the library setting, and the effective answer.
+
+    Read-only; a plain project-meta lookup beside the integration goal's."""
+    from webapp.auto_edit_pref import read_auto_edit_pref
+
+    default = bool(deps.get_settings(request).auto_edit_on_autostack)
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        pref = read_auto_edit_pref(proj)
+    finally:
+        proj.close()
+        lib.close()
+    return AutoEditPrefOut(
+        auto_edit=pref, library_default=default,
+        effective=default if pref is None else pref)
+
+
+@router.put("/{safe}/auto-edit", response_model=AutoEditPrefOut)
+def set_auto_edit_pref(
+    safe: str, body: AutoEditPrefPatch, request: Request
+) -> AutoEditPrefOut:
+    """Set (``true``/``false``) or clear (``null``) this target's auto-finish
+    override — the "easy to override with manual settings" half the owner made a
+    condition of auto-editing being on at all.
+
+    Stored in the existing ``project_meta`` kv table, so it is additive and
+    upgrade-safe (no schema migration), and it survives the next night rather
+    than lasting until the page is closed. Clearing returns the target to
+    following the library setting."""
+    from webapp.auto_edit_pref import write_auto_edit_pref
+
+    default = bool(deps.get_settings(request).auto_edit_on_autostack)
+    pref = None if body.auto_edit is None else bool(body.auto_edit)
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        write_auto_edit_pref(proj, pref)
+    finally:
+        proj.close()
+        lib.close()
+    return AutoEditPrefOut(
+        auto_edit=pref, library_default=default,
+        effective=default if pref is None else pref)
 
 
 @router.patch("/{safe}", response_model=TargetOut)

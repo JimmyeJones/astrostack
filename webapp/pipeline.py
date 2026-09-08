@@ -555,8 +555,13 @@ def _pipeline_body(
                     # the fully-unattended path returns a finished image, not a
                     # flat linear master. Best-effort: never sinks the batch.
                     run_id = res.get("run_id")
-                    if (settings.auto_edit_on_autostack and run_id is not None
-                            and not job.cancel_requested()):
+                    # The per-target override wins over the library setting, and
+                    # survives the night because it lives in the project rather
+                    # than in a page's state — the owner made "easy to override"
+                    # a condition of turning this on (see webapp/auto_edit_pref).
+                    if run_id is not None and not job.cancel_requested() and \
+                            _wants_auto_edit_for(
+                                lib, safe, settings.auto_edit_on_autostack):
                         if _auto_edit_process_run(
                                 lib, safe, run_id,
                                 auto_crop=settings.auto_crop_border) is not None:
@@ -3347,6 +3352,37 @@ def _rendered_preview_crop(project_dir: Path, run_id: int, recipe,
     return preview_crop_json(crop)
 
 
+def _wants_auto_edit_for(lib: Library, safe: str, library_default: bool) -> bool:
+    """Should the unattended pass finish *this* target's fresh stack?
+
+    Opens the target's project for one meta read, which is why it is a function
+    rather than an inline lookup: the auto-stack loop has no project handle open
+    at this point (``_stack_target`` closed its own), and a target that is not
+    being auto-stacked never pays for the read at all.
+
+    Fail-soft on purpose: a project that cannot be opened falls back to the
+    library setting, because a preference we cannot read is not a preference the
+    owner expressed — and refusing to finish the picture would be a silent,
+    invisible change to the walk-away result.
+    """
+    from seestack.io.project import Project
+    from webapp.auto_edit_pref import wants_auto_edit
+
+    try:
+        entry = lib.find_target(safe)
+        if entry is None:
+            return library_default
+        proj = Project.open(lib.target_dir(entry))
+        try:
+            return wants_auto_edit(proj, library_default)
+        finally:
+            proj.close()
+    except Exception:  # noqa: BLE001 — a side lookup never decides a stack's fate
+        log.warning("could not read the auto-edit preference for %s", safe,
+                    exc_info=True)
+        return library_default
+
+
 def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
                            auto_crop: bool = True) -> int | None:
     """Chain the one-click Auto recipe onto a freshly-produced stack run so the
@@ -3391,6 +3427,31 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
             run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
             if run is None or not run.fits_path or not Path(run.fits_path).exists():
                 return None
+            # Never write over a look somebody *saved* — a condition of the owner
+            # agreeing to auto-editing at all, and one that must not rest on
+            # call-site reasoning alone ("the run is always new, so it has no
+            # recipe") when a refactor could make that false.
+            #
+            # "Somebody saved it" is not the same as "a recipe exists": this
+            # function legitimately re-runs over its **own** previous result (a
+            # re-render with a different `auto_crop`, "Reprocess everything"), and
+            # the marker that tells the two apart already exists — the look this
+            # pass baked, stored uid-/timestamp-blind beside the run. A stored
+            # recipe that is exactly what we last baked is ours to redo; anything
+            # else — hand-edited since, or a recipe with no marker at all — is the
+            # user's, and we stand down.
+            saved_recipe = proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}")
+            if saved_recipe:
+                from webapp.routers.stack import _baked_look_disagrees, _recipe_look
+
+                raw_baked = proj.get_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run_id}")
+                # No stamp at all ⇒ this recipe did not come from us, so it is the
+                # user's. (``_baked_look_disagrees`` answers False in that case —
+                # correctly, for its own question, which is "has a *stamped* run
+                # drifted?" — so the missing-stamp arm has to be spelled out here.)
+                if not raw_baked or _baked_look_disagrees(
+                        raw_baked, _recipe_look(saved_recipe)):
+                    return None
             median_fwhm = proj.median_fwhm()
             # Apply the library's Adaptive-Auto taste profile (neutral if unset)
             # so an unattended "Process target" auto-edit matches what the owner

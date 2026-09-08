@@ -20,8 +20,10 @@ is a queue.
 
 ## 2026-09-08 (later again) — Builder run (branch `claude/sweet-babbage-e506ni`): the "use this name?" rename, a third clean dogfood pass, and one live check the tests could not have made
 
+**The run.** *(Version chosen at merge time, per §11: this shipped as 0.395.0 until a concurrent Builder landed its own 0.395.0 — the auto-edit flip — mid-run, so it was re-bumped to **0.396.0** on the merge and both backlog/SHIPPED entries were kept as a union. Collision #15, and the rule worked exactly as written.)*
+
 **The run.** Baseline green before any change (**5,312 passed / 2 skipped**, full
-suite headless, 37:51). Shipped **v0.395.0** — the "this target is still named
+suite headless, 37:51). Shipped **v0.396.0** — the "this target is still named
 after its folder — call it *Crescent Nebula*?" offer, the last open slice of the
 Scout's 2026-08-27 #10 entry and the one that had been **🛑 BLOCKED** since
 2026-09-01 on a real defect (a rename would have made the next scan allocate a
@@ -49,7 +51,7 @@ shipped adds nothing always-on (the offer is absent unless a target is folder-na
 jsdom whatever order its lines are in, so the offer had landed *between* the two
 italic "pure-wonder" lines the card deliberately keeps adjacent — the only action
 on the card reading as a third fact. A screenshot at 1440 px and 420 px showed it
-in one look, and it moved to the end (v0.395.0's last commit). The same live pass
+in one look, and it moved to the end (v0.396.0's last commit). The same live pass
 also confirmed, on a real running app, what only integration can: one click
 renames and the page heading changes, the offer withdraws itself, "Keep my name"
 survives a reload, a rename onto a name another target owns comes back **400**
