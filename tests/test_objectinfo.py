@@ -277,3 +277,45 @@ def test_the_fills_each_sub_clause_reads_the_same_telescope_as_the_framing_line(
     # …and the framing line agrees with it in the same breath.
     assert fallback.framing.level == "mosaic"
     assert derived.framing.level == "tight"
+
+
+def test_a_folder_named_target_gets_the_catalog_name_offered():
+    """The whole point: a target still called after its Seestar folder, sitting
+    squarely on a catalog object, has a better name to suggest."""
+    from seestack.objectinfo import suggested_target_rename
+
+    assert suggested_target_rename("M_42_SUB_2026", 83.822, -5.391) == "Orion Nebula"
+    assert suggested_target_rename("Unsorted", 10.685, 41.269) == "Andromeda Galaxy"
+
+
+def test_no_rename_is_offered_for_a_target_that_already_names_itself():
+    """The owner's own words win — the app never "corrects" M 31 into
+    Andromeda Galaxy, and never argues with a name that identifies something."""
+    from seestack.objectinfo import suggested_target_rename
+
+    for name in ("M 31", "M31", "M_31", "Andromeda Galaxy"):
+        assert suggested_target_rename(name, 10.685, 41.269) is None, name
+
+
+def test_the_rename_cone_is_the_title_cone_not_the_cards():
+    """A rename outlives the session, so it is offered at the same confidence as
+    a name baked into a shared picture — not at the card's looser cone."""
+    from seestack.objectinfo import identify_object, suggested_target_rename
+
+    # 0.5° off: close enough to *describe* on a card, not close enough to rename.
+    assert identify_object("Unsorted", 10.685, 41.269 + 0.5) is not None
+    assert suggested_target_rename("Unsorted", 10.685, 41.269 + 0.5) is None
+    # …and with no solved centre at all there is nothing to go on.
+    assert suggested_target_rename("Unsorted") is None
+
+
+def test_a_mosaic_keeps_its_suffix_and_is_not_offered_its_own_name_back():
+    """Mosaic-ness is carried by the name, so the suggestion carries it too —
+    and a mosaic already called what it is has nothing left to offer."""
+    from seestack.objectinfo import suggested_target_rename
+
+    assert suggested_target_rename("M_42_mosaic (mosaic)", 83.822, -5.391) == \
+        "Orion Nebula (mosaic)"
+    # The suffixed name doesn't match the catalog by name (so a title *is*
+    # found), but the suggestion is what the target is called already.
+    assert suggested_target_rename("Orion Nebula (mosaic)", 83.822, -5.391) is None

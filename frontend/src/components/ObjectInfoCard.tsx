@@ -1,6 +1,8 @@
-import { Badge, Group, Paper, Stack, Text } from "@mantine/core";
+import { Anchor, Badge, Button, Group, Paper, Stack, Text } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { IconStars } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api, type DifficultyHint, type FramingHint, type MosaicPlan } from "../api/client";
 
 /** A plain-language one-liner for the object card, e.g.
@@ -64,6 +66,14 @@ export function difficultyColor(level: DifficultyHint["level"]): string {
  * target's safe name (Target, History, editor). Shares its query key with the
  * Target page's own identify fetch, so react-query dedupes to one request.
  *
+ * `allowRename` adds the one *action* the card can offer: when the target is
+ * still called after its folder ("NGC 6888_SUB") and the plate solve puts it
+ * squarely on a catalog object, the backend fills in `rename_to` and the card
+ * offers "Use this name?". Off by default, so the pages that merely *describe* a
+ * target (the editor, History) stay read-only and only the Target page — where
+ * the name is the heading the owner is looking at — can rename. Nothing is ever
+ * renamed automatically: the owner clicks, or dismisses.
+ *
  * `hideFraming` drops just the catalog "will it fit?" line, for a page that is
  * already showing the *measured* verdict for a finished picture of this target
  * (`FramingVerdictNote`). The two say the same thing — "M 42 is bigger than the
@@ -73,15 +83,32 @@ export function difficultyColor(level: DifficultyHint["level"]): string {
  * other caller are unchanged.
  */
 export function ObjectInfoCard(
-  { safe, hideFraming = false }: { safe: string; hideFraming?: boolean },
+  { safe, hideFraming = false, allowRename = false }:
+  { safe: string; hideFraming?: boolean; allowRename?: boolean },
 ) {
+  const qc = useQueryClient();
+  const [dismissed, setDismissed] = useState(false);
   const identity = useQuery({
     queryKey: ["identify", safe],
     queryFn: () => api.identifyTarget(safe),
     enabled: !!safe,
   });
+  const rename = useMutation({
+    mutationFn: (name: string) => api.patchTarget(safe, { name }),
+    onSuccess: (t) => {
+      notifications.show({ message: `Renamed to ${t.name}`, color: "teal" });
+      // The heading, the library list and the card's own "already named" answer
+      // all read the name, so refresh the three of them rather than leaving the
+      // page showing the folder name until the next navigation.
+      qc.invalidateQueries({ queryKey: ["target", safe] });
+      qc.invalidateQueries({ queryKey: ["targets"] });
+      qc.invalidateQueries({ queryKey: ["identify", safe] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
   const d = identity.data;
   if (!d) return null;
+  const suggestion = allowRename && !dismissed ? (d.rename_to || "") : "";
   return (
     <Paper withBorder p="sm" radius="md" bg="var(--mantine-color-default-hover)">
       <Group gap="sm" wrap="nowrap" align="flex-start">
@@ -133,6 +160,29 @@ export function ObjectInfoCard(
             <Text size="sm" c="indigo.5" fs="italic">
               {d.angular_size.text}
             </Text>
+          ) : null}
+          {/* "This target is still called after its folder — want to call it
+              what it is?" One click, and dismissible: a beginner who dropped
+              "NGC 6888_SUB" in gets the real name offered where they are
+              already reading about the object, and someone who likes their own
+              folder names taps ✕ once. Only the display name changes — the
+              folder, the frames and every link keep working. */}
+          {suggestion ? (
+            <Group gap="xs" wrap="wrap" mt={4}>
+              <Text size="sm">
+                This target is still named after its folder — call it{" "}
+                <Text span fw={600}>{suggestion}</Text>?
+              </Text>
+              <Button size="compact-xs" variant="light" color="indigo"
+                loading={rename.isPending}
+                onClick={() => rename.mutate(suggestion)}>
+                Use this name
+              </Button>
+              <Anchor component="button" type="button" size="xs" c="dimmed"
+                onClick={() => setDismissed(true)}>
+                Keep my name
+              </Anchor>
+            </Group>
           ) : null}
           {/* "How far did you see?" — the other pure-wonder line, so it sits
               last and reads in the app's accent colour. Self-hiding: an object

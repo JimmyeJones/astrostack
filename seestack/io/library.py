@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS targets (
     notes                 TEXT,
     tags                  TEXT,                      -- JSON array of tag strings
     cover_stack_run_id    INTEGER,                   -- pinned "cover" run id (in this target's project.sqlite); NULL = use newest
-    legacy_mixed_drop     INTEGER                    -- 1 = legacy whole-device/mixed-folder drop the container-expansion scan superseded; NULL = normal
+    legacy_mixed_drop     INTEGER,                   -- 1 = legacy whole-device/mixed-folder drop the container-expansion scan superseded; NULL = normal
+    folder_name           TEXT                       -- the name this target was first created from (the scanner's folder-derived one); NULL = never renamed, so `name` is still it
 );
 
 CREATE INDEX IF NOT EXISTS idx_targets_radec ON targets(ra_deg, dec_deg);
@@ -166,6 +167,11 @@ class TargetEntry:
     # detectors, so it's flagged here for the Library's one-click cleanup. ``None``
     # (the default) means a normal, real target.
     legacy_mixed_drop: int | None = None
+    # The name this target was first registered under — the scanner's
+    # folder-derived one. Set when a rename moves ``name`` away from it, so a
+    # later scan of the same folder still resolves to this target. ``None`` means
+    # "never renamed": ``name`` is still the folder name.
+    folder_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -397,13 +403,26 @@ class Library:
 
     # ---- targets -------------------------------------------------------
 
-    def _name_owning_safe(self, safe: str) -> str | None:
-        """The display name currently registered to folder ``safe``, or None."""
+    def _names_owning_safe(self, safe: str) -> tuple[str, ...]:
+        """Every name folder ``safe`` answers to — its display name and, once it
+        has been renamed, the name it was created from.
+
+        The second one is what keeps a rename from splitting a target in two:
+        the scanner re-offers the *folder's* name on every scan, so a target
+        renamed "NGC 6888_SUB" → "Crescent Nebula" must still claim the
+        ``NGC_6888_SUB`` folder rather than look like a stranger colliding with
+        it (which would allocate a second, hash-suffixed folder and re-ingest
+        every sub into it). ``folder_name`` is NULL for a target that has never
+        been renamed — including every row written before the column existed —
+        where the display name is still the folder name."""
         assert self._conn is not None
         row = self._conn.execute(
-            "SELECT name FROM targets WHERE safe_name = ?", (safe,)
+            "SELECT name, folder_name FROM targets WHERE safe_name = ?", (safe,)
         ).fetchone()
-        return row["name"] if row else None
+        if row is None:
+            return ()
+        folder = row["folder_name"] if "folder_name" in row.keys() else None
+        return tuple(n for n in (row["name"], folder) if n)
 
     def _allocate_safe_name(self, name: str) -> str:
         """A filesystem-safe folder name for ``name`` that never folds two
@@ -425,8 +444,8 @@ class Library:
         retro-split, but no *new* name will merge into it.)
         """
         base = make_safe_name(name)
-        owner = self._name_owning_safe(base)
-        if owner is None or owner == name:
+        owners = self._names_owning_safe(base)
+        if not owners or name in owners:
             return base
         # Collides with a different display name — disambiguate by a stable hash
         # of *this* name so the mapping is deterministic across re-scans. Widen
@@ -436,8 +455,8 @@ class Library:
         for width in range(8, len(digest) + 1, 4):
             suffix = f"-{digest[:width]}"
             candidate = (base[: 64 - len(suffix)].rstrip("._-") or "target") + suffix
-            owner = self._name_owning_safe(candidate)
-            if owner is None or owner == name:
+            owners = self._names_owning_safe(candidate)
+            if not owners or name in owners:
                 return candidate
         return candidate
 
@@ -521,6 +540,68 @@ class Library:
                 f"UPDATE targets SET {', '.join(sets)} WHERE id = ?", params
             )
         return self.find_target(name_or_safe)
+
+    def rename_target(self, name_or_safe: str, new_name: str) -> TargetEntry | None:
+        """Give a target a new **display name**, leaving everything else alone.
+
+        The folder (``safe_name``), the project database, the frames and every
+        stored path are untouched: this edits the label the app shows, which is
+        what a folder-named target ("NGC 6888_SUB") needs when the plate solve
+        has worked out what it really is. Keeping ``safe_name`` fixed is the
+        whole safety story — every lookup in the app resolves a target by its
+        safe name, so a rename can never strand a path, a run, or a bookmark.
+
+        A mosaic target keeps its " (mosaic)" suffix (see
+        :func:`seestack.io.scanner.preserve_mosaic_suffix`) because mosaic-ness
+        is carried by the name. The project's own ``name`` meta is updated too,
+        so a stack written after the rename carries the new name and a registry
+        rebuilt from disk doesn't resurrect the old one.
+
+        Returns the refreshed entry, or ``None`` if the target is unknown.
+        Raises :class:`ValueError` for a blank name or one already used by a
+        *different* target (``targets.name`` is UNIQUE, and two targets sharing a
+        display name would break name-based lookup).
+        """
+        from seestack.io.scanner import preserve_mosaic_suffix
+
+        assert self._conn is not None
+        entry = self.find_target(name_or_safe)
+        if entry is None:
+            return None
+        wanted = str(new_name or "").strip()
+        if not wanted:
+            raise ValueError("a target name cannot be blank")
+        wanted = preserve_mosaic_suffix(entry.name, wanted)
+        if wanted == entry.name:
+            return entry
+        clash = self._conn.execute(
+            "SELECT id FROM targets WHERE name = ? AND id != ?", (wanted, entry.id),
+        ).fetchone()
+        if clash is not None:
+            raise ValueError(f"another target is already called '{wanted}'")
+        # ``folder_name`` remembers what the scanner calls this target's folder,
+        # so the next scan still recognises it as this target instead of
+        # allocating a second one beside it. COALESCE, so a second rename keeps
+        # the *first* (folder-derived) name rather than the intermediate one, and
+        # a row written before the column existed learns it here.
+        self._conn.execute(
+            "UPDATE targets SET name = ?, folder_name = COALESCE(folder_name, ?) "
+            "WHERE id = ?",
+            (wanted, entry.name, entry.id),
+        )
+        # Best-effort: the registry row is authoritative for the app, so a
+        # project that won't open (missing, locked, mid-upgrade) must not fail
+        # the rename — it only means a later heal would re-read the old label.
+        try:
+            proj = self.open_target(entry.safe_name)
+            try:
+                proj.set_meta("name", wanted)
+            finally:
+                proj.close()
+        except Exception:  # noqa: BLE001
+            log.warning("renamed target %s in the registry but not in its project",
+                        entry.safe_name, exc_info=True)
+        return self.find_target(entry.safe_name)
 
     def set_target_cover(self, name_or_safe: str,
                          cover_stack_run_id: int | None) -> TargetEntry | None:
@@ -672,13 +753,18 @@ class Library:
         assert self._conn is not None
         now = _utc_iso()
         self._conn.execute(
-            "INSERT INTO targets(name, safe_name, ra_deg, dec_deg, created_utc, notes) "
-            "VALUES(?, ?, ?, ?, ?, ?) "
+            "INSERT INTO targets(name, safe_name, ra_deg, dec_deg, created_utc, notes,"
+            "                    folder_name) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(safe_name) DO UPDATE SET "
             "  ra_deg = COALESCE(excluded.ra_deg, ra_deg),"
             "  dec_deg = COALESCE(excluded.dec_deg, dec_deg),"
-            "  notes = COALESCE(excluded.notes, notes)",
-            (name, safe_name, ra_deg, dec_deg, now, notes),
+            "  notes = COALESCE(excluded.notes, notes),"
+            # Backfill only: a scan that re-offers the folder name teaches an
+            # older row what folder it came from, but never overwrites the name a
+            # renamed target was created with.
+            "  folder_name = COALESCE(folder_name, excluded.folder_name)",
+            (name, safe_name, ra_deg, dec_deg, now, notes, name),
         )
         row = self._conn.execute(
             "SELECT * FROM targets WHERE safe_name = ?", (safe_name,),
@@ -840,6 +926,9 @@ def _row_to_target(row: sqlite3.Row) -> TargetEntry:
         legacy_mixed_drop=(
             row["legacy_mixed_drop"]
             if "legacy_mixed_drop" in row.keys() else None
+        ),
+        folder_name=(
+            row["folder_name"] if "folder_name" in row.keys() else None
         ),
     )
 

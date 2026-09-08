@@ -1683,7 +1683,7 @@ export function TargetView() {
 
       {identity.data ? (
         <Box mt="xs">
-          <ObjectInfoCard safe={safe} hideFraming={!!measuredFraming} />
+          <ObjectInfoCard safe={safe} hideFraming={!!measuredFraming} allowRename />
         </Box>
       ) : null}
 
