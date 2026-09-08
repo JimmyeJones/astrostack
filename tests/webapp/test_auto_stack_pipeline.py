@@ -60,6 +60,33 @@ def test_auto_stack_runs_for_solved_targets(solved_library, monkeypatch):
     assert not summary.get("stack_errors")
 
 
+def test_the_shipped_defaults_stack_a_target_with_nobody_watching(
+        solved_library, monkeypatch):
+    """v0.391.0: ``auto_stack`` is deliberately *not* named here.
+
+    Every other test in this file turns it on by hand, so none of them could tell
+    whether a fresh install actually walks the whole chain — which is the entire
+    promise of "drop your subs in and come back to a picture". This one takes the
+    flag off the shipped default and fails before the flip (the auto-stack pass is
+    skipped, ``calls`` stays empty and ``auto_stacked`` is absent).
+
+    The other three automation flags stay off because this fixture's frames are
+    already ingested, QC'd and solved; the settle window is zeroed for the reason
+    given in ``_settings`` above.
+    """
+    calls = _patch_run_stack(monkeypatch)
+    settings = Settings(
+        data_root=str(solved_library), auto_ingest=False, auto_qc=False,
+        auto_solve=False, auto_stack_settle_min=0,
+    )
+    assert settings.auto_stack is True  # the shipped default, not set above
+    job = Job(kind="pipeline")
+    summary = pipeline._pipeline_body(settings, _FakeJM(), job, root=None)
+    assert calls, "a fresh install did not stack anything"
+    assert summary["auto_stacked"]
+    assert not summary.get("stack_errors")
+
+
 def _reject_down_to(lib, keep: int) -> None:
     """Reject frames in every target until only ``keep`` accepted+solved remain."""
     for entry in lib.list_targets():
