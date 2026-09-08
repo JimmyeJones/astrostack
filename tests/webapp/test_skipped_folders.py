@@ -118,7 +118,7 @@ def test_a_scan_remembers_the_folder_it_could_not_account_for(client, data_root)
 
     assert _remembered(client) == [{
         "name": "NGC_6888", "path": str(bare),
-        "n_files": 3, "n_unrecognised": 2,
+        "n_files": 3, "n_unrecognised": 2, "reason": "device_output",
     }]
 
 
@@ -135,6 +135,77 @@ def test_an_ordinary_seestar_library_is_told_nothing(client, data_root):
 
     _scan(client)
     assert _remembered(client) == []
+
+
+def test_another_programs_working_folder_is_reported_with_its_own_reason(
+        client, data_root):
+    """The scan-time half of the owner's 2026-09-08 "yes, skip it": the folder is
+    no longer ingested as a junk target, and — because a silent skip could never
+    be undone from the UI — it is reported with the rule that skipped it, so the
+    card can say what it really is instead of calling another program's scratch
+    directory "your Seestar's own finished picture"."""
+    incoming = Path(data_root) / "incoming"
+    scratch = incoming / "batch_stack_tmp"
+    scratch.mkdir(parents=True)
+    for i in range(2):
+        write_seestar_fits(scratch / f"Light_{i:04d}.fit",
+                           width=480, height=320, n_stars=10, seed=20 + i)
+
+    result = _scan(client)
+    # Fail-before: it ingested, so the scratch folder became a target of its own
+    # and nothing was reported as skipped.
+    assert "batch_stack_tmp" not in result.get("targets", [])
+    assert [s["reason"] for s in result["skipped_folders"]] == ["temp_folder"]
+    assert _remembered(client) == [{
+        "name": "batch_stack_tmp", "path": str(scratch),
+        "n_files": 2, "n_unrecognised": 2, "reason": "temp_folder",
+    }]
+
+
+def test_the_working_folder_can_still_be_brought_in_by_hand(client, data_root):
+    """The owner's condition on the skip: *"the owner must be able to ingest it
+    anyway if a future folder happens to share the name"*. The card's own
+    "bring it in" is a scoped ``POST /api/scan`` at that path — which is exactly
+    what this does — and once its frames have landed the card goes quiet."""
+    incoming = Path(data_root) / "incoming"
+    scratch = incoming / "batch_stack_tmp"
+    scratch.mkdir(parents=True)
+    for i in range(2):
+        write_seestar_fits(scratch / f"Light_{i:04d}.fit",
+                           width=480, height=320, n_stars=10, seed=30 + i)
+    _scan(client)
+    assert [f["name"] for f in _remembered(client)] == ["batch_stack_tmp"]
+
+    result = _scan(client, root=scratch)
+    assert result["scanned"] == 2
+    assert _remembered(client) == []
+
+
+def test_a_remembered_working_folder_survives_a_backend_that_never_wrote_one(
+):
+    """Upgrade-safety, both ways. A record written by an older build carries no
+    ``reason``, and must read back as the only case that build could produce —
+    never be dropped, and never claim to be a temp folder."""
+    old = '[{"name": "M 13", "path": "/i/M 13", "n_files": 3, "n_unvouched": 1}]'
+    back = decode_skipped_folders(old)
+    assert [r.reason for r in back] == ["device_output"]
+    # …and an unknown future value degrades the same way rather than reaching
+    # the card as a reason no copy exists for.
+    weird = '[{"name": "M 13", "path": "/i/M 13", "n_files": 3, ' \
+            '"n_unvouched": 1, "reason": "something_new"}]'
+    assert [r.reason for r in decode_skipped_folders(weird)] == ["device_output"]
+
+
+def test_a_working_folder_is_remembered_even_with_nothing_unvouched():
+    """A device-output skip earns its line by holding files the device's naming
+    cannot vouch for, so ``n_unvouched == 0`` drops it. A temp folder must not be
+    dropped by that same filter — being reported is what makes it recoverable."""
+    raw = encode_skipped_folders([
+        SkippedFolder(name="batch_stack_tmp", path="/i/batch_stack_tmp",
+                      n_files=4, n_unvouched=0, reason="temp_folder"),
+        SkippedFolder(name="M 13", path="/i/M 13", n_files=4, n_unvouched=0),
+    ])
+    assert [r.name for r in decode_skipped_folders(raw)] == ["batch_stack_tmp"]
 
 
 def test_a_library_that_never_scanned_says_nothing_rather_than_erroring(client):

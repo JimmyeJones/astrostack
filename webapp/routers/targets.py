@@ -255,6 +255,7 @@ def skipped_folders(request: Request) -> list[SkippedFolderOut]:
         SkippedFolderOut(
             name=r.name, path=r.path,
             n_files=r.n_files, n_unrecognised=r.n_unvouched,
+            reason=r.reason,
         )
         for r in records
     ]

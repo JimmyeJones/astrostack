@@ -124,6 +124,43 @@ describe("SkippedFoldersCard", () => {
     await screen.findByText(/M 13:/);
   });
 
+  it("names another program's working folder for what it is", async () => {
+    // The card's whole sentence was about a folder named like a "_sub" sibling.
+    // Since v0.393.0 a scan also skips another stacking program's scratch
+    // directory by name, and describing that as "the finished picture your
+    // Seestar made on the scope" would be a plain untruth. Fails before.
+    vi.spyOn(client.api, "skippedFolders").mockResolvedValue([folder({
+      name: "batch_stack_tmp", path: "/data/incoming/batch_stack_tmp",
+      n_files: 137, n_unrecognised: 137, reason: "temp_folder",
+    })]);
+    renderCard();
+    await screen.findByText(/A folder in your incoming folder was skipped/);
+    expect(screen.getByText(
+      /batch_stack_tmp: 137 files skipped — another stacking program's working folder/,
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/finished picture your Seestar made/)).toBeNull();
+    // Recoverable, which is the owner's condition on saying yes to the skip.
+    expect(screen.getByRole(
+      "button", { name: 'Bring "batch_stack_tmp" in anyway' })).toBeInTheDocument();
+  });
+
+  it("keeps the subs-may-be-missing framing when a real one is in the list",
+    async () => {
+      // Two reasons in one scan: the question the card exists to answer is
+      // still "are some of my subs missing?", so that title wins and both
+      // sentences are shown rather than one standing in for the other.
+      vi.spyOn(client.api, "skippedFolders").mockResolvedValue([
+        folder(),
+        folder({ name: "batch_stack_tmp", path: "/i/batch_stack_tmp",
+                 n_files: 9, n_unrecognised: 9, reason: "temp_folder" }),
+      ]);
+      renderCard();
+      await screen.findByText(/Some of your subs may not be reaching a picture/);
+      expect(screen.getByText(/finished picture your Seestar made/)).toBeInTheDocument();
+      expect(screen.getByText(/another stacking program leaves behind/))
+        .toBeInTheDocument();
+    });
+
   it("survives a broken localStorage rather than blanking the Library", async () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("storage disabled");

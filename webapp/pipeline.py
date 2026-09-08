@@ -201,6 +201,7 @@ def _remember_scan_skips(
                 path=str(Path(s.parent) / s.name),
                 n_files=s.n_files,
                 n_unvouched=s.n_unvouched,
+                reason=s.reason,
             )
             for s in scan.unvouched_skips
         ]))
@@ -273,7 +274,8 @@ def _pipeline_body(
             unvouched = [
                 {"name": s.name, "n_files": s.n_files,
                  "n_unrecognised": s.n_unvouched,
-                 "path": str(Path(s.parent) / s.name)}
+                 "path": str(Path(s.parent) / s.name),
+                 "reason": s.reason}
                 for s in scan.unvouched_skips
             ]
             if unvouched:
