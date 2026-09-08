@@ -200,20 +200,44 @@ def test_an_older_run_gets_its_coverage_advice_from_the_map_on_disk(
     import numpy as np
 
     fits_path = data_root / "out" / "old.fits"
-    cov = np.ones((300, 300), dtype=np.float32)
-    cov[:, 200:] = 12.0  # two thirds of the picture on a single frame
+    cov = np.full((300, 300), 12.0, dtype=np.float32)
+    # A 20-px edge on a single frame: narrow enough (6.7 % of the covered area,
+    # under the 8 % a coverage plateau needs) to be an edge rather than a panel.
+    cov[:, :20] = 1.0
     _write_coverage_map(fits_path, cov)
     rid = _add_run(data_root, "M_42", fits_path=str(fits_path),
                    coverage_thin_frac=None, coverage_min=1, coverage_max=12)
 
     body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
     note = next(n for n in body["notes"] if n["kind"] == "coverage")
-    assert "67%" in note["message"]
+    assert "7%" in note["message"]
     assert note["action"] == "trim_border"
 
     # …and it is remembered, so the next read costs no canvas-sized map read.
     assert _stored_thin_frac(data_root, "M_42", rid) == pytest.approx(
-        2 / 3, abs=0.01)
+        1 / 15, abs=0.01)
+
+
+def test_a_mosaics_thinner_panel_is_not_offered_as_a_border_to_trim(
+        client, solved_library, data_root):
+    """The end-to-end shape of the v0.389.2 fix, on the map the test above used
+    to use. Two thirds of the canvas one frame deep and the last third twelve is
+    a *panel* that got a bad night — the "Trim border" the coverage note offers
+    keeps every pixel of it — so the note that fired on it (67 % of the picture,
+    measured against the panel-overlap peak) described one thing and offered a fix
+    for another. Fails before: a `coverage` note with a `trim_border` action."""
+    import numpy as np
+
+    fits_path = data_root / "out" / "panels.fits"
+    cov = np.ones((300, 300), dtype=np.float32)
+    cov[:, 200:] = 12.0
+    _write_coverage_map(fits_path, cov)
+    rid = _add_run(data_root, "M_42", fits_path=str(fits_path),
+                   coverage_thin_frac=None, coverage_min=1, coverage_max=12)
+
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
+    assert not any(n["kind"] == "coverage" for n in body["notes"])
+    assert not any(n["action"] == "trim_border" for n in body["notes"])
 
 
 def test_an_evenly_covered_older_run_earns_the_compliment_too(

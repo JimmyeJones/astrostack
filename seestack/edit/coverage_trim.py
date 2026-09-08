@@ -60,6 +60,20 @@ def coverage_is_mosaic(coverage: np.ndarray,
     ``coverage_max > coverage_min`` test, which is ~always true (the reprojection
     border is uncovered, so the minimum is 0) and so mislabelled single-field
     stacks as mosaics.
+
+    **Known false negative, deliberately left (2026-09-08).** "Two levels each
+    spanning 8 % of the covered area" is a *sparse* mosaic's shape. A dense one
+    dilutes it: a 3x3 at 5 % overlap and a 12x8 raster with uneven panel depth
+    both return False, because no single level reaches 8 % once the depth is
+    spread across a dozen of them. That is a real miss, and it is not widened
+    here on purpose — this function is reached **only** for runs recorded before
+    the stacker persisted ``is_mosaic`` (schema < 8), which no run the owner's
+    install has made in a long time, and loosening the floor on the classifier
+    that decides whether the editor treats a picture as a mosaic is a behaviour
+    change to legacy runs bought for nothing. If a future change ever puts this
+    back on a live path, the honest test is the one D1 settled on — a mosaic is a
+    map whose :func:`panel_coverage_level` sits meaningfully below its peak — not
+    a lower ``min_frac``.
     """
     cov = np.asarray(coverage)
     if cov.ndim == 3:
@@ -225,7 +239,9 @@ def largest_covered_rect(coverage: np.ndarray,
     there's nothing worth trimming.
 
     A pixel is "well covered" when its coverage is finite and at least
-    ``min_frac`` of the peak coverage; NaN (no coverage) always counts as
+    ``min_frac`` of **one panel's** coverage depth (:func:`panel_coverage_level`
+    — the peak until D1, which on a mosaic is the panel-overlap band); NaN (no
+    coverage) always counts as
     uncovered. ``None`` is returned when the coverage is uniform (a single-field
     stack — every pixel passes, so the rectangle is the whole frame), when the
     best rectangle already spans essentially the whole frame (nothing ragged to

@@ -1020,3 +1020,121 @@ def test_a_single_field_note_is_untouched_by_the_new_argument():
         [(n.kind, n.message) for n in withdepth]
     assert "100 subs should cut the background noise about 10×" in \
         next(n.message for n in plain if n.kind == "noise_low")
+
+
+# --- what "thin coverage" is measured against (v0.389.2) ---------------------
+#
+# The share this note fires on was measured against the coverage map's *peak*
+# until v0.389.2. On a tiled mosaic the peak is where panels overlap, so ordinary
+# panel interiors counted as a ragged border and the panel told a mosaic owner
+# that most of his picture was one — offering a "Trim border" that, post-D1,
+# keeps the whole canvas. The measure now uses the same panel-depth reference the
+# trim does, so the note and its action cannot disagree.
+
+
+def _mosaic_coverage(rows: int, cols: int, depths, panel: int = 120,
+                     overlap: float = 0.10):
+    import numpy as np
+
+    step = int(round(panel * (1.0 - overlap)))
+    cov = np.zeros((step * (rows - 1) + panel, step * (cols - 1) + panel))
+    for r in range(rows):
+        for c in range(cols):
+            cov[r * step:r * step + panel,
+                c * step:c * step + panel] += float(depths[(r, c)])
+    return cov
+
+
+def test_no_ragged_border_note_on_a_mosaic_whose_panels_are_simply_panels():
+    """End to end through the real measure, on the shape the owner shoots: a 2×2
+    mosaic at 6/6/6/3 subs. Fails before — it reported 22 % "thin" and offered a
+    trim that keeps 92 % of the canvas, i.e. does nothing about what it
+    described."""
+    from seestack.stack.stacker import coverage_thin_fraction
+
+    cov = _mosaic_coverage(2, 2, {(0, 0): 6, (0, 1): 6, (1, 0): 6, (1, 1): 3})
+    notes = stack_health(
+        _run(n_frames_used=21, is_mosaic=True, coverage_min=3, coverage_max=21,
+             coverage_thin_frac=coverage_thin_fraction(cov)),
+        [_frame() for _ in range(21)],
+    )
+    assert "coverage" not in _kinds(notes)
+    assert not any(n.action == "trim_border" for n in notes)
+    # …and it is praised for what it is, rather than warned about.
+    assert "even coverage" in _note(notes, "solid").message
+
+
+def test_a_real_ragged_border_still_gets_the_note_and_the_trim():
+    """The measure is not simply quieter: a genuine thin edge still fires, and
+    the note now says edge rather than "the best-covered part"."""
+    notes = stack_health(
+        _run(coverage_thin_frac=0.18, coverage_max=30),
+        [_frame() for _ in range(30)],
+    )
+    note = _note(notes, "coverage")
+    assert note is not None
+    assert "18%" in note.message and "thin edge" in note.message
+    assert note.action == "trim_border"
+
+
+# --- κ-σ's reach on a mosaic, judged on the depth half the picture is at ------
+
+
+def test_rejection_blind_note_fires_where_half_a_mosaic_is_below_the_threshold():
+    """The other half of A6. ``coverage_max`` is the corner where four panels
+    meet, so a 2×2 three subs deep with a 12-deep overlap corner cleared the κ=3
+    threshold of 11 and the note stayed silent — while κ-σ was blind over
+    essentially the whole canvas. Fails before: no note at all."""
+    notes = stack_health(
+        _run(n_frames_used=12, coverage_min=3, coverage_max=12, is_mosaic=True,
+             coverage_median_depth=3.0, rejection_mode="sigma-clip",
+             rejection_fraction=0.0,
+             options_json='{"sigma_clip": true, "sigma_kappa": 3.0}'),
+        [_frame() for _ in range(12)],
+    )
+    note = _note(notes, "rejection_blind")
+    assert note is not None
+    assert "at least half of this picture no more than 3 subs overlap" in note.message
+    assert "couldn't drop anything there" in note.message
+    assert "11 frames" in note.message
+    assert note.action == "restack"
+
+
+def test_the_provable_everywhere_wording_still_wins_when_the_peak_is_shallow():
+    """When even the deepest pixel is below the threshold the stronger claim is
+    true, and the note must keep making it rather than retreating to "half"."""
+    notes = stack_health(
+        _run(n_frames_used=12, coverage_min=3, coverage_max=3, is_mosaic=True,
+             coverage_median_depth=3.0, rejection_mode="sigma-clip",
+             options_json='{"sigma_clip": true, "sigma_kappa": 3.0}'),
+        [_frame() for _ in range(12)],
+    )
+    note = _note(notes, "rejection_blind")
+    assert note is not None
+    assert "3 subs overlapping at any one spot" in note.message
+    assert "at least half" not in note.message
+
+
+def test_a_deep_mosaic_stays_silent_even_with_the_median_known():
+    """It can only ever make the note fire in more cases — never fewer, and never
+    on a mosaic whose panels really are deep enough."""
+    notes = stack_health(
+        _run(n_frames_used=400, coverage_min=20, coverage_max=60, is_mosaic=True,
+             coverage_median_depth=30.0, rejection_mode="sigma-clip",
+             rejection_fraction=0.003,
+             options_json='{"sigma_clip": true, "sigma_kappa": 3.0}'),
+        [_frame() for _ in range(40)],
+    )
+    assert "rejection_blind" not in _kinds(notes)
+
+
+def test_a_run_recorded_before_the_median_existed_keeps_the_old_test_exactly():
+    """Upgrade safety: None means "unknown", and an unknown median must leave the
+    peak test to the letter — no new note on the owner's existing library."""
+    notes = stack_health(
+        _run(n_frames_used=12, coverage_min=3, coverage_max=12, is_mosaic=True,
+             coverage_median_depth=None, rejection_mode="sigma-clip",
+             options_json='{"sigma_clip": true, "sigma_kappa": 3.0}'),
+        [_frame() for _ in range(12)],
+    )
+    assert "rejection_blind" not in _kinds(notes)

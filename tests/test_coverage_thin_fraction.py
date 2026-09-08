@@ -44,12 +44,33 @@ def test_a_dithered_border_stays_a_couple_of_percent_however_deep_the_stack():
     assert all(ratio <= COVERAGE_THIN_RATIO for ratio in old), old
 
 
-def test_a_lopsided_mosaic_reads_as_mostly_thin():
-    # Two thirds of the canvas got one frame; the last third got twelve.
+def test_a_lopsided_mosaic_panel_is_not_a_ragged_border():
+    """Rewritten deliberately in v0.389.2 — it asserted the opposite, and the
+    fixture is why. Two thirds of the canvas on one frame and the last third on
+    twelve is a *panel* that got a bad night, not an edge: the "Trim border" this
+    measure's note offers keeps every pixel of it, so calling ⅔ of the picture a
+    ragged border (which measuring against the **peak** did) described one thing
+    and offered a fix for another. A thin panel is a place to point the scope
+    next, and the mosaic depth map says so with a *where*."""
+    from seestack.edit.coverage_trim import largest_covered_rect
+
     cov = np.ones((300, 300))
     cov[:, 200:] = 12.0
-    share = coverage_thin_fraction(cov)
-    assert share == pytest.approx(2 / 3, abs=0.01)
+    assert coverage_thin_fraction(cov) < 0.02
+    # …and here is the reason, measured rather than asserted: nothing to trim.
+    assert largest_covered_rect(cov) is None
+
+
+def test_a_genuinely_ragged_border_still_reads_as_thin():
+    """The other direction, so the rewrite above cannot be read as "it never
+    fires on a big thin region": an edge narrow enough to be an edge (under the
+    8 % a coverage plateau needs) still counts, and trimming it helps."""
+    from seestack.edit.coverage_trim import largest_covered_rect
+
+    cov = np.full((300, 300), 12.0)
+    cov[:, :20] = 1.0
+    assert coverage_thin_fraction(cov) == pytest.approx(1 / 15, abs=0.01)
+    assert largest_covered_rect(cov) is not None
 
 
 def test_uncovered_pixels_are_not_part_of_the_picture():
@@ -72,7 +93,10 @@ def test_nothing_covered_is_no_answer_rather_than_zero():
     assert coverage_thin_fraction(np.array([])) is None
 
 
-def test_the_threshold_is_a_share_of_the_peak():
+def test_the_threshold_is_a_share_of_one_panels_depth():
+    """On a map this small no level is substantial enough to name a panel, so
+    ``panel_coverage_level`` declines and the peak stands — which is what keeps
+    every small and legacy map behaving exactly as it always has."""
     cov = np.array([[100.0, 100.0], [24.0, 26.0]])
     assert COVERAGE_THIN_RATIO == 0.25
     # 24 is under a quarter of 100 and 26 is over it: exactly one of four pixels.
