@@ -1,6 +1,7 @@
 import { MantineProvider } from "@mantine/core";
+import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ObjectInfoCard,
@@ -12,11 +13,13 @@ import {
 } from "./ObjectInfoCard";
 import * as client from "../api/client";
 
-function renderCard(safe = "M_31", hideFraming = false) {
+function renderCard(safe = "M_31", hideFraming = false, allowRename = false) {
   return render(
     <MantineProvider>
+      <Notifications />
       <QueryClientProvider client={new QueryClient()}>
-        <ObjectInfoCard safe={safe} hideFraming={hideFraming} />
+        <ObjectInfoCard safe={safe} hideFraming={hideFraming}
+          allowRename={allowRename} />
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -317,5 +320,68 @@ describe("ObjectInfoCard", () => {
     // Give the query a tick to resolve, then assert the card stayed empty.
     await waitFor(() => expect(client.api.identifyTarget).toHaveBeenCalled());
     expect(container.querySelector(".mantine-Paper-root")).toBeNull();
+  });
+});
+
+describe("ObjectInfoCard — \"use this name?\"", () => {
+  const folderNamed = {
+    id: "NGC7000", name: "North America Nebula", type: "nebula",
+    constellation: "Cygnus", constellation_abbr: "Cyg",
+    ra_deg: 314, dec_deg: 44, matched_by: "coords" as const,
+    rename_to: "North America Nebula",
+  };
+
+  it("offers the catalog name, and renames on one click", async () => {
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(folderNamed);
+    const patch = vi.spyOn(client.api, "patchTarget").mockResolvedValue({
+      safe_name: "MyWorks_2026", name: "North America Nebula",
+    } as never);
+    renderCard("MyWorks_2026", false, true);
+
+    const button = await screen.findByRole("button", { name: "Use this name" });
+    expect(screen.getByText(/still named after its folder/)).toBeInTheDocument();
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(patch).toHaveBeenCalledWith("MyWorks_2026",
+        { name: "North America Nebula" }));
+  });
+
+  it("takes no for an answer", async () => {
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(folderNamed);
+    const patch = vi.spyOn(client.api, "patchTarget");
+    renderCard("MyWorks_2026", false, true);
+
+    fireEvent.click(await screen.findByText("Keep my name"));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Use this name" })).toBeNull());
+    // Dismissing is a *decision*, not a rename — nothing is written.
+    expect(patch).not.toHaveBeenCalled();
+    // …and the card itself is still there doing its describing job.
+    expect(screen.getByText(/A nebula in the constellation Cygnus\./))
+      .toBeInTheDocument();
+  });
+
+  it("offers nothing on a page that only describes the target", async () => {
+    // The editor and History render the same card read-only: the rename belongs
+    // where the name is the heading, not everywhere the card appears.
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(folderNamed);
+    const { container } = renderCard("MyWorks_2026");
+    await waitFor(() =>
+      expect(screen.getByText("North America Nebula")).toBeInTheDocument());
+    expect(container.textContent).not.toContain("still named after its folder");
+  });
+
+  it("offers nothing for a target that already names itself", async () => {
+    // The backend withholds `rename_to` for a recognisable name; an older
+    // backend omits the field entirely. Both must read as "nothing to offer".
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+    });
+    const { container } = renderCard("M_31", false, true);
+    await waitFor(() =>
+      expect(screen.getByText("Andromeda Galaxy")).toBeInTheDocument());
+    expect(container.textContent).not.toContain("still named after its folder");
   });
 });

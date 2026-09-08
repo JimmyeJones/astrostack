@@ -398,7 +398,7 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
     ``null`` when nothing matches confidently. Read-only; renders the
     "What am I looking at?" card. Matches by the target's name first, then by its
     plate-solved centre if one is known."""
-    from seestack.objectinfo import identify_object
+    from seestack.objectinfo import identify_object, suggested_target_rename
     from webapp.frame_field import install_frame_field
 
     lib = deps.open_library(request)
@@ -406,6 +406,11 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
         entry = lib.find_target(safe)
         if entry is None:
             raise HTTPException(status_code=404, detail=f"No target '{safe}'")
+        # "Use this name?" — offered only for a target still called after its
+        # folder, and only at title-grade confidence (see the helper). Computed
+        # here rather than in the card because it is a fact about *this target's
+        # stored name*, which the pure catalog lookup below never sees.
+        rename_to = suggested_target_rename(entry.name, entry.ra_deg, entry.dec_deg)
         # "Will it fit in one frame?" and "how many mosaic panels?" are answers
         # about the owner's *own* telescope; without this they were answered for
         # an S50 on an S30's frames (see webapp/frame_field.py). None → the
@@ -444,6 +449,7 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
                                      text=info.angular_size.text)
                       if info.angular_size is not None else None),
         nebula_class=info.nebula_class,
+        rename_to=rename_to,
     )
 
 
@@ -1351,12 +1357,27 @@ def set_integration_goal(
 
 @router.patch("/{safe}", response_model=TargetOut)
 def patch_target(safe: str, body: TargetPatch, request: Request) -> TargetOut:
-    """Edit user-owned target metadata: free-text notes and tags."""
+    """Edit user-owned target metadata: display name, free-text notes and tags."""
     lib = deps.open_library(request)
     try:
+        if body.name is not None:
+            # A rename edits the label only — the safe name, the folder and every
+            # stored path stay put, so nothing that resolves a target by ``safe``
+            # (which is everything) can be stranded by it.
+            try:
+                renamed = lib.rename_target(safe, body.name)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if renamed is None:
+                raise HTTPException(status_code=404, detail=f"No target '{safe}'")
         entry = lib.update_target(safe, notes=body.notes, tags=body.tags)
         if entry is None:
             raise HTTPException(status_code=404, detail=f"No target '{safe}'")
+        if body.name is not None:
+            # The Dashboard roll-up, the Library list and the Tonight planner all
+            # serve target names out of the registry cache, so publish the new one
+            # now instead of making the user wait out a TTL to see their rename.
+            invalidate_registry_cache(request.app)
         return _to_out(entry)
     finally:
         lib.close()

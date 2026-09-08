@@ -50,6 +50,11 @@ class TargetOut(BaseModel):
 class TargetPatch(BaseModel):
     notes: str | None = None
     tags: list[str] | None = None
+    # A new **display name** for the target ("NGC 6888_SUB" → "Crescent Nebula").
+    # Null (or absent, as every older client sends) leaves the name alone. The
+    # folder, project and every stored path keep the target's safe name, so this
+    # only ever changes the label the app shows.
+    name: str | None = None
 
 
 class SetCoverRequest(BaseModel):
@@ -172,6 +177,13 @@ class ObjectInfoOut(BaseModel):
     # exposed here so the identity card can stay the one place that answers
     # "what am I looking at?". Old backends omit it.
     nebula_class: str = ""
+    # "This looks like M 31 — use this name?" — the display name worth offering
+    # for a target still called after its folder, set only when the *solved*
+    # centre sits within the tight title-grade cone and the stored name
+    # identifies nothing (:func:`seestack.objectinfo.suggested_target_rename`).
+    # ``null`` for every target that already carries a recognisable name, which
+    # is the common case. Nothing renames on its own — the UI only offers it.
+    rename_to: str | None = None
 
 
 class IntegrationGoalOut(BaseModel):

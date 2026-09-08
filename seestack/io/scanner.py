@@ -95,6 +95,19 @@ def is_mosaic_target_name(target_name: str) -> bool:
     return target_name.strip().lower().endswith(_MOSAIC_TARGET_SUFFIX)
 
 
+def preserve_mosaic_suffix(old_name: str, new_name: str) -> str:
+    """``new_name``, re-suffixed so a mosaic target never stops looking like one.
+
+    Mosaic-ness is carried by the *name* (:func:`is_mosaic_target_name`), so a
+    rename that drops " (mosaic)" would quietly turn a mosaic into a single
+    field for everything that groups targets by where they point. Renaming is a
+    display-name edit, never a change of what was shot — so the suffix travels
+    with the target. Idempotent, and a no-op for a single-field target."""
+    if is_mosaic_target_name(old_name) and not is_mosaic_target_name(new_name):
+        return mosaic_target_name(new_name.strip())
+    return new_name
+
+
 def target_name_for_folder(folder_name: str) -> str:
     """The target a folder of raw subs belongs to, by the Seestar convention.
 
