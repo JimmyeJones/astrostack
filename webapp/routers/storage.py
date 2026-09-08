@@ -13,6 +13,7 @@ router reports where the space went and lets the user reclaim it safely:
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -140,6 +141,20 @@ class StorageResponse(BaseModel):
     #: answer. ``0`` when none has been built, which is the default and every
     #: install that never presses the button.
     exports_bytes: int = 0
+    #: The owner's raw subs in ``incoming/``, which on this install are the only
+    #: copy that exists (Owner Facts; AGENTS.md §10) — counted from the ``frames``
+    #: rows, never by walking or stat-ing the folder itself. ``incoming_bytes`` is
+    #: the sum of the sizes we know; ``incoming_unsized_frames`` counts rows
+    #: ingested before ``source_size_bytes`` existed, which is why the page says
+    #: "at least". All additive and 0 on a fresh install.
+    incoming_frames: int = 0
+    incoming_bytes: int = 0
+    incoming_unsized_frames: int = 0
+    #: Whether ``copy_to_cache`` is on. Off (the owner's setting) means the app
+    #: holds no copy of a sub at all; on means the copies are working files that
+    #: "Clear caches" deletes — a distinction the page has to draw, because
+    #: neither is a backup.
+    incoming_copied: bool = False
     disk: dict
 
 
@@ -147,11 +162,16 @@ class StorageResponse(BaseModel):
 def get_storage(request: Request) -> StorageResponse:
     from seestack.io.project import Project
 
+    settings = deps.get_settings(request)
     lib = deps.open_library(request)
     rows: list[TargetStorage] = []
     # Capture cadence across the whole library, for the "nights left" estimate.
     night_counts: dict[str, int] = {}
     total_frames = 0
+    # …and how much raw data sits in incoming/, summed from the frame rows. The
+    # trailing separator matters: without it a sibling like `incoming2/` matches.
+    incoming_prefix = os.path.join(str(settings.resolved_incoming_dir), "")
+    incoming_frames = incoming_bytes = incoming_unsized = 0
     try:
         for t in lib.list_targets():
             tdir = lib.target_dir(t)
@@ -180,6 +200,10 @@ def get_storage(request: Request) -> StorageResponse:
                 for night, n in proj.frame_night_counts().items():
                     night_counts[night] = night_counts.get(night, 0) + n
                     total_frames += n
+                n_inc, b_inc, u_inc = proj.source_frames_under(incoming_prefix)
+                incoming_frames += n_inc
+                incoming_bytes += b_inc
+                incoming_unsized += u_inc
             except Exception:  # noqa: BLE001
                 pass
             finally:
@@ -223,8 +247,11 @@ def get_storage(request: Request) -> StorageResponse:
         output_bytes=sum(r.output_bytes for r in rows),
         cache_bytes=sum(r.cache_bytes for r in rows),
         # Best-effort like every other figure here: a missing directory is 0.
-        exports_bytes=_dir_bytes(
-            picturesarchive.archive_dir(deps.get_settings(request))),
+        exports_bytes=_dir_bytes(picturesarchive.archive_dir(settings)),
+        incoming_frames=incoming_frames,
+        incoming_bytes=incoming_bytes,
+        incoming_unsized_frames=incoming_unsized,
+        incoming_copied=bool(settings.copy_to_cache),
         disk=disk,
     )
 

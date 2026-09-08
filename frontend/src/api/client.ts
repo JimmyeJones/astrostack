@@ -1116,6 +1116,18 @@ export interface StorageInfo {
   // The prepared full-size picture archive, if one has been built. Optional:
   // an older backend doesn't report it, and 0 means there is nothing to show.
   exports_bytes?: number;
+  /**
+   * Your raw subs in `incoming/`, counted from the frame rows the app already
+   * wrote (never by reading the folder). `incoming_bytes` sums only the sizes
+   * that are known — `incoming_unsized_frames` is how many rows predate the
+   * size column, which is why the page says "at least". `incoming_copied`
+   * mirrors the `copy_to_cache` setting. All optional: an older backend omits
+   * them, and 0 frames is a fresh install with nothing to say.
+   */
+  incoming_frames?: number;
+  incoming_bytes?: number;
+  incoming_unsized_frames?: number;
+  incoming_copied?: boolean;
   disk: {
     total_gb?: number;
     used_gb?: number;

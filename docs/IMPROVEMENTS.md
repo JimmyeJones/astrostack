@@ -86,15 +86,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > the target of any "see above" / "see below" in the entries below that no longer resolves
 > here.
 
-- **🟡 D2 — "Only N of M subs could be located … installing ASTAP's star database helps" fires while the night
-  is still being solved.** *(Third audit; severity: misleading copy, transient; confidence: traced and observed
-  on their rig.)* The scan **ingests every new sub before any is solved**, and the health note in
-  `seestack/stackhealth.py` guards only on "at least one located sub" — so mid-pipeline it counted 84 of 120 as
-  failures and pointed at a setup problem that does not exist. On the owner's install a night of several hundred
-  new subs keeps that note up **for the whole length of the solve**. **Fix:** exclude frames never attempted
-  (`wcs_json IS NULL` and no `solve_failed:` reason) from the count, or suppress the note while a pipeline job
-  is running for that target.
-
 - **⚪ D4 — the working list still hides shipped work in plain sight** *(third audit, counted)*. Across the
   priority sections: **36 shipped-but-unstruck entries and 63 closed records**; sweep blockquotes still inside
   "Bugs" despite the three-file rule; and **"Features that serve real workflows" has zero ready entries against
@@ -102,8 +93,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   genuinely ready to build** — one in five is already shipped, one in three is a closed record. Builders now
   catch the duplicates at triage (five recorded catches since the split), which costs each run its opening
   minutes. **One Scout run of mechanical work**: cut the 36 shipped and 63 closed entries to `SHIPPED.md`, move
-  the sweep blockquotes to `PROCESS-NOTES.md`, and leave "Bugs" holding only D1, D2 and the sky-atlas rotation
-  bug. That roughly halves the working list again.
+  the sweep blockquotes to `PROCESS-NOTES.md`, and leave "Bugs" holding only the sky-atlas rotation bug
+  *(D1 and D2, which this used to name alongside it, shipped 2026-09-08 as v0.382.4 / v0.382.5)*. That roughly
+  halves the working list again.
   *(D3 — the re-aimed Scout rotation living only in the hand-pasted prompt, so all four subsequent runs swept
   the area it marks closed — is **already fixed**: the rotation was moved into the `AGENTS.md` Scout bullet on
   2026-09-07, which is a file the Scout actually reads.)*
@@ -3785,44 +3777,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   component renders no modal. **Fails today:** a `Target.test.tsx` case asserting the hero's menu offers
   **"Copy caption"** and **FITS** for a run with `has_fits` — the Target page has neither. The existing page
   tests above must still pass.
-
-- **READY (backlog-readiness run 2026-09-07) — the Storage page should say, with numbers, that the subs in
-  `incoming/` are the only copy there is.** *(Pillar: trust / friendliness — PRIORITY 3; size S; one additive
-  response field and one sentence of frontend. Confidence: `webapp/routers/storage.py::get_storage` and
-  `frontend/src/routes/Storage.tsx` read — neither knows anything about `incoming/`. Checked `docs/SHIPPED.md`
-  and this file for "backup" / "second copy" / "only copy": v0.357.0 (the pictures archive) is about finished
-  *pictures*; nothing states the raws' situation. **Not a new card** — it replaces a sentence the page already
-  prints, in the same place.)*
-  **The problem, in the owner's terms.** The single largest risk to his pictures is not a bug in this app: his
-  thousands of raw subs live in `incoming/` and nowhere else (Owner Facts; AGENTS.md §10), `copy_to_cache` is
-  off so the app holds no copy of them, and nothing in the app says so. The Storage page's closing paragraph
-  (`Storage.tsx` ~line 250) says the folder is "worth having a backup of" — in a dimmed aside under the cache
-  table, true, generic and invisible; a beginner reads "AstroStack can rebuild your whole library from them"
-  and reasonably concludes the app has him covered.
-  **Shape.** `StorageResponse` gains three additive fields: `incoming_frames: int`, `incoming_bytes: int`,
-  `incoming_unsized_frames: int` (rows whose size is unknown), plus `incoming_copied: bool`
-  (= `settings.copy_to_cache`). **Derive them from the per-target databases, never by walking `incoming/`:**
-  every `frames` row already carries `source_path` and `source_size_bytes` (`seestack/io/project.py`, "source
-  st_size at ingest/refresh"), so per target it is one `SELECT count(*), sum(source_size_bytes),
-  sum(source_size_bytes IS NULL)` over rows whose `source_path` is under `Settings.resolved_incoming_dir` —
-  `get_storage` already opens every target for its cache stats, so the query goes inside the same per-target
-  `try`. `source_size_bytes` is NULL on rows ingested before the column existed, hence the third field and an
-  "at least" in the sentence. Frontend: replace the dimmed aside with one plain sentence in the same place,
-  driven by the numbers — *"Your 8,542 subs (41 GB) in incoming/ are the only copy AstroStack knows of. It
-  reads them where they are and never writes there — and nothing this app does backs them up. Keep a copy
-  somewhere else."* With `copy_to_cache` on, the second sentence becomes *"the copies in the cache are working
-  files that Clear caches deletes, not a backup."* Self-hides when `incoming_frames` is 0 (a fresh install). No
-  new card; no page height beyond the sentence already there.
-  **Traps.** (1) §10: read-only is not enough — the answer must not even `stat` under `incoming/`; the DB sum is
-  the whole point. Pin it the way v0.381.0 pinned "polling never walks `incoming/`": a test that makes any
-  filesystem access under the incoming root fatal. (2) Frames added through the upload endpoints also live under
-  `incoming/` — correct, they are raws too. (3) Not on the Dashboard tile: the Storage page is where the owner
-  is already thinking about disks, and the tile has its own headroom sentence (`storageHeadroom`).
-  **Tests.** `tests/webapp/test_storage*.py`: the response carries the count and byte sum for a library
-  ingested from an incoming dir (**fails today: key absent**); NULL sizes are counted separately; nothing under
-  the incoming root is opened or stat-ed while answering; `copy_to_cache` flips `incoming_copied`.
-  `Storage.test.tsx`: the sentence renders the numbers, the "at least" form when sizes are missing, the
-  cache-copy variant, and nothing on a fresh install.
 
 - **READY (backlog-readiness run 2026-09-07, lifted out of "Performance" because the wait is the owner's) — a
   Sun or Moon video stack takes roughly three times as long as it needs to, because pass 2 demosaics every
@@ -8560,6 +8514,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.383.0** — PRIORITY 3 (trust / friendliness), the READY entry filed 2026-09-07: **the Storage page says, with the owner's own numbers, that the subs in `incoming/` are the only copy there is.** The largest risk to his pictures is not a bug in this app — his raws live in `incoming/` and nowhere else, `copy_to_cache` is off so the app holds no copy, and nothing said so; the page's closing aside called the folder "worth having a backup of" in the same breath as "you can rebuild your whole library from them". That aside is now one plain sentence built from his data: *"Your 8,542 subs (44 GB) in incoming/ are the only copy AstroStack knows of. It reads them where they are and never writes there, and it keeps no copy of its own — nothing this app does backs them up. Keep a copy somewhere else."* With `copy_to_cache` on it says instead that the cache copies are working files "Clear caches" deletes — not a backup. **The numbers come from the `frames` rows, never from the folder:** new pure `Project.source_frames_under(prefix)` sums `source_size_bytes` over rows whose `source_path` has that literal prefix (`substr`, no LIKE escaping; trailing separator so `incoming2/` can't match), called inside the per-target `try` `get_storage` already opens — so answering never walks, opens or `stat`s anything under `incoming/` (AGENTS.md §10), pinned by a test that makes those calls fatal *and* proves the trap armed first. Rows predating `source_size_bytes` are reported separately, so the figure is honestly "at least". Four additive response fields with defaults + `frontend/src/components/incomingCopyNote.ts` (pure, takes the page's own byte formatter). Nothing removed; no new card. Tests +11, two fail-before; `tsc`/`vitest`/`vite build` clean. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.382.5** — 🟡 PRIORITY 3 (friendliness / trust), the third audit's **D2**: **the "installing ASTAP's star database helps" note stops firing at a night that is merely still being solved.** A scan ingests every new sub *before* any is solved, and `seestack/stackhealth.py`'s `unsolved` note counted every accepted sub with no `wcs_json` as a plate-solve failure — so mid-pipeline, on a healthy night, it announced *"Only 36 of 120 subs could be located"* and pointed the owner at a setup problem that does not exist, for as long as the solve took. Both terms now count only frames whose solve has actually **run**: new pure `_solve_was_tried` reads the `reject_reason='solve_failed:…'` mark a failed solve leaves (a failure deliberately does not touch `accept`), which is the same predicate `Project.solve_failure_reasons` already uses, so the note and the reject breakdown cannot disagree. Side effect worth having: the ratio a beginner reads is now the true failure rate rather than one diluted by the queue — 6 located / 6 failed / 300 pending reads *"6 of 12"*, not *"6 of 312"*. Conservative by design (a frame keeping a concrete `qc_error` reason reads as untried — undercounting keeps the note quiet, overcounting is the bug). Engine + copy only; no config, schema, on-disk, API or default change. Tests +2 fail-before, plus four existing fixtures given the mark a real failed solve leaves. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.382.4** — 🔴🔴 **D1, the third audit's headline find: Auto's border trim cropped every mosaic down to its panel overlaps.** `coverage_trim.well_covered_mask` measured "well covered" as half the map's **peak** — right on a single field (the peak *is* the interior), catastrophic on a mosaic (the peak is where panels **overlap**, so the threshold sat above every panel interior). Reproduced before changing anything, with the audit's own shapes: 2x2 @15% kept **8.0 %** of the canvas, 3x3 @5% **1.7 %**, 12x8 raster 1.5 %, and a 1x2 with unequal depths **dropped the thin panel whole** — while the single-field control returned its correct `(0.02, 0.02, 0.98, 0.98)`. New pure `coverage_trim.panel_coverage_level` measures against **one panel** instead: the lowest coverage level a real share of the canvas sits at. That one sentence is right for both shapes — a single field has exactly one such level and it *is* the peak, so that path is **byte-for-byte unchanged**; a mosaic has several and the lowest is one panel; unequal panels give the *thinner* one. Levels are found by relative tolerance (weighted coverage reads as 30±jitter, and integer bucketing would shatter it) above an absolute pixel floor (on a tiny map 8 % rounds down to "one pixel is a plateau"). **The reference is always ≤ the peak, so the mask can only grow — the worst case is leaving fringe in, never trimming a panel away**, and that property is itself tested. Both consumers move together (`render/thumbnail.stack_detail_mask`, the "My map" fade). Half the commit is fixtures: six tests shared a "thin single-frame fringe" that was **62 % of the canvas** — the same shape as the bug — and now share one ramped 4 px border, with no assertion loosened. Tests +8, three fail-before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.382.3** — PRIORITY 1 (editor responsiveness), the second bite out of the same clause and the bigger one: **the live preview stops reading a mosaic's whole coverage canvas, twice, on every render.** `seestack/edit/proxy.py::_load_map` did `np.asarray(fits.getdata(path), dtype=np.float32)` and strided *afterwards* — the cast copies, so the run's **full-resolution** map was materialised every time, and that map is hundreds of MB at this owner's mosaic sizes. The editor asks for two of them (coverage + frame coverage) per render and fires two renders per edit, so one slider drag was four full-canvas reads and four full-canvas allocations before any op ran. Now: open with `memmap=True`, slice `[::step, ::step]` first, cast last — measured on a 480 MB map at the proxy's own step of 8, **2.65 s cold / 0.21 s warm → 0.011–0.021 s**, with identical values (the decimation picks pixels, the cast rounds each one; neither order changes which or what). The defensive 3-D collapse moves after the stride for the same reason. Tests +2 (the memory contract as its two observable halves — a memmap is asked for, `fits.getdata` is monkeypatched to raise and never reached — plus the float64 and 3-D reorder cases); the 133 existing coverage/leveling tests pass unchanged. Same signature, same values, nothing persisted or defaulted differently. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.382.2** — PRIORITY 1 (editor), the first bite out of the only thing the "Live preview" entry still listed as open — *responsiveness*: **the live preview stops re-solving the star field it solved a moment ago.** Several ops measure the whole image before they transform it (the stretch's per-channel stats, the tone curve's points, "Neutralize background"'s sky medians, and by far the largest, colour calibration's star detection + white-balance solve), and every render redid all of it from the top — twice, since the preview PNG and the histogram are two requests over the same recipe and the same proxy. New `webapp/edit_fit_cache.py` carries those measurements forward through the `EditContext.fit` channel the loupe already uses, but **only for the longest common prefix of enabled ops**: the first op whose id or params differ ends the prefix, so an op either receives the number it would have measured anyway or measures it. Measured on a 1500×1000 proxy with the one-click Auto recipe: **4.25 s → 2.39 s per render (1.78×)**, `np.array_equal(before, after, equal_nan=True)` **True**. Position-not-uid matching is load-bearing (a recipe posted without uids gets fresh ones per request, which would have made the carry a permanent miss); proxy geometry is in the key so a windowed render can never share one. In-process, bounded to 8 slots of small scalars, nothing persisted — a miss is exactly today's behaviour. Tests +10, four of them through the endpoints. Full entry, and the measured next slice (`frozen_deltas`, another 1.8×, 4.2e-7 apart), in [`SHIPPED.md`](SHIPPED.md).

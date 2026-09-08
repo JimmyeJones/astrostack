@@ -1297,6 +1297,37 @@ class Project:
         earliest = row[0] if row else None
         return str(earliest) if earliest else None
 
+    def source_frames_under(self, prefix: str) -> tuple[int, int, int]:
+        """``(n_frames, known_bytes, unsized_frames)`` for the frames whose
+        ``source_path`` lies under ``prefix``.
+
+        Answers "how much raw data of mine lives *there*, and is it the only
+        copy?" from the rows the app already wrote — ``source_size_bytes`` is the
+        source file's ``st_size`` at ingest/refresh — so nothing has to walk or
+        even ``stat`` the folder in question. That matters for the one caller:
+        ``incoming/`` holds the owner's only copy of every sub and is strictly
+        read-only (AGENTS.md §10), so the honest way to report on it is not to
+        touch it.
+
+        ``prefix`` is matched as a literal string prefix (``substr``, not
+        ``LIKE`` — no ``%``/``_`` to escape), so pass it with its trailing
+        separator or a sibling directory sharing the name's first characters will
+        match. ``unsized_frames`` counts rows ingested before
+        ``source_size_bytes`` existed, whose bytes are simply unknown — which is
+        why the number this feeds is phrased as "at least".
+        """
+        assert self._conn is not None
+        row = self._conn.execute(
+            "SELECT COUNT(*), "
+            "       COALESCE(SUM(COALESCE(source_size_bytes, 0)), 0), "
+            "       SUM(CASE WHEN source_size_bytes IS NULL THEN 1 ELSE 0 END) "
+            "FROM frames WHERE substr(source_path, 1, ?) = ?",
+            (len(prefix), prefix),
+        ).fetchone()
+        if not row:
+            return (0, 0, 0)
+        return (int(row[0] or 0), int(row[1] or 0), int(row[2] or 0))
+
     def frame_night_counts(self) -> dict[str, int]:
         """Tally *all* frames (accepted or rejected) by capture night.
 

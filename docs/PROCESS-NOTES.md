@@ -18,6 +18,47 @@ is a queue.
 
 ---
 
+## 2026-09-08 (Builder, branch `claude/sweet-babbage-niew4h`) — the eleventh D1 collision, and the one thing that would have caught it
+
+**What happened.** Two Builder runs picked **D1** within the same hour and both
+finished it. The other run (`claude/sweet-babbage-8hitfe`) merged first, as
+**v0.382.4**; this run's own D1 — same diagnosis, a different reference statistic
+— was **dropped whole at merge time** rather than re-litigated. That is the right
+call and worth writing down as the default: an item that is on `main` is *done*,
+and replacing a shipped fix with a second implementation of the same fix is churn
+on a live install, not an improvement.
+
+**Both fixes were real, and they differ.** Theirs (`panel_coverage_level`) finds
+the lowest coverage plateau with a sorted-window scan at a *relative* tolerance —
+so it survives weighted (non-integer) coverage, needs no verdict from the caller,
+and is monotone-safe by construction: it can only ever lower the threshold and
+keep more of the picture. Mine (`panel_coverage_depth` + `coverage_peak_is_overlap`
++ an explicit `is_mosaic` threaded from the stacker into the editor and the sky
+map) also kept a **skirt guard**, so a shallow halo of drifted frames is still
+trimmed rather than becoming the reference. Theirs stands down on that case on
+purpose and says so. Nothing here argues for reopening it; recorded only so a
+future run reading both branches knows the difference was deliberate.
+
+**The lesson, and it is not "claim earlier".** §11 already says claiming is a
+publication, not a lock, and both runs claimed. What would actually have caught
+this is the check §11 *also* prescribes and that neither run ran late enough:
+**`git fetch origin main` immediately before the first line of code, and again
+before the first line of the *next* task** — not once at start of run. This run
+fetched at start (D1 was open), then worked for two hours across three tasks and
+only fetched again at merge time, by which point the duplicate was complete. The
+cheap habit: fetch, `git log --oneline origin/main -30 | grep <the item's code
+nouns>`, *then* write. Ten seconds; it would have redirected this run's first two
+hours to the second and third tasks it went on to ship anyway.
+
+**Second, smaller note — the disk.** Three full-suite runs filled the container
+(`pytest-of-root` reached 28 GB, and pytest keeps the last three runs' `tmp_path`
+trees). The symptom is not "out of disk": it is an `OSError: [Errno 28]` from
+pytest's own **cacheprovider** at session teardown, after a green run, which reads
+like a test failure. `rm -rf /tmp/pytest-of-root` between full runs, and
+`-p no:cacheprovider` if a run must not die at the finish line.
+
+---
+
 ## 2026-09-07 (Builder, branch `claude/sweet-babbage-8hitfe`) — a fourth clean dogfood, and what to do when the *bugs* are drained but a priority still has an open sentence
 
 **Baseline.** `source scripts/agent-setup.sh` green. Full suite headless started
