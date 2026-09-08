@@ -1351,6 +1351,22 @@ export interface StackRun {
   // auto-stretch of the linear stack, not the picture the user made. Absent on an
   // older backend, which reads as "no unfinished edit" and shows nothing.
   unexported_edit?: boolean;
+  // True when the *unattended* walk-away pass finished this run into a picture
+  // for the user (rather than a hand-driven Auto click). Absent on an older
+  // backend, which reads as "you made this one", the safe answer. Lets the hero
+  // offer "leave this target's pictures alone" exactly where someone meets a
+  // picture they did not make.
+  auto_edited?: boolean;
+}
+
+/** The per-target answer to "should the app finish my pictures of this one?" */
+export interface AutoEditPref {
+  /** The override: `null` = follow the library setting. */
+  auto_edit: boolean | null;
+  /** What the Settings switch currently says. */
+  library_default: boolean;
+  /** What will actually happen — the override if set, else the setting. */
+  effective: boolean;
 }
 
 export interface StackInfoCard {
@@ -2929,6 +2945,17 @@ export const api = {
   // stack (date, target, subs, integration, sharpness, calibration, noise). A
   // href/download, not a fetch: the browser saves the file.
   imagingLogUrl: () => `/api/imaging-log.csv`,
+  // Whether the unattended pass finishes this target's new stacks into a
+  // picture: the per-target override (`null` = follow the library setting), the
+  // library setting, and the effective answer — resolved server-side so a
+  // screen and the pipeline cannot disagree about one target.
+  getAutoEditPref: (safe: string) =>
+    req<AutoEditPref>(`/api/targets/${safe}/auto-edit`),
+  setAutoEditPref: (safe: string, autoEdit: boolean | null) =>
+    req<AutoEditPref>(`/api/targets/${safe}/auto-edit`, {
+      method: "PUT",
+      body: JSON.stringify({ auto_edit: autoEdit }),
+    }),
   getIntegrationGoal: (safe: string) =>
     req<{ goal_s: number | null }>(`/api/targets/${safe}/integration-goal`),
   setIntegrationGoal: (safe: string, goalS: number | null) =>

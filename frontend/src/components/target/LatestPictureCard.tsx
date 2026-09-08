@@ -107,6 +107,30 @@ export function LatestPictureCard({
   // that cannot exist without one.
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
+  // Did the *unattended* pass finish this picture for the user? Only then is the
+  // "leave this target's pictures alone" control worth showing — a standing
+  // control on every target page would be one more always-on element, which the
+  // owner's own "the UI is extremely busy" priority rules out. The query is
+  // enabled on the same condition, so an ordinary target never issues it.
+  const wasAutoEdited = run?.auto_edited === true;
+  const autoEditPref = useQuery({
+    queryKey: ["auto-edit-pref", safe],
+    queryFn: () => api.getAutoEditPref(safe),
+    enabled: wasAutoEdited,
+  });
+  const setAutoEditPref = useMutation({
+    mutationFn: (v: boolean | null) => api.setAutoEditPref(safe, v),
+    onSuccess: (r) => {
+      qc.setQueryData(["auto-edit-pref", safe], r);
+      notifications.show({
+        message: r.effective
+          ? "AstroStack will keep finishing this target's new pictures."
+          : "Left to you — new pictures of this target stay as the plain stack.",
+        color: "violet",
+      });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
   const finishEdit = useMutation({
     mutationFn: () => api.exportSavedEdit(safe, run!.id, `${safe}_edit`),
     onSuccess: ({ job_id }) => {
@@ -299,6 +323,34 @@ export function LatestPictureCard({
           of the stack. Say so where the picture is, and offer the one step that
           makes their version the real one — rather than quietly showing an image
           they didn't make. */}
+      {/* "AstroStack finished this one for you" — said where the picture is,
+          with the one control that turns it off for this target and nowhere
+          else. Shown only on a run the unattended pass actually finished, so it
+          is an answer to something that just happened rather than a standing
+          switch. */}
+      {wasAutoEdited && autoEditPref.data ? (
+        <Text size="xs" c="dimmed" mt={4}>
+          {autoEditPref.data.effective
+            ? "AstroStack finished this picture for you — open the editor to change "
+              + "anything, or "
+            : "New pictures of this target are left as the plain stack. "}
+          <Anchor component="button" type="button" size="xs"
+            onClick={() => setAutoEditPref.mutate(
+              // Off → an explicit `false` for this target, whatever the library
+              // setting says. On → clear the override when the library setting
+              // already says yes (so a later change to it still reaches this
+              // target), and an explicit `true` when it does not — otherwise
+              // "let AstroStack finish them again" would quietly do nothing.
+              autoEditPref.data.effective
+                ? false
+                : (autoEditPref.data.library_default ? null : true))}>
+            {autoEditPref.data.effective
+              ? "leave this target's pictures to me"
+              : "let AstroStack finish them again"}
+          </Anchor>
+          {autoEditPref.data.effective ? "." : ""}
+        </Text>
+      ) : null}
       {run.unexported_edit && (
         <Alert
           color="violet" variant="light" p="xs" mt="xs" radius="sm"

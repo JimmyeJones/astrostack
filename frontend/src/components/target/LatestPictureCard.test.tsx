@@ -548,3 +548,78 @@ describe("LatestPictureCard — a saved edit that was never exported", () => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ["runs", "M_42"] }));
   });
 });
+
+// The owner approved auto-editing the walk-away picture with a condition —
+// "yes, but should be easy to override with manual settings" — and a
+// library-wide switch is not an override for *one* target. The link that turns
+// it off lives under the picture the app finished, so it is an answer to
+// something that just happened rather than a standing control on every page.
+describe("LatestPictureCard — \"AstroStack finished this one for you\"", () => {
+  it("says nothing, and asks nothing, about a picture the user made", async () => {
+    const pref = vi.spyOn(client.api, "getAutoEditPref");
+    renderCard(mkRun());
+    await waitFor(() => expect(screen.getByAltText(/M42/)).toBeInTheDocument());
+    expect(screen.queryByText(/finished this picture for you/)).toBeNull();
+    // An ordinary target must not pay for a request it has nothing to show.
+    expect(pref).not.toHaveBeenCalled();
+  });
+
+  it("offers to leave this target alone under a picture it finished", async () => {
+    vi.spyOn(client.api, "getAutoEditPref").mockResolvedValue({
+      auto_edit: null, library_default: true, effective: true,
+    });
+    const set = vi.spyOn(client.api, "setAutoEditPref").mockResolvedValue({
+      auto_edit: false, library_default: true, effective: false,
+    });
+    renderCard(mkRun({ auto_edited: true }));
+
+    expect(await screen.findByText(/finished this picture for you/))
+      .toBeInTheDocument();
+    fireEvent.click(screen.getByRole(
+      "button", { name: "leave this target's pictures to me" }));
+    // An explicit false for this target — not "clear the override", which would
+    // change nothing while the library setting says yes.
+    await waitFor(() => expect(set).toHaveBeenCalledWith("M_42", false));
+  });
+
+  it("offers it back, and picks the value that actually re-enables it", async () => {
+    // With the library setting ON, going back means clearing the override, so a
+    // later change to the setting still reaches this target. With it OFF,
+    // clearing would silently do nothing, so an explicit true is written.
+    vi.spyOn(client.api, "getAutoEditPref").mockResolvedValue({
+      auto_edit: false, library_default: true, effective: false,
+    });
+    const set = vi.spyOn(client.api, "setAutoEditPref").mockResolvedValue({
+      auto_edit: null, library_default: true, effective: true,
+    });
+    renderCard(mkRun({ auto_edited: true }));
+
+    expect(await screen.findByText(/left as the plain stack/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole(
+      "button", { name: "let AstroStack finish them again" }));
+    await waitFor(() => expect(set).toHaveBeenCalledWith("M_42", null));
+  });
+
+  it("writes an explicit yes when the library setting is off", async () => {
+    vi.spyOn(client.api, "getAutoEditPref").mockResolvedValue({
+      auto_edit: false, library_default: false, effective: false,
+    });
+    const set = vi.spyOn(client.api, "setAutoEditPref").mockResolvedValue({
+      auto_edit: true, library_default: false, effective: true,
+    });
+    renderCard(mkRun({ auto_edited: true }));
+
+    fireEvent.click(await screen.findByRole(
+      "button", { name: "let AstroStack finish them again" }));
+    await waitFor(() => expect(set).toHaveBeenCalledWith("M_42", true));
+  });
+
+  it("shows nothing at all against a backend that has no such endpoint", async () => {
+    // Upgrade-safety in the other direction: an older backend 404s the query and
+    // never sends `auto_edited`, so the picture is simply shown with no control.
+    vi.spyOn(client.api, "getAutoEditPref").mockRejectedValue(new Error("404"));
+    renderCard(mkRun({ auto_edited: true }));
+    await waitFor(() => expect(screen.getByAltText(/M42/)).toBeInTheDocument());
+    expect(screen.queryByText(/finished this picture for you/)).toBeNull();
+  });
+});

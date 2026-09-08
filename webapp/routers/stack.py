@@ -741,6 +741,7 @@ def channel_combine(safe: str, body: dict[str, Any], request: Request) -> dict[s
 def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
     from webapp.routers.editor import (
         AUTO_EDIT_BAKED_LOOK_PREFIX,
+        AUTO_EDIT_NOTE_PREFIX,
         EXPORTED_RECIPE_META_PREFIX,
         RECIPE_META_PREFIX,
     )
@@ -763,6 +764,14 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
                 proj.get_meta(f"{EXPORTED_RECIPE_META_PREFIX}{r.id}"),
                 proj.get_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{r.id}"),
             )
+            for r in runs
+        }
+        # A fourth read in the same loop: did the *unattended* pass finish this
+        # run for the user? The note is only ever stamped by the background
+        # auto-edit, never by a hand-driven one, so its presence is the honest
+        # test for "this picture was made for you".
+        auto_edited = {
+            r.id: bool(proj.get_meta(f"{AUTO_EDIT_NOTE_PREFIX}{r.id}"))
             for r in runs
         }
         # The observer's longitude, so each run's capture window can be named by
@@ -833,6 +842,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             options=_parse_options(r.options_json),
             engine_version=r.engine_version,
             unexported_edit=unexported.get(r.id, False),
+            auto_edited=auto_edited.get(r.id, False),
         ))
     return out
 

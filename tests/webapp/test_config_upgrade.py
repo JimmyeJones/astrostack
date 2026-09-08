@@ -34,9 +34,12 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     # own; the sensitivity default is the balanced middle.
     assert s.auto_grade_frames is False
     assert s.auto_grade_sensitivity == "balanced"
-    # New auto-edit-on-autostack flag defaults off → an upgrade never starts
-    # seeding editor recipes on unattended stacks on its own.
-    assert s.auto_edit_on_autostack is False
+    # Auto-edit-on-autostack defaults ON since v0.394.0 (the owner approved it
+    # 2026-09-08). That reaches a *fresh* install only, and this config is a
+    # hand-made partial one: a real install that has ever booted carries an
+    # explicit value, because SettingsStore re-saves the whole model — which is
+    # what the stored-false test below actually pins.
+    assert s.auto_edit_on_autostack is True
     # New auto-bind-calibration flag defaults off → an upgrade never starts
     # binding master darks/flats to unattended stacks on its own (a live
     # install's autonomous output is unchanged until the user opts in).
@@ -85,6 +88,31 @@ def test_auto_stack_defaults_on_for_a_fresh_install(tmp_path):
     # And a genuinely fresh state dir — no config.json at all — gets that default.
     (tmp_path / "state").mkdir(parents=True, exist_ok=True)
     assert SettingsStore(str(tmp_path)).get().auto_stack is True
+
+
+def test_auto_edit_on_autostack_defaults_on_for_a_fresh_install(tmp_path):
+    # v0.394.0 flipped the shipped default, so a brand-new install comes back
+    # from a night to a *picture* rather than a flat linear master — the last
+    # step of the walk-away promise. Approved by the owner on 2026-09-08 with a
+    # condition ("easy to override"), which ships alongside it: the Settings
+    # switch, a per-target override (webapp/auto_edit_pref) and a guard that
+    # never writes over a saved recipe.
+    assert Settings().auto_edit_on_autostack is True
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)
+    assert SettingsStore(str(tmp_path)).get().auto_edit_on_autostack is True
+
+
+def test_a_stored_auto_edit_false_survives_the_default_flip(tmp_path):
+    # Same §9 argument as auto_stack's, and the same reason it is a real
+    # assertion: the stored value differs from the fresh default, so an upgrade
+    # that quietly re-enabled it would fail here rather than pass tautologically.
+    _write_cfg(tmp_path, {"auto_edit_on_autostack": False, "cpu_workers": 6})
+    s = SettingsStore(str(tmp_path)).get()
+    assert s.auto_edit_on_autostack is False
+    assert s.auto_edit_on_autostack is not Settings().auto_edit_on_autostack
+    assert SettingsStore(str(tmp_path)).get().auto_edit_on_autostack is False
+    assert json.loads((tmp_path / "state" / "config.json").read_text())[
+        "auto_edit_on_autostack"] is False
 
 
 def test_a_stored_auto_stack_false_survives_the_default_flip(tmp_path):
