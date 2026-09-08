@@ -70,6 +70,33 @@ def _write_coverage(data_root, safe, cov, basename="master"):
         lib.close()
 
 
+def _ragged_border_coverage(h: int = 80, w: int = 100, *, deep: float = 5.0,
+                            border: int = 4) -> np.ndarray:
+    """A well-covered interior inside a genuinely **ragged, thin** border.
+
+    Deliberately not the fixture these trim tests used to share — a full canvas at
+    coverage 1.0 with a deeper block dropped in the middle, commented "thin
+    single-frame fringe" while being **62 % of the canvas**. A large region at a
+    lower depth is not a border, it is a shallower *panel*, and treating it as
+    fringe is exactly the D1 wrong-result bug (2026-09-07): the audit's "1x2 with
+    no overlap, 400 vs 150 subs" case is that shape, and discarding the thin side
+    is what it counted as the defect. Six tests here carried it, which is part of
+    why the bug survived three audits.
+
+    So the border is now what a reprojection/dither border actually is: a few
+    pixels wide and *ramped*, so no single low level owns a real share of the
+    canvas. Each test's own assertions are unchanged in kind.
+    """
+    cov = np.full((h, w), deep, dtype=np.float32)
+    for k in range(border):
+        v = deep * (k + 1) / (border + 1)
+        cov[k, :] = np.minimum(cov[k, :], v)
+        cov[-1 - k, :] = np.minimum(cov[-1 - k, :], v)
+        cov[:, k] = np.minimum(cov[:, k], v)
+        cov[:, -1 - k] = np.minimum(cov[:, -1 - k], v)
+    return cov
+
+
 def _enc(recipe: dict) -> str:
     return base64.urlsafe_b64encode(json.dumps(recipe).encode()).decode()
 
@@ -1121,8 +1148,7 @@ def test_trim_suggestion_mosaic(client, solved_library):
     well-covered rectangle, excluding the ragged low-coverage border."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)  # mosaic
-    cov = np.full((80, 100), 1.0, dtype=np.float32)      # thin single-frame fringe
-    cov[15:65, 20:80] = 5.0                              # well-covered interior
+    cov = _ragged_border_coverage()
     _write_coverage(solved_library, safe, cov)
 
     r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/trim-suggestion")
@@ -1133,8 +1159,12 @@ def test_trim_suggestion_mosaic(client, solved_library):
     c = body["crop"]
     assert 0.0 <= c["x0"] < c["x1"] <= 1.0
     assert 0.0 <= c["y0"] < c["y1"] <= 1.0
-    # It should land on the interior block, not the full frame.
-    assert abs(c["x0"] - 0.20) < 0.02 and abs(c["y0"] - 15 / 80) < 0.02
+    # It should land on the well-covered interior, not the full frame. The border
+    # ramps 1→2→3→4 over four pixels against a panel depth of 5, so the two outer
+    # rings fall below half a panel and are cut, and the two inner ones clear it
+    # and are kept — which is the rule doing exactly what it says.
+    assert abs(c["x0"] - 2 / 100) < 1e-6 and abs(c["y0"] - 2 / 80) < 1e-6
+    assert abs(c["x1"] - 98 / 100) < 1e-6 and abs(c["y1"] - 78 / 80) < 1e-6
 
 
 def test_trim_suggestion_single_field_is_noop(client, solved_library):
@@ -1413,8 +1443,7 @@ def test_auto_process_trims_ragged_mosaic_border(client, solved_library):
     result is cleanly framed (reusing the Trim-border machinery)."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)  # mosaic
-    cov = np.full((80, 100), 1.0, dtype=np.float32)
-    cov[15:65, 20:80] = 5.0  # a well-covered interior inside a low-coverage border
+    cov = _ragged_border_coverage()
     _write_coverage(solved_library, safe, cov)
 
     r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto")
@@ -1466,8 +1495,7 @@ def test_auto_analysis_trim_matches_the_auto_crop(client, solved_library):
     fraction matches the frame area the Auto recipe's geometry.crop removes."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
-    cov = np.full((80, 100), 1.0, dtype=np.float32)
-    cov[15:65, 20:80] = 5.0
+    cov = _ragged_border_coverage()
     _write_coverage(solved_library, safe, cov)
 
     recipe = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()
@@ -2164,8 +2192,7 @@ def test_auto_crop_setting_off_keeps_the_full_frame(client, solved_library):
     it off, a mosaic that would otherwise be trimmed keeps its full frame."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
-    cov = np.full((80, 100), 1.0, dtype=np.float32)
-    cov[15:65, 20:80] = 5.0
+    cov = _ragged_border_coverage()
     _write_coverage(solved_library, safe, cov)
 
     # On (the default) → trimmed, exactly as before this setting existed.
@@ -2190,8 +2217,7 @@ def test_auto_crop_body_overrides_the_setting_for_one_run(client, solved_library
     over the saved setting, in both directions, without persisting anything."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
-    cov = np.full((80, 100), 1.0, dtype=np.float32)
-    cov[15:65, 20:80] = 5.0
+    cov = _ragged_border_coverage()
     _write_coverage(solved_library, safe, cov)
     url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto"
 
@@ -2213,8 +2239,7 @@ def test_auto_endpoints_ignore_a_junk_auto_crop_body(client, solved_library):
     (which posts no body at all) and a garbled one both behave as before."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
-    cov = np.full((80, 100), 1.0, dtype=np.float32)
-    cov[15:65, 20:80] = 5.0
+    cov = _ragged_border_coverage()
     _write_coverage(solved_library, safe, cov)
     url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto"
 
