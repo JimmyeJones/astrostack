@@ -14,6 +14,97 @@ Newest first.
 
 ---
 
+## v0.389.1 — 2026-09-08 — CLOSED BY MEASUREMENT: `photometric_normalize` stays off outside a mosaic, and here are the numbers
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-91fx05`.)** The Scout's
+2026-08-26 #2 idea, unblocked the moment v0.387.0 landed: now that photometric
+normalization auto-enables for a mosaic, should it also auto-enable for an
+*ordinary single-field* target stacked across nights of mixed transparency —
+which is what the walk-away chain builds constantly as a beginner revisits one
+object? The entry asked for a **measurement**, not an assumption. It got one.
+
+**The answer is no, and not because the pass is useless.** On a single field
+every output pixel receives the *same* set of subs, so the spatial inconsistency
+that makes it valuable on a mosaic — one panel's stars visibly fainter than its
+neighbour's, with a step along the join — is **structurally absent**. All the
+pass can change is the combine weighting, and with the `1/s²` variance fold
+(`weighting.combine_weights_with_photometric`) that is inverse-variance
+weighting, which the `transparency_factor` in quality weighting already
+approximates. So the residual is small, and it is measured small.
+
+**Star-core SNR, 8 subs, one field, one star pattern, independent per-sub noise,
+quality weighting ON (the auto/walk-away path):**
+
+| case | SNR change |
+|---|---|
+| 8 clear — nothing to correct | **+0.00 %**, bit-identical |
+| 6 clear + 2 hazy at ×0.8 signal — the ordinary case | **+0.16 %** |
+| 4 clear + 4 hazy at ×0.8 | +0.39 % |
+| 6 clear + 2 hazy at ×0.5 | +1.22 % |
+| 4 clear + 4 hazy at ×0.5 — an extreme | +3.33 % |
+
+With quality weighting **off** the same four give +0.50 / +0.61 / +3.30 /
++5.53 %, and the unweighted 4+4 ×0.5 figure lands within 0.1 % of the closed-form
+inverse-variance prediction (+5.4 %) — so the pass is doing exactly the right
+work; it is just work the auto chain has largely already done. **+0.16 % on the
+realistic case is not a default flip on the on-by-default hot path** (AGENTS.md
+§1 and §9). It stays an opt-in option outside a mosaic.
+
+**A second, non-quality effect worth knowing about, since it is what a user would
+actually notice.** In the *unbalanced* cases the finished picture gets
+**brighter** — star flux 13081 → 14609 ADU at 6 clear + 2 hazy ×0.5 — because
+normalising to the run's median transparency lifts everything to the clear
+frames' level when most frames are clear. That is the "consistency of the
+combined signal level" the entry predicted, and it is a level change, not a
+quality change. It is also a reason *not* to flip it on quietly: an existing
+install's next stack of the same target would come out visibly brighter than the
+one before it, with nothing in the UI to explain why.
+
+**⚠ THE FIXTURE DECIDED THE ANSWER ONCE, IN THE WRONG DIRECTION — this is the
+fourth time this file has recorded that (A1, the 200-px sinusoid, the background
+mesh floor, and now this).** The first haze fixture dimmed a sub with
+`sky + (pixel - sky) * factor`, which scales the sky **noise** by the factor too,
+because noise rides on that same difference. Every hazy sub therefore came out
+proportionally *quieter*; after gain-matching, all frames had identical signal
+**and** identical noise, so the correct `1/s²` weight became the wrong weight,
+and the whole sweep read as a consistent **−9.7 % SNR loss**. Haze attenuates the
+source, not the sky glow behind it. The fix is one line and it is in the test
+file: `make_star_field` draws its noise from `noise_seed` *before* it places a
+star, so the same call with `n_stars=0` is exactly that frame's sky, and the
+difference is exactly its stars. **Anyone re-opening this must haze the stars
+only.**
+
+**Shipped with it, so the two claims the decision rests on cannot silently
+rot:** `tests/test_photometric_single_field.py` (+2, ~8 s) — a uniform-
+transparency single field with the option **on** is **bit-for-bit** identical to
+one with it off (the safety half), and a mixed one never *costs* SNR while
+gaining nowhere near what a mosaic's panel step gains (the decision half). The
+assertions are directions, not the percentages: a change that genuinely improves
+the pass should not fail a test, it should send whoever made it back to the table
+above to re-litigate the default. No engine, webapp or frontend code changed.
+
+*Original entry:*
+
+- **IDEA (Scout 2026-08-26 #2, follow-on to the front-of-queue `photometric_normalize`-for-mosaic Builder item)
+  — once photometric normalization auto-enables for mosaics, weigh doing the same measurement for a
+  *single-field* target stacked across nights of **mixed transparency** (one hazy night + one clear night).**
+  *(Pillar: image quality — PRIORITY 4. Size: S–M. **The mosaic item it waits on shipped as v0.387.0**, so
+  this is unblocked — but still measured, not a blind flip.)* The mosaic item corrects a hazy *panel*'s multiplicative dimming; the same mechanism
+  (`compute_photometric_scales` gain-matching by `transparency_score`, folded into the `1/s²` combine weight)
+  would gain-match a hazy *night*'s subs up to a clear night's on an ordinary single-target stack, which the
+  walk-away chain builds constantly as a beginner revisits one object. **Honest caveat that bounds the value:**
+  quality weighting (which the auto chain already enables) *down-weights* a hazy sub by `1/s²` today, so it
+  already does most of the SNR-optimal thing — the residual photometric normalization would add is mainly
+  **consistency of the combined signal level** (and cleaner behaviour where a night's transparency varies
+  within the stack), not a large noise win. So this is worth a **measurement** (a synthetic single-field target,
+  half its subs dimmed multiplicatively, star-flux step across the two sub-populations with vs. without
+  normalization) to decide whether the marginal gain justifies enabling it outside mosaics — file the numbers,
+  don't assume. `compute_photometric_scales` already self-neutralises when no usable transparency scores exist,
+  so the no-data path is safe either way. **Prereq:** the mosaic item's coverage-map interaction is already
+  handled by v0.270.4's `{base}_framecov.fits`, so the single-field extension inherits that safety for free.
+
+---
+
 ## v0.389.0 — 2026-09-08 — "Does my colour look right?": the finished picture's colour, checked against what that object actually looks like
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-91fx05`.)** The beginner
