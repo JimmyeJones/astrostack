@@ -3719,65 +3719,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   lines that contradict each other" (three passes running): it is anything where the *composite* on screen is
   read as data. **Confirm what a pixel is with an endpoint before writing copy that explains it.**
 
-- **READY (backlog-readiness run 2026-09-07) — the "Save / share" menu is built twice, and the two copies
-  disagree: one `SavePictureMenu` component for the Target page and every History card.** *(Pillar:
-  friendliness — PRIORITY 3; the standing IA priority's own named leftover ("the ten-item share menu",
-  AGENTS.md §1). Size M, frontend-only. Confidence: both implementations read side by side; nothing below is a
-  guess. Checked `docs/SHIPPED.md` and this file for "share menu" / "Save/share" / "SavePictureMenu": v0.267.0
-  folded the buttons into a menu on each page *separately*, v0.327.3 unified the trigger's `aria-label`, and
-  nothing since has merged them.)*
-  **The problem, in the owner's terms.** The same picture offers a different set of things to do with it
-  depending on which page he is standing on. `frontend/src/routes/Target.tsx` (the `<Menu>` whose trigger is
-  `aria-label="Save or share your picture"`, ~lines 1366–1500) offers 9 items plus the wallpaper block;
-  `frontend/src/routes/History.tsx` (the run card's `<Menu>`, ~lines 1426–1578) offers 11 plus the same block.
-  The Target menu has **no "Copy caption", no FITS and no TIFF**; History's has all three. History's JPEG,
-  keepsake and share follow the card's *North-up* and *nameplate* toggles (`applyNorthUp`, `nameplate`);
-  Target's ignore both, so "share" from the hero and "share" from the top History card can hand out two
-  different files of the same run. The same file is named differently on each page ("PNG · Quick preview, up
-  to 1024 px wide" vs "Quick preview PNG (up to 1024px)"; "JPEG · Smaller — best for sharing" vs "JPEG (smaller —
-  best for sharing)"). Each page carries its own `MENU_HINT` constant, its own `mah={420}` scroll cap, its own
-  QR-modal-ownership comment and its own "nothing was removed" comment. Every future item — the object-label
-  share that `LatestPictureCard` placed *beside* the picture instead of "as a seventh item" (v0.293.0) — has to
-  be added twice or lands on one page only, which is how the drift above happened.
-  **Consolidation is not removal** (AGENTS.md §1, 2026-09-07): every destination stays one click away; the
-  number of *distinct* actions does not go down; what goes away is the second implementation.
-  **Shape.** New `frontend/src/components/SavePictureMenu.tsx` rendering the whole `<Menu>` (trigger +
-  dropdown) from one props object — `{ safe, run: { id, has_fits, has_preview, has_tiff, canvas_w, canvas_h,
-  output_basename, options }, shareName, captureLabel, shareCaption?, northUp?, nameplate?, canNorthUp?,
-  onToPhone, size?, variant? }`. Sections stay **Download / Share / Make it your wallpaper** (the grouping both
-  pages already use) and the item set is the **union**: Full-res PNG, quick PNG, JPEG, framed keepsake, with
-  scale & compass, FITS, TIFF · share, share the keepsake, to phone, copy caption, zoom clip · `WallpaperMenuItems`.
-  FITS / TIFF / copy-caption self-hide exactly as History's do today (`has_fits`, `has_tiff`, `shareCaption`
-  given). Reuse what exists rather than re-deriving it: `SharePictureButton asMenuItem`, `DownloadMenuItem`,
-  `WallpaperMenuItems`, `sharePictureText`, `keepsakeFilename`, `fullResPngLabel` / `fullResPngHint`
-  (pick **one** wording — History's label-plus-hint idiom is the one v0.267.0 chose), `tiffDownloadHint`. Both
-  pages then render `<SavePictureMenu …/>` and delete their inline copies and `MENU_HINT` constants. Target
-  passes `northUp={false}` / `nameplate={false}` (its behaviour today) and `captureLabel`; History passes its
-  toggles and `shareCaption`.
-  **Traps found while reading.** (1) The QR modal must stay owned by the *page* — both comments say why (a menu
-  closes on click and would unmount a popover it owned) — so the component takes `onToPhone` and never renders
-  the modal. (2) `Target.test.tsx` "leaves five controls inline and folds the picture actions into one menu" /
-  "keeps every folded action reachable inside the one menu" / the three "shares … date" cases, and
-  `History.test.tsx` "keeps every save/share action, wallpapers included, inside the one menu" / "caps the
-  save/share menu's height instead of letting it clip" / "opens the phone QR in a modal…" all query by visible
-  text: keep the wording they assert, or update each assertion **one for one in the same commit** — never by
-  loosening. (3) The share-sheet date: Target's share deliberately passes `captureLabel` (the night the subs
-  were *shot*; see the comment on its `SharePictureButton`) — the shared component must not fall back to the
-  stack day. (4) History's JPEG `href` carries `(applyNorthUp, nameplate)`, the keepsake `(applyNorthUp, false,
-  true)`, scale & compass `(applyNorthUp, false, false, true)`, the shared keepsake `(…, true, true, true)` —
-  `api.stackArtifactUrl`'s positional flags are easy to transpose; pin each item's `href` per flag. (5) Do
-  **not** also fold History's second "About this stack" menu (Info / Identify / Scale & compass / Show what was
-  removed / Adjust / Set as cover): those are per-card *view* toggles, not file actions — a different menu with
-  different state, out of scope. (6) `ImageLightbox`'s download control (`downloadHref` / `jpegHref` /
-  `fullResHref`) is a third, smaller surface — leave it; it is a toolbar, not this menu.
-  **Measured, as the IA rule requires:** run `scripts/agent-dogfood.sh` before and after; page heights must
-  not grow (the menu is closed by default, so they should not move at all) — state the numbers in the commit.
-  **Tests.** New `SavePictureMenu.test.tsx`: every item renders for a full run; FITS / TIFF / copy-caption hide
-  when absent; each `href` carries the right flags for `northUp` / `nameplate`; `onToPhone` fires and the
-  component renders no modal. **Fails today:** a `Target.test.tsx` case asserting the hero's menu offers
-  **"Copy caption"** and **FITS** for a run with `has_fits` — the Target page has neither. The existing page
-  tests above must still pass.
-
 
 - **⚪ DOGFOOD BASELINE (Builder 2026-09-04, `scripts/agent-dogfood.sh` at v0.345.7 — the fourth measurement,
   and the fourth that says DO NOT open a speculative IA slice).** Full run (boot → sample → stack → Playwright
@@ -8412,6 +8353,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.385.0** — PRIORITY 3 (friendliness), the READY entry filed 2026-09-07: **the "Save / share" menu was built twice and the two copies disagreed — now one `SavePictureMenu` component serves the Target page's hero and every History run card.** The item set is the *union* of the two (the hero gains FITS, TIFF and "Copy caption"; the History card gains "Share the keepsake"), the wording is History's label-plus-hint idiom on both, and the North-up / nameplate toggles still reach exactly the JPEG-family downloads they did. Nothing removed, no new surface, no page height changed (the menu is closed by default). Frontend-only; tests +7 new component cases, two Target assertions that fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.384.0** — PRIORITY 3 (get / enjoy / share), the READY entry filed 2026-09-07: **the picture he shares of a "Process target" run comes off the master instead of the 1024 px preview — and every share of any run stops re-reading that master.** `_native_picture_source` declined every display-space run (his main path: "Process target", "Reprocess everything", and every walk-away run once `auto_edit_on_autostack` is on), so its JPEG, keepsake, scale-&-compass, share and all three wallpapers were re-encodes of a 1024 px preview; and for a *linear* run it re-rendered the master on **every** request — 104 MB off the NAS per tap on his mosaic, nine taps to a run. New `_build_or_get_share_source` renders once through `pipeline.render_run_full_res_png` (the one place that decides which render a finished run *means*, so the share, the Full-res PNG button and the pictures archive cannot drift) and caches it beside the run as `<basename>_share.png` + `_share.sig`, modelled on the zoom clip: signature = preview stamp | master stamp | recipe hash | size | app version, written `.tmp`-then-renamed. One render at the largest size any hand-out needs serves them all; the share JPEG decimates the decoded cache (`Image.BOX`), never a second FITS read. Both files are registered in `RUN_ARTEFACT_SUFFIXES`, so they are deleted and pruned with the run. **A display-space run with no saved recipe still declines** — the plain render of its linear master is the *un-edited* picture — as do the baked-North-up and cropped-preview cases, unchanged. Tests +8, four fail-before; the two existing tests that pinned the old blanket decline now pin the recipe-less case they were really about, renamed in the same commit. Additive files only; no config, schema, API-shape or default change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.383.1** — PRIORITY 3 (friendliness — a felt wait on a beginner feature): **a Sun or Moon video stack stops debayering the frames it is about to throw away.** `video/ffmpeg.iter_frames` demosaics a raw (CFA) capture once per decoded frame — ~350 ms a frame on the owner's 4,487-frame solar file — and `lucky.stack_video`'s second pass paid it for *every* frame before dropping all but `keep_percent` of them one line later, so roughly a third of a half-hour stack was debayering discards. `iter_frames` now takes `wanted: Collection[int] | None`; a frame outside it is still decoded (the byte framing demands it) but not demosaiced, and is yielded as **`None`** rather than skipped — so the caller's `enumerate` still lines up with the `keep_idx` pass 1 built, and no caller can ever mistake an un-demosaiced mosaic for a picture. Pass 1 is untouched (it grades on the colour frame's luma). The "is this really a mosaic" latch stays on the **first frame off the wire**, wanted or not, so a capture whose first frame is discarded still debayers correctly. Tests +5: the demosaic count is `n_graded + n_kept` (18, where it was 24) on a real ffmpeg-encoded `pal8` capture, and the stacked image is `array_equal` to the same run with the old eager decode — this is a skip, not a change. Engine-only.
 - **v0.383.0** — PRIORITY 3 (trust / friendliness), the READY entry filed 2026-09-07: **the Storage page says, with the owner's own numbers, that the subs in `incoming/` are the only copy there is.** The largest risk to his pictures is not a bug in this app — his raws live in `incoming/` and nowhere else, `copy_to_cache` is off so the app holds no copy, and nothing said so; the page's closing aside called the folder "worth having a backup of" in the same breath as "you can rebuild your whole library from them". That aside is now one plain sentence built from his data: *"Your 8,542 subs (44 GB) in incoming/ are the only copy AstroStack knows of. It reads them where they are and never writes there, and it keeps no copy of its own — nothing this app does backs them up. Keep a copy somewhere else."* With `copy_to_cache` on it says instead that the cache copies are working files "Clear caches" deletes — not a backup. **The numbers come from the `frames` rows, never from the folder:** new pure `Project.source_frames_under(prefix)` sums `source_size_bytes` over rows whose `source_path` has that literal prefix (`substr`, no LIKE escaping; trailing separator so `incoming2/` can't match), called inside the per-target `try` `get_storage` already opens — so answering never walks, opens or `stat`s anything under `incoming/` (AGENTS.md §10), pinned by a test that makes those calls fatal *and* proves the trap armed first. Rows predating `source_size_bytes` are reported separately, so the figure is honestly "at least". Four additive response fields with defaults + `frontend/src/components/incomingCopyNote.ts` (pure, takes the page's own byte formatter). Nothing removed; no new card. Tests +11, two fail-before; `tsc`/`vitest`/`vite build` clean. Full entry in [`SHIPPED.md`](SHIPPED.md).

@@ -175,8 +175,10 @@ slices by name rather than reading from the top of the section. A verified bug s
 the new grouping rather than appending one more always-on banner.
 **Consolidation is not removal** *(added 2026-09-07)*. The owner's rule forbids *removing* a feature; it
 does **not** forbid merging two surfaces that answer the same question into one, provided every destination
-stays reachable in one click. **Prefer a consolidation over a new card, every time.** Concretely: the Target
-page's save/share menu has **12** items and History's has **19**, implemented twice; six new always-on cards
+stays reachable in one click. **Prefer a consolidation over a new card, every time.** Concretely: ~~the Target
+page's save/share menu has **12** items and History's has **19**, implemented twice~~ *(done — v0.385.0 folded
+both into one `SavePictureMenu` component, item set the union of the two, nothing removed; don't re-pick it)*;
+six new always-on cards
 now fire on the owner's real library; the phone Target page reached **3,853 px** on three nights of real data.
 
 **📜 HISTORICAL (was "⚡ IMMEDIATE PRIORITY", 2026-07-30; demoted 2026-09-03 because it

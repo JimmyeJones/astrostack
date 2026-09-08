@@ -1,20 +1,19 @@
 import {
   ActionIcon, Alert, Badge, Box, Button, Center, Grid, Group, HoverCard, Image,
-  Loader, Menu, Modal, NumberFormatter, NumberInput, Paper, Progress, Select, Stack,
+  Loader, Modal, NumberFormatter, NumberInput, Paper, Progress, Select, Stack,
   Table, TagsInput, Text, Textarea, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconAlertTriangle, IconArrowBackUp, IconCheck, IconChevronDown, IconClock,
-  IconDeviceFloppy, IconDeviceMobile, IconDownload, IconHistory,
-  IconNotes, IconPhoto, IconPhotoDown, IconSparkles, IconStack2, IconTelescope,
-  IconTargetArrow, IconVideo, IconWand, IconX,
+  IconAlertTriangle, IconArrowBackUp, IconCheck, IconClock,
+  IconDeviceFloppy, IconHistory,
+  IconNotes, IconPhoto, IconSparkles, IconStack2, IconTelescope,
+  IconTargetArrow, IconWand, IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
-import { fullResPngLabel } from "../fullres";
 import { formatCaptureNights, formatFrameStamp, formatIntegration } from "../format";
 import { integrationReadiness, readinessColor, noiseReductionHint } from "../readiness";
 import { QueryError } from "../components/QueryError";
@@ -45,10 +44,7 @@ import { CalibrationSkippedNote } from "../components/CalibrationSkippedNote";
 import { StackNoiseBadge } from "../components/StackNoiseBadge";
 import { FirstLookCard } from "../components/FirstLookCard";
 import { SampleTourNote } from "../components/SampleTourNote";
-import { WallpaperMenuItems } from "../components/WallpaperMenu";
-import { SharePictureButton } from "../components/SharePictureButton";
 import { ScanToPhoneModal } from "../components/ScanToPhoneButton";
-import { keepsakeFilename, sharePictureText } from "../share";
 import { detectSolveSetupProblem } from "../components/target/solveSetup";
 import { RejectionBreakdown } from "../components/target/RejectionBreakdown";
 import { RejectionBreakdownCard } from "../components/target/RejectionBreakdownCard";
@@ -68,20 +64,13 @@ import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadg
 import { nextBestMove } from "../components/target/nextBestMove";
 import { softerThanUsual } from "../components/target/softStars";
 import { detectMixedPointings } from "../components/target/mixedPointings";
-import { DownloadMenuItem } from "../components/DownloadMenuItem";
+import { SavePictureMenu } from "../components/SavePictureMenu";
 
 // Re-exported for existing tests that import it from this route module.
 export { describeObject };
 
 const NUM = (v: number | null, digits = 2) =>
   v === null || v === undefined ? "—" : v.toFixed(digits);
-
-// One line of plain-language help under a menu item's label — the wording that
-// used to live in each button's hover tooltip, now readable without hovering
-// (which a phone can't do anyway). Matches the History card's menus.
-const MENU_HINT: CSSProperties = {
-  display: "block", fontSize: "0.72rem", opacity: 0.6, whiteSpace: "normal",
-};
 
 const REJECT_METRICS = [
   { value: "fwhm_px", label: "FWHM" },
@@ -1363,141 +1352,31 @@ export function TargetView() {
               Nothing was removed: every item below is the control that used to
               be a button, with its own wording and behaviour. */}
           {pictureRun?.has_preview ? (
-            <Menu shadow="md" width={260} position="bottom-end" withinPortal>
-              <Menu.Target>
-                <Button variant="default" leftSection={<IconDownload size={16} />}
-                  rightSection={<IconChevronDown size={16} />}
-                  aria-label="Save or share your picture">
-                  <Box visibleFrom="sm">Save / share</Box>
-                  <Box hiddenFrom="sm">Save</Box>
-                </Button>
-              </Menu.Target>
-              {/* Same cap the History card needed (v0.267.2): a dropdown this
-                  tall flips upwards under a card halfway down the screen and
-                  loses its first item off the top — scroll instead of clip. */}
-              <Menu.Dropdown mah={420} style={{ overflowY: "auto" }}>
-                <Menu.Label>Download</Menu.Label>
-                {pictureRun.has_fits ? (
-                  <Menu.Item leftSection={<IconPhotoDown size={16} />}
-                    component="a" href={api.stackFullResPngUrl(safe, pictureRun.id)}>
-                    {fullResPngLabel(pictureRun.canvas_w, pictureRun.canvas_h)}
-                  </Menu.Item>
-                ) : null}
-                <Menu.Item leftSection={<IconPhotoDown size={16} />}
-                  component="a" href={api.stackArtifactUrl(safe, pictureRun.id, "preview")}>
-                  {pictureRun.has_fits ? "Quick preview PNG (up to 1024px)" : "PNG (best quality)"}
-                </Menu.Item>
-                <Menu.Item leftSection={<IconPhotoDown size={16} />}
-                  component="a" href={api.stackArtifactUrl(safe, pictureRun.id, "jpeg")}>
-                  JPEG (smaller — best for sharing)
-                </Menu.Item>
-                {/* The framed variant: the same picture matted on a dark card
-                    with its name, date and total exposure set *beneath* it, so
-                    the story travels with the file instead of living in a
-                    caption box that never leaves the app. */}
-                <Menu.Item leftSection={<IconPhotoDown size={16} />}
-                  component="a"
-                  href={api.stackArtifactUrl(
-                    safe, pictureRun.id, "jpeg", false, false, true)}>
-                  Framed keepsake
-                  <span style={MENU_HINT}>
-                    Its name, date and exposure printed on the picture
-                  </span>
-                </Menu.Item>
-                {/* The two marks every published astrophoto carries — how big a
-                    piece of sky this is, and which way round it is. The app
-                    already draws them on screen, but a browser overlay doesn't
-                    travel with the file, so the downloaded picture loses both.
-                    Drawn from this run's own solve; a run that was never solved
-                    simply gets the plain picture back. */}
-                <Menu.Item leftSection={<IconPhotoDown size={16} />}
-                  component="a"
-                  href={api.stackArtifactUrl(
-                    safe, pictureRun.id, "jpeg", false, false, false, true)}>
-                  With scale &amp; compass
-                  <span style={MENU_HINT}>
-                    How big it is and which way is North, printed on the picture
-                  </span>
-                </Menu.Item>
-                <Menu.Divider />
-                <Menu.Label>Share</Menu.Label>
-                <SharePictureButton
-                  asMenuItem
-                  url={api.stackArtifactUrl(safe, pictureRun.id, "jpeg")}
-                  {...sharePictureText(
-                    target.data?.name,
-                    // The same date `LatestPictureCard`'s share text uses for the
-                    // same picture — and it has to be the night the subs were
-                    // *shot*, not the day the stack ran. This site was missed when
-                    // the rest of the share sheet was fixed, so the app's most
-                    // prominent picture went on announcing "captured <the day you
-                    // pressed Process>": the same day only if you stack the night
-                    // you shoot, and years out on a re-stack of a back catalogue.
-                    // A run with no recorded window shares with no date at all.
-                    captureLabel,
-                  )}
-                />
-                {/* Share the *framed* variant. This is the one that matters on
-                    Instagram or a printed 6×4: a share-sheet caption doesn't
-                    travel with the file, so the plain share above arrives as an
-                    unlabelled rectangle while this one carries its own story.
-                    Same caption, but `filename` overrides the spread's so the
-                    two shares can't land on top of each other in downloads.
-
-                    It carries the *marks* too — the scale bar, the North/East
-                    rose and the names of the catalog objects in the field. This
-                    is the share meant for other people, and those three are what
-                    make a picture read as a real astrophoto to someone who
-                    wasn't there; the plain share above stays naked for anyone
-                    who wants the bare picture. Every one of them is a clean
-                    no-op server-side on a run that can't supply it (no solve, a
-                    reshaped preview, an empty field), so this never becomes a
-                    share that fails — it just carries less. A picture a past
-                    "North up → Save" turned is no longer one of those cases: the
-                    pins follow the turn, so a rotated keepsake still says what's
-                    in it. */}
-                <SharePictureButton
-                  asMenuItem
-                  label={<>
-                    Share the keepsake
-                    <span style={MENU_HINT}>
-                      Framed, with its scale, which way is North, and what’s in it
-                    </span>
-                  </>}
-                  ariaLabel="Share the framed keepsake"
-                  url={api.stackArtifactUrl(
-                    safe, pictureRun.id, "jpeg", false, false, true, true, true)}
-                  {...sharePictureText(target.data?.name, captureLabel)}
-                  filename={keepsakeFilename(
-                    sharePictureText(target.data?.name).filename)}
-                />
-                {/* The QR opens in a modal owned by the page, not a popover owned
-                    by this item — a menu closes on click, which would unmount its
-                    own popover with it. */}
-                <Menu.Item leftSection={<IconDeviceMobile size={16} />}
-                  onClick={() => setToPhone(true)}>
-                  To phone
-                  <span style={MENU_HINT}>Scan a QR to open it on your phone</span>
-                </Menu.Item>
-                {/* Motion, for the places a still gets swiped past. Built and
-                    cached server-side from this run's own preview, so it needs no
-                    extra request to decide whether to offer it: every run with a
-                    picture has one. */}
-                <DownloadMenuItem
-                  icon={<IconVideo size={16} />}
-                  url={api.stackZoomClipUrl(safe, pictureRun.id)}
-                  filename={`${pictureRun.output_basename || "stack"}_zoom.webp`}
-                  label="Zoom clip"
-                  hint="A few seconds gliding into your target — for posting"
-                  busyHint="Building your clip — a few seconds the first time"
-                  errorMessage="Couldn't build a zoom clip for this run."
-                  hintStyle={MENU_HINT}
-                />
-                <Menu.Divider />
-                <WallpaperMenuItems safe={safe} runId={pictureRun.id}
-                  canNorthUp={wallpaperCanNorthUp} />
-              </Menu.Dropdown>
-            </Menu>
+            <SavePictureMenu
+              safe={safe}
+              run={pictureRun}
+              shareName={target.data?.name}
+              // The same date `LatestPictureCard`'s share text uses for the same
+              // picture — and it has to be the night the subs were *shot*, not
+              // the day the stack ran. This site was missed when the rest of the
+              // share sheet was fixed, so the app's most prominent picture went
+              // on announcing "captured <the day you pressed Process>": the same
+              // day only if you stack the night you shoot, and years out on a
+              // re-stack of a back catalogue. A run with no recorded window
+              // shares with no date at all.
+              captureLabel={captureLabel}
+              identity={identity.data}
+              // The hero picture has no North-up / nameplate toggles of its own —
+              // those are per-card view state on the History page — so it hands
+              // out the picture as stored, exactly as it did before.
+              canNorthUp={wallpaperCanNorthUp}
+              onToPhone={() => setToPhone(true)}
+              variant="default"
+              ariaLabel="Save or share your picture"
+              responsiveLabel
+              position="bottom-end"
+              withinPortal
+            />
           ) : null}
           <Button component={Link} to={`/targets/${safe}/stack`}
             leftSection={<IconStack2 size={16} />} aria-label="Stack">
