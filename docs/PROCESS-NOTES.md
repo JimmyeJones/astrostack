@@ -18,6 +18,57 @@ is a queue.
 
 ---
 
+## 2026-09-08 (later still) — Builder run (branch `claude/sweet-babbage-yzhopm`): three shipped items, and the one that had to argue with an existing test before it could exist
+
+**The run.** Baseline green before any change (**5,337 passed / 2 skipped**, full
+suite headless, 22:54). Final suite green on the merged branch: **5,350 passed / 2 skipped**, 22:08. Shipped **v0.397.0** (a mosaic is offered its object's
+name), **v0.398.0** (a new beginner feature — "add tonight to calendar" on the
+constellation nudge) and **v0.398.1** (the Lucky-imaging knob typed as a
+percent). Write-ups in [`SHIPPED.md`](SHIPPED.md). No dogfood pass this run: three
+clean `--mosaic --editor` passes were recorded in the last two days and none of
+these three changes moves a page's layout, so a fourth would have been a
+measurement of the same thing.
+
+**The thing worth recording: a design that would have needed a good test
+rewritten is a design worth changing.** The mosaic rename fix (v0.397.0) first
+looked like "let `confident_object_title` accept an object whose extent contains
+the centre". That version was written, and it turned two existing tests red —
+both of them pinning that a point 0.5° from M 31 must be offered nothing. Those
+tests are *right* about the danger (a wider radius claims neighbours) and merely
+unlucky in their fixture (M 31's minor half-axis is 0.525°, so 0.5° really is
+inside Andromeda). The temptation was to rewrite them onto a different object and
+carry on.
+
+Instead the design moved: the extent rule is now **only consulted when the cone
+found nothing**, and **only for a mosaic-suffixed name**, behind a keyword that
+defaults to today's behaviour. Both tests pass untouched, the caption path that
+bakes names into shared pixels is provably unchanged, and the feature still does
+the one thing it existed to do. **The red test was information about the design,
+not an obstacle to it** — and the version that survives is strictly narrower and
+easier to revert than the one that needed the test moved.
+
+**And the gate the entry set was answerable after all, by enumeration rather than
+by data.** The filed lead said the "inside its extent" rule needed *"a real
+mosaic's centre offsets to validate before it decides a name; the synthetic
+sample gives exactly one data point"*. That is the right worry for a *threshold*,
+and this is not one — it is geometric containment — so the question it really
+asks is "how often could two objects both claim a centre?". Running every one of
+the 157 bundled objects against every other's centre answers it exactly:
+**one** containment exists beyond the 0.25° cone (M 31 contains M 32, the
+satellite galaxy that is genuinely inside it). A gate that reads as
+"needs the owner's data" is sometimes a gate that needs *a measurement over the
+data already in the repo*; it is worth asking which before deferring.
+
+**A trap for the next run: `npx vite build` changes how the app 404s.** A test
+asserting that an unknown `/api/...` path returns 404 passed alone and failed
+after a frontend build, because `webapp/static/` then exists and the SPA
+catch-all serves `index.html` with a **200** for anything unmatched. The
+assertion was replaced with one against the app's own `/openapi.json` — which is
+the honest question anyway ("is there an id-shaped variant of this route?") and
+is independent of whether the frontend happens to be built in this container.
+
+---
+
 ## 2026-09-08 (later again) — Builder run (branch `claude/sweet-babbage-e506ni`): the "use this name?" rename, a third clean dogfood pass, and one live check the tests could not have made
 
 **The run.** *(Version chosen at merge time, per §11: this shipped as 0.395.0 until a concurrent Builder landed its own 0.395.0 — the auto-edit flip — mid-run, so it was re-bumped to **0.396.0** on the merge and both backlog/SHIPPED entries were kept as a union. Collision #15, and the rule worked exactly as written.)*
