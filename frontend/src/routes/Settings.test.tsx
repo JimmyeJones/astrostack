@@ -175,6 +175,26 @@ describe("Auto-stack hint", () => {
   });
 });
 
+// v0.395.0 flipped auto_edit_on_autostack's shipped default to on, with the
+// owner's condition ("easy to override with manual settings") shipping alongside
+// it rather than after it. The copy has to carry both halves — the same
+// fresh-install-only caveat auto_stack's does, and where to find the override —
+// because he has been bitten by an on-by-default reframing before (v0.226.0's
+// auto-crop) and the switch must be findable *before* the first surprise.
+describe("Settings — auto-edit the walk-away picture", () => {
+  it("says the default is on for new installs and unchanged for existing ones", () => {
+    expect(HINTS.auto_edit_on_autostack).toMatch(/on for new installs/i);
+    expect(HINTS.auto_edit_on_autostack).toMatch(/keeps whatever you last set/i);
+  });
+
+  it("names every way out, so nothing it does is a thing you cannot undo", () => {
+    expect(HINTS.auto_edit_on_autostack).toMatch(/one Reset from the plain stack/i);
+    expect(HINTS.auto_edit_on_autostack).toMatch(/never written over/i);
+    expect(HINTS.auto_edit_on_autostack)
+      .toMatch(/leave that one target's pictures alone/i);
+  });
+});
+
 describe("Walk-away mode", () => {
   it("is off unless every one of the bundled switches is on", () => {
     expect(walkAwayEnabled({})).toBe(false);

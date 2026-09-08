@@ -14,6 +14,100 @@ Newest first.
 
 ---
 
+## v0.395.0 — 2026-09-08 — PRIORITY 2: the walk-away night comes back as a picture, and any one target can be told to stop (`Settings.auto_edit_on_autostack`, `webapp/auto_edit_pref`, `pipeline._wants_auto_edit_for`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-lso4r6`. Gate **Q1** of the
+owner's one-sitting list, answered the same day: *"yes, but should be easy to
+override with manual settings."*)**
+
+**What it does.** With `auto_stack` already on by default (v0.391.0), the picture
+an unattended night published was still the **flat linear master** — the
+one-click Auto look only reached someone who opened the editor (v0.390.0's
+seed). `auto_edit_on_autostack` now ships `True`, so the fully-hands-off chain
+ends where the north star says it should: *drop your subs in, walk away, come
+back to a good picture.*
+
+**The flip reaches fresh installs only**, by exactly the argument v0.391.0
+recorded: `SettingsStore` re-saves the whole model on every boot, so any install
+that has ever run carries an explicit `"auto_edit_on_autostack": false` and keeps
+it. No migration flips it, because the file cannot tell *"he turned it off"* from
+*"the app dumped the default"* — the breach §9 exists to prevent. The owner turns
+his own switch on, beside the `auto_stack` one already waiting for him.
+
+**The condition ships in the same commit, not after it** — the backlog's own note
+said not to ship the flip without it, and the owner has been bitten by an
+on-by-default reframing before (v0.226.0's auto-crop), so the way out has to be
+findable *before* the first surprise. Three halves:
+
+1. **A per-target override that survives the night.** New `webapp/auto_edit_pref`
+   stores a **tri-state** in the existing `project_meta` kv table (the
+   `webapp/goals.py` pattern — no schema migration, and an old project simply has
+   no key): `None` follows the library setting, `True`/`False` override it.
+   `pipeline._wants_auto_edit_for` consults it before finishing a fresh stack, and
+   because it lives in the project rather than in a page's state it is still true
+   next night. Clearing **deletes** the key rather than writing whatever the
+   setting happens to say, so a later change to the setting still reaches that
+   target. A garbled or hand-edited value reads as *unset*, never as "off" — a
+   typo must not silently turn a target's auto-finishing off. Read failures fall
+   back to the library setting: a preference we cannot read is not a preference
+   the owner expressed, and refusing to finish the picture would be an invisible
+   change to the walk-away result. Exposed as `GET`/`PUT
+   /api/targets/{safe}/auto-edit`, which returns the override, the library
+   setting and the **effective** answer — resolved server-side, so a screen and
+   the pipeline cannot disagree about one target.
+2. **A recipe the user saved is never written over** — and the interesting part
+   is that "the user saved it" is *not* the same as "a recipe exists".
+   `_auto_edit_process_run` legitimately re-runs over its **own** previous
+   result: a re-render with a different `auto_crop`, "Reprocess everything". The
+   first version of this guard stood down on any stored recipe and turned those
+   into silent no-ops — caught by `test_re_rendering_without_a_trim_clears_a_recorded_crop`,
+   so the distinction was **found rather than reasoned about**. The marker that
+   separates them already existed: the look this pass stamps beside the run
+   (`AUTO_EDIT_BAKED_LOOK_PREFIX`, compared uid-/timestamp-blind by the same
+   `_baked_look_disagrees` the "unfinished edit" flag uses). Unchanged ⇒ ours to
+   redo; changed, or a recipe with **no stamp at all** ⇒ the user's, and we stand
+   down. It matters that this is a guard in the function rather than an argument
+   about call sites: a guarantee the owner made a condition of his yes, resting
+   on where a function happens to be called, is one refactor from being false.
+3. **The control is where the surprise is.** `StackRunOut` gains an additive
+   `auto_edited` (one more meta read in a loop that already does three — the
+   "what Auto did" note, which only the *background* pass ever stamps), and the
+   Target hero puts a link under a picture the app finished: *"AstroStack
+   finished this picture for you — … leave this target's pictures to me."* Not a
+   standing switch on every target page, which would be one more always-on
+   element against the owner's own "the UI is extremely busy" priority. The link
+   writes an explicit `false` to turn off; to turn back on it **clears** the
+   override when the library setting already says yes (so the setting still
+   governs) and writes an explicit `true` when it does not — otherwise "let
+   AstroStack finish them again" would quietly do nothing.
+
+**Deliberately out of scope:** "Process target". An explicit click has always
+auto-edited regardless of the setting, and the owner's condition is about the
+*unattended* behaviour; changing the button would be a second behaviour change
+hiding inside this one.
+
+**Upgrade-safe (§9).** One default value; one additive project-meta key (absent
+on every existing project, which reads as "follow the setting" — today's
+behaviour bit for bit); two additive, defaulted response fields; two new
+endpoints, none removed or renamed; no schema bump and no on-disk change. An
+older frontend ignores `auto_edited`; an older backend that 404s the preference
+query simply shows no control.
+
+**Tests (+19).** `tests/webapp/test_auto_edit_pref.py` (5): an untouched target
+follows the setting both ways, the override wins both ways, clearing deletes
+rather than stores, a garbled value means unset, and the spellings a hand edit
+would use are understood. `tests/webapp/test_pipeline.py` (5, four of
+them fail before): one target left out while the library's *other* target is
+still finished — so the override is an override and not a global off switch — one
+target opted in while the setting is off, clearing going back to following it,
+the unattended pass refusing to overwrite a hand-saved recipe, and the pass still
+being allowed to redo its own previous result. `test_config_upgrade.py` (2): the
+fresh-install default, and a stored `false` that asserts it **differs from the
+fresh default** rather than merely being `False`. `LatestPictureCard.test.tsx`
+(5): nothing shown *and nothing fetched* on a picture the user made, the link and
+the value it writes in each of the three states, and silence against a backend
+with no such endpoint. `Settings.test.tsx` (2): the fresh-install caveat and all
+three named ways out.
 ## v0.394.0 — 2026-09-08 — PRIORITY 3 (enjoy + share): the life list becomes one shareable picture (`seestack/lifelistcard.py`, `GET /api/life-list/grid.jpg`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-9wjrt9`. Slice (iii) of the
