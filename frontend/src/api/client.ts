@@ -518,6 +518,12 @@ export interface ObjectInfo {
   // "does my colour look right?" note is built from this server-side (older
   // backends omit it).
   nebula_class?: string;
+  // "This looks like M 31 — use this name?": the display name worth offering for
+  // a target still called after its folder, set only when the solved centre sits
+  // squarely on this object and the stored name identifies nothing.
+  // Absent/null for a target that already has a recognisable name (older
+  // backends omit it — the card then simply offers nothing).
+  rename_to?: string | null;
 }
 
 export interface BackgroundModeHint {
@@ -2863,7 +2869,10 @@ export const api = {
   getTarget: (safe: string) => req<Target>(`/api/targets/${safe}`),
   createTarget: (name: string) =>
     req<Target>("/api/targets", { method: "POST", body: JSON.stringify({ name }) }),
-  patchTarget: (safe: string, body: { notes?: string | null; tags?: string[] }) =>
+  patchTarget: (
+    safe: string,
+    body: { notes?: string | null; tags?: string[]; name?: string },
+  ) =>
     req<Target>(`/api/targets/${safe}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteTarget: (safe: string, removeFiles: boolean) =>
     req(`/api/targets/${safe}?remove_files=${removeFiles}`, { method: "DELETE" }),

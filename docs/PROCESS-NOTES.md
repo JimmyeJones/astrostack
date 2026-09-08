@@ -18,6 +18,55 @@ is a queue.
 
 ---
 
+## 2026-09-08 (later again) — Builder run (branch `claude/sweet-babbage-e506ni`): the "use this name?" rename, a third clean dogfood pass, and one live check the tests could not have made
+
+**The run.** *(Version chosen at merge time, per §11: this shipped as 0.395.0 until a concurrent Builder landed its own 0.395.0 — the auto-edit flip — mid-run, so it was re-bumped to **0.396.0** on the merge and both backlog/SHIPPED entries were kept as a union. Collision #15, and the rule worked exactly as written.)*
+
+**The run.** Baseline green before any change (**5,312 passed / 2 skipped**, full
+suite headless, 37:51). Shipped **v0.396.0** — the "this target is still named
+after its folder — call it *Crescent Nebula*?" offer, the last open slice of the
+Scout's 2026-08-27 #10 entry and the one that had been **🛑 BLOCKED** since
+2026-09-01 on a real defect (a rename would have made the next scan allocate a
+second folder). Write-up in [`SHIPPED.md`](SHIPPED.md).
+
+**The blocked premise was true, and a test reproduced it before a line of the fix
+existed.** `test_rename_survives_a_reopen_and_a_rescan_of_the_same_folder` was
+written from the entry's own warning and failed on its first run with
+`MyWorks_2026-08-14-6944ab3c` — i.e. the split library, exactly as predicted, in
+under a second. Writing the test the *blocked* entry implied, before believing
+the design, is what turned a "don't ship the chip on its own" into a shippable
+feature: it named the missing piece (`targets.folder_name`, the alias row the
+entry asked for) rather than leaving it to be reasoned about.
+
+**Dogfood pass (§2), CLEAN — the third in a row.** `scripts/agent-dogfood.sh
+--mosaic --editor`, both samples: **mosaic trim 7.9 %** of the canvas (the §1 bug
+bar is ~15 %), all 21 ops added on both the field and the **mosaic** run with the
+preview re-rendering each time, undo/redo fine, nothing overflowing and no console
+errors on either width. Tallest page, phone: the mosaic Target page at **3,369 px**
+(field sample 3,040 px), consistent with the v0.338.1 baseline; the feature this run
+shipped adds nothing always-on (the offer is absent unless a target is folder-named
+*and* solved onto an object), so the page heights it was measured against are its own.
+
+**The part the suite could not have told me.** The card renders identically in
+jsdom whatever order its lines are in, so the offer had landed *between* the two
+italic "pure-wonder" lines the card deliberately keeps adjacent — the only action
+on the card reading as a third fact. A screenshot at 1440 px and 420 px showed it
+in one look, and it moved to the end (v0.396.0's last commit). The same live pass
+also confirmed, on a real running app, what only integration can: one click
+renames and the page heading changes, the offer withdraws itself, "Keep my name"
+survives a reload, a rename onto a name another target owns comes back **400**
+(hit by accident, which is the best way), and the **mosaic** sample — union centre
+0.31° from M42 — is correctly offered nothing, because the offer is gated at the
+0.25° title-grade cone. **Two of those five would have passed a green suite while
+being wrong on screen.**
+
+**Note for whoever reads `frontend/src/tiffDownload.ts` next:** the download-copy
+sweep entry in `IMPROVEMENTS.md` still listed the colour-space axis as "still
+open". It shipped; the line is struck. Grepping the shipped code before building
+what an entry says is missing cost thirty seconds and saved a slot.
+
+---
+
 ## 2026-09-08 (later still) — Builder run (branch `claude/sweet-babbage-9wjrt9`): the life-list share grid, a version collision with a concurrent run, and a second clean dogfood pass
 
 **The run.** Baseline green before any change (**5,284 passed / 2 skipped**, full

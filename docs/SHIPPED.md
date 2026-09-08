@@ -14,6 +14,178 @@ Newest first.
 
 ---
 
+## v0.396.0 — 2026-09-08 — NEW BEGINNER FEATURE: "this target is still named after its folder — call it what it is?" (`Library.rename_target`, `objectinfo.suggested_target_rename`, `targets.folder_name`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-e506ni`. The last open slice
+of the Scout's 2026-08-27 #10 entry — and the thing that entry was **🛑 BLOCKED**
+on, which is most of what this block is about. The original entry is kept
+verbatim at the foot.)**
+
+**The gap.** A beginner who drops a Seestar folder in gets a target called
+`NGC 6888_SUB`, `MyWorks_2026-08-14` or `Unsorted`. The app already *knows* what
+it is — the plate solve puts the field on a catalog object and the identity card
+says so in as many words ("Identified from this target's plate-solved position")
+— but the library, the tiles, the gallery and every caption keep showing the
+folder name, and nothing in the app could change it. `PATCH /api/targets/{safe}`
+took `notes` and `tags`; a target's display name had never been editable through
+any API.
+
+**Why the entry was blocked, and what actually unblocks it.** The 2026-09-01
+Builder traced it and stopped: a target's project directory comes from
+`_allocate_safe_name(display_name)`, which keeps a readable safe name only while
+it is free *or already owned by that same display name*, and the scanner resolves
+a folder with `open_or_create_target(folder_name)` — **by display name**. So a
+rename would have made the next scan ask for `NGC 6888_SUB`, find that folder
+owned by a stranger called `Crescent Nebula`, and allocate `NGC_6888_SUB-<sha1>`:
+a second target, a second project directory, the same sky, tonight's subs landing
+in the new one. The entry named the fix it needed — *"an explicit alias row
+recording 'this folder is that target'"* — and that is what shipped:
+
+- **`targets.folder_name`**, one additive nullable column reconciled onto an
+  existing registry by the `_ensure_columns` self-heal that is already run on
+  every open (so **no `LIBRARY_SCHEMA_VERSION` bump** — a bump would make an older
+  image refuse to open the registry, which on an in-place box is a bricked
+  rollback). It records the name a target was *created* from and never moves
+  again; NULL means "never renamed", which is every row written before today and
+  is why old behaviour is bit-for-bit unchanged.
+- **`_name_owning_safe` → `_names_owning_safe`**: a folder now answers to both its
+  display name and its `folder_name`, so a renamed target still claims its own
+  directory on the next scan instead of looking like a colliding stranger. This
+  is the whole safety story, and it is pinned by
+  `test_rename_survives_a_reopen_and_a_rescan_of_the_same_folder` — which **failed
+  on its first run** with `MyWorks_2026-08-14-6944ab3c`, i.e. the split-library
+  outcome the blocked entry predicted, reproduced.
+
+**What a rename is, deliberately narrowly.** `Library.rename_target` changes the
+display name and nothing else: the safe name, the folder, `project.sqlite`, the
+frames and every stored path stay exactly where they were. That is what makes it
+safe — every lookup in the app resolves a target by `safe`, so a rename cannot
+strand a path, a run or a bookmark. It also updates the project's own `name` meta
+(best-effort, and a project that won't open never fails the rename), so a stack
+written afterwards carries the new name and a registry rebuilt from disk doesn't
+resurrect the old one. It refuses a blank name and one another target already
+owns (`targets.name` is UNIQUE, and two targets sharing a name would break
+name-based lookup); both come back as a 400, not a 500.
+
+**A mosaic cannot be renamed out of being a mosaic.** Mosaic-ness is carried by
+the *name* (`scanner.is_mosaic_target_name`, read by the merge suggester so a
+mosaic is never offered for combination with its single field), so dropping
+" (mosaic)" in a rename would silently reclassify the target. New
+`scanner.preserve_mosaic_suffix` re-suffixes the new name, and it is applied in
+**two** places on purpose: in the suggestion, so the user sees the name they will
+get, and in `rename_target` itself, so the invariant holds whatever a client
+sends.
+
+**The suggestion is offered at title confidence, not card confidence.**
+`objectinfo.suggested_target_rename` is a thin, pure join on top of
+`confident_object_title` — the same 0.25° cone the app is already willing to bake
+into a *shared* picture, three times tighter than the identity card's own cone —
+because a rename outlives the session in a way a dismissible card doesn't. It
+returns `None` when the stored name already identifies an object (the owner's own
+words win: the app never "corrects" `M 31` into `Andromeda Galaxy`), when nothing
+sits confidently at the solved centre, and when the suggestion is what the target
+is called already — that last case being reachable exactly for a mosaic named
+`Orion Nebula (mosaic)`, whose suffixed name matches no catalog entry by name.
+
+**The surface.** `ObjectInfoOut.rename_to` (additive, `null` for the common case)
+is computed in `GET /api/targets/{safe}/identify`, which is the one place that
+knows both the catalog match and *this target's stored name*. `ObjectInfoCard`
+gains an opt-in `allowRename`, set only on the Target page — the editor and
+History render the same card read-only, because the rename belongs where the name
+is the heading the owner is looking at. It offers one sentence, one button and a
+"Keep my name" dismissal; nothing renames on its own, and taking the offer
+invalidates the target, list and identify queries so the heading changes at once.
+`PATCH /api/targets/{safe}` gained an optional `name`, and invalidates the
+registry cache on a rename so the Dashboard and Tonight don't serve the old name
+out of a TTL.
+
+**Upgrade-safe (§9):** one nullable column added by the existing additive
+self-heal, no schema-version bump, no on-disk move, no default change, no API
+shape change (one optional request field, one nullable response field — an older
+frontend ignores both, an older backend omitting `rename_to` reads as "nothing to
+offer", which is right). `test_a_library_written_before_the_folder_name_column_renames_cleanly`
+opens a pre-column registry, checks the column arrives, renames, and asserts the
+old folder is still claimed.
+
+**Tests (+16):** 4 engine (`test_objectinfo.py` — the offer, the owner's own
+words, the title-grade cone vs the card's, the mosaic suffix and the no-op case);
+5 registry (`tests/test_library_rename.py`, new — what a rename must not move, the
+rescan case that failed first, the mosaic invariant, the refusals, the pre-column
+upgrade); 3 webapp (`test_targets_meta.py` rename + refusals, and the older-client
+patch that leaves the name alone); 4 frontend (`ObjectInfoCard.test.tsx` — offered
+and renames in one click, dismissal writes nothing, nothing offered without
+`allowRename`, nothing offered for a target that names itself). No existing test
+weakened.
+
+---
+
+**The original entry, verbatim:**
+
+- **NEW IDEA (Scout 2026-08-27 #10, PARTLY SHIPPED — re-scoped by Scout #13, 2026-08-27) — "This looks like M31":
+  offline auto-identify an un-named / Unsorted target from its solved centre against the bundled catalog, in the
+  web app.** *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size of the REMAINING slice: S.)*
+  **⚠ The engine + backend + read-only card already shipped since this was filed** — `GET
+  /api/targets/{safe}/identify` (`webapp/routers/targets.py:299`) calls `seestack.objectinfo.identify_object`,
+  which "matches by the target's name first, then by its plate-solved centre if one is known" and reports
+  `matched_by`; `frontend/src/components/ObjectInfoCard.tsx` renders it and even shows *"Identified from this
+  target's plate-solved position."* when `matched_by === "coords"`. So slices (a) engine + (b) backend are DONE.
+  **Remaining open slice:** the card *identifies* but never offers to **rename** an `Unsorted`/folder-named
+  target — there is no "use this name?" affordance wired to the existing rename path. Add just that: when the
+  target's stored name is generic/Unsorted and `identify` matched by coords with a confident separation, show a
+  dismissible one-click "Rename to **{name}**?" chip on the card (reuse the existing `PATCH /api/targets/{safe}`
+  rename; never auto-rename). Everything below is now historical context for that last chip.
+
+  **🛑 BLOCKED — TWO PREMISES CHECKED AND BOTH ARE FALSE; READ THIS BEFORE PICKING IT UP (Builder 2026-09-01,
+  branch `claude/wizardly-feynman-be4ubk`, traced in code, not run).** This is filed as "add a chip", and it is
+  not: as written it would **split the owner's library on the next scan.**
+  1. **There is no existing rename path to reuse.** `PATCH /api/targets/{safe}` (`targets.py`) takes
+     `notes` and `tags` only, and `Library.update_target` can set exactly those two columns. A target's display
+     `name` has never been editable through any API.
+  2. **And a rename is not a metadata edit — it silently re-homes the target.** A target's project directory is
+     `_allocate_safe_name(display_name)`, which keeps the readable safe name only while it is free *or already
+     owned by this same display name*, and otherwise appends a stable hash. The scanner resolves a folder with
+     `library.open_or_create_target(target_name)` (`scanner.py`), i.e. **by display name**. So rename `Unsorted`
+     → `M 31` and the next scan of that same folder asks for `Unsorted`, finds its safe name now owned by a
+     *different* display name, and gets `Unsorted-<sha1>` — **a second target, a second project directory, the
+     same sky**. Tonight's subs land in the new one and the old picture stays behind in the other. That is the
+     duplicate-target class v0.319.3 spent a run cleaning up, manufactured deliberately.
+  **What a safe version needs first,** and it is the real item: the scanner must resolve a folder to a target by
+  something that does **not** move when the name does — the existing `source_paths` / folder identity that
+  `library_hygiene`'s duplicate detection already reads, or an explicit alias row recording "this folder is that
+  target". Only once a rename cannot orphan a folder is the chip an S. **Do not ship the chip on its own**, and
+  do not "fix" it by renaming the directory either — §9 rules out moving on-disk layout outright.
+
+    A beginner who drops loose FITS, or a folder the Seestar named
+  something un-obvious, ends up with a target tile reading `Unsorted` or a cryptic folder name — and no plain
+  hint of what it actually is. Once the target is plate-solved it *has* a centre (`TargetEntry.ra_deg/dec_deg`),
+  and we already ship the offline catalog, so we can say "This looks like **M31 (Andromeda Galaxy)** — rename?"
+  with zero network and one cheap lookup. Reduces a manual step (naming) and adds trust ("the app knows what I
+  shot").
+
+  **Distinct from what exists:** `seestack/post/target_id.py::identify_target` is **SIMBAD (network) and wired
+  only into the Qt desktop `main_window.py`** — it never runs in the headless web app, which is the only thing
+  the owner uses. The in-frame annotation (`seestack/annotate.py`, shipped v0.141.0) labels catalog objects
+  that fall *inside a finished stack's frame*; this identifies the **target itself** by its centre, before/
+  without a stack, and is what feeds a rename suggestion. Neither covers this.
+
+  **Grounding (machinery already present):** the closest-catalog-object-to-a-point match is the mirror of
+  `Library.find_target_within` (which finds the closest *target* to a point) — a pure
+  `nearest_catalog_object(ra_deg, dec_deg, catalog, *, max_sep_deg≈0.4)` over `load_catalog()` reusing
+  `_angular_separation_deg` gives `(CatalogObject, sep_deg) | None`. `CatalogObject` already carries the plain
+  name + `blurb` for the readout.
+
+  **Slices:** **(a) engine (S):** the pure `nearest_catalog_object` helper + unit tests (centre on an object →
+  that object; 2° away → None; RA-seam safe; closest of two nearby wins). **(b) backend (S):** fold the match
+  into the existing target detail / library response (or a tiny read-only `GET
+  /api/targets/{safe}/identify` → `{catalog_id, name, type, blurb, sep_deg}` or `null`), computed only for a
+  target that has a solved centre. **(c) frontend (S):** show a dimmed "This looks like **{name}** — use this
+  name?" chip on an `Unsorted`/folder-named target (one-click rename via the existing rename path; dismissible;
+  never auto-renames — the owner decides). Additive/offline/upgrade-safe; no schema/default/API-shape change.
+  **Beginner-bar:** instantly understood, sane default (only *suggests*, ≈0.4° radius so a nearby-but-different
+  object isn't falsely claimed), plain-language, and not a pro knob.
+
+---
+
 ## v0.395.0 — 2026-09-08 — PRIORITY 2: the walk-away night comes back as a picture, and any one target can be told to stop (`Settings.auto_edit_on_autostack`, `webapp/auto_edit_pref`, `pipeline._wants_auto_edit_for`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-lso4r6`. Gate **Q1** of the

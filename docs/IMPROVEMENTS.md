@@ -380,6 +380,21 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **LEAD, measured while shipping the v0.396.0 rename offer (Builder 2026-09-08) — a *mosaic* target is
+  usually too far off its own object to be offered a name, because the offer is gated on the union centre.**
+  *(Pillar: autonomy/friendliness — PRIORITY 2–3; size S; **do not "fix" this by widening the cone**.)*
+  `suggested_target_rename` uses `confident_object_title`'s 0.25° title-grade cone against
+  `TargetEntry.ra_deg/dec_deg`, which for a mosaic is the centre of the **union canvas**, not of the object.
+  Measured on the bundled 2×2 mosaic sample: its centre sits **0.31°** from M 42, so a folder-named mosaic
+  gets no offer at all while the single field of the same object gets one. That is the *safe* failure and is
+  why it shipped this way — but the owner is a heavy mosaic user, so the surface that helps him most is the
+  one that mostly stays quiet. **The honest shape, if it is ever worth doing, is not a bigger radius** (which
+  would start claiming neighbours for single fields too): it is to ask whether the solved centre falls
+  *inside the object's own extent* — the catalog already carries `size_arcmin`/`size_minor_arcmin`, and
+  `framing.py` already reasons in those units — so a 2×2 of M 42 qualifies on the object's 85′ span while a
+  neighbour 0.5° away still does not. Needs a real mosaic's centre offsets to validate the "inside its
+  extent" rule before it decides a name; the synthetic sample gives exactly one data point.
+
 - **NEW IDEA (Builder 2026-09-03, the cost the v0.335.0 endpoint knowingly accepted) — `/rejection-outlook`
   pays for a whole `estimate_stack` to learn two numbers.** *(Pillar: performance — size XS; **only if the
   note is ever un-gated**, see the entry two above.)* It needs the accepted+solved count and the mosaic's
@@ -552,8 +567,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   exact); the JPEG, nameplate, scale-bar and keepsake items, which describe what they bake rather than a size;
   and the FITS, whose "Raw data — for re-processing, not sharing" is right.
 
-  **Still open, filed as its own item below:** the **colour-space** axis — the TIFF download carries *no*
-  description at all, and a plain stack's TIFF is written **linear**, so it opens looking black. The
+  ~~**Still open, filed as its own item below:** the **colour-space** axis — the TIFF download carries *no*
+  description at all, and a plain stack's TIFF is written **linear**, so it opens looking black.~~ — **DONE, and
+  this line was stale** *(struck 2026-09-08 by a Builder that grepped before building)*: `frontend/src/tiffDownload.ts`
+  owns the wording (`tiffOpensAsShown` / `tiffDownloadHint`) and every TIFF item renders it through the shared
+  `SavePictureMenu` — *"16-bit raw levels — opens dark until you stretch it in another app"* for a linear stack,
+  *"16-bit — the finished picture, at full depth"* for one saved in display space, with `tiffDownload.test.ts`
+  pinning both. The
   **geometry** axis (cropped/rotated vs the stored canvas) was not swept.
   **▶ The geometry axis was then swept by the `…-e1p1x8` Builder and turned up a real one straight away:**
   "Full-res PNG (native size)" served a picture **rotated away from the one on screen** on any run saved North
@@ -645,69 +665,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   often *not* a showpiece, so this needs either a second route scoped to "objects the nearly-there endpoint
   actually returned" or a widening of that whitelist with the same care about arbitrary ids. Don't just remove
   the check.
-
-- **NEW IDEA (Scout 2026-08-27 #10, PARTLY SHIPPED — re-scoped by Scout #13, 2026-08-27) — "This looks like M31":
-  offline auto-identify an un-named / Unsorted target from its solved centre against the bundled catalog, in the
-  web app.** *(Pillar: autonomy + friendliness — PRIORITY 2–3. Size of the REMAINING slice: S.)*
-  **⚠ The engine + backend + read-only card already shipped since this was filed** — `GET
-  /api/targets/{safe}/identify` (`webapp/routers/targets.py:299`) calls `seestack.objectinfo.identify_object`,
-  which "matches by the target's name first, then by its plate-solved centre if one is known" and reports
-  `matched_by`; `frontend/src/components/ObjectInfoCard.tsx` renders it and even shows *"Identified from this
-  target's plate-solved position."* when `matched_by === "coords"`. So slices (a) engine + (b) backend are DONE.
-  **Remaining open slice:** the card *identifies* but never offers to **rename** an `Unsorted`/folder-named
-  target — there is no "use this name?" affordance wired to the existing rename path. Add just that: when the
-  target's stored name is generic/Unsorted and `identify` matched by coords with a confident separation, show a
-  dismissible one-click "Rename to **{name}**?" chip on the card (reuse the existing `PATCH /api/targets/{safe}`
-  rename; never auto-rename). Everything below is now historical context for that last chip.
-
-  **🛑 BLOCKED — TWO PREMISES CHECKED AND BOTH ARE FALSE; READ THIS BEFORE PICKING IT UP (Builder 2026-09-01,
-  branch `claude/wizardly-feynman-be4ubk`, traced in code, not run).** This is filed as "add a chip", and it is
-  not: as written it would **split the owner's library on the next scan.**
-  1. **There is no existing rename path to reuse.** `PATCH /api/targets/{safe}` (`targets.py`) takes
-     `notes` and `tags` only, and `Library.update_target` can set exactly those two columns. A target's display
-     `name` has never been editable through any API.
-  2. **And a rename is not a metadata edit — it silently re-homes the target.** A target's project directory is
-     `_allocate_safe_name(display_name)`, which keeps the readable safe name only while it is free *or already
-     owned by this same display name*, and otherwise appends a stable hash. The scanner resolves a folder with
-     `library.open_or_create_target(target_name)` (`scanner.py`), i.e. **by display name**. So rename `Unsorted`
-     → `M 31` and the next scan of that same folder asks for `Unsorted`, finds its safe name now owned by a
-     *different* display name, and gets `Unsorted-<sha1>` — **a second target, a second project directory, the
-     same sky**. Tonight's subs land in the new one and the old picture stays behind in the other. That is the
-     duplicate-target class v0.319.3 spent a run cleaning up, manufactured deliberately.
-  **What a safe version needs first,** and it is the real item: the scanner must resolve a folder to a target by
-  something that does **not** move when the name does — the existing `source_paths` / folder identity that
-  `library_hygiene`'s duplicate detection already reads, or an explicit alias row recording "this folder is that
-  target". Only once a rename cannot orphan a folder is the chip an S. **Do not ship the chip on its own**, and
-  do not "fix" it by renaming the directory either — §9 rules out moving on-disk layout outright.
-
-    A beginner who drops loose FITS, or a folder the Seestar named
-  something un-obvious, ends up with a target tile reading `Unsorted` or a cryptic folder name — and no plain
-  hint of what it actually is. Once the target is plate-solved it *has* a centre (`TargetEntry.ra_deg/dec_deg`),
-  and we already ship the offline catalog, so we can say "This looks like **M31 (Andromeda Galaxy)** — rename?"
-  with zero network and one cheap lookup. Reduces a manual step (naming) and adds trust ("the app knows what I
-  shot").
-
-  **Distinct from what exists:** `seestack/post/target_id.py::identify_target` is **SIMBAD (network) and wired
-  only into the Qt desktop `main_window.py`** — it never runs in the headless web app, which is the only thing
-  the owner uses. The in-frame annotation (`seestack/annotate.py`, shipped v0.141.0) labels catalog objects
-  that fall *inside a finished stack's frame*; this identifies the **target itself** by its centre, before/
-  without a stack, and is what feeds a rename suggestion. Neither covers this.
-
-  **Grounding (machinery already present):** the closest-catalog-object-to-a-point match is the mirror of
-  `Library.find_target_within` (which finds the closest *target* to a point) — a pure
-  `nearest_catalog_object(ra_deg, dec_deg, catalog, *, max_sep_deg≈0.4)` over `load_catalog()` reusing
-  `_angular_separation_deg` gives `(CatalogObject, sep_deg) | None`. `CatalogObject` already carries the plain
-  name + `blurb` for the readout.
-
-  **Slices:** **(a) engine (S):** the pure `nearest_catalog_object` helper + unit tests (centre on an object →
-  that object; 2° away → None; RA-seam safe; closest of two nearby wins). **(b) backend (S):** fold the match
-  into the existing target detail / library response (or a tiny read-only `GET
-  /api/targets/{safe}/identify` → `{catalog_id, name, type, blurb, sep_deg}` or `null`), computed only for a
-  target that has a solved centre. **(c) frontend (S):** show a dimmed "This looks like **{name}** — use this
-  name?" chip on an `Unsorted`/folder-named target (one-click rename via the existing rename path; dismissible;
-  never auto-renames — the owner decides). Additive/offline/upgrade-safe; no schema/default/API-shape change.
-  **Beginner-bar:** instantly understood, sane default (only *suggests*, ≈0.4° radius so a nearby-but-different
-  object isn't falsely claimed), plain-language, and not a pro knob.
 
 - **NEW IDEA (Builder 2026-08-17, the one thing deliberately left out of "Finish them all" v0.265.0) — put a real
   byte figure in the batch-export confirmation, without making the Dashboard's note expensive.** *(Pillar:
@@ -2934,6 +2891,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.396.0** — NEW BEGINNER FEATURE (the last open slice of the Scout's 2026-08-27 #10 entry, and the **🛑 BLOCKED** premise it was stuck on): **a target still named after its folder can be renamed to what the plate solve says it is, in one click.** The identity card gains "this target is still named after its folder — call it *Crescent Nebula*?" (opt-in `allowRename`, Target page only), backed by new `Library.rename_target` (display name only — the safe name, folder, project and every stored path stay put) and `objectinfo.suggested_target_rename` (the **title-grade** 0.25° cone, not the card's looser one, because a rename outlives the session; silent when the stored name already identifies something). **The blocker was real and is now fixed:** the scanner resolves a folder *by display name*, so a rename would have made the next scan allocate `NGC_6888_SUB-<sha1>` — a second target, same sky. New additive nullable `targets.folder_name` (no `SCHEMA_VERSION` bump; the existing `_ensure_columns` self-heal adds it) is the alias row that entry asked for, and `_names_owning_safe` lets a folder answer to both names. A test caught the split live before the column existed. `scanner.preserve_mosaic_suffix` keeps a mosaic a mosaic. Tests +16. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.395.0** — PRIORITY 2 (autonomy) and the last step of the north star, the owner's 2026-09-08 answer to gate Q1 shipped **with its condition rather than after it**: **an unattended night now comes back as a picture, and any one target can be told to stop.** `Settings.auto_edit_on_autostack` ships `True` — fresh installs only, the same §9 argument as v0.391.0's (`SettingsStore` re-saves the whole model, so every install that has booted carries an explicit `false` and no migration may flip it). The owner said *"yes, but should be easy to override with manual settings"*, and the backlog's own note said not to ship the flip without it, so all three halves are here: new `webapp/auto_edit_pref` stores a **tri-state per target** in the existing `project_meta` kv table (no schema change) — `None` follows the setting, `True`/`False` override it — which `pipeline._wants_auto_edit_for` consults before finishing a fresh stack, so it survives the night rather than a page; `_auto_edit_process_run` now refuses to write over a recipe **the user** saved — which is not the same as "a recipe exists", since the pass legitimately re-runs over its own output, a distinction an existing test found rather than reasoning did; it is separated by the baked-look stamp the run already carries; and the control is a link under **any picture the app finished** (`StackRunOut.auto_edited`, one more meta read in a loop that already does three) rather than a standing switch on every target page — it writes an explicit `false` to turn off, and clears vs. sets `true` to turn on depending on which one would actually work. A garbled or hand-edited value reads as *unset*, never as "off". Settings copy names the fresh-install caveat and all three ways out. "Process target" is deliberately untouched — an explicit click has always auto-edited. Tests +19 (5 pref unit, 5 pipeline/API, 2 config-upgrade incl. a stored-`false` that asserts it *differs from the fresh default*, 5 card, 2 copy). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.394.0** — PRIORITY 3 (enjoy + share), slice (iii) of the life-list follow-ups filed 2026-08-27 and the last one open: **"My life list" becomes one shareable picture.** New pure engine module `seestack/lifelistcard.py` composes all 110 Messier squares in catalog order — your own picture cover-cropped into the ones you have, a faintly lit square for one captured but not stacked yet, a dim numbered square for the rest — under a strip saying how far along you are. **The empty squares are the point:** the montage wall (`/api/gallery/montage.jpg`) shows only the pictures you have, which makes it a gallery; a life list has to draw the whole list. Three drawing calls are deliberately the opposite of the wall's and are explained in the full entry (cover-crop not letterbox; its own label drawer, because `_draw_corner_label` clamps to 9 px on a 114 px tile and would make the captured ids smaller than the to-shoot ones; left-aligned catalog order, so the counting survives a short last row). `GET /api/life-list/grid.jpg` renders it on demand from the previews the app already keeps and writes nothing, resolving each picture through the shared `targets.current_picture_path` so the poster cannot disagree with the page it was shared from; it **404s until one object is captured**, which is exactly where the new self-hiding "Share my grid" button inside the page's existing header card stops being offered. Previews are downscaled to `TILE_SOURCE_MAX_PX` on the way in and each target is loaded once, so filling 110 squares is tens of megabytes, not hundreds. Additive: one module, one read-only GET, one button; no config, schema, on-disk, API-shape or default change. Tests +18 (13 engine, 5 endpoint, 2 vitest). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.393.0** — the owner's 2026-09-08 answer to gate Q5 ("skip folders named `batch_stack_tmp` at scan time? → YES"), which was the one open **Bugs** entry nobody could start: **another stacking program's working folder is walked past instead of ingested as a junk target.** `_apply_seestar_convention` now skips a folder whose name is in the existing `_TEMP_FOLDER_NAMES` (the entry's own condition — reuse the set the v0.319.6 *cleanup* verdict already uses, never a second list), before the bare-folder fallback that used to bring it in. **Exact names, not a `*_tmp` pattern**, so a real folder someone named badly is untouched. **Not silent, because a silent skip could never be undone from the UI:** it lands in `ScanResult.unvouched_skips` *whatever its files are named* — the device-output rule can be certain it is right and so stays quiet when every file is accounted for, a name-pattern guess about someone else's directory cannot — and the report is where the one-click "bring it in" lives. That override needed no special case: a scoped scan takes the folder as the unit without consulting its name, which is its documented meaning; pinned by a test either way. New shared `components/skippedFolderCopy.ts` owns the wording so the Jobs alert and the Library card cannot drift into two accounts of one folder, and neither now calls a scratch directory "your Seestar's own finished picture"; the card keeps its own "are some of my subs missing?" title, which is the right question for the old rule and the wrong one for this. Additive `reason` field on `SkippedOutputFolder`, the remembered record and `SkippedFolderOut`, defaulted so an older record/backend/frontend reads as the only case it could produce. Tests +18 (6 engine, 4 webapp, 8 copy/UI; the engine and webapp ones fail before). Full entry in [`SHIPPED.md`](SHIPPED.md).

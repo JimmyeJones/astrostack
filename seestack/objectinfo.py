@@ -243,6 +243,42 @@ def confident_object_title(
     return title or None
 
 
+def suggested_target_rename(
+    current_name: str | None,
+    ra_deg: float | None = None,
+    dec_deg: float | None = None,
+    *,
+    catalog: tuple[CatalogObject, ...] | None = None,
+) -> str | None:
+    """The catalog name worth *offering* as a rename for this target, or ``None``.
+
+    A beginner who drops a Seestar folder in ends up with a target called
+    ``NGC 6888_SUB`` or ``Unsorted`` — the app knows what it actually is (the
+    plate solve puts the field on a catalog object) but the library still lists
+    the folder name. This answers "is there a better name to suggest?" and is
+    deliberately the *same* confidence as the title we're willing to bake into a
+    shared picture (:func:`confident_object_title`, a 0.25° cone): a rename is
+    something the owner sees for as long as they keep the target, so a
+    card-grade guess is not good enough.
+
+    Returns ``None`` — i.e. suggest nothing at all — when the stored name
+    already identifies an object, when nothing sits confidently at the solved
+    centre, or when the suggestion is what the target is called already. A
+    mosaic target keeps its " (mosaic)" suffix, since renaming edits the display
+    name and never what was shot. The caller only ever *offers* this; nothing in
+    the app renames a target on its own.
+    """
+    from seestack.io.scanner import preserve_mosaic_suffix
+
+    title = confident_object_title(current_name, ra_deg, dec_deg, catalog=catalog)
+    if not title:
+        return None
+    suggestion = preserve_mosaic_suffix((current_name or "").strip(), title)
+    if suggestion.strip().lower() == (current_name or "").strip().lower():
+        return None
+    return suggestion
+
+
 def _to_info(obj: CatalogObject, matched_by: str,
              field: FrameField | None = None) -> ObjectInfo:
     return ObjectInfo(
