@@ -89,6 +89,42 @@ def coverage_is_mosaic(coverage: np.ndarray,
 # worth trimming, so we return None (no crop) rather than a no-op crop.
 _FULL_AREA_FRAC = 0.985
 
+# How much of what the *coverage itself* allows the depth threshold may give up
+# before it has stopped trimming a border and started discarding panels.
+#
+# This is the second half of D1, and it is a different failure from the first.
+# D1 was "the reference is the peak"; :func:`panel_coverage_level` fixed that by
+# taking the lowest *substantial* plateau instead. But "substantial" means 8 % of
+# the covered canvas, and on a **dense raster with uneven panel depth** — the
+# owner shoots 3x3 and 12x8, over many nights, so his panels are not equally deep
+# — no single depth holds 8 % of anything: 96 panels spread across two dozen
+# depths, each holding ~1 %. The search then walks past the thin panels and lands
+# near the *mode*, and every panel shallower than half of that is declared fringe.
+# Measured, before this guard: a 12x8 raster 8-30 subs deep with 6 % weight jitter
+# was cropped to **25.6 %** of its canvas, a 6x4 to 34.8 %, an 8x6 to 17.6 %. All
+# three are fully tiled — there is no ragged edge to trim at all — and AGENTS.md
+# §1 puts the bar at "a trim above ~15 % of the canvas is a bug, not a ragged
+# edge".
+#
+# The discriminator is what the discarded pixels *are*. A border is **uncovered**
+# (no frame reached it) plus the thin fringe beside it; a thin panel is covered —
+# real data, fewer subs. So the coverage alone fixes an upper bound on how much a
+# border trim can honestly remove, and a depth threshold that does far worse than
+# that bound is not describing a border. When one does, the threshold is walked
+# down (each rung halves it) until it agrees with the coverage again — which on a
+# raster that is *both* uneven and genuinely ragged still trims the ragged edge
+# (measured: 34.2 % kept -> 95.1 %) instead of standing down altogether.
+#
+# Chosen, not tuned: every honest shape in this module's tests keeps within 5 % of
+# its coverage bound (single field 92.2 % vs 100 %... a diagonal mosaic 12.2 % vs
+# 12.2 %), and the broken ones are 3-5x below it, so anything from ~0.5 to ~0.9
+# separates them identically. 0.8 sits in the middle of that gap.
+TRIM_KEEP_RATIO = 0.8
+# Eight halvings reach 1/256 of one panel's depth, below which every covered pixel
+# passes and the rule has become the coverage itself — the bound it is converging
+# on. Bounded so this can never loop on a pathological map.
+_TRIM_LADDER_RUNGS = 8
+
 
 def _largest_hist_rect(heights: np.ndarray, base_row: int):
     """Largest rectangle in a 1-D histogram, as ``(r0, c0, r1, c1, area)``.
@@ -200,6 +236,55 @@ def panel_coverage_level(covered: np.ndarray,
     return min(level, peak) if level > 0 else peak
 
 
+def _coverage_threshold(coverage: np.ndarray,
+                        min_frac: float = DEFAULT_MIN_FRAC) -> float | None:
+    """The coverage value at or above which a pixel is "well covered", or ``None``
+    when the map has no opinion to offer (non-2-D, empty, nothing finite/positive).
+
+    Factored out of :func:`well_covered_mask` so :func:`largest_covered_rect` can
+    walk the same number *down* without re-deriving the reference depth by hand.
+    """
+    cov = np.asarray(coverage, dtype=np.float32)
+    if cov.ndim != 2 or cov.size == 0:
+        return None
+    finite = cov[np.isfinite(cov)]
+    if finite.size == 0:
+        return None
+    peak = float(finite.max())
+    if peak <= 0:
+        return None
+    reference = panel_coverage_level(finite[finite > 0])
+    if reference is None or not (reference > 0):
+        reference = peak
+    frac = min(0.95, max(0.05, float(min_frac)))
+    return frac * reference
+
+
+def _rect_from_mask(mask: np.ndarray | None):
+    """Fractional ``(x0, y0, x1, y1)`` of the largest all-True rectangle, or
+    ``None`` for "keep the whole picture" — a uniform mask, an empty one, a
+    degenerate rectangle, or one already spanning essentially the whole frame."""
+    if mask is None or mask.all() or not mask.any():
+        return None
+    rect = _max_rectangle(mask)
+    if rect is None:
+        return None
+    r0, c0, r1, c1 = rect
+    h, w = mask.shape
+    if (r1 - r0) < 2 or (c1 - c0) < 2:
+        return None  # degenerate
+    if (r1 - r0) * (c1 - c0) >= _FULL_AREA_FRAC * h * w:
+        return None  # already spans the whole frame — nothing worth trimming
+    return (c0 / w, r0 / h, c1 / w, r1 / h)
+
+
+def _rect_area(rect) -> float:
+    """Fraction of the canvas a rectangle keeps; ``None`` (no trim) keeps it all."""
+    if rect is None:
+        return 1.0
+    return (rect[2] - rect[0]) * (rect[3] - rect[1])
+
+
 def well_covered_mask(coverage: np.ndarray,
                       min_frac: float = DEFAULT_MIN_FRAC) -> np.ndarray | None:
     """Boolean mask of the pixels a coverage map calls **well covered**: finite,
@@ -216,20 +301,11 @@ def well_covered_mask(coverage: np.ndarray,
     mosaic the peak is the panel *overlap* band, so measuring against it threw the
     panel interiors away. On a single field the two are the same number, so that
     path is unchanged."""
+    threshold = _coverage_threshold(coverage, min_frac)
+    if threshold is None:
+        return None
     cov = np.asarray(coverage, dtype=np.float32)
-    if cov.ndim != 2 or cov.size == 0:
-        return None
-    finite = cov[np.isfinite(cov)]
-    if finite.size == 0:
-        return None
-    peak = float(finite.max())
-    if peak <= 0:
-        return None
-    reference = panel_coverage_level(finite[finite > 0])
-    if reference is None or not (reference > 0):
-        reference = peak
-    frac = min(0.95, max(0.05, float(min_frac)))
-    return np.isfinite(cov) & (cov >= frac * reference)
+    return np.isfinite(cov) & (cov >= threshold)
 
 
 def largest_covered_rect(coverage: np.ndarray,
@@ -247,19 +323,28 @@ def largest_covered_rect(coverage: np.ndarray,
     best rectangle already spans essentially the whole frame (nothing ragged to
     trim), or when the result would be degenerate — so the caller can treat
     ``None`` as "leave the image alone".
+
+    **The answer is also bounded by the coverage itself** (:data:`TRIM_KEEP_RATIO`,
+    where the reasoning lives). The pixels a border trim is entitled to remove are
+    the *uncovered* ones and the fringe beside them; a pixel that is merely
+    shallower than its neighbours is a thinner **panel**, and cropping it away is
+    D1 all over again — which is exactly what a dense raster with uneven panel
+    depth used to get, because no single depth there is substantial enough for
+    :func:`panel_coverage_level` to find and it settles near the mode instead.
+    So the rectangle the coverage alone allows is computed too, and when the depth
+    threshold does far worse than that bound the threshold is halved and asked
+    again. It can only ever keep **more** than it did before this guard existed.
     """
-    mask = well_covered_mask(coverage, min_frac)
-    if mask is None:
+    threshold = _coverage_threshold(coverage, min_frac)
+    if threshold is None:
         return None
-    if mask.all() or not mask.any():
-        return None  # uniform (single-field) or nothing covered → no trim
-    rect = _max_rectangle(mask)
-    if rect is None:
-        return None
-    r0, c0, r1, c1 = rect
-    h, w = mask.shape
-    if (r1 - r0) < 2 or (c1 - c0) < 2:
-        return None  # degenerate
-    if (r1 - r0) * (c1 - c0) >= _FULL_AREA_FRAC * h * w:
-        return None  # already spans the whole frame — nothing worth trimming
-    return (c0 / w, r0 / h, c1 / w, r1 / h)
+    cov = np.asarray(coverage, dtype=np.float32)
+    covered = np.isfinite(cov) & (cov > 0)
+    # What the coverage alone allows: the honest ceiling on a border trim.
+    bound = _rect_area(_rect_from_mask(covered))
+    for _ in range(_TRIM_LADDER_RUNGS):
+        rect = _rect_from_mask(np.isfinite(cov) & (cov >= threshold))
+        if _rect_area(rect) >= TRIM_KEEP_RATIO * bound:
+            return rect
+        threshold *= 0.5
+    return _rect_from_mask(covered)

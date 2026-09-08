@@ -14,6 +14,159 @@ Newest first.
 
 ---
 
+## v0.391.1 — 2026-09-08 — BUG FIX: a thin mosaic panel is not a ragged border (`coverage_trim.TRIM_KEEP_RATIO`, `_rect_from_mask`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-0r3aga`. Verified by
+reproduction while building the READY fixture-shape sweep — which is how the
+entry said it would be found: "this is test code, and it is what finds the next
+D1".)**
+
+**Symptom.** On a **dense mosaic raster whose panels are not equally deep** —
+the owner's own shooting shape; he shoots 3x3 and 12x8 across many nights, so a
+panel's depth is however many subs that panel happened to get — the one-click
+Auto edit **cropped the picture down to a quarter of its canvas**, on a canvas
+that is fully tiled and has no ragged edge to trim at all. Measured on three
+shapes, before the fix: a 12x8 raster 8-30 subs deep with 6 % weight jitter kept
+**25.6 %**, a 6x4 kept **34.8 %**, an 8x6 4-40 deep kept **17.6 %**. AGENTS.md §1
+puts the bar at *"a trim above ~15 % of the canvas is a bug, not a ragged edge"*.
+Default Auto path, `auto_crop_border` on (the historical default), mosaics only.
+
+**Root cause — the second half of D1, and a different failure from the first.**
+D1 (v0.382.4) was "the reference depth is the map's *peak*", fixed by
+`panel_coverage_level` taking the lowest **substantial** coverage level instead.
+But "substantial" is `PANEL_LEVEL_MIN_FRAC` = 8 % of the covered canvas, and on a
+dense raster with uneven depth **no single depth is that substantial**: 96 panels
+spread over two dozen depths hold ~1 % each. The search walks straight past the
+thin panels and settles near the **mode** of the depth distribution — 19.1 where
+the thinnest panel is 8 — and `well_covered_mask` then declares every panel below
+half of that to be fringe. Because those panels are *scattered* across the canvas
+rather than around its rim, the largest all-well-covered rectangle collapses.
+An even-depth raster is fine (all panels are the mode), and so is a 1x2 at
+400/150 subs (each panel is half the canvas, so both are substantial) — which is
+why every existing fixture missed it.
+
+**The fix, and why this discriminator and not a threshold.** Two shapes that a
+percentile cap on the threshold could not tell apart, because the failure is
+*spatial*: 5 % of pixels scattered through a canvas destroys the rectangle just
+as thoroughly as 40 % around its rim. What actually separates the two cases is
+**what the discarded pixels are**. A border is *uncovered* — no frame reached it
+— plus the thin fringe beside it; a thin panel is *covered*: real data, fewer
+subs. So the coverage alone fixes an honest ceiling on how much a border trim can
+remove, and `largest_covered_rect` now computes that bound (the largest rectangle
+over `isfinite & > 0`) alongside its answer. When the depth threshold does worse
+than `TRIM_KEEP_RATIO` (0.8) of the bound it has stopped describing a border, and
+the threshold is halved and asked again, up to eight rungs.
+
+**Measured, on fifteen shapes.** Every honest case is byte-identical: single
+field with a fringe 92.2 %, jittered 92.2 %, ragged 2x2 95.1 %, the NaN-hole
+fixture 45.0 %, every evenly-tiled mosaic still `None`, and — the case the bound
+must not swallow — a **diagonal** mosaic still trims to 12.2 %, because it is
+mostly *uncovered*, so its bound is small too. The three broken rasters become
+`None` (no crop). And a raster that is **both** uneven and genuinely ragged, which
+a blanket stand-down would have left ragged, goes **34.2 % -> 95.1 % kept**: the
+border goes, every panel stays.
+
+**Checked on the real thing, not only on maps.** The app's own mosaic sample
+(v0.386.0) stacked fresh and read through `_trim_rect_for_run` keeps **92.1 %**
+of its 907x615 canvas — the same figure to the digit that v0.390.0 measured
+before this change. That sample is evenly-ish deep (6/6/6/3), which is why it
+never showed the bug and why it must not move now.
+
+**Safety.** The guard can only ever *lower* the threshold, so the mask only grows
+and the rectangle only gets bigger: it can leave fringe in, never crop a panel
+away — the same property D1's own fix carries, pinned here by a randomised test.
+`well_covered_mask` itself is unchanged (its threshold logic moved intact into a
+shared `_coverage_threshold`), so `thumbnail.py`'s all-sky fade and
+`stacker.coverage_thin_fraction` are untouched — the latter measures at
+`ratio` 0.25 of the panel depth rather than 0.5, which puts it below the thinnest
+panel on all three shapes, so the "How's my stack?" note was already right.
+The coverage map is strided to 512 px before this runs, so the extra
+`_max_rectangle` sweeps are microseconds and the ladder only runs at all when the
+guard trips.
+
+**Tests (+5, two failing before).**
+`test_an_uneven_weighted_raster_is_not_cropped_to_its_deeper_panels` and
+`test_a_raster_that_is_both_uneven_and_ragged_still_loses_its_ragged_edge` are
+the regressions; plus the safety property over 40 random maps, the diagonal
+mosaic that must keep its small rectangle, and the shape-claim test below.
+No test weakened or rewritten — all 20 existing cases pass unchanged, both
+before and after.
+
+**Also shipped here: `tests/shapes.py`, the READY fixture-shape entry.** A small
+vocabulary for stating what a "mosaic" fixture can and cannot vouch for —
+statistically vs positionally alike panels, even vs uneven depth, two- vs
+four-way overlap, integer vs weighted coverage — measured with the *same*
+`panel_coverage_level` the rule under test uses, so a claim is stated in the
+units the rule measures in. `test_coverage_trim.py` now asserts its fixtures'
+shapes rather than describing them in a comment: `_tiled_mosaic` really does have
+a four-way corner and a peak 4x a panel, the 1x2 400/150 strip really does put
+the reference on its thinner panel, and the new raster fixture really does hold
+panels below the threshold (`assert_panels_thinner_than_the_reference`) — without
+which a "12x8 with uneven depth" test can pass for the wrong reason and vouch for
+nothing. This is exactly what the entry asked for and exactly what found the bug.
+
+**Upgrade-safe.** Pure geometry, no config, schema, on-disk, API-shape or default
+change. Old runs are unaffected — the trim is recomputed from the coverage map on
+every request.
+
+**The infra entry, as it stood — and the one part of it deliberately NOT done.**
+Its item (3) asked for a 3x3-with-a-four-way-corner and a 12x8-with-uneven-depth
+coverage fixture "that do not exist anywhere in the suite". The four-way corner
+already existed (`_tiled_mosaic(3, 3)` builds one, and now says so); the 12x8
+with uneven depth did not, and building it is what found the bug above. Its
+item (2) — switch a fixture that measures *between* two panels to
+`make_shared_sky_field` — needed splitting before it could be answered, because
+"between two panels" is two different things. A test that reads the **overlap**,
+where the same sky is seen twice, genuinely needs positionally-alike panels: the
+only one in the suite is `test_overlap_panel_gain.py`, which v0.387.0 already
+built on the shared-sky helpers. The others (`test_photometric_mosaic.py`,
+`test_photometric_mosaic_auto.py`) compare two **pure-panel** regions with the
+overlap strip masked out, and rest instead on the panels being drawn from the
+same seed — statistically and pixel-for-pixel alike, though not positionally.
+That premise was load-bearing and unasserted, so it is now a test
+(`test_the_fixture_really_does_give_both_panels_the_same_star_field`: with
+nothing dimmed the step between the two panels is < 5 %, so any step a later
+test measures is the pass under test and nothing else). The fixtures themselves
+are left alone, per the entry's own item (4).
+
+- **READY (backlog-readiness run 2026-09-08; the mechanism behind A1, D1 and the thin-note bug filed today) —
+  sweep the test fixtures that call themselves a mosaic and pin each one's *shape claim* with the shared-sky
+  helpers, so a rule can no longer pass twenty sweeps by being tested on a fixture that contradicts its own
+  comment.** *(Pillar: correctness of the QA reach — this is test code, not agent tooling, and it is what
+  finds the next D1. Size S–M, tests only. Checked `docs/PROCESS-NOTES.md` 2026-09-07/08: the D1 note ("six
+  tests had the bug pinned in a fixture that contradicted its own comment") and the v0.387.0 note ("the fixture
+  that *looked* like a mosaic and let a new pass invent a 2.6× gain") are the two recorded instances;
+  `tests/synth.star_catalog` + `make_shared_sky_field` (v0.387.0) exist and are used by exactly one file.)*
+  **The pattern, three times now.** A1: the STF's zero-clip spike read as the sky, pinned by fixtures with no
+  spike. D1: `well_covered_mask` measured against the peak, pinned by six tests whose "mosaic" was one plateau
+  plus a fringe. Today's thin-note bug: `_COVERAGE_THIN_SHARE` calibrated on "an even three-panel mosaic" —
+  no four-way corner, no weight jitter — while the owner shoots 3×3 and 12×8 rasters with uneven depth. Each
+  time the *code* was tested and the *fixture* was the wrong assumption.
+  **Code sites.** The twenty test files that build frames with `tests/synth.make_star_field` /
+  `write_seestar_fits` and say "mosaic" or "panel" (`grep -ln 'make_star_field\|write_seestar_fits' tests/*.py
+  tests/webapp/*.py | xargs grep -l -i 'mosaic\|panel'`): `test_auto_reject_mosaic_depth.py`,
+  `test_calibration_mosaic_edge.py`, `test_frame_coverage_sibling.py`, `test_photometric_mosaic.py`,
+  `test_photometric_mosaic_auto.py`, `test_subpixel_mosaic_reference.py`, `test_thumbnail.py`,
+  `test_coverage_trim.py` (fixtures are synthetic maps, not frames) and the rest. `tests/synth.py::star_catalog`
+  / `make_shared_sky_field` (the shared-sky twins of `webapp/sample_data`'s v0.386.0 mosaic).
+  **Shape.** (1) Per fixture, write down in one line what it can and cannot vouch for — *statistically alike*
+  vs *positionally alike* panels, even vs uneven depth, integer vs weighted coverage, two-way vs four-way
+  overlap — and assert the claim (e.g. `assert coverage_is_mosaic(cov)`; `assert len(set(levels)) >= 3` for a
+  four-way corner; a shared star lands at the same sky position in both panels). (2) Where a test measures
+  anything *between* two panels (a seam, a gain, a level step), switch the fixture to `make_shared_sky_field`.
+  (3) Add the two owner-shaped fixtures that do not exist anywhere in the suite: a **3×3 with a four-way corner
+  and weight jitter**, and a **12×8 raster with uneven depth** — as coverage maps in `test_coverage_trim.py` and
+  as a small frame set (tiny frames; the shape is what matters, not the pixels). (4) Do **not** rewrite fixtures
+  that work for what they were built for — the v0.387.0 note's own caution; the deliverable is the assertion
+  that says what each one is.
+  **Tests (this entry *is* tests).** Fails today: the four-way-corner and 12×8 coverage fixtures run through
+  `coverage_thin_fraction` (they fail until the thin-note bug is fixed, which is the point — file them with that
+  fix or `xfail`-free behind it, never as a skipped test); and at least one existing "mosaic" fixture whose new
+  shape assertion is false as written (the per-frame-star-field ones), corrected in the same commit.
+
+
+---
+
 ## v0.391.0 — 2026-09-08 — SHIPPED: auto-stack is on for a fresh install (`webapp/config.Settings.auto_stack`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-0r3aga`.)** The ⭐ READY —
