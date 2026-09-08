@@ -1,7 +1,18 @@
-import { Badge, Group, Paper, Stack, Text } from "@mantine/core";
+import { Anchor, Badge, Button, Group, Paper, Stack, Text } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { IconStars } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api, type DifficultyHint, type FramingHint, type MosaicPlan } from "../api/client";
+import { loadDismissedSig, saveDismissedSig } from "../dismissal";
+
+/** Where a dismissed "use this name?" offer is remembered, per target. The
+ *  stored signature is the suggested *name*, following the app's dismissal
+ *  convention: saying "keep my name" to one suggestion never silences a
+ *  genuinely different one (a re-solve that lands on another object). */
+export function renameOfferKey(safe: string): string {
+  return `astrostack.renameOffer.${safe}`;
+}
 
 /** A plain-language one-liner for the object card, e.g.
  *  "A galaxy in the constellation Andromeda." Constellation is dropped when the
@@ -64,6 +75,14 @@ export function difficultyColor(level: DifficultyHint["level"]): string {
  * target's safe name (Target, History, editor). Shares its query key with the
  * Target page's own identify fetch, so react-query dedupes to one request.
  *
+ * `allowRename` adds the one *action* the card can offer: when the target is
+ * still called after its folder ("NGC 6888_SUB") and the plate solve puts it
+ * squarely on a catalog object, the backend fills in `rename_to` and the card
+ * offers "Use this name?". Off by default, so the pages that merely *describe* a
+ * target (the editor, History) stay read-only and only the Target page — where
+ * the name is the heading the owner is looking at — can rename. Nothing is ever
+ * renamed automatically: the owner clicks, or dismisses.
+ *
  * `hideFraming` drops just the catalog "will it fit?" line, for a page that is
  * already showing the *measured* verdict for a finished picture of this target
  * (`FramingVerdictNote`). The two say the same thing — "M 42 is bigger than the
@@ -73,15 +92,35 @@ export function difficultyColor(level: DifficultyHint["level"]): string {
  * other caller are unchanged.
  */
 export function ObjectInfoCard(
-  { safe, hideFraming = false }: { safe: string; hideFraming?: boolean },
+  { safe, hideFraming = false, allowRename = false }:
+  { safe: string; hideFraming?: boolean; allowRename?: boolean },
 ) {
+  const qc = useQueryClient();
+  const [dismissed, setDismissed] = useState<string | null>(
+    () => (allowRename ? loadDismissedSig(renameOfferKey(safe)) : null),
+  );
   const identity = useQuery({
     queryKey: ["identify", safe],
     queryFn: () => api.identifyTarget(safe),
     enabled: !!safe,
   });
+  const rename = useMutation({
+    mutationFn: (name: string) => api.patchTarget(safe, { name }),
+    onSuccess: (t) => {
+      notifications.show({ message: `Renamed to ${t.name}`, color: "teal" });
+      // The heading, the library list and the card's own "already named" answer
+      // all read the name, so refresh the three of them rather than leaving the
+      // page showing the folder name until the next navigation.
+      qc.invalidateQueries({ queryKey: ["target", safe] });
+      qc.invalidateQueries({ queryKey: ["targets"] });
+      qc.invalidateQueries({ queryKey: ["identify", safe] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
   const d = identity.data;
   if (!d) return null;
+  const offered = allowRename ? (d.rename_to || "") : "";
+  const suggestion = offered && offered !== dismissed ? offered : "";
   return (
     <Paper withBorder p="sm" radius="md" bg="var(--mantine-color-default-hover)">
       <Group gap="sm" wrap="nowrap" align="flex-start">
@@ -126,7 +165,9 @@ export function ObjectInfoCard(
           {/* "How big is it, really?" — arcminutes mean nothing to a beginner,
               but "as wide as 6 full Moons" lands instantly. Pairs with the
               light-travel line below as the card's two pure-wonder facts, so
-              they share its accent styling and sit last. Self-hiding: an object
+              they share its accent styling and stay adjacent — the rename offer
+              is an *action* and sits after them, so the description reads
+              uninterrupted. Self-hiding: an object
               with no vetted size, or one far below Moon-scale (where the
               comparison says nothing useful), shows no line at all. */}
           {d.angular_size ? (
@@ -134,13 +175,44 @@ export function ObjectInfoCard(
               {d.angular_size.text}
             </Text>
           ) : null}
-          {/* "How far did you see?" — the other pure-wonder line, so it sits
-              last and reads in the app's accent colour. Self-hiding: an object
+          {/* "How far did you see?" — the other pure-wonder line, so it closes
+              the description and reads in the app's accent colour. Self-hiding: an object
               with no vetted catalog distance shows nothing at all. */}
           {d.light_travel ? (
             <Text size="sm" c="indigo.5" fs="italic">
               {d.light_travel.text}
             </Text>
+          ) : null}
+          {/* "This target is still called after its folder — want to call it
+              what it is?" One click, and dismissible: a beginner who dropped
+              "NGC 6888_SUB" in gets the real name offered where they are
+              already reading about the object, and someone who likes their own
+              folder names says so once and is not asked again. It sits last
+              because it is the card's only action: everything above it is
+              description, and an action wedged between two facts reads as a
+              third fact. Only the display name changes — the folder, the
+              frames and every link keep working. */}
+          {suggestion ? (
+            <Group gap="xs" wrap="wrap" mt={4}>
+              <Text size="sm">
+                This target is still named after its folder — call it{" "}
+                <Text span fw={600}>{suggestion}</Text>?
+              </Text>
+              <Button size="compact-xs" variant="light" color="indigo"
+                loading={rename.isPending}
+                onClick={() => rename.mutate(suggestion)}>
+                Use this name
+              </Button>
+              <Anchor component="button" type="button" size="xs" c="dimmed"
+                onClick={() => {
+                  // Remembered, so someone who likes their own folder names is
+                  // asked once rather than on every visit to the target.
+                  saveDismissedSig(renameOfferKey(safe), suggestion);
+                  setDismissed(suggestion);
+                }}>
+                Keep my name
+              </Anchor>
+            </Group>
           ) : null}
         </Stack>
       </Group>

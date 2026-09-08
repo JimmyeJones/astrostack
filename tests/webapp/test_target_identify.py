@@ -202,3 +202,32 @@ def test_the_planner_badges_the_same_field_as_the_target_card(
     # …and the Target card agrees about M 42 in the same breath.
     info = client.get("/api/targets/M_42/identify").json()
     assert info["framing"]["level"] == "tight"
+
+
+def test_a_named_target_is_never_offered_a_rename(client, solved_library):
+    """M_42 already says what it is, so the card describes it and offers
+    nothing — the owner's own words win."""
+    info = client.get("/api/targets/M_42/identify").json()
+    assert info["matched_by"] == "name"
+    assert info["rename_to"] is None
+
+
+def test_a_folder_named_target_is_offered_the_name_the_solve_found(
+    client, solved_library,
+):
+    """The feature: a target still called after its Seestar folder, whose solved
+    centre sits squarely on a catalog object, gets that object's name offered —
+    and taking it renames the label without moving the target."""
+    assert client.patch("/api/targets/NGC_7000",
+                        json={"name": "MyWorks_2026-08-14"}).status_code == 200
+
+    info = client.get("/api/targets/NGC_7000/identify").json()
+    assert info["matched_by"] == "coords"
+    assert info["rename_to"] == "Orion Nebula"
+
+    # Taking the offer is one PATCH, and the offer then withdraws itself.
+    assert client.patch("/api/targets/NGC_7000",
+                        json={"name": info["rename_to"]}).status_code == 200
+    after = client.get("/api/targets/NGC_7000/identify").json()
+    assert after["rename_to"] is None
+    assert client.get("/api/targets/NGC_7000").json()["name"] == "Orion Nebula"
