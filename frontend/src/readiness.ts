@@ -72,7 +72,11 @@ export interface IntegrationReadiness {
 
 // The goal as a compact figure: "6", "4", "1.5" (trailing ".0" trimmed), for a
 // "~N h" phrasing.
-function fmtGoal(h: number): string {
+// One plain-language rendering of a goal in hours: a whole number as-is, anything
+// else to one decimal. Shared so the inline "goal ~N h" chip and the verdict
+// sentence agree — a mosaic's per-panel-scaled goal is a long float
+// (`4 × 3.63… = 14.526171875`), and printing it raw is a real friendliness bug.
+export function fmtGoal(h: number): string {
   return Number.isInteger(h) ? `${h}` : `${h.toFixed(1)}`;
 }
 
