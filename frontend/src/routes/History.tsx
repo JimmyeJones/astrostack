@@ -8,7 +8,7 @@ import { notifications } from "@mantine/notifications";
 import { IconAdjustments, IconCheck, IconChevronDown, IconCopy, IconDeviceFloppy, IconGitCompare, IconInfoCircle, IconPencil, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting, type StackDrizzleDegraded } from "../api/client";
+import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackPanelGainSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting, type StackDrizzleDegraded } from "../api/client";
 import {
   formatCaptureNights, formatIntegration, formatStampDateTime,
 } from "../format";
@@ -173,6 +173,29 @@ export function photometricSummaryText(
   // would otherwise wonder where the line came from.
   if (photometric.auto) {
     s += " · automatic for a mosaic";
+  }
+  return s;
+}
+
+// One-line provenance for cross-panel gain matching — "Mosaic panels matched to
+// each other · 2 panels · measured where they overlap". Returns null when the run
+// didn't match its panels (a single field, or a mosaic whose overlaps had nothing
+// to say), so the card omits the line. Deliberately says *where the evidence came
+// from*: this is the one correction that reaches across a join, and a beginner
+// reading it should be able to see it was measured rather than guessed.
+export function panelGainSummaryText(
+  panelGain: StackPanelGainSummary | null | undefined,
+): string | null {
+  if (!panelGain) return null;
+  let s = "Mosaic panels matched to each other";
+  if (typeof panelGain.n_panels === "number") {
+    s += ` · ${panelGain.n_panels} panel${panelGain.n_panels === 1 ? "" : "s"}`;
+  }
+  if (typeof panelGain.min === "number" && typeof panelGain.max === "number") {
+    s += ` · brightness ${panelGain.min.toFixed(2)}–${panelGain.max.toFixed(2)}×`;
+  }
+  if (typeof panelGain.n_pairs === "number" && panelGain.n_pairs > 0) {
+    s += ` · measured in ${panelGain.n_pairs} overlap${panelGain.n_pairs === 1 ? "" : "s"}`;
   }
   return s;
 }
@@ -652,6 +675,11 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
       {photometricSummaryText(data.photometric) ? (
         <Text size="xs" c="dimmed">
           {photometricSummaryText(data.photometric)}
+        </Text>
+      ) : null}
+      {panelGainSummaryText(data.panel_gain) ? (
+        <Text size="xs" c="dimmed">
+          {panelGainSummaryText(data.panel_gain)}
         </Text>
       ) : null}
       {darkScalingSummaryText(data.dark_scaling) ? (

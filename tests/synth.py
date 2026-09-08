@@ -73,6 +73,77 @@ def make_star_field(
     return img
 
 
+def star_catalog(
+    *, seed: int, width: int, height: int, n_stars: int,
+    star_fwhm_px_full: float = 4.0,
+) -> list[tuple[int, int, float]]:
+    """``(x, y, peak)`` for one patch of synthetic sky, in *sky-pixel* coordinates.
+
+    The companion to :func:`make_shared_sky_field`: a mosaic's panels are windows
+    onto **one** catalog, so the stars in an overlap really are the same stars.
+    :func:`make_star_field` draws its own field per frame, which is fine for a
+    single field but means a mosaic's overlap holds two unrelated star patterns —
+    so nothing measuring the *shared* sky (panel photometry, seams, the overlap
+    itself) is exercised at all. Mirrors ``webapp.sample_data._star_catalog``,
+    which does the same job for the shipped mosaic sample.
+    """
+    sigma = star_fwhm_px_full / 2.3548
+    box = max(7, int(np.ceil(sigma * 6)))
+    half = box // 2
+    rng_stars = np.random.default_rng(seed)
+    stars: list[tuple[int, int, float]] = []
+    for _ in range(n_stars):
+        cx = int(rng_stars.integers(half + 4, width - half - 4))
+        cy = int(rng_stars.integers(half + 4, height - half - 4))
+        peak = float(rng_stars.uniform(2000, 30000))
+        stars.append((cx, cy, peak))
+    return stars
+
+
+def make_shared_sky_field(
+    stars: list[tuple[int, int, float]],
+    *,
+    width: int = 480,
+    height: int = 320,
+    origin: tuple[int, int] = (0, 0),
+    star_shift: tuple[float, float] = (0.0, 0.0),
+    signal_scale: float = 1.0,
+    sky_level: float = 1000.0,
+    sky_noise: float = 50.0,
+    noise_seed: int = 0,
+    star_fwhm_px_full: float = 4.0,
+) -> np.ndarray:
+    """Render one sub: the window of ``stars`` this frame points at, uint16.
+
+    ``origin`` is the frame's top-left corner in the catalog's sky-pixel grid —
+    a mosaic panel's pointing — and ``star_shift`` is the sub-pixel dither on top
+    of it. ``signal_scale`` dims the stars the way thin haze does: multiplicative
+    on the *signal*, leaving the sky where it is, which is exactly the case
+    neither the per-frame background flatten nor per-panel photometric
+    normalisation can undo.
+    """
+    sigma = star_fwhm_px_full / 2.3548
+    box = max(7, int(np.ceil(sigma * 6)))
+    half = box // 2
+    img = np.random.default_rng(noise_seed).normal(
+        loc=sky_level, scale=sky_noise, size=(height, width)).astype(np.float32)
+    sx, sy = star_shift
+    ox, oy = origin
+    yy, xx = np.indices((box, box))
+    for cx, cy, peak in stars:
+        kernel = (peak * signal_scale) * np.exp(
+            -((xx - half - sx) ** 2 + (yy - half - sy) ** 2) / (2 * sigma * sigma))
+        x0, y0 = cx - half - ox, cy - half - oy
+        # A panel's edge cuts stars in half — clip the paste rather than dropping
+        # them, or every panel border would be a star-free strip.
+        xa, ya = max(0, x0), max(0, y0)
+        xb, yb = min(width, x0 + box), min(height, y0 + box)
+        if xb <= xa or yb <= ya:
+            continue
+        img[ya:yb, xa:xb] += kernel[ya - y0:yb - y0, xa - x0:xb - x0]
+    return np.clip(img, 0, 65535).astype(np.uint16)
+
+
 def write_seestar_fits(
     path: str | Path,
     *,
@@ -93,6 +164,7 @@ def write_seestar_fits(
     pixel_size_um: float | None = None,
     instrume: str | None = "auto",
     date_obs: str = "2024-09-12T03:14:55.123",
+    data: np.ndarray | None = None,
 ) -> Path:
     """Write a synth FITS file with Seestar-like headers. Requires astropy.
 
@@ -108,13 +180,19 @@ def write_seestar_fits(
     ``date_obs`` overrides ``DATE-OBS`` — the header field that says *which
     capture* this is, so two files of the same size can be told apart as
     different exposures (the default keeps every existing fixture identical).
+
+    ``data`` writes a pixel array the caller already has instead of drawing a
+    fresh star field — how a mosaic fixture writes panels rendered from one
+    shared catalog (:func:`make_shared_sky_field`) while keeping every Seestar
+    header this writer puts on a sub.
     """
     from astropy.io import fits
 
-    data = make_star_field(
-        width=width, height=height, n_stars=n_stars, seed=seed, streak=streak,
-        star_shift=star_shift, noise_seed=noise_seed,
-    )
+    if data is None:
+        data = make_star_field(
+            width=width, height=height, n_stars=n_stars, seed=seed, streak=streak,
+            star_shift=star_shift, noise_seed=noise_seed,
+        )
     hdu = fits.PrimaryHDU(data=data)
     hdu.header["BAYERPAT"] = "RGGB"
     hdu.header["EXPTIME"] = 10.0

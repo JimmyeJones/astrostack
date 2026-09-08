@@ -945,6 +945,14 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "transparency; leaves un-measured frames untouched. Mosaics do this "
              "automatically — a panel shot through haze would otherwise stay dimmer "
              "than the one next to it."},
+    {"key": "panel_gain_match", "label": "Match mosaic panel brightness", "type": "bool",
+     "group": "advanced",
+     "help": "Mosaics only. Where two panels overlap they photograph the same sky, so "
+             "their brightness there can be compared honestly — this uses that to lift "
+             "a panel shot through haze up to match its neighbours, instead of leaving "
+             "it as a darker tile with a step along the join. Leave it on: it measures "
+             "first and changes nothing at all unless the overlaps give it a clear "
+             "answer. Single-field targets ignore this."},
     {"key": "lucky_fraction", "label": "Lucky imaging (keep sharpest fraction)", "type": "float",
      "group": "simple", "min": 0.05, "max": 1.0, "step": 0.05,
      "help": "Keep only the sharpest frames by FWHM and drop the rest. This is a "

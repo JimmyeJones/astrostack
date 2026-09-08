@@ -18,6 +18,112 @@ is a queue.
 
 ---
 
+## 2026-09-08 (Builder, branch `claude/sweet-babbage-wvv6ff`) — collision #13: two Builders built the overlap gain in the same hour, and the second threw its copy away
+
+**What happened.** This run took two tasks. The first — the Scout's "While you
+were asleep" digest — shipped as v0.388.0. The second was the READY size-L
+image-quality entry, cross-panel gain matching from the overlaps. It was
+implemented end to end: `seestack/stack/overlapgain.py`, the stacker pre-pass,
+a shared-sky fixture in `tests/synth.py`, 11 new tests, measured at **37.2 % →
+4.6 %** on a 0.6× hazy panel with the fitted gain ratio 1.669 against a true
+1.667. On the pre-merge `git fetch` it turned out that
+`claude/sweet-babbage-xm81q4` had merged **the same feature** as v0.387.0
+roughly an hour earlier — same module name, same function name, same
+measurement to within a rounding.
+
+**What was done about it.** The duplicate was **deleted, not merged and not
+"improved on"**. Their implementation is on `main`, green, and carries the one
+guard that matters most (`MIN_OVERLAP_CORRELATION`, a Pearson correlation across
+the overlap strip — a stronger form of the log-ratio scatter test this run's
+copy used, and arrived at the same way: by a fixture inventing a confident gain
+out of unrelated stars). Two of this run's choices differ — a 2 % neutral band
+so an even mosaic re-stacks bit-for-bit, and picking each panel's *typical* subs
+rather than its clearest — but both are unmeasured against theirs, and
+re-opening a shipped, tested pass to substitute untested preferences is exactly
+the churn §1 warns off. If either is ever wanted, it is a small change on top of
+what shipped, with a measurement; nothing was filed, because neither is a known
+defect.
+
+**Why the §11 rule did not catch it.** It was followed: `git fetch origin main`
++ `git log --oneline origin/main -30` grepped for the item's nouns, at the start
+of the run. The other run's work landed **during** the build — commit
+`68f48f8d` at 07:06, this run's task-2 was already underway — so the log was
+honest when it was read and stale before a line of the second task was written.
+That is the shape of every one of the thirteen: the fetch bounds *how early* a
+collision can be detected, not *whether* one happens.
+
+**The one thing that would have helped**, and it costs nothing: for a task the
+backlog sizes at **L**, re-fetch and re-grep once more *before writing code*,
+after the design read. This run spent ~40 minutes designing against the entry
+(reading `photometric.py`, `align_one`, the stacker hook) and never re-checked
+in that window — which is precisely when the other run's merge landed. The
+existing rule says "before starting each task"; on a long task the useful moment
+is later than that. Cheap, and it is the only lever a Builder has that does not
+require coordination it cannot do.
+
+---
+
+## 2026-09-08 (Builder, branch `claude/sweet-babbage-xm81q4`) — the fixture that *looked* like a mosaic and let a new pass invent a 2.6× gain
+
+**One task this run** (v0.387.0, cross-panel gain matching in a mosaic's
+overlaps). Two things it learned are about *how to check work*, not about the
+work, so they live here.
+
+**1. "It is a mosaic" is not the same as "its overlaps hold the same sky", and
+only one of those is testable by shape.** The engine's existing mosaic fixture
+(`tests/test_photometric_mosaic_auto.py::_hazy_mosaic_project`) draws a fresh
+star field per *frame*: two panels stepped 80 % of a field, overlapping on the
+canvas, each holding stars the other has never seen. It is a perfectly good
+fixture for everything it was built for — per-panel photometric behaviour, panel
+bins, provenance — and it says so in its own docstring ("Both panels use the
+*same* per-sub star seeds", which makes the two halves *statistically* alike, not
+*positionally* alike). What it cannot carry is any claim about the **overlap**.
+The new pass was written against it, measured a 2.6× gain between two
+equally-exposed panels, and applied a 28 % step — the manufactured panel grid the
+pass exists to prevent — and the only reason that surfaced was that an unrelated
+existing test (`test_haze_within_a_panel_is_gain_matched_out`) asserted the panels
+still matched afterwards. **Without that one assertion, this would have shipped.**
+The lesson generalises past this pass: before measuring anything *between* two
+regions of a synthetic canvas, check the fixture puts the same photons in both.
+`tests/synth.star_catalog` + `make_shared_sky_field` now exist for that (the
+test-side twin of what `webapp.sample_data` gained in v0.386.0), and
+`tests/test_overlap_panel_gain.py` uses them.
+
+**This is the same shape as the D1 lesson recorded on 2026-09-07** ("six tests had
+the bug pinned in a fixture that contradicted its own comment"). Twice in two days
+a defect survived because the fixture, not the code, was where the wrong
+assumption lived. A fixture is an assertion about the world; it deserves the same
+adversarial reading as a function.
+
+**2. The bug the false positive exposed was worth more than the false positive.**
+The fix was not "use a better fixture" — that only hides it. Overlapping
+*footprints* mean two WCS solutions agree, which a **mis-solved panel** also
+achieves while pointing somewhere else entirely. So the pass now correlates the
+shared strip before believing it (`MIN_OVERLAP_CORRELATION`), and correlation is
+blind to gain — precisely the quantity being measured — so a genuinely hazy panel
+still passes while unrelated sky does not. A synthetic fixture stood in for a real
+failure mode nobody had thought to guard against.
+
+**3. Two of the run's defects were my own, found by measuring rather than
+reading.** The first implementation aligned each sub onto a *coarse* canvas WCS
+**and then** block-folded it again — a double downsample that happened to give the
+right answer (both panels were squashed identically) while doing something the
+docstring did not describe. And the fit's consistency check originally dropped
+disagreeing pairs until the residual fell, which always terminates: a loop-free
+graph fits *any* ratios with exactly zero residual, so "it agrees now" was
+guaranteed rather than earned. Both were caught by writing a test that stated the
+intended arithmetic (`test_the_block_fold_lands_a_window_where_the_canvas_put_it`,
+`test_ratios_that_never_settle_stand_the_whole_pass_down`) instead of a test that
+only checked the end-to-end number, which was green throughout.
+
+**4. The end-to-end check that mattered was the sample nobody wrote for it.**
+Stacking v0.386.0's mosaic sample — four panels, one at ×0.85 signal, built by a
+different run for a different purpose — recovered panel scales of [0.999, 1.174]
+against a true 1/0.85 = 1.176. A fixture written by the same run that writes the
+feature can only confirm the author's own model; one written earlier, elsewhere,
+for something else, is evidence.
+
+---
 ## 2026-09-08 (Scout, branch `claude/admiring-brahmagupta-luiss8`) — mosaic Auto/editor + coverage-trim + ASTAP filesystem re-audit CLEAN; one verified friendliness bug found and fixed (the goal chip)
 
 **Baseline.** Fresh `source scripts/agent-setup.sh`; stacking+calibrate subset green

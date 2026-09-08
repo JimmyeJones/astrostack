@@ -3458,6 +3458,22 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
         with contextlib.suppress(KeyError, TypeError, ValueError):
             photometric["n_panels"] = int(header["PHOTPANL"])
 
+    # Cross-panel gain matching (mosaics only, present only when the overlaps
+    # actually yielded a measurement). Kept separate from ``photometric`` above
+    # because it is a different measurement on different evidence: that one
+    # compares each sub to its own panel's transparency scores, this one compares
+    # panels to each other through the sky they share. A run can carry either,
+    # both or neither, and a user reading "gain-matched" needs to know which.
+    panel_gain: dict[str, Any] | None = None
+    if "PANGAIN" in header:
+        panel_gain = {"mode": str(header["PANGAIN"])}
+        for hk, k in (("PANGNPAN", "n_panels"), ("PANGNPAR", "n_pairs")):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                panel_gain[k] = int(header[hk])
+        for hk, k in (("PANGMIN", "min"), ("PANGMAX", "max")):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                panel_gain[k] = float(header[hk])
+
     # Dark exposure-scaling summary (present only when a master dark was actually
     # scaled to the subs' exposure), parsed the same way so the panel can show a
     # single "Dark scaled to sub exposure · 30s → 10s" line — the user can trust
@@ -3600,7 +3616,8 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     return {"run_id": run_id, "integration_s": integration_s,
             "n_frames": n_frames, "weighting": weighting,
             "weighting_skipped": weighting_skipped,
-            "photometric": photometric, "dark_scaling": dark_scaling,
+            "photometric": photometric, "panel_gain": panel_gain,
+            "dark_scaling": dark_scaling,
             "sensor_defects": sensor_defects,
             "rejection": rejection, "frame_accounting": frame_accounting,
             "drizzle_degraded": drizzle_degraded,
