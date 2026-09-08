@@ -960,6 +960,13 @@ class StackOptionField(BaseModel):
     # When set, the field is only relevant if another field is truthy, or — with
     # the ``"key=value"`` form — equals a specific value.
     depends_on: str | None = None
+    # Display units for a numeric field, when the engine's own unit is not what a
+    # beginner should be typing. ``"percent"`` means the value is a fraction in
+    # (0, 1] that the form shows and accepts as 0–100 with a ``%`` suffix,
+    # converting at the boundary — the *stored* value, the engine field and its
+    # bounds are unchanged. ``None`` (the default, and every other field) means
+    # the form shows the raw number, exactly as it always has.
+    unit: Literal["percent"] | None = None
 
 
 # Curated descriptors. `default` is filled from the dataclass at import time so
@@ -1009,12 +1016,13 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "it as a darker tile with a step along the join. Leave it on: it measures "
              "first and changes nothing at all unless the overlaps give it a clear "
              "answer. Single-field targets ignore this."},
-    {"key": "lucky_fraction", "label": "Lucky imaging (keep sharpest fraction)", "type": "float",
-     "group": "simple", "min": 0.05, "max": 1.0, "step": 0.05,
-     "help": "Keep only the sharpest frames by FWHM and drop the rest. This is a "
-             "fraction, not a percentage: 1.0 = keep all, 0.75 = keep the sharpest "
-             "three-quarters, 0.5 = the sharpest half. Shown as a percentage "
-             "(e.g. \"Lucky 50%\") on the finished picture."},
+    {"key": "lucky_fraction", "label": "Lucky imaging (keep the sharpest frames)",
+     "type": "float", "group": "simple", "min": 0.05, "max": 1.0, "step": 0.05,
+     "unit": "percent",
+     "help": "Keep only the sharpest frames by FWHM and drop the rest. Type how "
+             "much to keep: 100 = keep all, 75 = keep the sharpest three-quarters, "
+             "50 = the sharpest half. The finished picture is badged with the same "
+             "number (e.g. \"Lucky 50%\")."},
     {"key": "drizzle", "label": "Drizzle (super-resolution)", "type": "bool", "group": "simple",
      "help": "Use the drizzle algorithm. Best with 200+ dithered frames."},
     {"key": "drizzle_reject", "label": "Drizzle outlier rejection", "type": "bool",

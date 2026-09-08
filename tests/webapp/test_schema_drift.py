@@ -64,3 +64,28 @@ def test_fractional_fields_do_not_label_themselves_as_percentages():
         f"Fractional (max ≤ 1.0) stack-form fields whose label implies a percentage: "
         f"{mislabelled}"
     )
+
+
+def test_a_percent_unit_only_ever_sits_on_a_field_that_really_is_a_fraction():
+    # `unit: "percent"` tells the form to multiply by 100 on the way in and
+    # divide on the way out. Put it on a field that is *already* 0–100 (or on a
+    # bool/enum) and every value a user types is silently 100x wrong on the
+    # stacking hot path — so the invariant is pinned here rather than trusted to
+    # whoever adds the next descriptor: a percent field is a float whose bounds
+    # are a fraction.
+    wrong = [
+        f.key for f in stack_option_fields() if f.unit == "percent"
+        and not (f.type == "float" and f.max is not None and f.max <= 1.0
+                 and f.min is not None and f.min > 0.0)
+    ]
+    assert not wrong, f"Stack-form fields marked percent that are not fractions: {wrong}"
+
+
+def test_lucky_imaging_is_typed_as_a_percent_and_stored_as_a_fraction():
+    # The friendliness half of the same fact: the beginner types the number the
+    # Gallery badges their picture with ("Lucky 50%"), while the engine field and
+    # its (0, 1] contract are untouched.
+    field = next(f for f in stack_option_fields() if f.key == "lucky_fraction")
+    assert field.unit == "percent"
+    assert (field.min, field.max, field.step) == (0.05, 1.0, 0.05)
+    assert field.default == StackOptions().lucky_fraction == 1.0

@@ -14,6 +14,216 @@ Newest first.
 
 ---
 
+## v0.398.1 — 2026-09-08 — the Lucky-imaging knob is typed as the percent the picture is badged with (`StackOptionField.unit`, `StackOptionControl.percentFromFraction`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-yzhopm`. The Scout's
+2026-08-26 #3 entry, the follow-up v0.272.1 deliberately left open. Original at
+the foot.)**
+
+**The gap.** v0.272.1 fixed a *misleading* label by renaming the knob to "keep
+sharpest **fraction**" — honest, but it still asked a beginner to think in
+0.05–1.0 while everywhere else in the app the same number is a percent: the
+Gallery badges the finished picture **"Lucky 50%"**. So the one place you *set*
+it was the one place it was not a percentage.
+
+**The fix is a units layer at the form boundary, not a new field.**
+`StackOptionField` gains an optional `unit`, and `lucky_fraction` is the first
+(and today only) field to carry `"percent"`. `StackOptionControl` then shows and
+accepts 0–100 with a `%` suffix — **value, min, max and step all scaled
+together**, so the typed input and the editor's slider speak one unit and neither
+can be off by 100×. The engine field, its `(0, 1]` contract, the stored value and
+every descriptor without the hint are untouched: `show`/`store` are the identity
+for every other field, which is why this generalises to the next fraction knob
+instead of special-casing this one.
+
+**The round-trip is exact, not nearly exact.** `0.35 × 100` is
+`35.000000000000004` in IEEE-754, so both directions round
+(`percentFromFraction` / `fractionFromPercent`) — a saved recipe that stored 0.35
+renders as `35 %` and stores back as exactly `0.35`, which a test pins for 0.05,
+0.35 and 1.0.
+
+**Upgrade-safe (§9):** one additive, defaulted response field; an older frontend
+ignores it and renders the raw fraction exactly as before, an older backend
+omitting it lands on the same path. No config, schema, on-disk, default or
+engine change — a stack run started before and after this reads the identical
+`lucky_fraction`.
+
+**Copy follows the input:** the help text no longer says "this is a fraction, not
+a percentage" but *"Type how much to keep: 100 = keep all, 75 = keep the sharpest
+three-quarters, 50 = the sharpest half"*, and names the badge it matches. The
+label keeps no `%` of its own, so the v0.272.1 drift guard
+(`test_fractional_fields_do_not_label_themselves_as_percentages`) still holds
+unweakened over every field, this one included.
+
+**Tests (+8):** `StackOptionControl.test.tsx` (+6 — a stored 0.5 shown as `50 %`;
+typing 50 storing 0.5; the binary-fraction round-trip; the bounds scaled on the
+slider, where they are observable; the slider readout speaking percent too; and a
+field *without* the hint behaving byte-for-byte as before) and
+`tests/webapp/test_schema_drift.py` (+2 — the invariant that `unit: "percent"`
+may only sit on a float whose bounds really are a fraction, so a future
+descriptor cannot put it on a field that is already 0–100 and make every typed
+value 100× wrong on the stacking hot path; and `lucky_fraction`'s own bounds and
+default pinned against the dataclass).
+
+  *Original entry, for the record: "make the Lucky-imaging input a **real**
+  percent, not a raw fraction… the genuinely friendly end state is a percent
+  input (5–100, step 5, default 100) that the control converts to/from the
+  engine's `lucky_fraction` (0.05–1.0) at the boundary… needs either a per-field
+  `unit: "percent"`/scale hint the control honours on display *and* on submit
+  (cleanest — generalises to any future fraction knob) or a special-case, and a
+  matching round-trip so a saved '50%' still persists `lucky_fraction=0.5`." The
+  first option, and the round-trip is the test that made it worth writing.*
+
+---
+
+## v0.397.0 — 2026-09-08 — a mosaic is offered its object's name (`objectinfo._object_containing`, `_extent_match_radius_deg`, `confident_object_title(allow_extent_match=)`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-yzhopm`. The LEAD filed by the
+run that shipped the v0.396.0 rename offer, measured but deliberately not fixed
+there. Original entry kept verbatim at the foot.)**
+
+**The gap, in the owner's own shooting shape.** The "this target is still named
+after its folder — call it *Orion Nebula*?" offer is gated on
+`confident_object_title`'s 0.25° title-grade cone against the target's stored
+centre. For a **mosaic** that centre is the middle of the *union canvas*, not of
+a pointed field — so the bundled 2×2 sample sits **0.3223°** from M 42 and gets
+no offer at all, while a single field of the same object gets one. The owner is a
+heavy mosaic user (AGENTS.md §1), so the surface that helps him most was the one
+that mostly stayed quiet.
+
+**The fix is the object's own extent, not a bigger cone.** Widening the radius
+would start claiming neighbours for single fields too, which is exactly what the
+0.25° cone exists to prevent (Stephan's Quintet beside NGC 7331, ~0.5°). Instead,
+for a target whose name carries the mosaic suffix — `is_mosaic_target_name`, this
+module's own definition of mosaic-ness, already used two lines away by
+`preserve_mosaic_suffix` — an object whose **own extent contains the centre**
+counts as well. A 2×2 of M 42 qualifies on the nebula's 60′ minor span; a
+neighbour half a degree away still does not, because a 10′ galaxy has no extent
+to claim with.
+
+**Three things keep it from becoming a wider cone:**
+
+* **It only ever runs after the cone finds nothing** (`confident_object_title`
+  consults `_object_containing` only when `best is None`), so it can add an
+  answer where there was silence and can never change one that already existed.
+* **`allow_extent_match` is off by default.** `confident_object_title` is what
+  bakes a name into shared pixels, and `webapp/pipeline.py`'s caption path calls
+  it unchanged. Only `suggested_target_rename` turns it on, and only for a mosaic
+  name.
+* **The radius is the *minor* half-axis, capped at `_EXTENT_MATCH_MAX_DEG` =
+  1.5°.** The catalog stores no position angle, so the minor half-axis is the
+  only radius we are sure lies inside the object whichever way it is turned; the
+  cap means a future catalog entry with a huge span (Barnard's Loop is ~10°
+  across) can never claim a whole region of sky. The largest object in the
+  bundled catalog asks for 1.25°, so the cap binds nothing today.
+
+**Measured before believing it, over the whole real catalog.** Every one of the
+157 bundled objects was tested against every other's centre: **exactly one**
+containment exists beyond the 0.25° cone — M 31 contains M 32's centre (0.403°,
+against M 31's 0.525° radius), i.e. the satellite galaxy that really is inside
+Andromeda. So the ambiguity this rule could in principle create does not exist in
+practice, and where it does the answer is defensible. Ties break on the smallest
+sep÷radius (the object the point sits most centrally inside), then the smaller
+object, then the catalog id, so the answer is deterministic rather than
+catalog-order-dependent.
+
+**On the real sample, not a synthetic point:** the bundled mosaic sample's stored
+centre (84.09142, −5.56980) is 0.3223° from M 42 and 0.3663° from M 43. It now
+offers **"Orion Nebula (mosaic)"** — M 43 loses not on distance but because at
+20′ it is smaller than the cone and is skipped outright by the extent pass. A
+single field pointed at the very same spot is still offered nothing: the owner
+aimed there, so the cone is the honest question to ask.
+
+**Upgrade-safe (§9):** one keyword argument defaulting to today's behaviour; no
+config, schema, on-disk, API-shape or default change, and nothing renames
+anything — the caller only ever *offers*.
+
+**Tests (+5, four failing before):** `tests/test_objectinfo.py` — the sample's own
+centre offered its object's name as a mosaic and nothing as a single field; the
+neighbour case (0.5° from NGC 7331) still silent **both** ways, so the widening
+is not a wider cone; only objects bigger than the cone can claim by extent and an
+unsized object has no extent at all; the radius is the minor axis and is capped;
+and `confident_object_title`'s default answer unchanged for every caller that
+does not ask.
+
+**What was deliberately left alone:** the caption path in `webapp/pipeline.py`
+(it bakes a name into shared pixels, and its own guard — the stored name must
+identify nothing — already covers the case a mosaic reaches), and
+`identify_object`'s wider 0.75° card cone, which already speaks for these mosaics.
+
+  *Original LEAD, for the record: "a mosaic target is usually too far off its own
+  object to be offered a name, because the offer is gated on the union centre…
+  the honest shape, if it is ever worth doing, is not a bigger radius (which
+  would start claiming neighbours for single fields too): it is to ask whether
+  the solved centre falls inside the object's own extent — the catalog already
+  carries `size_arcmin`/`size_minor_arcmin`… Needs a real mosaic's centre offsets
+  to validate the 'inside its extent' rule before it decides a name; the
+  synthetic sample gives exactly one data point." The gate is answered by the
+  whole-catalog containment measurement above: the rule is geometric containment,
+  not a tuned threshold, and the one place it could be ambiguous was enumerated
+  rather than assumed.*
+
+---
+
+## v0.398.0 — 2026-09-08 — NEW BEGINNER FEATURE: "add tonight to calendar" for the object that would finish a constellation (`lifelist.get_nearly_there_ics`, `plan.catalog_object_ics_response`)
+
+**(Builder 2026-09-08. The 2026-08-27 idea "the constellation nudge names the
+object that's up tonight but gives no way to act on it". Original entry kept at
+the foot.)**
+
+**The gap.** The "You're one object away from finishing Lyra — M57 is well placed
+tonight, usable until 02:10" card ended on a *sentence*. Everything needed to act
+on it already existed on both sides — the endpoint returns the pick's
+`usable_start_utc`/`usable_end_utc`, and the planner already renders a one-tap
+`.ics` for a catalog object — but the two never met, so the beginner had to
+remember the night themselves.
+
+**Why a new route rather than reusing the suggestion one.** The idea's own care
+note was the design: `/api/plan/suggest/{catalog_id}/calendar.ics` is deliberately
+restricted to `_SHOWPIECE_IDS` ("a bogus id is a 404, not a way to calendar
+arbitrary catalog rows"), and a nearly-finished constellation's missing object is
+drawn from the *whole* bundled catalog. Rather than widen that guard, the new
+route **names no id at all**: `GET /api/life-list/nearly-there/calendar.ics`
+re-asks the same endpoint the card read and calendars the object *it* picked. So
+there is nothing arbitrary to address, no whitelist to loosen, and the file can
+never describe a different object or a different night from the card.
+
+**One reminder, not two.** The `.ics` body itself is built by the new shared
+`plan.catalog_object_ics_response`, extracted verbatim from `get_suggest_ics`, so
+the suggestion card's reminder and this one cannot drift into two different
+descriptions of the same night. It takes an **object, never an id** — which rows
+are addressable stays each caller's own decision, and is not something the helper
+can be talked into widening.
+
+**Never a blank calendar:** 404 when no constellation is close, when nothing of it
+is up tonight, when no observing location is known, or when there is no upcoming
+window; 422 on a bad `when`, like its sibling. The card shows the link only when
+there *is* a tonight pick, so the 404 is a backstop rather than a path a user can
+click into.
+
+**Offline, additive, and off nothing:** a plain `.ics` download the OS calendar
+imports — no account, no network (AGENTS.md §1), no settings, no schema. One new
+read-only route and one new anchor on an existing self-hiding card; nothing was
+removed and no always-on surface was added.
+
+**Tests (+8):** `tests/webapp/test_life_list_nearly_there.py` (+6 — the download
+served as `text/calendar` with the object's name in plain language; the event's
+UID matching the id the card reported *and* no id-shaped variant of the route
+existing; a winter evening with nothing up as a 404; no-location and
+nothing-close as 404s; a bad `when` as 422; and the premise itself pinned as a
+fact — the bundled catalog is **not** a subset of `_SHOWPIECE_IDS`, which is why
+the route exists) and `NearlyThereCard.test.tsx` (+2 — the link's href and
+`download` attribute, and no link at all when there is no tonight pick).
+
+  *Original idea, for the record: "the constellation nudge names the object
+  that's up tonight but gives no way to act on it… Care before building: the
+  `.ics` route is deliberately restricted to `_SHOWPIECE_IDS`… so this needs
+  either a second route scoped to 'objects the nearly-there endpoint actually
+  returned' or a widening of that whitelist with the same care about arbitrary
+  ids. Don't just remove the check." — the first option, taken literally.*
+
+---
+
 ## v0.396.0 — 2026-09-08 — NEW BEGINNER FEATURE: "this target is still named after its folder — call it what it is?" (`Library.rename_target`, `objectinfo.suggested_target_rename`, `targets.folder_name`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-e506ni`. The last open slice
