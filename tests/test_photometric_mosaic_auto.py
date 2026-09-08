@@ -167,6 +167,37 @@ def _mean_star_flux(fits_path) -> float:
     return _star_flux(data, finite)
 
 
+def test_the_fixture_really_does_give_both_panels_the_same_star_field(tmp_path):
+    """The unasserted premise every measurement in this file rests on.
+
+    `_panel_step` reads star flux in the left and right panel-only regions and
+    calls any difference photometric mismatch. That is only true because
+    `_hazy_mosaic_project` seeds every sub with `100 + j` **regardless of panel**,
+    so the two halves of the canvas carry the *same* star field — statistically
+    and pixel-for-pixel alike, though not positionally (the panels point at
+    different sky, so the same star is not in both; nothing here may read the
+    overlap, and `_panel_masks` excludes it on purpose).
+
+    Stated as an assertion rather than a comment, because the last three findings
+    in this project were all a rule tested against a fixture whose comment was
+    wrong (see `tests/shapes.py`). If the seeding ever drifts, every test below
+    would quietly start measuring a difference in the sky as a difference in gain
+    — and would still pass.
+    """
+    proj = _hazy_mosaic_project(tmp_path, haze=1.0, score=False)  # no haze at all
+    try:
+        result = run_stack(proj, StackOptions(
+            output_name="neutral", max_workers=1, sigma_clip=False))
+    finally:
+        proj.close()
+    # Two panels, one overlap strip: a genuine mosaic canvas, not one field.
+    left, right = _panel_masks(result.fits_path)
+    assert left.sum() > 1000 and right.sum() > 1000
+    # ...and with nothing dimmed, the step between them is essentially zero, so
+    # any step a later test measures is the pass under test and nothing else.
+    assert _panel_step(result.fits_path) < 0.05
+
+
 def test_haze_within_a_panel_is_gain_matched_out(tmp_path, monkeypatch):
     """The measurement, as it stands after v0.276.0: transparency that drifts
     *while a panel is being shot* is gain-matched away, against that panel's own

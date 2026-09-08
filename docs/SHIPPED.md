@@ -14,6 +14,258 @@ Newest first.
 
 ---
 
+## v0.391.1 — 2026-09-08 — BUG FIX: a thin mosaic panel is not a ragged border (`coverage_trim.TRIM_KEEP_RATIO`, `_rect_from_mask`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-0r3aga`. Verified by
+reproduction while building the READY fixture-shape sweep — which is how the
+entry said it would be found: "this is test code, and it is what finds the next
+D1".)**
+
+**Symptom.** On a **dense mosaic raster whose panels are not equally deep** —
+the owner's own shooting shape; he shoots 3x3 and 12x8 across many nights, so a
+panel's depth is however many subs that panel happened to get — the one-click
+Auto edit **cropped the picture down to a quarter of its canvas**, on a canvas
+that is fully tiled and has no ragged edge to trim at all. Measured on three
+shapes, before the fix: a 12x8 raster 8-30 subs deep with 6 % weight jitter kept
+**25.6 %**, a 6x4 kept **34.8 %**, an 8x6 4-40 deep kept **17.6 %**. AGENTS.md §1
+puts the bar at *"a trim above ~15 % of the canvas is a bug, not a ragged edge"*.
+Default Auto path, `auto_crop_border` on (the historical default), mosaics only.
+
+**Root cause — the second half of D1, and a different failure from the first.**
+D1 (v0.382.4) was "the reference depth is the map's *peak*", fixed by
+`panel_coverage_level` taking the lowest **substantial** coverage level instead.
+But "substantial" is `PANEL_LEVEL_MIN_FRAC` = 8 % of the covered canvas, and on a
+dense raster with uneven depth **no single depth is that substantial**: 96 panels
+spread over two dozen depths hold ~1 % each. The search walks straight past the
+thin panels and settles near the **mode** of the depth distribution — 19.1 where
+the thinnest panel is 8 — and `well_covered_mask` then declares every panel below
+half of that to be fringe. Because those panels are *scattered* across the canvas
+rather than around its rim, the largest all-well-covered rectangle collapses.
+An even-depth raster is fine (all panels are the mode), and so is a 1x2 at
+400/150 subs (each panel is half the canvas, so both are substantial) — which is
+why every existing fixture missed it.
+
+**The fix, and why this discriminator and not a threshold.** Two shapes that a
+percentile cap on the threshold could not tell apart, because the failure is
+*spatial*: 5 % of pixels scattered through a canvas destroys the rectangle just
+as thoroughly as 40 % around its rim. What actually separates the two cases is
+**what the discarded pixels are**. A border is *uncovered* — no frame reached it
+— plus the thin fringe beside it; a thin panel is *covered*: real data, fewer
+subs. So the coverage alone fixes an honest ceiling on how much a border trim can
+remove, and `largest_covered_rect` now computes that bound (the largest rectangle
+over `isfinite & > 0`) alongside its answer. When the depth threshold does worse
+than `TRIM_KEEP_RATIO` (0.8) of the bound it has stopped describing a border, and
+the threshold is halved and asked again, up to eight rungs.
+
+**Measured, on fifteen shapes.** Every honest case is byte-identical: single
+field with a fringe 92.2 %, jittered 92.2 %, ragged 2x2 95.1 %, the NaN-hole
+fixture 45.0 %, every evenly-tiled mosaic still `None`, and — the case the bound
+must not swallow — a **diagonal** mosaic still trims to 12.2 %, because it is
+mostly *uncovered*, so its bound is small too. The three broken rasters become
+`None` (no crop). And a raster that is **both** uneven and genuinely ragged, which
+a blanket stand-down would have left ragged, goes **34.2 % -> 95.1 % kept**: the
+border goes, every panel stays.
+
+**Checked on the real thing, not only on maps.** The app's own mosaic sample
+(v0.386.0) stacked fresh and read through `_trim_rect_for_run` keeps **92.1 %**
+of its 907x615 canvas — the same figure to the digit that v0.390.0 measured
+before this change. That sample is evenly-ish deep (6/6/6/3), which is why it
+never showed the bug and why it must not move now.
+
+**Safety.** The guard can only ever *lower* the threshold, so the mask only grows
+and the rectangle only gets bigger: it can leave fringe in, never crop a panel
+away — the same property D1's own fix carries, pinned here by a randomised test.
+`well_covered_mask` itself is unchanged (its threshold logic moved intact into a
+shared `_coverage_threshold`), so `thumbnail.py`'s all-sky fade and
+`stacker.coverage_thin_fraction` are untouched — the latter measures at
+`ratio` 0.25 of the panel depth rather than 0.5, which puts it below the thinnest
+panel on all three shapes, so the "How's my stack?" note was already right.
+The coverage map is strided to 512 px before this runs, so the extra
+`_max_rectangle` sweeps are microseconds and the ladder only runs at all when the
+guard trips.
+
+**Tests (+5, two failing before).**
+`test_an_uneven_weighted_raster_is_not_cropped_to_its_deeper_panels` and
+`test_a_raster_that_is_both_uneven_and_ragged_still_loses_its_ragged_edge` are
+the regressions; plus the safety property over 40 random maps, the diagonal
+mosaic that must keep its small rectangle, and the shape-claim test below.
+No test weakened or rewritten — all 20 existing cases pass unchanged, both
+before and after.
+
+**Also shipped here: `tests/shapes.py`, the READY fixture-shape entry.** A small
+vocabulary for stating what a "mosaic" fixture can and cannot vouch for —
+statistically vs positionally alike panels, even vs uneven depth, two- vs
+four-way overlap, integer vs weighted coverage — measured with the *same*
+`panel_coverage_level` the rule under test uses, so a claim is stated in the
+units the rule measures in. `test_coverage_trim.py` now asserts its fixtures'
+shapes rather than describing them in a comment: `_tiled_mosaic` really does have
+a four-way corner and a peak 4x a panel, the 1x2 400/150 strip really does put
+the reference on its thinner panel, and the new raster fixture really does hold
+panels below the threshold (`assert_panels_thinner_than_the_reference`) — without
+which a "12x8 with uneven depth" test can pass for the wrong reason and vouch for
+nothing. This is exactly what the entry asked for and exactly what found the bug.
+
+**Upgrade-safe.** Pure geometry, no config, schema, on-disk, API-shape or default
+change. Old runs are unaffected — the trim is recomputed from the coverage map on
+every request.
+
+**The infra entry, as it stood — and the one part of it deliberately NOT done.**
+Its item (3) asked for a 3x3-with-a-four-way-corner and a 12x8-with-uneven-depth
+coverage fixture "that do not exist anywhere in the suite". The four-way corner
+already existed (`_tiled_mosaic(3, 3)` builds one, and now says so); the 12x8
+with uneven depth did not, and building it is what found the bug above. Its
+item (2) — switch a fixture that measures *between* two panels to
+`make_shared_sky_field` — needed splitting before it could be answered, because
+"between two panels" is two different things. A test that reads the **overlap**,
+where the same sky is seen twice, genuinely needs positionally-alike panels: the
+only one in the suite is `test_overlap_panel_gain.py`, which v0.387.0 already
+built on the shared-sky helpers. The others (`test_photometric_mosaic.py`,
+`test_photometric_mosaic_auto.py`) compare two **pure-panel** regions with the
+overlap strip masked out, and rest instead on the panels being drawn from the
+same seed — statistically and pixel-for-pixel alike, though not positionally.
+That premise was load-bearing and unasserted, so it is now a test
+(`test_the_fixture_really_does_give_both_panels_the_same_star_field`: with
+nothing dimmed the step between the two panels is < 5 %, so any step a later
+test measures is the pass under test and nothing else). The fixtures themselves
+are left alone, per the entry's own item (4).
+
+- **READY (backlog-readiness run 2026-09-08; the mechanism behind A1, D1 and the thin-note bug filed today) —
+  sweep the test fixtures that call themselves a mosaic and pin each one's *shape claim* with the shared-sky
+  helpers, so a rule can no longer pass twenty sweeps by being tested on a fixture that contradicts its own
+  comment.** *(Pillar: correctness of the QA reach — this is test code, not agent tooling, and it is what
+  finds the next D1. Size S–M, tests only. Checked `docs/PROCESS-NOTES.md` 2026-09-07/08: the D1 note ("six
+  tests had the bug pinned in a fixture that contradicted its own comment") and the v0.387.0 note ("the fixture
+  that *looked* like a mosaic and let a new pass invent a 2.6× gain") are the two recorded instances;
+  `tests/synth.star_catalog` + `make_shared_sky_field` (v0.387.0) exist and are used by exactly one file.)*
+  **The pattern, three times now.** A1: the STF's zero-clip spike read as the sky, pinned by fixtures with no
+  spike. D1: `well_covered_mask` measured against the peak, pinned by six tests whose "mosaic" was one plateau
+  plus a fringe. Today's thin-note bug: `_COVERAGE_THIN_SHARE` calibrated on "an even three-panel mosaic" —
+  no four-way corner, no weight jitter — while the owner shoots 3×3 and 12×8 rasters with uneven depth. Each
+  time the *code* was tested and the *fixture* was the wrong assumption.
+  **Code sites.** The twenty test files that build frames with `tests/synth.make_star_field` /
+  `write_seestar_fits` and say "mosaic" or "panel" (`grep -ln 'make_star_field\|write_seestar_fits' tests/*.py
+  tests/webapp/*.py | xargs grep -l -i 'mosaic\|panel'`): `test_auto_reject_mosaic_depth.py`,
+  `test_calibration_mosaic_edge.py`, `test_frame_coverage_sibling.py`, `test_photometric_mosaic.py`,
+  `test_photometric_mosaic_auto.py`, `test_subpixel_mosaic_reference.py`, `test_thumbnail.py`,
+  `test_coverage_trim.py` (fixtures are synthetic maps, not frames) and the rest. `tests/synth.py::star_catalog`
+  / `make_shared_sky_field` (the shared-sky twins of `webapp/sample_data`'s v0.386.0 mosaic).
+  **Shape.** (1) Per fixture, write down in one line what it can and cannot vouch for — *statistically alike*
+  vs *positionally alike* panels, even vs uneven depth, integer vs weighted coverage, two-way vs four-way
+  overlap — and assert the claim (e.g. `assert coverage_is_mosaic(cov)`; `assert len(set(levels)) >= 3` for a
+  four-way corner; a shared star lands at the same sky position in both panels). (2) Where a test measures
+  anything *between* two panels (a seam, a gain, a level step), switch the fixture to `make_shared_sky_field`.
+  (3) Add the two owner-shaped fixtures that do not exist anywhere in the suite: a **3×3 with a four-way corner
+  and weight jitter**, and a **12×8 raster with uneven depth** — as coverage maps in `test_coverage_trim.py` and
+  as a small frame set (tiny frames; the shape is what matters, not the pixels). (4) Do **not** rewrite fixtures
+  that work for what they were built for — the v0.387.0 note's own caution; the deliverable is the assertion
+  that says what each one is.
+  **Tests (this entry *is* tests).** Fails today: the four-way-corner and 12×8 coverage fixtures run through
+  `coverage_thin_fraction` (they fail until the thin-note bug is fixed, which is the point — file them with that
+  fix or `xfail`-free behind it, never as a skipped test); and at least one existing "mosaic" fixture whose new
+  shape assertion is false as written (the per-frame-star-field ones), corrected in the same commit.
+
+
+---
+
+## v0.391.0 — 2026-09-08 — SHIPPED: auto-stack is on for a fresh install (`webapp/config.Settings.auto_stack`)
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-0r3aga`.)** The ⭐ READY —
+GATE OPEN entry the owner approved 2026-09-07, with both prerequisites landed
+(the editor auto-seed v0.390.0 and the settle hold v0.390.1) and nothing in
+front of it.
+
+**What shipped.** `Settings.auto_stack` is `True`. A brand-new install now walks
+the whole chain — ingest → QC → solve → **stack** — without the owner having to
+find a switch, which is what "drop your subs in and come back to a picture"
+actually means. Until now a fresh install did the first three steps and then
+stopped at a Stack form.
+
+**What it deliberately does *not* do, and why the release note has to say so.**
+`SettingsStore.__init__` loads `state/config.json` and re-saves the *full* model
+on every boot, so every install that has ever run carries an explicit
+`"auto_stack": false` and keeps it. That is AGENTS.md §9 working exactly as
+intended, and no migration flips it: the file cannot distinguish "the owner
+turned it off in August" from "the app dumped the old default", and flipping a
+setting someone deliberately turned off is the breach §9 exists to prevent. So
+this reaches **fresh installs only**; the owner turns it on himself from
+Settings → "Auto-stack" (still the one item under "REQUIRES MANUAL OWNER
+ACTION").
+
+**Why it is safe on by default now, when it was not before.** Three guards had
+to land first, and all three are in the path: the readability preflight and the
+thinner-than-best hold (v0.270.1) — a stack never publishes a picture thinner
+than the one the target already has, and a transient storage fault holds without
+stamping the attempt marker; `auto_stack_min_frames` = 3 (v0.256.0) — one or two
+lone solved subs are held, not published as colour speckle; and the settle
+window `auto_stack_settle_min` = 20 min (v0.390.1) — a target still receiving
+subs waits for the night to finish instead of re-stacking after every 5-minute
+poll. `auto_edit_on_autostack` stays **off**: the owner's decision named
+`auto_stack`, and whether the walk-away picture should also be auto-*edited* is
+question 1 on his one-sitting list.
+
+**Copy.** The Settings hint now says both halves — on for new installs, unchanged
+for an existing one — and names the three guards, so "it stacks on its own now"
+reads as a feature rather than a risk. The "Walk-away mode" master switch is
+unaffected (it needs all five of its keys, and the other four still default off).
+
+**Tests (+3 Python, +2 vitest; all five fail before the flip).**
+`test_config_upgrade.py::test_auto_stack_defaults_on_for_a_fresh_install`
+(`Settings()` and a state dir with no `config.json`);
+`::test_a_stored_auto_stack_false_survives_the_default_flip` — a stored `false`
+loads as `False`, **differs from the fresh default** (the assertion that makes it
+more than a tautology), survives the boot-time re-save, and is still `false` in
+the file afterwards;
+`test_auto_stack_pipeline.py::test_the_shipped_defaults_stack_a_target_with_nobody_watching`
+— the one test in that file that does *not* name `auto_stack`, so it is the only
+one that could ever have caught this; plus two `Settings.test.tsx` cases pinning
+the two halves of the copy and the three guards. Nothing loosened: every existing
+auto-stack test already set the flag explicitly.
+
+**Upgrade safety.** One default value; no schema, on-disk, API-shape or endpoint
+change. A stored config is bit-for-bit unaffected.
+
+**The entry, as it stood:**
+
+- **⭐ READY — GATE OPEN, AND BOTH PREREQUISITES HAVE NOW LANDED (D1 v0.382.4; the editor auto-seed **v0.390.0**;
+  the settle hold **v0.390.1**, 2026-09-08 — this is the next item in the order the owner fixed, and nothing is
+  in front of it). ✅ APPROVED BY THE OWNER 2026-09-07: turn `auto_stack` back on
+  by default.** *(Pillar: autonomy — PRIORITY 2; size S. Owner decision recorded in
+  answer to the third audit, which verified the walk-away path end-to-end through the real watcher — three
+  nights, two targets, 160 solves, no re-solves, `incoming/` bit-identical afterwards. Re-checked against the
+  current code 2026-09-08.)*
+  **What the owner asked for, and what a default flip can and cannot do.** He wants the walk-away chain on.
+  `webapp/config.py::Settings.auto_stack: bool = False` (~115) is the shipped default. **A default flip does
+  not reach his install:** `SettingsStore.__init__` (~401–423) loads `state/config.json` and **re-saves the
+  full model on every boot** (`save()` writes `model_dump_json()`), so every install that has ever booted
+  carries an explicit `"auto_stack": false` and keeps it — AGENTS.md §9 says a stored value survives an
+  upgrade, and there is no way to tell a value he set from a value the app dumped. So this item is two things,
+  and must be honest about both: (1) the shipped default flips for **fresh** installs; (2) the owner flips the
+  switch himself on his install (Settings → the "Auto-stack" `Switch`, `routes/Settings.tsx` ~712) — that is
+  the one live item under "REQUIRES MANUAL OWNER ACTION", and it stays until he does. **Do not write a
+  migration that flips a stored `false`** — the file cannot distinguish "he turned it off in August" from "the
+  app wrote the default", and flipping a setting he deliberately turned off is the breach §9 exists to prevent.
+  Say all of this in the release note.
+  **Code sites.** `webapp/config.py` — `auto_stack` and, directly under it, `auto_edit_on_autostack: bool =
+  False`: **leave that one off**; the owner's decision named `auto_stack`, and whether the walk-away picture
+  should also be auto-*edited* is the first question on the owner's one-sitting list below. `webapp/pipeline.py`
+  ~399 (`if settings.auto_stack:` — the walk-away batch) and ~543 (the `auto_edit_on_autostack` gate). The
+  guards that must still be in the path: the readability preflight and the thinner-than-best hold (v0.270.1),
+  `_auto_stack_degraded_recheck` (v0.273.0), `auto_stack_min_frames` (default 3).
+  `frontend/src/routes/Settings.tsx` ~44 (the `auto_stack` hint copy).
+  `tests/webapp/test_config_upgrade.py::test_old_config_loads_keeps_values_and_defaults_new_fields` (~22).
+  **Shape.** Flip the default; update the Settings hint to say it is on for new installs; **write the upgrade
+  test first**: a `config.json` carrying `"auto_stack": false` loads as `False` after the flip. Grep the suite
+  (`grep -rn auto_stack tests/webapp`: `test_auto_stack_pipeline.py`, `test_autostack_hold.py`,
+  `test_auto_stack_defaults.py`, `test_api.py`, `test_pipeline*.py`) — most set it explicitly; fix any that
+  relied on the default by **setting it explicitly**, never by loosening. Run `scripts/agent-dogfood.sh
+  --empty`: a first-run app now has auto-stack on — check the empty-Dashboard copy still reads right.
+  **Tests.** `test_config_upgrade.py`: a stored `false` survives *and differs from the fresh default* (**fails
+  today** — both are `False`); `Settings().auto_stack is True` (**fails today**); `test_auto_stack_pipeline.py`:
+  with defaults, a scan of a new target with ≥ `auto_stack_min_frames` located subs stacks it, and the thin /
+  unreadable holds still hold.
+
+---
+
 ## v0.390.1 — 2026-09-08 — SHIPPED: hold a target the sky is still filling (`pipeline._auto_stack_settle_hold`, `auto_stack_settle_min`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-ldlc6c`.)** The READY entry

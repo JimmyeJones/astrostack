@@ -112,7 +112,24 @@ class Settings(BaseModel):
     auto_ingest: bool = True
     auto_qc: bool = True
     auto_solve: bool = True
-    auto_stack: bool = False
+    # ON by default since v0.391.0 (owner decision, 2026-09-07). "Drop your subs
+    # in and come back to a picture" is the product's North Star, and until now a
+    # fresh install did the first four steps of that chain and then stopped,
+    # leaving a beginner staring at a Stack form. The three guards that make it
+    # safe unattended all landed first: the readability preflight and the
+    # thinner-than-best hold (v0.270.1), ``auto_stack_min_frames`` (v0.256.0) and
+    # the settle window (v0.390.1), so a hands-off stack now waits for the night
+    # to finish, refuses to publish a thinner picture than the target already
+    # has, and never fires on one or two lone solved subs.
+    #
+    # **This flip only reaches a FRESH install.** ``SettingsStore`` re-saves the
+    # whole model on every boot, so any install that has ever run carries an
+    # explicit ``"auto_stack": false`` in ``state/config.json`` and keeps it —
+    # that is AGENTS.md §9 working as intended, and it is deliberate: the file
+    # cannot tell a value the owner turned off from a value the app dumped, so
+    # nothing here may migrate a stored ``false``. An existing install turns it
+    # on from Settings.
+    auto_stack: bool = True
     # After a successful background auto-stack, also auto-edit the fresh master
     # into a finished picture (persist the one-click Auto recipe as the run's
     # editor recipe + re-render its thumbnail through it), the same chain the

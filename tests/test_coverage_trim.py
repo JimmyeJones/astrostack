@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from seestack.edit.coverage_trim import (
+    _rect_from_mask,
     coverage_is_mosaic,
     largest_covered_rect,
     panel_coverage_level,
     well_covered_mask,
+)
+from tests.shapes import (
+    assert_panels_thinner_than_the_reference,
+    assert_reference_is_the_thinnest_panel,
+    assert_weighted,
+    describe_coverage,
+    level_share,
+    panel_level,
+    peak_over_panel,
 )
 
 
@@ -272,3 +283,140 @@ def test_the_new_reference_can_only_ever_keep_more():
 
 def test_panel_level_declines_on_an_empty_population():
     assert panel_coverage_level(np.asarray([], dtype=np.float32)) is None
+
+
+# --- what these fixtures can and cannot vouch for -----------------------------
+#
+# D1 survived twenty sweeps because every fixture that called itself a mosaic was
+# one plateau plus a fringe, i.e. a shape on which "the peak" and "a panel" are
+# the same number. `_tiled_mosaic` is not that shape — but nothing said so, and an
+# unasserted comment is what the last three findings all had in common. See
+# `tests/shapes.py` for the vocabulary.
+
+def test_the_tiled_fixture_really_is_the_shape_its_name_claims():
+    """`_tiled_mosaic` vouches for: a peak strictly above one panel, a real share
+    of the canvas at each of one/two/four panels deep, and — at 2x2 and up — a
+    genuine four-way corner. It does **not** vouch for uneven depth or weighted
+    coverage unless asked for them, and it is a coverage map, so it says nothing
+    about pixels, stars or seams."""
+    for name, cov, ways in [
+        ("2x2 @15%", _tiled_mosaic(2, 2, overlap=0.15), 4.0),
+        ("3x3 @20%", _tiled_mosaic(3, 3, overlap=0.20), 4.0),
+        ("3x3 @5%", _tiled_mosaic(3, 3, overlap=0.05), 4.0),
+        ("12x8 raster", _tiled_mosaic(12, 8, overlap=0.10, h=800, w=1200), 4.0),
+    ]:
+        assert panel_level(cov) == 30.0, f"{name}: {describe_coverage(cov)}"
+        assert peak_over_panel(cov) == pytest.approx(ways), \
+            f"{name}: {describe_coverage(cov)}"
+        # ...and each of those levels is a real share of the picture, not a seam
+        # a pixel wide: one panel dominates, the 2x seams and 4x corners are real.
+        assert level_share(cov, 30.0) > 0.2, name
+        assert level_share(cov, 60.0) > 0.005, name
+        assert level_share(cov, 120.0) > 0.0005, name
+    # A 1x2 strip with no overlap at all: two panels, nothing deeper than one, and
+    # deliberately uneven — the one shape here that can vouch for uneven depth.
+    strip = _tiled_mosaic(2, 1, overlap=0.0, depths=[400, 150])
+    assert panel_level(strip) == 150.0
+    assert peak_over_panel(strip) < 3.0, describe_coverage(strip)
+    # Uneven depth, yes — but each panel is half the canvas, so the reference
+    # correctly *is* the thinner one and nothing real sits below the threshold.
+    # That is what stops this fixture standing in for the raster case below.
+    assert_reference_is_the_thinnest_panel(strip, what="1x2 400/150")
+    # And the control: a single field is one level, peak == panel, which is why
+    # D1 was structurally invisible on every single-field fixture in this suite.
+    field = _single_field_with_fringe()
+    assert peak_over_panel(field) == pytest.approx(1.0)
+
+
+def _raster_with_uneven_depth(nx, ny, *, overlap=0.10, h=800, w=1200, seed=0,
+                              lo=8, hi=31, jitter=0.06):
+    """The owner's shape, and the one no fixture in this suite had: a raster whose
+    panels are **not** equally deep and whose coverage is a sum of weights.
+
+    He shoots 3x3 and 12x8 rasters across many nights, so a panel's depth is
+    however many subs that panel happened to get, and `quality_weighted` (on by
+    default on the walk-away path) makes each sub's contribution a float rather
+    than a count. Every mosaic fixture above is evenly deep and integral.
+    """
+    rng = np.random.default_rng(seed)
+    depths = [float(d) for d in rng.integers(lo, hi, size=nx * ny)]
+    cov = _tiled_mosaic(nx, ny, overlap=overlap, depths=depths, h=h, w=w)
+    pos = cov > 0
+    cov[pos] *= (1 + rng.normal(0, jitter, size=int(pos.sum()))).astype(np.float32)
+    return cov
+
+
+# --- D1, second half: a thin panel is not a border ----------------------------
+#
+# `panel_coverage_level` looks for the lowest *substantial* level, where
+# substantial is 8 % of the covered canvas. On a dense raster with uneven panel
+# depth no single depth is that substantial — 96 panels spread over two dozen
+# depths — so the search walks past the thin panels and settles near the mode,
+# and every panel below half of it is declared fringe and cropped away. Fully
+# tiled canvases, with no ragged edge to trim at all.
+
+def test_an_uneven_weighted_raster_is_not_cropped_to_its_deeper_panels():
+    """Fail-before: 25.6 %, 34.8 % and 17.6 % of the canvas kept, on three fully
+    tiled mosaics. AGENTS.md §1 puts the bar at "a trim above ~15 % of the canvas
+    is a bug, not a ragged edge"."""
+    for name, cov in [
+        ("12x8 8-30", _raster_with_uneven_depth(12, 8)),
+        ("6x4 6-30", _raster_with_uneven_depth(6, 4, overlap=0.12, h=600, w=900,
+                                               lo=6)),
+        ("8x6 4-40", _raster_with_uneven_depth(8, 6, h=700, w=1000, lo=4, hi=41,
+                                               jitter=0.08)),
+    ]:
+        # The fixture is doing its job: uneven, weighted, and with a peak far
+        # above the thinnest panel, so a depth-referenced rule had room to be wrong.
+        assert_panels_thinner_than_the_reference(cov, what=name)
+        assert_weighted(cov, what=name)
+        assert peak_over_panel(cov) > 2.0, f"{name}: {describe_coverage(cov)}"
+        # Fully tiled: there is no border, so the honest answer is no crop.
+        assert largest_covered_rect(cov) is None, \
+            f"{name}: {describe_coverage(cov)}"
+
+
+def test_a_raster_that_is_both_uneven_and_ragged_still_loses_its_ragged_edge():
+    """The fix must not turn the trim off — only stop it eating panels. A 6x4 with
+    uneven depth *and* a genuine 12 px partial-coverage border keeps ~95 %: the
+    border goes, every panel stays. Fail-before: 34.2 %."""
+    cov = _raster_with_uneven_depth(6, 4, overlap=0.12, h=600, w=900, lo=6)
+    for k in range(12):
+        v = 6 * (k + 1) / 13
+        cov[k, :] = np.minimum(cov[k, :], v)
+        cov[-1 - k, :] = np.minimum(cov[-1 - k, :], v)
+        cov[:, k] = np.minimum(cov[:, k], v)
+        cov[:, -1 - k] = np.minimum(cov[:, -1 - k], v)
+    rect = largest_covered_rect(cov)
+    assert rect is not None
+    assert 0.90 < _kept_fraction(rect) < 0.99, describe_coverage(cov)
+    x0, y0, x1, y1 = rect
+    assert x0 < 0.05 and y0 < 0.05 and x1 > 0.95 and y1 > 0.95
+
+
+def test_the_trim_can_only_ever_keep_more_than_the_depth_threshold_alone():
+    """The safety property of the coverage bound, over random maps: the rectangle
+    returned is never smaller than the one the depth threshold alone would give.
+    So this guard, like D1's own fix, can only leave fringe in — never crop a
+    panel away."""
+    rng = np.random.default_rng(7)
+    for _ in range(40):
+        cov = rng.gamma(2.0, 8.0, size=(60, 80)).astype(np.float32)
+        cov[rng.random((60, 80)) < 0.1] = np.nan
+        strict = _kept_fraction(_rect_from_mask(well_covered_mask(cov)))
+        assert _kept_fraction(largest_covered_rect(cov)) >= strict - 1e-9
+
+
+def test_a_diagonal_mosaics_genuinely_small_rectangle_is_still_offered():
+    """The case the bound must not swallow: a diagonal mosaic is *mostly
+    uncovered*, so the largest well-covered rectangle is honestly small — and the
+    coverage bound is small too, because it is measured on the same uncovered
+    pixels. Nothing changes here."""
+    cov = np.zeros((400, 400), dtype=np.float32)
+    for k in range(6):
+        x0 = int(k * (400 - 140) / 5)
+        y0 = int(k * (400 - 140) / 5)
+        cov[y0:y0 + 140, x0:x0 + 140] += 20.0
+    rect = largest_covered_rect(cov)
+    assert rect is not None
+    assert _kept_fraction(rect) < 0.2, describe_coverage(cov)
