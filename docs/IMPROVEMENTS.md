@@ -5276,6 +5276,28 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW BEGINNER FEATURE (Scout 2026-09-08) — "While you were asleep": a one-glance morning digest of what
+  the walk-away pipeline did overnight, across every target.** *(Pillar: 3 friendliness + 2 autonomy, "enjoy /
+  understand"; size M.)* The owner's live settings are `auto_stack` off today, but the North Star and priority 2
+  are exactly the walk-away night: drop files in, go to bed, wake up to good pictures. When that *is* on (or
+  after any hands-off scan), the owner currently has to open target after target to learn what changed — there
+  is **no cross-target "what happened since I last looked" surface**. Verified absent by grep: `overnight` /
+  `digest` / `what's new` / `since you last` turn up only `seestack/gui/notify.py` (a historical desktop toast,
+  not the web app) and unrelated hashing; the Dashboard has a heatmap and per-target cards but nothing that
+  *summarises the delta*. **What a beginner gets:** a Dashboard card (or a `/whats-new` nested route — new pages
+  are allowed, AGENTS.md §1 IA rule; no new always-on banner) that answers, in plain language, "since your last
+  visit / last night": which targets gained subs and how many, which produced a **new or better** picture
+  ("M42 — 120 new subs, cleaner than before"), and which **need a look** — a target the walk-away path *held*
+  for missing files or as too-thin, or whose subs are failing to plate-solve. Sane default: it only appears when
+  there is a delta to report, and says nothing (or a quiet "nothing new since <when>") otherwise, so it never
+  nags. **Reuse, don't reinvent (grep before building):** every input already exists — `session_recap` /
+  `activity_calendar` for per-night deltas and pace, `readiness` for "better/enough", `stackhealth` +
+  `pipeline._auto_stack_readability_hold`'s `auto_stack_held_unreadable` / `held_thin` summaries and
+  `_solve_was_tried` for "needs a look". The new work is aggregating those across targets since a stored
+  "last seen" stamp and rendering the card; additive, read-only, off nobody's hot path. **Verify first** that
+  the Dashboard doesn't already fold most of this — size it against `Dashboard.tsx` before starting; if it
+  mostly does, this shrinks to a "what's changed since last visit" filter on what's there.
+
 - ~~**NEW BEGINNER FEATURE (Scout 2026-09-07) — "Is my mosaic evenly filled?": a per-panel depth /
   gap readout that tells a mosaic shooter where to point next.**~~ — **ALREADY SHIPPED, TWO DAYS BEFORE IT WAS
   FILED; struck 2026-09-07 by the next Builder run so nobody builds it a second time.** The whole feature is
