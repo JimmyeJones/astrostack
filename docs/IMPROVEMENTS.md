@@ -1044,9 +1044,10 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Autonomy — "just works" (PRIORITY 2)
 
-- **⭐ READY — GATE OPEN (D1 shipped v0.382.4). ✅ APPROVED BY THE OWNER 2026-09-07: turn `auto_stack` back on
-  by default — but take the auto-seed entry under "Editor" first, and the settle hold directly below this
-  entry in the same run or before it.** *(Pillar: autonomy — PRIORITY 2; size S. Owner decision recorded in
+- **⭐ READY — GATE OPEN, AND BOTH PREREQUISITES HAVE NOW LANDED (D1 v0.382.4; the editor auto-seed **v0.390.0**;
+  the settle hold **v0.390.1**, 2026-09-08 — this is the next item in the order the owner fixed, and nothing is
+  in front of it). ✅ APPROVED BY THE OWNER 2026-09-07: turn `auto_stack` back on
+  by default.** *(Pillar: autonomy — PRIORITY 2; size S. Owner decision recorded in
   answer to the third audit, which verified the walk-away path end-to-end through the real watcher — three
   nights, two targets, 160 solves, no re-solves, `incoming/` bit-identical afterwards. Re-checked against the
   current code 2026-09-08.)*
@@ -1080,50 +1081,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   today** — both are `False`); `Settings().auto_stack is True` (**fails today**); `test_auto_stack_pipeline.py`:
   with defaults, a scan of a new target with ≥ `auto_stack_min_frames` located subs stacks it, and the thin /
   unreadable holds still hold.
-
-- **READY (backlog-readiness run 2026-09-08, found by re-reading the walk-away chain for the `auto_stack`
-  flip) — once auto-stack is on, a target that is *still being shot* is re-stacked in full after every scan
-  that brings new subs: hold a target until it has gone quiet.** *(Pillar: autonomy — PRIORITY 2; size S–M;
-  backend only, one additive setting. Confidence: traced — `_auto_stack_frame_count` (`webapp/pipeline.py`
-  ~2334) fires whenever "more accepted+solved frames exist than the last stack covered", and nothing between it
-  and `_stack_target` asks whether subs are still arriving; the third audit's end-to-end run had 160 subs in
-  total and could not feel this. Checked `docs/SHIPPED.md` and this file for "settle" / "quiet" /
-  "still shooting" / "cadence": `watch_quiet_period_s` settles a *file*, never a *target*; nothing else.)*
-  **The problem, in the owner's terms.** He turns Auto-stack on and shoots a 12-panel mosaic for six hours.
-  The watcher's poll (`watch_poll_interval_s`, 300 s) delivers a batch of new subs, the scan solves them, and
-  `_auto_stack_frame_count` says "new solved frames" — so the app stacks the **whole target** (every night's
-  subs, up to his 5,477) and, with auto-edit on, edits it. By the time that finishes the next poll has
-  delivered more, so it stacks the whole target again. The single-worker `JobManager` serialises them, so the
-  NAS spends the night re-stacking, and the Target page's "newest picture" flips every hour to a picture of a
-  night that is not over. A second face of the same gap: `auto_stack_min_frames` (3 located subs) is counted
-  **per target**, so on night one of a mosaic the first three located subs of the first panel are enough to
-  publish a one-panel "mosaic" as the target's picture. Both are exactly what "drop files in, walk away, come
-  back to a great image" is not.
-  **Code sites.** `webapp/pipeline.py`: the walk-away batch (~399 `if settings.auto_stack:` … the per-target
-  loop that calls `_auto_stack_frame_count(lib, safe)` ~444 and holds on `auto_stack_min_frames` ~462 *without*
-  stamping the attempt marker — the hold shape to copy); `_auto_stack_frame_count` (~2334);
-  `_auto_stack_readability_hold` (~2434, the other hold, and the one whose "held, not stamped, retried next scan"
-  semantics this must share). `seestack/io/project.py` — `frames.source_mtime` (the sub's own file time, set at
-  ingest/refresh) and `date_obs`; `webapp/config.py` (`watch_quiet_period_s`, `watch_poll_interval_s`,
-  `auto_stack_min_frames`). `frontend/src/routes/Settings.tsx` ~712–721 (the Auto-stack group).
-  **Shape.** One additive setting, `auto_stack_settle_min: int = 20` (`ge=0`; 0 = today's behaviour), and one
-  hold in the walk-away loop beside the two that exist: if the target's newest accepted sub (`max(source_mtime)`,
-  falling back to `date_obs`) is younger than the settle window, **hold** — status *"still receiving subs
-  (last one N min ago) — will stack once the night has settled"*, no attempt marker, retried on the next scan
-  exactly like the min-frames hold. The manual Stack form and "Process target" are never held. Twenty minutes
-  is longer than any poll and shorter than a meridian-flip pause; make it a named constant with that sentence
-  beside it. Optional second half, only if the first proves insufficient on real data: a per-target minimum
-  interval between unattended stacks. **Not** a debounce inside the watcher — the watcher settles files, and a
-  target keeps receiving files all night.
-  **Upgrade-safe (§9):** a new setting with a default; behaviour changes only on installs with `auto_stack`
-  on, which today is no install the owner runs (his is off) — the honest time to land it is *before* his
-  switch goes on, which is why it sits beside the flip.
-  **Tests** (`tests/webapp/test_autostack_hold.py`, the existing hold tests are the template): a target whose
-  newest sub is 2 min old is held with the new status and no marker (**fails today** — it stacks); the same
-  target 30 min later stacks; `auto_stack_settle_min = 0` reproduces today's behaviour byte-for-byte; a
-  target with no `source_mtime` on any row (pre-fingerprint rows) is not held; "Process target" on a held
-  target stacks immediately.
-
 
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
@@ -3060,6 +3017,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.390.1** — PRIORITY 2 (autonomy), the READY entry filed 2026-09-08 and the prerequisite the `auto_stack` flip is gated on (**so that flip is now unblocked**): **a target the sky is still filling is held until the night settles, instead of being re-stacked in full after every 5-minute poll.** `_auto_stack_frame_count` fires on "more solved subs than the last stack covered" and nothing asked whether subs were still *arriving*, so a night of shooting one target meant re-stacking every night it had, over and over, while the "newest picture" kept becoming a picture of a night that was not over. New `pipeline._auto_stack_settle_hold` holds while the newest accepted sub is younger than `auto_stack_settle_min` (default 20 — a named constant: longer than any poll, shorter than a meridian-flip pause; 0 = today's cadence exactly), **without stamping the attempt marker**, exactly like the thin and readability holds — so the stack happens once, on the whole night, at the first scan after the subs stop. Delayed, never stranded, never skipped; the Stack form and "Process target" are untouched. Time comes from new pure `Project.newest_accepted_sub_time()` (two `MAX()`s, no `FrameRow` — asked of every target on every poll), preferring `source_mtime` and falling back to `timestamp_utc`, whose error direction can only make a target stack *sooner*. A source clock running ahead costs one window plus the skew, never forever. The entry's "second face" (per-target `auto_stack_min_frames` publishing a one-panel mosaic on night one) is covered by the same hold, not by a second mechanism. Surfaced on the Jobs page in the same alert shape the other two holds use ("waiting on N still being shot"), and deliberately **not** in `overnight.needs_a_look` — a target still being shot is not something to go and check. Tests +10 Python / +4 vitest; seventeen existing auto-stack tests across five files now set the window to 0 explicitly (their fixtures write subs seconds before asserting), none loosened. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.390.0** — PRIORITY 1 (editor), the ⭐ READY — GATE OPEN entry the owner approved 2026-09-07: **the editor opens on the good picture instead of a nudge to press one button.** On a run with no saved recipe, first open runs `…/editor/auto` and opens on that, with the usual "What Auto-process did" note and *"Started you off with Auto-process — Undo to see the plain stack."* It stands aside for a saved recipe, and for either look of the user's **own** — the previous run's edit *and* their saved default; the entry named only the first, but both buttons live inside the nudge a seed replaces, and removing a feature is the owner's one hard constraint. `resetOps([])` then `setOps(built)` puts it exactly one Undo from the plain stack (the reset matters — navigating from another run leaves that run's recipe in `ops`); nothing is persisted without a Save; a failed seed falls through to the old empty pipeline and nudge with **no** red error, via its own `autoSeed` mutation sharing `fetchAuto`/`applyAutoResult` with the button. `seeded` still gates every preview query, so the decision is made once and there is no seed-then-reseed flash. **Gate re-measured, not trusted:** the mosaic sample stacked fresh and read through `_trim_rect_for_run` keeps **92.1 %** of the canvas. Tests +6 net; the old first-view test rewritten deliberately, never weakened. The entry's "unsaved-changes guard" does not exist anywhere in the frontend — filed back under Ideas. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.389.2** — BUG FIX (the 🟠 VERIFIED entry filed 2026-09-08, with its two named companions): **"thin coverage" is measured against a *panel's* depth, not the coverage map's peak — the same mistake D1 removed from the trim.** `coverage_thin_fraction` now references `coverage_trim.panel_coverage_level`, so "How's my stack?" can no longer tell a mosaic owner that 22–74 % of his picture is a ragged border while offering a "Trim border" that keeps the whole canvas (measured on seven shapes: the 2x2 sample 22 % → 0.0 %, a 12x8 raster with uneven depth and weight jitter 74 % → 0.0 %; the single field unchanged to the digit, since the panel level *is* its peak). The level comes off a strided sample capped at 2 M pixels, because `panel_coverage_level` sorts a float64 copy and this runs at stack time on the full canvas. Old runs heal without a re-stack: two additive columns (`coverage_shares_version`, `coverage_median_depth`, no `SCHEMA_VERSION` bump) let `backfill_coverage_shares` **re-derive** a stale share off the map the run already wrote — a single-field run is never marked stale, and a stale mosaic whose map is gone goes quiet in memory only, never losing the row. The κ-σ reach note gains the provable half of A6: `coverage_median_depth` fires it on a mosaic whose panels are shallow but whose four-way corner cleared the threshold, worded as the half of the picture it can prove. `coverage_is_mosaic`'s dense-raster false negative is documented, deliberately **not** widened (legacy-fallback only). Tests +26. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.389.1** — CLOSED BY MEASUREMENT (the Scout's 2026-08-26 #2 idea, unblocked by v0.387.0): **`photometric_normalize` stays off outside a mosaic — star-core SNR gains only +0.16 % on the realistic single-field case with quality weighting on** (+0.39 / +1.22 / +3.33 % as the haze gets extreme; +0.00 % and bit-identical when there is nothing to correct). On a single field every pixel gets the *same* subs, so the spatial step that makes the pass valuable on a mosaic is structurally absent and all it can change is the combine weight — which quality weighting's `transparency_factor` already approximates. Not a default flip on the hot path. **The first fixture inverted the answer to −9.7 %** by scaling the sky noise along with the signal; haze dims the stars, not the sky glow. `tests/test_photometric_single_field.py` (+2) pins the bit-identity and the never-hurts direction. No code changed. Full entry, table and fixture warning in [`SHIPPED.md`](SHIPPED.md).

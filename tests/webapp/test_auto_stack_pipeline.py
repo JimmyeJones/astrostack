@@ -21,9 +21,13 @@ class _FakeJM:
 
 def _settings(root) -> Settings:
     # Only auto_stack on, so the run goes straight to the auto-stack pass.
+    # ``auto_stack_settle_min=0``: this fixture's subs were written seconds
+    # ago, so the settle hold (v0.390.1) would legitimately hold every target
+    # as "still being shot". These tests are about other things; the settle
+    # window has its own tests in ``test_autostack_settle.py``.
     return Settings(
         data_root=str(root), auto_ingest=False, auto_qc=False,
-        auto_solve=False, auto_stack=True,
+        auto_solve=False, auto_stack=True, auto_stack_settle_min=0,
     )
 
 

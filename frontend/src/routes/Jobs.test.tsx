@@ -402,6 +402,23 @@ describe("pipelineSummary", () => {
     ]);
   });
 
+  it("says which targets are still being shot, rather than reading as nothing done", () => {
+    // A beginner watching Jobs on a night of shooting would otherwise see
+    // "Imported 60 new frames." and no picture, with nothing saying why.
+    const { line, heldSettling } = pipelineSummary({
+      scanned: 60, auto_stacked: [],
+      auto_stack_held_settling: [
+        { target: "M 42", quiet_min: 2, settle_min: 20 },
+        { target: "NGC 7000", quiet_min: 0, settle_min: 20 },
+      ],
+    });
+    expect(line).toBe("Imported 60 new frames · waiting on 2 still being shot.");
+    expect(heldSettling).toEqual([
+      { target: "M 42", quietMin: 2, settleMin: 20 },
+      { target: "NGC 7000", quietMin: 0, settleMin: 20 },
+    ]);
+  });
+
   it("reads 'No new frames' and singularises one target / one picture", () => {
     expect(pipelineSummary({ scanned: 0, auto_stacked: ["M 42"], auto_edited: 1 }).line)
       .toBe("No new frames · auto-stacked 1 target · finished 1 into a picture.");

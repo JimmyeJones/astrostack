@@ -240,7 +240,8 @@ def test_auto_stack_without_auto_edit_leaves_linear_master(client, solved_librar
     # background stack produces a flat linear master with no saved editor recipe
     # — the pre-existing behaviour is unchanged by the new opt-in.
     client.put("/api/settings",
-               json={"auto_stack": True, "auto_edit_on_autostack": False})
+               json={"auto_stack": True, "auto_edit_on_autostack": False,
+                     "auto_stack_settle_min": 0})
     body = _run_scan(client)
     assert "auto_edited" not in body["result"]
     runs = client.get("/api/targets/M_42/stack-runs").json()
@@ -256,7 +257,8 @@ def test_auto_edit_on_autostack_finishes_the_picture(client, solved_library):
     # into a picture: the Auto recipe is saved as the run's editor recipe, just
     # like the one-click Process / Reprocess chains.
     client.put("/api/settings",
-               json={"auto_stack": True, "auto_edit_on_autostack": True})
+               json={"auto_stack": True, "auto_edit_on_autostack": True,
+                     "auto_stack_settle_min": 0})
     body = _run_scan(client)
     assert body["result"].get("auto_edited", 0) >= 1
     runs = client.get("/api/targets/M_42/stack-runs").json()
@@ -290,7 +292,8 @@ def test_auto_edited_run_matches_the_reveal_and_hides_the_stretch_suggestion(
     # This goes through the *watcher* auto-stack rather than the Process button, so
     # both routes into the same auto-edit are covered.
     client.put("/api/settings",
-               json={"auto_stack": True, "auto_edit_on_autostack": True})
+               json={"auto_stack": True, "auto_edit_on_autostack": True,
+                     "auto_stack_settle_min": 0})
     body = _run_scan(client)
     assert body["result"].get("auto_edited", 0) >= 1
     runs = client.get("/api/targets/M_42/stack-runs").json()
@@ -351,7 +354,8 @@ def test_mixed_pointing_guard_skips_watcher_auto_stack(client, data_root):
     # stranded.
     _build_mixed_pointing_target(data_root)
     client.put("/api/settings",
-               json={"auto_stack": True, "mixed_pointing_guard": True})
+               json={"auto_stack": True, "mixed_pointing_guard": True,
+                     "auto_stack_settle_min": 0})
     body = _run_scan(client)
     result = body["result"]
     assert "M_MIXED" in result.get("auto_stack_mixed_skipped", [])
@@ -360,7 +364,8 @@ def test_mixed_pointing_guard_skips_watcher_auto_stack(client, data_root):
     # Turning the guard back off, a re-scan now auto-stacks the (bimodal) target —
     # proof the skip didn't strand it via the crash-loop attempt marker.
     client.put("/api/settings",
-               json={"auto_stack": True, "mixed_pointing_guard": False})
+               json={"auto_stack": True, "mixed_pointing_guard": False,
+                     "auto_stack_settle_min": 0})
     body = _run_scan(client)
     assert "M_MIXED" in body["result"].get("auto_stacked", [])
     assert len(client.get("/api/targets/M_MIXED/stack-runs").json()) == 1
@@ -462,6 +467,10 @@ def test_auto_stack_auto_edit_honours_the_auto_crop_setting(
     seen = _record_auto_crop(monkeypatch)
     client.put("/api/settings", json={
         "auto_stack": True, "auto_edit_on_autostack": True,
+        # This fixture writes its subs seconds before the scan, so the
+        # settle hold (v0.390.1) would legitimately hold every target as
+        # "still being shot". This test is about the auto-edit chain.
+        "auto_stack_settle_min": 0,
         "auto_crop_border": False})
     _run_scan(client)
     assert seen and all(v is False for v in seen), seen

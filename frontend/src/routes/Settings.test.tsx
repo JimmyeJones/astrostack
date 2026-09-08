@@ -693,3 +693,32 @@ describe("Automatic pipeline — let AstroStack pick outlier removal", () => {
     expect([...WALK_AWAY_KEYS]).not.toContain("auto_reject_on_unattended");
   });
 });
+
+// --- the walk-away settle window (v0.390.1) ---------------------------------
+
+describe("Automatic pipeline — wait for the night to settle", () => {
+  const SETTLE = /wait for the night to settle/i;
+
+  it("shows the window with the rest of the Auto-stack group", async () => {
+    renderSettingsWith({}, "automation", { auto_stack: true, auto_stack_settle_min: 20 });
+    const field = await screen.findByLabelText(SETTLE);
+    await waitFor(() => expect(field).toHaveValue("20"));
+    expect(field).not.toBeDisabled();
+  });
+
+  it("is greyed out while auto-stack is off, like the rest of the group", async () => {
+    renderSettingsWith({}, "automation", { auto_stack: false });
+    await waitFor(() => expect(screen.getByLabelText(SETTLE)).toBeDisabled());
+  });
+
+  it("explains, in plain language, why waiting is the point", async () => {
+    renderSettingsWith({}, "automation", { auto_stack: true });
+    await screen.findByLabelText(SETTLE);
+    // The hint has to answer "why is my picture not updating yet?" without the
+    // reader knowing what a poll or a scan is.
+    const hint = HINTS.auto_stack_settle_min;
+    expect(hint).toMatch(/while you're still shooting/i);
+    expect(hint).toMatch(/Nothing is ever skipped/i);
+    expect(hint).toMatch(/Set to 0/i);
+  });
+});
