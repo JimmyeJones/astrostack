@@ -67,6 +67,15 @@ class RecentStack(BaseModel):
     # a run recorded before the app tracked it, so a caller says nothing rather
     # than claiming a count it does not have. Additive.
     capture_nights: int | None = None
+    # Whether this row is an actual integration rather than an editor export or
+    # a channel combine — both of which are also recorded in ``stack_runs`` but
+    # store a different ``options_json`` shape (see
+    # ``webapp.pipeline._stack_options_from_run_json``, the shared predicate).
+    # The strip renders every run regardless; the overnight digest counts only
+    # genuine ones, or exporting a finished edit would read as the app having
+    # made a second picture overnight. Additive, default ``True`` so an older
+    # frontend (and any caller that doesn't ask) sees no change.
+    is_genuine: bool = True
 
 
 class StatsResponse(BaseModel):
@@ -139,8 +148,36 @@ class EarlyStopOut(BaseModel):
     n_nights_compared: int
 
 
+class NewPictureOut(BaseModel):
+    """One picture the app made while the owner was away — the wire shape of
+    :class:`webapp.overnight.NewPicture`."""
+
+    name: str
+    safe: str
+    run_id: int
+    when_utc: str
+    n_frames: int
+    # What that target's previous picture was made of, or ``None`` when this is
+    # its first — so the card can say "deeper than before" honestly, and stay
+    # quiet when there is nothing to compare against.
+    previous_frames: int | None = None
+
+
+class NeedsLookOut(BaseModel):
+    """One target the newest hands-off scan held back — the wire shape of
+    :class:`webapp.overnight.NeedsLook`."""
+
+    name: str
+    safe: str
+    kind: str          # 'missing_files' | 'too_thin'
+    n_frames: int
+    n_other: int
+
+
 class LastNightResponse(BaseModel):
-    """The library's most recent capture night, combined across targets."""
+    """The library's most recent capture night, combined across targets — and,
+    since v0.387.0, what the walk-away pipeline then did with it (see
+    :mod:`webapp.overnight`)."""
 
     n_targets: int
     n_frames: int
@@ -163,6 +200,19 @@ class LastNightResponse(BaseModel):
     # Additive and optional: ``None`` on every ordinary night, and an older
     # frontend simply never renders the line.
     early_stop: EarlyStopOut | None = None
+    # ---- "while you were asleep": what the app *did* with the night ----------
+    # The window the two lists below cover: the first sub of the night this card
+    # is recapping. Everything the pipeline finished after that stamp happened
+    # while the owner was away. Additive; an older frontend ignores it.
+    since_utc: str | None = None
+    # Pictures the app produced inside that window, newest first, one per
+    # target. Empty on a night nothing was stacked (auto-stack off, or held) —
+    # the card simply says nothing rather than inventing a line.
+    new_pictures: list[NewPictureOut] = []
+    # Targets the newest hands-off scan deliberately held back. Self-clearing:
+    # it reports the newest scan only, so a hold the next scan resolved is gone
+    # without any state to go stale.
+    needs_look: list[NeedsLookOut] = []
 
 
 # The library-progress roll-up opens each project once to read its (optional)
@@ -592,6 +642,7 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
     second cross-target read (see :func:`_run_ids_with_meta_prefix`).
     """
     from seestack.io.project import Project
+    from webapp.pipeline import _stack_options_from_run_json
     from webapp.routers.editor import (
         EXPORTED_RECIPE_META_PREFIX,
         RECIPE_META_PREFIX,
@@ -639,6 +690,12 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
                     capture_night_start=night_start,
                     capture_night_end=night_end,
                     capture_nights=nights,
+                    # One more read of options we are parsing anyway two lines
+                    # up, through the *shared* predicate rather than a fourth
+                    # hand-rolled "is this a real stack" test (the three that
+                    # were hand-mirrored did eventually disagree — v0.338.1).
+                    is_genuine=_stack_options_from_run_json(
+                        run.options_json) is not None,
                 ))
             n_stack_runs += target_runs
             if target_runs:
@@ -745,9 +802,20 @@ def get_last_night(request: Request) -> LastNightResponse | None:
     does not include), and the judgement is about *nights*, not capture sessions
     — a night shot in two goes is one night, and handing both its halves to
     ``early_stop`` both counts it twice toward "enough nights to have a habit"
-    and dilutes the median with a bedtime that is not when the night ended."""
+    and dilutes the median with a bedtime that is not when the night ended.
+
+    Since v0.387.0 the card also carries the **other half of the morning
+    question** — not what the sky gave, but what the app *did* with it while
+    nobody was watching: the pictures it produced since the night's first sub
+    (``new_pictures``) and the targets the hands-off scan deliberately held back
+    (``needs_look``). Both are folded into this response rather than given a card
+    of their own, because they are answers to the same question on a Dashboard
+    the owner has called busy (AGENTS.md §1). See :mod:`webapp.overnight` for the
+    aggregation, which is pure; this endpoint only supplies it the roll-up the
+    stat tiles are already paying for and the newest scan's own summary."""
     from seestack.activity_calendar import night_date_of
     from seestack.session_recap import early_stop, merge_end_stamps_by_night
+    from webapp.overnight import needs_a_look, new_pictures_since, newest_scan_summary
 
     settings = deps.get_settings(request)
     lib = deps.open_library(request)
@@ -755,6 +823,7 @@ def get_last_night(request: Request) -> LastNightResponse | None:
         targets = lib.list_targets()
         lon = resolve_site_lon(request, lib, settings.site_lon)
         night_key = resolve_night_key(request, lib, settings.site_lon)
+        names = {t.safe_name: t.name for t in targets}
         # The longitude is part of the signature because it decides where one
         # observing night ends — so moving the site in Settings re-cuts the night
         # immediately instead of serving a stale one until the TTL runs out.
@@ -769,11 +838,23 @@ def get_last_night(request: Request) -> LastNightResponse | None:
             recap, stamps_by_target = _collect_last_night(lib, targets, night_key)
             request.app.state.last_night_cache = {
                 "sig": sig, "at": now, "data": (recap, stamps_by_target)}
+        # Only worth the roll-up once there *is* a night to date the window
+        # from — an empty library must not pay for a walk over every project to
+        # answer a card that is about to return null.
+        recent = (
+            _rollup_stacks_cached(request, lib, targets, lon)[0]
+            if recap is not None and recap.start_utc else []
+        )
     finally:
         lib.close()
 
     if recap is None:
         return None
+    made = new_pictures_since(recent, recap.start_utc)
+    held = needs_a_look(
+        newest_scan_summary(deps.get_job_manager(request).list(limit=200)),
+        lambda safe: names.get(safe, safe),
+    )
     early = {}
     for safe, stamps in stamps_by_target.items():
         stop = early_stop(merge_end_stamps_by_night(stamps, night_key))
@@ -800,6 +881,19 @@ def get_last_night(request: Request) -> LastNightResponse | None:
         ],
         reject_buckets=recap.reject_buckets,
         early_stop=_pick_early_stop(recap, early),
+        since_utc=recap.start_utc,
+        new_pictures=[
+            NewPictureOut(
+                name=p.name, safe=p.safe, run_id=p.run_id, when_utc=p.when_utc,
+                n_frames=p.n_frames, previous_frames=p.previous_frames,
+            )
+            for p in made
+        ],
+        needs_look=[
+            NeedsLookOut(name=h.name, safe=h.safe, kind=h.kind,
+                         n_frames=h.n_frames, n_other=h.n_other)
+            for h in held
+        ],
     )
 
 
@@ -832,6 +926,36 @@ def _pick_early_stop(recap, early: dict) -> EarlyStopOut | None:
     )
 
 
+def _rollup_stacks_cached(request: Request, lib, targets, lon_deg):
+    """:func:`_rollup_stacks` behind the app-level cache both its readers share.
+
+    Extracted so the "Last night" card can reach the same roll-up the Dashboard's
+    stat tiles are already paying for. Doing it by hand a second time would have
+    given the overnight digest its own cache — two walks over every project on a
+    Dashboard that renders both in one paint — and, worse, two signatures that
+    could disagree about which stacks exist.
+
+    Cheap signature over the registry: the roll-up only changes when the set of
+    targets, their activity stamp, or their latest-stack preview does. Any of
+    those bumps when a stack completes, so the cache refreshes promptly; the TTL
+    backstops the rare same-second collision. The observer's longitude buckets
+    each run's capture window into the observing night the Nights card would
+    name, so it belongs in the signature too: a location the owner has just set
+    must not keep serving nights bucketed for the old one.
+    """
+    sig = (lon_deg, tuple(sorted(
+        (t.safe_name, t.last_activity_utc or "", t.last_stack_preview or "")
+        for t in targets
+    )))
+    cache = getattr(request.app.state, "stats_cache", None)
+    now = time.monotonic()
+    if cache and cache["sig"] == sig and (now - cache["at"]) < _STATS_CACHE_TTL_S:
+        return cache["data"]
+    rolled = _rollup_stacks(lib, targets, lon_deg)
+    request.app.state.stats_cache = {"sig": sig, "at": now, "data": rolled}
+    return rolled
+
+
 @router.get("/api/stats", response_model=StatsResponse)
 def get_stats(request: Request, recent_limit: int = 8) -> StatsResponse:
     import shutil
@@ -848,29 +972,10 @@ def get_stats(request: Request, recent_limit: int = 8) -> StatsResponse:
     try:
         camp = lib.campaign_stats()
         targets = lib.list_targets()
-        # Cheap signature over the registry: the roll-up only changes when the
-        # set of targets, their activity stamp, or their latest-stack preview
-        # does. Any of those bumps when a stack completes, so the cache refreshes
-        # promptly; the TTL backstops the rare same-second collision.
-        # The observer's longitude buckets each run's capture window into the
-        # observing night the Nights card would name, so it belongs in the
-        # signature: a location the owner has just set must not keep serving
-        # nights bucketed for the old one.
         lon = resolve_site_lon(request, lib, settings.site_lon)
-        sig = (lon, tuple(sorted(
-            (t.safe_name, t.last_activity_utc or "", t.last_stack_preview or "")
-            for t in targets
-        )))
-        cache = getattr(request.app.state, "stats_cache", None)
-        now = time.monotonic()
-        if cache and cache["sig"] == sig and (now - cache["at"]) < _STATS_CACHE_TTL_S:
-            (recent, n_stack_runs, n_targets_with_stacks,
-             n_edited_runs, n_finished_pictures) = cache["data"]
-        else:
-            rolled = _rollup_stacks(lib, targets, lon)
-            (recent, n_stack_runs, n_targets_with_stacks,
-             n_edited_runs, n_finished_pictures) = rolled
-            request.app.state.stats_cache = {"sig": sig, "at": now, "data": rolled}
+        (recent, n_stack_runs, n_targets_with_stacks,
+         n_edited_runs, n_finished_pictures) = _rollup_stacks_cached(
+            request, lib, targets, lon)
     finally:
         lib.close()
 
