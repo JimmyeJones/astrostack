@@ -596,6 +596,32 @@ describe("TargetView readiness card", () => {
     ).toBeInTheDocument();
   });
 
+  it("rounds a mosaic's per-panel-scaled goal in the chip (no raw 14.526171875 h)", async () => {
+    // A nebula (4 h/field default) shot as a 3.63-field mosaic scales the goal to
+    // 4 × 3.63… = 14.526171875 h. The verdict already rounds via fmtGoal; the
+    // inline "goal ~N h" chip used to print the raw float. Regression for that.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 240, field_fulls: 3.6315429688 }),
+    );
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M42", name: "Orion Nebula", type: "nebula",
+      constellation: "Orion", constellation_abbr: "Ori",
+      ra_deg: 84, dec_deg: -5, matched_by: "name",
+    });
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("Is it enough yet?")).toBeInTheDocument());
+    expect(
+      screen.getByText(/goal ~14\.5 h \(3\.63-field mosaic\)/),
+    ).toBeInTheDocument();
+    // The raw unrounded float must not appear anywhere on the page.
+    expect(screen.queryByText(/14\.526/)).not.toBeInTheDocument();
+  });
+
   it("answers 'is more time worth it?' from the measured stack, replacing the √N line", async () => {
     // 3 h on a galaxy still reads "a solid start — keep going" against the 6 h
     // type goal, but the picture itself measured σ 0.016 — inside the band the
