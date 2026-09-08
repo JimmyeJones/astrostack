@@ -73,6 +73,31 @@ def test_iter_frames_stride_keeps_every_nth_frame(tmp_path):
         assert np.array_equal(frame, every[k * 3])
 
 
+def test_iter_frames_yields_none_for_the_frames_the_caller_said_it_wants_no_part_of(tmp_path):
+    """``wanted`` is how pass 2 says "don't bother preparing the frames I'm about
+    to discard". The unwanted ones are still *yielded* — as ``None``, so the
+    caller's ``enumerate`` keeps lining up with the index set pass 1 built — and
+    the wanted ones come back exactly as a plain decode gives them."""
+    path = lunar_video(tmp_path / "Lunar_video.mp4", n_frames=6, w=64, h=48)
+    every = list(iter_frames(path))
+    picked = list(iter_frames(path, wanted={1, 4}))
+    assert len(picked) == len(every) == 6
+    assert [i for i, f in enumerate(picked) if f is not None] == [1, 4]
+    for i in (1, 4):
+        assert np.array_equal(picked[i], every[i])
+
+
+def test_iter_frames_wanted_indexes_the_strided_stream_not_the_file(tmp_path):
+    """The indices ``wanted`` names are the ones the caller's own ``enumerate``
+    sees — i.e. after ``stride`` has thinned the stream, which is the numbering
+    ``keep_idx`` is built in."""
+    path = lunar_video(tmp_path / "Lunar_video.mp4", n_frames=12, w=64, h=48)
+    every = list(iter_frames(path))
+    picked = list(iter_frames(path, stride=3, wanted={2}))
+    assert [f is None for f in picked] == [True, True, False, True]
+    assert np.array_equal(picked[2], every[6])
+
+
 def test_abandoning_the_frame_iterator_does_not_leave_ffmpeg_running(tmp_path):
     path = lunar_video(tmp_path / "Lunar_video.mp4", n_frames=30, w=64, h=48)
     it = iter_frames(path)
