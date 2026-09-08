@@ -5276,6 +5276,28 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW BEGINNER FEATURE (Scout 2026-09-08) — "While you were asleep": a one-glance morning digest of what
+  the walk-away pipeline did overnight, across every target.** *(Pillar: 3 friendliness + 2 autonomy, "enjoy /
+  understand"; size M.)* The owner's live settings are `auto_stack` off today, but the North Star and priority 2
+  are exactly the walk-away night: drop files in, go to bed, wake up to good pictures. When that *is* on (or
+  after any hands-off scan), the owner currently has to open target after target to learn what changed — there
+  is **no cross-target "what happened since I last looked" surface**. Verified absent by grep: `overnight` /
+  `digest` / `what's new` / `since you last` turn up only `seestack/gui/notify.py` (a historical desktop toast,
+  not the web app) and unrelated hashing; the Dashboard has a heatmap and per-target cards but nothing that
+  *summarises the delta*. **What a beginner gets:** a Dashboard card (or a `/whats-new` nested route — new pages
+  are allowed, AGENTS.md §1 IA rule; no new always-on banner) that answers, in plain language, "since your last
+  visit / last night": which targets gained subs and how many, which produced a **new or better** picture
+  ("M42 — 120 new subs, cleaner than before"), and which **need a look** — a target the walk-away path *held*
+  for missing files or as too-thin, or whose subs are failing to plate-solve. Sane default: it only appears when
+  there is a delta to report, and says nothing (or a quiet "nothing new since <when>") otherwise, so it never
+  nags. **Reuse, don't reinvent (grep before building):** every input already exists — `session_recap` /
+  `activity_calendar` for per-night deltas and pace, `readiness` for "better/enough", `stackhealth` +
+  `pipeline._auto_stack_readability_hold`'s `auto_stack_held_unreadable` / `held_thin` summaries and
+  `_solve_was_tried` for "needs a look". The new work is aggregating those across targets since a stored
+  "last seen" stamp and rendering the card; additive, read-only, off nobody's hot path. **Verify first** that
+  the Dashboard doesn't already fold most of this — size it against `Dashboard.tsx` before starting; if it
+  mostly does, this shrinks to a "what's changed since last visit" filter on what's there.
+
 - ~~**NEW BEGINNER FEATURE (Scout 2026-09-07) — "Is my mosaic evenly filled?": a per-panel depth /
   gap readout that tells a mosaic shooter where to point next.**~~ — **ALREADY SHIPPED, TWO DAYS BEFORE IT WAS
   FILED; struck 2026-09-07 by the next Builder run so nobody builds it a second time.** The whole feature is
@@ -8279,6 +8301,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 ## Shipped
 _Newest first. One line each: what + commit/PR._
+- **v0.386.2** — PRIORITY 3 (friendliness), Scout dogfood find on the **mosaic** target: **the "Is it enough yet?" goal chip printed a mosaic's per-panel-scaled goal as a raw float — `goal ~14.526171875 h (3.63-field mosaic)`.** The verdict sentence beside it already rounded via `readiness.ts::fmtGoal` ("~14.5 h"), but `Target.tsx` printed `readiness.goalHours` unrounded in the chip, so the two disagreed and the chip read like a bug. `fmtGoal` is now exported and used for the chip too (whole number as-is, else one decimal). Frontend-only, one-line behaviour change; verified by the `--mosaic` dogfood screenshot. Tests +1 fail-before (`Target.test.tsx`, a 3.63-field nebula mosaic → `goal ~14.5 h`, and the raw float absent). No config/schema/API/default change.
 - **v0.386.1** — PRIORITY 3 (robustness on the RAM-capped NAS), the READY entry filed 2026-09-07: **the "Full-res PNG" download — and the "Full-size versions" archive that renders every target through the same call — stops holding about five copies of the picture at once.** `render_preview_png_full_res` owns every array it touches and never reads them again, so it now consumes rather than copies: `autostretch(copy=False)` (new opt-in flag; the default still copies for every other caller), an in-place normalise (`np.subtract/np.divide(out=img)` — that one line used to allocate two more full-size temporaries at once), `del rgb`, `nan_to_num(copy=False)`, `clip(out=)` and `pack_unit(copy=False)`. **Measured with `tracemalloc`, not estimated: 5.00× the decimated array before, 3.83× after** — ≈ 520 MB → ≈ 400 MB on the owner's 3494×2470 mosaic, ≈ 2.9 GB → ≈ 2.2 GB at the 8000 px cap, on a button a beginner presses to print while a stack job may be holding its own canvases. **Bit-parity, and pinned as such:** a new test renders linear, display-space and Adjust-stretched masters through an independent out-of-place copy of the old path and asserts the PNG bytes are identical. The robust percentile is left exact (a strided sample would move pixels), so what remains is the stretch's own working set. Tests +2, the ratio one failing before at 5.00×. Engine-only. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.386.0** — the READY infra entry filed 2026-09-07: **`scripts/agent-dogfood.sh --mosaic` — a second, opt-in sample target shaped like the owner's shooting, so an Auto/editor claim can finally be checked on a mosaic.** `webapp/sample_data.load_sample(lib, shape="mosaic")` builds a separate target from **one shared star catalog**: 2×2 panels stepping 82 % of a frame (so overlaps hold the *same* stars), per-panel pointing jitter, uneven depth (6/6/6/3) and one panel shot through haze (×0.85 signal on a +8 % sky). Measured on the real thing: a 907×615 union canvas, **4.8 % genuinely uncovered**, coverage plateaus at 3/6/12/21, `coverage_is_mosaic` True and four `pointing_groups` panels — every one of which is structurally invisible on the single-field sample, which is how D1 survived twenty sweeps. The script loads it, stacks it, prints the trim Auto would apply (**7.9 %** today; above ~15 % is D1-shaped) and probes/edits it into `$SHOTS/mosaic/` so the field sample's page-height baselines are untouched. Default unchanged everywhere: the Dashboard button, `POST /api/sample` with no body, and the field sample's generated pixels are **bit-identical** (verified against the old implementation). Tests +7. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.385.0** — PRIORITY 3 (friendliness), the READY entry filed 2026-09-07: **the "Save / share" menu was built twice and the two copies disagreed — now one `SavePictureMenu` component serves the Target page's hero and every History run card.** The item set is the *union* of the two (the hero gains FITS, TIFF and "Copy caption"; the History card gains "Share the keepsake"), the wording is History's label-plus-hint idiom on both, and the North-up / nameplate toggles still reach exactly the JPEG-family downloads they did. Nothing removed, no new surface, no page height changed (the menu is closed by default). Frontend-only; tests +7 new component cases, two Target assertions that fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).
