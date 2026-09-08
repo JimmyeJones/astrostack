@@ -86,6 +86,13 @@ before and 2.3 % after**, and the measured panel scales are 0.774 / 1.291 — a
 ratio of 1.667, i.e. 1/0.6 to three figures. Measured on *signal*, never on
 `SEAMRES` (which measures a sky step and reads ~0 either way).
 
+**Confirmed on a fixture this change did not write.** Stacking the mosaic sample
+that shipped in v0.386.0 — four panels, one of them deliberately shot "through
+haze" at ×0.85 signal on a +8 % sky — the pass measured **six** overlap pairs
+(the diagonals included, so the loop-consistency check had something to check and
+dropped nothing) and recovered panel scales of **[0.999, 1.174]**. The exact lift
+that panel needs is 1/0.85 = 1.176.
+
 **Provenance, because nobody ticked a box.** `PANGAIN`/`PANGNPAN`/`PANGNPAR`/
 `PANGMIN`/`PANGMAX` are stamped on the master, parsed by
 `GET /api/targets/{safe}/stack-runs/{id}/info` into a `panel_gain` object kept

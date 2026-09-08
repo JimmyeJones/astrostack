@@ -4884,11 +4884,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   settings change — so a historical baseline needs either a gain/exposure guard or a fallback to today's
   within-session levelling. Fail back to the current behaviour whenever it can't be established; never guess.
 
+- **LEAD (Builder 2026-09-08, filed with v0.387.0 because it is the one thing that shipped unmeasured) — how
+  long does the overlap gain pre-pass actually add to the owner's mosaic stack?** *(Pillar: performance —
+  size XS to measure, and **do not "optimise" it before measuring**.)* `overlapgain` runs up to
+  `MAX_FRAMES_PER_PANEL = 5` subs per panel through `align.align_one` **sequentially** at stack setup — nine
+  panels is 45 loads, each paying a debayer plus the per-frame `Background2D` fit, which is the expensive
+  half. On this repo's fixtures it is seconds; on the owner's 1080×1920 subs it is plausibly 1–3 minutes,
+  against a mosaic stack that runs for hours. That is very likely fine, which is exactly why it should be
+  *measured* rather than pre-emptively parallelised: the obvious change (feed it the stacker's own
+  `max_workers` pool) multiplies the pass's peak memory by the worker count on the one path §6 calls out for
+  its OOM history. If a measurement ever says it matters, the cheaper lever is `MAX_FRAMES_PER_PANEL` — the
+  ratio is a median over thousands of coarse cells, so 3 subs a panel would cost little accuracy — not
+  threads. **Measure on real subs; the synthetic ones are 480×320 and prove nothing about this.**
+
 - **IDEA (Scout 2026-08-26 #2, follow-on to the front-of-queue `photometric_normalize`-for-mosaic Builder item)
   — once photometric normalization auto-enables for mosaics, weigh doing the same measurement for a
   *single-field* target stacked across nights of **mixed transparency** (one hazy night + one clear night).**
-  *(Pillar: image quality — PRIORITY 4. Size: S–M. Do AFTER the mosaic item ships, and measured — not a
-  blind flip.)* The mosaic item corrects a hazy *panel*'s multiplicative dimming; the same mechanism
+  *(Pillar: image quality — PRIORITY 4. Size: S–M. **The mosaic item it waits on shipped as v0.387.0**, so
+  this is unblocked — but still measured, not a blind flip.)* The mosaic item corrects a hazy *panel*'s multiplicative dimming; the same mechanism
   (`compute_photometric_scales` gain-matching by `transparency_score`, folded into the `1/s²` combine weight)
   would gain-match a hazy *night*'s subs up to a clear night's on an ordinary single-target stack, which the
   walk-away chain builds constantly as a beginner revisits one object. **Honest caveat that bounds the value:**
