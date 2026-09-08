@@ -3046,3 +3046,49 @@ describe("EditorView heading", () => {
     expect(await screen.findByText("Editor — M_42")).toBeInTheDocument();
   });
 });
+
+describe("EditorView — \"does my colour look right?\"", () => {
+  // The backend decides whether there is anything confident to say (it needs the
+  // object's catalog family *and* a clear measurement); the editor's job is to
+  // render the line it is handed, in the right tone, and to show nothing at all
+  // when it is handed nothing — which is most pictures.
+  const mockColourCheck = (colour_check: client.ColourCheck | null) => {
+    mockEditorQueries();
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue({
+      bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+      b: [0, 0, 0, 0], colour_check,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+    renderEditor();
+  };
+
+  it("reassures when the colour matches the object's family", async () => {
+    mockColourCheck({
+      ok: true, family: "emission", expected: "red-pink",
+      text: "Colour looks right for an emission nebula — a warm red-pink glow ✓",
+    });
+    expect(await screen.findByText(/Colour looks right for an emission nebula/))
+      .toBeInTheDocument();
+  });
+
+  it("nudges, and names the fix, when the colour clearly does not", async () => {
+    mockColourCheck({
+      ok: false, family: "emission", expected: "red-pink",
+      text: "Emission nebulae like this usually glow red-pink, but yours is coming "
+        + "out green — add the \"Remove green (SCNR)\" step.",
+    });
+    expect(await screen.findByText(/usually glow red-pink/)).toBeInTheDocument();
+    expect(screen.getByText(/Remove green \(SCNR\)/)).toBeInTheDocument();
+  });
+
+  it("shows nothing when the backend has nothing confident to say", async () => {
+    mockColourCheck(null);
+    // Wait for the panel to have rendered before asserting an absence, or the
+    // assertion passes trivially against an empty screen.
+    expect(await screen.findByText("Stretch")).toBeInTheDocument();
+    expect(screen.queryByText(/nebulae like this/)).toBeNull();
+    expect(screen.queryByText(/Colour looks right/)).toBeNull();
+  });
+});

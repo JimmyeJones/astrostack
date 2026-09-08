@@ -19,8 +19,13 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from seestack.colourcheck import colour_expectation
 from seestack.edit.coverage_trim import coverage_is_mosaic, largest_covered_rect
-from seestack.edit.histogram import compute_histogram, measure_sky_cast
+from seestack.edit.histogram import (
+    compute_histogram,
+    measure_object_colour,
+    measure_sky_cast,
+)
 from seestack.edit.ops.detail import (
     deconv_understates_on_proxy,
     hot_pixels_skipped_on_proxy,
@@ -136,6 +141,30 @@ def _run_info(request: Request, safe: str, run_id: int) -> tuple[Path, Any]:
     if not run.fits_path or not Path(run.fits_path).exists():
         raise HTTPException(status_code=404, detail="Run has no FITS to edit")
     return pdir, run
+
+
+def _target_nebula_class(request: Request, safe: str) -> str:
+    """The bundled catalog's nebula family for this target, or ``""``.
+
+    ``""`` covers everything the "does my colour look right?" note stays silent
+    about: an unidentified target, a galaxy or cluster, and a nebula whose
+    family isn't confidently one thing. Best-effort — an identification failure
+    is *absence of a note*, never an error on the preview path, so it swallows.
+    """
+    from seestack.objectinfo import identify_object
+
+    try:
+        lib = deps.open_library(request)
+        try:
+            entry = lib.find_target(safe)
+            if entry is None:
+                return ""
+            info = identify_object(entry.name, entry.ra_deg, entry.dec_deg)
+        finally:
+            lib.close()
+    except Exception:  # noqa: BLE001
+        return ""
+    return info.nebula_class if info is not None else ""
 
 
 def _run_display_space(run: Any) -> bool:
@@ -1604,6 +1633,10 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
                          recipe: str | None = None) -> dict:
     project_dir, run = _run_info(request, safe, run_id)
     rec = _decode_recipe_query(request, safe, run_id, recipe)
+    # Read outside `work()` so the measurement below stays a pure function of the
+    # rendered pixels plus this one string (and so the DB handle isn't held open
+    # across the render).
+    nebula_class = _target_nebula_class(request, safe)
 
     def work() -> dict:
         rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
@@ -1628,6 +1661,18 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         # neutral ✓ / slight green cast" line from these fields. Absent-safe: old
         # clients ignore the extra key.
         hist["sky_cast"] = measure_sky_cast(out)
+        # "Does my colour look right?" — the same display image, measured on the
+        # *object* population instead of the sky, compared against what this
+        # object's family actually looks like. Deliberately absent far more often
+        # than present: only a catalog-identified emission or reflection nebula
+        # whose measured colour is clearly right (or clearly wrong) says anything
+        # at all. Read-only; absent-safe for old clients.
+        note = colour_expectation(nebula_class, measure_object_colour(out))
+        hist["colour_check"] = (
+            None if note is None
+            else {"ok": note.ok, "family": note.family,
+                  "expected": note.expected, "text": note.text}
+        )
         # Whether this run is already in display space (an editor export re-opened
         # for editing), so no default stretch is applied. The one-click "Neutralize
         # background" fix only lands in display space — where the cast is measured —
