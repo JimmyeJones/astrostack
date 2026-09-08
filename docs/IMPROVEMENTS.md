@@ -862,61 +862,32 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 
-- **⭐ READY — GATE OPEN (D1 shipped as v0.382.4; verified on the mosaic sample 2026-09-08). ✅ APPROVED BY
-  THE OWNER 2026-09-07: auto-seed the editor with the Auto recipe on first open, on by default.** *(Pillar:
-  editor — PRIORITY 1; size M, frontend plus one endpoint check; take this **before** the `auto_stack` flip
-  under "Autonomy" — the order the owner fixed is D1 → this → auto-stack. Re-checked against the current code
-  by the backlog-readiness run 2026-09-08: every anchor below still holds. Checked `docs/SHIPPED.md` /
-  `PROCESS-NOTES.md` for "auto-seed" / "seeded": the 2026-07-04 prototype is on no branch (only `main` exists
-  on the remote), so this is a rebuild from the sites below, not a merge.)*
-  **Why the gate is open, verified rather than assumed.** The seed *is* `…/editor/auto`, and before D1 that
-  recipe ended, on any mosaic, in a `geometry.crop` keeping as little as 4 % of the canvas. On the shipped 2×2
-  mosaic sample (`webapp/sample_data.load_sample(shape="mosaic")`, 6/6/6/3 subs, one hazy panel), stacked with
-  the walk-away options and read through `routers/editor._trim_rect_for_run`, Auto's crop is now
-  `(0.022, 0.033, 0.987, 0.987)` — **92.1 % of the canvas kept**, the ragged edge only. The Scout's
-  `agent-dogfood.sh --mosaic --editor` pass the same day measured the same 7.9 % trim through the browser.
-  `coverage_trim.panel_coverage_level` also holds on a 3×3 at 5 % overlap and a 12×8 raster with uneven,
-  weight-jittered panel depths (100 % kept on all of them). The seeded first view of a mosaic is therefore the
-  whole picture, which is what the gate was for.
-  **The problem, in the owner's terms.** A beginner opens a picture in the editor for the first time and gets
-  the flat default stretch plus a grape-coloured nudge ("New to this? Let Auto-process build…"). The good
-  picture is one click away, and the click is the one a beginner doesn't know to make.
-  **Code sites.** `frontend/src/routes/Editor.tsx`: `saved = useQuery(["recipe", safe, rid], api.getRecipe)`
-  (~130) and `savedIsEmpty` (~137); the seed effect `if (saved.data && !seeded) { resetOps(ops0);
-  setSeedKey(JSON.stringify(ops0)); setSeeded(true) }` (~296) — **this is the place**; the `auto` mutation
-  (~721: `api.autoProcess(safe, rid, autoCropArg)` + `api.autoAnalysis(...)`, then `setOps(built)`,
-  `setAutoSummary` / `setAutoValues` / `setAutoCause`, `setAutoKey`); the empty-pipeline nudge (~2149,
-  `ops.length === 0`); `prevRecipe` (~138, the previous run's saved edit offered as a carry-over);
-  `hooks/useUndoable.ts` (`resetOps` clears history, `setOps` pushes a step). `frontend/src/api/client.ts::
-  autoProcess`. `webapp/routers/editor.py::build_auto_recipe_for_run` — returns the recipe and **never persists
-  it**; keep it that way.
-  **Shape.** In the seed effect: when `saved.data` resolves with `ops.length === 0` **and** `prevRecipe` has
-  nothing to offer (`count === 0` — the carry-over of a previous edit is the better seed and must keep
-  winning), call `api.autoProcess` + `api.autoAnalysis` once, hold the editor on its existing loader until they
-  resolve (the preview queries are already gated on `seeded`), then `resetOps([])` followed by `setOps(built)`
-  so the seed is **one Undo away from the empty recipe**; set the three Auto sentences and `autoKey` exactly as
-  the button does (so "What Auto-process did" shows and drops when the recipe diverges); set `seedKey` to the
-  **empty** recipe so the unsaved-changes guard treats the seed as unsaved work — it is: nothing is persisted
-  unless the user presses Save, a saved recipe is never overwritten because the seed only fires on
-  `ops.length === 0`, and a silent leave would drop a look the beginner just saw while the hero keeps showing
-  the plain stack. On a failed Auto call fall through to today's empty pipeline plus nudge — never block the
-  editor on it; the nudge also stays for a user who Undoes the seed. One notification: *"Started you off with
-  Auto-process — Undo to see the plain stack."* **Not a setting**: the owner said on by default.
-  **Traps.** (1) `autoCropArg` is `undefined` on an untouched editor (= the saved `auto_crop_border`) — pass it
-  the way the button does. (2) `Editor.test.tsx` "nudges a first-timer with an empty pipeline toward
-  Auto-process" (~1069) pins the *current* first view; **rewrite it deliberately** to assert the seeded view and
-  the nudge on the failure path — never weaken it. (3) `scripts/dogfood_editor.mjs` (`--editor`) adds every op
-  onto whatever recipe it opens on; a seeded recipe changes its baseline — run `agent-dogfood.sh --mosaic
-  --editor` and record the numbers. (4) The verification above is the bar: the seeded first view of the
-  **mosaic** sample must keep ≥ 90 % of the canvas; a `--editor` drive on the 6-frame field alone does not count.
-  **Tests** (`Editor.test.tsx`): opening a run with an empty saved recipe calls `autoProcess` once and shows its
-  ops plus "What Auto-process did" (**fails today**); a run with a saved recipe never calls it; a run with a
-  previous-run recipe on offer is not auto-seeded (the carry-over button still shows); Undo after the seed gives
-  an empty pipeline; Save persists the seeded ops; an `autoProcess` failure shows the old nudge and no error
-  modal; leaving after a seed triggers the unsaved-changes guard.
-
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
+
+- **LEAD, filed by the Builder that shipped v0.390.0 (a lead it could not finish,
+  not an invented idea) — the editor has no unsaved-changes guard at all, and the
+  auto-seed makes that matter more.** *(Pillar: editor — PRIORITY 1; size S–M,
+  frontend only. Confidence: checked — `grep -rn "useBlocker\|usePrompt\|beforeunload\|unsaved" frontend/src`
+  returns nothing in `routes/Editor.tsx`; the v0.390.0 entry assumed a guard
+  existed and it does not.)*
+  **The problem, in the owner's terms.** An edit lives only in the browser until
+  Save; navigating away (the nav bar, the back button, a deep link) drops it
+  silently, and the hero keeps showing the plain stack. Since v0.390.0 that also
+  covers a look the app itself put in front of the user: the seeded Auto recipe
+  is real, unsaved work they did not build and may not know is unsaved.
+  **Code sites.** `frontend/src/routes/Editor.tsx`: `seedKey` (~284) is already
+  exactly the signature such a guard needs — the recipe the run *opened with*,
+  frozen for the run, and set to the **empty** recipe on a seeded open precisely
+  so the seed counts as unsaved; `recipeKey` is the live one. `react-router-dom`
+  is already a dependency (a data router is needed for `useBlocker`; check which
+  router `main.tsx` mounts before assuming it).
+  **Shape.** Dirty = `seedKey !== null && recipeKey !== seedKey`. Guard an
+  in-app navigation with a small confirm ("Save this look, leave it, or stay"),
+  and a tab close with `beforeunload`. Keep it quiet: never fire on a pristine
+  recipe, and never on a Save→navigate. **Watch the seed case specifically** — a
+  guard that nags on a seed the user never asked for would be worse than no
+  guard, so the confirm's wording must offer "leave it" as the easy answer.
 
 - **Live preview** — the preview must show **every** enabled action (that's the
   whole point of it). **DONE (v0.57.0):** the last hold-out, Deconvolution, was
@@ -3089,6 +3060,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.390.0** — PRIORITY 1 (editor), the ⭐ READY — GATE OPEN entry the owner approved 2026-09-07: **the editor opens on the good picture instead of a nudge to press one button.** On a run with no saved recipe, first open runs `…/editor/auto` and opens on that, with the usual "What Auto-process did" note and *"Started you off with Auto-process — Undo to see the plain stack."* It stands aside for a saved recipe, and for either look of the user's **own** — the previous run's edit *and* their saved default; the entry named only the first, but both buttons live inside the nudge a seed replaces, and removing a feature is the owner's one hard constraint. `resetOps([])` then `setOps(built)` puts it exactly one Undo from the plain stack (the reset matters — navigating from another run leaves that run's recipe in `ops`); nothing is persisted without a Save; a failed seed falls through to the old empty pipeline and nudge with **no** red error, via its own `autoSeed` mutation sharing `fetchAuto`/`applyAutoResult` with the button. `seeded` still gates every preview query, so the decision is made once and there is no seed-then-reseed flash. **Gate re-measured, not trusted:** the mosaic sample stacked fresh and read through `_trim_rect_for_run` keeps **92.1 %** of the canvas. Tests +6 net; the old first-view test rewritten deliberately, never weakened. The entry's "unsaved-changes guard" does not exist anywhere in the frontend — filed back under Ideas. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.389.2** — BUG FIX (the 🟠 VERIFIED entry filed 2026-09-08, with its two named companions): **"thin coverage" is measured against a *panel's* depth, not the coverage map's peak — the same mistake D1 removed from the trim.** `coverage_thin_fraction` now references `coverage_trim.panel_coverage_level`, so "How's my stack?" can no longer tell a mosaic owner that 22–74 % of his picture is a ragged border while offering a "Trim border" that keeps the whole canvas (measured on seven shapes: the 2x2 sample 22 % → 0.0 %, a 12x8 raster with uneven depth and weight jitter 74 % → 0.0 %; the single field unchanged to the digit, since the panel level *is* its peak). The level comes off a strided sample capped at 2 M pixels, because `panel_coverage_level` sorts a float64 copy and this runs at stack time on the full canvas. Old runs heal without a re-stack: two additive columns (`coverage_shares_version`, `coverage_median_depth`, no `SCHEMA_VERSION` bump) let `backfill_coverage_shares` **re-derive** a stale share off the map the run already wrote — a single-field run is never marked stale, and a stale mosaic whose map is gone goes quiet in memory only, never losing the row. The κ-σ reach note gains the provable half of A6: `coverage_median_depth` fires it on a mosaic whose panels are shallow but whose four-way corner cleared the threshold, worded as the half of the picture it can prove. `coverage_is_mosaic`'s dense-raster false negative is documented, deliberately **not** widened (legacy-fallback only). Tests +26. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.389.1** — CLOSED BY MEASUREMENT (the Scout's 2026-08-26 #2 idea, unblocked by v0.387.0): **`photometric_normalize` stays off outside a mosaic — star-core SNR gains only +0.16 % on the realistic single-field case with quality weighting on** (+0.39 / +1.22 / +3.33 % as the haze gets extreme; +0.00 % and bit-identical when there is nothing to correct). On a single field every pixel gets the *same* subs, so the spatial step that makes the pass valuable on a mosaic is structurally absent and all it can change is the combine weight — which quality weighting's `transparency_factor` already approximates. Not a default flip on the hot path. **The first fixture inverted the answer to −9.7 %** by scaling the sky noise along with the signal; haze dims the stars, not the sky glow. `tests/test_photometric_single_field.py` (+2) pins the bit-identity and the never-hurts direction. No code changed. Full entry, table and fixture warning in [`SHIPPED.md`](SHIPPED.md).
 - **v0.389.0** — NEW BEGINNER FEATURE (the Scout's 2026-08-26 #4 entry, unblocked by doing the data task its 2026-08-29 stand-down laid out): **"does my colour look right?" — the finished picture's colour, checked against what that object actually looks like.** A vetted `nebula_class` (`emission` / `reflection` / `both` / `unknown`) is curated onto all 28 bundled `type: "nebula"` entries and nothing else, pinned by the blurb cross-check v0.276.0's `distance_ly` pass used (22/2/3/1). `edit/histogram.py::measure_object_colour` is the sibling of `measure_sky_cast` on the *object* population — sky-subtracted, star-core-trimmed, read off the stretched display image — and `seestack/colourcheck.py::colour_expectation` is the pure join to one line, or `None`. **Built to stay quiet:** only two families speak, a nudge needs 3× the lead a reassurance does, there is a dead band of silence between them, `both`/`unknown`/planetary/SNR never speak, and the word "wrong" never appears. A test, not reasoning, caught the σ estimator: a lower-half MAD called 34 % of a pure-noise frame "object"; `median − p15.87` puts it back at ~2 %. Surfaced as the editor histogram's `colour_check` beside the sky-cast line, plus `ObjectInfoOut.nebula_class`. Tests +27. Full entry in [`SHIPPED.md`](SHIPPED.md).
