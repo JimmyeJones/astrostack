@@ -2839,6 +2839,45 @@ outright bug in existing behaviour, never to add capability.
 ## Needs owner sign-off (do NOT start autonomously)
 ### The owner's one-sitting list (consolidated 2026-09-08 — every gate in this file, in one place)
 
+> ## ✅ OWNER ANSWERED FOUR OF THESE — 2026-09-08. Read before picking anything from the list below.
+>
+> **Q1 — Auto-edit the walk-away picture too? → YES, _with a condition_.** The owner's words:
+> *"yes, but should be easy to override with manual settings."* So `auto_edit_on_autostack` may default
+> **on** once its prerequisites have shipped — **but the override is part of the feature, not a follow-up.**
+> Do not ship the default flip without it. Concretely, before it goes on: a plainly-labelled Settings switch
+> that turns it off; a per-target way to opt out that survives the next night (the walk-away chain must
+> honour a target's saved preference, the way `_stack_target` already honours saved stack options); and a
+> saved/edited recipe must **never** be overwritten by the unattended pass. The owner has been bitten by
+> an on-by-default reframing before (the v0.226.0 auto-crop), so the switch must be findable **before** the
+> first surprise, not after — name it in the Settings copy alongside Auto-stack's three guards.
+>
+> **Q3 — "Do you still see a multicolour grid?" → CANNOT ANSWER YET: he has not deployed.** He is running a
+> build older than the mosaic/colour fixes. **Do not treat silence as "clean" and do not close the colour-chain
+> bisect** — it stays gated, and the question gets re-asked after he next deploys. Anything that claims the
+> colour chain is verified on his real data is claiming something nobody has checked.
+>
+> **Q4 (list item 15) — Dependencies and network → RESOLVED, PERMANENTLY: the app stays LOCAL.** Owner:
+> *"let's stick with it being local."* **This is now a standing rule in `AGENTS.md` §1 Owner Facts, not a
+> gate** — stop asking. Declined outright: outbound weather for Tonight, SIMBAD identification from the
+> webapp, satellite-pass forecasts, a StarNet-class model, and anything needing a periodic data refresh.
+> **Strike those entries rather than leaving them gated** — a gated entry invites a future run to re-ask a
+> settled question. Bundled offline data remains fine. **Not settled by this:** `astroalign` for the
+> WCS-free fallback, which is an offline *dependency* question and still needs its own sign-off per §10.
+>
+> **Q5 (list item 9) — Skip folders named `batch_stack_tmp` at scan time? → YES, skip.** This is the stray
+> folder from the owner's real `\\TRUENAS\astro` listing — another program's scratch directory, confirmed
+> not created by this app. Implement it as the **name-pattern skip the earlier entry deliberately did not
+> blind-add** (`classify_seestar_junk_target` already grew a `temp_folder` verdict in v0.319.6 for the
+> *cleanup* side; this is the *scan-time* half). Keep it conservative and evidence-based: skip the folder,
+> say so in the scan's skipped-folders report (v0.381.0 already surfaces those on the Library page with a
+> one-click "bring it in"), and make it recoverable — the owner must be able to ingest it anyway if a future
+> folder happens to share the name.
+>
+> **Still unanswered and still worth asking** (unchanged below): the Settings → Maintenance screenshot,
+> which alone unblocks three image-quality gates (list item 5) — it was asked in a way the owner found
+> unclear, so **re-ask it plainly: "open Settings → Maintenance and screenshot the two self-check lines"**,
+> and note it only carries information after a week or so of Process runs.
+
 > Everything below is waiting on **one** thing only the owner can supply: a decision, a screenshot, a
 > command's output, or a folder name. He has answered every gate put to him so far (a folder listing, an
 > `ffprobe`, two decisions); the constraint was that they were scattered. Answer in any order; each answer

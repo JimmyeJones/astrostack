@@ -89,6 +89,20 @@ file had never contained. The owner has an S30.)*
 - **Shooting style:** heavy mosaic user (`<T>_mosaic_sub/`), many targets spanning
   many nights. **Test mosaic-shaped and large-canvas cases, not just a 1080p single
   field** — several 2026-09-02 findings existed only at mosaic scale.
+- **🔌 THE APP STAYS LOCAL. NO OUTBOUND NETWORK, EVER — owner's standing answer,
+  2026-09-08, asked as a single policy question and answered "let's stick with it
+  being local".** This is a **standing policy, not a per-feature gate**: do not file,
+  spec, prototype or ask again about anything that needs the running install to reach
+  the internet. Named and **declined** by this answer: outbound **weather** lookup for
+  Tonight; **SIMBAD** target identification from the webapp; **satellite-pass**
+  forecasts; a **StarNet-class ONNX** model (also a heavy dependency); any feature
+  needing a **periodic data refresh**. Bundled offline data is fine and is how this app
+  already works (the Messier/deep-sky catalogues, the bright-star catalogue, ASTAP's
+  local star database, ffmpeg). A **new offline Python dependency** is a separate
+  question and still needs sign-off per §10 — e.g. `astroalign` for the WCS-free
+  fallback is *not* settled by this answer, because it is a dependency question, not a
+  network one. If a feature is only worth building with a network call, **it is not
+  worth building**: say so and drop it rather than filing it as gated.
 
 **Priorities, in strict order (the owner set these).** When choosing what to do,
 higher on this list wins — always:
