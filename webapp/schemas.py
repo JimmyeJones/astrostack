@@ -188,6 +188,30 @@ class IntegrationGoalPatch(BaseModel):
     goal_s: float | None = None
 
 
+class AutoEditPrefOut(BaseModel):
+    """Whether the **unattended** walk-away pass finishes this target's new
+    stacks into a picture.
+
+    ``auto_edit`` is the per-target override: ``null`` means "follow the library
+    setting" (every target, until someone says otherwise), ``true``/``false`` an
+    explicit choice for this one target that survives the next night.
+    ``library_default`` is what the Settings switch currently says, and
+    ``effective`` is what will actually happen — so a screen never has to
+    re-derive the combination and can never disagree with the pipeline about it.
+    """
+
+    auto_edit: bool | None = None
+    library_default: bool = False
+    effective: bool = False
+
+
+class AutoEditPrefPatch(BaseModel):
+    """Set (``true``/``false``) or clear (``null``) a target's auto-finish
+    override. Clearing returns the target to following the library setting."""
+
+    auto_edit: bool | None = None
+
+
 class SessionQualityDriftOut(BaseModel):
     """A cross-session softness nudge: the newest session is materially softer
     than the target's *typical* previous one (higher FWHM = softer stars).
@@ -778,6 +802,13 @@ class StackRunOut(BaseModel):
     # those surfaces say so — and offer to finish the export — instead of
     # silently presenting the wrong image. False for every ordinary run.
     unexported_edit: bool = False
+    # True when the *unattended* pass finished this run into a picture for the
+    # user (it stamped a "what Auto did" note beside the run). Lets the hero
+    # offer "leave this target's pictures alone" exactly where someone meets a
+    # picture they did not make, rather than as a standing control on every
+    # target page. Defaults False — every hand-driven run, and every run made
+    # before the note existed; an older client simply ignores the field.
+    auto_edited: bool = False
 
 
 class JobOut(BaseModel):

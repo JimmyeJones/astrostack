@@ -133,12 +133,26 @@ class Settings(BaseModel):
     # After a successful background auto-stack, also auto-edit the fresh master
     # into a finished picture (persist the one-click Auto recipe as the run's
     # editor recipe + re-render its thumbnail through it), the same chain the
-    # one-click "Process target" and "Reprocess everything" runs use. Off by
-    # default (it seeds an editor recipe on every unattended stack); when on, the
-    # "drop subs in, walk away, come back to a great image" path returns a
-    # finished picture instead of a flat linear master. Best-effort per target —
-    # a failed auto-edit never sinks the stack. Requires ``auto_stack``.
-    auto_edit_on_autostack: bool = False
+    # one-click "Process target" and "Reprocess everything" runs use. Best-effort
+    # per target — a failed auto-edit never sinks the stack. Requires
+    # ``auto_stack``.
+    #
+    # **Default True since v0.394.0 — the last step of "drop subs in, walk away,
+    # come back to a great image".** Without it the picture the unattended chain
+    # publishes is a flat linear master, and the auto-seed (v0.390.0) only helps
+    # someone who opens the editor. The owner approved it on 2026-09-08 — *"yes,
+    # but should be easy to override with manual settings"* — and that condition
+    # ships with it, not after it: the Settings switch below, a **per-target**
+    # override that survives the night (``webapp/auto_edit_pref``), a guard that
+    # never writes over a saved recipe, and the edit itself is one Reset from the
+    # plain stack.
+    #
+    # **Like ``auto_stack``, the flip only reaches a FRESH install** — every
+    # install that has ever run carries an explicit ``false`` in
+    # ``state/config.json`` and keeps it, because the file cannot tell a value the
+    # owner turned off from a value the app dumped (AGENTS.md §9). An existing
+    # install turns it on from Settings.
+    auto_edit_on_autostack: bool = True
     # Minimum solved+accepted frames before the *unattended* walk-away auto-stack
     # will produce (and, with ``auto_edit_on_autostack``, publish) a master. A
     # faint / sparse-star field where ASTAP fails to plate-solve most subs can
