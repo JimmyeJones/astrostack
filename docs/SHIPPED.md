@@ -14,6 +14,152 @@ Newest first.
 
 ---
 
+## v0.389.0 — 2026-09-08 — "Does my colour look right?": the finished picture's colour, checked against what that object actually looks like
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-91fx05`.)** The beginner
+feature the Scout filed on 2026-08-26 and a Builder stood down from on 08-29,
+built in the order that stand-down laid out. A beginner who stacks and auto-edits
+M42 has no way to tell whether the grey-green result is a white balance they
+should fix or just what it looks like; the app already knows *what they shot* and
+already renders *the finished picture*, so it can now say so in one line.
+
+**(1) The data task the stand-down was really about.** The blocker was real: the
+bundled catalogs have one flat `nebula` bucket, and emission (Hα red-pink) and
+reflection (dust-lit blue) — the two families whose expectations *disagree* — are
+not separable in it. So a vetted `nebula_class` (`emission` / `reflection` /
+`both` / `unknown`) is now curated onto all **28** `type: "nebula"` entries in
+`messier.json` + `deepsky_popular.json`, and onto nothing else. The evidence rule
+is the one v0.276.0's `distance_ly` curation used, and it is pinned as a test:
+**where an entry's own beginner blurb names the family, the class must agree with
+it** — which covers 11 of the 28 outright, including every case the stand-down
+named as awkward (M20's blurb literally says "pairs pink emission gas with blue
+reflection nebulosity" → `both`; M78's says "one of the brightest reflection
+nebulae" → `reflection`). Counts: **22 emission, 2 reflection, 3 both, 1
+unknown**. `both` and `unknown` exist precisely so the ambiguous famous objects
+(M20, IC 405, IC 5146, NGC 2264) are *silent* rather than guessed at. The
+yardstick is stated in the data file itself: **broadband OSC**, where Hα
+dominates an unfiltered frame, so an OIII-strong Wolf-Rayet bubble like NGC 6888
+is still `emission`. Planetary nebulae and supernova remnants deliberately carry
+no class at all — a planetary's colour swings from Cat's-Eye teal to Ring red
+object by object, so there is no class-wide claim to make.
+
+**(2) The measurement.** `edit/histogram.py::measure_object_colour` is the
+deliberate sibling of `measure_sky_cast`, measured on the other population:
+that one asks "did my *background* end up neutral", this one asks "what colour
+did the *thing I shot* come out". Both anchor on the same robust sky level
+(`sky_channel_medians`), which is what makes it honest — a nebula's colour is its
+**excess over the sky**, so a bright light-polluted sky can't make everything read
+orange. Object population = finite pixels above `median + 2σ`, minus the top
+0.5 % by luminance (a saturated star core reads neutral-white whatever colour the
+nebula is, and leaving them in dilutes the very measurement being made — pinned
+by a test that a 250-star field moves the balance by < 0.08). It reads the
+**stretched, post-recipe display** image, never the linear stack, so raw OSC
+green-dominance cannot trip it.
+
+**One thing a test found that reasoning did not.** σ was first taken as the MAD
+of the lower half of the luminance distribution — the obvious robust choice, and
+wrong: that half is truncated at its own median, so the MAD lands well under σ
+and the 2σ "object" cut then admitted **34 % of a pure-noise frame**. It is now
+`median − p15.87`, which is exactly 1σ for a Gaussian sky and puts a blank frame
+back at ~2 %. The regression asserts the fraction, not just the verdict.
+
+**(3) The verdict — built to stay quiet.** `seestack/colourcheck.py` is a pure
+join: family + measurement → one line, or `None`. Its own Care note is that *a
+single wrong "your colour is off" on a genuinely fine picture is worse than ten
+correct reassurances are good*, so: only `emission` and `reflection` ever speak;
+the expected side must lead by 0.05 in `(r−b)/(r+b)` to be reassured, and the
+*wrong* side must lead by **three times that** (0.15) before anything is said —
+with a deliberate **dead band between them where the answer is silence, not a
+hedge**; a green cast (no deep-sky object is green, so it is always a processing
+fault) is checked first because it has a better answer to offer, and it both
+nudges toward the existing "Remove green (SCNR)" step and *withholds* a
+reassurance a fine red/blue balance would otherwise have earned. The word
+"wrong" never appears, and a test asserts that.
+
+**(4) The surface.** The editor's histogram response carries `colour_check`
+(`{ok, family, expected, text}` or `null`), built beside the `sky_cast` line it
+sits under in the UI — dimmed when the colour looks right, orange when it does
+not. `_target_nebula_class` does the catalog lookup outside the render, and
+swallows: an identification failure is *absence of a note*, never an error on the
+live-preview path. `ObjectInfoOut.nebula_class` is exposed on `/identify` too, so
+the identity card stays the one place that answers "what am I looking at?".
+
+**Upgrade-safe (§9):** two additive catalog keys, two additive response fields,
+one new engine module; no config, DB, on-disk, default or existing-response-shape
+change, and the loader still accepts a catalog entry with no `nebula_class` (a
+test pins it). Nothing is written anywhere.
+
+**Tests (+27):** `tests/test_colourcheck.py` (21 — the curation's own
+correctness bar, including the blurb cross-check and the eight objects a beginner
+actually shoots; the measurement against a *blue-led sky* that a non-sky-subtracted
+median would misread; noise, star fields, NaN gaps, an all-NaN frame and a
+4×4 frame; and one test that gathers **every** case that must stay silent),
++4 `tests/webapp/test_editor.py`, +3 `Editor.test.tsx`.
+
+**What was deliberately not built:** the frontend has no verdict logic of its own
+— the text is server-built, because the thresholds and the wording are the part
+that must not drift between two implementations.
+
+*Original entry, and the 2026-08-29 stand-down that shaped it:*
+
+- **NEW BEGINNER FEATURE (Scout 2026-08-26 #4) — "Does my colour look right?": an object-aware colour sanity
+  nudge on the finished picture.** *(Pillar: understand + trust / image quality — PRIORITY 3–4. Size: M.)*
+  **⚠️ BLOCKED ON DATA — Builder 2026-08-29 sized this against the real catalog and stood down; read this
+  before picking it up.** The spec's premise is that "the bundled catalogs carry a `type` field
+  (galaxy / **emission nebula** / cluster / …)". **They don't carry the distinction the feature turns on.**
+  Measured this run — `collections.Counter(o.type for o in load_catalog())` over all 157 bundled entries:
+  `galaxy 51, globular cluster 31, open cluster 30, nebula 28, planetary nebula 10, supernova remnant 4,
+  star cloud 1, double star 1, asterism 1`. There is **one** flat `nebula` bucket; emission (red-pink Hα) and
+  reflection (blue) are not separable, and they are the two families whose expectations *disagree*. The other
+  path the spec offers — `seestack/post/target_id.py`'s SIMBAD codes, which *do* split `HII` / `RNe` / `EmO` —
+  needs `astroquery` and a **network** lookup, which this app is deliberately offline for (`target_id`
+  degrades to "unknown target" without it), so it can't be the gate on a walk-away install.
+  **So the only way to build it as filed is to hand-curate an emission/reflection flag onto the 28 `nebula`
+  entries from an agent's own recall — and this is the one feature where that is the wrong move**, because its
+  own Care note is *"a single wrong 'your colour is off' on a genuinely fine picture is worse than ten correct
+  reassurances are good"*, and the awkward cases are exactly the famous ones (M20 is emission **and**
+  reflection; M45's nebulosity is reflection-blue; M78 is blue) — i.e. the objects a beginner shoots first.
+  **If it is picked up, the shippable order is:** (1) add a vetted `nebula_class` (`emission`/`reflection`/
+  `both`/`unknown`) to the catalog data, defaulting to `unknown` → silence, with the same
+  agrees-with-its-own-blurb cross-check the v0.276.0 `distance_ly` curation used as its evidence; (2) only
+  then the hue helper and the card line, with `both`/`unknown` never nudging. Step (1) is a data task with a
+  real correctness bar, not a code task — size it as such.
+  A beginner who stacks and auto-edits an emission nebula has **no way to tell whether the colour came out
+  right** — is that grey-green M42 a bad white balance they should fix, or just what it looks like? The app
+  already *knows the object class*: the bundled catalogs carry a `type` field (galaxy / emission nebula /
+  cluster / …) and `seestack/post/target_id.py` already classifies the solved target (emission nebula, etc.),
+  so once a run is plate-solved we know what family it is. It can therefore say, in one plain line on the
+  result/History object-info card, whether the finished picture's dominant colour matches what that family
+  usually shows — and, when it clearly doesn't, nudge toward the existing one-click fix. **Verified genuinely
+  new (grepped this run):** nothing compares a picture's colour against an expected class today — the closest
+  code is the editor's *sky-cast* readout (neutral-background check) and SCNR (green removal), neither of which
+  knows or uses the object type.
+  **Shape:** a pure helper `colour_expectation(object_type, rgb_or_hue) -> ColourNote | None` that (a) maps the
+  handful of confident families to an expected dominant hue — emission/HII nebula → red-pink (Hα), reflection
+  nebula → blue, galaxy/cluster/most else → *no confident expectation* → return `None`; (b) measures the
+  finished picture's dominant hue on the **object** pixels (reuse the editor's existing object-mask + the
+  sky-cast/hue machinery — measure the *stretched, post-SCNR display* image, never the linear stack, since raw
+  OSC is green-heavy by construction); and (c) returns either a reassuring *"The colour looks right for an
+  emission nebula — a warm red-pink glow"* or a gentle, actionable *"Emission nebulae like this usually glow
+  red-pink; yours is coming out green-grey. Try the SCNR (green removal) step, or press Auto-process."* — never
+  the word "wrong". **Beginner bar:** clears it cleanly — a non-expert instantly understands "does my colour
+  look right?", it's phrased in plain language, ships with a sane default (self-hides unless the class has a
+  confident expectation *and* the deviation clears a comfortable margin), points at a one-click fix, and is not a
+  pro knob. **Guardrails against false-nagging (the whole risk):** only the two or three families with a genuinely
+  confident, class-wide expectation ever trigger; require a *strong* deviation (well past ordinary OSC
+  variation) before nudging; measure only the stretched display image so linear green-dominance can't trip it;
+  and default the whole card to the reassuring/absent state, so an honest picture is never told it's off.
+  **Feasibility:** offline, additive, read-only (renders from data the app already has — the solved type + the
+  picture it already displays), pure helper → unit-testable (emission nebula + red picture → reassure; emission
+  nebula + green picture → nudge; galaxy / unknown type → `None`; a mild green tint within margin → reassure,
+  not nag). **Slices —** (a) the pure `colour_expectation` helper + the family→hue table + tests (a shippable
+  Builder run on its own); (b) wire the object mask + display-hue measurement + render the line on the existing
+  object-info card (frontend, gated on presence). **Care:** this must earn a beginner's *trust*, so bias hard
+  toward silence — a single wrong "your colour is off" on a genuinely fine picture is worse than ten correct
+  reassurances are good.
+
+---
+
 ## v0.388.0 — 2026-09-08 — "While you were asleep": the Last-night card says what the app *did*, not only what the sky gave
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-wvv6ff`.)** The beginner

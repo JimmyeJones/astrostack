@@ -2433,3 +2433,81 @@ def test_auto_edit_records_what_the_highlight_button_would_say(
     # The fixture stack has no blown core, so the honest reading is "nothing to
     # suggest" — recorded, rather than left absent.
     assert reading["strength"] is None
+
+
+def _emission_target(client) -> str:
+    """The fixture target the bundled catalog identifies as an emission nebula."""
+    targets = client.get("/api/targets").json()
+    safe = next(t["safe_name"] for t in targets if t["name"].replace("_", " ")
+                .upper().startswith("M 42") or t["safe_name"].upper().startswith("M_42"))
+    return safe
+
+
+def test_identify_reports_the_catalog_nebula_class(client, solved_library):
+    """The bundled catalog's vetted glow family reaches the identity card, so the
+    "does my colour look right?" note has something to compare against. Additive
+    field — an object with no class (galaxy, cluster, planetary) reports ""."""
+    safe = _emission_target(client)
+    info = client.get(f"/api/targets/{safe}/identify").json()
+    assert info["id"] == "M42" and info["nebula_class"] == "emission"
+
+
+def test_histogram_reports_a_colour_check_only_when_it_is_confident(
+        client, solved_library, monkeypatch):
+    """The histogram carries a ``colour_check`` note built from the object's
+    catalog family plus the measured colour of its object pixels — and carries
+    ``null`` whenever there is nothing confident to say, which is most pictures."""
+    from webapp.routers import editor as editor_router
+
+    safe = _emission_target(client)
+    rid = _make_run(solved_library, safe)
+    recipe = {"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6, "black": 0.35}}]}
+    q = _enc(recipe)
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}"
+
+    # The key is always present, so the editor can trust its absence to mean
+    # "old backend" rather than "nothing to say".
+    hist = client.get(url).json()
+    assert "colour_check" in hist
+
+    # A red-pink emission nebula: the note reassures.
+    monkeypatch.setattr(editor_router, "measure_object_colour", lambda _out: {
+        "measured": True, "balance": 0.30, "green_excess": -0.10,
+        "r": 0.2, "g": 0.1, "b": 0.11, "fraction": 0.1})
+    note = client.get(url).json()["colour_check"]
+    assert note is not None and note["ok"] is True
+    assert note["family"] == "emission" and note["expected"] == "red-pink"
+    assert "looks right" in note["text"]
+
+    # The same target coming out green: a nudge that names the one-click fix.
+    monkeypatch.setattr(editor_router, "measure_object_colour", lambda _out: {
+        "measured": True, "balance": 0.0, "green_excess": 0.30,
+        "r": 0.1, "g": 0.2, "b": 0.1, "fraction": 0.1})
+    note = client.get(url).json()["colour_check"]
+    assert note is not None and note["ok"] is False and "SCNR" in note["text"]
+
+    # Nothing measurable → no note at all (never a hedge).
+    monkeypatch.setattr(editor_router, "measure_object_colour",
+                        lambda _out: {"measured": False})
+    assert client.get(url).json()["colour_check"] is None
+
+
+def test_histogram_colour_check_is_silent_on_an_unidentified_target(
+        client, solved_library, monkeypatch):
+    """A target the catalog can't confidently place in one glow family must never
+    produce a colour verdict, however strong the measurement is — the failure mode
+    this feature has to avoid is telling a beginner a fine picture is wrong."""
+    from webapp.routers import editor as editor_router
+
+    safe = _emission_target(client)
+    rid = _make_run(solved_library, safe)
+    q = _enc({"ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}]})
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}"
+    monkeypatch.setattr(editor_router, "measure_object_colour", lambda _out: {
+        "measured": True, "balance": -0.40, "green_excess": -0.10,
+        "r": 0.1, "g": 0.1, "b": 0.25, "fraction": 0.1})
+    # Confidently blue on an *emission* nebula → a nudge…
+    assert client.get(url).json()["colour_check"]["ok"] is False
+    # …but the same pixels on a target with no vetted family say nothing.
+    monkeypatch.setattr(editor_router, "_target_nebula_class", lambda *_a: "")
+    assert client.get(url).json()["colour_check"] is None

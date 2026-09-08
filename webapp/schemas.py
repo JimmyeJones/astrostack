@@ -165,6 +165,13 @@ class ObjectInfoOut(BaseModel):
     # no vetted size, or the object is too small for the comparison to say
     # anything (old backends omit it — the UI shows nothing either way).
     angular_size: AngularSizeOut | None = None
+    # Which family a nebula's glow belongs to — "emission" | "reflection" |
+    # "both" | "unknown" — from the bundled catalog; ``""`` for everything that
+    # isn't a classified nebula. The "does my colour look right?" note is built
+    # server-side from this (see the editor histogram's ``colour_check``); it is
+    # exposed here so the identity card can stay the one place that answers
+    # "what am I looking at?". Old backends omit it.
+    nebula_class: str = ""
 
 
 class IntegrationGoalOut(BaseModel):
