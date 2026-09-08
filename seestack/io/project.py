@@ -76,7 +76,9 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     capture_end_utc TEXT,
     capture_hours_json TEXT,
     coverage_thin_frac REAL,
-    uncovered_frac REAL
+    uncovered_frac REAL,
+    coverage_shares_version INTEGER,
+    coverage_median_depth REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -1144,6 +1146,46 @@ class Project:
             )
         ]
 
+    def newest_accepted_sub_time(self) -> float | None:
+        """When the most recent accepted sub arrived, as a POSIX timestamp — or
+        ``None`` when nothing accepted carries a time.
+
+        The one question "is this target still being shot?" needs, and the whole
+        of it: two ``MAX()``s over an indexed-free but narrow scan, never a
+        ``FrameRow``, because the walk-away scan asks it of **every** target on
+        every poll and this owner's targets carry thousands of subs each.
+
+        Prefers ``source_mtime`` — the sub's own file time, stamped at ingest —
+        because it answers "when did this land here?", which is what a settle
+        window is about, and it is set for every frame ingested since the
+        fingerprint columns arrived. Falls back to ``timestamp_utc`` (the frame's
+        ``DATE-OBS``) for rows that predate them, which is close enough for the
+        same question and wrong only in the harmless direction (a sub shot long
+        ago and copied in today reads as old, so the target stacks *sooner*).
+        Both are ignored where NULL, so a library with neither simply has no
+        opinion and every caller must treat ``None`` as "don't hold".
+        """
+        assert self._conn is not None
+        row = self._conn.execute(
+            "SELECT MAX(source_mtime) FROM frames WHERE accept = 1"
+        ).fetchone()
+        newest = row[0] if row else None
+        if newest is not None:
+            return float(newest)
+        row = self._conn.execute(
+            "SELECT MAX(timestamp_utc) FROM frames "
+            "WHERE accept = 1 AND timestamp_utc IS NOT NULL AND timestamp_utc != ''"
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        # Local import: `activity_calendar` is a leaf module (stdlib only), and
+        # keeping it out of this module's import list keeps `project` free of
+        # anything it does not need to open a database.
+        from seestack.activity_calendar import parse_utc
+
+        parsed = parse_utc(str(row[0]))
+        return None if parsed is None else parsed.timestamp()
+
     def source_paths(self) -> list[str]:
         """Every registered frame's ``source_path``, in id order.
 
@@ -1377,9 +1419,10 @@ class Project:
             "  noise_sigma, calstat, is_mosaic, engine_version,"
             "  rejection_fraction, rejection_mode, n_roughly_aligned, stack_fwhm_px,"
             "  seam_residual, capture_start_utc, capture_end_utc,"
-            "  capture_hours_json, coverage_thin_frac, uncovered_frac"
+            "  capture_hours_json, coverage_thin_frac, uncovered_frac,"
+            "  coverage_shares_version, coverage_median_depth"
             ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            "         ?, ?, ?, ?, ?, ?)",
+            "         ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -1396,6 +1439,10 @@ class Project:
                  else float(run.coverage_thin_frac)),
                 (None if run.uncovered_frac is None
                  else float(run.uncovered_frac)),
+                (None if run.coverage_shares_version is None
+                 else int(run.coverage_shares_version)),
+                (None if run.coverage_median_depth is None
+                 else float(run.coverage_median_depth)),
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -1499,6 +1546,14 @@ class Project:
                     row["uncovered_frac"]
                     if "uncovered_frac" in row.keys() else None
                 ),
+                coverage_shares_version=(
+                    row["coverage_shares_version"]
+                    if "coverage_shares_version" in row.keys() else None
+                ),
+                coverage_median_depth=(
+                    row["coverage_median_depth"]
+                    if "coverage_median_depth" in row.keys() else None
+                ),
             )
 
     def stack_run_options(self, run_ids: Iterable[int]) -> dict[int, tuple[str, str]]:
@@ -1587,6 +1642,34 @@ class Project:
         cur = self._conn.execute(
             "UPDATE stack_runs SET uncovered_frac = ? WHERE id = ?",
             (None if frac is None else float(frac), run_id))
+        return cur.rowcount > 0
+
+    def set_stack_coverage_shares_version(self, run_id: int,
+                                          version: int | None) -> bool:
+        """Record which rule a run's coverage shares were measured by — see
+        :data:`seestack.stack.stacker.COVERAGE_SHARES_VERSION`. Stamped by the
+        stack itself, and written again by
+        :func:`seestack.coverage_backfill.backfill_coverage_shares` when it
+        re-derives a share an older rule had stamped. Returns True if a row was
+        updated, False if no run with ``run_id`` exists."""
+        assert self._conn is not None
+        cur = self._conn.execute(
+            "UPDATE stack_runs SET coverage_shares_version = ? WHERE id = ?",
+            (None if version is None else int(version), run_id))
+        return cur.rowcount > 0
+
+    def set_stack_coverage_median_depth(self, run_id: int,
+                                        depth: float | None) -> bool:
+        """Record the depth at least half a run's picture is at or below — the
+        honest answer to "how many subs overlap here?" on a mosaic, where
+        ``coverage_max`` describes only the corner where four panels meet.
+        Stamped by the stack and healed off the coverage map by
+        :func:`seestack.coverage_backfill.backfill_coverage_shares`. Returns True
+        if a row was updated, False if no run with ``run_id`` exists."""
+        assert self._conn is not None
+        cur = self._conn.execute(
+            "UPDATE stack_runs SET coverage_median_depth = ? WHERE id = ?",
+            (None if depth is None else float(depth), run_id))
         return cur.rowcount > 0
 
     def set_stack_seam_residual(self, run_id: int,
@@ -1776,6 +1859,23 @@ class StackRunRow:
     # before this column existed and when nothing was covered at all — callers
     # self-hide rather than describe a border they cannot measure.
     uncovered_frac: float | None = None
+    # Which *rule* the two shares above were measured by — see
+    # :data:`seestack.stack.stacker.COVERAGE_SHARES_VERSION`. None means "an
+    # older rule, unknown which": every run recorded before this column existed,
+    # all of which measured "thin" against the coverage map's peak, which is a
+    # mosaic's panel-overlap band rather than its panel depth. It exists so
+    # ``coverage_backfill`` can tell a stale stamped share from a fresh one and
+    # re-derive it from the map the run wrote, instead of the owner's existing
+    # mosaics keeping a wrong note until they are stacked again.
+    coverage_shares_version: int | None = None
+    # The **median** per-pixel frame count over this run's covered pixels: the
+    # depth at least half the picture is at or below. ``coverage_max`` is the
+    # deepest *single* pixel, which on a mosaic is the corner where four panels
+    # meet — so it cannot answer "how many subs actually overlap here?", which is
+    # the question κ-σ's reach depends on. None for runs recorded before this
+    # column existed and when nothing was covered; readers then fall back to the
+    # peak, which is what they did before it existed.
+    coverage_median_depth: float | None = None
     # How many contributing subs sub-pixel refine had to leave *only roughly
     # aligned* (its measured shift exceeded the cap, so the frame stacked
     # unshifted → possibly soft/doubled stars). None when refine was off, not

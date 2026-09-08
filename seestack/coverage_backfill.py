@@ -14,7 +14,7 @@ run answers like any freshly-stacked one:
 
 ``coverage_thin_frac`` (schema 20)
     The number "How's my stack?" judges a ragged border on — the share of the
-    picture covered by far fewer frames than the best-covered part. The panel
+    picture covered by far fewer frames than one panel's depth. The panel
     reads NULL as "say nothing" deliberately: the test it replaced fired on every
     stack the app had ever made, so re-using it on old runs would mean knowingly
     repeating a false alarm.
@@ -24,6 +24,17 @@ run answers like any freshly-stacked one:
     The share of the *canvas* no frame reached — the empty black area a mosaic's
     union canvas leaves around its panels. Read off the same map as the thin
     share above, in the same pass, so healing one heals both.
+
+``coverage_median_depth`` (added additively)
+    The depth at least half the picture is at or below — the number κ-σ's reach
+    is really judged on, where ``coverage_max`` describes only the corner where
+    four of a mosaic's panels happen to meet. Same map, same pass.
+
+Since v0.389.2 this also **re-derives** a share an older rule measured, keyed on
+``coverage_shares_version`` (added additively): a run stamped under the
+peak-referenced thin rule is re-measured against the panel depth, so the owner's
+existing mosaics stop showing a border note about their panel overlaps without
+having to be stacked again.
 
 ``seam_residual`` (schema 15)
     How flat a **mosaic's** panel joins came out, in units of the picture's own
@@ -72,8 +83,9 @@ log = logging.getLogger(__name__)
 
 
 def backfill_coverage_shares(project: Project, run: StackRunRow) -> None:
-    """Fill in whichever of ``run``'s two coverage shares are missing, from the
-    one coverage map they are both pure functions of, and record them on the row.
+    """Fill in whichever of ``run``'s coverage measurements are missing **or were
+    measured by a superseded rule**, from the one coverage map they are all pure
+    functions of, and record them on the row.
 
     ``coverage_thin_frac`` (how much of the *picture* is a thin border) and
     ``uncovered_frac`` (how much of the *canvas* is empty black) answer different
@@ -81,10 +93,27 @@ def backfill_coverage_shares(project: Project, run: StackRunRow) -> None:
     uncovered pixels from both of its terms and is therefore blind to exactly
     what the second measures. Healing them together means one read for both:
     a run recorded before either column existed pays the map read once.
+    ``coverage_median_depth`` comes off the same read.
 
-    A no-op — and no disk touched — for a run that already carries both.
-    ``run`` is updated in place on success, so the caller's copy grades exactly
-    like a freshly-stacked run.
+    A no-op — and no disk touched — for a run that already carries all of them at
+    the current rule. ``run`` is updated in place on success, so the caller's copy
+    grades exactly like a freshly-stacked run.
+
+    **Re-deriving, not only filling in.** ``coverage_shares_version`` records the
+    rule a run's shares were measured by, and a run stamped under an older one is
+    re-measured here. The rule that changed is the reference "thin" is judged
+    against: it was the coverage map's **peak** until v0.389.2, which on a mosaic
+    is the band where panels overlap, so ordinary panels counted as a ragged
+    border and "How's my stack?" told a mosaic owner that up to three-quarters of
+    his picture was one. Without this, every mosaic already in the owner's library
+    would keep that note until it happened to be stacked again.
+
+    A stale run whose coverage map is *gone* cannot be re-measured. Its stored
+    thin share is then dropped **in memory** (never written back — the row keeps
+    what it has, and heals if the map returns), so the surfaces stay silent rather
+    than repeat a number known to be measured the wrong way. Only for a run the
+    stacker recorded as a mosaic: on a single field the old reference and the new
+    one are the same number, so the stored share is still exactly right.
 
     Which map: the honest per-pixel **frame count** (``{stem}_framecov.fits``)
     when the run wrote one, else the weighted coverage map — the same preference,
@@ -95,32 +124,71 @@ def backfill_coverage_shares(project: Project, run: StackRunRow) -> None:
     covered leaves the rows NULL and every surface silent. It never falls back to
     the ``coverage_min`` test the thin share replaced.
     """
-    want_thin = run.coverage_thin_frac is None
+    from seestack.stack.stacker import (
+        COVERAGE_SHARES_VERSION,
+        coverage_median_depth,
+        coverage_thin_fraction,
+        uncovered_fraction,
+    )
+
+    # Only a **mosaic** (or a run too old to say which it is) can carry a stale
+    # thin share: the rule that changed is the reference, and on a single field
+    # the old peak and the new panel depth are the same number, so its stored
+    # share is right to the digit and re-reading its map would buy nothing.
+    stale = ((run.coverage_shares_version or 0) < COVERAGE_SHARES_VERSION
+             and run.is_mosaic is not False)
+    want_thin = run.coverage_thin_frac is None or stale
     want_uncovered = run.uncovered_frac is None
-    if not (want_thin or want_uncovered) or not run.fits_path:
+    want_depth = run.coverage_median_depth is None
+    if not (want_thin or want_uncovered or want_depth) or not run.fits_path:
         return
 
     from seestack.edit.proxy import load_coverage, load_frame_coverage
-    from seestack.stack.stacker import coverage_thin_fraction, uncovered_fraction
 
     cov = load_frame_coverage(run.fits_path)
     if cov is None:
         cov = load_coverage(run.fits_path)
     if cov is None:
+        _drop_unmeasurable_stale_thin_share(run, stale)
         return
 
     if want_thin:
         share = coverage_thin_fraction(cov)
         if share is not None:
             _record(project, run, "coverage_thin_frac", share)
+        elif stale:
+            _drop_unmeasurable_stale_thin_share(run, stale)
     if want_uncovered:
         empty = uncovered_fraction(cov)
         if empty is not None:
             _record(project, run, "uncovered_frac", empty)
+    if want_depth:
+        depth = coverage_median_depth(cov)
+        if depth is not None:
+            _record(project, run, "coverage_median_depth", depth)
+    # Stamped last, and only once the share it certifies has actually been
+    # re-measured: a run whose map could not be read must stay stale so it heals
+    # if the map comes back.
+    if run.coverage_thin_frac is not None and stale:
+        _record(project, run, "coverage_shares_version", COVERAGE_SHARES_VERSION)
+
+
+def _drop_unmeasurable_stale_thin_share(run: StackRunRow, stale: bool) -> None:
+    """Silence — in memory only — a **mosaic's** thin share that was measured by
+    the superseded peak-referenced rule and can no longer be re-derived.
+
+    The row is deliberately left alone: nothing is deleted, and the run heals for
+    real the moment its coverage map is readable again. This only stops the
+    caller's copy from carrying a number that is known to describe a mosaic's
+    panel overlaps rather than its border. A single-field run keeps its share —
+    the two rules give it the same answer.
+    """
+    if stale and run.is_mosaic and run.coverage_thin_frac is not None:
+        run.coverage_thin_frac = None
 
 
 def _record(project: Project, run: StackRunRow, column: str,
-            value: float) -> None:
+            value: float | int) -> None:
     """Write one healed share to the row and to the DB (best-effort)."""
     setattr(run, column, value)
     if run.id is None:

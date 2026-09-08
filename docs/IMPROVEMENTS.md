@@ -87,68 +87,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > the target of any "see above" / "see below" in the entries below that no longer resolves
 > here.
 
-- **🟠 VERIFIED (backlog-readiness run 2026-09-08, reproduced on the app's own mosaic sample and on four raster
-  shapes) — "How's my stack?" tells a mosaic owner that up to three-quarters of his picture is a "ragged
-  border" and offers a Trim that would keep all of it: `coverage_thin_fraction` still measures "thin" against
-  the coverage map's PEAK, the exact mechanism D1 just removed from the trim.** *(Same class as D1; found by
-  asking what else measures coverage against the peak. Severity: a wrong, contradictory note on the owner's
-  primary workflow, with a wrong action attached; not a wrong picture. Confidence: **reproduced** with the real
-  functions — numbers below. Size S–M. Checked `docs/SHIPPED.md` for "coverage_thin_fraction" /
-  "_COVERAGE_THIN_SHARE": v0.320.2 introduced the share, v0.377.0 added the companion `uncovered` note and the
-  backfill; neither re-examined the reference.)*
-  **What the owner sees.** Stack the shipped 2×2 mosaic sample (`load_sample(shape="mosaic")`, panels 6/6/6/3
-  subs) and read its health notes: *"About 25% of this picture has far fewer frames than the best-covered part,
-  so it's noisier and uneven there. Trim border gives a clean, even rectangle."* — directly above *"The panels
-  of this mosaic evened out"*. The 25 % is the **3-sub panel**, whole; it is not a border, and post-D1 "Trim
-  border" on that run keeps **92 %** of the canvas (`_trim_rect_for_run` → `(0.022, 0.033, 0.987, 0.987)`), so
-  the offered action does nothing about what the note describes.
-  **The rule.** `seestack/stack/stacker.py::coverage_thin_fraction` (~2094): `count((cov > 0) & (cov < 0.25 ·
-  peak)) / count(cov > 0)`, stamped into `stack_runs.coverage_thin_frac` at stack time (~3471) and backfilled
-  for old runs by `seestack/coverage_backfill.py::backfill_coverage_shares`. On a single field the peak is the
-  interior. On a mosaic the peak is where **four panels meet**, so a quarter of it is *one panel's depth* — and
-  every panel even slightly below the mean, or any panel thinner than the rest, reads "thin" wholesale.
-  `_COVERAGE_THIN_SHARE = 0.05` in `seestack/stackhealth.py` (~63) was calibrated on *"an even three-panel
-  mosaic is 0.0 %"* — a shape with no four-way corner and no weight jitter — which is the fixture-shaped
-  assumption behind this, the same way D1's six tests pinned the bug in a fixture.
-  **Measured with the real functions** (`well_covered_mask` / `largest_covered_rect` post-D1, then
-  `coverage_thin_fraction` on the same map):
-  | shape | D1-fixed trim keeps | thin share reported |
-  |---|---|---|
-  | 2×2 sample, 6/6/6/3 subs (stacked, walk-away options) | 92 % | **25 %** |
-  | 3×3 equal 30 subs + 8 % weight jitter (quality weighting on) | 100 % | **58 %** |
-  | 3×3 uneven 20–45 subs (a multi-night mosaic) | 100 % | **48 %** |
-  | 12×8 raster, uneven 15–45 subs | 100 % | **68 %** |
-  | 12×8 raster, uneven + 8 % jitter | 100 % | **75 %** |
-  | 1×2, 400 vs 100 subs | 100 % | **46 %** |
-  | single field + dithered fringe (control) | trims the fringe | 0.2–0.6 % (unchanged, correct) |
-  Every mosaic row fires the note (`≥ 5 %`) and offers `trim_border`.
-  **Two more consumers of the same number, lower severity, fix in the same pass.** (1) `stackhealth.py` ~607:
-  the κ-σ reach note takes `peak_depth = min(n_combined, run.coverage_max)`; on a mosaic the four-way corner is
-  deep while every panel interior is shallow, so the note stays **silent** on a night-one mosaic whose panels
-  are all below `kappa_min_frames` (the comment there claims the opposite direction). Silent, not false — but
-  the number it should use is the panel depth. (2) `seestack/edit/coverage_trim.py::coverage_is_mosaic`
-  (`MOSAIC_LEVEL_MIN_FRAC = 0.08`, two levels each ≥ 8 % of the covered area) returns **False** for a 3×3 at
-  5 % overlap and for a 12×8 raster with uneven depth (no single level reaches 8 %); it is only the fallback
-  for runs recorded before the stacker persisted `is_mosaic`, so it matters for the owner's *older* runs only —
-  say so in the fix rather than widening it. Also while there: `seestack/render/thumbnail.py:730` still says
-  `stack_detail_mask` uses "the same 'at least min_frac of the **peak**' rule" — a comment lag the Scout noted.
-  **Fix direction.** Measure "thin" against the same reference D1 adopted — `coverage_trim.panel_coverage_level`
-  (the thinnest real panel plateau; on a single field it *is* the peak, so that path is byte-identical) — i.e.
-  `cov < ratio · panel_level`, and make the note say the true thing when it does fire: a **panel** that is
-  thinner than the others is not a border to trim, it is a place to point next — the depth map already knows
-  which one (`seestack/mosaicmap.py::mosaic_depth_map` → the thinnest panel, `aim_hint`), so on a mosaic the
-  note should defer to it (or stay silent and let the `mosaic-depth-map` card speak) rather than offer
-  `trim_border`. Keep the note's ragged-fringe meaning for the single field. **Do not** raise
-  `_COVERAGE_THIN_SHARE` to hide it — that would also hide the genuine lopsided 12/1/1 case it was calibrated
-  on. Old runs carry the wrong stamped number: extend `backfill_coverage_shares` the way v0.377.0 did (re-derive
-  both shares from the coverage map when the stored value predates the fix — a `coverage_shares_version` meta or
-  the run's `engine_version`), so the owner's existing mosaics stop showing the note without a re-stack.
-  **Tests (fail before / pass after).** `tests/test_stack_pipeline.py` or a new `tests/test_coverage_thin.py`:
-  the seven shapes in the table — every mosaic row `< 0.02` thin after, the single-field control unchanged to
-  the digit, the lopsided 12/1/1 case still `> 0.05`; `tests/test_stackhealth.py`: the mosaic sample's run
-  gets no `coverage` note and no `trim_border` action, and the κ-σ note fires on a 2×2 with 3-sub panels and a
-  12-deep corner; `tests/test_coverage_backfill.py`: a run stamped with the old number is re-derived on open.
-
 - **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** ~~No validator
   stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
   resolves inside the raw tree — *not* the owner's current state, but one settings edit away)~~ *(shipped
@@ -924,61 +862,32 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### ⭐ Editor — make it excellent (PRIORITY 1)
 
-- **⭐ READY — GATE OPEN (D1 shipped as v0.382.4; verified on the mosaic sample 2026-09-08). ✅ APPROVED BY
-  THE OWNER 2026-09-07: auto-seed the editor with the Auto recipe on first open, on by default.** *(Pillar:
-  editor — PRIORITY 1; size M, frontend plus one endpoint check; take this **before** the `auto_stack` flip
-  under "Autonomy" — the order the owner fixed is D1 → this → auto-stack. Re-checked against the current code
-  by the backlog-readiness run 2026-09-08: every anchor below still holds. Checked `docs/SHIPPED.md` /
-  `PROCESS-NOTES.md` for "auto-seed" / "seeded": the 2026-07-04 prototype is on no branch (only `main` exists
-  on the remote), so this is a rebuild from the sites below, not a merge.)*
-  **Why the gate is open, verified rather than assumed.** The seed *is* `…/editor/auto`, and before D1 that
-  recipe ended, on any mosaic, in a `geometry.crop` keeping as little as 4 % of the canvas. On the shipped 2×2
-  mosaic sample (`webapp/sample_data.load_sample(shape="mosaic")`, 6/6/6/3 subs, one hazy panel), stacked with
-  the walk-away options and read through `routers/editor._trim_rect_for_run`, Auto's crop is now
-  `(0.022, 0.033, 0.987, 0.987)` — **92.1 % of the canvas kept**, the ragged edge only. The Scout's
-  `agent-dogfood.sh --mosaic --editor` pass the same day measured the same 7.9 % trim through the browser.
-  `coverage_trim.panel_coverage_level` also holds on a 3×3 at 5 % overlap and a 12×8 raster with uneven,
-  weight-jittered panel depths (100 % kept on all of them). The seeded first view of a mosaic is therefore the
-  whole picture, which is what the gate was for.
-  **The problem, in the owner's terms.** A beginner opens a picture in the editor for the first time and gets
-  the flat default stretch plus a grape-coloured nudge ("New to this? Let Auto-process build…"). The good
-  picture is one click away, and the click is the one a beginner doesn't know to make.
-  **Code sites.** `frontend/src/routes/Editor.tsx`: `saved = useQuery(["recipe", safe, rid], api.getRecipe)`
-  (~130) and `savedIsEmpty` (~137); the seed effect `if (saved.data && !seeded) { resetOps(ops0);
-  setSeedKey(JSON.stringify(ops0)); setSeeded(true) }` (~296) — **this is the place**; the `auto` mutation
-  (~721: `api.autoProcess(safe, rid, autoCropArg)` + `api.autoAnalysis(...)`, then `setOps(built)`,
-  `setAutoSummary` / `setAutoValues` / `setAutoCause`, `setAutoKey`); the empty-pipeline nudge (~2149,
-  `ops.length === 0`); `prevRecipe` (~138, the previous run's saved edit offered as a carry-over);
-  `hooks/useUndoable.ts` (`resetOps` clears history, `setOps` pushes a step). `frontend/src/api/client.ts::
-  autoProcess`. `webapp/routers/editor.py::build_auto_recipe_for_run` — returns the recipe and **never persists
-  it**; keep it that way.
-  **Shape.** In the seed effect: when `saved.data` resolves with `ops.length === 0` **and** `prevRecipe` has
-  nothing to offer (`count === 0` — the carry-over of a previous edit is the better seed and must keep
-  winning), call `api.autoProcess` + `api.autoAnalysis` once, hold the editor on its existing loader until they
-  resolve (the preview queries are already gated on `seeded`), then `resetOps([])` followed by `setOps(built)`
-  so the seed is **one Undo away from the empty recipe**; set the three Auto sentences and `autoKey` exactly as
-  the button does (so "What Auto-process did" shows and drops when the recipe diverges); set `seedKey` to the
-  **empty** recipe so the unsaved-changes guard treats the seed as unsaved work — it is: nothing is persisted
-  unless the user presses Save, a saved recipe is never overwritten because the seed only fires on
-  `ops.length === 0`, and a silent leave would drop a look the beginner just saw while the hero keeps showing
-  the plain stack. On a failed Auto call fall through to today's empty pipeline plus nudge — never block the
-  editor on it; the nudge also stays for a user who Undoes the seed. One notification: *"Started you off with
-  Auto-process — Undo to see the plain stack."* **Not a setting**: the owner said on by default.
-  **Traps.** (1) `autoCropArg` is `undefined` on an untouched editor (= the saved `auto_crop_border`) — pass it
-  the way the button does. (2) `Editor.test.tsx` "nudges a first-timer with an empty pipeline toward
-  Auto-process" (~1069) pins the *current* first view; **rewrite it deliberately** to assert the seeded view and
-  the nudge on the failure path — never weaken it. (3) `scripts/dogfood_editor.mjs` (`--editor`) adds every op
-  onto whatever recipe it opens on; a seeded recipe changes its baseline — run `agent-dogfood.sh --mosaic
-  --editor` and record the numbers. (4) The verification above is the bar: the seeded first view of the
-  **mosaic** sample must keep ≥ 90 % of the canvas; a `--editor` drive on the 6-frame field alone does not count.
-  **Tests** (`Editor.test.tsx`): opening a run with an empty saved recipe calls `autoProcess` once and shows its
-  ops plus "What Auto-process did" (**fails today**); a run with a saved recipe never calls it; a run with a
-  previous-run recipe on offer is not auto-seeded (the carry-over button still shows); Undo after the seed gives
-  an empty pipeline; Save persists the seeded ops; an `autoProcess` failure shows the old nudge and no error
-  modal; leaving after a seed triggers the unsaved-changes guard.
-
 The editor is where a good stack becomes a good *picture*, and it has real
 problems. Dogfood it every big-picture run and fix root causes.
+
+- **LEAD, filed by the Builder that shipped v0.390.0 (a lead it could not finish,
+  not an invented idea) — the editor has no unsaved-changes guard at all, and the
+  auto-seed makes that matter more.** *(Pillar: editor — PRIORITY 1; size S–M,
+  frontend only. Confidence: checked — `grep -rn "useBlocker\|usePrompt\|beforeunload\|unsaved" frontend/src`
+  returns nothing in `routes/Editor.tsx`; the v0.390.0 entry assumed a guard
+  existed and it does not.)*
+  **The problem, in the owner's terms.** An edit lives only in the browser until
+  Save; navigating away (the nav bar, the back button, a deep link) drops it
+  silently, and the hero keeps showing the plain stack. Since v0.390.0 that also
+  covers a look the app itself put in front of the user: the seeded Auto recipe
+  is real, unsaved work they did not build and may not know is unsaved.
+  **Code sites.** `frontend/src/routes/Editor.tsx`: `seedKey` (~284) is already
+  exactly the signature such a guard needs — the recipe the run *opened with*,
+  frozen for the run, and set to the **empty** recipe on a seeded open precisely
+  so the seed counts as unsaved; `recipeKey` is the live one. `react-router-dom`
+  is already a dependency (a data router is needed for `useBlocker`; check which
+  router `main.tsx` mounts before assuming it).
+  **Shape.** Dirty = `seedKey !== null && recipeKey !== seedKey`. Guard an
+  in-app navigation with a small confirm ("Save this look, leave it, or stay"),
+  and a tab close with `beforeunload`. Keep it quiet: never fire on a pristine
+  recipe, and never on a Save→navigate. **Watch the seed case specifically** — a
+  guard that nags on a seed the user never asked for would be worse than no
+  guard, so the confirm's wording must offer "leave it" as the easy answer.
 
 - **Live preview** — the preview must show **every** enabled action (that's the
   whole point of it). **DONE (v0.57.0):** the last hold-out, Deconvolution, was
@@ -1135,9 +1044,10 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Autonomy — "just works" (PRIORITY 2)
 
-- **⭐ READY — GATE OPEN (D1 shipped v0.382.4). ✅ APPROVED BY THE OWNER 2026-09-07: turn `auto_stack` back on
-  by default — but take the auto-seed entry under "Editor" first, and the settle hold directly below this
-  entry in the same run or before it.** *(Pillar: autonomy — PRIORITY 2; size S. Owner decision recorded in
+- **⭐ READY — GATE OPEN, AND BOTH PREREQUISITES HAVE NOW LANDED (D1 v0.382.4; the editor auto-seed **v0.390.0**;
+  the settle hold **v0.390.1**, 2026-09-08 — this is the next item in the order the owner fixed, and nothing is
+  in front of it). ✅ APPROVED BY THE OWNER 2026-09-07: turn `auto_stack` back on
+  by default.** *(Pillar: autonomy — PRIORITY 2; size S. Owner decision recorded in
   answer to the third audit, which verified the walk-away path end-to-end through the real watcher — three
   nights, two targets, 160 solves, no re-solves, `incoming/` bit-identical afterwards. Re-checked against the
   current code 2026-09-08.)*
@@ -1171,50 +1081,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   today** — both are `False`); `Settings().auto_stack is True` (**fails today**); `test_auto_stack_pipeline.py`:
   with defaults, a scan of a new target with ≥ `auto_stack_min_frames` located subs stacks it, and the thin /
   unreadable holds still hold.
-
-- **READY (backlog-readiness run 2026-09-08, found by re-reading the walk-away chain for the `auto_stack`
-  flip) — once auto-stack is on, a target that is *still being shot* is re-stacked in full after every scan
-  that brings new subs: hold a target until it has gone quiet.** *(Pillar: autonomy — PRIORITY 2; size S–M;
-  backend only, one additive setting. Confidence: traced — `_auto_stack_frame_count` (`webapp/pipeline.py`
-  ~2334) fires whenever "more accepted+solved frames exist than the last stack covered", and nothing between it
-  and `_stack_target` asks whether subs are still arriving; the third audit's end-to-end run had 160 subs in
-  total and could not feel this. Checked `docs/SHIPPED.md` and this file for "settle" / "quiet" /
-  "still shooting" / "cadence": `watch_quiet_period_s` settles a *file*, never a *target*; nothing else.)*
-  **The problem, in the owner's terms.** He turns Auto-stack on and shoots a 12-panel mosaic for six hours.
-  The watcher's poll (`watch_poll_interval_s`, 300 s) delivers a batch of new subs, the scan solves them, and
-  `_auto_stack_frame_count` says "new solved frames" — so the app stacks the **whole target** (every night's
-  subs, up to his 5,477) and, with auto-edit on, edits it. By the time that finishes the next poll has
-  delivered more, so it stacks the whole target again. The single-worker `JobManager` serialises them, so the
-  NAS spends the night re-stacking, and the Target page's "newest picture" flips every hour to a picture of a
-  night that is not over. A second face of the same gap: `auto_stack_min_frames` (3 located subs) is counted
-  **per target**, so on night one of a mosaic the first three located subs of the first panel are enough to
-  publish a one-panel "mosaic" as the target's picture. Both are exactly what "drop files in, walk away, come
-  back to a great image" is not.
-  **Code sites.** `webapp/pipeline.py`: the walk-away batch (~399 `if settings.auto_stack:` … the per-target
-  loop that calls `_auto_stack_frame_count(lib, safe)` ~444 and holds on `auto_stack_min_frames` ~462 *without*
-  stamping the attempt marker — the hold shape to copy); `_auto_stack_frame_count` (~2334);
-  `_auto_stack_readability_hold` (~2434, the other hold, and the one whose "held, not stamped, retried next scan"
-  semantics this must share). `seestack/io/project.py` — `frames.source_mtime` (the sub's own file time, set at
-  ingest/refresh) and `date_obs`; `webapp/config.py` (`watch_quiet_period_s`, `watch_poll_interval_s`,
-  `auto_stack_min_frames`). `frontend/src/routes/Settings.tsx` ~712–721 (the Auto-stack group).
-  **Shape.** One additive setting, `auto_stack_settle_min: int = 20` (`ge=0`; 0 = today's behaviour), and one
-  hold in the walk-away loop beside the two that exist: if the target's newest accepted sub (`max(source_mtime)`,
-  falling back to `date_obs`) is younger than the settle window, **hold** — status *"still receiving subs
-  (last one N min ago) — will stack once the night has settled"*, no attempt marker, retried on the next scan
-  exactly like the min-frames hold. The manual Stack form and "Process target" are never held. Twenty minutes
-  is longer than any poll and shorter than a meridian-flip pause; make it a named constant with that sentence
-  beside it. Optional second half, only if the first proves insufficient on real data: a per-target minimum
-  interval between unattended stacks. **Not** a debounce inside the watcher — the watcher settles files, and a
-  target keeps receiving files all night.
-  **Upgrade-safe (§9):** a new setting with a default; behaviour changes only on installs with `auto_stack`
-  on, which today is no install the owner runs (his is off) — the honest time to land it is *before* his
-  switch goes on, which is why it sits beside the flip.
-  **Tests** (`tests/webapp/test_autostack_hold.py`, the existing hold tests are the template): a target whose
-  newest sub is 2 min old is held with the new status and no marker (**fails today** — it stacks); the same
-  target 30 min later stacks; `auto_stack_settle_min = 0` reproduces today's behaviour byte-for-byte; a
-  target with no `source_mtime` on any row (pre-fingerprint rows) is not held; "Process target" on a held
-  target stacks immediately.
-
 
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
@@ -3151,6 +3017,9 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.390.1** — PRIORITY 2 (autonomy), the READY entry filed 2026-09-08 and the prerequisite the `auto_stack` flip is gated on (**so that flip is now unblocked**): **a target the sky is still filling is held until the night settles, instead of being re-stacked in full after every 5-minute poll.** `_auto_stack_frame_count` fires on "more solved subs than the last stack covered" and nothing asked whether subs were still *arriving*, so a night of shooting one target meant re-stacking every night it had, over and over, while the "newest picture" kept becoming a picture of a night that was not over. New `pipeline._auto_stack_settle_hold` holds while the newest accepted sub is younger than `auto_stack_settle_min` (default 20 — a named constant: longer than any poll, shorter than a meridian-flip pause; 0 = today's cadence exactly), **without stamping the attempt marker**, exactly like the thin and readability holds — so the stack happens once, on the whole night, at the first scan after the subs stop. Delayed, never stranded, never skipped; the Stack form and "Process target" are untouched. Time comes from new pure `Project.newest_accepted_sub_time()` (two `MAX()`s, no `FrameRow` — asked of every target on every poll), preferring `source_mtime` and falling back to `timestamp_utc`, whose error direction can only make a target stack *sooner*. A source clock running ahead costs one window plus the skew, never forever. The entry's "second face" (per-target `auto_stack_min_frames` publishing a one-panel mosaic on night one) is covered by the same hold, not by a second mechanism. Surfaced on the Jobs page in the same alert shape the other two holds use ("waiting on N still being shot"), and deliberately **not** in `overnight.needs_a_look` — a target still being shot is not something to go and check. Tests +10 Python / +4 vitest; seventeen existing auto-stack tests across five files now set the window to 0 explicitly (their fixtures write subs seconds before asserting), none loosened. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.390.0** — PRIORITY 1 (editor), the ⭐ READY — GATE OPEN entry the owner approved 2026-09-07: **the editor opens on the good picture instead of a nudge to press one button.** On a run with no saved recipe, first open runs `…/editor/auto` and opens on that, with the usual "What Auto-process did" note and *"Started you off with Auto-process — Undo to see the plain stack."* It stands aside for a saved recipe, and for either look of the user's **own** — the previous run's edit *and* their saved default; the entry named only the first, but both buttons live inside the nudge a seed replaces, and removing a feature is the owner's one hard constraint. `resetOps([])` then `setOps(built)` puts it exactly one Undo from the plain stack (the reset matters — navigating from another run leaves that run's recipe in `ops`); nothing is persisted without a Save; a failed seed falls through to the old empty pipeline and nudge with **no** red error, via its own `autoSeed` mutation sharing `fetchAuto`/`applyAutoResult` with the button. `seeded` still gates every preview query, so the decision is made once and there is no seed-then-reseed flash. **Gate re-measured, not trusted:** the mosaic sample stacked fresh and read through `_trim_rect_for_run` keeps **92.1 %** of the canvas. Tests +6 net; the old first-view test rewritten deliberately, never weakened. The entry's "unsaved-changes guard" does not exist anywhere in the frontend — filed back under Ideas. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.389.2** — BUG FIX (the 🟠 VERIFIED entry filed 2026-09-08, with its two named companions): **"thin coverage" is measured against a *panel's* depth, not the coverage map's peak — the same mistake D1 removed from the trim.** `coverage_thin_fraction` now references `coverage_trim.panel_coverage_level`, so "How's my stack?" can no longer tell a mosaic owner that 22–74 % of his picture is a ragged border while offering a "Trim border" that keeps the whole canvas (measured on seven shapes: the 2x2 sample 22 % → 0.0 %, a 12x8 raster with uneven depth and weight jitter 74 % → 0.0 %; the single field unchanged to the digit, since the panel level *is* its peak). The level comes off a strided sample capped at 2 M pixels, because `panel_coverage_level` sorts a float64 copy and this runs at stack time on the full canvas. Old runs heal without a re-stack: two additive columns (`coverage_shares_version`, `coverage_median_depth`, no `SCHEMA_VERSION` bump) let `backfill_coverage_shares` **re-derive** a stale share off the map the run already wrote — a single-field run is never marked stale, and a stale mosaic whose map is gone goes quiet in memory only, never losing the row. The κ-σ reach note gains the provable half of A6: `coverage_median_depth` fires it on a mosaic whose panels are shallow but whose four-way corner cleared the threshold, worded as the half of the picture it can prove. `coverage_is_mosaic`'s dense-raster false negative is documented, deliberately **not** widened (legacy-fallback only). Tests +26. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.389.1** — CLOSED BY MEASUREMENT (the Scout's 2026-08-26 #2 idea, unblocked by v0.387.0): **`photometric_normalize` stays off outside a mosaic — star-core SNR gains only +0.16 % on the realistic single-field case with quality weighting on** (+0.39 / +1.22 / +3.33 % as the haze gets extreme; +0.00 % and bit-identical when there is nothing to correct). On a single field every pixel gets the *same* subs, so the spatial step that makes the pass valuable on a mosaic is structurally absent and all it can change is the combine weight — which quality weighting's `transparency_factor` already approximates. Not a default flip on the hot path. **The first fixture inverted the answer to −9.7 %** by scaling the sky noise along with the signal; haze dims the stars, not the sky glow. `tests/test_photometric_single_field.py` (+2) pins the bit-identity and the never-hurts direction. No code changed. Full entry, table and fixture warning in [`SHIPPED.md`](SHIPPED.md).
 - **v0.389.0** — NEW BEGINNER FEATURE (the Scout's 2026-08-26 #4 entry, unblocked by doing the data task its 2026-08-29 stand-down laid out): **"does my colour look right?" — the finished picture's colour, checked against what that object actually looks like.** A vetted `nebula_class` (`emission` / `reflection` / `both` / `unknown`) is curated onto all 28 bundled `type: "nebula"` entries and nothing else, pinned by the blurb cross-check v0.276.0's `distance_ly` pass used (22/2/3/1). `edit/histogram.py::measure_object_colour` is the sibling of `measure_sky_cast` on the *object* population — sky-subtracted, star-core-trimmed, read off the stretched display image — and `seestack/colourcheck.py::colour_expectation` is the pure join to one line, or `None`. **Built to stay quiet:** only two families speak, a nudge needs 3× the lead a reassurance does, there is a dead band of silence between them, `both`/`unknown`/planetary/SNR never speak, and the word "wrong" never appears. A test, not reasoning, caught the σ estimator: a lower-half MAD called 34 % of a pure-noise frame "object"; `median − p15.87` puts it back at ~2 %. Surfaced as the editor histogram's `colour_check` beside the sky-cast line, plus `ObjectInfoOut.nebula_class`. Tests +27. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.388.0** — NEW BEGINNER FEATURE (the Scout's 2026-09-08 "While you were asleep" entry, built as it instructed — the Dashboard *did* already fold most of it, so it shipped as a consolidation rather than a card): **the "Last night" card now says what the app *did* with the night, not only what the sky gave.** New pure `webapp/overnight.py` — `new_pictures_since` (one line per target, newest first, each carrying the frame count of the picture it replaced so "deeper than the 78 it had before" is only said when true) and `needs_a_look` / `newest_scan_summary` (the holds the scan already records — `auto_stack_held_unreadable` missing-files first, then `auto_stack_held_thin` — read from the **newest finished scan only**, so a resolved hold stops being news with no state to go stale). Stamps compared with `activity_calendar.parse_utc`, never as strings (the app writes UTC in two shapes). Additive `RecentStack.is_genuine`, set through the *shared* `pipeline._stack_options_from_run_json` predicate, keeps an editor export from reading as a second picture; `_rollup_stacks_cached` extracts the cache `/api/stats` already owned so the digest costs no second walk over every project. `LastNightCard` gains three pure wording helpers — a missing-files hold reads as something outside the app to go and check, a thin hold as patience. Both lists are empty on a night nothing was stacked (the owner's live `auto_stack` off), so the card renders exactly as before. Tests +17 Python / +13 frontend. Full entry in [`SHIPPED.md`](SHIPPED.md).

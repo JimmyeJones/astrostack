@@ -50,6 +50,15 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     # instead of publishing it, while a real stack still goes through. Loads
     # cleanly from an old config that never wrote the field.
     assert s.auto_stack_min_frames == 3
+    # New walk-away settle window defaults to 20 minutes. This one *does* change
+    # what an install with auto_stack ON does — deliberately, and only in the
+    # direction of waiting: a target still receiving subs is held, never skipped,
+    # and stacks on the first scan after they stop. That replaces re-stacking the
+    # whole target after every 5-minute poll all night, which is what the walk-away
+    # promise is not. Set it to 0 for the old cadence, exactly.
+    assert s.auto_stack_settle_min == 20
+    assert Settings(**{**s.model_dump(), "auto_stack_settle_min": 0}
+                    ).auto_stack_settle_min == 0
     # New "let Auto trim the ragged mosaic border" preference defaults ON — the
     # historical behaviour — so an upgraded install's one-click Auto frames every
     # picture exactly as it did before the setting existed.
