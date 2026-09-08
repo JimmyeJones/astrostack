@@ -11,9 +11,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > of the Auto/editor path**: every Auto/editor claim is judged on a tiled mosaic canvas at the
 > owner's scale, never on the 6-frame sample (D1 hid there through three audits). After that:
 > autonomy, friendliness and image quality (priorities 2–4). Fix any real editor regression first;
-> favour these areas when picking *new* work. **Ready-to-build entries are marked `READY` — grep for it; the two owner-approved
-> editor/autonomy items are `⭐ READY — GATE OPEN`. Every gate that needs the owner is in one list at the top
-> of "Needs owner sign-off".**
+> favour these areas when picking *new* work. **Ready-to-build entries are marked `READY` — grep for it.
+> Both `⭐ READY — GATE OPEN` items have now shipped (the editor auto-seed v0.390.0, the `auto_stack` default
+> flip v0.391.0), so there is no starred queue left — pick from `READY` and from the priority sections.
+> Every gate that needs the owner is in one list at the top of "Needs owner sign-off".**
 
 **Conventions**
 - **This file is the WORKING LIST. A run must leave it no longer than it found it,**
@@ -1043,44 +1044,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   is a judgment call, not a blind fix.)_
 
 ### Autonomy — "just works" (PRIORITY 2)
-
-- **⭐ READY — GATE OPEN, AND BOTH PREREQUISITES HAVE NOW LANDED (D1 v0.382.4; the editor auto-seed **v0.390.0**;
-  the settle hold **v0.390.1**, 2026-09-08 — this is the next item in the order the owner fixed, and nothing is
-  in front of it). ✅ APPROVED BY THE OWNER 2026-09-07: turn `auto_stack` back on
-  by default.** *(Pillar: autonomy — PRIORITY 2; size S. Owner decision recorded in
-  answer to the third audit, which verified the walk-away path end-to-end through the real watcher — three
-  nights, two targets, 160 solves, no re-solves, `incoming/` bit-identical afterwards. Re-checked against the
-  current code 2026-09-08.)*
-  **What the owner asked for, and what a default flip can and cannot do.** He wants the walk-away chain on.
-  `webapp/config.py::Settings.auto_stack: bool = False` (~115) is the shipped default. **A default flip does
-  not reach his install:** `SettingsStore.__init__` (~401–423) loads `state/config.json` and **re-saves the
-  full model on every boot** (`save()` writes `model_dump_json()`), so every install that has ever booted
-  carries an explicit `"auto_stack": false` and keeps it — AGENTS.md §9 says a stored value survives an
-  upgrade, and there is no way to tell a value he set from a value the app dumped. So this item is two things,
-  and must be honest about both: (1) the shipped default flips for **fresh** installs; (2) the owner flips the
-  switch himself on his install (Settings → the "Auto-stack" `Switch`, `routes/Settings.tsx` ~712) — that is
-  the one live item under "REQUIRES MANUAL OWNER ACTION", and it stays until he does. **Do not write a
-  migration that flips a stored `false`** — the file cannot distinguish "he turned it off in August" from "the
-  app wrote the default", and flipping a setting he deliberately turned off is the breach §9 exists to prevent.
-  Say all of this in the release note.
-  **Code sites.** `webapp/config.py` — `auto_stack` and, directly under it, `auto_edit_on_autostack: bool =
-  False`: **leave that one off**; the owner's decision named `auto_stack`, and whether the walk-away picture
-  should also be auto-*edited* is the first question on the owner's one-sitting list below. `webapp/pipeline.py`
-  ~399 (`if settings.auto_stack:` — the walk-away batch) and ~543 (the `auto_edit_on_autostack` gate). The
-  guards that must still be in the path: the readability preflight and the thinner-than-best hold (v0.270.1),
-  `_auto_stack_degraded_recheck` (v0.273.0), `auto_stack_min_frames` (default 3).
-  `frontend/src/routes/Settings.tsx` ~44 (the `auto_stack` hint copy).
-  `tests/webapp/test_config_upgrade.py::test_old_config_loads_keeps_values_and_defaults_new_fields` (~22).
-  **Shape.** Flip the default; update the Settings hint to say it is on for new installs; **write the upgrade
-  test first**: a `config.json` carrying `"auto_stack": false` loads as `False` after the flip. Grep the suite
-  (`grep -rn auto_stack tests/webapp`: `test_auto_stack_pipeline.py`, `test_autostack_hold.py`,
-  `test_auto_stack_defaults.py`, `test_api.py`, `test_pipeline*.py`) — most set it explicitly; fix any that
-  relied on the default by **setting it explicitly**, never by loosening. Run `scripts/agent-dogfood.sh
-  --empty`: a first-run app now has auto-stack on — check the empty-Dashboard copy still reads right.
-  **Tests.** `test_config_upgrade.py`: a stored `false` survives *and differs from the fresh default* (**fails
-  today** — both are `False`); `Settings().auto_stack is True` (**fails today**); `test_auto_stack_pipeline.py`:
-  with defaults, a scan of a new target with ≥ `auto_stack_min_frames` located subs stacks it, and the thin /
-  unreadable holds still hold.
 
 - Auto-suggest stack settings from the data (frame count, FWHM spread, streaks)
   so the user rarely needs to touch the Stack form. (S–M, autonomy)
@@ -2926,13 +2889,15 @@ outright bug in existing behaviour, never to add capability.
 
 1. **Auto-edit the walk-away picture too?** (`auto_edit_on_autostack`, off.) Once Auto-stack is on, the
    picture the app publishes after a night is the plain linear stretch; the auto-seed only helps in the
-   editor. **Question:** *after D1, auto-seed and the settle hold have shipped, should the unattended chain
+   editor. **Question:** *after D1, auto-seed, the settle hold and the default flip (v0.391.0) have shipped, should the unattended chain
    also run Auto-process on each new stack (yes/no)?* Worth: the last step of "drop files in, walk away, come
    back to a great image". A yes is a one-line default plus the same "your stored setting keeps its value"
    caveat as `auto_stack`.
-2. **Flip Auto-stack on yourself** once the default flip ships — Settings → "Auto-stack". The shipped default
-   cannot reach a stored `config.json` (see the READY entry under "Autonomy"). Worth: the whole walk-away
-   path. *(This is the one item under "REQUIRES MANUAL OWNER ACTION".)*
+2. **Flip Auto-stack on yourself — the default flip has now shipped (v0.391.0).** Settings → "Auto-stack".
+   A *new* install gets it on; yours cannot, because `state/config.json` carries an explicit
+   `"auto_stack": false` that no upgrade may overwrite (the file cannot tell a value you set from a value the
+   app dumped, so flipping it would be the AGENTS.md §9 breach). This is a one-click job and nothing else is
+   waiting on it. Worth: the whole walk-away path. *(The one item under "REQUIRES MANUAL OWNER ACTION".)*
 3. **Do you still see a multicolour grid on any mosaic on a current build?** The v0.225.0 fix rated its own
    root cause "medium confidence as the *sole* contributor". **Answer:** yes/no, and the target's name.
    Unblocks: "bisect the rest of the v0.158→v0.220 colour chain" under "Bugs". Worth: closes or reopens the
@@ -3017,6 +2982,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.391.0** — PRIORITY 2 (autonomy), the ⭐ READY — GATE OPEN entry the owner approved 2026-09-07, with both prerequisites landed and nothing in front of it: **a fresh install now walks the whole chain — ingest → QC → solve → *stack* — without the owner finding a switch.** `Settings.auto_stack` ships `True`. **It reaches fresh installs only, deliberately:** `SettingsStore` re-saves the full model on every boot, so every install that has ever run carries an explicit `"auto_stack": false` and keeps it — and no migration flips it, because the file cannot tell "he turned it off in August" from "the app dumped the default", and flipping a setting someone turned off is the breach AGENTS.md §9 exists to prevent. The owner flips his own switch in Settings (still the one item under REQUIRES MANUAL OWNER ACTION). Safe on by default only because three guards landed first, all in the path: the readability preflight + thinner-than-best hold (v0.270.1), `auto_stack_min_frames`=3 (v0.256.0), and the settle window (v0.390.1). `auto_edit_on_autostack` stays **off** — that is question 1 on the owner's one-sitting list, not this entry's call. Settings copy now says both halves and names the three guards; the Walk-away master switch is unaffected (its other four keys still default off). Tests +3 Python / +2 vitest, **all five fail before the flip** — including the only test in `test_auto_stack_pipeline.py` that does not name `auto_stack`, and a stored-`false` upgrade test that asserts it *differs from the fresh default* rather than merely being `False`. Nothing loosened; one default value, no schema/on-disk/API change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.390.1** — PRIORITY 2 (autonomy), the READY entry filed 2026-09-08 and the prerequisite the `auto_stack` flip is gated on (**so that flip is now unblocked**): **a target the sky is still filling is held until the night settles, instead of being re-stacked in full after every 5-minute poll.** `_auto_stack_frame_count` fires on "more solved subs than the last stack covered" and nothing asked whether subs were still *arriving*, so a night of shooting one target meant re-stacking every night it had, over and over, while the "newest picture" kept becoming a picture of a night that was not over. New `pipeline._auto_stack_settle_hold` holds while the newest accepted sub is younger than `auto_stack_settle_min` (default 20 — a named constant: longer than any poll, shorter than a meridian-flip pause; 0 = today's cadence exactly), **without stamping the attempt marker**, exactly like the thin and readability holds — so the stack happens once, on the whole night, at the first scan after the subs stop. Delayed, never stranded, never skipped; the Stack form and "Process target" are untouched. Time comes from new pure `Project.newest_accepted_sub_time()` (two `MAX()`s, no `FrameRow` — asked of every target on every poll), preferring `source_mtime` and falling back to `timestamp_utc`, whose error direction can only make a target stack *sooner*. A source clock running ahead costs one window plus the skew, never forever. The entry's "second face" (per-target `auto_stack_min_frames` publishing a one-panel mosaic on night one) is covered by the same hold, not by a second mechanism. Surfaced on the Jobs page in the same alert shape the other two holds use ("waiting on N still being shot"), and deliberately **not** in `overnight.needs_a_look` — a target still being shot is not something to go and check. Tests +10 Python / +4 vitest; seventeen existing auto-stack tests across five files now set the window to 0 explicitly (their fixtures write subs seconds before asserting), none loosened. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.390.0** — PRIORITY 1 (editor), the ⭐ READY — GATE OPEN entry the owner approved 2026-09-07: **the editor opens on the good picture instead of a nudge to press one button.** On a run with no saved recipe, first open runs `…/editor/auto` and opens on that, with the usual "What Auto-process did" note and *"Started you off with Auto-process — Undo to see the plain stack."* It stands aside for a saved recipe, and for either look of the user's **own** — the previous run's edit *and* their saved default; the entry named only the first, but both buttons live inside the nudge a seed replaces, and removing a feature is the owner's one hard constraint. `resetOps([])` then `setOps(built)` puts it exactly one Undo from the plain stack (the reset matters — navigating from another run leaves that run's recipe in `ops`); nothing is persisted without a Save; a failed seed falls through to the old empty pipeline and nudge with **no** red error, via its own `autoSeed` mutation sharing `fetchAuto`/`applyAutoResult` with the button. `seeded` still gates every preview query, so the decision is made once and there is no seed-then-reseed flash. **Gate re-measured, not trusted:** the mosaic sample stacked fresh and read through `_trim_rect_for_run` keeps **92.1 %** of the canvas. Tests +6 net; the old first-view test rewritten deliberately, never weakened. The entry's "unsaved-changes guard" does not exist anywhere in the frontend — filed back under Ideas. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.389.2** — BUG FIX (the 🟠 VERIFIED entry filed 2026-09-08, with its two named companions): **"thin coverage" is measured against a *panel's* depth, not the coverage map's peak — the same mistake D1 removed from the trim.** `coverage_thin_fraction` now references `coverage_trim.panel_coverage_level`, so "How's my stack?" can no longer tell a mosaic owner that 22–74 % of his picture is a ragged border while offering a "Trim border" that keeps the whole canvas (measured on seven shapes: the 2x2 sample 22 % → 0.0 %, a 12x8 raster with uneven depth and weight jitter 74 % → 0.0 %; the single field unchanged to the digit, since the panel level *is* its peak). The level comes off a strided sample capped at 2 M pixels, because `panel_coverage_level` sorts a float64 copy and this runs at stack time on the full canvas. Old runs heal without a re-stack: two additive columns (`coverage_shares_version`, `coverage_median_depth`, no `SCHEMA_VERSION` bump) let `backfill_coverage_shares` **re-derive** a stale share off the map the run already wrote — a single-field run is never marked stale, and a stale mosaic whose map is gone goes quiet in memory only, never losing the row. The κ-σ reach note gains the provable half of A6: `coverage_median_depth` fires it on a mosaic whose panels are shallow but whose four-way corner cleared the threshold, worded as the half of the picture it can prove. `coverage_is_mosaic`'s dense-raster false negative is documented, deliberately **not** widened (legacy-fallback only). Tests +26. Full entry in [`SHIPPED.md`](SHIPPED.md).
