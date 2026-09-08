@@ -18,6 +18,7 @@
 #   scripts/agent-dogfood.sh --no-probe      # boot only, don't drive a browser
 #   scripts/agent-dogfood.sh --empty         # probe a FIRST-RUN app: no data at all
 #   scripts/agent-dogfood.sh --editor        # ALSO drive the editor (adds every op)
+#   scripts/agent-dogfood.sh --mosaic        # ALSO load/stack/probe a 2x2 MOSAIC sample
 #
 # --editor exists because the page probe only ever *photographs* the editor, in
 # the one state it opens in. Priority 1 is the editor and the owner's complaints
@@ -26,6 +27,21 @@
 # with no console error and no failed request. It is off by default only because
 # it costs a few minutes on top of a pass that already stacks the sample — run it
 # on any run that touches the editor.
+#
+# --mosaic exists because AGENTS.md §1 judges every Auto/editor claim on a tiled
+# mosaic at the owner's scale, never on the 6-frame single field — and until now
+# the tooling could not produce one, so every "dogfood CLEAN" was still measured
+# on the field. It loads a second, generated sample (`POST /api/sample` with
+# {"shape":"mosaic"}): four overlapping panels of one shared sky, uneven depth,
+# one panel shot through haze, and a ragged union canvas with genuinely uncovered
+# pixels — so the surfaces gated on NaN "no coverage" (the union canvas, coverage
+# levelling, per-panel photometry, the uncovered-fraction note, the depth map,
+# Auto's border trim) are finally in front of a browser. It stacks it, prints the
+# trim Auto would apply to it (a trim above ~15 % of the canvas is a BUG, not a
+# ragged edge — AGENTS.md §1), and writes its shots to $SHOTS/mosaic/ so the
+# page-height baselines measured on the field sample are not disturbed. With
+# --editor, the editor is driven on the mosaic run too. Opt-in because the field
+# sample is what keeps a standard pass fast.
 #
 # --empty exists because every measurement this script has ever taken was of the
 # sample-loaded app, so the screens a beginner meets *first* — an empty Dashboard,
@@ -49,7 +65,7 @@ cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.."
 REPO="$PWD"
 
 DOGFOOD_DIR="${DOGFOOD_DIR:-${TMPDIR:-/tmp}/astrostack-dogfood}"
-DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0; DO_EDITOR=0
+DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0; DO_EDITOR=0; DO_MOSAIC=0
 for arg in "$@"; do
   case "$arg" in
     --serve) DO_SERVE=1 ;;
@@ -58,7 +74,8 @@ for arg in "$@"; do
     --build) DO_BUILD=1 ;;
     --empty) DO_EMPTY=1 ;;
     --editor) DO_EDITOR=1 ;;
-    -h|--help) sed -n '1,46p' "$0"; exit 0 ;;
+    --mosaic) DO_MOSAIC=1 ;;
+    -h|--help) sed -n '1,62p' "$0"; exit 0 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
@@ -132,24 +149,79 @@ SAFE="$(curl -sf "$BASE/api/targets" \
         2>/dev/null || true)"
 echo "-- target: ${SAFE:-<none>}"
 
+# 3b. The mosaic sample (--mosaic): a second target, four overlapping panels of
+#     one shared sky, uneven depth, one hazy panel, a ragged union canvas. It is
+#     the only data this script can produce on which a mosaic-scale Auto/editor
+#     claim means anything (AGENTS.md §1).
+MOSAIC_SAFE=""
+if [ "$DO_MOSAIC" = 1 ] && [ "$DO_EMPTY" = 0 ]; then
+  echo "-- loading the bundled MOSAIC sample (2x2 panels)"
+  curl -sf -X POST "$BASE/api/sample" -H 'Content-Type: application/json' \
+       -d '{"shape":"mosaic"}' >/dev/null || echo "warn: mosaic sample load failed"
+  MOSAIC_SAFE="$(curl -sf "$BASE/api/sample" \
+                 | python -c 'import json,sys; print(json.load(sys.stdin).get("mosaic_safe") or "")' \
+                 2>/dev/null || true)"
+  echo "-- mosaic target: ${MOSAIC_SAFE:-<none>}"
+fi
+
 # 4. A finished picture, so the picture-shaped surfaces (hero card, Gallery,
 #    History, the editor) have something real to render rather than self-hiding.
-if [ "$DO_STACK" = 1 ] && [ -n "$SAFE" ]; then
-  if [ "$(curl -sf "$BASE/api/targets/$SAFE/stack-runs" | tr -d '[:space:]')" = "[]" ]; then
-    echo "-- stacking the sample (this is the slow part; --no-stack skips it)"
-    JOB="$(curl -sf -X POST "$BASE/api/targets/$SAFE/process" \
-           | python -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' 2>/dev/null || true)"
-    for _ in $(seq 1 180); do
-      STATE="$(curl -sf "$BASE/api/jobs/$JOB" \
-               | python -c 'import json,sys; print(json.load(sys.stdin).get("state",""))' 2>/dev/null || true)"
-      # The engine's own terminal set (`webapp/jobs.py::_TERMINAL`). A success is
-      # "done", never "finished" — waiting on the wrong word costs the whole
-      # 180×2s budget on every run, long after the picture is on disk.
-      case "$STATE" in
-        done|error|cancelled|interrupted) echo "-- process job: $STATE"; break ;;
-      esac
-      sleep 2
-    done
+stack_target() {  # $1 = safe name, $2 = what to call it in the log
+  local safe="$1" label="$2"
+  [ -n "$safe" ] || return 0
+  [ "$(curl -sf "$BASE/api/targets/$safe/stack-runs" | tr -d '[:space:]')" = "[]" ] || return 0
+  echo "-- stacking the $label (this is the slow part; --no-stack skips it)"
+  local job state
+  job="$(curl -sf -X POST "$BASE/api/targets/$safe/process" \
+         | python -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' 2>/dev/null || true)"
+  for _ in $(seq 1 180); do
+    state="$(curl -sf "$BASE/api/jobs/$job" \
+             | python -c 'import json,sys; print(json.load(sys.stdin).get("state",""))' 2>/dev/null || true)"
+    # The engine's own terminal set (`webapp/jobs.py::_TERMINAL`). A success is
+    # "done", never "finished" — waiting on the wrong word costs the whole
+    # 180×2s budget on every run, long after the picture is on disk.
+    case "$state" in
+      done|error|cancelled|interrupted) echo "-- process job ($label): $state"; break ;;
+    esac
+    sleep 2
+  done
+}
+
+run_id_of() {  # newest stack run id for a target, or empty
+  [ -n "$1" ] || return 0
+  curl -sf "$BASE/api/targets/$1/stack-runs" \
+    | python -c 'import json,sys; r=json.load(sys.stdin); print(r[0]["id"] if r else "")' \
+    2>/dev/null || true
+}
+
+if [ "$DO_STACK" = 1 ]; then
+  stack_target "$SAFE" "sample"
+  stack_target "$MOSAIC_SAFE" "mosaic sample"
+fi
+
+# 4b. What Auto would trim off the mosaic. AGENTS.md §1: on a mosaic canvas a
+#     trim above ~15 % of the canvas is a BUG (it is cropping to the panel
+#     overlaps), not a ragged edge — and it is invisible on the single field,
+#     whose canvas has no uncovered pixel to trim. Printed, not asserted: this
+#     script is a finder, and anything it turns up still needs a real test.
+if [ -n "$MOSAIC_SAFE" ]; then
+  MOSAIC_RUN="$(run_id_of "$MOSAIC_SAFE")"
+  if [ -n "$MOSAIC_RUN" ]; then
+    curl -sf "$BASE/api/targets/$MOSAIC_SAFE/stack-runs/$MOSAIC_RUN/editor/trim-suggestion" \
+      | python -c '
+import json, sys
+d = json.load(sys.stdin)
+crop = d.get("crop")
+if not d.get("is_mosaic"):
+    print("-- mosaic trim: the run does NOT read as a mosaic (that is itself a bug)")
+elif not crop:
+    print("-- mosaic trim: none suggested (nothing worth trimming)")
+else:
+    kept = (crop["x1"] - crop["x0"]) * (crop["y1"] - crop["y0"])
+    trimmed = 1.0 - kept
+    flag = "  <-- ABOVE ~15%: this is D1-shaped, look at it" if trimmed > 0.15 else ""
+    print(f"-- mosaic trim: Auto would cut {trimmed:.1%} of the canvas{flag}")
+' 2>/dev/null || echo "-- mosaic trim: could not read the trim suggestion"
   fi
 fi
 
@@ -173,12 +245,7 @@ if [ "$DO_PROBE" = 1 ] || [ "$DO_EDITOR" = 1 ]; then
       || echo "warn: could not install playwright — skipping the browser probe"
   fi
   if [ -d "$PW_DIR/node_modules/playwright" ]; then
-    RUN_ID=""
-    if [ -n "$SAFE" ]; then
-      RUN_ID="$(curl -sf "$BASE/api/targets/$SAFE/stack-runs" \
-                | python -c 'import json,sys; r=json.load(sys.stdin); print(r[0]["id"] if r else "")' \
-                2>/dev/null || true)"
-    fi
+    RUN_ID="$(run_id_of "$SAFE")"
     if [ "$DO_PROBE" = 1 ]; then
       echo "-- probing the running app"
       # Copied in rather than run from the repo: an ESM `import "playwright"`
@@ -195,6 +262,26 @@ if [ "$DO_PROBE" = 1 ] || [ "$DO_EDITOR" = 1 ]; then
            TARGET_RUN_ID="$RUN_ID" node editor.mjs) || echo "warn: editor drive failed"
       else
         echo "-- --editor: no stacked target to edit, skipping"
+      fi
+    fi
+    # The same two drives again on the mosaic, into their own shots dir: the §1
+    # page-height baselines were all measured on the field sample, so a mosaic
+    # shot must not overwrite one and be compared against it by mistake.
+    if [ -n "$MOSAIC_SAFE" ]; then
+      MOSAIC_RUN="$(run_id_of "$MOSAIC_SAFE")"
+      mkdir -p "$SHOTS/mosaic"
+      if [ "$DO_PROBE" = 1 ]; then
+        echo "-- probing the running app on the MOSAIC target"
+        (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS/mosaic" \
+           TARGET_SAFE="$MOSAIC_SAFE" TARGET_RUN_ID="$MOSAIC_RUN" node probe.mjs) \
+          || echo "warn: mosaic probe failed"
+      fi
+      if [ "$DO_EDITOR" = 1 ] && [ -n "$MOSAIC_RUN" ]; then
+        echo "-- driving the editor on the MOSAIC run (the one that matters, §1)"
+        cp "$REPO/scripts/dogfood_editor.mjs" "$PW_DIR/editor.mjs"
+        (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS/mosaic" \
+           TARGET_SAFE="$MOSAIC_SAFE" TARGET_RUN_ID="$MOSAIC_RUN" node editor.mjs) \
+          || echo "warn: mosaic editor drive failed"
       fi
     fi
     echo "-- screenshots: $SHOTS"

@@ -14,6 +14,172 @@ Newest first.
 
 ---
 
+## v0.386.1 — 2026-09-08 — the full-res PNG stops holding five copies of the picture
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-113tio`.)** The READY entry
+filed by the 2026-09-07 backlog-readiness run — the one it said to take last,
+because no felt complaint is on record and the ceiling is simply cheap to lower.
+
+**The count, re-measured.** `render_preview_png_full_res` owns every array it
+touches (`load_stack_rgb` hands it a fresh one, nothing else can see it) and
+never reads them again — but it copied at every step: the stretch copied its
+input, normalised it **out-of-place** (`img = (img - lo) / (hi - lo)` holds two
+more full-size temporaries at that instant), then the caller allocated again for
+`nan_to_num`, again for `clip`, and twice more inside `pack_unit`'s
+`rint(arr * 255)`. On this repo's fixture that peaked at **5.00×** the decimated
+array; the entry's own reading of the code said "about four".
+
+**What shipped.** `autostretch` and `_autostretch_for_export` take `copy: bool =
+True`; `pack_unit` takes the same flag. The full-res render passes `copy=False`
+to both, normalises in place, `del`s the source once the stretch returns, and
+uses `nan_to_num(copy=False)` + `np.clip(out=…)`. Every other caller keeps the
+default and its array untouched. Measured after: **3.83×** — ≈ 520 MB → ≈ 400 MB
+on the owner's 3494×2470 mosaic, ≈ 2.9 GB → ≈ 2.2 GB at the 8000 px cap, on a
+button a beginner presses to print and on the archive that runs *every* target
+through the same call, possibly while a stack job holds its own canvases.
+
+**What was deliberately left.** The robust 99.5th percentile that sets the
+normalisation ceiling stays exact — a strided sample would move pixels, and this
+is a bit-parity change (it is the single largest remaining transient, ~1.26×).
+So are the zeroed output array and the per-channel covered-pixel temporaries:
+both are the stretch's own working set, not copying, and reworking the channel
+loop to shave ~0.2× would risk the very pixels this change proves it doesn't
+touch.
+
+**Tests** (`tests/test_full_res_png.py`, +2). `test_the_in_place_full_res_render_
+is_byte_identical` renders a linear, a display-space and an Adjust-stretched
+master and compares the PNG bytes against an **independent** out-of-place
+reference written the old way in the test file — so "identical" means the same
+arithmetic, not merely self-consistent. `test_full_res_render_no_longer_holds_
+five_copies_of_the_picture` pins the peak ratio under `tracemalloc` (NumPy
+reports its allocations to it): 5.00× before, 3.83× after, threshold 4.4× with
+room either side. Engine-only: no config, schema, on-disk, API or default change.
+
+---
+
+## v0.386.0 — 2026-09-08 — `--mosaic`: a sample shaped like the owner's shooting, so a mosaic claim can be checked
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-113tio`.)** The READY infra
+entry filed by the 2026-09-07 backlog-readiness run, built to its spec.
+`AGENTS.md` §1 judges every Auto/editor claim **on a tiled mosaic at the owner's
+scale, never on the 6-frame single field** — and the tooling could not produce
+one, so every "dogfood CLEAN" recorded since was still measured on the field.
+That sample's canvas has no uncovered pixel and one coverage plateau, so every
+surface gated on NaN "no coverage" (the union canvas, coverage levelling,
+per-panel photometry, the uncovered-fraction note, the depth map, Auto's border
+trim) was structurally invisible to the probe. It is how D1 — Auto cropping a
+mosaic to its overlap band, correct on a single field and catastrophic on a
+mosaic — survived twenty clean sweeps and three audits.
+
+**What shipped.** `webapp/sample_data.load_sample(lib, shape="mosaic")` builds a
+**separate** target (`"Sample: M42 mosaic (2×2)"`, its own reserved name) from
+**one shared star catalog**: `_star_catalog` draws the stars over the whole sky
+window once and `_render_star_field` renders each panel's window onto it, so an
+overlap really does hold the *same* stars — without that, the overlaps are two
+unrelated star fields and nothing that measures a mosaic's seams is exercised at
+all. Panels step 82 % of a frame (~18 % overlap) with a per-panel pointing
+jitter, which is what makes the union canvas *ragged*; depth is deliberately
+uneven (6/6/6/3 — one panel clouded out early, and it is on the following night);
+and one panel was shot through haze — ×0.85 on the signal, +8 % on the sky, the
+multiplicative case per-frame photometric normalisation cannot fix from inside a
+single panel. Each sub records **its own panel's** centre (`_frame_center_deg`
+through the frame's real WCS), because every per-panel decision in the engine
+clusters on exactly that pair.
+
+**Measured on the built sample, not asserted from the design:** 21 subs → a
+907×615 union canvas, **4.8 % uncovered**, coverage plateaus at 3 / 6 / 12 / 21,
+`coverage_is_mosaic` True, `pointing_groups` finds 4 panels of 6/6/6/3, 0 align
+failures, and the trim Auto suggests is **7.9 %** of the canvas (healthy — D1 is
+fixed; above ~15 % is the D1 shape and the script says so in as many words).
+
+**`scripts/agent-dogfood.sh --mosaic`** loads it after the field sample, stacks
+it (the stack-and-wait is now one `stack_target` function rather than two copies),
+prints that trim fraction, and runs the page probe — and, with `--editor`, the
+editor drive — against the mosaic run too, writing into `$SHOTS/mosaic/` so the
+field sample's page-height baselines cannot be overwritten and compared against by
+mistake. Opt-in, because the field sample is what keeps a standard pass fast.
+
+**Upgrade-safe and default-unchanged.** `load_sample`/`get_sample_status` take
+`shape` with a `"field"` default; `POST /api/sample` takes an optional
+`{"shape": "mosaic"}` body, so the Dashboard button and the frontend's
+`loadSample()` (no body) are byte-for-byte what they were. `SampleStatusOut`
+gains three fields *with defaults* (`mosaic_loaded`, `mosaic_safe`,
+`mosaic_n_frames`) — `loaded` still means the single-field sample. One `DELETE`
+removes both. The refactor that made the shared catalog possible is provably
+free: the field sample's generated pixels are **bit-identical** to the old
+implementation's, checked against a transcribed copy of it for three dithers.
+The subs are written under the *target's own* directory, never `incoming/` (§10).
+
+**Tests** (`tests/webapp/test_sample_data.py`, +7): the mosaic is four panels of
+6/6/6/3 by `pointing_groups`; it stacks onto a canvas bigger than a frame in both
+axes with 0.5–25 % NaN and `coverage_is_mosaic` True; neighbouring panels
+correlate > 0.9 in their overlap (the shared-sky property, rendered directly);
+the hazy panel really is brighter-skied; the two samples are separate targets,
+loading the mosaic leaves the field one untouched, and one remove sweeps both;
+the API loads the field by default and the mosaic only on request. Full suite
+green.
+
+---
+
+## v0.385.0 — 2026-09-08 — one "Save / share" menu, shared by the Target hero and every History card
+
+**(Builder 2026-09-08, branch `claude/sweet-babbage-113tio`.)** The READY entry
+filed by the 2026-09-07 backlog-readiness run, built to its spec. The same
+picture offered a different set of things to do with it depending on which page
+the owner was standing on: the Target page's hero menu had **no "Copy caption",
+no FITS and no TIFF**; the History card's had all three but **no "Share the
+keepsake"**; the same file was named differently on each ("JPEG (smaller — best
+for sharing)" vs "JPEG" plus a dimmed hint); and each page carried its own
+`MENU_HINT` constant, its own `mah={420}` scroll cap and its own copy of the
+QR-ownership comment. Every item added since v0.267.0 had to be added twice or
+landed on one page only — which is how the drift happened.
+
+**What shipped.** New `frontend/src/components/SavePictureMenu.tsx` renders the
+whole menu (trigger + dropdown) from one props object; `routes/Target.tsx` and
+`routes/History.tsx` render it and their inline copies are gone. The item set is
+the **union**, in one order on both pages: Full-res PNG · PNG · JPEG · Framed
+keepsake · With scale & compass · FITS · TIFF | share · share the keepsake · to
+phone · copy caption · zoom clip | the three wallpapers. **Consolidation is not
+removal** (AGENTS.md §1): no page lost an action, the number of distinct
+destinations went *up* on both, and every one is still one click away. The
+wording is History's label-plus-hint idiom throughout (the one v0.267.0 chose);
+the pieces are the ones that already existed — `SharePictureButton`,
+`DownloadMenuItem`, `WallpaperMenuItems`, `sharePictureText`, `keepsakeFilename`,
+`fullResPngHint`, `tiffDownloadHint`, `postCaption`, `storedPreviewScaleBar` — so
+this is a regrouping, not a re-derivation.
+
+**The traps the entry named, all honoured.** The QR modal stays owned by the
+*page* (the component takes `onToPhone` and renders no modal — a menu closes on
+click and would unmount a popover it owned). Target still passes its
+`captureLabel` — the night the subs were *shot*, never the day the stack ran — so
+the hero's share sheet keeps the date v0.293.0 fixed. The North-up / nameplate
+toggles are per-card view state on History and don't exist on the hero, so they
+arrive as props and reach the JPEG family exactly as before: the plain JPEG takes
+both, the keepsake takes North-up but ignores the nameplate (it carries its own
+caption), "with scale & compass" adds the marks to the same turn, the bare PNG
+takes neither, and each is pinned per flag by a test. History's second "About
+this stack" menu (per-card *view* toggles, different state) and `ImageLightbox`'s
+download toolbar were left alone, as the entry says.
+
+**Behaviour deltas, deliberate and small.** The hero gains FITS, TIFF and "Copy
+caption"; the History card gains "Share the keepsake". The preview PNG's hint now
+says "the best this run has" when there is no FITS behind it, which is what the
+Target page's old "PNG (best quality)" label meant and what History's
+"Quick preview" hint got wrong for such a run.
+
+**Tests.** New `SavePictureMenu.test.tsx` (+7): the union renders for a full run;
+FITS/TIFF hide when absent and the no-FITS hint changes; a run with no files
+renders no menu at all; each `href` carries the right positional flags with and
+without the toggles; `onToPhone` fires and no dialog is rendered; "Copy caption"
+writes a caption built from the run and its catalog identity. Two
+`Target.test.tsx` assertions **fail before** (the hero's menu offering FITS and
+"Copy caption"), and the three wording assertions were updated one-for-one, never
+loosened. Full frontend suite 3,377 passed / 242 files, `tsc --noEmit` clean,
+`vite build` clean; the Python suite is untouched by this change and green.
+Frontend-only: no config, schema, API-shape or default change.
+
+---
+
 ## v0.384.0 — 2026-09-08 — the share of a processed run comes off the master, once, and is cached beside the run
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-5fx14v`.)** The READY entry

@@ -386,7 +386,8 @@ def _write_frame_coverage_fits(path: Path, frame_coverage: np.ndarray) -> None:
 
 # ---- TIFF + preview ------------------------------------------------------
 
-def pack_unit(arr: np.ndarray, dtype: type = np.uint8) -> np.ndarray:
+def pack_unit(arr: np.ndarray, dtype: type = np.uint8, *,
+              copy: bool = True) -> np.ndarray:
     """A ``[0, 1]`` image packed into ``uint8``/``uint16``, **rounded** not truncated.
 
     The one spelling of "float to integer" for every file this module writes, so
@@ -405,8 +406,18 @@ def pack_unit(arr: np.ndarray, dtype: type = np.uint8) -> np.ndarray:
 
     The caller is responsible for clipping to ``[0, 1]`` (all six already do);
     ``rint(1.0 * MAX) == MAX`` exactly, so there is no overflow to guard.
+
+    ``copy=False`` says the caller owns ``arr``, will not read it again, and is
+    happy for the scale-and-round to happen **in** it — two full-size float
+    temporaries a full-resolution render need not hold. Only the integer result
+    is allocated. Identical bytes either way; a non-float input ignores it, since
+    scaling in place would need a cast anyway.
     """
     info = np.iinfo(dtype)
+    if not copy and arr.dtype.kind == "f":
+        np.multiply(arr, float(info.max), out=arr)
+        np.rint(arr, out=arr)
+        return arr.astype(dtype)
     return np.rint(arr * float(info.max)).astype(dtype)
 
 
@@ -705,7 +716,7 @@ def linear_scale_anchors(rgb: np.ndarray) -> tuple[float, float]:
 EXPORT_AUTOSTRETCH_TARGET_BG = 0.06
 
 
-def _autostretch_for_export(rgb: np.ndarray) -> np.ndarray:
+def _autostretch_for_export(rgb: np.ndarray, *, copy: bool = True) -> np.ndarray:
     """
     Conservative export stretch — much milder than the GUI preview thumbnail.
 
@@ -718,12 +729,18 @@ def _autostretch_for_export(rgb: np.ndarray) -> np.ndarray:
     is nan-aware and computes its per-channel statistics over covered pixels
     only, so a mosaic's no-data gaps can't corrupt the black point or skew
     the colour balance.
+
+    ``copy=False`` hands ``rgb`` over to be normalised in place (see
+    :func:`~seestack.render.thumbnail.autostretch`): same pixels out, one fewer
+    full-size float32 copy held. Only pass it if you own ``rgb`` and are done
+    with it.
     """
     from seestack.render.thumbnail import autostretch
 
     return autostretch(
         rgb.astype(np.float32, copy=False),
         target_bg=EXPORT_AUTOSTRETCH_TARGET_BG, sigma_factor=-2.8,
+        copy=copy,
     )
 
 

@@ -494,20 +494,29 @@ def render_preview_png_full_res(
     # ``load_stack_rgb`` area-averages the width down to ``max_long_edge`` during
     # load (cheap for a wide image); a tall image's height is capped after stretch.
     rgb, display_space = load_stack_rgb(fits_path, max_width=max_long_edge)
+    # This function owns ``rgb`` — nothing else can see it — and never reads it
+    # again once the stretch has run, so every step below consumes rather than
+    # copies. On the owner's 3494×2470 mosaic the decimated array is ~104 MB and
+    # this path used to hold about four of them at once, on a button a beginner
+    # presses to print, possibly while a stack job holds its own canvases. The
+    # pixels are unchanged: same operations, same order, written in place.
     if display_space:
         # Already tone-mapped: written verbatim, and the sliders don't apply.
-        stretched = np.nan_to_num(rgb, nan=0.0)
+        stretched = np.nan_to_num(rgb, nan=0.0, copy=False)
     elif stretch is not None and black is not None:
         stretched = asinh_stretch(
             rgb, stretch=float(stretch), black=float(black),
             stats=_preview_grid_asinh_stats(
                 fits_path, rgb, rendered_max_width=max_long_edge))
     else:
-        stretched = _autostretch_for_export(rgb)
-    disp = np.clip(np.nan_to_num(stretched), 0.0, 1.0)
+        stretched = _autostretch_for_export(rgb, copy=False)
+    del rgb  # the stretch is the only reader; free it before the clip
+    disp = np.nan_to_num(stretched, copy=False)
+    np.clip(disp, 0.0, 1.0, out=disp)
     if north_up:
         disp = _apply_north_up(disp, fits_path)
-    u8 = pack_unit(disp)
+    u8 = pack_unit(disp, copy=False)
+    del disp
     img = Image.fromarray(u8, mode="RGB")
     h, w = u8.shape[:2]
     long_edge = max(h, w)
@@ -1090,6 +1099,7 @@ def autostretch(
     protect_highlights: bool = True,
     highlight_protect: float = 0.0,
     stats: AsinhStats | None = None,
+    copy: bool = True,
 ) -> np.ndarray:
     """
     PixInsight-style "Screen Transfer Function" (STF) autostretch.
@@ -1125,9 +1135,15 @@ def autostretch(
     stretching a different array from the one that should decide the curve: a
     higher-resolution render of the same picture, or — the editor's case — one
     *region* of a picture whose sky level is a property of the whole frame.
+
+    ``copy=False`` says the caller owns ``rgb``, will not read it again, and is
+    happy for this to normalise it **in place** — one whole float32 copy of the
+    picture that a full-resolution render need not hold. The pixels returned are
+    identical either way; only the input is consumed. The default keeps every
+    other caller's array untouched, as it always has been.
     """
     knee = highlight_knee_for(highlight_protect)
-    img = rgb.astype(np.float32, copy=True)
+    img = rgb.astype(np.float32, copy=copy)
     if img.ndim == 2:
         # A 2-D (mono) array is treated as a grey image — expand to 3 channels
         # so the per-channel stretch below has an ``axis=2`` to work on, exactly
@@ -1160,7 +1176,13 @@ def autostretch(
     if bounds is None:
         return np.zeros_like(np.nan_to_num(img))
     lo, hi = bounds
-    img = (img - lo) / (hi - lo)
+    # In place: ``img`` is either the fresh copy this function just made or an
+    # array the caller handed over with ``copy=False``, so nobody else can see it.
+    # Written out-of-place this line allocated two more full-size temporaries at
+    # once — the largest single spike in a full-resolution render. Same
+    # arithmetic in the same order, so the pixels are identical.
+    np.subtract(img, lo, out=img)
+    np.divide(img, hi - lo, out=img)
 
     out = np.zeros_like(img)
     for c in range(3):
