@@ -831,6 +831,15 @@ hours, pick the next.
   lock: it only helps agents who look again. Two Builders have independently
   built the same item twice in one hour despite both claiming early — a fetch
   between tasks costs a second and catches it before a line is written.
+- **On an item the backlog sizes at L, fetch again *after* the design read and
+  before writing code.** *(Added 2026-09-08 by collision #13, which cost a
+  finished, measured, fully-tested implementation of the mosaic overlap-gain
+  pass: the run fetched at task start, spent ~40 minutes reading
+  `photometric.py` / `align_one` / the stacker hook, and the other Builder's
+  merge landed inside exactly that window. See `docs/PROCESS-NOTES.md`.)* The
+  start-of-task fetch bounds how *early* a collision can be caught, not whether
+  one happens; on a long task the useful moment is the last one before the first
+  line. It costs a second and it is the only lever a Builder has here.
 - Keep branches small and single-topic so they rarely conflict.
 - `docs/IMPROVEMENTS.md` is the shared blackboard: claim an item by moving it to
   **In progress** with your branch name in the same commit that starts the work;
