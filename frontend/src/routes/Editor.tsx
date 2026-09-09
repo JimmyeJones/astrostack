@@ -43,6 +43,9 @@ import { autoColorCalCaption, colorCalProxyFallbackCaption } from "../components
 import { previewScaleCaption } from "../components/editor/previewScale";
 import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { recentreCropRect, recentreKeptLabel } from "../components/editor/recentreCrop";
+import { PREVIEW_TOOLS, visiblePreviewTools } from "../components/editor/previewTools";
+import { PreviewToolGuide } from "../components/editor/PreviewToolGuide";
+import { HintIcon } from "../components/HintIcon";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
   cropCoveragePct, removeCropOps, type TrimCrop }
   from "../components/editor/mosaicTrim";
@@ -1543,11 +1546,18 @@ export function EditorView() {
               Auto would add the crop. On an ordinary single-field stack Auto never
               crops, so the switch would be a decision about nothing. */}
           {trimCrop ? (
-            <Tooltip multiline w={260} withArrow
-              label="Auto normally trims the ragged, uneven edge off a mosaic so the picture is cleanly framed. Turn this off to keep the full frame, edges and all — you can still crop by hand with 'Trim border'. The default for every target is in Settings → Automation.">
+            /* The hint sits *beside* the switch, not wrapped around it: a
+               tooltip on a switch is unreachable on a phone, where the only
+               gesture available — tapping it — flips the setting instead of
+               answering the question. The icon is the app's own affordance for
+               that (`HintIcon`, v0.374.11's), and this is the one control here
+               whose explanation carries something the screen doesn't: where the
+               library-wide default lives. */
+            <Group gap={4} wrap="nowrap">
               <Switch size="xs" label="Auto-crop edges" checked={autoCrop}
                 onChange={(e) => setAutoCropOverride(e.currentTarget.checked)} />
-            </Tooltip>
+              <HintIcon hint="Auto normally trims the ragged, uneven edge off a mosaic so the picture is cleanly framed. Turn this off to keep the full frame, edges and all — you can still crop by hand with 'Trim border'. The default for every target is in Settings → Automation." />
+            </Group>
           ) : null}
           {/* One preview mode serves both crop offers ("Trim border" and
               "Re-centre"), because they end in the same place: one adjustable
@@ -1879,8 +1889,7 @@ export function EditorView() {
                 about what is being shown rather than controls to aim at. */}
             <Group gap={6} justify="flex-end" mt={6}>
               {hist.data?.is_mosaic ? (
-                <Tooltip multiline w={230} withArrow
-                  label="Show this mosaic's frame-coverage map as a colour heatmap: yellow where the most frames overlap, dark blue at the ragged, uncovered edges. This is what 'Trim border' and 'Coverage leveling' act on.">
+                <Tooltip multiline w={230} withArrow label={PREVIEW_TOOLS.coverage.hint}>
                   <Button size="xs" variant={showCoverage ? "filled" : "default"}
                     color="grape"
                     disabled={!preview.data || cropPreview}
@@ -1893,7 +1902,7 @@ export function EditorView() {
                   </Button>
                 </Tooltip>
               ) : null}
-              <Tooltip label="Show the soft mask that gates star ops (white = treated as a star)">
+              <Tooltip label={PREVIEW_TOOLS.mask.hint}>
                 <Button size="xs" variant={showMask ? "filled" : "default"}
                   color="grape"
                   disabled={!preview.data || cropPreview}
@@ -1910,8 +1919,7 @@ export function EditorView() {
                   is selected (that is the point — nobody hunts for a mode they
                   don't know exists); this is how you put it away again. */}
               {cropDragOp && !cropDragBlocked ? (
-                <Tooltip multiline w={240} withArrow
-                  label="Drag the white handles on the picture to choose what to keep. While this is on, the preview shows the picture as it goes into the crop, so you can see what you're cutting off.">
+                <Tooltip multiline w={240} withArrow label={PREVIEW_TOOLS.cropDrag.hint}>
                   <Button size="xs" variant={cropDragActive ? "filled" : "default"}
                     color="grape" leftSection={<IconCrop size={14} />}
                     disabled={!preview.data || cropPreview}
@@ -1930,8 +1938,7 @@ export function EditorView() {
                 onClick={() => setShowBase((s) => { if (!s) { setSoloExclude(false); setSoloSplit(false); setLookSplit(false); } return !s; })}>
                 {showBase ? "Edited" : "Compare"}
               </Button>
-              <Tooltip multiline w={230} withArrow
-                label="Drag a divider across the preview to reveal the Original on the left and your edit on the right in one frame — the clearest way to judge exactly what a change did.">
+              <Tooltip multiline w={230} withArrow label={PREVIEW_TOOLS.split.hint}>
                 <Button size="xs" variant={splitCompare ? "filled" : "default"}
                   disabled={!preview.data || showMask || showCoverage || cropPreview}
                   onClick={() => setSplitCompare((s) => {
@@ -1961,6 +1968,16 @@ export function EditorView() {
               <Button size="xs" variant="default" leftSection={<IconZoomScan size={14} />}
                 disabled={!shownSrc} onClick={() => setLightbox(true)}>Zoom</Button>
             </Group>
+            {/* The same sentences the buttons above carry as tooltips, as text a
+                phone can show — a tap on one of those buttons runs it, so hover
+                was the only way to ask what any of them meant. One line closed;
+                the tooltips are untouched for anyone with a mouse. It is built
+                from the same two booleans the row is, so it can never explain a
+                button that isn't there. */}
+            <PreviewToolGuide tools={visiblePreviewTools({
+              isMosaic: hist.data?.is_mosaic === true,
+              cropDrag: !!cropDragOp && !cropDragBlocked,
+            })} />
             <Histogram data={hist.data}
               guides={tonalHistGuides(selectedOp,
                 levels.data?.black != null && levels.data?.white != null

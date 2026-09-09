@@ -1,6 +1,6 @@
 import {
   ActionIcon, Alert, Anchor, Badge, Button, Center, Group, Loader, Paper, Progress, Stack, Switch,
-  Text, Title, Tooltip,
+  Text, Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconActivity, IconDownload, IconFlask, IconPhoto, IconX } from "@tabler/icons-react";
@@ -14,6 +14,7 @@ import {
   skippedFoldersTitle,
 } from "../components/skippedFolderCopy";
 import { QueryError } from "../components/QueryError";
+import { HintIcon } from "../components/HintIcon";
 import { settingsLink } from "../settingsSections";
 import { CalibrationSkippedNote } from "../components/CalibrationSkippedNote";
 import { StackNoiseBadge } from "../components/StackNoiseBadge";
@@ -1305,17 +1306,20 @@ export function JobsView() {
         <Title order={2}>Jobs</Title>
         <Group gap="md">
           {notify.supported ? (
-            <Tooltip
-              label="Get a desktop notification when a job finishes, so you can switch tabs while it runs."
-              multiline w={240} withArrow
-            >
+            /* Beside the switch, not wrapped around it: on a phone the only
+               gesture available is the tap that flips it — which here also asks
+               the browser for notification permission — so the sentence
+               explaining what the switch is for was unreadable exactly where it
+               was needed before deciding. */
+            <Group gap={4} wrap="nowrap">
               <Switch
                 size="sm"
                 checked={notify.enabled}
                 onChange={(e) => { void notify.toggle(e.currentTarget.checked); }}
                 label="Notify me when done"
               />
-            </Tooltip>
+              <HintIcon hint="Get a desktop notification when a job finishes, so you can switch tabs while it runs." />
+            </Group>
           ) : null}
           {finished > 0 ? (
             <Button size="xs" variant="subtle" color="gray" loading={clear.isPending}

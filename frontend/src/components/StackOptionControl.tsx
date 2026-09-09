@@ -1,10 +1,8 @@
 import {
-  Group, NumberInput, Select, Slider, Stack, Switch, Text, TextInput, Tooltip,
-  UnstyledButton,
+  Group, NumberInput, Select, Slider, Stack, Switch, Text, TextInput,
 } from "@mantine/core";
-import { IconInfoCircle } from "@tabler/icons-react";
-import { useState } from "react";
 import type { StackOptionField } from "../api/client";
+import { HintIcon } from "./HintIcon";
 
 /**
  * A label with its plain-language explanation behind a small info icon.
@@ -14,67 +12,18 @@ import type { StackOptionField } from "../api/client";
  * and the editor's print-size control — so whatever it does, it does everywhere
  * an engine parameter is offered.
  *
- * **The icon is a real button, and that is the point.** A phone has no hover, so
- * an explanation that only ever appears on `mouseenter` is, on the device this
- * app is mostly read on, not written at all. Worse, `HintLabel` is passed as the
- * `label` of a `Switch`/`Select`/`NumberInput`, which Mantine renders *inside a
- * `<label>`* — so the one thing a touch user could try, tapping the icon, used
- * to activate the control instead: tapping "what does this do?" on a checkbox
- * flipped the setting. The click handler now `preventDefault()`s exactly that.
- *
- * Nothing changes for a mouse: hovering still opens the same tooltip with the
- * same words, and the button carries no padding, so no row gets taller (the
- * standing "the pages are extremely busy" priority). Keyboard users gain it too
- * — the icon is focusable now, and focus opens the hint.
+ * **The icon is a real button, and that is the point** — see `HintIcon`, which
+ * owns that behaviour and is shared with the controls the app lays out itself.
+ * `HintLabel` is passed as the `label` of a `Switch`/`Select`/`NumberInput`,
+ * which Mantine renders *inside a `<label>`*, so the one thing a touch user
+ * could try — tapping the icon — used to activate the control instead: tapping
+ * "what does this do?" on a checkbox flipped the setting.
  */
 export function HintLabel({ label, hint }: { label: string; hint?: string | null }) {
-  // Two reasons a hint can be showing, kept apart so a pointer leaving doesn't
-  // dismiss one the user deliberately tapped open. Blur closes both: on touch,
-  // tapping anything else takes focus away, which is how a tapped hint is
-  // dismissed without a second, precise tap on a 14 px target.
-  const [tapped, setTapped] = useState(false);
-  const [pointed, setPointed] = useState(false);
   return (
     <Group gap={4} wrap="nowrap">
       <Text size="sm">{label}</Text>
-      {hint ? (
-        <Tooltip label={hint} multiline w={260} withArrow position="top-start"
-          opened={tapped || pointed}>
-          <UnstyledButton
-            // A <span>, not a <button>, and that is load-bearing: Mantine
-            // renders this inside the control's own <label>, and a <button>
-            // there is a *labelable* element — so the field's label would name
-            // two controls at once, and "find the ASTAP path field" would become
-            // ambiguous for a screen reader exactly as it does for a test query.
-            // A span carries the role explicitly instead.
-            component="span" role="button" tabIndex={0}
-            // Deliberately generic rather than "What does <label> do?": the
-            // label text is how the control itself is found, so repeating it
-            // here would collide the same way. A reader hears the field's own
-            // label immediately before this, in the same <label>.
-            aria-label="What does this do?"
-            onClick={(e) => {
-              // Without this the surrounding <label> forwards the tap to the
-              // control it labels — reading the hint would change the setting.
-              e.preventDefault();
-              setTapped((open) => !open);
-            }}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter" && e.key !== " ") return;
-              e.preventDefault();   // Space would scroll the panel
-              setTapped((open) => !open);
-            }}
-            onMouseEnter={() => setPointed(true)}
-            onMouseLeave={() => setPointed(false)}
-            onFocus={() => setPointed(true)}
-            onBlur={() => { setPointed(false); setTapped(false); }}
-            style={{ display: "inline-flex", lineHeight: 0, flexShrink: 0,
-              cursor: "pointer" }}
-          >
-            <IconInfoCircle size={14} color="var(--mantine-color-dimmed)" />
-          </UnstyledButton>
-        </Tooltip>
-      ) : null}
+      {hint ? <HintIcon hint={hint} /> : null}
     </Group>
   );
 }
