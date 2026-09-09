@@ -2045,6 +2045,39 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **NEW IDEA (Scout 2026-09-09) — a *shareable* labelled picture: burn the object names into a downloadable
+  JPEG. This is the explicitly-deferred "slice (d)" of the v0.141.0 "What's in this picture?" feature, which
+  never made it onto the live backlog.** *(Pillar: enjoy + share + understand — PRIORITY 3, "annotated results"
+  is one of §1's named beginner examples; size S–M; offline, additive, no new dependency.)*
+  **Why:** v0.141.0 shipped the *interactive* "Identify" overlay (`seestack/annotate.py::objects_in_field` →
+  `GET …/stack-runs/{id}/annotations` → the `AnnotatedImage` overlay behind a History toggle). That answers
+  "what's in my frame?" **on screen**, but a beginner who wants to *post* "M42, the Orion Nebula, with the
+  Running Man (NGC 1977) just above" has no way to get the labels *into* an image — the share JPEG, recap
+  poster and wallpaper are all unlabelled. The shipped entry itself records slice (d) — "burned-in labelled
+  JPEG + Gallery lightbox / editor surfaces" — as an open follow-up, and it fell off the working list, so a
+  grep for "annotated" finds nothing to pick up. This re-files it.
+  **Shape (grep-checked — every ingredient already exists):** a pure engine render (new
+  `seestack/annotate_render.py`, or fold into `seestack/sharecard.py`) that takes the run's stored preview
+  bytes + `objects_in_field(...)` and draws each object's marker + name with PIL — the app already burns text
+  labels this exact way in `render/deepening.py`, `beforeafter.py`, `lifelistcard.py` and `montage.py`, so
+  there is no new drawing machinery and the visual language is settled. Serve it as
+  `GET …/stack-runs/{id}/annotated.jpg` (mirror the existing `before-after.jpg` download endpoint next to it in
+  `stack.py`), and add one download entry to the shared `SavePictureMenu` (v0.385.0) so it sits with the other
+  exports.
+  **Beginner bar ✔ / sane default:** off-by-nothing — it is a download, not a default surface. The default
+  render labels the notable in-frame catalog objects (the same set `objects_in_field` already returns), with a
+  size cap + a simple label-declutter so a dense field doesn't become unreadable (drop the smallest/faintest,
+  or nudge colliding labels — measure against the real bundled catalog on the M42 sample before picking the cap,
+  the way the "N spots" idea's measurement discipline demands). Plain-language, not a knob-farm; **not**
+  pro/niche (this is astrometry.net-style annotation reduced to one button, no reticle/grid options).
+  **Care / upgrade-safe:** additive endpoint + one menu item; no config/DB/on-disk/default/API-shape change; an
+  older frontend simply doesn't offer the download and an older backend 404s it, which the menu already handles
+  for the other conditional exports. A run with no solved WCS (no `wcs_json`) yields no objects → the endpoint
+  should decline (404 / disabled menu item), exactly as `/annotations` already self-hides. Reuses the
+  RA-seam/pole-safe projection that already ships, so no new correctness surface. **Test:** the JPEG renders
+  with the expected labels present on a solved run, declines on an unsolved one, and the menu item shows/hides
+  with `has_annotations` (or equivalent), mirroring the before/after reveal's availability gate.
+
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
   *(Pillar: trust + understand — PRIORITY 3; both small, both purely additive on machinery that now exists.)*
@@ -2218,31 +2251,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   per-target plateau computation on the Dashboard (extra run fetches), not "purely additive copy". Lower value now that
   the on-page nudge exists; keep the real-data threshold-validation caveat before making anything loud.
 
-- **NEW IDEA (Builder 2026-07-24, follow-on to the v0.192.0 target-difficulty badge) — make the galaxy/nebula
-  difficulty split *data-driven* by adding an optional `mag` (and/or `surface_brightness`) field to the bundled
-  catalog, so difficulty can be computed instead of hand-curated.** *(Friendliness / image-quality-trust, PRIORITY
-  3–4; size M; offline, additive.)* **Why:** the shipped `target_difficulty` hand-curates ~90 galaxies/nebulae/PNe/SNRs
-  because `messier.json`/`deepsky_popular.json` carry no magnitude or surface brightness — the very quantities that
-  decide "hard for a Seestar". A curated table is honest but doesn't scale to a growing catalog and encodes one person's
-  judgement calls. **Shape:** add an optional `mag` (integrated) and, better, an estimated **surface brightness**
-  (mag/arcsec², derivable from `mag` + `size_arcmin`) to the catalog entries where a reliable value exists; then a pure
-  `difficulty_from_surface_brightness(sb, type)` blends SB + type into the same easy/moderate/challenging bucket, with
-  the curated table kept as an override/fallback for entries lacking a value. Keeps the cluster type-rule. Self-hides when
-  neither SB nor a curated tag exists. **Feasibility:** static data-file addition + a pure function; no network, no
-  schema/config/API/default change (the `DifficultyHint` shape is unchanged). Validate the SB→bucket thresholds against
-  the existing curated table (they should broadly agree) before trusting them over curation. (S–M.)
-  **⚪ CLOSED — THE GAP IT EXISTS TO FILL IS MEASURED AT ZERO (Builder 2026-09-07). Do not build it.** The entry's
-  premise is that curation "doesn't scale to a growing catalog", i.e. that objects are going unbadged. Ran the real
-  resolver over the real bundled catalog: **157 of 157 objects get a verdict** — the ~90-entry `_CURATED` table plus
-  the "clusters and star fields are uniformly easy" type rule cover `messier.json` and `deepsky_popular.json`
-  completely, and `target_difficulty` returns `None` for nothing. So the proposal would replace a hand-vetted answer
-  that is 100 % covered with a derived one, on data (`mag` / surface brightness) that is **not in the catalog** and
-  would have to be written from memory by an agent — a real chance of putting a wrong number in front of the owner
-  for no coverage gain. The one thing worth keeping was the measurement, so it is now a test rather than a sentence:
-  `tests/test_target_difficulty.py::test_the_bundled_catalog_is_covered_end_to_end_today` names any object that would
-  show no badge, so the gap can't re-open unnoticed if the catalog grows. If it ever *does* re-open, curating the new
-  entries is still the cheaper and more honest answer; reopen this only with a real magnitude source, not from
-  recall.
+- ~~**Data-driven target difficulty** (optional `mag`/surface-brightness in the catalog instead of the curated
+  table).~~ **⚪ CLOSED — measured at zero, do not build** (Builder 2026-09-07; full write-up moved to
+  [`SHIPPED.md`](SHIPPED.md), search "data-driven target difficulty"). The gap it fills is empty: 157/157 bundled
+  objects already get a verdict from `_CURATED` + the cluster type-rule, pinned by
+  `tests/test_target_difficulty.py::test_the_bundled_catalog_is_covered_end_to_end_today`. Reopen only with a real
+  magnitude source, never from recall.
 - **NEW (Builder 2026-07-21, follow-up to shipped "Set as cover" v0.145.0) — let the cover also be an *edited*
   export, not only a raw stack run.** v0.145.0 pins a **`stack_runs` row** as the target's cover (`cover_stack_run_id`
   resolved through the run's `preview_path`). But the #7 spec's motivating case — "a beginner who *edited* a stack
