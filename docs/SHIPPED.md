@@ -14,6 +14,82 @@ Newest first.
 
 ---
 
+## v0.404.0 — 2026-09-09 — which targets you've shot more of since their picture was made (`Project.count_accepted_solved_after`, `/api/new-subs-waiting`, `NewSubsWaitingNote`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-pu1q6v`. A new beginner
+feature, PRIORITY 2 autonomy + 3 friendliness, picked because the backlog's ready
+work is thin and this gap is the owner's own workflow rather than an invented
+one.)**
+
+**The gap, and why it survived.** The Target page has said *"N new subs since your
+last stack — restack?"* since **v0.90.0**, and it is the right sentence for
+someone already looking at the picture that has fallen behind. But the owner
+shoots **many targets across many nights with `auto_stack` off** (AGENTS.md §1),
+so the question after a night's capture is *which* target to open — and the only
+surface that knew was the one you had to open to find out. A picture could
+therefore sit months behind its own data with nothing anywhere saying so. Every
+other library-wide "what is out of date?" surface answers a different question:
+`/api/reprocess-status` and Settings' reprocess card are **version**-based (the
+engine moved on), and `RestackGainNote` (v0.377-era) is about a run that predates
+the columns that date a picture. Neither notices a single new sub.
+
+**One definition, two surfaces — and that is the whole design.** "New" means
+exactly what the Target page's nudge means: **accepted and plate-solved**, dated,
+captured after the newest *genuine* stack run — genuine via the shared
+`webapp.run_options.run_has_reusable_options`, which is where the Target page's
+own `reusable` flag comes from, so an editor export or a channel combine cannot
+reset the clock. `test_the_dashboard_and_the_target_page_cannot_disagree`
+re-derives the number from the very payloads that page reads (`/stack-runs` +
+`/frames`) and asserts the library-wide answer matches it exactly, so the two can
+never name different figures for one target.
+
+**Accepted + solved, not "frames since"**, because `run_stack` combines only
+those: a nudge offering a re-stack for frames it would skip is a nag, not an
+offer. An undated sub is not counted either — it cannot be placed on one side of
+the stack or the other.
+
+**Affordable, and measured against its own precedent.** Per target: one
+`stack_runs` read that stops at the newest genuine row (`iter_stack_runs` is a
+generator ordered newest-first, so it is normally one row), and — only for a
+target that has one — a single `COUNT` behind `idx_frames_ts`
+(`Project.count_accepted_solved_after`). A never-stacked target costs the first
+read alone and is skipped entirely: *"you have never stacked this"* is a
+different sentence that other surfaces already say. It is its **own** endpoint
+for the reason `/api/gallery/unexported-edits` states in its own docstring —
+`/api/stats` is polled every 10 s and `/api/gallery` lists every run of every
+target, so neither is an honest home for a cross-target read.
+
+**It offers; it never acts.** Re-stacking is hours of CPU on a NAS, so there is
+deliberately **no** batch button (unlike "finish them all", which only re-renders
+an existing picture). Each named target links to its own **Stack form**, where
+the frame count, the time estimate and the settings live. A test asserts the note
+contains no button at all besides its own "Not now".
+
+**It joins the Dashboard's `NoticeBoard`** at `advisory` priority rather than
+becoming one more always-on banner (the standing IA rule, AGENTS.md §1), and
+self-hides at zero — which is every fully-stacked library, and every library on
+first render. Dismissal is by **signature including the counts**, so "not now"
+quiets exactly this backlog and next week's subs still speak up.
+
+**Upgrade-safe (§9):** one new read-only endpoint, one new read-only `Project`
+method, one new self-hiding component. No config, DB-schema, on-disk, API-shape
+or default change; an older backend simply 404s the fetch and the note renders
+nothing (pinned by a test).
+
+**Tests (+18):** 9 in `tests/webapp/test_new_subs_waiting.py` (the count in
+isolation — rejected, unsolved and undated new subs each stop counting, and an
+empty stamp is "don't know" not "everything"; a library with no stacks; the
+happy path carrying the picture it is missing from; a target stacked after its
+newest sub; an editor export not resetting the clock; ranking by how much a
+re-stack would buy; the Dashboard-vs-Target-page agreement; and one unreadable
+project not costing the whole answer), 7 in `NewSubsWaitingNote.test.tsx`
+(silence at zero, the named target and its Stack link, the naming cap and the
+Library overflow link, the singular wording, dismiss-by-signature and the
+re-speak, no action buttons, and a failed fetch), and 2 in `Dashboard.test.tsx`
+(the note on the real board, and silence when nothing waits).
+
+---
+
 ## v0.403.0 — 2026-09-09 — the upload box knows which targets you already have (`Project.source_folders_under`, `/api/upload-destinations`, `uploadDestination.ts`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-dto79f`. The "in-UI destination

@@ -1341,6 +1341,38 @@ class Project:
         earliest = row[0] if row else None
         return str(earliest) if earliest else None
 
+    def count_accepted_solved_after(self, timestamp_utc: str) -> int:
+        """How many accepted, plate-solved subs were captured **after**
+        ``timestamp_utc`` — i.e. light a stack taken at that moment could not
+        have used.
+
+        The rule is deliberately the Target page's own
+        (``countNewSubsSinceStack`` in ``routes/Target.tsx``): **accepted and
+        solved only**, so a pile of rejected or unsolved new subs never reads as
+        data waiting. ``run_stack`` would skip those too, and a nudge offering a
+        re-stack for frames it cannot combine is a nag rather than an offer. A
+        frame with no capture time is not counted either — an undated sub cannot
+        be placed on one side of the stack or the other.
+
+        The comparison is a plain string ``>`` because both sides are already
+        normalised to tz-aware UTC ISO-8601 (``fits_loader._normalise_iso_datetime``
+        for a frame, ``datetime.now(timezone.utc).isoformat()`` for a run), which
+        is the same lexicographic ordering the rest of this module does on
+        ``timestamp_utc``.
+
+        One ``COUNT`` behind ``idx_frames_ts``, so it stays cheap on a target
+        with thousands of subs and can be asked of every target in a library."""
+        assert self._conn is not None
+        if not timestamp_utc:
+            return 0
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM frames "
+            "WHERE accept = 1 AND wcs_json IS NOT NULL AND wcs_json <> '' "
+            "AND timestamp_utc IS NOT NULL AND timestamp_utc <> '' "
+            "AND timestamp_utc > ?",
+            (str(timestamp_utc),),
+        ).fetchone()[0]
+
     def source_frames_under(self, prefix: str) -> tuple[int, int, int]:
         """``(n_frames, known_bytes, unsized_frames)`` for the frames whose
         ``source_path`` lies under ``prefix``.
