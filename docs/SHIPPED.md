@@ -14,6 +14,191 @@ Newest first.
 
 ---
 
+## CLOSED, not built — 2026-09-09 — "a corner target can't be centred in its own zoom clip": the proposed fix is backwards (`zoomclip.crop_box_for_scale`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-8td9m9`, while in this module
+for v0.400.0. Cut from `IMPROVEMENTS.md` → Autonomy & friendliness, where it was
+filed 2026-08-30 as "size S; pure, engine-only, fully testable".)**
+
+**The observation was right.** `crop_box_for_scale` slides the crop back inside
+the picture rather than letting it hang off the edge, because a black margin in a
+share clip looks broken — so an object near an edge is pushed in on but never
+actually arrived at.
+
+**The fix it named cannot work.** It asked for "the largest zoom at which the
+focus point can still be the crop's true centre (bounded below by, say, 1.3× so it
+stays a move, and above by today's 1.8×), so a corner object gets a **gentler**
+push-in that genuinely lands on it". Gentler is the wrong direction. The crop is
+`W/s` wide, so the focus can be its true centre only when
+`W/(2s) ≤ min(cx, W−cx)` — that is, the further out the object, the **more** zoom
+is required, not less. Within a bounded range the "largest zoom that centres it"
+is therefore always the range's top, which is today's behaviour.
+
+**Measured on the function itself, at W = 1000:**
+
+| focus | deepest crop centre today | zoom needed to truly centre | crop width then |
+|---|---|---|---|
+| 0.500 W | 0.500 W | 1.00× | 1000 px |
+| 0.722 W | 0.722 W | 1.80× | 556 px |
+| 0.750 W | 0.722 W | 2.00× | 500 px |
+| 0.900 W | 0.722 W | 5.00× | 200 px |
+| 0.960 W | 0.722 W | 12.50× | 80 px |
+
+So today's 1.8× already lands exactly on anything inside [0.278 W, 0.722 W], and
+the entry's own 0.96 W case would need a **12.5×** push-in — an 80 px-wide crop
+blown up to the clip's 640 px long edge, a 3.5× upscale at the deepest frame,
+which is precisely what `zoom_clip_size`'s never-upsample rule exists to prevent.
+
+**If it is ever reopened** it needs a genuinely different idea — letting the whole
+move re-aim (start off-centre and end on the object), or accepting a margin and
+filling it — not a re-derivation of the bounded-zoom shape, which is closed.
+
+---
+
+## v0.400.1 — 2026-09-09 — A trimmed auto-edit stops sharing at 1024 px just because Auto cropped its border (`_render_reproduces_the_crop`, `_visible_canvas`, `_native_picture_gate`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-8td9m9`, found while wiring the
+zoom clip into `_native_picture_source` in v0.400.0 — a gate read, not a filed
+item.)**
+
+**Symptom.** v0.384.0's headline was "the picture he shares of a *Process target*
+run comes off the master instead of the 1024 px preview". For the owner's actual
+main path it did not, because **Auto trims the border**: the auto-edit records a
+`preview_crop_json`, and `_native_picture_source` declined outright on any
+recorded crop. So every share of every auto-edited picture — the JPEG, the
+keepsake, the scale-&-compass, all three wallpapers, and (as of v0.400.0) the zoom
+clip — was still a re-encode of the stored preview. `auto_crop_border` is on by
+default, so this is not an edge case; it is what a "Process target" run *is*.
+
+**Why the decline was over-cautious.** Its stated reason — "the render is of the
+whole canvas, so it would hand back a wider picture than the one on screen" — is
+true for a **linear** run, where nothing replays the trim. It is false for a
+display-space run with a saved recipe, because Auto's trim is a `geometry.crop`
+op **inside that very recipe**, and `render_run_full_res_png` renders such a run
+*through* the recipe (`render_run_recipe_fullres_png`). The crop is expressed in
+fractions, so replaying it on the master yields the same rectangle of sky: the
+picture on screen, larger.
+
+**Fix.** `_native_picture_gate` now declines a recorded crop unless
+`_render_reproduces_the_crop` says the render will reproduce it — display-space,
+a saved recipe, and `preview_crop_of_recipe` on that recipe equal to the recorded
+value (the same function `pipeline._rendered_preview_crop` used to record it, so
+the two cannot drift; `UNKNOWN` on either side, or any disagreement, is a **no**,
+because a big wrongly-framed picture is worse than a small honest one). Sizing
+decisions then measure against `_visible_canvas` — the recorded canvas narrowed
+by the reproduced crop — since that rectangle, not the whole stack, is what the
+render hands back.
+
+**Nothing downstream needed changing, and that was checked rather than assumed.**
+Every consumer of these bytes is expressed in fractions of the picture it is
+handed: `wallpaper_target_pixel` shifts the full-res pixel into the cropped
+rectangle *before* rescaling to whatever size it is given, and the scale bar's
+`fraction` is already a fraction of the cropped canvas' width, multiplied by the
+width the marks are drawn on. So a bigger cropped picture is the same geometry at
+a different scale.
+
+**Measured.** On a 1600×1600 canvas trimmed to 80 % with a 400 px preview, the
+share JPEG goes **400×400 → 1280×1280**, and the picture is the same framing at a
+different scale (max difference 12/255 against the identical scene served the old
+way, both downscaled to 32×32).
+
+**Upgrade-safe (§9).** No config, DB-schema, on-disk, default or API-shape change;
+a class of runs is served more pixels of the picture it was already serving. The
+share render and its cache are the ones v0.384.0 introduced.
+
+**Tests (+4 in `tests/webapp/test_share_native_resolution.py`, two fail before):**
+a trimmed auto-edit shares off the master; it is the same framing only bigger; a
+**linear** run whose preview is cropped still declines (the case the gate exists
+for, unchanged); and a recipe that no longer matches the recorded crop still
+declines. The fixture gained `record_recipe_crop`, which makes the stored preview
+the recipe's own render and records the crop through
+`preview_crop_of_recipe` — the honest shape of an auto-edited run, rather than a
+hand-written rectangle. Nothing loosened.
+
+---
+
+## v0.400.0 — 2026-09-09 — The zoom clip stops being a 1024 px preview blown into a share (`_zoom_clip_source`, `zoom_clip_min_source_long_edge`, `ZOOM_CLIP_SOURCE_OVERSAMPLE`, `_native_picture_gate`, `_native_picture_size`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-8td9m9`. The last open **size**
+item of the download-copy sweep filed 2026-08-30 — "the zoom clip (built from the
+same preview, and the cap sets its resolution directly — 569 px where 640 was
+available)".)**
+
+**Symptom.** The zoom clip is the one thing this app makes for the places a
+beginner actually posts, and it was cut out of `run.preview_path` — the stored
+preview, capped at 1024 px. `zoom_clip_size` never upsamples, so that cap did not
+merely soften the clip, it *sized* it: `CLIP_LONG_EDGE` is 640 and the clip came
+out at `1024 / CLIP_ZOOM` = **569 px**, with its deepest frame the preview at 1:1.
+Two of the three properties the sweep says keep drifting were in play at once —
+the file was smaller than the constant that names it, and `…/zoom-clip/info`
+reported that smaller number as if it were the ask.
+
+**Fix.** The clip is now cut from the **same cached share render every other
+hand-out already uses**. `_zoom_clip_source` asks `_native_picture_source` — the
+v0.310.0/v0.311.0 machinery behind the wallpaper and the share JPEG, which
+declines on exactly the cases where a re-render would be a *different* picture
+from the one on screen (a baked North-up turn, a display-space preview with no
+saved recipe, a trimmed preview, no readable master, a canvas no bigger than the
+preview) — and falls back to the stored bytes otherwise, so an ordinary run is
+byte-for-byte the clip it was. The focus point is re-measured against whichever
+bytes win, the way the wallpaper already does it: framing the move on the other
+grid's pixel would push the camera onto empty sky.
+
+**How big a source, and why not simply "the biggest".** Past
+`zoom_clip_min_source_long_edge()` (= `CLIP_LONG_EDGE × CLIP_ZOOM` = 1152) the
+output size stops growing and further pixels are spent **supersampling** — each
+frame averaged down from more real pixels, a cleaner picture rather than a bigger
+one. That is worth having, but it is not paid once: the move is 24 separate
+crop-and-resize passes, so the source's area is paid 24 times over, on a NAS, for
+one tap. `ZOOM_CLIP_SOURCE_OVERSAMPLE = 2` takes the plain 2×2 average and stops
+there; the ask is `min(that, _share_source_long_edge(...))`, so an ordinary stack
+costs **no render the share JPEG and the wallpaper were not already paying for**
+(same `<basename>_share.png` cache, same signature), and only a canvas far bigger
+than the clip can use is decimated on the way in.
+
+**The cache had to grow with the source.** `_zoom_clip_signature` was keyed on the
+preview's stamp alone, which *was* the whole source. It now also carries the
+master's stamp, the saved recipe's hash and the app version — the same set
+`_share_source_signature` uses — and the version tag goes `v1` → `v2` so every
+cached clip is rebuilt in place rather than serving the old move. A re-stack that
+rewrites the master under an unchanged preview no longer serves a clip of pixels
+that are gone.
+
+**`info` follows the file, which is the whole point of the sweep.** It answers
+before anything is rendered, so it cannot look at the source — instead
+`_native_picture_source`'s cheap gates were lifted verbatim into
+`_native_picture_gate`, which that function now *is* (plus the render), and
+`_native_picture_size` reads the size off the run's own record through the same
+gate. So the number `info` prints and the file the download builds cannot drift
+apart by construction, and a test asserts they agree **on both paths** by decoding
+the served animation rather than by comparing strings. It is explicitly
+best-effort and documented as such: it is answered from the record, so it can sit
+a pixel from the render's own two-step rounding, and a legacy run whose master is
+smaller than its recorded canvas would be over-stated.
+
+**Measured.** On a 1600×1200 canvas with a 400 px stored preview the clip goes
+**222×167 → 640×480**, and its deepest frame carries detail the preview never
+held: against the same scene served as a display-space run with no recipe (which
+declines the render and so moves over the capped preview exactly as before),
+high-frequency energy in the deepest frame is over 1.5× — compared at one size,
+where upscaling invents nothing.
+
+**Upgrade-safe (§9).** No config, DB-schema, on-disk-layout, default or
+API-*shape* change; two response fields (`width`/`height`) that already existed
+report a bigger number for the same picture. The clip and its `.sig` are the
+already-registered `RUN_ARTEFACT_SUFFIXES` files, deleted and archived with the
+run as before. Nothing renders that the share surfaces did not already render.
+
+**Tests (+4 in `tests/webapp/test_zoom_clip.py`, three fail before):** the clip is
+sized by the master and not by the capped preview; it carries detail the stored
+preview could not hold; `info` reports the size the download actually comes out at,
+on the native path *and* the declined one; and the clip is rebuilt when the master
+it is now made from changes. Nothing loosened — the eight existing cases are
+untouched and still pass, because their fixture's canvas *is* its preview, which
+is exactly the case the gate declines.
+
+---
+
 ## v0.399.4 — 2026-09-09 — BUG FIX: D1's fourth instalment — a border is where the data runs out (`coverage_trim.FRINGE_OUTSIDE_FRAC`, `_border_trim_rect`, `_thin_labels`, `editor._load_run_frame_counts_strided`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-u828ql`. Two commits: the

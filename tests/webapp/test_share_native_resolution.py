@@ -27,9 +27,14 @@ _seq = 0
 
 def _register(data_root, safe: str, *, canvas=(1600, 1600), preview_long: int = 400,
               display_space: bool = False, rotation_deg: float = 0.0,
-              recipe: str | None = None) -> int:
+              recipe: str | None = None,
+              record_recipe_crop: bool = False) -> int:
     """A run as a real stack leaves one: a full-resolution master, and a stored
-    preview that is the *capped* render of it."""
+    preview that is the *capped* render of it.
+
+    ``record_recipe_crop`` makes the preview the *recipe's* render and records the
+    ``preview_crop_json`` that render implies — the shape an auto-edit leaves when
+    Auto trims a border."""
     global _seq
     _seq += 1
     tag = f"share_{_seq}"
@@ -53,8 +58,22 @@ def _register(data_root, safe: str, *, canvas=(1600, 1600), preview_long: int = 
         fits.PrimaryHDU(data=cube, header=wcs.to_header()).writeto(
             fits_path, overwrite=True)
         preview_path = tdir / f"{tag}_master_preview.png"
-        preview_path.write_bytes(
-            render_preview_png_full_res(fits_path, max_long_edge=preview_long))
+        crop_json = None
+        if recipe is not None and record_recipe_crop:
+            # The honest shape of an auto-edited run: the stored preview *is* the
+            # recipe's render (crop and all), and `preview_crop_json` is what
+            # `pipeline._rendered_preview_crop` records off that same recipe.
+            from seestack.edit.recipe import preview_crop_of_recipe, recipe_from_json
+            from seestack.previewcrop import preview_crop_json
+            from webapp.pipeline import render_run_recipe_fullres_png
+
+            parsed = recipe_from_json(recipe)
+            preview_path.write_bytes(render_run_recipe_fullres_png(
+                str(fits_path), parsed.to_dict(), max_long_edge=preview_long))
+            crop_json = preview_crop_json(preview_crop_of_recipe(parsed))
+        else:
+            preview_path.write_bytes(
+                render_preview_png_full_res(fits_path, max_long_edge=preview_long))
 
         opts = {"output_name": tag}
         if display_space:
@@ -68,6 +87,8 @@ def _register(data_root, safe: str, *, canvas=(1600, 1600), preview_long: int = 
                 canvas_h=h, canvas_w=w, coverage_min=1, coverage_max=5,
                 options_json=json.dumps(opts),
             ))
+            if crop_json is not None:
+                proj.set_stack_preview_crop(run_id, crop_json)
             if recipe is not None:
                 from webapp.routers.editor import RECIPE_META_PREFIX
                 proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe)
@@ -190,6 +211,93 @@ def test_share_jpeg_of_a_processed_run_is_rendered_through_its_saved_recipe(
                        display_space=True, recipe=_stretch_recipe())
     got = _img(client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg").content)
     assert got.size == (1600, 1600)      # the canvas, not the 400 px preview
+
+
+def _trimmed_recipe(x0=0.1, y0=0.1, x1=0.9, y1=0.9) -> str:
+    """A saved auto-edit: a stretch **and** the border trim Auto applies. The
+    trim is a `geometry.crop` op inside the very recipe the render replays."""
+    from seestack.edit.recipe import OpInstance, Recipe
+
+    return Recipe(ops=[
+        OpInstance(id="tone.stretch", params={"mode": "stf", "target_bg": 0.5},
+                   enabled=True),
+        OpInstance(id="geometry.crop",
+                   params={"x0": x0, "y0": y0, "x1": x1, "y1": y1}, enabled=True),
+    ]).to_json()
+
+
+def test_a_trimmed_auto_edit_still_shares_off_the_master(client, solved_library):
+    """The owner's actual main path, and the case the crop gate was refusing.
+
+    Auto's border trim is a `geometry.crop` op *in the saved recipe*, and the
+    full-res render replays that recipe — so it reproduces the trim and hands back
+    the picture on screen, larger. Declining it left every share of every
+    auto-edited picture a re-encode of the 1024 px preview. Fail-before: 320 px."""
+    safe = _safe(client)
+    run_id = _register(solved_library, safe, canvas=(1600, 1600), preview_long=400,
+                       display_space=True, recipe=_trimmed_recipe(),
+                       record_recipe_crop=True)
+    got = _img(client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg").content)
+    # 80 % of a 1600 px canvas, not 80 % of the 400 px preview.
+    assert got.size == (1280, 1280)
+
+
+def test_the_trimmed_share_is_the_same_framing_only_bigger(client, solved_library):
+    """Bigger, not differently framed — the trim has to land on the same sky.
+
+    Compared against the identical scene served the old way: a twin whose preview
+    is the *same* recipe render but whose options are linear, so the gate still
+    declines it and its share is the stored 320 px bytes."""
+    safe = _safe(client)
+    native = _register(solved_library, safe, canvas=(1600, 1600), preview_long=400,
+                       display_space=True, recipe=_trimmed_recipe(),
+                       record_recipe_crop=True)
+    stored = _register(solved_library, safe, canvas=(1600, 1600), preview_long=400,
+                       recipe=_trimmed_recipe(), record_recipe_crop=True)
+    a = _img(client.get(f"/api/targets/{safe}/stack-runs/{native}/jpeg").content)
+    b = _img(client.get(f"/api/targets/{safe}/stack-runs/{stored}/jpeg").content)
+    assert a.size == (1280, 1280) and b.size == (400, 400)
+    small_a = np.asarray(a.convert("L").resize((32, 32), Image.BOX), dtype=float)
+    small_b = np.asarray(b.convert("L").resize((32, 32), Image.BOX), dtype=float)
+    assert np.abs(small_a - small_b).max() < 12.0
+
+
+def test_a_linear_run_whose_preview_is_cropped_still_declines(
+        client, solved_library):
+    """The case the gate exists for, unchanged: nothing replays the crop for a
+    *linear* run, so its full-res render is of the whole canvas and would hand
+    back a wider picture than the one on screen."""
+    safe = _safe(client)
+    run_id = _register(solved_library, safe, canvas=(1600, 1600), preview_long=400,
+                       recipe=_trimmed_recipe(), record_recipe_crop=True)
+    got = _img(client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg").content)
+    assert got.size == (400, 400)        # the stored preview's own bytes
+
+
+def test_a_recipe_that_no_longer_matches_the_recorded_crop_declines(
+        client, solved_library):
+    """The recorded crop is what the *stored bytes* show; the recipe is what a
+    render would do. If a later save left the two disagreeing, placing anything on
+    the render would be placing it wrong — so the stored bytes stay."""
+    from seestack.io.library import Library as _Library
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    safe = _safe(client)
+    run_id = _register(solved_library, safe, canvas=(1600, 1600), preview_long=400,
+                       display_space=True, recipe=_trimmed_recipe(),
+                       record_recipe_crop=True)
+    lib = _Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}",
+                          _trimmed_recipe(0.2, 0.2, 0.8, 0.8))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    got = _img(client.get(f"/api/targets/{safe}/stack-runs/{run_id}/jpeg").content)
+    assert got.size == (400, 400)        # the stored preview's own bytes
 
 
 def test_the_share_source_is_rendered_once_and_then_reused(
