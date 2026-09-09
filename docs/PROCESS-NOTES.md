@@ -94,8 +94,19 @@ killed the pass mid-`--editor`, and the mosaic editor drive filled the log with
 `ERR_CONNECTION_REFUSED` for every op. It is not a finding and it is not a
 regression — kill probe servers by PID, or give them a marker argument.
 
-**Green gates:** baseline on `origin/main` before any change, and the full suite
-again on the finished tree — both recorded in the merge commit.
+**Green gates.** Baseline on `origin/main` before a line was changed: **5,473
+passed / 2 skipped** (full suite headless, 26:05) — the same figure the previous
+run recorded, so the tree started where it was left. On the finished tree:
+**5,480 passed / 2 skipped** (24:39), i.e. **exactly +7**, the seven tests this
+run added and nothing else moved. Frontend **253 files / 3,550 tests**,
+`tsc --noEmit` clean, `vite build` green. `origin/main` was still at `f420351b`
+at merge time, so no sync and no version renumber were needed.
+
+**One tooling note for whoever runs the suite next: run the two suites one at a
+time.** pytest and vitest together put a load average of ~23 on four cores and
+each took roughly twice as long as it does alone; the previous run recorded the
+same thing (37:58 against its usual ~23 min) and put it down to a dogfood pass.
+It is not the dogfood — it is two worker pools.
 
 ## 2026-09-09 — Builder run (`claude/sweet-babbage-8j2dwm` → v0.406.0, v0.406.1): the rectangle a CLEAN dogfood and a flat seam number both missed
 
