@@ -88,8 +88,11 @@ clipped σ is inflated on both sides by whatever structure survives the object
 mask, so it can only understate — which is the right direction for a claim the
 app makes out loud.
 
-**Green gates on the merged tree:** full Python suite headless, frontend
-**253 files / 3,550 tests**, `tsc --noEmit` clean, `vite build` green.
+**Green gates on the merged tree:** **5,473 passed / 2 skipped** (full suite
+headless, 29:47), frontend **253 files / 3,550 tests**, `tsc --noEmit` clean and
+`vite build` green. The Python delta is exactly the +27 collected items this run
+added (24 in `tests/test_coverage_grain.py`, 3 on the wire) against the 5,446
+baseline, and the frontend delta exactly the +3 in `PanelSeamsBadge.test.tsx`.
 
 ## 2026-09-09 — Builder run (`claude/sweet-babbage-pu1q6v` → v0.405.0, v0.405.1): the library-wide "new subs waiting" note, and the bug a CLEAN dogfood was hiding
 
