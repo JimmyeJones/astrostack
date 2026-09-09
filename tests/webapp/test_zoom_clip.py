@@ -78,6 +78,80 @@ def _register_run(data_root, safe: str, *, preview: Image.Image | None,
         lib.close()
 
 
+def _register_master_run(data_root, safe: str, *, canvas=(1600, 1200),
+                         preview_long: int = 400, display_space: bool = False,
+                         fine_detail: bool = False) -> tuple[int, Path]:
+    """A run as a real stack leaves one: a full-resolution master plus a stored
+    preview that is the *capped* render of it — the shape
+    ``_register_run`` above deliberately doesn't have (its canvas is its preview,
+    so the native re-render declines and the clip stays preview-sourced).
+
+    ``fine_detail`` plants a pattern whose period survives at canvas resolution
+    and is beyond the capped preview's Nyquist, so "is the clip really made of
+    more detail?" is answerable from the frames.
+    """
+    global _seq
+    _seq += 1
+    tag = f"zcm_{_seq}"
+    from seestack.render.thumbnail import render_preview_png_full_res
+
+    w, h = canvas
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        tdir = Path(lib.target_dir(lib.find_target(safe)))
+        yy, xx = np.mgrid[0:h, 0:w]
+        plane = np.tile(np.linspace(0.05, 0.85, w, dtype=np.float32), (h, 1))
+        if fine_detail:
+            plane = plane + 0.12 * np.sin(2 * np.pi * xx / 8.0).astype(np.float32)
+        plane += (0.6 * np.exp(-(((xx - w * 0.3) / (w * 0.03)) ** 2
+                                 + ((yy - h * 0.5) / (h * 0.03)) ** 2))
+                  ).astype(np.float32)
+        cube = np.clip(np.stack([plane] * 3, axis=0), 0.0, 1.0)
+        wcs = WCS(naxis=2)
+        wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+        wcs.wcs.crpix = [w / 2 + 0.5, h / 2 + 0.5]
+        wcs.wcs.crval = [150.0, 20.0]
+        s = 0.001
+        wcs.wcs.cd = [[-s, 0.0], [0.0, s]]
+        fits_path = tdir / f"{tag}_master.fits"
+        fits.PrimaryHDU(data=cube, header=wcs.to_header()).writeto(
+            fits_path, overwrite=True)
+        preview_path = tdir / f"{tag}_master_preview.png"
+        preview_path.write_bytes(
+            render_preview_png_full_res(fits_path, max_long_edge=preview_long))
+
+        opts: dict = {"output_name": tag}
+        if display_space:
+            opts["preview_display_space"] = True
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename=f"{tag}_master", fits_path=str(fits_path),
+                tiff_path=None, preview_path=str(preview_path), n_frames_used=7,
+                canvas_h=h, canvas_w=w, coverage_min=1, coverage_max=7,
+                options_json=json.dumps(opts), total_exposure_s=1260.0,
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        return (run_id, fits_path)
+    finally:
+        lib.close()
+
+
+def _deepest(frames: list[Image.Image]) -> Image.Image:
+    """The most zoomed-in frame of the loop — the push-in's last one."""
+    return frames[(len(frames) + 2) // 2 - 1]
+
+
+def _high_frequency_energy(img: Image.Image) -> float:
+    """Mean absolute adjacent-pixel difference: how much detail a frame carries,
+    blind to overall brightness."""
+    a = np.asarray(img.convert("L"), dtype=np.float32)
+    return float(np.abs(np.diff(a, axis=1)).mean() + np.abs(np.diff(a, axis=0)).mean())
+
+
 def _set_target_position(data_root, safe: str, ra: float, dec: float) -> None:
     lib = Library.open_or_create(data_root / "library")
     try:
@@ -195,6 +269,98 @@ def test_the_clip_is_cached_and_rebuilt_when_the_picture_changes(
 
     # The user re-edits and saves: same path, different picture.
     _blob_preview(blob_xy=(80, 220)).save(preview_path)
+    rebuilt = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/zoom-clip")
+    assert rebuilt.status_code == 200
+    assert rebuilt.content != first.content
+
+
+def test_the_clip_is_sized_by_the_master_not_by_the_capped_preview(
+    client, solved_library,
+):
+    """The clip asks for `CLIP_LONG_EDGE` and, made from the 1024 px stored
+    preview, could never reach it: `zoom_clip_size` never upsamples, so the whole
+    move was sized at ``preview / CLIP_ZOOM``. Fail-before: a 400 px preview of a
+    1600 px canvas gave a 222 px clip."""
+    from seestack.render.zoomclip import CLIP_LONG_EDGE
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, _ = _register_master_run(
+        solved_library, safe, canvas=(1600, 1200), preview_long=400)
+
+    frames = _frames(client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/zoom-clip").content)
+    assert frames[0].size == (CLIP_LONG_EDGE, 480)
+
+
+def test_the_clip_carries_detail_the_stored_preview_could_not_hold(
+    client, solved_library,
+):
+    """Not just more pixels — more picture. The same scene is served twice: once
+    where the native re-render is allowed, and once as a display-space run with no
+    saved recipe, which declines it and so moves the camera over the capped
+    preview exactly as before. Comparing the deepest frames at one size (upscaling
+    invents nothing) shows the fine pattern only the master ever carried."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    native, _ = _register_master_run(
+        solved_library, safe, canvas=(1600, 1200), preview_long=400,
+        fine_detail=True)
+    stored, _ = _register_master_run(
+        solved_library, safe, canvas=(1600, 1200), preview_long=400,
+        fine_detail=True, display_space=True)
+
+    a = _deepest(_frames(client.get(
+        f"/api/targets/{safe}/stack-runs/{native}/zoom-clip").content))
+    b = _deepest(_frames(client.get(
+        f"/api/targets/{safe}/stack-runs/{stored}/zoom-clip").content))
+    assert a.size == (640, 480) and b.size == (222, 167)
+    assert _high_frequency_energy(a) > 1.5 * _high_frequency_energy(
+        b.resize(a.size, Image.LANCZOS))
+
+
+def test_info_reports_the_size_the_download_actually_comes_out_at(
+    client, solved_library,
+):
+    """The size axis of the download-copy sweep: `info` answers before anything is
+    rendered, so its figure has to be read off the same source the download will
+    use — on both paths."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    native, _ = _register_master_run(
+        solved_library, safe, canvas=(1600, 1200), preview_long=400)
+    stored, _ = _register_master_run(
+        solved_library, safe, canvas=(1600, 1200), preview_long=400,
+        display_space=True)
+
+    for run_id in (native, stored):
+        info = client.get(
+            f"/api/targets/{safe}/stack-runs/{run_id}/zoom-clip/info").json()
+        frames = _frames(client.get(
+            f"/api/targets/{safe}/stack-runs/{run_id}/zoom-clip").content)
+        assert (info["width"], info["height"]) == frames[0].size
+
+
+def test_the_clip_is_rebuilt_when_the_master_it_is_now_made_from_changes(
+    client, solved_library,
+):
+    """The cache used to be keyed on the preview alone, which was the whole source.
+    It isn't any more — a re-stack that rewrites the master under an unchanged
+    preview must not serve a move over pixels that are gone."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, fits_path = _register_master_run(
+        solved_library, safe, canvas=(1600, 1200), preview_long=400)
+
+    first = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/zoom-clip")
+    assert first.status_code == 200
+    again = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/zoom-clip")
+    assert again.content == first.content          # cached, not re-rendered
+
+    h, w = 1200, 1600
+    yy, xx = np.mgrid[0:h, 0:w]
+    flipped = np.clip(
+        np.tile(np.linspace(0.85, 0.05, w, dtype=np.float32), (h, 1))
+        + 0.6 * np.exp(-(((xx - w * 0.7) / (w * 0.03)) ** 2
+                         + ((yy - h * 0.5) / (h * 0.03)) ** 2)), 0.0, 1.0)
+    with fits.open(fits_path, mode="update") as hdul:
+        hdul[0].data = np.stack([flipped] * 3, axis=0).astype(np.float32)
     rebuilt = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/zoom-clip")
     assert rebuilt.status_code == 200
     assert rebuilt.content != first.content
