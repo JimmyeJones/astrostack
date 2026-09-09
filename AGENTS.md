@@ -663,6 +663,19 @@ the repo.
 > its shots to `$SHOTS/mosaic/`, leaving the field sample's page-height baselines
 > alone. Combine with `--editor` to drive the editor on the *mosaic* run.
 >
+> **And read the block it prints under "what the app SAYS about this mosaic" as
+> one paragraph** *(added 2026-09-09 with v0.406.2)*. A "CLEAN" pass is a
+> statement about console errors — not about pixels (v0.406.0's lesson) and not
+> about **sentences**. Three consecutive findings were in the *gap between* two
+> of the app's own claims rather than in any one of them: a "flat" seam number
+> answering a question about the sky's *level* to someone looking at a difference
+> in *depth*; the History chip repeating it; and the panel map drawing a hole
+> where the thin panel was, over the words *"no part of the picture is being held
+> back"*, while the health panel on the same run called a quarter of that picture
+> 1.4× grainier. Every one of those passes was CLEAN. So the question to ask of
+> that block is not "did anything error?" but **"could a beginner hold all of
+> these at once?"**
+>
 > **On any run that touches the editor, add `--editor`.** The pass above only
 > *photographs* the editor, in the one state it opens in — priority 1 is the
 > editor and the owner's complaints about it are all about what happens after a
