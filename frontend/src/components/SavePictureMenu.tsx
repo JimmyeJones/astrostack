@@ -258,6 +258,26 @@ export function SavePictureMenu({
             </span>
           </Menu.Item>
         ) : null}
+        {/* The names, on their own. "What’s in it?" answers "which fuzzy blob is
+            which" on screen, and the answer vanishes the moment the picture
+            leaves the app — so the one thing a beginner most wants to *post*
+            ("M 42, with the Running Man just above") could only be screenshotted.
+            The keepsake share has carried the names since v0.293.0, but only
+            bundled with the matte and the scale bar; this is the plain picture
+            with the names on it. Same no-op degradation as the marks above: an
+            unsolved run, or a field with nothing catalogued in it, simply gets
+            the plain picture back. */}
+        {run.has_preview ? (
+          <Menu.Item leftSection={<IconPhotoDown size={16} />}
+            component="a"
+            href={api.stackArtifactUrl(
+              safe, run.id, "jpeg", northUp, false, false, false, true)}>
+            With object names
+            <span style={MENU_HINT}>
+              What’s in it, named on the picture — so the labels travel with the file
+            </span>
+          </Menu.Item>
+        ) : null}
         {run.has_fits ? (
           <Menu.Item leftSection={<IconDownload size={16} />}
             component="a" href={api.stackArtifactUrl(safe, run.id, "fits")}>
