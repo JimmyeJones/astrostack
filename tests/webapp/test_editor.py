@@ -70,6 +70,34 @@ def _write_coverage(data_root, safe, cov, basename="master"):
         lib.close()
 
 
+def _output_dir(data_root, safe):
+    """A target's ``output/`` directory, where a run's sibling maps live."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            return Path(proj.project_dir) / "output"
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def _write_frame_coverage(data_root, safe, counts, basename="master"):
+    """Write a ``{basename}_framecov.fits`` sibling — the honest per-pixel frame
+    count, which is what the border trim measures a panel's depth in."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            fp = Path(proj.project_dir) / "output" / f"{basename}_framecov.fits"
+            fits.writeto(fp, np.asarray(counts, dtype="float32"), overwrite=True)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
 def _ragged_border_coverage(h: int = 80, w: int = 100, *, deep: float = 5.0,
                             border: int = 4) -> np.ndarray:
     """A well-covered interior inside a genuinely **ragged, thin** border.
@@ -1165,6 +1193,46 @@ def test_trim_suggestion_mosaic(client, solved_library):
     # and are kept — which is the rule doing exactly what it says.
     assert abs(c["x0"] - 2 / 100) < 1e-6 and abs(c["y0"] - 2 / 80) < 1e-6
     assert abs(c["x1"] - 98 / 100) < 1e-6 and abs(c["y1"] - 78 / 80) < 1e-6
+
+
+def test_trim_suggestion_measures_the_frame_count_not_the_weights(client,
+                                                                  solved_library):
+    """The trim reads ``_framecov.fits`` where the run wrote one.
+
+    A coverage value is a sum of per-frame *weights* once ``quality_weighted`` is
+    on — the walk-away default — which spreads one real panel across a band of
+    values and is the input D1 kept being wrong on. The frame count is flat inside
+    a panel by construction. Here the two maps disagree on purpose: the weighted
+    map has no border at all (so it would offer no trim), while the frame count
+    has the ragged one. The answer must follow the frame count."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    _write_coverage(solved_library, safe, np.full((80, 100), 5.0, dtype="float32"))
+    _write_frame_coverage(solved_library, safe, _ragged_border_coverage())
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/trim-suggestion").json()
+    assert body["crop"] is not None, "the frame-count map's border was ignored"
+    c = body["crop"]
+    assert abs(c["x0"] - 2 / 100) < 1e-6 and abs(c["y0"] - 2 / 80) < 1e-6
+    assert abs(c["x1"] - 98 / 100) < 1e-6 and abs(c["y1"] - 78 / 80) < 1e-6
+
+
+def test_trim_suggestion_falls_back_to_the_weighted_map_without_a_sibling(
+        client, solved_library):
+    """Every run recorded before ``_framecov.fits`` existed keeps exactly the
+    behaviour it has today — the weighted coverage map, read as before."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    _write_coverage(solved_library, safe, _ragged_border_coverage())
+    proj_dir = _output_dir(solved_library, safe)
+    assert not (proj_dir / "master_framecov.fits").exists()
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/trim-suggestion").json()
+    c = body["crop"]
+    assert c is not None
+    assert abs(c["x0"] - 2 / 100) < 1e-6 and abs(c["y0"] - 2 / 80) < 1e-6
 
 
 def test_trim_suggestion_single_field_is_noop(client, solved_library):
