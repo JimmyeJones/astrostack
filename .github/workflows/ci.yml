@@ -64,9 +64,19 @@ jobs:
       - name: Install
         working-directory: frontend
         run: npm ci
-      - name: Typecheck + build
+      - name: Typecheck (everything, tests included)
         working-directory: frontend
-        run: npm run build   # tsc --noEmit && vite build
+        # Full check, incl. the test files that import repo-root tests/fixtures/
+        # shared with the Python suite. Runs here, where the whole repo exists —
+        # the image build cannot do it (it copies only frontend/). Keep this
+        # step: without it the tests' types stop being checked anywhere.
+        run: npm run typecheck
+      - name: Build (what the image builds)
+        working-directory: frontend
+        # tsc -p tsconfig.build.json && vite build — excludes tests, so this
+        # matches docker/Dockerfile's frontend stage and catches a TS2307 there
+        # before it reaches the owner's `docker compose up --build`.
+        run: npm run build
       - name: Unit tests
         working-directory: frontend
         run: npm run test    # vitest run
