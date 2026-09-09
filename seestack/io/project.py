@@ -22,6 +22,7 @@ add complexity for no win at this scale.
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -1370,6 +1371,58 @@ class Project:
         if not row:
             return (0, 0, 0)
         return (int(row[0] or 0), int(row[1] or 0), int(row[2] or 0))
+
+    def source_folders_under(self, prefix: str,
+                             sep: str = os.sep) -> list[tuple[str, int]]:
+        """``(folder, n_frames)`` for the folder under ``prefix`` each of this
+        target's registered frames actually sits in, busiest first.
+
+        Answers "which folder under ``incoming/`` do this target's subs actually
+        live in?", which is the question the upload form has to answer before it
+        can offer a destination: the folder name and the target name are related
+        by the scanner's convention (``M 31_sub/`` → *M 31*) and are therefore
+        **not** interchangeable — offering the target's own name as a folder is
+        how you land subs in the bare ``M 31/`` the scanner skips as the Seestar's
+        own output (:func:`seestack.io.scanner._apply_seestar_convention`).
+
+        Like :meth:`source_frames_under` it is answered from the ``frames`` rows
+        alone, so nothing walks, opens or ``stat``s anything under ``incoming/``
+        (AGENTS.md §10). ``prefix`` is matched as a literal string prefix
+        (``substr``, not ``LIKE`` — no ``%``/``_`` to escape), so pass it with its
+        trailing separator or a sibling directory sharing the name's first
+        characters will match.
+
+        The folder is the **whole** relative directory, separators and all — a
+        frame at ``incoming/MyWorks/M 31_sub/L.fit`` reports
+        ``"MyWorks/M 31_sub"``, not ``"MyWorks"``. That distinction is the point:
+        the upload endpoint writes exactly one folder level
+        (``webapp.routers.upload.safe_target_dir``), so a caller must be able to
+        tell "these subs sit in a folder you could upload into" from "these subs
+        sit two levels down", and a first-component answer makes the second look
+        like the first. A frame sitting loose *directly* in ``prefix`` (the
+        scanner's ``Unsorted`` catch-all) reports the empty string.
+
+        Grouped in SQL rather than by reading every ``source_path`` back, because
+        this runs per target on a page a beginner opens and the owner's biggest
+        target holds thousands of rows. The dirname is the standard SQLite idiom:
+        ``replace(r, sep, '')`` is every character of ``r`` except the
+        separators, so ``rtrim`` against it eats the basename from the right and
+        stops at the last separator — which is the one character it cannot be
+        holding.
+        """
+        assert self._conn is not None
+        start = len(prefix) + 1
+        rows = self._conn.execute(
+            "WITH rest AS ("
+            "  SELECT substr(source_path, ?) AS r FROM frames"
+            "   WHERE substr(source_path, 1, ?) = ?"
+            ") "
+            "SELECT rtrim(rtrim(r, replace(r, ?, '')), ?) AS folder, "
+            "       COUNT(*) AS n "
+            "FROM rest GROUP BY folder ORDER BY n DESC, folder",
+            (start, len(prefix), prefix, sep, sep),
+        ).fetchall()
+        return [(str(r[0]), int(r[1] or 0)) for r in rows]
 
     def frame_night_counts(self) -> dict[str, int]:
         """Tally *all* frames (accepted or rejected) by capture night.

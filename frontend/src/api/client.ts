@@ -2873,6 +2873,13 @@ export interface UploadResult {
   folders?: string[];  // top-level folders kept from a folder drop (may be absent)
 }
 
+/** The folders under `incoming/` that already hold subs, and the target each one
+ *  became — so the upload form can offer "add to a target you already have"
+ *  instead of a blank box. See `webapp.routers.upload.upload_destinations`. */
+export interface UploadDestinationsResult {
+  destinations: { target: string; folder: string; n_frames: number }[];
+}
+
 function encodeRecipe(recipe: Recipe): string {
   const bytes = new TextEncoder().encode(JSON.stringify(recipe));
   let bin = "";
@@ -3328,6 +3335,8 @@ export const api = {
     method: "POST",
     body: JSON.stringify(root ? { root } : {}),
   }),
+  uploadDestinations: () =>
+    req<UploadDestinationsResult>("/api/upload-destinations"),
   uploadFits: (
     fileList: File[],
     target: string,
