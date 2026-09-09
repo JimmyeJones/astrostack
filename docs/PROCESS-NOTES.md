@@ -18,6 +18,93 @@ is a queue.
 
 ---
 
+## 2026-09-09 (Scout, branch `claude/admiring-brahmagupta-gmlwfo`) — a clean `--mosaic --editor` dogfood, four subsystems swept clean, the router-audit lead traced to non-reachable, and one deferred beginner feature re-filed
+
+**The run.** Baseline green before any change: full suite headless started at
+task-0 (the ~23-min run was still finishing when the docs work was done; it is
+the merge gate, checked green before merge). Docs-only run — no product code
+touched, so the suite result is unchanged by anything here. One new beginner
+feature filed; one CLOSED idea cut to `SHIPPED.md`; both edits confined to the
+three docs files, so the working list ends roughly where it started (§2
+three-file rule).
+
+**Dogfood: CLEAN** (`scripts/agent-dogfood.sh --mosaic --editor`, exit 0).
+- **Mosaic trim: Auto would cut 7.9 %** of the union canvas — the same figure the
+  last four passes recorded, well under the ~15 % §1 calls a bug. No drift.
+- **Page probes clean, both samples.** Nothing overflowing, no console errors.
+  Tallest phone pages: field `/life-list` 3,094 px and `/targets/<field>`
+  3,078 px — in line with the standing baselines, no IA slice indicated.
+- **Editor drive clean.** All **21** ops added one at a time, each re-rendering
+  the live preview, then undo/redo — no console error, no failed request.
+
+**QA rotation (AGENTS.md §1 / §Agent-roles rotation) — engine core stays closed.**
+Per §1 the single-field engine core (`seestack/stack/*`, `seestack/calibrate/*`)
+is **closed until a new bug is found there** (twenty-plus clean sweeps) — this
+supersedes the stale `agent-prompt-scout.md` line that still says "lead with the
+stacking engine", which §1 explicitly flags as the trap that made four prior runs
+re-sweep a closed area. This run worked the other rotation lanes and the
+newer engine-*adjacent* code that the "twenty sweeps" never covered:
+
+* **webapp routers — CLEAN.** Delegated an exhaustive adversarial read of all
+  seven large routers (~9,700 lines: `stack.py`, `gallery.py`, `targets.py`,
+  `upload.py`, `newsubs.py`, `lifelist.py`, `plan.py`) to a subagent, then
+  verified its claims. No verified bug. Specifically confirmed **safe**: every
+  `rmtree`/`unlink` is scoped to the library `targets/` tree, never `incoming/`
+  (`delete_target`→`library.py:674`, `purge_stack_run`, the deepening/zoom sibling
+  unlinks, `clear_pictures_archive`); `upload.py` confines every write with
+  `safe_relpath`/`confined_dest` and never `extractall`s; calibration `*_path`
+  client keys are popped and only server-side master **ids** resolved
+  (`stack.py:508`, and `put_stack_defaults` filters to known fields); the mosaic
+  per-panel-depth handling passes `panel_depth`/`crop_depth` (not the whole-target
+  count) to every reach/verdict helper; `_measure_crop_depth` excludes NaN **and**
+  0 before the median (NaN "no coverage" never coerced to 0).
+* **The one router-audit lead, traced to NON-REACHABLE.**
+  `plan._window_ics_event` (`plan.py:646-647`) reads `w.moon_illumination` and
+  `w.moon_up_fraction` without a None guard, and `moon_up_fraction` is declared
+  `float | None` — so `None > 0.5` would 500 the next-session `.ics` download.
+  It cannot happen: `next_observing_windows` only returns a window with
+  `minutes_above_min_alt >= 45`, and in `_observability_batch`
+  `minutes_above = sample_min[usable].sum()` while `n_usable = count_nonzero(usable)`,
+  so `minutes_above > 0 ⟹ n_usable > 0 ⟹ moon_up_fraction` is a float, not None
+  (`nightplan.py:983-1010`). The week-ICS path defends it explicitly anyway
+  (`_week_night_as_window`, `plan.py:748`). Defensive nit at most; not filed.
+* **`seestack/render/*` — CLEAN.** `zoomclip.py` (NaN-focus → centre, box slid
+  inside the frame, out = in reversed for a seamless loop) and the grain/level
+  machinery it neighbours read correctly.
+* **`webapp/watcher.py` — CLEAN.** The `StabilityTracker` in-place-rewrite re-arm
+  and the stranded-batch re-offer are careful and correct; the skewed-source-clock
+  `mtime_old_enough` case is already the filed 2026-08-27 hardening note, not a new
+  bug.
+* **`seestack/coverage_backfill.py` + `bg/coverage_leveling.py::measure_coverage_grain`
+  + `stackhealth.py::grain_verdict` (the v0.406 additions) — CLEAN.** The lazy
+  heal never substitutes a different measurement, leaves the row NULL (and the
+  surface silent) when the map is gone, and the strided-read constants are measured
+  against the full-res answer. `measure_coverage_grain` compares each substantial
+  level **below the mode** against the mode (so an evenly-shot mosaic is silent),
+  medians the three channels, and declines rather than guessing on a thin/star-eaten
+  region.
+
+**The feature filed** (Features that serve real workflows): a *shareable* labelled
+picture — burn the in-frame object names into a downloadable JPEG. This is the
+explicitly-deferred **slice (d)** of the v0.141.0 "What's in this picture?" feature
+(the interactive `objects_in_field` → `/annotations` → `AnnotatedImage` overlay
+shipped; the burned-in export did not) and it had fallen off the working list
+entirely — a grep for "annotated" in `IMPROVEMENTS.md` finds nothing. Every
+ingredient exists: `objects_in_field` returns the pixel spots, the app already
+burns text labels the same way in `render/deepening.py` / `beforeafter.py` /
+`lifelistcard.py` / `montage.py`, and the `before-after.jpg` endpoint + shared
+`SavePictureMenu` are the pattern to mirror. Offline, additive, sane-default,
+beginner-bar ✔.
+
+**Why no verified bug was filed.** Every subsystem read this run came back clean or
+immaterial — consistent with the last several runs' "the app is genuinely
+hardened" conclusion. Per §2 the run did not manufacture a bug or a marginal
+feature; it recorded the sweeps (including the clean ones and the traced
+non-finding, so they aren't re-run), filed one genuinely-untracked beginner
+feature, and cut one CLOSED idea out of the working list.
+
+---
+
 ## 2026-09-09 — Builder run (`claude/sweet-babbage-8j2dwm` → v0.406.0, v0.406.1): the rectangle a CLEAN dogfood and a flat seam number both missed
 
 **The run.** One finding, shipped in two slices (both in [`SHIPPED.md`](SHIPPED.md)):
