@@ -18,6 +18,68 @@ is a queue.
 
 ---
 
+## 2026-09-09 (Builder, branch `claude/sweet-babbage-8td9m9`) — two share-resolution items, one measured closure, and a clean `--mosaic` dogfood
+
+**The run.** Baseline green before any change: **5,395 passed / 2 skipped**, full
+suite headless, 26:57. Two shipped items (v0.400.0, v0.400.1), each committed
+independently green with its own full-suite run — **5,399** then **5,403** passed,
+2 skipped. Frontend green too (`tsc` clean, `vitest` 3,465 / 245 files,
+`vite build` OK); `ruff` unchanged (the one pre-existing `I001` in
+`routers/stack.py` was there before and is untouched).
+
+**How the work was chosen, since this matters for the next Builder.** The Bugs
+section holds no open, ungated bug, and the Ideas sections are mostly measured
+stand-downs — I read every top-level entry in all six and came up with nine that
+are not already closed, of which most are explicitly real-data-gated. What was
+genuinely open and worth building was the **last "still open on size" item of the
+2026-08-30 download-copy sweep** (the zoom clip), and that turned into two items
+because building it required reading `_native_picture_source`'s gates, which is
+where the second one was found.
+
+**The second item is the more valuable of the two, and it was found by reading a
+gate rather than by a test.** v0.384.0 shipped "the picture he shares of a
+*Process target* run comes off the master instead of the 1024 px preview", and for
+the owner's actual main path it did not, because **Auto trims the border** and any
+recorded `preview_crop_json` was an outright decline. `auto_crop_border` is on by
+default, so this was not an edge case — every share of every auto-edited picture
+was still a re-encode of the 1024 px preview. The lesson worth carrying: a
+decline list is written for the cases in front of the author, and its *reasons*
+age at a different rate from its *entries*. This one's stated reason ("the render
+is of the whole canvas") stopped being true for a display-space run the moment
+v0.384.0 made that render go through the saved recipe — the same commit that made
+the entry look correct is the one that made it wrong. **When a gate's docstring
+gives a reason, re-check the reason and not just the condition.**
+
+**A closure, measured rather than argued.** The 2026-08-30 idea *"a corner target
+can't be centred in its own zoom clip"* proposed picking the **largest zoom in
+[1.3×, 1.8×]** at which the focus can be the crop's true centre, for "a gentler
+push-in that genuinely lands on it". Run against `crop_box_for_scale` itself, the
+direction is backwards: centring needs `W/(2s) ≤ min(cx, W−cx)`, so the further
+out the object the **more** zoom is required — today's 1.8× already lands exactly
+on anything inside [0.278 W, 0.722 W], and the entry's own 0.96 W case needs
+**12.5×**, an 80 px crop blown up to a 640 px frame. Entry cut to `SHIPPED.md`
+with the table. It was filed as "size S; pure, engine-only, fully testable",
+which is exactly the shape of entry a run picks up when it wants a quick win —
+five minutes with the function it names saved that run.
+
+**Live check: `scripts/agent-dogfood.sh --mosaic` — CLEAN.** Both samples loaded,
+stacked and probed; **nothing overflowing, no console errors** at 1440 px and
+420 px; mosaic trim **7.9 %** of the canvas (the §1 bug line is ~15 %). Tallest
+page `[phone] /targets/Sample_M42_mosaic_2_2` at **3,407 px**. Then, because the
+change is a *share*-path change and the probe never downloads anything, the app
+was re-booted against the same scratch data and the endpoints were called
+directly: on the mosaic run the share JPEG comes back **875×587** — the 907×615
+canvas with Auto's trim reproduced, i.e. the v0.400.1 path live — and the zoom
+clip **486×326**, which `…/zoom-clip/info` predicted **exactly**, on both targets.
+That last agreement is the v0.400.0 anti-drift claim checked on real data rather
+than on a fixture. (The bundled samples' canvases are *smaller* than the 1024 px
+preview cap, so neither sample can show the size *gain* — that is what the
+synthetic 1600 px fixtures in the two test files are for. Worth knowing before a
+future run tries to measure a resolution claim on the sample and concludes
+nothing changed.)
+
+---
+
 ## 2026-09-09 (Scout, branch `claude/admiring-brahmagupta-idqivk`) — a clean dogfood, two rotation sweeps closed by tracing, one preview↔export non-finding measured, and one new beginner feature filed
 
 **The run.** Baseline green before any change: **5,395 passed / 2 skipped**, full
