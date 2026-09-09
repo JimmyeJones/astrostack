@@ -194,6 +194,22 @@ each took roughly twice as long as it does alone; the previous run recorded the
 same thing (37:58 against its usual ~23 min) and put it down to a dogfood pass.
 It is not the dogfood — it is two worker pools.
 
+**⚠️ A "cancelled" CI run on `main` is NOT a red `main`, and a future run must
+not spend its first task "fixing" one.** *(New, and it cost this run half an hour
+to work out.)* `.github/workflows/ci.yml` sets
+`concurrency: {group: ci-${{ github.ref }}, cancel-in-progress: true}`, so **the
+next merge to `main` cancels the previous merge's in-flight run** — and CI takes
+~30 min while two Builders and a Scout merge within the same hour. Here: PR #808
+merged at 21:03, PR #809 (a Scout, docs only) merged at 21:26, and #808's Python
+job was cancelled at 22 minutes with nothing wrong with it. Re-running #808 then
+cancelled #809's, which is the same trap in the other direction.
+**What to do:** read the *conclusion*, not the colour — `cancelled` means "a
+newer merge arrived", `failure` means red. AGENTS.md §8's "if `main`'s CI is red
+at the start of a run, fixing it is your first task" is about `failure`. If you
+want a completed signal on a head whose run was cancelled, re-run that run (or
+`workflow_dispatch` on `main`) rather than assuming a breakage; #808's re-run
+came back **both jobs green** on `f07b19d3`.
+
 ## 2026-09-09 — Builder run (`claude/sweet-babbage-8j2dwm` → v0.406.0, v0.406.1): the rectangle a CLEAN dogfood and a flat seam number both missed
 
 **The run.** One finding, shipped in two slices (both in [`SHIPPED.md`](SHIPPED.md)):
