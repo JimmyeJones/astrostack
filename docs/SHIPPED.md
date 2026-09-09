@@ -14,6 +14,66 @@ Newest first.
 
 ---
 
+## v0.407.1 — 2026-09-09 — 🐛 the panel map and the health panel gave opposite instructions about the same panel
+
+*(Builder-verified by reproduction on the running app: `scripts/agent-dogfood.sh --build --mosaic --editor`,
+whose step-4c block prints both sentences side by side. Filed and fixed in the same run, so it never sat in
+"Bugs (fix these first)". Severity: friendliness / trust, PRIORITY 3 — the fourth finding in the gap
+*between* two of the app's own claims rather than inside either, after v0.406.0, v0.406.1 and v0.406.2.)*
+
+**What the pass printed, one line under the other, about one run:**
+
+```
+[panel map]  Your 2×2 mosaic is a little behind at the top-right: about 30 s there against 1 min on a
+             typical panel. It's only a few minutes' difference at this stage, so it evens out on its
+             own as you keep shooting.
+[health/grain_uneven]  Part of this mosaic is thinner than the rest — about 23% of the picture has 3
+             subs on it where most of it has 6, so that part looks about 1.4× grainier. That isn't
+             something processing can fix — grain only comes down with more light — so another night on
+             that panel is what evens it out.
+```
+
+Same mosaic, same panel, same run — *"it evens out on its own"* against *"go and spend another night on
+it"*. Both surfaces render on the Target page. The dogfood pass reported **CLEAN**, because a clean pass is
+a statement about console errors.
+
+**Which one was wrong, and why.** The map asks two questions of a thin panel: is it thinner *by the
+fraction* (`THIN_FRACTION`), and is the shortfall *worth going out for* (`THIN_MIN_SHORTFALL_S` = 300 s,
+whose own docstring says it exists to "stop a brand-new mosaic from being nagged about noise in its first
+half hour"). The grain note asked neither: it fires on `grain_ratio ≥ 1.25` alone. **A depth cannot answer
+the second question** — 3 subs against 6 reads 1.4× grainier whether that is half a minute behind or three
+hours behind, because grain falls as 1/√depth and 1/√2 = 1.41 either way. And the small case really does
+close itself: another 10 minutes on *every* panel takes 30 s vs 60 s to 630 s vs 660 s, a grain ratio of
+1.02. So on this run the map was right and the note was sending a beginner out for a targeted night to
+recover thirty seconds.
+
+**The fix is the map's own threshold, not a second one.** `stack_health` now converts the depth shortfall
+to *time* — `(deep − thin) × median accepted sub exposure`, via a new `_median_sub_exposure` mirroring
+`recommended_dark_spec`'s median over the same population — and reads it against the imported
+`mosaicmap.THIN_MIN_SHORTFALL_S`. Below it the note keeps its whole measurement and swaps only the closing
+clause, quoting the shortfall through the same `sharecard.format_duration` the map's sentence uses and
+ending in the map's own words: *"…so that part looks about 1.4× grainier. Processing can't fix that — grain
+only comes down with more light — but it's only about 30 s behind, so it evens out on its own as you keep
+shooting."* That is exactly the shape v0.406.2 gave the map's `behind` branch — keep the fact, drop the nag.
+
+**Nothing is removed and nothing else moves.** At or above the threshold the sentence is byte-for-byte what
+it has always been (pinned as a whole-string equality, not a substring). `grain_verdict` is untouched, so
+the History / Gallery / Compare `PanelSeamsBadge` tooltip v0.406.1 built on it is unaffected; `action` stays
+`None`; no threshold, column, schema, config, API shape or default changes. A run whose subs never recorded
+an exposure keeps today's wording — the smallness is a claim about minutes, and one we cannot measure there
+is one we do not make.
+
+**Tests (+4 cases, 3 fail before).** In `tests/test_coverage_grain.py`: the sample's own figures no longer
+prescribe a night and do say how far behind they are; a genuinely-behind mosaic (30 subs against 120 at 10 s
+= 15 min) still gets the old sentence, asserted whole; an unrecorded sub exposure keeps it too; and a
+parametrized **agreement** pin over four shortfalls that runs `mosaic_depth_map` on a real 2×2 pointing set
+and `stack_health` on the matching run, asserting *"go and shoot that panel"* is said by **both** surfaces or
+by neither. That last one is asserted against the map itself rather than against a copy of its answer — the
+two measure different things on purpose (pointings vs the finished canvas's coverage), so they cannot be one
+function; what they can be, and now are, is one threshold on one quantity.
+
+---
+
 ## v0.407.0 — 2026-09-09 — a *shareable* labelled picture: the names were already baked, and nothing offered them on their own
 
 *(Cut from `IMPROVEMENTS.md` → Ideas → "Features that serve real workflows" by the Builder that shipped it.
