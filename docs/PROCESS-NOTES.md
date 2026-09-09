@@ -81,15 +81,17 @@ Library also gains a small honest improvement for free: the field's placeholder
 is now `e.g. M 31_sub` rather than `e.g. M31`, which teaches the folder
 convention at the moment it matters instead of modelling the near-miss.
 
-**Playwright note for the next run.** `scripts/agent-dogfood.sh` installs
-playwright on demand, and the version it pulls now expects
+**Playwright note, and the check that turned it into a non-finding.** The
+playwright npm package installed on demand today expects
 `chromium_headless_shell-1243` while the image ships `chromium-1194` /
-`chromium_headless_shell-1194`. Launching with
-`chromium.launch({ executablePath: "/opt/pw-browsers/chromium" })` works and is
-what the environment brief already recommends; a bare `chromium.launch()` fails
-with "Executable doesn't exist … run npx playwright install" (which must not be
-run). If the dogfood script's browser half ever starts skipping silently, this is
-why.
+`chromium_headless_shell-1194`, so a bare `chromium.launch()` dies with
+"Executable doesn't exist … run npx playwright install" (which must not be run).
+**`scripts/dogfood_probe.mjs` and `scripts/dogfood_editor.mjs` are already immune**
+— both resolve `${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}/chromium` and pass
+it as `executablePath` — so this cost nothing here and will cost nothing there.
+It is recorded only for the *ad-hoc* case: a one-off browser script written in a
+scratch dir (as this run's was) must pass `executablePath` itself, and the bare
+launch is what fails.
 
 ---
 
