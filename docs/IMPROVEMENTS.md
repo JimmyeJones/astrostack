@@ -110,6 +110,25 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   data" TIFF anchors its white point on the single brightest surviving pixel *(traced 2026-09-03 — the
   mechanism is confirmed, but read the note below before "fixing" it)*.
 
+- **⚪ MEASURED RESIDUAL OF D1's FOURTH INSTALMENT (Builder 2026-09-09, filed with the v0.399.3/v0.399.4 fix
+  that closed the rest) — the border rule still over-crops a **weighted** coverage map on a minority of fully
+  tiled rasters, which only a **legacy** run can now hand it.** *(Severity: low — every run that writes
+  `{stem}_framecov.fits` is measured on the frame count instead, where the same 147 rasters are 0/0/0 in all
+  three outline shapes. Confidence: HIGH, same harness. Size: unknown.)*
+  Over 147 rasters × 3 outline shapes (exactly tiled; four uncovered corners; a ragged perimeter), as how many
+  keep under 95 % of what their own coverage allows: **frame counts 0 / 0 / 0** (worst 1.000), **weighted
+  13 / 14 / 39 → 4 / 4 / 10** (worst 0.822 / 0.817 / 0.801). The mechanism is the one the fix already names: a
+  weighted value is a sum of per-frame *weights*, so one panel occupies a *band* of values rather than a level,
+  the panel-vs-ramp shape test sees speckle rather than blocks, and the reference itself wanders. **The reachable
+  population is runs recorded before `_framecov.fits` existed**, which `_trim_rect_for_run` falls back to the
+  weighted map for; a re-stack writes the sibling and moves the run into the fixed column.
+  **Before starting, read the five rejected levers and the shipped rule in [`SHIPPED.md`](SHIPPED.md) (search
+  `FRINGE_OUTSIDE_FRAC`)** — four scalar levers are measured and closed, and the answer here is unlikely to be a
+  sixth. The honest next step, if this is ever worth it, is to make the *shape* test survive jitter (a local mean
+  before the plateau/connectivity work) rather than to move a constant. **Probably not worth building**: the
+  cheaper and more useful fix for a real install is a re-stack, and the whole population shrinks every night the
+  owner shoots.
+
 - **⚪ ✅ CLOSED, SHIPPED AS v0.399.2 — the all-sky "My map" fade (and the sky-area tally) faded whole thin
   panels out of a fully tiled raster.** *(Was filed 2026-09-08 as a low-value display lead. It was worth
   more than that, and its measurement was taken on the wrong map — both corrected below; kept here rather
