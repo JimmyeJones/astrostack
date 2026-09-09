@@ -787,6 +787,10 @@ def test_field_fill_overflow_is_reported_not_clipped():
     assert fill is not None
     assert fill.frac_long > 1.0
     assert "Bigger than one frame" in fill.text
+    # …and the sentence names the *frame*, not "the outline". On this branch the
+    # drawing has two shapes at once and the object covers the frame, so a reader
+    # who is not told which is which cannot read the picture at all.
+    assert "dashed" in fill.text and "your field" in fill.text
 
 
 def test_field_fill_without_a_minor_axis_assumes_a_square_box():

@@ -93,6 +93,15 @@ describe("FieldFillDiagram", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps the frame's edge on top of an overflowing object", () => {
+    // Painted under a translucent wash the dashed frame reads as a smudge, not
+    // as the edge of your field — which is the one thing this picture is for.
+    // SVG paints in document order, so the frame must come last.
+    const { container } = renderDiagram(fill(1.4, 1.2));
+    const shapes = [...container.querySelectorAll("svg > *")].map((n) => n.tagName);
+    expect(shapes.indexOf("ellipse")).toBeLessThan(shapes.indexOf("rect"));
+  });
+
   it("draws the object bigger than the frame when it overflows", () => {
     const { container } = renderDiagram(fill(1.4, 0.9));
     const rect = container.querySelector("rect")!;
