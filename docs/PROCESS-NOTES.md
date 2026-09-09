@@ -18,6 +18,71 @@ is a queue.
 
 ---
 
+## 2026-09-09 (later) — Builder run (branch `claude/sweet-babbage-c9vw1a`): one shipped fix, one verified bug filed with five rejected fixes, and a lead whose own measurement was taken on the wrong map
+
+**The run.** Baseline green before any change (**5,350 passed / 2 skipped**, full
+suite headless, 27:16). Final suite green on the merged branch: **5,389 passed /
+2 skipped**, 26:20. Shipped **v0.399.2** (a mosaic's thin panel is no longer faded
+off the all-sky map, nor left out of the sky-area tally). Write-up in
+[`SHIPPED.md`](SHIPPED.md). One verified priority-1 bug filed rather than fixed —
+D1's fourth instalment, in "Bugs (fix these first)".
+
+**Dogfood pass (§2), CLEAN — the fourth in a row.** `scripts/agent-dogfood.sh
+--mosaic --editor`, both samples: **mosaic trim 7.9 %** of the canvas (the §1 bug
+bar is ~15 %, and the same figure v0.391.1 recorded, so it has not drifted), all
+21 ops added on the field **and** the mosaic run with the preview re-rendering
+each time, undo/redo fine, nothing overflowing and no console errors at either
+width. Tallest page, phone: **/life-list at 3,094 px**, in line with the v0.338.1
+baseline — so no IA slice is indicated, for the third measurement running.
+
+**The thing worth recording: re-measure a lead before you build from it, and
+re-measure *what the code actually reads*.** The 2026-09-08 lead this run picked
+up was filed as "cosmetic/display, low value — a fade on a map, not the picture
+itself", with a measured `9.3 %`. Both halves were wrong, and each was wrong in a
+way that only re-measuring could show.
+
+* **The severity.** `stack_detail_mask` is not only the map's fade; it is also
+  what `seestack.skyarea` counts. So the defect was also under-reporting the
+  owner's *photographed sky* — a number on a page, not a shade on a picture.
+  Nothing in the lead was untrue about the map; it had simply enumerated one
+  consumer. **Grep the callers before accepting a filed severity.**
+* **The measurement.** Its 9.3 % came from a **weighted** coverage map with 6 %
+  per-pixel jitter. `stack_detail_mask` never reads that map — it loads the
+  `_framecov.fits` *frame-count* sibling and falls back to the plain has-data
+  footprint when there is none. On count maps the same shapes fade **nothing** at
+  8-30 subs, and the real defect lives at wider depth spreads (5-60, 10-100,
+  30-300), where 90 of 147 fully tiled rasters fade something and the worst loses
+  26.3 % of its canvas. Building from the filed fixture would have produced a fix
+  aimed at a shape the code never sees.
+
+**Five fixes measured and rejected for the trim, which is why it is filed and not
+shipped.** The same run reproduced a *second*, larger defect: `largest_covered_rect`
+still crops a fully tiled mosaic by up to 19.8 %, on the on-by-default Auto crop.
+Every scalar lever was measured and every one failed — lowering the level fraction
+is **non-monotone** (0.08 → 11 bad, 0.04 → **13**, 0.03 → 2, 0.02 → 4, because a
+lower reference raises the strict rectangle past the coverage bound and switches
+v0.391.1's rescue *off*); reading frame counts instead of weights helps but leaves
+14; tightening `TRIM_KEEP_RATIO` collides exactly (honest ragged 2x2 keeps 0.912,
+broken 8x6 keeps 0.912); refusing to discard well-covered pixels collides in the
+other direction (an axis-aligned rectangle over *any* irregular footprint cuts
+good data, so the honest cases score 1.000); and "a fully covered canvas has no
+border to trim" — the one guard that could only ever stop a crop — closes all 147
+fixtures and fires on **0 of 147** once they are given an honest uncovered
+outline. **A fix that works on every fixture and on no real canvas is a fix for
+the fixture.** AGENTS.md §1 says not to blind-flip a constant on the on-by-default
+hot path; with five levers measured, filing the numbers is worth more to the next
+run than a sixth guess would be.
+
+**A measurement trap that cost two sweeps.** `panel_coverage_level(covered,
+min_frac=PANEL_LEVEL_MIN_FRAC)` binds its default **at def time**, so a harness
+that rebinds the module constant to sweep the threshold silently measures the
+*same* value every time. Two full sweeps came back reporting "0.05 and 0.04 are
+identical to 0.08" before the flat rows gave it away. Monkeypatch the *function*,
+not the constant — and treat a sweep whose rows are identical as a bug in the
+sweep until proven otherwise.
+
+---
+
 ## 2026-09-09 — Builder run (branch `claude/sweet-babbage-4yit4y`): a feature invented because the backlog was dry, a bug the *live check* found, and one filed perf idea closed by measuring it
 
 **The run.** Baseline green before any change (**5,350 passed / 2 skipped**, full
