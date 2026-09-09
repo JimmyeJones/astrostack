@@ -74,6 +74,7 @@ from seestack.stack.weighting import (
 )
 
 if TYPE_CHECKING:
+    from seestack.bg.coverage_leveling import CoverageGrain
     from seestack.calibrate.apply import CalibrationMasters
 
 # Peak count of full-canvas float32 RGB arrays alive at once across the stack
@@ -1748,6 +1749,45 @@ def _compute_seam_residual(
         return None
 
 
+def _compute_coverage_grain(
+    rgb: np.ndarray,
+    coverage: np.ndarray,
+    frame_coverage: np.ndarray | None,
+    *,
+    is_mosaic: bool,
+) -> CoverageGrain | None:
+    """How much grainier this mosaic's thinnest substantial region is than the
+    depth most of it was shot at (``None`` if there is nothing to say).
+
+    The companion to :func:`_compute_seam_residual`, and the half it cannot
+    see. The seam number asks whether levelling *worked* — whether the sky
+    matches across the joins — and a mosaic built over several nights routinely
+    measures flat by that yardstick while still showing an obvious rectangle,
+    because the panel with fewer subs is simply noisier. Nothing in the app
+    measured that, so the health panel could truthfully say "the panels evened
+    out — you shouldn't see seams" to someone looking straight at a visible
+    tile.
+
+    Gated on a **mosaic** canvas for the same reason the seam is: a single-field
+    stack has one substantial coverage level and the measurement would decline
+    anyway, so it never pays for the level statistics. It does build its own
+    level context rather than sharing the seam pass's — that context is the
+    expensive half, but it is well under a second on a stacked canvas against a
+    mosaic run measured in hours, and keeping the two measurements independent
+    keeps each one testable on its own. Best-effort: a diagnostic must never
+    break a finished stack.
+    """
+    if not is_mosaic:
+        return None
+    try:
+        from seestack.bg.coverage_leveling import measure_coverage_grain
+
+        return measure_coverage_grain(
+            rgb, coverage, frame_coverage=frame_coverage)
+    except Exception:  # noqa: BLE001 — a diagnostic must never break the stack
+        return None
+
+
 @dataclass
 class RejectionStats:
     """How much a rejection pass actually clipped, measured while it ran.
@@ -3414,6 +3454,12 @@ def run_stack(
     # None (and free) on every single-field stack.
     seam_residual = _compute_seam_residual(
         result_image, coverage, frame_cov, is_mosaic=bool(is_mosaic_canvas))
+    # ...and the other way a panel shows: a region shot with fewer subs is
+    # grainier than the rest, however perfectly its sky was levelled. Measured
+    # on the same finished image so the health panel can name the rectangle a
+    # beginner is looking at instead of calling the picture flat.
+    coverage_grain = _compute_coverage_grain(
+        result_image, coverage, frame_cov, is_mosaic=bool(is_mosaic_canvas))
     # The min/max order-statistic path combines by rank and ignores per-frame
     # weights, so weighting provenance must not be stamped when it ran. Every
     # other path (drizzle, κ-σ pass 2, plain weighted sum, and the min/max
@@ -3498,6 +3544,15 @@ def run_stack(
         header_meta["STKFWHM"] = (stack_fwhm, "median star FWHM, native-frame px")
     if seam_residual is not None:
         header_meta["SEAMRES"] = (seam_residual, "mosaic panel-seam step, in sky sigma")
+    if coverage_grain is not None:
+        header_meta["GRAINRAT"] = (round(float(coverage_grain.ratio), 4),
+                                   "thin region grain / modal region grain")
+        header_meta["GRAINTHN"] = (int(coverage_grain.thin_frames),
+                                   "subs per pixel in that thin region")
+        header_meta["GRAINDEP"] = (int(coverage_grain.deep_frames),
+                                   "subs per pixel most of the canvas is at")
+        header_meta["GRAINSHR"] = (round(float(coverage_grain.thin_share), 4),
+                                   "that thin region's share of the canvas")
     paths = write_stack_outputs(
         project_dir=project.project_dir,
         rgb=result_image,
@@ -3641,6 +3696,19 @@ def run_stack(
             # picture's own grain. NULL on a single-field stack (no joins) and
             # when it couldn't be measured — callers self-hide either way.
             seam_residual=seam_residual,
+            # The grain step between a thinly-covered region and the depth most
+            # of the canvas was shot at — the panel a levelled mosaic can still
+            # show. All four NULL together (a single-field stack, an evenly
+            # covered mosaic, or nothing measurable), and the health note reads
+            # NULL as "say nothing".
+            grain_ratio=(round(float(coverage_grain.ratio), 4)
+                         if coverage_grain is not None else None),
+            grain_thin_frames=(int(coverage_grain.thin_frames)
+                               if coverage_grain is not None else None),
+            grain_deep_frames=(int(coverage_grain.deep_frames)
+                               if coverage_grain is not None else None),
+            grain_thin_share=(round(float(coverage_grain.thin_share), 4)
+                              if coverage_grain is not None else None),
             # How long this run took, so the *next* one can be estimated from it
             # rather than from a model of the stacker (see
             # :mod:`seestack.stacktime`). Measured around the whole run —

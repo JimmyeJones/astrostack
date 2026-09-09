@@ -562,6 +562,146 @@ def measure_seam_residual(
     )
 
 
+# A coverage level has to cover this share of the picture before its grain is
+# worth saying anything about. It keeps the measurement to the *panel bodies*: a
+# mosaic's overlap strips are always deeper (and so always cleaner) than the
+# panels they join, and reporting that as "part of your picture is grainier"
+# would fire on every mosaic ever shot while naming nothing anyone can act on.
+_GRAIN_MIN_SHARE = 0.10
+
+# ...and its sky sample needs at least this many pixels for a σ to be a
+# measurement rather than a mood. Deliberately far above ``_MIN_STRIDED_PIXELS``
+# (which is a floor on *levelling* a region, where a rough answer still beats
+# stranding it): nothing is lost by staying silent here.
+_GRAIN_MIN_SKY_PIXELS = 500
+
+
+@dataclass(frozen=True)
+class CoverageGrain:
+    """How much grainier the thinly-covered part of a canvas is than the rest.
+
+    The **other** way a mosaic panel becomes visible. :class:`SeamResidual`
+    measures the *level* step between coverage regions — the thing levelling can
+    fix — and a canvas can measure perfectly flat by that yardstick while still
+    showing an obvious rectangle, because a region shot with fewer subs is
+    simply noisier: grain falls as ``1/√depth`` and no processing puts back
+    photons that were never collected. On a mosaic built over several nights
+    (panels rarely finish level with each other) that rectangle is the single
+    most visible thing about the finished picture, and until this was measured
+    nothing in the app could name it.
+
+    ``ratio`` is the thin region's sky σ over the modal region's, per channel,
+    taken as the median of the three — unit-free, so it means the same thing
+    whatever the exposure or normalisation. ``thin_frames``/``deep_frames`` are
+    the two regions' per-pixel sub counts, which is what a user can actually act
+    on ("that corner has 3 subs where the rest has 6").
+
+    The σ comes from :func:`_robust_stats`, the same sigma-clipped estimator
+    :func:`measure_seam_residual` already uses as its per-level yardstick — not
+    the adjacent-pixel-difference estimator used elsewhere for absolute noise.
+    Deliberately: an adjacent-difference σ cannot be taken off a *decimated*
+    read (see :mod:`seestack.coverage_backfill`), and this measurement has to
+    give the same answer on a strided read of an older run as on the full
+    canvas. Measured on the mosaic sample, the ratio reads 1.34 / 1.36 / 1.33 at
+    strides 1 / 2 / 4, where the adjacent-difference form reads 1.50 / 1.36 /
+    unmeasurable. The clipped σ is inflated by whatever faint structure survives
+    the object mask in *both* regions, so the ratio it reports is conservative —
+    it can only ever understate the difference, never invent one.
+    """
+
+    thin_frames: int     # subs on a pixel of the grainiest substantial region
+    deep_frames: int     # subs on a pixel of the region most of the picture is at
+    thin_share: float    # that grainy region's share of the covered canvas
+    ratio: float         # thin σ / deep σ, median over the three channels
+
+
+def measure_coverage_grain(
+    rgb: np.ndarray,
+    coverage: np.ndarray,
+    *,
+    frame_coverage: np.ndarray | None = None,
+    object_sigma: float = 2.0,
+    min_pixels_per_level: int = 200,
+    dilate_object_mask_px: int = 4,
+    proxy_scale: float = 1.0,
+) -> CoverageGrain | None:
+    """Measure the *grain* step a finished canvas carries between a thinly
+    covered region and the depth most of it was shot at.
+
+    Compares each substantial coverage level **below the modal one** against the
+    modal level itself, and reports the grainiest of them. Comparing against the
+    mode rather than against the deepest level is what keeps an *evenly* shot
+    mosaic silent: its overlap strips sit above the mode, never below it, so
+    there is no candidate and the answer is ``None``.
+
+    Returns ``None`` whenever there is nothing to say — a single-coverage-level
+    stack, an evenly covered mosaic, a canvas whose levels can't be measured, or
+    a thin region too small or too star-filled to take a σ from. Never raises on
+    ordinary input; the caller treats ``None`` as "say nothing".
+    """
+    img = np.asarray(rgb, dtype=np.float32)
+    ctx = _level_context(
+        img, coverage, frame_coverage, object_sigma, min_pixels_per_level,
+        dilate_object_mask_px, proxy_scale)
+    if ctx is None or len(ctx.big_levels) < 2:
+        return None
+
+    total = int(ctx.valid_pix.sum())
+    if total <= 0:
+        return None
+    counts = {int(level): int(((ctx.cov_int == level) & ctx.valid_pix).sum())
+              for level in ctx.big_levels}
+    # The depth most of the picture was actually shot at — not the mean, which a
+    # ragged fringe drags down, and not the peak, which is one mosaic corner.
+    deep_level = max(counts, key=lambda level: (counts[level], level))
+    candidates = [level for level in counts
+                  if level < deep_level
+                  and counts[level] >= _GRAIN_MIN_SHARE * total]
+    if not candidates:
+        return None
+
+    def _sigmas(level: int) -> list[float] | None:
+        found = _level_sky_mask(ctx, level, object_sigma, dilate_object_mask_px)
+        if found is None:
+            return None
+        region_sky_mask, _rescued = found
+        if int(region_sky_mask.sum()) < _GRAIN_MIN_SKY_PIXELS:
+            return None
+        out = [_robust_stats(img[..., c][region_sky_mask])[1] for c in range(3)]
+        if any(not np.isfinite(s) or s <= 0 for s in out):
+            return None
+        return [float(s) for s in out]
+
+    deep_sigmas = _sigmas(deep_level)
+    if deep_sigmas is None:
+        return None
+
+    best: CoverageGrain | None = None
+    for level in sorted(candidates):
+        thin_sigmas = _sigmas(level)
+        if thin_sigmas is None:
+            continue
+        # Per channel, then the median of the three: one channel can carry a
+        # colour cast or a bright star the mask missed, and a median of three is
+        # the cheapest way to stop it deciding the answer on its own.
+        ratio = float(np.median([t / d for t, d in zip(thin_sigmas, deep_sigmas,
+                                                       strict=True)]))
+        if not np.isfinite(ratio) or ratio <= 0:
+            continue
+        if best is None or ratio > best.ratio:
+            best = CoverageGrain(
+                thin_frames=int(level), deep_frames=int(deep_level),
+                thin_share=float(counts[level]) / float(total), ratio=ratio)
+    if best is None:
+        return None
+    log.info(
+        "Coverage grain: %.0f%% of the picture is %d subs deep against a modal "
+        "%d, and measures %.2fx grainier",
+        best.thin_share * 100.0, best.thin_frames, best.deep_frames, best.ratio,
+    )
+    return best
+
+
 def level_by_coverage(
     rgb: np.ndarray,
     coverage: np.ndarray,

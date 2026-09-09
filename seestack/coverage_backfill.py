@@ -371,3 +371,83 @@ def backfill_seam_residual(project: Project,
                       exc_info=True)
     run.seam_residual = ratio
     return ratio
+
+
+def backfill_coverage_grain(project: Project, run: StackRunRow) -> bool:
+    """Measure how much grainier an older **mosaic** run's thinly-covered region
+    is than the depth most of its canvas was shot at, from the master and
+    coverage map it already wrote; record it and return whether the row now
+    carries the measurement.
+
+    Same shape, same laziness and the same declines as
+    :func:`backfill_seam_residual` — a no-op for a run that already has one, and
+    free (no disk touched at all) for a run the stacker recorded as a single
+    field, which has one substantial coverage level and nothing to compare.
+
+    Healing this one *is* possible where healing ``noise_sigma`` is not, and the
+    difference is the estimator: this ratio comes from a sigma-clipped σ, which
+    a strided read leaves alone, rather than from adjacent-pixel differences,
+    which a strided read destroys (measured on the mosaic sample: 1.43 at full
+    resolution against 1.40 at stride 2, where the adjacent-difference form goes
+    1.50 → 1.36 → unmeasurable). A canvas strided past the point where the thin
+    region still holds a usable sky sample simply declines, which is the right
+    answer rather than a worse number.
+    """
+    if run.grain_ratio is not None:
+        return True
+    if not run.is_mosaic or not run.fits_path:
+        return False
+
+    from pathlib import Path as _Path
+
+    from seestack.bg.coverage_leveling import measure_coverage_grain
+    from seestack.edit.proxy import load_coverage, load_frame_coverage
+
+    master = _Path(run.fits_path)
+    if not master.exists():
+        return False
+    try:
+        h, w = int(run.canvas_h), int(run.canvas_w)
+    except (TypeError, ValueError):
+        return False
+    step = _seam_read_step(h, w)
+    if step is None:
+        return False
+
+    rgb = _load_strided_rgb(master, step)
+    if rgb is None:
+        return False
+    cov = load_coverage(master, step=step)
+    if cov is None:
+        return False
+    frame_cov = load_frame_coverage(master, step=step)
+    if cov.shape != rgb.shape[:2] or (
+            frame_cov is not None and frame_cov.shape != rgb.shape[:2]):
+        return False
+    try:
+        result = measure_coverage_grain(
+            rgb, cov, frame_coverage=frame_cov, proxy_scale=float(step))
+    except Exception:  # noqa: BLE001 — a diagnostic must never reach the user
+        log.debug("could not measure coverage grain for run %s", run.id,
+                  exc_info=True)
+        return False
+    if result is None or not math.isfinite(float(result.ratio)):
+        return False
+    # Rounded exactly as the stacker rounds it, so a healed row and a
+    # freshly-stacked one are the same kind of number.
+    ratio = round(float(result.ratio), 4)
+    thin_share = round(float(result.thin_share), 4)
+
+    if run.id is not None:
+        try:
+            project.set_stack_coverage_grain(
+                run.id, ratio, int(result.thin_frames), int(result.deep_frames),
+                thin_share)
+        except sqlite3.Error:
+            log.debug("could not record coverage grain for run %s", run.id,
+                      exc_info=True)
+    run.grain_ratio = ratio
+    run.grain_thin_frames = int(result.thin_frames)
+    run.grain_deep_frames = int(result.deep_frames)
+    run.grain_thin_share = thin_share
+    return True
