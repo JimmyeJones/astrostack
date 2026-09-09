@@ -166,6 +166,116 @@ def framing_hint(
     )
 
 
+@dataclass(frozen=True)
+class FieldFill:
+    """How much of one frame an object actually fills — the *picture* behind the
+    "will it fit?" sentence.
+
+    :func:`framing_hint` answers the question in words, which is enough to know
+    *whether* to shoot a mosaic but not what the shot will look like: "fits
+    comfortably in a single Seestar frame" covers both a nebula that fills two
+    thirds of the frame and a planetary that is a dot in the middle of it, and
+    those are very different pictures to plan for. This carries the two numbers a
+    to-scale drawing needs, plus the sentence that must agree with it.
+
+    ``frac_long``/``frac_short`` are the object's major and minor axes as
+    fractions of the frame's long and short edges — so ``0.35`` means "a third of
+    the way across", and anything above ``1.0`` genuinely overflows that edge.
+    They are deliberately *not* clamped to the frame (a drawing that clipped them
+    would hide exactly the overflow it exists to show); a caller drawing them
+    scales its own viewport instead. The field's own edges ride along so the
+    drawing can get the frame's shape right without re-deriving which telescope
+    this was measured against — the recurring lesson in this file is that a
+    number and the sentence beside it must come from one place.
+    """
+
+    frac_long: float
+    frac_short: float
+    field_long_arcmin: float
+    field_short_arcmin: float
+    text: str
+
+
+# Below this fraction of the frame's long edge, "it fits" is true but unhelpful:
+# the object is a dot near the middle and the beginner's real question is whether
+# they will be cropping in hard afterwards. A twentieth of the frame is about
+# where a Seestar's own preview stops showing anything but a smudge.
+_FILL_TINY = 0.05
+# Never draw or describe a fill beyond this many frames across. Nothing in the
+# bundled catalogue comes close (the widest is a few frames), so this only stops
+# a corrupt size from asking for an absurd viewport.
+_FILL_MAX = 20.0
+
+
+def _fill_pct(fraction: float) -> int:
+    """The fill as a friendly percentage: to the nearest 5 once it is big enough
+    for that to be honest, otherwise to the nearest 1 (where rounding to 5 would
+    turn "3 % of the frame" into "5 %" or, worse, "0 %")."""
+    pct = fraction * 100.0
+    if pct >= 20.0:
+        return int(round(pct / 5.0) * 5)
+    return max(1, int(round(pct)))
+
+
+def field_fill(
+    size_arcmin: float | None,
+    size_minor_arcmin: float | None = None,
+    *,
+    field: FrameField | None = None,
+    fov_long_arcmin: float = SEESTAR_FOV_LONG_ARCMIN,
+    fov_short_arcmin: float = SEESTAR_FOV_SHORT_ARCMIN,
+) -> FieldFill | None:
+    """How much of a single frame this object fills, ready to draw and to read.
+
+    ``field`` is the owner's own single-frame field (:func:`frame_field_from_solve`)
+    and wins over the ``fov_*`` fallbacks, exactly as :func:`framing_hint` and
+    :func:`mosaic_plan` do — the three answer one question and must answer it
+    about the same telescope.
+
+    When the catalog records no minor axis the object is treated as **square**
+    (its major axis both ways), the same generous convention :func:`mosaic_plan`
+    uses: it errs toward "you will need more room" rather than promising a
+    beginner a tighter fit than they will get.
+
+    Returns ``None`` when the size is unknown or non-positive (never guess — the
+    same gate the textual hint uses, so the drawing and the sentence appear and
+    disappear together), or when the field is degenerate.
+    """
+    if size_arcmin is None or size_arcmin <= 0:
+        return None
+    fov_long_arcmin, fov_short_arcmin = _edges(
+        field, fov_long_arcmin, fov_short_arcmin)
+    if not (fov_long_arcmin > 0 and fov_short_arcmin > 0):
+        return None
+    if not all(math.isfinite(v) for v in (fov_long_arcmin, fov_short_arcmin)):
+        return None
+
+    major = float(size_arcmin)
+    if not math.isfinite(major):
+        return None
+    minor = major
+    if size_minor_arcmin is not None and size_minor_arcmin > 0:
+        minor = min(float(size_minor_arcmin), major)
+
+    # The object is assumed laid along the frame's long edge — the arrangement
+    # anyone framing it would choose, and the one ``mosaic_plan`` already counts
+    # panels for.
+    frac_long = min(_FILL_MAX, major / fov_long_arcmin)
+    frac_short = min(_FILL_MAX, minor / fov_short_arcmin)
+
+    if frac_long >= 1.0 or frac_short >= 1.0:
+        text = ("Bigger than one frame — the outline shows how far it spills "
+                "over the edges.")
+    elif frac_long < _FILL_TINY:
+        text = (f"Small in the frame — it spans about {_fill_pct(frac_long)}% of "
+                "the width, so expect to crop in close afterwards.")
+    else:
+        text = f"It spans about {_fill_pct(frac_long)}% of your frame's width."
+
+    return FieldFill(frac_long, frac_short,
+                     fov_long_arcmin, fov_short_arcmin, text)
+
+
 # Panels have to overlap or there is nothing for the stitch to align on, so a
 # panel *steps* by less than its own width. A tenth of a frame is the usual
 # margin (and what the Seestar's own mosaic mode leaves), which is why the grid
