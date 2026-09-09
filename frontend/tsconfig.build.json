@@ -1,0 +1,18 @@
+{
+  // Production/type-check config for the *shipped* bundle.
+  //
+  // The Docker frontend stage copies **only `frontend/`** (docker/Dockerfile,
+  // `COPY frontend/ ./`), but three test files import JSON fixtures from the
+  // repo-root `tests/fixtures/` — deliberately, so the TypeScript and Python
+  // suites assert against the *same* cases. Under the default config `tsc`
+  // type-checks those test files too, so the image build failed with TS2307
+  // while CI stayed green (CI checks out the whole repo, so the imports
+  // resolve there).
+  //
+  // Tests are never shipped, so the build type-checks only what it ships.
+  // The **full** check, tests included, still runs via `npm run typecheck`
+  // (wired into CI) — coverage is unchanged, it just happens where the
+  // fixtures exist.
+  "extends": "./tsconfig.json",
+  "exclude": ["**/*.test.ts", "**/*.test.tsx", "src/test"]
+}
