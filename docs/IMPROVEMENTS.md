@@ -76,7 +76,8 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- `claude/sweet-babbage-ilfabz` — the mosaic panel map drops the thin panel and then says nothing
+  is being held back (`mosaicmap.mosaic_depth_map`). Filed as a bug directly below.
 
 ---
 
@@ -89,6 +90,37 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > rather than skimmed. **Grep those two files for anything older than v0.352.3**, including
 > the target of any "see above" / "see below" in the entries below that no longer resolves
 > here.
+
+- **🔴 WRONG REASSURANCE ON THE OWNER'S OWN SHOOTING SHAPE (Builder 2026-09-09, reproduced end-to-end on the
+  generated mosaic sample) — the Target page's mosaic panel map DROPS a thin panel and then tells the owner
+  "no part of the picture is being held back", while the stack-health panel on the same target says a quarter
+  of the picture is 1.4× grainier.** *(Severity: high for trust — the harmful direction, a false all-clear, on
+  priority 2–3; the owner is a heavy mosaic user shooting one target across many nights. Confidence: HIGH,
+  reproduced through the real endpoint path. Size: S–M.)*
+  **Repro** (`scripts/agent-dogfood.sh --mosaic`, then `accepted_solved_pointings()` → `mosaic_depth_map`, on
+  the bundled 2×2 sample whose panels are 6/6/6/**3** subs):
+  - panel map: `panels: [(0,0,6), (1,0,6), (1,1,6)]`, `thin: None`,
+    text *"All 3 panels of your 2×2 mosaic have had a similar amount of time — around 1 min each — so no part
+    of the picture is being held back."*
+  - `stack_health` on the same run, same moment: *"Part of this mosaic is thinner than the rest — about 23% of
+    the picture has 3 subs on it where most of it has 6, so that part looks about 1.4× grainier … another
+    night on that panel is what evens it out."*
+  **Mechanism.** `mosaic_depth_map` labels its folded pointings with `pointing_groups(min_members=MIN_PANEL_FRAMES=5)`
+  and then does `if label < 0: continue` — so a cluster that is thin *because it is thin* is discarded by the very
+  floor that exists to discard **strays**, and the map is blind to exactly the case it was built to report. Everything
+  downstream is then computed over the survivors: the grid, the median, the `thin` verdict and the sentence. Two
+  consequences, both live: the map shows a **hole where the thin panel is** (so "which panel?" is unanswerable —
+  and the grain note's `action=None` is justified in `stackhealth.py` by "the panel map on the Target page already
+  says which panel is behind", which is false in this case), and the sentence reads **"All 3 panels of your 2×2
+  mosaic"**, which is self-contradictory on its face. Realistic severity: three panels at 300 subs and a fourth cut
+  short by cloud at 4 subs is dropped outright, and the map calls that mosaic even.
+  **Fix shape (kept conservative on purpose):** leave `pointing_groups` as the *substantial-panel* gate and the
+  mosaic-or-not gate — unchanged — and, after the grid is laid out from the substantial panels, re-offer the
+  dropped pointings **once**: admit one as a thin panel only when it lands on the grid those panels already define
+  (within the same `tol` of an existing row line *and* an existing column line) and its cell is **empty**. A stray a
+  degree off the mosaic is not on a grid line, so it stays out; an occupied cell is left byte-for-byte alone, so no
+  existing panel's figures move. A thin cluster must never be allowed to *extend* the grid — that would let a stray
+  define geometry, which is what the floor is for.
 
 - **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** ~~No validator
   stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
