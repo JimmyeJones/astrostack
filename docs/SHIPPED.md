@@ -14,6 +14,164 @@ Newest first.
 
 ---
 
+## v0.406.1 — 2026-09-09 — finish the sweep: the History/Gallery/Compare chip made the same promise (`seamsLabel(verdict, grain)`, `grain_verdict` on `StackRunOut`/`GalleryItem`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-8j2dwm`, immediately after
+v0.406.0 — the same untruth, on the two surfaces where the owner is actually
+looking at the thumbnail.)**
+
+v0.406.0 fixed the "How's my stack?" note and stopped there. But
+`PanelSeamsBadge` renders on **History rows, Gallery cards and the Compare
+view**, and its tooltip was a verbatim copy of the sentence that had just been
+corrected: *"This mosaic's panels evened out — the sky matches across the joins,
+so **you shouldn't see seams between them**."* Half a fix on the surface a
+beginner reads *least* is not a fix.
+
+`seamsLabel` now takes the grain verdict as well, and with it `"uneven"` says
+*"…so where the picture looks grainier that's a difference in depth (fewer subs
+on that panel), not a step in the sky."* The chip stays **green**, keeps the
+word **"Panels even"**, and still says the panels evened out — the level claim
+was never wrong, and nothing is removed. A `"check"` verdict is untouched
+whatever the grain says: a real sky step is still the more useful thing to say.
+
+`grain_verdict` is an additive optional field on `StackRunOut` and `GalleryItem`,
+resolved server-side by the same `seestack.stackhealth.grain_verdict` the health
+note reads, so a chip and a note can never disagree — the rule `seam_verdict`
+already ships under. Both listings read the **column**, opening no files, so a
+run stacked before the measurement stays silent until the health panel heals it;
+identical to how `seam_verdict` behaves on those same listings.
+
+**Upgrade-safe (§9):** one additive optional response field on two shapes and one
+optional prop. An older backend omitting it reads as "not measured", which is
+character-for-character today's tooltip — pinned by a test that walks
+`null`/`undefined`/`""`/an unknown word.
+
+**Tests (+6):** four in `PanelSeamsBadge.test.tsx` (the corrected wording, the
+colour and label unchanged, the old sentence preserved exactly when nothing
+measured the grain, and `"check"` left alone) and two on the wire
+(`tests/webapp/test_grain_verdict_endpoint.py` for the run listing, plus a
+Gallery case), each asserting the *unmeasured* and *even* runs stay `None`
+rather than claiming their panels are equally deep.
+
+---
+
+## v0.406.0 — 2026-09-09 — a levelled mosaic can still show a panel, and the app said it couldn't (`measure_coverage_grain`, `grain_verdict`, `stackhealth` `grain_uneven`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-8j2dwm`. Found by measuring a
+`--mosaic` dogfood pass's actual pixels, on the shape §1 names — four panels at
+6/6/6/3 subs — rather than by reading its exit code, which said CLEAN.)**
+
+**What it looked like.** Open the mosaic sample's finished picture and the
+bottom-right quadrant is plainly a different rectangle: brighter-looking,
+visibly grainier, with a hard straight edge down the middle of the frame. That
+is the "grid of tiles" this app exists to avoid, and the thing the owner has
+reported before. Ask the app about it and it says the opposite —
+`seam_residual` **0.70**, which is `seam_verdict` `"flat"`, which renders as
+*"The panels of this mosaic evened out — the sky matches across the joins, so
+**you shouldn't see seams between them**."* The run was also praised in the same
+panel for **"even coverage"**.
+
+**Why both statements were true, and why that is the bug.** A panel can differ
+from its neighbours in two ways, and the app only ever measured one.
+
+- Its **sky level** can sit high or low. That is what `level_by_coverage`
+  removes and what `measure_seam_residual` checks afterwards. Measured on the
+  sample, per substantial coverage level: sky mode `0.115` at 3 subs against
+  `−0.363` at 6 — a spread of **0.478 ADU, i.e. 0.09× the grain**. Levelling did
+  its job perfectly.
+- Its **grain** can differ, because grain falls as `1/√depth` and a panel shot
+  three times is noisier than one shot six times. Measured on the same two
+  regions: sigma-clipped σ **7.79 against 5.20**, a ratio of **1.43**, over
+  **23 %** of the canvas. That is the rectangle, and nothing in the app measured
+  it, named it, or knew it was there.
+
+So the health panel was answering a question about the *level* to someone
+looking at a difference in *depth*, and the answer read as "there is nothing to
+see". Worse, this is not a fault to fix: no processing puts back light nobody
+collected, so a beginner who believes the picture is broken has no way to learn
+that the fix is another night on that panel.
+
+**What shipped.**
+
+- **`seestack.bg.coverage_leveling.measure_coverage_grain`** — the companion to
+  `measure_seam_residual`, in the module that already owns per-level binning and
+  object masking, so both read the same view of the canvas. It compares each
+  substantial coverage level **below the modal one** against the modal level and
+  reports the grainiest: `(thin_frames, deep_frames, thin_share, ratio)`.
+- **Comparing against the *mode*, not the deepest level, is what keeps an evenly
+  shot mosaic silent.** Every mosaic has overlap strips deeper than its panels,
+  so a measurement anchored on the deepest level would fire on all of them while
+  naming something nobody can act on. An even mosaic has nothing *below* its
+  mode, so the answer is `None`. Pinned by a test whose fixture has a 12.5 %
+  overlap strip — big enough that a mode-vs-deepest implementation would
+  speak.
+- **The σ is sigma-clipped, deliberately not the adjacent-pixel-difference
+  estimator** used elsewhere for absolute noise. `coverage_backfill`'s own audit
+  note says why: an adjacent-difference σ cannot be taken off a decimated read,
+  which is how an *older* run has to be healed. Measured on the sample, the
+  ratio reads **1.43 / 1.40** at strides 1 / 2 where the adjacent-difference
+  form reads **1.50 / 1.36 / unmeasurable**. The clipped σ is inflated by
+  whatever faint structure survives the object mask on **both** sides, so the
+  ratio it reports can only ever understate the difference, never invent one.
+- **Stamped like the seam is**: `GRAINRAT`/`GRAINTHN`/`GRAINDEP`/`GRAINSHR` in
+  the FITS provenance and four additive `stack_runs` columns, written together
+  so a row can never hold a ratio with no depths to explain it. Gated on a
+  mosaic canvas, exactly as `_compute_seam_residual` is, so a single-field stack
+  never pays for the level statistics.
+- **`stackhealth.grain_verdict` + the `grain_uneven` note.** On the sample:
+  *"Part of this mosaic is thinner than the rest — about 23% of the picture has
+  3 subs on it where most of it has 6, so that part looks about 1.4× grainier.
+  That isn't something processing can fix — grain only comes down with more
+  light — so another night on that panel is what evens it out."* Its `action` is
+  deliberately `None`: there is no in-app fix, and offering one would be the
+  untruth the note exists to remove. The Target page's panel map already says
+  *which* panel.
+- **The over-claims stop.** With the grain uneven, the flat-seam note says
+  *"…the sky matches across the joins, so where the picture looks grainier that
+  is a difference in depth, not a step in the sky"* — nothing removed, both
+  sentences still say the panels evened out — and **"even coverage"** drops out
+  of the "solid stack" praise. The flat note is written to stand alone rather
+  than to point at the grain note, because the card renders only the top two and
+  at 42 against 62 they are rarely both on screen. Where nothing is measured
+  (an older run, a single field, an even mosaic) every sentence is **byte-for-byte
+  what it was**, which is its own test.
+- **An existing library is healed without re-stacking.**
+  `coverage_backfill.backfill_coverage_grain` re-measures from the master and
+  coverage map the run already wrote, lazily, on the request already grading
+  that run — the same shape, laziness and declines as `backfill_seam_residual`.
+  Run against the real dogfood mosaic (a project created by the *previous*
+  build, i.e. with no such columns): the columns arrived on open, the row healed
+  to `1.4297 / 3 / 6 / 0.2257`, and the note appeared.
+
+**Upgrade-safe (§9).** Four additive columns through `_reconcile_table_columns`
+and **no `SCHEMA_VERSION` bump** — deliberately, because a bump would make this
+un-rollbackable (an older build refuses a project stamped newer than itself).
+NULL reads as "never measured" everywhere. No config, on-disk, API-shape or
+default change; no frontend change at all (the health card renders notes
+generically). A single-field stack is byte-for-byte unaffected, including its
+cost.
+
+**Tests (+24, `tests/test_coverage_grain.py`).** The measurement (a thinner
+region measured and named by its depth; the seam calling that same canvas flat,
+which is the entry's whole premise as an assertion; an even mosaic, a single
+field, a dither-sized thin region and an all-NaN canvas each declining; the
+ratio surviving a stride-2 read). The verdict's seven cases. What the app says
+(the note and its figures; the flat-seam wording and the "even coverage" praise
+both standing down; the unmeasured wording pinned character-for-character; a
+half-written row never spoken). The wiring on a **real `run_stack`**, both ways
+— an 8/2 mosaic stamping header and row as one measurement, a 5/5 mosaic
+stamping nothing, each asserting `is_mosaic` first so the negative case cannot
+pass by never running. The heal, from an older project's files. And the additive
+upgrade, including that `user_version` does not move.
+
+**Fail-before, verified by reverting just the wording change with the columns in
+place:** `test_the_panel_flatness_praise_stops_claiming_there_is_nothing_to_see`
+fails on *"you shouldn't see seams between them"*. The measurement itself is new
+capability, so there is no older code for its tests to fail against — said
+plainly rather than dressed up.
+
+---
+
 ## v0.405.1 — 2026-09-09 — the editor told a mosaic's owner to shoot it in mosaic mode (`useStackFraming` + `FramingVerdictNote` on `Editor.tsx`, `hideFraming`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-pu1q6v`. Found by *looking at*

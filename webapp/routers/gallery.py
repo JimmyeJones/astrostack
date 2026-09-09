@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from seestack.edit.proxy import rejection_map_path_for
 from seestack.stack.output import save_display_jpeg
-from seestack.stackhealth import seam_verdict
+from seestack.stackhealth import grain_verdict, seam_verdict
 from webapp import deps, picturesarchive
 from webapp.capture_nights import capture_night_count, capture_night_range
 from webapp.run_options import parse_run_options, run_has_reusable_options
@@ -92,6 +92,12 @@ class GalleryItem(BaseModel):
     # stack?" notes use, so every surface reads one decision; drives the
     # "Panels even" / "Panels: check" chip on the Gallery and Compare cards.
     seam_verdict: str | None = None
+    # ...and the grain step beside it: "uneven" when a substantial part of the
+    # canvas was shot with fewer subs and measures grainier for it. Read off the
+    # column the same way — no file is opened here, so a run stacked before the
+    # measurement stays None until the health panel heals it, exactly as
+    # ``seam_verdict`` does.
+    grain_verdict: str | None = None
     # True when the user saved an edit for this run in the editor but never
     # exported it, so the thumbnail here is still the plain auto-stretch of the
     # linear stack rather than the picture they made. Same
@@ -282,6 +288,7 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         noise_sigma=run.noise_sigma,
         calstat=run.calstat,
         seam_verdict=seam_verdict(run.seam_residual),
+        grain_verdict=grain_verdict(run.grain_ratio),
         # Three extra keyed reads on the project DB the caller already has open —
         # the same near-free lookups the run listing does, which is what made
         # this affordable library-wide.

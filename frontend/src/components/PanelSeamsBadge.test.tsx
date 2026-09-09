@@ -46,4 +46,34 @@ describe("PanelSeamsBadge", () => {
     expect(seamsLabel(null)).toBeNull();
     expect(seamsLabel(undefined)).toBeNull();
   });
+
+  it("stops promising no visible difference on an unevenly deep mosaic", () => {
+    // The bug: a mosaic can be perfectly *level* and still show an obvious
+    // grainier rectangle, because that panel was shot with fewer subs. Saying
+    // "you shouldn't see seams between them" to someone looking straight at one
+    // is the untruth here.
+    const help = seamsLabel("flat", "uneven")?.help ?? "";
+    expect(help).not.toContain("you shouldn't see seams");
+    expect(help).toContain("difference in depth");
+    // Nothing removed: it still says the panels evened out, and stays green.
+    expect(help).toContain("evened out");
+    expect(seamsLabel("flat", "uneven")?.color).toBe("teal");
+    expect(seamsLabel("flat", "uneven")?.label).toBe("Panels even");
+  });
+
+  it("keeps exactly its old wording when nothing measured the grain", () => {
+    // An older run, a single field, an even mosaic, an older backend omitting
+    // the field — all of them are today's sentence, unchanged.
+    for (const g of [null, undefined, "", "something_else"]) {
+      expect(seamsLabel("flat", g)?.help).toBe(
+        "This mosaic's panels evened out — the sky matches across the joins, "
+        + "so you shouldn't see seams between them.",
+      );
+    }
+  });
+
+  it("leaves a stepped mosaic's warning alone whatever the grain says", () => {
+    // "check" is about the sky level and is still the more useful thing to say.
+    expect(seamsLabel("check", "uneven")?.help).toBe(seamsLabel("check")?.help);
+  });
 });

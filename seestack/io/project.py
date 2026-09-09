@@ -80,7 +80,11 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     uncovered_frac REAL,
     coverage_shares_version INTEGER,
     coverage_median_depth REAL,
-    duration_s REAL
+    duration_s REAL,
+    grain_ratio REAL,
+    grain_thin_frames INTEGER,
+    grain_deep_frames INTEGER,
+    grain_thin_share REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -1506,9 +1510,10 @@ class Project:
             "  rejection_fraction, rejection_mode, n_roughly_aligned, stack_fwhm_px,"
             "  seam_residual, capture_start_utc, capture_end_utc,"
             "  capture_hours_json, coverage_thin_frac, uncovered_frac,"
-            "  coverage_shares_version, coverage_median_depth, duration_s"
+            "  coverage_shares_version, coverage_median_depth, duration_s,"
+            "  grain_ratio, grain_thin_frames, grain_deep_frames, grain_thin_share"
             ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            "         ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -1530,6 +1535,13 @@ class Project:
                 (None if run.coverage_median_depth is None
                  else float(run.coverage_median_depth)),
                 (None if run.duration_s is None else float(run.duration_s)),
+                (None if run.grain_ratio is None else float(run.grain_ratio)),
+                (None if run.grain_thin_frames is None
+                 else int(run.grain_thin_frames)),
+                (None if run.grain_deep_frames is None
+                 else int(run.grain_deep_frames)),
+                (None if run.grain_thin_share is None
+                 else float(run.grain_thin_share)),
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -1604,6 +1616,22 @@ class Project:
                 seam_residual=(
                     row["seam_residual"]
                     if "seam_residual" in row.keys() else None
+                ),
+                grain_ratio=(
+                    row["grain_ratio"]
+                    if "grain_ratio" in row.keys() else None
+                ),
+                grain_thin_frames=(
+                    row["grain_thin_frames"]
+                    if "grain_thin_frames" in row.keys() else None
+                ),
+                grain_deep_frames=(
+                    row["grain_deep_frames"]
+                    if "grain_deep_frames" in row.keys() else None
+                ),
+                grain_thin_share=(
+                    row["grain_thin_share"]
+                    if "grain_thin_share" in row.keys() else None
                 ),
                 preview_north_up_deg=(
                     row["preview_north_up_deg"]
@@ -1775,6 +1803,31 @@ class Project:
         cur = self._conn.execute(
             "UPDATE stack_runs SET seam_residual = ? WHERE id = ?",
             (None if ratio is None else float(ratio), run_id))
+        return cur.rowcount > 0
+
+    def set_stack_coverage_grain(
+        self, run_id: int, ratio: float | None, thin_frames: int | None,
+        deep_frames: int | None, thin_share: float | None,
+    ) -> bool:
+        """Record how much grainier a run's thinly-covered region is than the
+        depth most of its canvas was shot at — normally stamped by the stack
+        itself, but also filled in after the fact for a run recorded before these
+        columns existed
+        (:func:`seestack.coverage_backfill.backfill_coverage_grain`, which
+        re-measures it from the master and coverage map the run wrote).
+
+        The four values are one measurement and are written together, so a row
+        can never hold a ratio with no depths to explain it. Returns True if a
+        row was updated, False if no run with ``run_id`` exists."""
+        assert self._conn is not None
+        cur = self._conn.execute(
+            "UPDATE stack_runs SET grain_ratio = ?, grain_thin_frames = ?,"
+            "  grain_deep_frames = ?, grain_thin_share = ? WHERE id = ?",
+            (None if ratio is None else float(ratio),
+             None if thin_frames is None else int(thin_frames),
+             None if deep_frames is None else int(deep_frames),
+             None if thin_share is None else float(thin_share),
+             run_id))
         return cur.rowcount > 0
 
     def set_stack_preview_stretch(
@@ -2004,6 +2057,24 @@ class StackRunRow:
     # when it couldn't be measured, or for runs recorded before this column
     # existed (schema < 15) — callers self-hide rather than guess.
     seam_residual: float | None = None
+    # The *other* way a mosaic panel shows, and the one ``seam_residual`` is
+    # blind to: a region shot with fewer subs is grainier than the rest however
+    # perfectly its sky was levelled, because grain falls as 1/√depth and no
+    # processing puts back photons nobody collected. ``grain_ratio`` is that
+    # region's sky σ over the σ of the depth most of the canvas was shot at
+    # (unit-free, so it means the same thing at any exposure/gain);
+    # ``grain_thin_frames``/``grain_deep_frames`` are the two per-pixel sub
+    # counts, i.e. the fact the owner can act on; ``grain_thin_share`` is how
+    # much of the picture the grainy region is. All four are None together — a
+    # single-field stack, an evenly covered mosaic, a run recorded before these
+    # columns existed, or nothing measurable — and every reader self-hides on
+    # None rather than guessing. Added **without** a ``SCHEMA_VERSION`` bump
+    # (like ``duration_s``): ``_reconcile_table_columns`` adds them on open, so a
+    # build that has never heard of them can still open a DB this one wrote.
+    grain_ratio: float | None = None
+    grain_thin_frames: int | None = None
+    grain_deep_frames: int | None = None
+    grain_thin_share: float | None = None
 
 
 def _to_db(value: Any) -> Any:

@@ -820,6 +820,14 @@ class StackRunOut(BaseModel):
     # server-side by the same `seestack.stackhealth.seam_verdict` the "How's my
     # stack?" notes use, so a card chip and the health note can never disagree.
     seam_verdict: str | None = None
+    # The second verdict on the same picture: "uneven" when a substantial part
+    # of the canvas was shot with fewer subs than the rest and measures grainier
+    # for it, else None. A mosaic can be perfectly *level* and still show an
+    # obvious rectangle — the two answer different questions — so the chip reads
+    # both and says which of them it is looking at. Additive and optional; an
+    # older frontend ignores it and a run with no measurement reads as None,
+    # which is exactly today's wording.
+    grain_verdict: str | None = None
     # Which calibration masters were applied to the lights ("dark+flat",
     # "bias+flat", "flat", …), or None when the stack was uncalibrated / for
     # pre-schema-7 runs; lets a card show a "dark+flat" chip at a glance.
