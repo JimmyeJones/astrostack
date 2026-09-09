@@ -12,6 +12,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type StackOptionField } from "../api/client";
 import { dependencyMet } from "../api/depends";
+import { autoRejectMethodNote as autoRejectMethodNoteText } from "../autoRejectNote";
 import { backgroundModeLabel, backgroundModeNudge } from "../backgroundModeNudge";
 import { SampleTourNote } from "../components/SampleTourNote";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
@@ -30,6 +31,7 @@ import {
 } from "../pinnedStackOptions";
 import { memoryFixAction } from "../stackMemoryFix";
 import { printBiggerAction } from "../stackPrintBigger";
+import { stackTimeLine } from "../stackTimeEstimate";
 import { minMaxIgnoresWeightingHint as minMaxIgnoresWeighting } from "../weightingHint";
 import { JobError } from "./Jobs";
 
@@ -654,12 +656,7 @@ export function StackView() {
   // finished run was min/max). They're greyed above; this says, in plain words,
   // which method Auto will actually use and where the boundary sits — so the
   // form tells the truth instead of leaving the user to discover it in History.
-  const autoRejectMethodNote =
-    autoResolved && autoResolved.n_frames > 0
-      ? (autoResolved.method === "min_max"
-        ? `Auto outlier removal is on, so it picks the method from your frame count: with ${autoResolved.n_frames} accepted, solved sub${autoResolved.n_frames === 1 ? "" : "s"} it will use min/max rejection, which drops the highest and lowest value at each pixel. It switches to sigma clipping from about ${autoResolved.switch_at_frames} subs, where there are enough frames to measure each pixel's spread.`
-        : `Auto outlier removal is on, so it picks the method from your frame count: with ${autoResolved.n_frames} accepted, solved subs it will use sigma clipping, which rejects pixels that sit far from the average. Below about ${autoResolved.switch_at_frames} subs it uses min/max rejection instead.`)
-      : null;
+  const autoRejectMethodNote = autoRejectMethodNoteText(autoResolved);
 
   // Will the rejection this stack is set up for actually remove a lone satellite
   // trail? Answered by the engine (`rejection_reach`), which reads the same
@@ -864,6 +861,12 @@ export function StackView() {
       + ` · output ${est.output_w}×${est.output_h}`
       + ` · ~${est.peak_gb.toFixed(est.peak_gb < 1 ? 2 : 1)} GB peak memory`
     : null;
+  // …and how long it would take, measured from this target's own comparable
+  // finished runs. Sits beside the sizing line because it answers the same
+  // "should I start this now?" question the size and the memory verdict do, and
+  // it self-hides entirely (no estimate on a target's first stack, or on a
+  // library upgraded from before runs were timed) rather than hedging.
+  const timeLine = est ? stackTimeLine(est.time_estimate, est.n_frames) : null;
   const estimateOverBudget = est?.would_exceed
     ? `This stack would need ~${est.peak_gb.toFixed(1)} GB of working memory, over the ~${est.budget_gb.toFixed(1)} GB budget on this server, so the run will be refused. Lower the drizzle scale, switch Canvas mode to “reference”, or reject off-target frames.`
     : null;
@@ -1426,6 +1429,9 @@ export function StackView() {
           ) : estimateLine && !noSolved ? (
             <Stack gap={2}>
               <Text size="xs" c="dimmed">{estimateLine}</Text>
+              {timeLine ? (
+                <Text size="xs" c="dimmed">{timeLine}</Text>
+              ) : null}
               {printPlan ? (
                 <Text size="xs" c="dimmed">
                   {printPlan.text}{printBigger ? ` ${printBigger}` : ""}
