@@ -104,6 +104,95 @@ non-finding, so they aren't re-run), filed one genuinely-untracked beginner
 feature, and cut one CLOSED idea out of the working list.
 
 ---
+## 2026-09-09 — Builder run (`claude/sweet-babbage-ilfabz` → v0.406.2): two of the app's own sentences, printed next to each other
+
+**The run.** One verified bug, shipped as **v0.406.2** (in
+[`SHIPPED.md`](SHIPPED.md)) across two commits — the panel admission, then the
+verdict copy the admission made visible — plus a tooling change that
+institutionalises how it was found (`agent-dogfood.sh` step 4c + the AGENTS.md §7
+paragraph beside `--mosaic`). Tests **+7** Python; two verified fail-before by
+stashing the fix.
+
+**How the work was chosen, and how long that took.** Triage agreed with the last
+three runs: "Bugs (fix these first)" holds no open, ungated bug — every entry is
+waiting on data no agent has, or is a stand-down carrying its own measurements —
+and the four Ideas subsections are mostly closed or measured shut. So the run
+took §2's big-picture pass. Two measurements were run before the one that paid,
+and both came back clean; they are worth recording so nobody re-runs them:
+
+- **Auto does not make the mosaic's panel structure worse.** Through the real
+  `build_auto_recipe_for_run` chain on the mosaic sample's proxy: linear master
+  seam **0.700** / grain **1.430** → Auto's output seam **0.668** / grain
+  **1.317**. Dropping `background.level_coverage` from that recipe moves the seam
+  to 0.675, i.e. barely — because the stacker has already levelled the master, so
+  the editor's pass has little left to do. Both reproduce the previous run's
+  figures exactly.
+- **Auto's sharpen amplifies the thin panel and the deep one by the same
+  factor.** Per-coverage-level sky σ with and without `detail.sharpen`: level 3
+  0.13469 → 0.18074 (**1.34×**), level 6 0.10245 → 0.11937 (**1.17×**)… and the
+  *ratio* between them moves 1.315 → 1.317. So the global noise verdict driving a
+  single sharpen strength is not quietly roughening the thin panel, and there is
+  no case here for a coverage-aware denoise. (Recorded because the shape of the
+  idea — "Auto measures one σ over a canvas with two grain levels" — is going to
+  occur to someone else.)
+
+**What paid: printing two sentences next to each other.** The finding was not in
+any pixel or any single claim. On the mosaic sample, at the same moment, about
+the same target:
+
+| surface | what it said |
+|---|---|
+| panel map | *"**All 3 panels of your 2×2 mosaic** have had a similar amount of time — around 1 min each — so **no part of the picture is being held back**."* |
+| stack health | *"Part of this mosaic is thinner than the rest — about **23 %** of the picture has 3 subs on it where most of it has 6, so that part looks about **1.4× grainier**."* |
+
+Both were computed correctly. `mosaic_depth_map` discards every
+`pointing_groups(min_members=MIN_PANEL_FRAMES=5)` cluster labelled `-1` — right
+for *strays*, and exactly wrong for a panel that is thin *because it is thin* —
+so the map drew a hole where the grain is and wrote an all-clear over it. Note
+the self-contradiction sitting in plain sight in its own six words: a 2×2 has
+four panels.
+
+**The lesson, and it is the third instalment of one.** v0.406.0's run learned
+that a CLEAN dogfood is a statement about *errors*, not *sentences*; v0.406.1's
+that it is not a statement about *pixels* either. This one: it is not a statement
+about **coherence**. Each of these three surfaces passed every check that reads
+it alone. So the pass now prints the mosaic's whole spoken output as one block
+(step 4c), and the question to ask of it is *"could a beginner hold all of these
+at once?"* — not *"did anything error?"* Before the fix that block reads
+`3 panels on a 2x2 grid, holes at [(0, 1)], thin=False` two lines above the
+1.4×-grainier note, which is the bug stated in one screenful.
+
+**A second-order note worth keeping: the fix made a new sentence reachable, and
+that needed fixing too.** With the panel finally drawn, a mosaic thinner by
+`THIN_FRACTION` but only *minutes* behind fell into the "all similar" branch —
+an all-clear underneath a cell the card now shades visibly paler. The tempting
+fix is to lower `THIN_MIN_SHORTFALL_S`; that is the blind hot-path threshold flip
+§1 forbids, and the constant's reasoning (don't nag a mosaic in its first half
+hour) is intact. The right one was to split the verdict into the two halves the
+code already computed and give the sentence a third branch: the fact, with no
+highlight, no `aim_hint` and no nag. **A threshold that is right is not a licence
+for the sentence beside it to be wrong.**
+
+**Self-inflicted, recorded so the next run doesn't repeat it: `pkill -f
+"webapp.main"` kills the dogfood's server.** The dogfood script boots the app
+with exactly that command line, so tidying up a hand-started probe instance
+killed the pass mid-`--editor`, and the mosaic editor drive filled the log with
+`ERR_CONNECTION_REFUSED` for every op. It is not a finding and it is not a
+regression — kill probe servers by PID, or give them a marker argument.
+
+**Green gates.** Baseline on `origin/main` before a line was changed: **5,473
+passed / 2 skipped** (full suite headless, 26:05) — the same figure the previous
+run recorded, so the tree started where it was left. On the finished tree:
+**5,480 passed / 2 skipped** (24:39), i.e. **exactly +7**, the seven tests this
+run added and nothing else moved. Frontend **253 files / 3,550 tests**,
+`tsc --noEmit` clean, `vite build` green. `origin/main` was still at `f420351b`
+at merge time, so no sync and no version renumber were needed.
+
+**One tooling note for whoever runs the suite next: run the two suites one at a
+time.** pytest and vitest together put a load average of ~23 on four cores and
+each took roughly twice as long as it does alone; the previous run recorded the
+same thing (37:58 against its usual ~23 min) and put it down to a dogfood pass.
+It is not the dogfood — it is two worker pools.
 
 ## 2026-09-09 — Builder run (`claude/sweet-babbage-8j2dwm` → v0.406.0, v0.406.1): the rectangle a CLEAN dogfood and a flat seam number both missed
 
