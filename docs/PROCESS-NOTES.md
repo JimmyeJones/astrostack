@@ -18,6 +18,86 @@ is a queue.
 
 ---
 
+## 2026-09-09 — Builder run (`claude/sweet-babbage-03ba9j` → v0.403.1, v0.404.0): a whole-recipe Auto parity guard, the auto-stack switch nobody had mentioned, and two clean sweeps
+
+**The run.** Baseline green before any change: **5,433 passed / 2 skipped**, full
+suite headless, 27:55. Two shipped items. `scripts/agent-setup.sh` completed
+cleanly first time (no repeat of the previous run's half-empty venv).
+
+**How the work was chosen, and what that says about the backlog.** The previous
+run's note already recorded that the Bugs section holds no open, ungated bug and
+that ~55 Ideas entries survive of which most are measured stand-downs. I
+re-extracted every top-level entry across all six sections and confirmed it, then
+checked five candidates in the code and closed each on its own terms: the
+"faint-field re-solve ladder" and "Try harder to locate these" are both answered
+by the 2026-07-24 real-ASTAP audit already in the tree (`_SOLVE_LADDER` is
+measured, and every sensitivity lever the entries guess at measured as a
+non-lever); slice (c) of the sibling-hint entry reduces, once traced, to "a
+hintless frame gets the sibling hint one scan later than it could" — a delay, not
+a loss, and structurally unreachable for a Seestar whose subs carry RA/Dec
+headers; and the owner-approved `batch_stack_tmp` scan skip (Q5) is **already
+built** (`scanner._TEMP_FOLDER_NAMES`, v0.319.6 and its scan-time half). So the
+two items shipped came from measuring and from reading the owner's own gate list,
+not from the Ideas queue.
+
+**QA SWEEP — whole-recipe Auto preview↔export parity on a mosaic canvas: CLEAN,
+and now a permanent test.** `test_edit_proxy_parity.py` measures the A2 class one
+op at a time; nothing had ever rendered the eleven-op recipe `auto_recipe`
+actually builds. Measured on three mosaic strips at the strides the owner's
+canvases reach — worst statistic **0.0034** at `proxy_scale=5` (600x3000),
+**0.0043** at 4 (1500x6000), **0.0076** at 8 (900x12000, the heavy-stride regime
+where the coverage-levelling floor bug lived until v0.237.2). All inside the ~2 %
+decimation floor. Shipped as `tests/test_auto_recipe_proxy_parity.py` (v0.403.1)
+with the trap armed on every run: patching `EditContext.scaled_px` to the
+identity *is* the A2 defect and moves the same number to **0.1085**, a 32x
+separation. The two larger strips are recorded in `SHIPPED.md` rather than run
+every time (a native-resolution render pair costs ~11 s).
+
+**DOGFOOD `--mosaic --editor`: CLEAN.** Field and mosaic samples both. Mosaic trim
+Auto would apply: **7.9 %** (above ~15 % is a bug, AGENTS.md §1). Nothing
+overflowing, no console errors on either target. The editor drive added all 21
+ops one at a time on both runs, each re-rendering the live preview, then undo and
+redo — clean on both. Phone page heights on the mosaic target: Target 3,407 px,
+editor 3,102 px, life list 3,094 px, Dashboard 2,432 px.
+
+**The lesson worth carrying, and it is the third run in a row of the same shape.**
+v0.404.0's first draft put its note inside `LastNightCard` — the right *content*
+home, where the news of the night is. Nine jsdom assertions passed. A real
+browser at 420 px reported the element **hidden**: `LastNightCard` lives inside
+the Dashboard's `InsightTabs` "Recent" panel, which is `display: none` until that
+tab is clicked. The feature is entirely about discovery, so that placement was
+not a polish issue, it was the feature not existing. It moved to the notice
+board. **Generalisation:** the previous run wrote *"an assertion that an element
+is in the document is not an assertion that it can be read"* — this run's
+addition is that it is not an assertion that it is **on screen** either. jsdom
+renders every branch of a tab component; only a browser knows which panel is
+displayed. Any run adding a surface to a page that groups its content — the
+Dashboard's `InsightTabs`, the Target page's — should photograph it before
+believing the suite.
+
+**Environment note — a run that does several full suites WILL run out of disk, and
+it does not look like a disk problem.** The fourth full `pytest` of this session
+died at ~80 % with every later write failing, and the tell was not in the pytest
+output at all (the harness could no longer write the log file). `/tmp` held
+**28 GB** under `/tmp/pytest-of-root` — pytest keeps the last three runs' `tmp_path`
+trees, and this suite's fixtures write real FITS, so each run is ~9 GB. Add the
+dogfood scratch (`/tmp/astrostack-dogfood`, sample library + stacked masters +
+the on-demand Playwright install) and the container's 252 GB allowance is gone.
+`rm -rf /tmp/pytest-of-root` took the disk from 100 % to 26 % in one command and
+the re-run was clean. **If a suite starts failing late in a long run, check `df -h /`
+before reading the failure** — and delete the dogfood scratch when the pass is
+over, since its screenshots are the only part worth keeping.
+
+**Also worth recording: the backlog's own "REQUIRES MANUAL OWNER ACTION" list was
+actionable after all.** Item 2 ("flip Auto-stack on yourself") had sat there since
+v0.391.0 as something no agent may do — correctly, because flipping a stored
+`false` is the §9 breach. But *telling* the owner is not flipping it, and nothing
+in the app had ever mentioned the switch the whole walk-away path waits on. When
+a gate says "only the owner can do this", it is worth asking separately whether
+the app can at least **ask** — the answer here was a whole feature.
+
+---
+
 ## 2026-09-09 — Builder run (`claude/sweet-babbage-dto79f` → v0.403.0): the upload destination picker, plus a clean editor proxy-scaling sweep
 
 **The run.** Baseline green before any change: **5,417 passed / 2 skipped**, full
