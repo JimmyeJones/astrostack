@@ -732,14 +732,17 @@ def stack_detail_mask(fits_path: str | Path, *, min_frac: float = 0.5
     (:func:`seestack.edit.coverage_trim.well_covered_mask`; it was the *peak*
     until D1, which on a mosaic is the panel-overlap band)
     — so the number isn't picked blind, it is the app's existing definition of
-    "enough coverage".
+    "enough coverage". What "one panel's depth" means is asked at
+    :data:`~seestack.edit.coverage_trim.MASK_LEVEL_MIN_FRAC` rather than the
+    module default, because a mask has no way to tell a thin *panel* from a
+    fringe after the fact the way the trim's rectangle does.
 
     Falls back to the plain has-data footprint when there is no frame-count
     sibling (older runs) or it carries no usable coverage, so a legacy run still
     maps its real shape rather than vanishing. On the canvas grid, like
     :func:`stack_coverage_mask`.
     """
-    from seestack.edit.coverage_trim import well_covered_mask
+    from seestack.edit.coverage_trim import MASK_LEVEL_MIN_FRAC, well_covered_mask
     from seestack.edit.proxy import load_frame_coverage
 
     covered = stack_coverage_mask(fits_path)
@@ -753,7 +756,13 @@ def stack_detail_mask(fits_path: str | Path, *, min_frac: float = 0.5
         counts = None
     if counts is None:
         return covered
-    mask = well_covered_mask(counts, min_frac)
+    # `MASK_LEVEL_MIN_FRAC`, not the module default: on a raster of dozens of
+    # panels no single depth is substantial enough for the default to find, so the
+    # reference lands near the mode of the depth distribution and whole thin
+    # panels — real, photographed sky — are called fringe. That is a fade on the
+    # all-sky map *and* sky the "how much have I photographed?" tally never counts
+    # (`seestack.skyarea`). See that constant for the measurements.
+    mask = well_covered_mask(counts, min_frac, level_min_frac=MASK_LEVEL_MIN_FRAC)
     if mask is None or not mask.any():
         return covered
     if mask.shape != covered.shape:

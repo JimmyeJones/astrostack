@@ -41,6 +41,55 @@ PANEL_LEVEL_TOL = 0.10
 # A real coverage map is read strided to ~10^5-10^6 pixels, where 8 % of it is
 # three orders of magnitude above this floor, so it never binds in production.
 PANEL_LEVEL_MIN_PIXELS = 256
+# The same "is this a real plateau?" floor once more, for the **mask** rather than
+# the trim — and lower, because the two are asked about mosaics of different sizes.
+#
+# `PANEL_LEVEL_MIN_FRAC` calls a level substantial at 8 % of the covered canvas,
+# which is one panel of a *twelve*-panel mosaic. The owner shoots 5x5, 10x10 and
+# 12x8 rasters across many nights, where one panel is 1-4 % of the canvas and no
+# panel's depth is ever that substantial — so `panel_coverage_level` walks past
+# every thin panel and settles near the **mode** of the depth distribution, and
+# `well_covered_mask` then calls everything below half of that fringe. On a fully
+# tiled canvas, with no ragged edge anywhere.
+#
+# The trim has a second line of defence against exactly this (the coverage-bound
+# ladder in `largest_covered_rect`, see TRIM_KEEP_RATIO) because it has a
+# *rectangle* to compare against the one the coverage alone allows. A per-pixel
+# mask has no such comparison: the honest fade and the broken one both simply
+# remove area, and on real map shapes they overlap outright (a genuinely ragged
+# 2x2 fades 8.2 % of its canvas; a broken 12x8 fades 11.4 %). So the mask is fixed
+# at the reference instead, which is the only lever it has — and a safe one:
+# `panel_coverage_level` is monotone in this fraction (lowering it can only widen
+# the set of qualifying windows, so the level can only fall), and a lower level
+# can only keep *more* of the picture. The worst case of this constant is leaving
+# fringe in, never fading a panel away.
+#
+# Measured on the integer frame-count maps the mask actually reads (the
+# `_framecov.fits` sibling — *not* the weighted coverage), over 147 fully tiled
+# rasters (3x3 … 12x8, panel depths spanning 3-15 up to 50-500 subs, three seeds
+# each), as the worst share of a **fully covered** canvas faded away:
+#
+#     min_frac   rasters affected   worst faded
+#       0.08          90 of 147        26.3 %
+#       0.04          10 of 147        12.8 %
+#       0.03           0 of 147         0.0 %
+#
+# …and what it costs, on the shapes that have a real fringe to fade: **nothing
+# measurable**. A single field with a dither ramp fades 2.50 % of its canvas
+# before and after, and a genuinely ragged 2x2 mosaic 8.17 % before and after —
+# identical, because on those shapes one level does hold 8 % of the canvas and
+# the reference does not move at all. A raster that is *both* many-panelled and
+# genuinely ragged fades 11.2 % rather than 22.1 %: it loses its border, and
+# keeps its thin panels. The only shape where the fade shrinks to nothing is a
+# heavily dithered (±80 px) single field, 1.6 % -> 0.0 %, and that is the safe
+# direction — an unweighted stack writes no frame-count sibling at all, so
+# `stack_detail_mask` already falls back to the plain has-data footprint and
+# fades nothing whatever for it.
+#
+# Below ~0.02 the reference starts landing on the dither ramp itself and the
+# ragged fades erode too (a ragged 12x8 goes 5.4 % -> 3.7 %), so 0.03 is not the
+# bottom of a slope: it is the middle of the band between the two failures.
+MASK_LEVEL_MIN_FRAC = 0.03
 
 
 def coverage_is_mosaic(coverage: np.ndarray,
@@ -237,12 +286,18 @@ def panel_coverage_level(covered: np.ndarray,
 
 
 def _coverage_threshold(coverage: np.ndarray,
-                        min_frac: float = DEFAULT_MIN_FRAC) -> float | None:
+                        min_frac: float = DEFAULT_MIN_FRAC,
+                        *, level_min_frac: float | None = None) -> float | None:
     """The coverage value at or above which a pixel is "well covered", or ``None``
     when the map has no opinion to offer (non-2-D, empty, nothing finite/positive).
 
     Factored out of :func:`well_covered_mask` so :func:`largest_covered_rect` can
     walk the same number *down* without re-deriving the reference depth by hand.
+
+    ``level_min_frac`` overrides how substantial a coverage level has to be before
+    :func:`panel_coverage_level` will call it a panel. ``None`` — every caller but
+    the mask — is :data:`PANEL_LEVEL_MIN_FRAC`, i.e. unchanged; see
+    :data:`MASK_LEVEL_MIN_FRAC` for why the mask asks for a lower one.
     """
     cov = np.asarray(coverage, dtype=np.float32)
     if cov.ndim != 2 or cov.size == 0:
@@ -253,7 +308,10 @@ def _coverage_threshold(coverage: np.ndarray,
     peak = float(finite.max())
     if peak <= 0:
         return None
-    reference = panel_coverage_level(finite[finite > 0])
+    reference = panel_coverage_level(
+        finite[finite > 0],
+        min_frac=(PANEL_LEVEL_MIN_FRAC if level_min_frac is None
+                  else float(level_min_frac)))
     if reference is None or not (reference > 0):
         reference = peak
     frac = min(0.95, max(0.05, float(min_frac)))
@@ -286,7 +344,8 @@ def _rect_area(rect) -> float:
 
 
 def well_covered_mask(coverage: np.ndarray,
-                      min_frac: float = DEFAULT_MIN_FRAC) -> np.ndarray | None:
+                      min_frac: float = DEFAULT_MIN_FRAC,
+                      *, level_min_frac: float | None = None) -> np.ndarray | None:
     """Boolean mask of the pixels a coverage map calls **well covered**: finite,
     and at or above ``min_frac`` of **one panel's** coverage depth.
 
@@ -300,8 +359,17 @@ def well_covered_mask(coverage: np.ndarray,
     The reference is :func:`panel_coverage_level`, **not** the map's peak — on a
     mosaic the peak is the panel *overlap* band, so measuring against it threw the
     panel interiors away. On a single field the two are the same number, so that
-    path is unchanged."""
-    threshold = _coverage_threshold(coverage, min_frac)
+    path is unchanged.
+
+    ``level_min_frac`` chooses how substantial a coverage level has to be before it
+    counts as a panel. It exists because on a *many-panel* raster no single depth
+    holds :data:`PANEL_LEVEL_MIN_FRAC` of the canvas, so the reference lands near
+    the depth distribution's mode and whole thin panels are called fringe — see
+    :data:`MASK_LEVEL_MIN_FRAC`, which is what :func:`seestack.render.thumbnail.
+    stack_detail_mask` passes. ``None`` is the module default, so every other
+    caller is unchanged."""
+    threshold = _coverage_threshold(coverage, min_frac,
+                                    level_min_frac=level_min_frac)
     if threshold is None:
         return None
     cov = np.asarray(coverage, dtype=np.float32)

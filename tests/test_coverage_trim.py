@@ -6,6 +6,9 @@ import numpy as np
 import pytest
 
 from seestack.edit.coverage_trim import (
+    MASK_LEVEL_MIN_FRAC,
+    PANEL_LEVEL_MIN_FRAC,
+    _coverage_threshold,
     _rect_from_mask,
     coverage_is_mosaic,
     largest_covered_rect,
@@ -420,3 +423,144 @@ def test_a_diagonal_mosaics_genuinely_small_rectangle_is_still_offered():
     rect = largest_covered_rect(cov)
     assert rect is not None
     assert _kept_fraction(rect) < 0.2, describe_coverage(cov)
+
+
+# --- D1, the mask half: a thin panel is not a fringe there either -------------
+#
+# `largest_covered_rect` was given a coverage bound (v0.391.1) so that a depth
+# threshold which discards far more than the coverage itself allows is walked
+# down. `well_covered_mask` never was, because a per-pixel mask has no rectangle
+# to compare against — and it is the mask, not the rectangle, that the all-sky
+# "My map" fades with (`render.thumbnail.stack_detail_mask`) and that the "how
+# much sky have I photographed?" tally counts (`seestack.skyarea`).
+#
+# So the mask carries D1's original failure on undiminished, one shape further
+# along: on a raster of *dozens* of panels no single depth holds
+# PANEL_LEVEL_MIN_FRAC of the canvas, the reference settles near the mode of the
+# depth distribution, and every panel below half of that is called fringe. The
+# mask's only lever is the reference itself, which is what MASK_LEVEL_MIN_FRAC
+# lowers — and lowering it is safe by construction: `panel_coverage_level` is
+# monotone in that fraction, so the reference can only fall and the mask can only
+# grow.
+
+
+def _counts_raster(nx, ny, *, lo, hi, seed=0, overlap=0.10, h=320, w=480):
+    """A fully tiled raster as the **frame-count** map really looks: one integer
+    per panel region, panels of unequal depth because each got however many subs
+    that night allowed. This — `{stem}_framecov.fits` — is what the mask reads,
+    not the weighted coverage."""
+    rng = np.random.default_rng(seed)
+    depths = [float(d) for d in rng.integers(lo, hi + 1, size=nx * ny)]
+    return _tiled_mosaic(nx, ny, overlap=overlap, depths=depths, h=h, w=w)
+
+
+def _faded_fraction(cov, **kw):
+    """Share of the *covered* pixels the mask throws away."""
+    covered = np.isfinite(cov) & (cov > 0)
+    mask = well_covered_mask(cov, **kw)
+    kept = 0 if mask is None else int(np.count_nonzero(mask & covered))
+    return 1.0 - kept / max(int(covered.sum()), 1)
+
+
+def test_a_fully_tiled_raster_fades_no_panel_at_the_mask_reference():
+    """Fail-before: 8.8-13.8 % of a canvas that is covered edge to edge faded out
+    — whole thin panels, off the all-sky map and out of the sky-area tally."""
+    for lo, hi in [(5, 60), (10, 100), (20, 200), (30, 300)]:
+        for seed in (0, 1, 2):
+            cov = _counts_raster(12, 8, lo=lo, hi=hi, seed=seed)
+            what = f"12x8 {lo}-{hi} subs, seed {seed}: {describe_coverage(cov)}"
+            # The fixture is doing its job: fully tiled, so the honest answer is
+            # that nothing here is fringe.
+            assert np.count_nonzero(cov > 0) == cov.size, what
+            assert _faded_fraction(
+                cov, level_min_frac=MASK_LEVEL_MIN_FRAC) == 0.0, what
+
+
+def test_the_mask_reference_fades_nothing_on_any_fully_tiled_raster():
+    """The same claim over the whole family the owner shoots — 3x3 to 12x8, panel
+    depths from 3-15 up to 50-500 subs, three seeds each. Fail-before: 90 of the
+    147 fade something, the worst 26.3 % of a fully covered canvas."""
+    worst = 0.0
+    affected = 0
+    for (nx, ny) in [(12, 8), (8, 6), (6, 4), (5, 5), (10, 10), (3, 3), (4, 3)]:
+        for (lo, hi) in [(5, 60), (10, 100), (20, 200), (8, 30), (30, 300),
+                         (3, 15), (50, 500)]:
+            for seed in range(3):
+                cov = _counts_raster(nx, ny, lo=lo, hi=hi, seed=seed)
+                faded = _faded_fraction(cov, level_min_frac=MASK_LEVEL_MIN_FRAC)
+                worst = max(worst, faded)
+                affected += faded > 0.0
+    assert (affected, worst) == (0, 0.0)
+
+
+def test_the_fringe_fade_the_mask_exists_for_still_fires():
+    """The other half: this must not become "fade nothing". A single field's
+    dither ramp and a ragged mosaic's fringe are *unchanged* to the digit (on
+    those shapes one level really does hold 8 % of the canvas, so the reference
+    does not move), and a raster that is both many-panelled and ragged still
+    loses its border — it just keeps its thin panels."""
+    field = _single_field_with_fringe(h=320, w=480)
+    ragged_2x2 = _ragged_rim(_tiled_mosaic(2, 2, overlap=0.15, h=320, w=480),
+                             border=16, floor=30.0)
+    for name, cov in [("single field", field), ("ragged 2x2", ragged_2x2)]:
+        assert _faded_fraction(cov, level_min_frac=MASK_LEVEL_MIN_FRAC) == \
+            pytest.approx(_faded_fraction(cov)), name
+        assert _faded_fraction(cov) > 0.02, name  # …and it was fading something
+
+    both = _ragged_rim(_counts_raster(12, 8, lo=10, hi=100, seed=1),
+                       border=12, floor=10.0)
+    assert _faded_fraction(both, level_min_frac=MASK_LEVEL_MIN_FRAC) > 0.05, \
+        describe_coverage(both)
+
+
+def _ragged_rim(cov, *, border=12, floor=6.0):
+    """A genuine partially-covered border: the outer `border` pixels are capped at
+    a ramp up to `floor` frames, the way a mosaic's dithered outline really is."""
+    cov = cov.copy()
+    for k in range(border):
+        v = np.floor(floor * (k + 1) / (border + 1))
+        cov[k, :] = np.minimum(cov[k, :], v)
+        cov[-1 - k, :] = np.minimum(cov[-1 - k, :], v)
+        cov[:, k] = np.minimum(cov[:, k], v)
+        cov[:, -1 - k] = np.minimum(cov[:, -1 - k], v)
+    return cov
+
+
+def test_lowering_the_level_fraction_can_only_ever_keep_more():
+    """Why this constant is safe to move at all, as a property rather than a
+    sentence: `panel_coverage_level` is monotone in `min_frac` — a smaller
+    fraction admits every window the larger one did, so the reference can only
+    fall, and a lower reference can only keep more of the picture."""
+    rng = np.random.default_rng(11)
+    for _ in range(40):
+        cov = rng.gamma(2.0, 8.0, size=(80, 120)).astype(np.float32)
+        cov[rng.random((80, 120)) < 0.1] = np.nan
+        covered = cov[np.isfinite(cov) & (cov > 0)]
+        levels = [panel_coverage_level(covered, min_frac=f)
+                  for f in (0.08, 0.05, 0.03, 0.02)]
+        assert all(a >= b - 1e-9
+                   for a, b in zip(levels, levels[1:], strict=False)), levels
+        assert (_faded_fraction(cov, level_min_frac=0.03)
+                <= _faded_fraction(cov) + 1e-9)
+
+
+def test_the_trim_keeps_its_own_reference_and_the_default_is_unmoved():
+    """This change is the mask's alone: a run's Auto crop is bit-for-bit what it
+    was. The default really is still ``PANEL_LEVEL_MIN_FRAC`` — nothing switched
+    underneath the trim — and on a raster where the two references genuinely
+    disagree, the threshold the trim starts from is still the default one."""
+    raster = _counts_raster(12, 8, lo=10, hi=100, seed=1)
+    for cov in [_single_field_with_fringe(h=320, w=480), raster,
+                _tiled_mosaic(2, 2, overlap=0.15, h=320, w=480)]:
+        assert np.array_equal(well_covered_mask(cov),
+                              well_covered_mask(cov, level_min_frac=None))
+        assert np.array_equal(
+            well_covered_mask(cov),
+            well_covered_mask(cov, level_min_frac=PANEL_LEVEL_MIN_FRAC))
+    # …and on this shape the two references really do disagree, so the equalities
+    # above are a statement about the default rather than a coincidence.
+    assert not np.array_equal(
+        well_covered_mask(raster),
+        well_covered_mask(raster, level_min_frac=MASK_LEVEL_MIN_FRAC))
+    assert _coverage_threshold(raster) > _coverage_threshold(
+        raster, level_min_frac=MASK_LEVEL_MIN_FRAC)
