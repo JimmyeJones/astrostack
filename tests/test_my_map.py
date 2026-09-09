@@ -253,3 +253,33 @@ def test_the_detail_mask_is_bounded_in_memory_on_a_big_canvas(tmp_path, monkeypa
     assert mask.shape == (h, w)
     assert not mask[:, :30].any()         # the badly-covered end is excluded
     assert mask[:, 60:].all()             # the good end survives
+
+
+def test_a_fully_tiled_raster_keeps_every_panel_on_the_map(tmp_path):
+    """Regression: the map fades a picture by its per-pixel frame count, and on a
+    raster of *dozens* of panels no single depth was substantial enough for the
+    "one panel's depth" reference to find — so it settled near the mode of the
+    depth distribution and faded every thinner panel out. Whole panels, on a
+    canvas covered edge to edge. Fail-before: 7.0 % of it faded."""
+    from astropy.io import fits
+
+    from seestack.render.thumbnail import stack_coverage_mask, stack_detail_mask
+
+    h, w, nx, ny, overlap = 200, 300, 6, 4, 0.10
+    rng = np.random.default_rng(1)
+    counts = np.zeros((h, w), dtype=np.float32)
+    pw, ph = w / (nx - (nx - 1) * overlap), h / (ny - (ny - 1) * overlap)
+    for j in range(ny):
+        for i in range(nx):
+            x0, y0 = int(round(i * pw * (1 - overlap))), int(round(j * ph * (1 - overlap)))
+            counts[y0:min(h, int(round(y0 + ph))),
+                   x0:min(w, int(round(x0 + pw)))] += float(rng.integers(10, 101))
+    assert np.count_nonzero(counts > 0) == counts.size   # fully tiled: no fringe
+
+    fp = tmp_path / "raster.fits"
+    fits.PrimaryHDU(data=np.full((3, h, w), 0.3, dtype=np.float32)).writeto(fp)
+    fits.PrimaryHDU(data=counts).writeto(tmp_path / "raster_framecov.fits")
+
+    detail = stack_detail_mask(fp)
+    assert detail.all()                                  # …so nothing is faded
+    assert np.array_equal(detail, stack_coverage_mask(fp))

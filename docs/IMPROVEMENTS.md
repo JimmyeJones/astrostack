@@ -110,23 +110,70 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   data" TIFF anchors its white point on the single brightest surviving pixel *(traced 2026-09-03 — the
   mechanism is confirmed, but read the note below before "fixing" it)*.
 
-- **⚪ LEAD, filed rather than fixed (Builder 2026-09-08, found and measured while fixing the v0.391.1 trim
-  bug — read that entry in [`SHIPPED.md`](SHIPPED.md) first, the reasoning is all there) — the all-sky "My
-  map" fade still uses the bare `well_covered_mask`, so on a dense raster with uneven panel depth it fades
-  out the thin panels along with the fringe.** *(Severity: cosmetic/display — nothing is cropped, no pixel
-  of the picture is lost, and it is a fade on a map, not the picture itself. Confidence: HIGH, measured —
-  `9.3 %` of a fully-tiled 12x8 raster 8-30 subs deep with 6 % weight jitter is faded, and it is whole
-  panels, not a rim.)* `seestack/render/thumbnail.py` (~line 742) calls
-  `seestack.edit.coverage_trim.well_covered_mask` directly, and v0.391.1 deliberately left that function
-  alone: its fix lives in `largest_covered_rect`, where there is a *rectangle* to compare against the one the
-  coverage alone allows. A per-pixel mask has no such comparison available, so the same guard does not
-  transfer — which is exactly why this was filed instead of bolted on. **If it is ever worth doing**, the
-  honest shape is the same discriminator, applied per-pixel: fade toward *uncovered*, not toward *shallow* —
-  i.e. give `well_covered_mask` an opt-in mode whose reference is the thinnest **substantial connected
-  region** rather than the depth distribution's mode, and pass it only from the map. Do **not** simply lower
-  `DEFAULT_MIN_FRAC`: that changes the trim too, and the trim is now correct. Low value (the map is a
-  navigation aid, and a thin panel reading as faint on it is arguably honest); filed so the next agent who
-  reads `thumbnail.py` doesn't have to re-derive any of this. (XS-S, priority 3 — friendliness/display.)
+- **🔴 D1, FOURTH INSTALMENT — VERIFIED BY REPRODUCTION, FILED RATHER THAN FIXED (Builder 2026-09-09, found
+  while shipping the v0.399.2 mask fix; five candidate fixes measured and all five rejected — read those
+  before proposing a sixth) — Auto's border trim still crops a *fully tiled* mosaic by up to 19.8 % of its
+  canvas.** *(Severity: **image-quality / priority 1** — this is the on-by-default `auto_crop_border` path,
+  so the owner's one-click and walk-away pictures lose whole panels. Confidence: HIGH, reproduced over 147
+  synthetic rasters. Size: unknown — that is the problem.)*
+  **Repro.** Fully tiled mosaic rasters (3x3 … 12x8, 10 % overlap, panels of unequal depth — the owner's
+  shape: each panel gets however many subs that night allowed). No ragged edge anywhere; the honest answer is
+  `largest_covered_rect(...) is None`. Measured on 147 of them (7 grids × 7 depth spreads from 3-15 up to
+  50-500 subs × 3 seeds), as the number that get cropped and the worst canvas fraction kept:
+  **weighted coverage + 6 % pixel jitter — 9 cropped, worst 0.804 kept; weighted, no jitter (the physically
+  correct shape: Σ of per-frame weights is constant across a panel region but no two panels share a value) —
+  19 cropped, worst 0.802; integer frame counts — 14 cropped, worst 0.802.** AGENTS.md §1 puts the bar at
+  "a trim above ~15 % of the canvas is a bug".
+  **Why v0.391.1 did not close it.** That fix bounds the trim by what the *coverage* allows and walks the
+  threshold down when it does worse than `TRIM_KEEP_RATIO` (0.8) of that bound. It rescues the catastrophic
+  cases (25 % kept). What is left is the band **just inside** the allowance: on a fully tiled canvas the
+  bound is 1.0, so a rectangle keeping 0.80-0.91 passes the ladder and is accepted — and that is exactly
+  where these land.
+  **Four levers measured and rejected — do not re-try these without reading the numbers:**
+  (a) *Lower `PANEL_LEVEL_MIN_FRAC`* (the fix that works for the mask, v0.399.2). Non-monotone for the trim
+  and it does not converge: 0.08 → 11 cropped, 0.04 → **13**, 0.03 → 2, 0.02 → 4. Lowering the reference
+  raises the strict rectangle *past* the 0.8 bound, which switches the ladder's rescue **off** and leaves a
+  mid-range crop standing. It moves the failures around rather than removing them.
+  (b) *Read the frame-count map instead of the weighted one* (`_framecov.fits`; the lesson the sky-leveling
+  pass already learned — "bin by panel geometry, not by how good a panel's subs happened to be"). Better
+  than weighted-unjittered (19 → 14) but still 14 of 147, worst 0.802. Not a fix, though it is arguably the
+  more honest input and could ride along with a real one.
+  (c) *Tighten `TRIM_KEEP_RATIO`.* Honest and broken collide outright: a genuinely ragged 2x2 keeps **0.912**
+  of its bound and a broken 8x6 keeps **0.912** too. No ratio separates them.
+  (d) *Refuse a crop that discards well-covered pixels* ("a border trim may not throw away good data" —
+  spatial, scale-free, and the natural next step after v0.391.1's own reasoning). Also collides, in the
+  other direction: an axis-aligned rectangle over *any* irregular footprint necessarily cuts good pixels, so
+  a legitimately ragged jittered 3x3 scores **1.000** and the diagonal mosaic **1.000**, against 0.63-0.93
+  for the broken rasters.
+  (e) *"A canvas with no uncovered pixel has no border to trim"* — a fact rather than a threshold, and the
+  one guard here that could only ever **stop** a crop. It closes the whole reproduced family (all 147 are
+  fully covered, all 19 over-crops go) and is worth nothing on a real canvas: give the same rasters an
+  honest union outline (four uncovered corners) and **0 of 147 are fully covered any more**, so the guard
+  never fires — while the over-cropping is still there underneath (worst kept 0.748 against an honest
+  corner-bound of ~0.892). A real raster is *nearly* tiled, never exactly, so an exact-coverage predicate
+  is the wrong shape. Filed rather than shipped for that reason: it would have been a fix for the fixture.
+  **What is left to try.** The failure is *spatial* (scattered thin panels destroy the rectangle; a rim does
+  not), so the honest discriminator is probably spatial too — is the discarded set a **connected rim** of the
+  canvas, or scattered interior blobs? — rather than any statistic over the depth histogram, which the four
+  above exhaust — and (e) shows the predicate has to tolerate a nearly-tiled canvas, not demand a perfect
+  one. **Do not blind-flip a constant here**: this is the on-by-default hot path, every scalar
+  lever has now been measured, and the failure mode is silent (the owner's picture is quietly smaller).
+  Repro scripts: rebuild from `tests/test_coverage_trim.py::_tiled_mosaic` with per-panel depths from
+  `rng.integers(lo, hi)`; the shipped `_counts_raster` helper in that file is the same fixture.
+
+- **⚪ ✅ CLOSED, SHIPPED AS v0.399.2 — the all-sky "My map" fade (and the sky-area tally) faded whole thin
+  panels out of a fully tiled raster.** *(Was filed 2026-09-08 as a low-value display lead. It was worth
+  more than that, and its measurement was taken on the wrong map — both corrected below; kept here rather
+  than cut so the correction is findable.)* Two things the original entry got wrong, both found by
+  re-measuring: **(1) it is not only a fade.** The same `stack_detail_mask` drives `seestack.skyarea`, so the
+  "how much sky have I photographed?" tally *under-reported the owner's real sky* by the same fraction —
+  measured 7.0 % on a 6x4 raster. **(2) its 9.3 % was measured on the weighted coverage map, which this code
+  path never reads**: `stack_detail_mask` loads the `_framecov.fits` *frame-count* sibling and falls back to
+  the plain has-data footprint when there is none. Re-measured on integer count maps, the defect is real and
+  **larger** — 90 of 147 fully tiled rasters fade something, the worst 26.3 % of a fully covered canvas. And
+  the entry's "do not simply lower the fraction, it changes the trim too" was answered by making it the
+  mask's own constant (`MASK_LEVEL_MIN_FRAC`), leaving the trim's reference untouched. Full entry in
+  [`SHIPPED.md`](SHIPPED.md).
 
 - **🟡 BROKEN-UX / AUTONOMY (Scout QA audit 2026-08-26 #4, traced + verified end-to-end) — PARTIALLY FIXED
   (misleading-copy half shipped v0.272.2; optional behavioural half open) — the `astap_timeout_s` setting bounds
@@ -2834,6 +2881,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.399.2** — 🐛 BUG (image-quality/trust, PRIORITY 3–4), Builder-verified by reproduction: **a mosaic panel that is merely thinner than its neighbours is no longer faded off the all-sky map, or left out of the "how much sky have I photographed?" tally.** `well_covered_mask` asks `panel_coverage_level` which coverage level counts as "one panel", and *substantial* there is 8 % of the canvas — one panel of a **twelve**-panel mosaic. On the owner's 5x5/10x10/12x8 rasters a panel is 1–4 %, so the search walks past every thin panel and settles near the **mode** of the depth distribution; everything below half of that is called fringe. Measured on the integer frame-count maps this path actually reads: **90 of 147 fully tiled rasters fade something, the worst 26.3 % of a canvas covered edge to edge** — and because `seestack.skyarea` counts the same mask, the owner's photographed-sky figure was short by the same fraction (7.0 % on the 6x4 regression). The trim had a second line of defence (v0.391.1's coverage bound); a per-pixel mask has no rectangle to compare against, so its only lever is the reference — hence a mask-only `MASK_LEVEL_MIN_FRAC` (0.03), leaving `largest_covered_rect` bit-for-bit unchanged. **0 of 147 after**, while every honest fade survives to the digit (a single field's dither ramp 2.50 % before *and* after, a ragged 2x2 8.17 % likewise; a raster that is both many-panelled and ragged still loses its border, 11.2 %). Safe by construction: `panel_coverage_level` is monotone in that fraction, so the reference can only fall and the mask can only grow. Tests +6, three fail-before. **The same run verified and filed D1's fourth instalment** — the trim still crops fully tiled rasters by up to 19.8 %, with five candidate fixes measured and rejected; see "Bugs (fix these first)". Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.399.1** — 🐛 BUG (broken-UX/trust, PRIORITY 1–2), found by **running** the app during the v0.399.0 live check: **the Stack form named the outlier method the run would *not* use, on a mosaic.** `/stack-estimate`'s `auto_reject_resolved.method` re-derived the answer from the target's *frame count* while the engine's `_resolve_auto_reject` sizes it from the mosaic's **per-pixel panel depth** — reproduced on the 2×2 sample: 21 subs, depth 3, endpoint said `sigma_clip`, the run that had just finished recorded min/max. The A6 class (v0.326.7) surviving in the reporting path, on the owner's dominant shape. Not just a sentence: `Stack.tsx` drives `sigmaClipEffective`/`minMaxEffective` off this field, so the form greyed the wrong toggle and coached about the wrong method. Fixed by reading the method off the **resolved** options the endpoint already computes (one definition, cannot drift), plus an additive `panel_depth` so the copy can give the reason; `autoRejectMethodNote` extracted to `frontend/src/autoRejectNote.ts` with a depth voice, frame wording byte-for-byte unchanged wherever depth says nothing new. Tests +9, three fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **CLOSED, not built (no version)** — Performance: **`GET /api/gallery/best` does not need the cache the 2026-08-04 entry proposed.** That entry set its own gate ("time the endpoint on a realistic library first"); measured at **97 ms** on 40 targets × 20 runs and **235 ms** on 80 × 40 — under CPU contention, so upper bounds — i.e. the same band as `/api/gallery` beside it and two orders off the 13.8 s endpoints that justified v0.374.7–v0.374.9. A cache would buy ~0.1–0.25 s twice per Dashboard path and pay in staleness on the one wall whose point is "the picture I pinned". Entry, numbers and the safe shape if it is ever reopened are in [`SHIPPED.md`](SHIPPED.md).
 - **v0.399.0** — NEW BEGINNER FEATURE, PRIORITY 2–3 (autonomy/friendliness): **the Stack form says about how long the run will take.** The Jobs page could say how much longer a *running* stack had to go; nothing answered "start it now or in the morning?" before the button, next to the size and the memory verdict the same panel already gives. Measured, never modelled: new additive `stack_runs.duration_s` stamped by `run_stack` — added **without** a `SCHEMA_VERSION` bump, through `_reconcile_table_columns`, because a bump would make an older build refuse to open the DB (a red rollback test said so) — and new `seestack/stacktime.py` takes the **median seconds-per-sub of this target's own comparable past runs**. "Comparable" is strict on purpose — same `stack_cost_class` (which *is* `stacker.combine_method` plus the two-pass-drizzle split, asserted equal to it in a test, so the two cannot drift), canvas within ×2, and at least 8 subs — and it returns nothing at all on a first stack, on unseen settings, and on every library the moment it upgrades. `/stack-estimate` resolves `auto_reject` through the engine's own picker before matching, so a run about to combine with min/max is not timed from κ-σ history. The wording says what it stands on ("from your last 2 stacks of this target") and softens to *Roughly* on a ×4 extrapolation, formatted through the running job's own `formatEtaSeconds`. Tests +35. Full entry in [`SHIPPED.md`](SHIPPED.md).
