@@ -18,6 +18,81 @@ is a queue.
 
 ---
 
+## 2026-09-09 — Builder run (branch `claude/sweet-babbage-4yit4y`): a feature invented because the backlog was dry, a bug the *live check* found, and one filed perf idea closed by measuring it
+
+**The run.** Baseline green before any change (**5,350 passed / 2 skipped**, full
+suite headless, 28:47). Shipped **v0.399.0** (about how long this stack will take)
+and **v0.399.1** (the Stack form named a method the run would not use, on a
+mosaic), and closed the 2026-08-04 `/api/gallery/best` cache idea with the
+measurement its own gate demanded. Write-ups in [`SHIPPED.md`](SHIPPED.md).
+
+**The backlog really is dry, and this is the sixth run to say so** — "Bugs (fix
+these first)" holds only entries gated on data no agent has or deliberate
+stand-downs carrying their own numbers, and "Features that serve real workflows"
+is entirely struck, closed or declined. The Ideas sections were swept
+mechanically (split into top-level entries, filtered for those with no
+SHIPPED/CLOSED/DECLINED marker) rather than read top-down; that took a minute and
+is worth repeating.
+
+**So the feature was invented, per the kickoff prompt's standing allocation, by
+walking the journey rather than the list.** The Stack form's own panel already
+answers *how big will this picture be* and *will it fit in memory*; the third
+question a person has before pressing the button — **how long will this take?** —
+had no answer anywhere in the app, while the Jobs page has been able to answer
+the *running* version of it for months. That asymmetry is the kind of gap a
+backlog does not contain.
+
+**Two lessons worth carrying, both of them things a test said and I did not.**
+
+**1. A new `stack_runs` column must NOT bump `SCHEMA_VERSION`.** The first
+version of v0.399.0 did (22 → 23, with a migration step, the pattern most of that
+table's columns still show), and `test_uncovered_fraction.py::
+test_an_old_build_can_still_read_a_project_this_build_wrote` went red on
+`PRAGMA user_version <= 22`. It is right: `Project._check_schema` **refuses** to
+open a project stamped newer than the build, so a bump makes the feature
+unrollbackable — upgrade-safe in one direction only. The column now reaches an
+existing project through `_reconcile_table_columns` (it is in `SCHEMA_SQL`, and
+that reconcile runs on *every* open, at the current version too), which is what
+`uncovered_frac` and `targets.folder_name` already do. **If you are adding a
+column to `frames` or `stack_runs`, do not write a migration step — add it to
+`SCHEMA_SQL` and let the reconcile place it.** The red test was information about
+the design, not an obstacle to it (the same lesson as 2026-09-08's rename).
+
+**2. The live check found a bug the whole test suite could not.** v0.399.0 was
+verified in a running app — boot `scripts/agent-dogfood.sh --serve --no-probe`,
+stack the sample, read `/stack-estimate` back — and that put two numbers side by
+side that no unit test had reason to compare: the endpoint said Auto would use
+**sigma clipping**, and the run that had just finished had recorded **min/max**.
+`auto_reject_resolved.method` re-derived the choice from the target's frame count
+while the engine sizes it from the mosaic's panel depth. That is v0.399.1, and it
+is the A6 class (v0.326.7) surviving in the *reporting* path a year after the
+engine half was fixed. **The generalisable move: after shipping something that
+reports what the engine will do, run it beside the engine actually doing it.**
+The dogfood mosaic sample is enough — the field sample's 6 subs sit below the
+estimate's own floor and would have shown nothing either way.
+
+**A cheap measurement closed a filed perf item.** `GET /api/gallery/best` was
+filed in 2026-08-04 as possibly "the most expensive read on the Dashboard", with
+its own gate: *time it on a realistic library first*. Seeded 40 targets × 20 runs
+and 80 × 40 straight into the DBs and timed it through a `TestClient`: **97 ms**
+and **235 ms** — measured under a competing pytest run, so upper bounds, and the
+same band as `/api/gallery` sitting beside it. Two orders off the 13.8 s
+endpoints that justified v0.374.7–v0.374.9, so the staleness a cache would add to
+the pinned-cover wall is not worth buying. Entry cut to
+[`SHIPPED.md`](SHIPPED.md) with the numbers and the safe shape if it ever
+reopens. **Seeding a library directly into the registry and project DBs costs
+about two seconds and answers a "is this slow?" gate outright** — the same trick
+the 2026-09-07 timing run used per-target.
+
+**Dogfood: not a full §2 pass this run.** The app was booted and driven for the
+live check above (field sample stacked, mosaic sample loaded and stacked, both
+estimates read back), but no page probe or editor drive was run — three clean
+`--mosaic --editor` passes are recorded within the last two days and neither of
+this run's changes moves a page's layout beyond one dimmed line inside an
+existing block.
+
+---
+
 ## 2026-09-08 (later still) — Builder run (branch `claude/sweet-babbage-yzhopm`): three shipped items, and the one that had to argue with an existing test before it could exist
 
 **The run.** Baseline green before any change (**5,337 passed / 2 skipped**, full

@@ -14,6 +14,68 @@ Newest first.
 
 ---
 
+## v0.399.1 — 2026-09-09 — the Stack form named a method the run would not use, on a mosaic (`/stack-estimate` → `auto_reject_resolved`, `autoRejectNote.ts`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-4yit4y`. A bug found by
+**running the app**, not by reading it — the live check of v0.399.0 happened to
+put the two numbers side by side.)**
+
+**The bug, reproduced end to end on the dogfood mosaic.** With "Auto outlier
+removal" on, `GET /stack-estimate` answered `auto_reject_resolved.method` from
+`auto_reject_method(sigma_kappa, n_frames)` — the *target's frame count*. The
+engine's own picker, `_resolve_auto_reject`, sizes the identical decision from a
+mosaic's **per-pixel panel depth**, because every threshold in it is a statement
+about how many samples land on one pixel. On the generated 2×2 sample those
+disagree: 21 subs, panel depth 3 → the endpoint said **`sigma_clip`**, and the
+stack that had just run recorded **`min_max_reject: True, sigma_clip: False`**.
+
+This is the A6 class of bug (v0.326.7, "auto_reject reading the target's frame
+count where the honest number is a panel's depth") surviving in the *reporting*
+path after the engine half was fixed — and on the shape §1 says the owner shoots
+most.
+
+**It is not only a sentence.** `Stack.tsx` derives `sigmaClipEffective` /
+`minMaxEffective` from this field, and those drive which of the two toggles is
+greyed as overridden, which dependent knob (κ vs. the min/max count) reads as
+live, and every method-specific advisory on the form. So on a mosaic the form
+greyed the wrong switch, offered κ for a run that would not use it, and coached
+about the wrong method — all consistently, which is why it reads as intended
+behaviour rather than a fault.
+
+**The fix is to stop re-deriving it.** The endpoint already had to resolve the
+effective options for v0.399.0's cost class; `auto_reject_resolved.method` is now
+read off *those* (`eff_options.sigma_clip`), i.e. from the same
+`_resolve_auto_reject` the run will use, depth and all. One definition, so they
+cannot drift again. `panel_depth` joins the object as an additive field —
+`rejection_reach` beside it has carried the same number since v0.326.7 — so the
+copy can give the reason instead of quoting a count that did not decide anything.
+
+**The wording follows the number.** `autoRejectMethodNote` moved out of
+`Stack.tsx` into `frontend/src/autoRejectNote.ts` (pure, so the branch that only
+appears on a mosaic is testable without a form) and gained a depth voice: *"it
+picks the method from how many subs land on each pixel: your 21 subs are spread
+across a mosaic that is only 3 deep where it is thinnest, so it will use min/max
+rejection… It switches to sigma clipping once about 11 subs overlap on one
+spot."* The frame wording is **byte-for-byte unchanged** wherever the depth says
+nothing new — a single field (`null`), an older backend (absent), and a mosaic
+whose panels fully overlap (`depth == n_frames`) — because quoting the same
+number twice is noise, not honesty.
+
+**Upgrade-safe (§9):** one additive optional response field and one optional
+client field; no config, schema, on-disk, default or existing-shape change. An
+older frontend ignores `panel_depth` and keeps today's frame wording; an older
+backend omitting it lands on the same branch.
+
+**Tests (+9, three failing before):** `tests/webapp/test_stack_estimate.py` (+3)
+— the mosaic resolving to min/max **and agreeing with `_resolve_auto_reject`
+itself** rather than with a copy of its answer, the single-field answer
+unchanged, and a 20-deep mosaic still resolving to sigma clipping so the fix is
+not "always min/max on a mosaic"; `autoRejectNote.test.ts` (6) over both voices
+and the three cases that must keep the frame wording. The 106 existing
+`Stack.test.tsx` cases pass untouched.
+
+---
+
 ## CLOSED, NOT BUILT — 2026-09-09 — `GET /api/gallery/best` does not need a cache: measured at owner scale (`webapp/routers/gallery.py`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-4yit4y`. The 2026-08-04 entry

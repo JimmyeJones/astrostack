@@ -546,3 +546,109 @@ def test_auto_reject_is_resolved_before_the_past_runs_are_matched(
     data = client.get(f"/api/targets/{safe}/stack-estimate", params=params).json()
     assert data["time_estimate"] is not None
     assert data["time_estimate"]["seconds"] == round(3.0 * data["n_frames"])
+
+
+# --- what "Auto outlier removal" will actually do ----------------------------
+
+
+def _repoint(data_root, safe: str, pointings: list[tuple[float, float, int]]) -> None:
+    """Re-point a target's frames into ``[(ra, dec, count), …]`` panels.
+
+    Rows are cloned from the fixture's own frames, so each keeps a real
+    ``source_path`` and WCS — the sizing path only reads the DB. Same helper
+    shape as ``tests/webapp/test_rejection_outlook.py``."""
+    from dataclasses import replace
+
+    from seestack.io.library import Library
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            rows = list(proj.iter_frames())
+            template = rows[0]
+            for r in rows:
+                proj.update_frame(r.id, accept=False)
+            n = 0
+            for ra, dec, count in pointings:
+                for _ in range(count):
+                    n += 1
+                    proj.add_frame(replace(
+                        template, id=None, accept=True,
+                        source_path=f"{template.source_path}.{n:03d}",
+                        ra_center_deg=ra, dec_center_deg=dec,
+                    ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_auto_reject_resolved_reads_a_mosaic_by_its_panel_depth(
+        client, solved_library):
+    """The bug, found in a running app on the owner's own shape: four panels 5
+    subs deep is 20 frames, so resolving from the *frame count* says sigma
+    clipping — while the stack, which sizes the same decision from the per-pixel
+    depth (5), runs min/max. The form named a method the run would not use, and
+    every method-specific hint and greyed toggle followed it.
+
+    Fails before v0.399.1: ``method`` was ``"sigma_clip"`` here."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _repoint(solved_library, safe, [
+        (83.6, -5.4, 5), (84.4, -5.4, 5), (83.6, -4.6, 5), (84.4, -4.6, 5),
+    ])
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"auto_reject": "true"}).json()
+    assert data["n_frames"] == 20
+    resolved = data["auto_reject_resolved"]
+    assert resolved["panel_depth"] == 5
+    assert resolved["method"] == "min_max"
+    # …and it agrees with what the engine's own picker resolves for this stack,
+    # asserted against the picker rather than against a copy of its answer.
+    from seestack.io.library import Library
+    from seestack.stack.stacker import (
+        StackOptions,
+        _resolve_auto_reject,
+        estimate_stack_basis,
+    )
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            basis = estimate_stack_basis(proj, "auto")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    eff = _resolve_auto_reject(StackOptions(auto_reject=True),
+                               basis.n_frames, depth=basis.panel_depth)
+    assert eff.min_max_reject is True and eff.sigma_clip is False
+
+
+def test_auto_reject_resolved_on_a_single_field_is_unchanged(
+        client, solved_library):
+    """The single-field answer must be byte-for-byte what it was: no depth, and
+    the method the frame count implies — 3 subs is below every κ-σ floor."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"auto_reject": "true"}).json()
+    resolved = data["auto_reject_resolved"]
+    assert resolved["panel_depth"] is None
+    assert resolved["method"] == "min_max"
+    assert resolved["n_frames"] == 3
+    assert resolved["switch_at_frames"] == 11
+
+
+def test_a_deep_mosaic_still_resolves_to_sigma_clipping(client, solved_library):
+    """The other direction, so the fix is not just "always min/max on a mosaic":
+    panels 20 deep clear the floor on the pixels that make the picture."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _repoint(solved_library, safe, [
+        (83.6, -5.4, 20), (84.4, -5.4, 20), (83.6, -4.6, 20), (84.4, -4.6, 20),
+    ])
+    resolved = client.get(f"/api/targets/{safe}/stack-estimate",
+                          params={"auto_reject": "true"}).json()["auto_reject_resolved"]
+    assert resolved["panel_depth"] == 20
+    assert resolved["method"] == "sigma_clip"
