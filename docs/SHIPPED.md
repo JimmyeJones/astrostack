@@ -14,6 +14,108 @@ Newest first.
 
 ---
 
+## v0.404.0 — 2026-09-09 — NEW BEGINNER FEATURE: the app finally mentions the one switch the whole walk-away path waits on (`autoStackNudge.ts`, `AutoStackOffNote`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-03ba9j`. Frontend only —
+no engine, webapp, config, schema, API or default change.)**
+
+**The gap, and it is the largest single one left in the product.**
+`Settings.auto_stack` has shipped **on** since v0.391.0 — but only reaches a
+*fresh* install. `SettingsStore` re-saves the whole model on every boot, so any
+box that has ever run carries an explicit `"auto_stack": false` in
+`state/config.json`, and no upgrade may overwrite it: a stored value cannot be
+told apart from a value its owner chose, and flipping one they chose is exactly
+the breach AGENTS.md §9 exists to prevent. That reasoning is right and stays. Its
+consequence was not: on every existing install — **the owner's included** — the
+entire "drop your subs in and come back to a picture" chain sits behind one
+switch on a Settings tab, and **nothing in the app had ever mentioned it.** It
+has sat in the backlog for days as item 2 of the owner's one-sitting list
+("Worth: the whole walk-away path"), filed as a thing only he can do. What
+nobody had done is *tell* him.
+
+So every morning the app knew it had ingested, QC'd and located a night's subs
+and made nothing of them, and said nothing. `LastNightCard`'s own docstring even
+records the silence as intended behaviour ("an install with auto-stack off — the
+owner's live setting — sees exactly what it saw before").
+
+**What shipped.** One self-hiding note in the Dashboard's existing
+`NoticeBoard`, at `NOTICE_PRIORITY.advisory`:
+
+> **Your subs came in, but nothing was stacked**
+> Hands-off auto-stack is switched off, so your subs were brought in and left as
+> they were. Turn it on and AstroStack will stack each target for you as its subs
+> arrive — once enough of them are located and the night has gone quiet. You can
+> switch it off again in Settings at any time.
+> **[Turn on auto-stack]  [See what it does]**
+
+One click PUTs `{auto_stack: true}` — a *patch*, so `SettingsStore.update` merges
+it and nothing else in the config moves — and the note is replaced by what
+happens next rather than merely vanishing: *"AstroStack will pick your targets up
+on its next scan, once each one has been quiet for a while. It adds new pictures
+rather than replacing the ones you have, and never writes over an edit you
+saved."* "Not now" (the Alert's close button) stores a dismissal signature and it
+never returns.
+
+**When it speaks, and the three reasons it stays quiet** — the decision is a pure
+function (`frontend/src/autoStackNudge.ts`) so it is unit-tested without
+rendering, the idiom every other self-hiding note here follows:
+- **auto-stack is on, or not known yet** — including a *failed* settings query.
+  Deliberately not "assume off": a note rendered against an unresolved query
+  flashes onto every Dashboard load and then withdraws itself.
+- **the app did make a picture in that window** — something stacked (a manual
+  run, a scan under other settings), so "nothing was stacked" would be a lie told
+  directly above its own contradiction in `LastNightCard`.
+- **no single target kept enough subs to clear `auto_stack_min_frames`** —
+  judged **per target**, not on the night's total, because the floor is
+  per target: four targets of two subs is eight subs and still no picture.
+
+**What it deliberately does not claim.** The behaviour ("it will stack each
+target for you"), never the outcome ("you would have had a picture"). Auto-stack
+counts **located** subs; the night recap this reads counts **kept** ones, and
+kept is always the larger number — an outcome promise built on it would
+over-promise on exactly the faint field ASTAP struggled with. The kept count is
+used only as a floor, to keep the offer off a night too thin to be worth one.
+
+**A browser moved this feature, and code review could not have.** The first
+draft put the note inside `LastNightCard` — where the news of the night is, and
+where every jsdom assertion passed. At 420 px Playwright reported the element
+**hidden**: `LastNightCard` lives in the Dashboard's `InsightTabs` "Recent"
+panel, which is `display: none` until that tab is clicked. An offer nobody
+scrolls to is not an offer, and the whole feature is about discovery. It moved to
+the notice board — which is the page's designated place for something to act on,
+is above the fold, folds surplus notes behind one line, and whose own comment
+says a later Dashboard warning should join it rather than become another banner.
+This is the third run in a row where the running app found what the suite could
+not (v0.401.1's unreadable diagram, v0.403.0's clipped button, now a note
+rendering into a hidden tab).
+
+**Verified end to end in a real browser**, not only in jsdom: on a dogfood app
+with `auto_stack` PUT to false, the note renders **above the fold at 420 px**
+(y=269, no clipping, no horizontal overflow, no console errors) and at 1440 px;
+one real click flips the real server's `auto_stack` to `true` while
+`auto_edit_on_autostack` and `copy_to_cache` are untouched; the confirmation
+appears; and after a reload the offer is gone. It costs the phone Dashboard
+**238 px** — and only on an install where it applies.
+
+**Upgrade-safe (§9):** frontend only. No config field is added or renamed, no
+default flipped (the note *offers*; the user decides), no schema, on-disk or API
+change; it uses the existing `PUT /api/settings` and the `["settings"]` /
+`["last-night"]` query caches the Dashboard already holds, so it costs no extra
+request. Against an older backend that omits `new_pictures` it reads as "nothing
+was made", which is the right answer for a backend that cannot say otherwise.
+
+**Tests +18:** 9 in `autoStackNudge.test.ts` (the offer; silent on-already-on,
+on-still-loading, on-a-picture-was-made, on-a-thin-night, on-no-targets; the
+floor judged per target not on the total; the shipped floor as the fallback; and
+a zero or negative floor never turning one sub into an offer) and 9 in
+`AutoStackOffNote.test.tsx` (the rendered offer and its Settings link; the click
+patching exactly `{auto_stack: true}` and the confirmation replacing it; silence
+in each of the five quiet cases including a *failed* settings query and a
+backend with no last night at all; the dismissal surviving a remount; and a
+failed save naming Settings → Automation rather than doing nothing visible).
+
+---
+
 ## v0.403.1 — 2026-09-09 — one-click Auto is measured end to end against its own export, on a mosaic (`tests/test_auto_recipe_proxy_parity.py`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-03ba9j`. Test-only; no
