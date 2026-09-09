@@ -14,7 +14,7 @@ Newest first.
 
 ---
 
-## v0.404.1 — 2026-09-09 — the editor told a mosaic's owner to shoot it in mosaic mode (`useStackFraming` + `FramingVerdictNote` on `Editor.tsx`, `hideFraming`)
+## v0.405.1 — 2026-09-09 — the editor told a mosaic's owner to shoot it in mosaic mode (`useStackFraming` + `FramingVerdictNote` on `Editor.tsx`, `hideFraming`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-pu1q6v`. Found by *looking at*
 a `--mosaic --editor` dogfood pass rather than by reading its exit code — the
@@ -68,7 +68,7 @@ shown, with no verdict element, when nothing measured this picture.
 
 ---
 
-## v0.404.0 — 2026-09-09 — which targets you've shot more of since their picture was made (`Project.count_accepted_solved_after`, `/api/new-subs-waiting`, `NewSubsWaitingNote`)
+## v0.405.0 — 2026-09-09 — which targets you've shot more of since their picture was made (`Project.count_accepted_solved_after`, `/api/new-subs-waiting`, `NewSubsWaitingNote`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-pu1q6v`. A new beginner
 feature, PRIORITY 2 autonomy + 3 friendliness, picked because the backlog's ready
@@ -141,6 +141,170 @@ project not costing the whole answer), 7 in `NewSubsWaitingNote.test.tsx`
 Library overflow link, the singular wording, dismiss-by-signature and the
 re-speak, no action buttons, and a failed fetch), and 2 in `Dashboard.test.tsx`
 (the note on the real board, and silence when nothing waits).
+## v0.404.0 — 2026-09-09 — NEW BEGINNER FEATURE: the app finally mentions the one switch the whole walk-away path waits on (`autoStackNudge.ts`, `AutoStackOffNote`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-03ba9j`. Frontend only —
+no engine, webapp, config, schema, API or default change.)**
+
+**The gap, and it is the largest single one left in the product.**
+`Settings.auto_stack` has shipped **on** since v0.391.0 — but only reaches a
+*fresh* install. `SettingsStore` re-saves the whole model on every boot, so any
+box that has ever run carries an explicit `"auto_stack": false` in
+`state/config.json`, and no upgrade may overwrite it: a stored value cannot be
+told apart from a value its owner chose, and flipping one they chose is exactly
+the breach AGENTS.md §9 exists to prevent. That reasoning is right and stays. Its
+consequence was not: on every existing install — **the owner's included** — the
+entire "drop your subs in and come back to a picture" chain sits behind one
+switch on a Settings tab, and **nothing in the app had ever mentioned it.** It
+has sat in the backlog for days as item 2 of the owner's one-sitting list
+("Worth: the whole walk-away path"), filed as a thing only he can do. What
+nobody had done is *tell* him.
+
+So every morning the app knew it had ingested, QC'd and located a night's subs
+and made nothing of them, and said nothing. `LastNightCard`'s own docstring even
+records the silence as intended behaviour ("an install with auto-stack off — the
+owner's live setting — sees exactly what it saw before").
+
+**What shipped.** One self-hiding note in the Dashboard's existing
+`NoticeBoard`, at `NOTICE_PRIORITY.advisory`:
+
+> **Your subs came in, but nothing was stacked**
+> Hands-off auto-stack is switched off, so your subs were brought in and left as
+> they were. Turn it on and AstroStack will stack each target for you as its subs
+> arrive — once enough of them are located and the night has gone quiet. You can
+> switch it off again in Settings at any time.
+> **[Turn on auto-stack]  [See what it does]**
+
+One click PUTs `{auto_stack: true}` — a *patch*, so `SettingsStore.update` merges
+it and nothing else in the config moves — and the note is replaced by what
+happens next rather than merely vanishing: *"AstroStack will pick your targets up
+on its next scan, once each one has been quiet for a while. It adds new pictures
+rather than replacing the ones you have, and never writes over an edit you
+saved."* "Not now" (the Alert's close button) stores a dismissal signature and it
+never returns.
+
+**When it speaks, and the three reasons it stays quiet** — the decision is a pure
+function (`frontend/src/autoStackNudge.ts`) so it is unit-tested without
+rendering, the idiom every other self-hiding note here follows:
+- **auto-stack is on, or not known yet** — including a *failed* settings query.
+  Deliberately not "assume off": a note rendered against an unresolved query
+  flashes onto every Dashboard load and then withdraws itself.
+- **the app did make a picture in that window** — something stacked (a manual
+  run, a scan under other settings), so "nothing was stacked" would be a lie told
+  directly above its own contradiction in `LastNightCard`.
+- **no single target kept enough subs to clear `auto_stack_min_frames`** —
+  judged **per target**, not on the night's total, because the floor is
+  per target: four targets of two subs is eight subs and still no picture.
+
+**What it deliberately does not claim.** The behaviour ("it will stack each
+target for you"), never the outcome ("you would have had a picture"). Auto-stack
+counts **located** subs; the night recap this reads counts **kept** ones, and
+kept is always the larger number — an outcome promise built on it would
+over-promise on exactly the faint field ASTAP struggled with. The kept count is
+used only as a floor, to keep the offer off a night too thin to be worth one.
+
+**A browser moved this feature, and code review could not have.** The first
+draft put the note inside `LastNightCard` — where the news of the night is, and
+where every jsdom assertion passed. At 420 px Playwright reported the element
+**hidden**: `LastNightCard` lives in the Dashboard's `InsightTabs` "Recent"
+panel, which is `display: none` until that tab is clicked. An offer nobody
+scrolls to is not an offer, and the whole feature is about discovery. It moved to
+the notice board — which is the page's designated place for something to act on,
+is above the fold, folds surplus notes behind one line, and whose own comment
+says a later Dashboard warning should join it rather than become another banner.
+This is the third run in a row where the running app found what the suite could
+not (v0.401.1's unreadable diagram, v0.403.0's clipped button, now a note
+rendering into a hidden tab).
+
+**Verified end to end in a real browser**, not only in jsdom: on a dogfood app
+with `auto_stack` PUT to false, the note renders **above the fold at 420 px**
+(y=269, no clipping, no horizontal overflow, no console errors) and at 1440 px;
+one real click flips the real server's `auto_stack` to `true` while
+`auto_edit_on_autostack` and `copy_to_cache` are untouched; the confirmation
+appears; and after a reload the offer is gone. It costs the phone Dashboard
+**238 px** — and only on an install where it applies.
+
+**Upgrade-safe (§9):** frontend only. No config field is added or renamed, no
+default flipped (the note *offers*; the user decides), no schema, on-disk or API
+change; it uses the existing `PUT /api/settings` and the `["settings"]` /
+`["last-night"]` query caches the Dashboard already holds, so it costs no extra
+request. Against an older backend that omits `new_pictures` it reads as "nothing
+was made", which is the right answer for a backend that cannot say otherwise.
+
+**Tests +18:** 9 in `autoStackNudge.test.ts` (the offer; silent on-already-on,
+on-still-loading, on-a-picture-was-made, on-a-thin-night, on-no-targets; the
+floor judged per target not on the total; the shipped floor as the fallback; and
+a zero or negative floor never turning one sub into an offer) and 9 in
+`AutoStackOffNote.test.tsx` (the rendered offer and its Settings link; the click
+patching exactly `{auto_stack: true}` and the confirmation replacing it; silence
+in each of the five quiet cases including a *failed* settings query and a
+backend with no last night at all; the dismissal surviving a remount; and a
+failed save naming Settings → Automation rather than doing nothing visible).
+
+---
+
+## v0.403.1 — 2026-09-09 — one-click Auto is measured end to end against its own export, on a mosaic (`tests/test_auto_recipe_proxy_parity.py`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-03ba9j`. Test-only; no
+engine, webapp or frontend line changed.)**
+
+**The gap.** `tests/test_edit_proxy_parity.py` measures the A2 class — *"a
+pixel-unit editor parameter not scaled by the proxy factor"* — **one op at a
+time**, and a 2026-09-09 sweep confirmed every current op passes it. Nothing
+rendered the recipe Auto actually *builds*. That matters because the recipe is
+eleven ops long and several of them **measure the image and hand the answer to
+the next one**: an op can scale its own parameter perfectly and still be fed a
+differently-fitted input, and a per-op assertion cannot see that. AGENTS.md §1
+re-opened priority 1 precisely because two A2 instances survived exactly such
+per-component reads, and it judges every Auto claim on a tiled mosaic at the
+owner's scale — which no parity test had ever rendered whole.
+
+**What shipped.** Four tests around one ragged, unevenly-deep mosaic strip
+(600×3000, five panels at depths 12/12/6/9/15, an 8.3 % genuinely uncovered
+border, ~3 px stars, a warm sky over a differently-tinted sensor cast). The
+recipe is built from the **proxy**, exactly as the editor builds it, then
+rendered twice — on the proxy at `proxy_scale=5` and on the native canvas — and
+the two are compared as pictures: per-channel median, 1st and 99th percentile,
+and overall mean, with the export strided down the same way so the comparison is
+of one sky rather than of two sizes.
+
+**Measured, on this fixture: the worst statistic differs by 0.0034** — well
+inside the ~2 % decimation floor the editor has always carried, which is the
+budget the test asserts. Two heavier canvases were measured while scoping it and
+are recorded here rather than run every time: a 1500×6000 strip at
+`proxy_scale=4` diverges by **0.0043**, and a 900×12000 strip at
+`proxy_scale=8` — heavy stride, the regime where the coverage-levelling floor
+bug lived until v0.237.2 — by **0.0076**. So the whole-recipe claim holds at
+every stride the owner's canvases can reach.
+
+**The test that makes the other one worth having.** A budget nothing can exceed
+is not a gate, so the trap is armed on every run:
+`test_the_parity_check_can_see_a_pixel_parameter_that_forgot_the_proxy_scale`
+monkeypatches `EditContext.scaled_px` to the identity — which *is* the A2 defect,
+a preview applying full-resolution pixel measures to a decimated image — and
+asserts the same measurement then lands far outside the budget. It measures
+**0.1085**, a **32×** separation from the honest 0.0034. Without it, a future
+change that made the fixture blind would leave a green test asserting nothing.
+
+**And the fixture states its own claim** (the `tests/shapes.py` idiom, v0.391.1):
+ragged outline, uneven depth with `peak_over_panel > 2`, and — the distinction
+that mattered — `assert_reference_is_the_thinnest_panel`, **not**
+`assert_panels_thinner_than_the_reference`. The first draft asserted the latter
+out of habit and `shapes.py` failed it: these five panels are each a fifth of the
+canvas, so the reference depth lands on the thinnest and nothing real sits below
+it. That is the honest claim for a file about *render parity* (the trim it feeds
+Auto is a real border trim, not the D1 shape), and the vocabulary exists exactly
+so a file cannot imply the claim it does not have. A fourth test pins that Auto
+still emits `background.level_coverage` first and `geometry.crop` last on this
+canvas, so a future change cannot quietly reduce the file to a single-field test
+that still passes.
+
+**Cost.** Two native-resolution render pairs, ~23 s, shared through a
+module-scoped fixture (the ops test builds the recipe without rendering; the trap
+cannot share the honest render because it changes the pipeline).
+
+**Upgrade-safe:** a new test file and a version bump. No config, schema,
+on-disk, API, default or engine-behaviour change. Tests +4.
 
 ---
 
