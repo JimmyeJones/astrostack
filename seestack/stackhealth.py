@@ -488,6 +488,24 @@ def _median_sub_fwhm(accepted: list[FrameRow]) -> float | None:
     return statistics.median(vals)
 
 
+def _median_sub_exposure(accepted: list[FrameRow]) -> float | None:
+    """Median recorded sub exposure, in seconds, across the accepted subs — or
+    ``None`` when not one of them recorded it.
+
+    The number that turns a *depth* difference into a *time* difference. The
+    grain note below knows a region holds 3 subs where the rest holds 6, and
+    "is that worth going out for?" is a question about minutes, not about subs:
+    the same 3-against-6 is half a minute behind on a first session and three
+    hours behind on a mosaic the owner has been building for a month. Mirrors
+    :func:`recommended_dark_spec`'s median over the same population — Seestar
+    subs are fixed-length, so the median *is* the sub exposure.
+    """
+    vals = [f.exposure_s for f in accepted
+            if f.exposure_s is not None and math.isfinite(f.exposure_s)
+            and f.exposure_s > 0]
+    return statistics.median(vals) if vals else None
+
+
 def _solve_was_tried(frame: FrameRow) -> bool:
     """Whether plate-solve has actually **run** on an unlocated frame.
 
@@ -844,17 +862,50 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     if grain == "uneven":
         thin = int(run.grain_thin_frames or 0)
         deep = int(run.grain_deep_frames or 0)
+        # …and *whether it is worth going out for* is a second question, which
+        # this note used to answer without asking. A depth on its own cannot
+        # answer it: 3 subs against 6 reads 1.4× grainier whether the shortfall
+        # is half a minute or three hours. The panel map on the same page has
+        # asked it since v0.406.2 — and on the bundled mosaic sample the two
+        # printed opposite instructions about the same panel, the map's
+        # "it's only a few minutes' difference at this stage, so it evens out on
+        # its own as you keep shooting" directly above this note's "another
+        # night on that panel is what evens it out".
+        #
+        # So convert the shortfall to *time* and read it against the map's own
+        # :data:`~seestack.mosaicmap.THIN_MIN_SHORTFALL_S` rather than inventing
+        # a second threshold here — that constant's whole reason for existing
+        # ("this stops a brand-new mosaic from being nagged about noise in its
+        # first half hour") is this note's case too. The measurement is
+        # untouched either way; only the closing clause moves, exactly as
+        # v0.406.2's ``behind`` branch kept the map's fact and dropped its nag.
+        # An unreadable sub exposure keeps today's sentence: we cannot show the
+        # shortfall is small, so we do not claim it.
+        from seestack.mosaicmap import THIN_MIN_SHORTFALL_S
+        from seestack.sharecard import format_duration
+
+        sub_s = _median_sub_exposure(accepted)
+        shortfall_s = (max(deep - thin, 0) * sub_s) if sub_s else None
+        catches_up = (shortfall_s is not None
+                      and 0.0 < shortfall_s < THIN_MIN_SHORTFALL_S)
+        measured = (
+            "Part of this mosaic is thinner than the rest — about "
+            f"{float(run.grain_thin_share or 0.0):.0%} of the picture has "
+            f"{thin} sub{'' if thin == 1 else 's'} on it where most of it "
+            f"has {deep}, so that part looks about "
+            f"{float(run.grain_ratio or 0.0):.1f}× grainier.")
+        ending = (
+            " Processing can't fix that — grain only comes down with more "
+            f"light — but it's only about {format_duration(shortfall_s)} "
+            "behind, so it evens out on its own as you keep shooting."
+            if catches_up else
+            " That isn't something processing can fix — grain only comes down "
+            "with more light — so another night on that panel is what evens "
+            "it out.")
         scored.append((42, HealthNote(
             kind="grain_uneven",
             severity="info",
-            message=(
-                "Part of this mosaic is thinner than the rest — about "
-                f"{float(run.grain_thin_share or 0.0):.0%} of the picture has "
-                f"{thin} sub{'' if thin == 1 else 's'} on it where most of it "
-                f"has {deep}, so that part looks about "
-                f"{float(run.grain_ratio or 0.0):.1f}× grainier. That isn't "
-                "something processing can fix — grain only comes down with more "
-                "light — so another night on that panel is what evens it out."),
+            message=measured + ending,
             # No in-app fix exists, and offering one would be the untruth this
             # note is here to remove. The panel map on the Target page already
             # says *which* panel is behind.

@@ -81,7 +81,7 @@ describe("SavePictureMenu", () => {
     // Download — the Target hero had no FITS and no TIFF; History had them.
     for (const name of [
       "Full-res PNG", "PNG", "JPEG", "Framed keepsake", "With scale & compass",
-      "FITS", "TIFF",
+      "With object names", "FITS", "TIFF",
     ]) {
       expect(await item(name)).toBeInTheDocument();
     }
@@ -137,6 +137,16 @@ describe("SavePictureMenu", () => {
     // …and the marked download adds the scale bar and compass to the same turn.
     expect((await item("With scale & compass")).getAttribute("href"))
       .toBe(api.stackArtifactUrl("M_42", 9, "jpeg", true, false, false, true));
+    // …while the named download asks for the object labels *instead of* the
+    // marks — the two are separate downloads, not one that grew a second flag.
+    // `label_objects` is the last of five positional booleans, which is exactly
+    // the transposition this test exists to catch.
+    expect((await item("With object names")).getAttribute("href"))
+      .toBe(api.stackArtifactUrl("M_42", 9, "jpeg", true, false, false, false, true));
+    expect((await item("With object names")).getAttribute("href"))
+      .toContain("label_objects=true");
+    expect((await item("With object names")).getAttribute("href"))
+      .not.toContain("scale=true");
     // The bare PNG has no rendering flags at all.
     expect((await item("PNG")).getAttribute("href"))
       .toBe(api.stackArtifactUrl("M_42", 9, "preview"));
