@@ -454,3 +454,95 @@ def test_estimate_builds_the_canvas_once_per_request(
     assert r.status_code == 200
     assert r.json()["drizzle_probe"] is not None
     assert calls["n"] == 1
+
+
+# --- "about how long will this take?" ----------------------------------------
+
+
+def _record_timed_run(data_root, safe: str, *, n_frames: int, duration_s: float,
+                      options: dict, canvas: tuple[int, int] = (320, 480)) -> None:
+    """Put one finished, timed run in a target's History — what the estimate
+    below measures from. The real writer is ``run_stack``; this is the same row."""
+    import json
+
+    from seestack.io.library import Library
+    from seestack.io.project import StackRunRow
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="master", fits_path=None, tiff_path=None,
+                preview_path=None, n_frames_used=n_frames,
+                canvas_h=canvas[0], canvas_w=canvas[1],
+                coverage_min=1, coverage_max=n_frames,
+                options_json=json.dumps(options), duration_s=duration_s,
+            ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_estimate_says_nothing_about_time_on_a_target_never_stacked(
+        client, solved_library):
+    """The honest answer with no history — and the state every library is in
+    right after the upgrade that added the timing column."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    r = client.get(f"/api/targets/{safe}/stack-estimate")
+    assert r.status_code == 200
+    assert r.json()["time_estimate"] is None
+
+
+def test_estimate_times_the_next_run_from_this_target_s_own_runs(
+        client, solved_library):
+    """One past min/max run of 40 subs in 80 s → 2 s a sub, and the 3 subs this
+    fixture would stack are quoted at that rate. Fails before v0.399.0: the
+    response carried no answer to "how long?" at all.
+
+    Min/max on both sides on purpose: this fixture has three frames, and κ-σ
+    does not dispatch below four — so a κ-σ *request* here really would combine
+    as a plain mean, and matching it against 40-sub κ-σ history would be the
+    very mistake the cost class exists to prevent."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _record_timed_run(solved_library, safe, n_frames=40, duration_s=80.0,
+                      options={"min_max_reject": True, "sigma_clip": False})
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"min_max_reject": "true"}).json()
+    assert data["time_estimate"] is not None
+    assert data["time_estimate"]["basis_runs"] == 1
+    assert data["time_estimate"]["basis_frames"] == 40
+    assert data["time_estimate"]["seconds"] == round(2.0 * data["n_frames"])
+
+
+def test_a_drizzle_run_is_not_timed_from_a_plain_stack_s_rate(
+        client, solved_library):
+    """Drizzle does several times the per-sub work, so history of a different
+    shape must not be spent on it — the form then says nothing rather than
+    quoting a number that is wrong by a multiple."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _record_timed_run(solved_library, safe, n_frames=40, duration_s=80.0,
+                      options={"min_max_reject": True, "sigma_clip": False})
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"drizzle": "true"}).json()
+    assert data["time_estimate"] is None
+
+
+def test_auto_reject_is_resolved_before_the_past_runs_are_matched(
+        client, solved_library):
+    """With "Auto outlier removal" on, this 3-frame stack resolves to min/max —
+    so a κ-σ history is *not* its evidence, and a min/max history is. The match
+    has to run on the options that will actually run, not on the toggles."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _record_timed_run(solved_library, safe, n_frames=40, duration_s=80.0,
+                      options={"sigma_clip": True})
+    params = {"auto_reject": "true"}
+    assert client.get(f"/api/targets/{safe}/stack-estimate",
+                      params=params).json()["time_estimate"] is None
+    _record_timed_run(solved_library, safe, n_frames=40, duration_s=120.0,
+                      options={"min_max_reject": True, "sigma_clip": False})
+    data = client.get(f"/api/targets/{safe}/stack-estimate", params=params).json()
+    assert data["time_estimate"] is not None
+    assert data["time_estimate"]["seconds"] == round(3.0 * data["n_frames"])

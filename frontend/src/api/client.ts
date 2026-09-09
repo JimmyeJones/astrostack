@@ -1850,6 +1850,21 @@ export interface StackEstimate {
     peak_gb: number;
     would_exceed: boolean;
   } | null;
+  // About how long a run of these settings would take, measured from this
+  // target's own comparable finished stacks — never modelled. null when nothing
+  // comparable has been timed (a target stacked for the first time, a library
+  // upgraded from before runs recorded their duration, or settings whose shape
+  // this target has never run), and the form then says nothing at all. Optional
+  // so an older backend simply stays quiet.
+  time_estimate?: {
+    seconds: number;
+    // How many past runs the median rate came from, so the form can say what it
+    // is standing on rather than presenting a guess as a fact.
+    basis_runs: number;
+    // The largest sub count among them — a rate learned on 40 subs projected
+    // onto 4,000 deserves a softer word than one learned on 3,000.
+    basis_frames: number;
+  } | null;
 }
 
 /** What the *unattended* chain's outlier rejection will be able to do.

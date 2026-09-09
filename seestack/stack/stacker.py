@@ -27,6 +27,7 @@ import logging
 import math
 import os
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
@@ -2456,6 +2457,11 @@ def run_stack(
     """
     progress = progress or (lambda *a: None)
     cancel = cancel or (lambda: False)
+    # Wall clock around the whole run, recorded on the resulting row so the
+    # Stack form can answer "about how long will this take?" for the *next* one
+    # from what this one actually cost (see :mod:`seestack.stacktime`). Monotonic
+    # so a clock adjustment mid-run can't record a negative or wild duration.
+    t_started = time.monotonic()
 
     if not (0.0 < options.lucky_fraction <= 1.0):
         raise ValueError(
@@ -3635,6 +3641,15 @@ def run_stack(
             # picture's own grain. NULL on a single-field stack (no joins) and
             # when it couldn't be measured — callers self-hide either way.
             seam_residual=seam_residual,
+            # How long this run took, so the *next* one can be estimated from it
+            # rather than from a model of the stacker (see
+            # :mod:`seestack.stacktime`). Measured around the whole run —
+            # everything a repeat of it would pay again — and recorded only here,
+            # on the stacker's own row: an editor export or a channel combine
+            # writes a ``stack_runs`` row too and neither is a stack, so both
+            # leave it NULL rather than teaching the estimate a rate no stack
+            # runs at.
+            duration_s=round(time.monotonic() - t_started, 3),
         ))
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)
