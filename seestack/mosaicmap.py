@@ -151,6 +151,95 @@ def _axis_bins(values: list[float], tol: float) -> list[int]:
     return bins
 
 
+def _axis_lines(bin_of: list[int], values: list[float]) -> dict[int, float]:
+    """Where each grid line sits on its axis: ``{bin index: mean coordinate}``.
+
+    :func:`_axis_bins` hands back which line each panel landed on; this is the
+    line's own position, so a pointing that was *not* one of those panels can be
+    asked "are you on this grid?" in the same coordinates and at the same
+    tolerance."""
+    lines: dict[int, list[float]] = {}
+    for index, value in zip(bin_of, values, strict=True):
+        lines.setdefault(index, []).append(value)
+    return {index: sum(vals) / len(vals) for index, vals in lines.items()}
+
+
+def _thin_panels_on_the_grid(
+    folded: list[tuple[float, float, int, float]],
+    labels: list[int],
+    panels: list[MosaicPanel],
+    *,
+    row_lines: dict[int, float],
+    col_lines: dict[int, float],
+    tol: float,
+    ra0: float,
+    dec0: float,
+    cos_dec: float,
+) -> list[MosaicPanel]:
+    """The panels the substantial-panel gate threw away but the grid says are real.
+
+    ``pointing_groups`` labels a cluster carrying fewer than
+    :data:`MIN_PANEL_FRAMES` subs ``-1``, and that floor is right for what it was
+    written for — *strays*, a handful of mis-solved subs a degree off the mosaic,
+    which must not become a thirteenth panel. But it also catches a panel that is
+    thin **because it is thin**: a corner the owner started and lost to cloud
+    after three subs is discarded outright, so the map drew a hole exactly where
+    the grain is and the verdict — computed over the survivors — called the
+    mosaic even. That is the one thing this whole module exists to say, said
+    backwards. (Reproduced on the 2×2 sample: three 6-sub panels and one 3-sub
+    panel read as "All 3 panels of your 2×2 mosaic … no part of the picture is
+    being held back", while the stack-health panel on the same run said 23 % of
+    it was 1.4× grainier.)
+
+    So the dropped pointings get **one** more hearing, against the geometry
+    rather than against a population: a cluster is a thin panel when it lands on
+    the grid the substantial panels already define — within the same ``tol`` of
+    an existing row line *and* an existing column line — and its cell is still
+    empty. Everything else stays out:
+
+    * a stray is not on a grid line (that is what makes it a stray), so the
+      floor's original job is untouched;
+    * a thin cluster can never *extend* the grid, only fill a cell inside it —
+      letting three subs define where the mosaic is would hand geometry to
+      exactly the population the floor distrusts;
+    * an **occupied** cell is left alone rather than merged into, so no panel
+      that exists today changes its frame count, its integration or its centre.
+      The map can only gain a panel it was previously blind to.
+
+    Dropped pointings sharing one cell are summed into a single panel, and its
+    centre is their frame-weighted direction — the same construction the
+    substantial panels' centres use.
+    """
+    if not row_lines or not col_lines:
+        return []
+    occupied = {(p.row, p.col) for p in panels}
+    cells: dict[tuple[int, int], list[float]] = {}
+    for (ra, dec, n, seconds), label in zip(folded, labels, strict=True):
+        if label >= 0:
+            continue
+        dra = _wrap180(ra - ra0) * cos_dec
+        ddec = dec - dec0
+        row = min(row_lines, key=lambda k: abs(row_lines[k] - ddec))
+        col = min(col_lines, key=lambda k: abs(col_lines[k] - dra))
+        if abs(row_lines[row] - ddec) > tol or abs(col_lines[col] - dra) > tol:
+            continue                     # not on this mosaic's grid — a stray
+        if (row, col) in occupied:
+            continue                     # a real panel already answers for this cell
+        x, y, z = _to_vec(ra, dec)
+        cell = cells.setdefault((row, col), [0.0, 0.0, 0.0, 0.0, 0.0])
+        cell[0] += n
+        cell[1] += seconds
+        cell[2] += x * n
+        cell[3] += y * n
+        cell[4] += z * n
+    out = []
+    for (row, col), (n, seconds, x, y, z) in sorted(cells.items()):
+        ra, dec = _direction((x, y, z))
+        out.append(MosaicPanel(row=row, col=col, n_frames=int(n),
+                               exposure_s=seconds, ra_deg=ra, dec_deg=dec))
+    return out
+
+
 def _band(index: int, count: int, low: str, high: str) -> str:
     """The word for one axis position: ``""`` on a single line, else the edge's
     name or "middle"."""
@@ -210,7 +299,12 @@ def _verdict_text(panels: list[MosaicPanel], rows: int, cols: int,
                   median_s: float, thin: MosaicPanel | None) -> str:
     from seestack.sharecard import format_duration
 
-    shape = f"{rows}×{cols}" if rows > 1 and cols > 1 else f"{len(panels)}-panel"
+    # "2×2" only when the mosaic really is one — four panels on a 2×2 grid. A
+    # partly-shot mosaic (or a genuine L-shape) has a 2×2 *bounding* grid and
+    # three panels, and calling that "All 3 panels of your 2×2 mosaic" is a
+    # sentence that contradicts itself in its own six words.
+    shape = (f"{rows}×{cols}" if rows > 1 and cols > 1 and len(panels) == rows * cols
+             else f"{len(panels)}-panel")
     if thin is not None:
         where = panel_position_words(thin.row, thin.col, rows, cols)
         return (
@@ -359,6 +453,12 @@ def mosaic_depth_map(
         )
         for i, label in enumerate(order)
     ]
+    panels += _thin_panels_on_the_grid(
+        folded, labels, panels,
+        row_lines=_axis_lines(row_of, ddecs),
+        col_lines=_axis_lines(col_of, dras),
+        tol=tol, ra0=ra0, dec0=dec0, cos_dec=cos_dec,
+    )
     panels.sort(key=lambda p: (p.row, p.col))
 
     times = sorted(p.exposure_s for p in panels)
