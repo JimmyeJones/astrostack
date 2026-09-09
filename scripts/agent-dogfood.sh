@@ -38,8 +38,11 @@
 # levelling, per-panel photometry, the uncovered-fraction note, the depth map,
 # Auto's border trim) are finally in front of a browser. It stacks it, prints the
 # trim Auto would apply to it (a trim above ~15 % of the canvas is a BUG, not a
-# ragged edge — AGENTS.md §1), and writes its shots to $SHOTS/mosaic/ so the
-# page-height baselines measured on the field sample are not disturbed. With
+# ragged edge — AGENTS.md §1), prints **every sentence the app says about that
+# mosaic side by side** (the panel map's and the health panel's — see step 4c:
+# three runs running, the finding was in the *gap between* two of them, and every
+# one of those passes reported CLEAN), and writes its shots to $SHOTS/mosaic/ so
+# the page-height baselines measured on the field sample are not disturbed. With
 # --editor, the editor is driven on the mosaic run too. Opt-in because the field
 # sample is what keeps a standard pass fast.
 #
@@ -222,6 +225,44 @@ else:
     flag = "  <-- ABOVE ~15%: this is D1-shaped, look at it" if trimmed > 0.15 else ""
     print(f"-- mosaic trim: Auto would cut {trimmed:.1%} of the canvas{flag}")
 ' 2>/dev/null || echo "-- mosaic trim: could not read the trim suggestion"
+
+    # 4c. …and everything the app SAYS about that same mosaic, printed together.
+    #     Three runs in a row have now found their bug in the gap between two of
+    #     these sentences rather than in any one of them — a "flat" seam number
+    #     answering a question about the *level* to someone looking at a
+    #     difference in *depth* (v0.406.0), the History chip repeating it
+    #     (v0.406.1), and the panel map drawing a hole where the thin panel was
+    #     and writing "no part of the picture is being held back" over it while
+    #     the health panel called a quarter of the same picture 1.4x grainier
+    #     (v0.406.2). Every one of those passes reported CLEAN, because a clean
+    #     pass is a statement about console errors, not about sentences.
+    #     So: read these as one paragraph and ask whether a beginner could hold
+    #     all of them at once. Printed, never asserted — a finder, as above.
+    echo "-- what the app SAYS about this mosaic (read them together — the last"
+    echo "   three findings were all two of these disagreeing, not one of them wrong):"
+    curl -sf "$BASE/api/targets/$MOSAIC_SAFE/mosaic-map" \
+      | python -c '
+import json, sys
+d = json.load(sys.stdin)
+if not d:
+    print("   [panel map] nothing at all (the target does not read as a mosaic)")
+else:
+    rows, cols = d["rows"], d["cols"]
+    cells = {(p["row"], p["col"]) for p in d["panels"]}
+    holes = [(r, c) for r in range(rows) for c in range(cols) if (r, c) not in cells]
+    n, thin, text = len(d["panels"]), d["thin"] is not None, d["text"]
+    where = ", holes at %s" % holes if holes else ""
+    print("   [panel map] %d panels on a %dx%d grid%s, thin=%s"
+          % (n, rows, cols, where, thin))
+    print("   [panel map] %s" % text)
+' 2>/dev/null || echo "   [panel map] could not read it"
+    curl -sf "$BASE/api/targets/$MOSAIC_SAFE/stack-health" \
+      | python -c '
+import json, sys
+d = json.load(sys.stdin) or {}
+for note in d.get("notes", []):
+    print("   [health/%s] %s" % (note.get("kind"), note.get("message")))
+' 2>/dev/null || echo "   [health] could not read it"
   fi
 fi
 

@@ -136,5 +136,24 @@ def test_an_even_mosaic_sends_no_aim_hint(client, built_library, data_root):
     assert body["aim_hint"] is None
 
 
+def test_a_panel_cut_short_by_cloud_reaches_the_card(client, built_library, data_root):
+    """The whole point, end to end: three panels at 20 min and a fourth lost to
+    cloud after four subs. The card must draw the fourth cell and name it —
+    before this, the substantial-panel floor discarded it and the response
+    reassured that no part of the picture was being held back, on the same
+    target whose stack-health panel was calling a quarter of it grainier."""
+    _seed_panels(data_root, _mosaic(2, 2, subs=120, per_panel={(0, 1): 4}))
+
+    body = client.get("/api/targets/M_42/mosaic-map").json()
+    assert body is not None
+    assert len(body["panels"]) == 4
+    starved = next(p for p in body["panels"] if (p["row"], p["col"]) == (0, 1))
+    assert starved["n_frames"] == 4
+    assert body["thin"] is not None
+    assert (body["thin"]["row"], body["thin"]["col"]) == (0, 1)
+    assert "top-right" in body["text"] and "held back" not in body["text"]
+    assert "top-right" in body["aim_hint"]
+
+
 def test_a_missing_target_is_a_404(client, built_library):
     assert client.get("/api/targets/NOPE/mosaic-map").status_code == 404

@@ -14,6 +14,102 @@ Newest first.
 
 ---
 
+## v0.406.2 — 2026-09-09 — the mosaic panel map drew a hole where the thin panel was, then said nothing was being held back (`mosaicmap._thin_panels_on_the_grid`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-ilfabz`. A verified bug,
+found by measuring the app's *sentences against each other* on the generated
+mosaic sample rather than by reading route files — the third run in a row where
+that is what paid.)**
+
+**The contradiction, reproduced end to end.** On the bundled 2×2 sample
+(`scripts/agent-dogfood.sh --mosaic`; panels 6/6/6/**3** subs), two surfaces
+described the same target at the same moment:
+
+- `mosaic_depth_map` → `panels: [(0,0,6), (1,0,6), (1,1,6)]`, `thin: None`,
+  *"**All 3 panels of your 2×2 mosaic** have had a similar amount of time —
+  around 1 min each — so **no part of the picture is being held back**."*
+- `stack_health` on that run → *"Part of this mosaic is thinner than the rest —
+  about **23 %** of the picture has 3 subs on it where most of it has 6, so that
+  part looks about **1.4× grainier** … another night on that panel is what evens
+  it out."*
+
+**Mechanism.** `mosaic_depth_map` labels its folded pointings with
+`pointing_groups(min_members=MIN_PANEL_FRAMES=5)` and then does
+`if label < 0: continue`. That floor is right for what it was written for —
+*strays*, a handful of mis-solved subs a degree off the mosaic, which must not
+become a thirteenth panel — but it also catches a panel that is thin **because
+it is thin**, which is the one thing the module exists to report. Everything
+downstream is then computed over the survivors: the grid, the median, the `thin`
+verdict and the sentence. So the map drew a **hole exactly where the grain is**
+(making "which panel?" unanswerable — and `stackhealth.py` justifies the grain
+note's `action=None` with "the panel map on the Target page already says which
+panel is behind", which was false in this case), and wrote an all-clear over it.
+Realistic severity: three panels at 300 subs and a fourth cut short by cloud at
+4 is dropped outright, and the map calls that mosaic even.
+
+**The fix, kept deliberately conservative.** `pointing_groups` stays exactly what
+it is — the substantial-panel gate *and* the is-this-a-mosaic gate, unchanged.
+After the grid is laid out from the substantial panels, the dropped pointings get
+**one** more hearing, against the geometry rather than against a population
+(`_thin_panels_on_the_grid`, fed by a new `_axis_lines` that reports where each
+grid line actually sits): a cluster becomes a thin panel only when it lands
+within the same `tol` of an existing row line **and** an existing column line,
+and its cell is still **empty**. Three consequences, each chosen rather than
+fallen into:
+
+- a **stray is not on a grid line** — that is what makes it a stray — so the
+  floor's original job is untouched, pinned by its own test;
+- a thin cluster can **never extend the grid**, only fill a cell inside it.
+  Letting three subs decide *where the mosaic is* would hand geometry back to the
+  population the floor distrusts. The cost is a known, tested limit: a thin panel
+  that is an entire new row or column of a 1×N mosaic stays invisible;
+- an **occupied cell is left alone** rather than merged into, so the change is
+  strictly additive — no panel that exists today moves its frame count, its
+  integration or its centre. The map can only *gain* a cell it was blind to.
+
+**And the sentence that contradicted itself in its own six words.** `_verdict_text`
+called a grid "2×2" whenever `rows > 1 and cols > 1`, so a set that does not fill
+its bounding grid — a partly-shot mosaic, or a genuine L-shape — read *"All 3
+panels of your 2×2 mosaic"*. The shape is now `rows×cols` only when the panels
+actually fill it, and `N-panel` otherwise.
+
+**And the middle case the fix itself made visible.** With the panel drawn, a
+mosaic that is thinner by the *fraction* but only minutes behind fell into the
+"all similar" branch — an all-clear written underneath a visibly paler cell, a
+sentence arguing with its own picture. `THIN_MIN_SHORTFALL_S` (300 s) is
+deliberately **not** touched: its reasoning (don't nag a mosaic in its first half
+hour) is intact, and moving it would be the blind hot-path flip AGENTS.md §1
+forbids. Instead `_verdict_text` gains a third branch fed by a `behind` panel —
+the thinnest, when *only* the absolute floor held it back. `thin` stays `None`,
+so there is no highlight, no `aim_hint` and no nag, exactly as before; the
+sentence just stops claiming "similar". Verified against the running app on the
+scratch library: *"Your 2×2 mosaic is a little behind at the top-right: about
+30 s there against 1 min on a typical panel. It's only a few minutes' difference
+at this stage, so it evens out on its own as you keep shooting."*
+
+**Measured on the sample after the fix:** `panels: [(0,0,6), (0,1,3), (1,0,6),
+(1,1,6)]` — the fourth cell is on the map with its real 3 subs, so the owner can
+*see* which corner the grain note is about. On real data (hours a panel, not the
+sample's synthetic 10 s subs) the shortfall clears the floor easily and the map
+names the thin panel outright.
+
+**Upgrade-safe (§9):** engine-only, one endpoint's existing `panels` list gains
+an entry. No config, DB schema, on-disk layout, default or API-*shape* change;
+the frontend card already draws gaps and shades against the mosaic's own range,
+so it needed no change at all.
+
+**Tests (+7; two fail before, verified by stashing the fix).** `tests/test_mosaic_map.py`:
+the cloud-shortened panel reaches the map and is named (**fails before**);
+admitting it leaves every real panel byte-identical; a stray off the grid is
+still not a panel; a thin cluster cannot extend the grid; the shape never claims
+a grid the panels do not fill (**fails before**); and the young mosaic gets the
+fact without the nag (`thin` and `aim_hint` both still `None`, "similar amount of
+time" gone). `tests/webapp/test_mosaic_map.py`: the cloud-shortened case end to
+end through the endpoint, including the `aim_hint`. Nothing weakened or
+rewritten — all 19 existing engine cases and 9 webapp cases pass untouched.
+
+---
+
 ## v0.406.1 — 2026-09-09 — finish the sweep: the History/Gallery/Compare chip made the same promise (`seamsLabel(verdict, grain)`, `grain_verdict` on `StackRunOut`/`GalleryItem`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-8j2dwm`, immediately after
