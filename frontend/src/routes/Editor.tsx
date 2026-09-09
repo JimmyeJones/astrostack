@@ -45,6 +45,7 @@ import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
 import { recentreCropRect, recentreKeptLabel } from "../components/editor/recentreCrop";
 import { PREVIEW_TOOLS, visiblePreviewTools } from "../components/editor/previewTools";
 import { PreviewToolGuide } from "../components/editor/PreviewToolGuide";
+import { HintIcon } from "../components/HintIcon";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
   cropCoveragePct, removeCropOps, type TrimCrop }
   from "../components/editor/mosaicTrim";
@@ -1545,11 +1546,18 @@ export function EditorView() {
               Auto would add the crop. On an ordinary single-field stack Auto never
               crops, so the switch would be a decision about nothing. */}
           {trimCrop ? (
-            <Tooltip multiline w={260} withArrow
-              label="Auto normally trims the ragged, uneven edge off a mosaic so the picture is cleanly framed. Turn this off to keep the full frame, edges and all — you can still crop by hand with 'Trim border'. The default for every target is in Settings → Automation.">
+            /* The hint sits *beside* the switch, not wrapped around it: a
+               tooltip on a switch is unreachable on a phone, where the only
+               gesture available — tapping it — flips the setting instead of
+               answering the question. The icon is the app's own affordance for
+               that (`HintIcon`, v0.374.11's), and this is the one control here
+               whose explanation carries something the screen doesn't: where the
+               library-wide default lives. */
+            <Group gap={4} wrap="nowrap">
               <Switch size="xs" label="Auto-crop edges" checked={autoCrop}
                 onChange={(e) => setAutoCropOverride(e.currentTarget.checked)} />
-            </Tooltip>
+              <HintIcon hint="Auto normally trims the ragged, uneven edge off a mosaic so the picture is cleanly framed. Turn this off to keep the full frame, edges and all — you can still crop by hand with 'Trim border'. The default for every target is in Settings → Automation." />
+            </Group>
           ) : null}
           {/* One preview mode serves both crop offers ("Trim border" and
               "Re-centre"), because they end in the same place: one adjustable

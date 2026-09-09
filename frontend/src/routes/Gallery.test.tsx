@@ -329,6 +329,36 @@ describe("Gallery batch apply", () => {
     await waitFor(() => expect(order()).toEqual(["Clean", "Noisy"]));
   });
 
+  it("explains what 'Cleanest' means without changing the sort", async () => {
+    // That sentence — the only place the Gallery says what its σ is — used to be
+    // a Tooltip wrapped around the segmented control, i.e. reachable only by
+    // hovering it. On a phone the one gesture available picks a segment, so
+    // asking the question re-sorted the page and never answered it.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [
+        { ...item(1, "Noisy"), noise_sigma: 0.05 },
+        { ...item(2, "Clean"), noise_sigma: 0.01 },
+      ],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getByText("Cleanest")).toBeInTheDocument());
+    const order = () =>
+      screen.getAllByRole("link").map((l) => l.textContent)
+        .filter((t) => t === "Noisy" || t === "Clean");
+    expect(order()).toEqual(["Noisy", "Clean"]);
+
+    const icons = screen.getAllByRole("button", { name: "What does this do?" });
+    fireEvent.click(icons[icons.length - 1]);
+    expect(await screen.findByText(/lowest background noise across every target/))
+      .toBeInTheDocument();
+    // Still on "Newest": the question was asked, not answered by doing it.
+    expect(order()).toEqual(["Noisy", "Clean"]);
+  });
+
   it("offers a Compare link only when exactly two images are selected", async () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [item(1), item(2), item(3)] });
     vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
