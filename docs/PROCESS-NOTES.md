@@ -75,6 +75,19 @@ displayed. Any run adding a surface to a page that groups its content — the
 Dashboard's `InsightTabs`, the Target page's — should photograph it before
 believing the suite.
 
+**Environment note — a run that does several full suites WILL run out of disk, and
+it does not look like a disk problem.** The fourth full `pytest` of this session
+died at ~80 % with every later write failing, and the tell was not in the pytest
+output at all (the harness could no longer write the log file). `/tmp` held
+**28 GB** under `/tmp/pytest-of-root` — pytest keeps the last three runs' `tmp_path`
+trees, and this suite's fixtures write real FITS, so each run is ~9 GB. Add the
+dogfood scratch (`/tmp/astrostack-dogfood`, sample library + stacked masters +
+the on-demand Playwright install) and the container's 252 GB allowance is gone.
+`rm -rf /tmp/pytest-of-root` took the disk from 100 % to 26 % in one command and
+the re-run was clean. **If a suite starts failing late in a long run, check `df -h /`
+before reading the failure** — and delete the dogfood scratch when the pass is
+over, since its screenshots are the only part worth keeping.
+
 **Also worth recording: the backlog's own "REQUIRES MANUAL OWNER ACTION" list was
 actionable after all.** Item 2 ("flip Auto-stack on yourself") had sat there since
 v0.391.0 as something no agent may do — correctly, because flipping a stored
