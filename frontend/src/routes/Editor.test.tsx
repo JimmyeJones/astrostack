@@ -3101,6 +3101,30 @@ describe("EditorView", () => {
       expect(screen.queryByLabelText("Auto-crop edges")).not.toBeInTheDocument();
     });
 
+  it("explains the auto-crop switch without flipping it", async () => {
+    // The sentence naming where the library-wide default lives (Settings →
+    // Automation) used to be a Tooltip wrapped around the switch itself — so on
+    // a phone the only way to reach it was the tap that overrides the setting
+    // for this picture, and the words never appeared at all.
+    const autoProcess = mockMosaicWithRaggedBorder();
+    vi.spyOn(client.api, "getSettings").mockResolvedValue({
+      auto_crop_border: true,
+      resolved_incoming_dir: "/in", resolved_library_root: "/lib",
+    });
+
+    renderEditor();
+
+    const sw = await screen.findByLabelText("Auto-crop edges");
+    await waitFor(() => expect(sw).toBeChecked());
+    fireEvent.click(screen.getByRole("button", { name: "What does this do?" }));
+    expect(await screen.findByText(/Settings → Automation/)).toBeInTheDocument();
+    expect(sw).toBeChecked();
+    // And no per-run override on the wire: reading the hint is not a decision.
+    fireEvent.click(screen.getAllByRole("button", { name: /Auto-process/ })[0]);
+    await waitFor(() =>
+      expect(autoProcess).toHaveBeenCalledWith("M_42", 3, undefined));
+  });
+
   // --- the preview toolbar, explained without a mouse ----------------------
 
   it("explains the preview buttons in text, not only in hover tooltips",

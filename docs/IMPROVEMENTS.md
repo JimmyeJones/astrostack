@@ -76,10 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- **The fourth slice of the "a tooltip is invisible on the device the owner reads this app on" entry — the
-  five `Tooltip`s wrapped around a *form control*** (the editor's Auto-crop switch, the Jobs notify switch, the
-  three Gallery filters), where the one gesture a phone has operates the control instead of answering the
-  question — branch `claude/sweet-babbage-x2ai9f`.
+*No live claims.*
 
 ---
 
@@ -1541,13 +1538,36 @@ problems. Dogfood it every big-picture run and fix root causes.
   an empty row), plus 2 in `Editor.test.tsx` on the real page (the split hint readable without hover; the
   mosaic-only coverage hint absent on a single field) — both fail before.
 
-  **Still open:** the *route-specific* tooltips on History, Stack and the Dashboard, and — the named next slice on
-  the editor — its **header** row: `Trim border`, `Re-centre`, `Crop` and, the one that actually hides behaviour
-  rather than meaning, the **`Auto-crop edges` switch**, whose tooltip is the only place that says the library-wide
-  default lives in Settings → Automation. That switch is the `HintLabel` case, not the guide's: it is a labelled
-  control, so the tap-able info icon v0.374.11 already built is the idiom, and the guide under the picture is the
-  wrong place for a control in the header. Each remaining route still needs its own measurement; this slice
-  deliberately doesn't guess at them.
+  **▶ FOURTH SLICE SHIPPED — v0.402.1, and it is a *bug* rather than an unreachable explanation, exactly as the
+  second slice was** (Builder 2026-09-09, same branch). v0.374.11 fixed the case where the hint icon sat inside a
+  control's `<label>` and the tap activated the control. **The same defect exists one level up, wherever a
+  `<Tooltip>` is wrapped around the control itself** — there the tap does not merely leak to the control, it *is*
+  the control, and no icon exists to aim at. Enumerated rather than guessed at: exactly **five** sites in the
+  whole frontend wrap a `Tooltip` around a `Switch`/`SegmentedControl`/input, and all five are now fixed —
+  - the **editor's `Auto-crop edges` switch**, whose sentence is the only place the app says the library-wide
+    default lives in Settings → Automation, and whose tap overrides that default for the picture in front of you;
+  - the **Jobs page's `Notify me when done` switch**, where the tap also fires the browser's permission prompt —
+    so reading what the control does was the same gesture as agreeing to it;
+  - the **Gallery's three filters** (calibration, combine method, and the sort whose hint is the only place that
+    page explains its σ) — on a segmented control the tap picks a segment, so asking the question re-sorted the
+    page and never answered it.
+  **The fix is the app's own affordance, not a new one.** `HintIcon` is the icon half of `HintLabel`, lifted into
+  `components/HintIcon.tsx` (`HintLabel` now renders it, byte-for-byte the same behaviour — its own tests are
+  untouched and pass). Beside a control rather than inside its `<label>`, it leaves the control's accessible name
+  exactly as it was, so nothing that looks a switch up by its own name — a screen reader, or a test — has to know
+  the hint exists. Hover and keyboard focus still open it; the hover target narrows from the control to the icon,
+  which is the same trade v0.374.11 made. No page gets taller (14 px icon, `lineHeight: 0`, no padding).
+  **Tests (+10):** `HintIcon.test.tsx` (+6 — tap opens, second tap and blur dismiss, hover and focus still open
+  it, Enter/Space, it never operates the control beside it, and the control's own name is unchanged) and one
+  fail-before regression at each of the three routes, each asserting the words appear *and* that the control did
+  not move: `Editor.test.tsx` (the switch stays checked and `autoProcess` still gets `undefined`),
+  `Jobs.test.tsx` (`requestPermission` not called), `Gallery.test.tsx` (still sorted by Newest).
+
+  **Still open:** the *route-specific* tooltips on History, Stack and the Dashboard, and the editor's **header**
+  row buttons — `Trim border`, `Re-centre`, `Crop`. Those three are the weaker half of the class and should be
+  judged before being swept: pressing them only *previews* a crop behind an Apply/Cancel, so the tap is a safe
+  way to find out, unlike the five above. Each remaining route still needs its own measurement; these slices
+  deliberately don't guess at them.
 
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — surface calibration-master mismatches (and a *never-applied* wrong-shaped
   bias) at *bind time* in the calibration UI, not only buried in the stack log.** *(Friendliness + trust; size S–M;
@@ -2858,6 +2878,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.402.1** — 🐛 BUG (friendliness / trust, PRIORITY 3), Builder-found by enumeration while shipping v0.402.0: **five controls in the app answered "what does this do?" by doing it.** Wherever a `<Tooltip>` is wrapped around a `Switch` or a `SegmentedControl`, the only gesture a phone has is the one that operates the control — so the editor's `Auto-crop edges` switch (whose sentence is the only place the library-wide default is named), the Jobs page's `Notify me when done` switch (whose tap also fires the browser permission prompt) and the Gallery's three filters (including the sort whose hint is the only place that page explains its σ) each hid their explanation behind the act of using them. This is v0.374.11's defect one level up, and the sweep is exhaustive: those five are every such site in the frontend. `HintIcon` — the icon half of `HintLabel`, lifted out so `HintLabel` renders it unchanged — now sits *beside* each control, which also leaves the control's own accessible name alone. Hover and keyboard focus still work; no page gets taller; nothing removed. Tests +10, four of them fail-before regressions at the three routes asserting the words appear *and* the control did not move. Full entry under the tooltip idea above.
 - **v0.402.0** — PRIORITY 1 (editor) × PRIORITY 3 (friendliness), the third slice of the "a tooltip is invisible on the device the owner reads this app on" entry: **the editor's preview toolbar now explains itself in text.** Four of the eight buttons directly under the picture (`Coverage`, `Star mask`, `Drag to crop`, `Split`) carried a plain-language sentence each and carried it *only* as a hover `Tooltip` — and a tap on one of those buttons runs it, so on a phone the one gesture available spends the question on the answer. New `PreviewToolGuide` disclosure (*"What do these buttons do? →"*), built from the same `PREVIEW_TOOLS` array the tooltips now take their labels from, and shown for exactly the tools `visiblePreviewTools({isMosaic, cropDrag})` says are on the screen. `Compare` gains the sentence it never had (it is `Split`'s twin and its label never says what it compares against). Measured with `agent-dogfood.sh --build --mosaic --editor`: editor at 420 px **3,047 → 3,072 px** closed, nothing overflowing, no console errors. Tooltips unchanged for anyone with a mouse; nothing removed. Tests +12, two fail-before. Full entry under the tooltip idea above.
 - **v0.401.1** — PRIORITY 3 (friendliness), found by **running** the app right after shipping v0.401.0 and invisible to every code read of it: **the new field-fill diagram's overflow case could not be read.** On that branch the card suddenly shows *two* shapes, the object covers the frame, and the caption said "the outline" — which names neither. Two fixes: `FieldFillDiagram` now paints the `ellipse` **before** the `rect` (SVG paints in document order, and a dashed grey edge under a translucent indigo wash reads as a smudge, not as the edge of your field), and `field_fill`'s overflow text names the frame — *"Bigger than one frame — it spills over the dashed edge of your field."* Both pinned by tests. The geometry was already correct and measured so off the screenshot's own pixels; the defect was purely "which shape am I looking at?", which is not a question that occurs to you while writing the shapes. Dogfood record and the generalisation in [`PROCESS-NOTES.md`](PROCESS-NOTES.md) (2026-09-09).
 - **v0.401.0** — NEW BEGINNER FEATURE, PRIORITY 2–3 (plan/understand), the Scout's 2026-09-09 idea filed the same day: **the "will it fit?" sentence gets a picture.** The identity card now draws the object to scale inside one frame, under the sentence it illustrates — because "fits comfortably in a single Seestar frame" is true of a nebula filling two thirds of the frame *and* of a planetary that is a dot in the middle of it, and those are different shots to plan (a test pins that pair: 3′ and 70′ through an S30 field, both `fits`, one captioned "expect to crop in close"). New pure `seestack.framing.field_fill` returns the object's axes as fractions of the frame's edges plus the field's own edges and one sentence; `objectinfo._to_info` fills it from the **same** catalogue size, the same square-box convention for a missing minor axis and the same *derived* field `framing_hint` and `mosaic_plan` already read, so the picture and the words cannot disagree. Three decisions worth keeping: the fractions are **not clamped** (`fieldFillGeometry` grows its `viewBox` instead, so an overflowing object is drawn whole outside the dashed frame — clipping it would hide the one thing the picture exists to show); the **field travels in the payload** rather than being re-derived in the frontend, pinned on both the derived-S30 and S50-fallback paths; and `_fill_pct` rounds to fives only above 20 %, because the app's usual idiom turns a 3 % object into "5 %" and a 0.2 % one into "0 % of the width". Additive: one optional response field, one optional engine dataclass, one component; `hideFraming` hides the drawing with the sentence, and an older backend draws nothing. Tests +24. Full entry in [`SHIPPED.md`](SHIPPED.md).
