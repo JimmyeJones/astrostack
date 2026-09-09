@@ -18,6 +18,101 @@ is a queue.
 
 ---
 
+## 2026-09-09 (Scout, branch `claude/admiring-brahmagupta-idqivk`) — a clean dogfood, two rotation sweeps closed by tracing, one preview↔export non-finding measured, and one new beginner feature filed
+
+**The run.** Baseline green before any change: **5,395 passed / 2 skipped**, full
+suite headless, 22:59. Docs-only run — no product code touched, so no re-run
+needed after (the two `docs/` edits below can't affect the suite). One new
+beginner-feature idea filed to `IMPROVEMENTS.md → Features that serve real
+workflows`; one already-CLOSED entry (v0.399.2) cut from the **Bugs** section,
+whose full record already lives in `SHIPPED.md` and whose lesson is already in the
+2026-09-09 block below — so the working list is left no longer than it was found
+(§2 three-file rule), and the Bugs section is back to open bugs only.
+
+**Dogfood: CLEAN** (`scripts/agent-dogfood.sh --mosaic --editor`).
+- **Mosaic trim: Auto would cut 7.9 %** of the union canvas — the same figure
+  v0.386.0/v0.391.1/the last three passes recorded, well under the ~15 % §1 calls a
+  bug. v0.399.3/.4's trim fix has not drifted.
+- **Page probes clean, both samples.** Nothing overflowing, no console errors.
+  Tallest phone pages: field `/life-list` 3,094 px and `/targets/<field>` 3,078 px;
+  mosaic `/targets/<mosaic>` 3,407 px, editor 2,917 px — all in line with the
+  standing baselines, so no IA slice is indicated (fourth measurement agreeing).
+- **Editor drive clean.** Field run: all **21** ops added one at a time, each
+  re-rendering the live preview, then undo/redo — no console error, no failed
+  request. Mosaic run: **20 of 21** ops driven identically clean (Stretch → Star
+  reduction); the 21st (Boost nebula) was cut off by the run's own 900 s wall-clock
+  `timeout`, not by any app error (the trailing "Target page has been closed" is the
+  harness killing the browser). Effectively clean; budget >900 s for `--mosaic
+  --editor` next time (the field + both probes + the field drive already eat most of
+  it).
+
+**QA rotation (AGENTS.md §1 / the four-item rotation) — where the yield was, and
+where it was not.** The single-field engine core stays closed (do not re-sweep
+`seestack/stack/*` / `seestack/calibrate/*` — twenty-plus clean sweeps). This run
+worked the other three rotation items:
+
+* **(3) Filesystem side effects of ASTAP / ffmpeg — traced CLEAN, and the §10
+  guardrail is intact.** `seestack/solve/astap.py` never points ASTAP at the
+  source: `_solve_once` copies the frame into a `TemporaryDirectory`, runs `-wcs`
+  (never `-update`) there, reads the `.wcs`/`.ini` before the scratch dir is
+  removed — so with `copy_to_cache` off, the owner's raw sub in `incoming/` is
+  never written beside (ASTAP writes its sidecars next to the `-f` file, which is
+  the scratch copy). `seestack/video/ffmpeg.py` reads the capture in place
+  (`-i <path> -nostdin`) and pipes raw frames to stdout (`-`); it writes **no**
+  output file and no sidecar. `ffprobe` is metadata-only. So neither binary can
+  touch `incoming/`. (Traced by reading; a stub-binary run would add nothing — the
+  argv and the scratch-copy discipline are the whole story.)
+* **(1) Scale-dependent preview↔export parity — one op looked unscaled; measured,
+  and it is a NON-finding.** Every user-facing pixel-radius op in `seestack/edit/ops/`
+  is correctly shrunk by `ctx.scaled_px()` (star erosion, chroma denoise, sharpen,
+  deconv, color-cal detection FWHM/aperture, bilateral spatial). The one exception
+  is `tone.py::_scnr`'s internal `_SCNR_NOISE_SIGMA = 3.0`, the Gaussian that
+  suppresses per-pixel chroma noise before the green-excess estimate — it is a
+  *fixed* pixel sigma, not scaled. **Measured** (2400×2400 scene, green blobs at
+  4/12/40/120 px widths, proxy step 8, `amount=0.8`): preview-minus-export green
+  **mean +0.00001**, worst-case only **96.2 % of export's green removal** on the
+  strongest-green pixels (a 3.8 % local under-removal), p99 |diff| 0.0042 on a
+  0.10 sky. **And the obvious "fix" is wrong**: scaling the sigma to 3/8 px on the
+  proxy would make it a near-delta, so per-pixel noise (preserved at full amplitude
+  because the proxy is *strided*, not averaged) would no longer cancel — reintroducing
+  exactly the magenta-sky bias this code was written to remove. The fixed sigma is
+  correct for its noise-suppression job; the residual structure-removal divergence is
+  immaterial. Recorded here so nobody re-scales it.
+* **(2/4) Adjacent code read adversarially, all consistent** (not a full sweep of
+  the routers, but read while chasing the above): `photometric.py` per-panel
+  references on a mosaic (`_pointing_references` normalises each panel against
+  itself, neutral fallback everywhere); `skyarea.py` union subtraction and block
+  attribution; `calibration.py` unattended auto-bind gates (dark exposure gate
+  applied *separately* from the gain/temp confidence distance — `_dark_match_confident`
+  passes `exposure_s=None`, correct — plus dimension and bayer-conflict gates, and
+  the "try every candidate in ascending distance, bind the first that clears a gate"
+  loop that stops a top-ranked-but-unbindable master masking a bindable one);
+  `stacktime.py` (new v0.399.0 — median seconds-per-sub over comparable runs, strict
+  cost-class/canvas/min-frames gating, `None` on anything unproven); and
+  `/stack-estimate` resolving `auto_reject` through the engine's own picker with the
+  mosaic's per-pixel `depth` so the time estimate, the reach line and the resolved
+  method all read the same decision. No bug found in any.
+
+**The feature idea filed** (Features that serve real workflows): a *visual*
+to-scale framing diagram — the object's angular extent drawn inside the S30 field
+rectangle, *before* the shoot — as the picture-shaped complement to the existing
+*textual* framing hint (v0.352.x). The ingredients already sit on the identify
+response (`ObjectInfo.angular_size.size_arcmin` + the derived field the panel plan
+is already computed against), so it is a pure `<svg>` in `ObjectInfoCard`, no new
+endpoint, no network. Grep-checked against `IMPROVEMENTS.md`/`SHIPPED.md`: the
+*textual* hint and the *post*-stack framing verdict exist; a *visual pre-capture*
+one does not.
+
+**Why no verified bug was filed.** Every subsystem read this run came back clean or
+immaterial — consistent with the last several runs' "the app is genuinely
+hardened" and "ready work is thin" conclusions. Per §2, the run did not manufacture
+a bug or a marginal feature to have shipped something; it recorded the sweeps
+(including the clean ones and the measured non-finding, so they aren't re-run),
+filed one genuinely-novel beginner feature to keep the pipeline stocked, and
+tidied one closed entry out of the Bugs section.
+
+---
+
 ## 2026-09-09 (latest) — Builder run (branch `claude/sweet-babbage-u828ql`): D1's fourth instalment closed, and a clean `--mosaic --editor` dogfood pass on top of it
 
 **The run.** Baseline green before any change (**5,389 passed / 2 skipped**, full
