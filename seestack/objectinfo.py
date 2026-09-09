@@ -21,9 +21,11 @@ from dataclasses import dataclass
 from seestack.angularsize import AngularSize, angular_size
 from seestack.bg_advice import BackgroundModeHint, background_mode_hint
 from seestack.framing import (
+    FieldFill,
     FrameField,
     FramingHint,
     MosaicPlan,
+    field_fill,
     framing_hint,
     mosaic_plan,
 )
@@ -89,6 +91,11 @@ class ObjectInfo:
     # too big for a single frame. ``None`` when it fits (or has no vetted size),
     # so the card says nothing rather than planning a one-panel mosaic.
     mosaic: MosaicPlan | None = None
+    # "How much of the frame does it fill?" — the to-scale numbers behind the
+    # framing sentence, for a card that wants to *show* the fit rather than only
+    # say it. None exactly when ``framing`` is None (no vetted size), so the
+    # drawing and the sentence appear and disappear together.
+    field_fill: FieldFill | None = None
     blurb: str = ""         # plain-language "what am I looking at?" one-liner, "" if none
     difficulty: DifficultyHint | None = None  # "how hard for a Seestar?" verdict, if vetted
     # Which per-frame background-flatten mode suits this target, when its catalog
@@ -366,6 +373,10 @@ def _to_info(obj: CatalogObject, matched_by: str,
         size_arcmin=obj.size_arcmin,
         framing=framing_hint(obj.size_arcmin, field=field),
         mosaic=mosaic_plan(obj.size_arcmin, obj.size_minor_arcmin, field=field),
+        # Same size, same minor-axis convention and same telescope as the two
+        # lines above, so the drawing can never contradict the sentence it sits
+        # under.
+        field_fill=field_fill(obj.size_arcmin, obj.size_minor_arcmin, field=field),
         blurb=obj.blurb,
         difficulty=target_difficulty(obj.id, obj.type),
         # The "it fills each sub" clause is the same field-of-view comparison

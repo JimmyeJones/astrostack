@@ -14,6 +14,83 @@ Newest first.
 
 ---
 
+## v0.401.0 — 2026-09-09 — "here's how it fills your field": the framing hint gets a picture (`framing.field_fill`, `FieldFillDiagram`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-7w0m19`. Cut from
+`IMPROVEMENTS.md` → "Features that serve real workflows", where the Scout filed it
+the same day.)**
+
+**What shipped.** The identity card now draws the object to scale inside one frame,
+directly under the "will it fit?" sentence it illustrates. New pure engine function
+`seestack.framing.field_fill` returns the object's major/minor axes as fractions of
+the frame's long/short edges, the field's own edges, and one ready-to-render
+sentence; `objectinfo._to_info` fills it from the **same** catalogue size, the same
+minor-axis convention (absent minor axis → square box) and the same *derived* field
+that `framing_hint` and `mosaic_plan` already read, so the picture and the words
+cannot disagree. `ObjectInfoOut.field_fill` carries it; `FieldFillDiagram.tsx` draws
+it as an inline `<svg>` with `fieldFillGeometry` as the pure, unit-tested half.
+
+**Why it is worth a feature slot.** "Fits comfortably in a single Seestar frame" is
+true of a nebula filling two thirds of the frame *and* of a planetary that is a dot
+in the middle of it — the sentence genuinely cannot tell those two shots apart, and
+they are planned differently. A test pins exactly that pair (3′ and 70′ through an
+S30 field, both `fits`, one captioned "expect to crop in close").
+
+**Three decisions worth carrying forward.**
+- **Fractions are not clamped.** A drawing that clipped the object at the frame's
+  edge would hide the single most useful thing it has to say. The viewport grows
+  instead: `fieldFillGeometry` sizes its `viewBox` from `max(frame, object)` on each
+  axis, so an overflowing object is drawn whole *outside* the dashed frame.
+- **The field rides along in the payload.** The drawing needs the frame's *shape*,
+  and re-deriving it in the frontend is exactly how a picture drifts from the
+  sentence above it. `field_long_arcmin`/`field_short_arcmin` are whatever
+  `install_frame_field` resolved — an S30's ~128′ × 72′ on the owner's solved
+  library, the S50 fallback on one with no plate scale yet — and a webapp test pins
+  both cases.
+- **The percentage is rounded honestly at both ends.** Rounding to fives (the app's
+  usual idiom) turns a 3 % object into "5 %" and a 0.2 % one into "0 % of the
+  width", a sentence that contradicts its own drawing. `_fill_pct` rounds to 5 only
+  above 20 %, and never below 1 %.
+
+**Upgrade-safe:** one optional response field, one optional engine dataclass, one new
+component. No config, schema, on-disk, API-shape or default change; an older backend
+that omits `field_fill` simply draws nothing, which is the same gate the sentence
+uses (`hideFraming` hides both, so a page showing the *measured* verdict for a
+finished picture never shows a drawing with nothing to explain it).
+
+**Tests:** +11 engine (`tests/test_framing.py`, including a catalogue-wide check that
+every drawable object yields finite positive fractions), +3 endpoint
+(`tests/webapp/test_target_identify.py`), +10 frontend (7 geometry/component, 3 card).
+
+### The entry as filed
+
+- **NEW IDEA (Scout 2026-09-09, dogfood pass — the *visual* half of the framing hint that has only ever been
+  words) — "here's how it fills your field": a small to-scale diagram of the object inside the S30 frame,
+  drawn *before* you shoot.** *(Pillar: plan + understand — PRIORITY 2–3; size S–M; frontend-mostly, no new
+  data. Beginner bar: cleared — a non-expert instantly reads "M42 fills about a third of my frame" from a
+  picture, sane default, no knobs.)* The app already tells a beginner *in words* whether a target fits one
+  Seestar frame or needs a mosaic (`framing_hint` / `ObjectInfoCard`'s panel line: *"fits comfortably in one
+  frame"* / *"about a 3×3 mosaic covers all of it"*, v0.352.x). What it has never *shown* is the one thing a
+  picture answers better than a sentence — **how much of the frame the object actually fills, and where it
+  sits** — which is exactly the question a beginner has when deciding "point straight at it, or offset for a
+  mosaic?". Draw the S30 field as a rectangle and the catalogue object's angular extent as a to-scale
+  ellipse/box centred in it, with a one-line caption (*"M42 fills about 35 % of your field"* or *"bigger than
+  one frame — a 2×2 mosaic catches it all"*). **The ingredients already exist on the identify response**:
+  `ObjectInfo.angular_size.size_arcmin` (the object's vetted major-axis size, `seestack/objectinfo.py`, already
+  carried onto `targets.py`'s `AngularSizeOut`) and the owner's *derived* field (the S30 FOV the panel plan is
+  already computed against, v0.352.0 — from the frame's own `FOCALLEN`/`XPIXSZ`, never an assumed model per
+  §1). So this is a pure `<svg>` in `ObjectInfoCard` fed by numbers the card already fetches — no new endpoint,
+  no network, additive, reversible. **Sane default:** render only when `angular_size` is vetted (the same gate
+  the textual hint uses) and stay silent otherwise, exactly like the panel line. **Grep first** — confirm the
+  identify/framing payload already carries *both* the object size and the field size before building (the
+  panel-plan text computes the ratio somewhere already; reuse that one ratio so the diagram and the sentence can
+  never disagree, the recurring lesson in this file). Tests: a component test that the box scales with the
+  size/field ratio and hides on a sizeless object; the geometry helper is pure and unit-testable. Deliberately
+  **pre-capture only** — the *post*-stack "did I frame it well?" verdict (`framing_payload`) already draws on
+  the solved WCS and is a different question.
+
+---
+
 ## CLOSED, not built — 2026-09-09 — "a corner target can't be centred in its own zoom clip": the proposed fix is backwards (`zoomclip.crop_box_for_scale`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-8td9m9`, while in this module

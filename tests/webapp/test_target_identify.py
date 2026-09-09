@@ -231,3 +231,59 @@ def test_a_folder_named_target_is_offered_the_name_the_solve_found(
     after = client.get("/api/targets/NGC_7000/identify").json()
     assert after["rename_to"] is None
     assert client.get("/api/targets/NGC_7000").json()["name"] == "Orion Nebula"
+
+
+def test_identify_carries_the_to_scale_field_fill_for_the_diagram(
+        client, solved_library):
+    """The picture half of "will it fit?". The card draws the object inside one
+    frame, so the endpoint has to carry both the object's fractions *and* the
+    frame they were measured against — a drawing that re-derived the field could
+    disagree with the sentence above it."""
+    info = client.get("/api/targets/M_42/identify").json()
+    fill = info["field_fill"]
+    assert fill is not None
+    # M42 is 85' x 60'; the un-solved fallback field is the S50's 77' x 44'.
+    assert fill["field_long_arcmin"] == 77.0
+    assert fill["field_short_arcmin"] == 44.0
+    assert fill["frac_long"] == 85.0 / 77.0
+    assert fill["frac_short"] == 60.0 / 44.0
+    # …and it says the same thing the framing verdict does.
+    assert info["framing"]["level"] == "mosaic"
+    assert "Bigger than one frame" in fill["text"]
+
+
+def test_the_field_fill_is_measured_from_the_owners_own_frames(
+        client, solved_library):
+    """Same telescope as the sentence, or the picture is a lie: M 42 overflows an
+    S50's 77' frame and very nearly fills a ~108' one."""
+    _set_pixel_scale(solved_library, 71.8 * 60.0 / 320.0, 480, 320)  # 107.7' x 71.8'
+
+    info = client.get("/api/targets/M_42/identify").json()
+    fill = info["field_fill"]
+    assert fill is not None
+    assert round(fill["field_long_arcmin"], 1) == 107.7
+    assert round(fill["field_short_arcmin"], 1) == 71.8
+    # 85' x 60' now sits inside the frame on both edges, where the S50's field
+    # had it overflowing the long one — the whole point of deriving the field.
+    assert fill["frac_long"] == 85.0 / fill["field_long_arcmin"]
+    assert fill["frac_short"] == 60.0 / fill["field_short_arcmin"]
+    assert fill["frac_long"] < 1.0 and fill["frac_short"] < 1.0
+    assert "Bigger than one frame" not in fill["text"]
+    assert info["framing"]["level"] == "tight"
+
+
+def test_identify_draws_nothing_for_an_object_with_no_vetted_size(
+        client, solved_library):
+    """The gate is the same one the sentence uses, so the card never shows a
+    drawing beside no words, or words beside no drawing."""
+    from seestack.nightplan import load_catalog
+
+    sizeless = next((o for o in load_catalog() if o.size_arcmin is None), None)
+    if sizeless is None:  # pragma: no cover - the catalogue vets every size today
+        return
+    client.post("/api/targets", json={"name": sizeless.id})
+    targets = client.get("/api/targets").json()
+    safe = next(t["safe_name"] for t in targets if t["name"] == sizeless.id)
+    info = client.get(f"/api/targets/{safe}/identify").json()
+    assert info is not None
+    assert info["field_fill"] is None and info["framing"] is None

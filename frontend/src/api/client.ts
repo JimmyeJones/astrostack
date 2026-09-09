@@ -468,6 +468,20 @@ export interface MosaicPlan {
   text: string;
 }
 
+/** "How much of your frame does it fill?" — the to-scale numbers behind the
+ *  identity card's little "here's how it fits" diagram. `frac_long`/`frac_short`
+ *  are the object's major/minor axes as fractions of the frame's long/short
+ *  edges, deliberately unclamped (above 1 is a real overflow the drawing shows);
+ *  the field's own edges ride along so the drawing gets the frame's shape right. */
+export interface FieldFill {
+  frac_long: number;
+  frac_short: number;
+  field_long_arcmin: number;
+  field_short_arcmin: number;
+  // A complete sentence: "It spans about 35% of your frame's width."
+  text: string;
+}
+
 export interface DifficultyHint {
   level: "easy" | "moderate" | "challenging";
   // One-word badge text, e.g. "Easy".
@@ -493,6 +507,10 @@ export interface ObjectInfo {
   // absent/null when it fits or has no vetted size (older backends omit it —
   // treat as "nothing to say").
   mosaic?: MosaicPlan | null;
+  // "How much of the frame does it fill?" — the to-scale numbers for the little
+  // diagram beside the framing sentence; absent/null when there is no vetted
+  // size (older backends omit it — the card simply draws nothing).
+  field_fill?: FieldFill | null;
   // A plain-language, beginner-friendly one-liner about the object ("what am I
   // looking at?"), for the popular targets; absent/"" when the catalog has none
   // (older backends omit it — the card reads fine from type + constellation).
