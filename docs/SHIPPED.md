@@ -83,7 +83,7 @@ new frontend module; no config, schema, on-disk, API-shape or default change. An
 older backend (or any failed read) yields no destinations, and the box then
 behaves exactly as it did — it never warns on no evidence, which is its own test.
 
-**Tests (+29):** 8 `tests/test_project_source_folders.py` (busiest-first, the
+**Tests (+37 — 16 Python, 21 frontend):** 7 `tests/test_project_source_folders.py` (busiest-first, the
 loose-in-incoming case, the nested-container case that found the bug, the
 `incoming2/` prefix guard, and the armed no-filesystem trap), 6 in
 `tests/webapp/test_upload.py` (the folder not the target name, `M 31_sub` vs
