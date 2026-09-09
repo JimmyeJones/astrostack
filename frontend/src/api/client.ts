@@ -1811,6 +1811,11 @@ export interface StackEstimate {
     switch_at_frames: number;
     // The accepted+solved frames this answer was computed for.
     n_frames: number;
+    // Subs on one spot of a mosaic — the number the method was actually chosen
+    // from, since every threshold in that decision is about samples per pixel.
+    // null on a single field, where it *is* the frame count. Optional so an
+    // older backend simply leaves the note worded in frames.
+    panel_depth?: number | null;
   } | null;
   // Whether the rejection this stack is configured for can actually drop a lone
   // satellite/plane/cosmic-ray hit at this frame count. Sigma clipping runs from

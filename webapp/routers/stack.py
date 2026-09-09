@@ -569,7 +569,6 @@ def stack_estimate(
     from seestack.stack.stacker import (
         StackOptions,
         _resolve_auto_reject,
-        auto_reject_method,
         auto_reject_switch_frames,
         estimate_stack_basis,
         estimate_stack_from_basis,
@@ -629,14 +628,18 @@ def stack_estimate(
     # runs count: ``auto_reject`` is resolved through the engine's own picker, so
     # a run about to combine with min/max is not compared against κ-σ runs.
     # ``None`` — and no line on the form — whenever nothing comparable is timed.
+    # The options that will actually run: with "Auto outlier removal" on, the
+    # engine's own picker resolves the concrete method — and it sizes that
+    # decision from a mosaic's *per-pixel depth*, not the target's frame count.
+    # Everything below that describes what will run reads this rather than
+    # re-deriving the rule, which is how the two came to disagree on a mosaic.
+    eff_options = _resolve_auto_reject(options, est.n_frames,
+                                       depth=est.panel_depth)
     time_estimate = estimate_from_runs(
         past_runs,
         n_frames=est.n_frames,
         canvas_px=int(est.canvas_w) * int(est.canvas_h),
-        cost_class=stack_cost_class(
-            asdict(_resolve_auto_reject(options, est.n_frames,
-                                        depth=est.panel_depth)),
-            est.n_frames),
+        cost_class=stack_cost_class(asdict(eff_options), est.n_frames),
     )
     # And the sibling question the form has to answer when the user has turned
     # rejection *off*: "would any setting take this trail out?" Asked of the same
@@ -729,9 +732,21 @@ def stack_estimate(
         # own two-pass rejection and auto leaves the toggles alone).
         "auto_reject_resolved": (
             {
-                "method": auto_reject_method(options.sigma_kappa, est.n_frames),
+                # Read off the *resolved* options rather than re-derived from the
+                # frame count. Every threshold in this decision is a statement
+                # about how many samples land on one pixel, and on a mosaic that
+                # is a panel's depth — so a 21-sub mosaic 3 deep runs min/max
+                # while the count alone said sigma clipping. Re-deriving it here
+                # is exactly how the form came to name a method the run would
+                # not use, on the shape this owner shoots most.
+                "method": "sigma_clip" if eff_options.sigma_clip else "min_max",
                 "switch_at_frames": auto_reject_switch_frames(options.sigma_kappa),
                 "n_frames": est.n_frames,
+                # Subs on one spot of a mosaic — the number the method was
+                # actually chosen from. ``null`` on a single field, where it *is*
+                # the frame count. Additive: an older frontend ignores it and
+                # keeps wording the note in frames, which stays true there.
+                "panel_depth": est.panel_depth,
             }
             if options.auto_reject and not options.drizzle
             else None

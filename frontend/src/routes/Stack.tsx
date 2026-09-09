@@ -12,6 +12,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type StackOptionField } from "../api/client";
 import { dependencyMet } from "../api/depends";
+import { autoRejectMethodNote as autoRejectMethodNoteText } from "../autoRejectNote";
 import { backgroundModeLabel, backgroundModeNudge } from "../backgroundModeNudge";
 import { SampleTourNote } from "../components/SampleTourNote";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
@@ -655,12 +656,7 @@ export function StackView() {
   // finished run was min/max). They're greyed above; this says, in plain words,
   // which method Auto will actually use and where the boundary sits — so the
   // form tells the truth instead of leaving the user to discover it in History.
-  const autoRejectMethodNote =
-    autoResolved && autoResolved.n_frames > 0
-      ? (autoResolved.method === "min_max"
-        ? `Auto outlier removal is on, so it picks the method from your frame count: with ${autoResolved.n_frames} accepted, solved sub${autoResolved.n_frames === 1 ? "" : "s"} it will use min/max rejection, which drops the highest and lowest value at each pixel. It switches to sigma clipping from about ${autoResolved.switch_at_frames} subs, where there are enough frames to measure each pixel's spread.`
-        : `Auto outlier removal is on, so it picks the method from your frame count: with ${autoResolved.n_frames} accepted, solved subs it will use sigma clipping, which rejects pixels that sit far from the average. Below about ${autoResolved.switch_at_frames} subs it uses min/max rejection instead.`)
-      : null;
+  const autoRejectMethodNote = autoRejectMethodNoteText(autoResolved);
 
   // Will the rejection this stack is set up for actually remove a lone satellite
   // trail? Answered by the engine (`rejection_reach`), which reads the same
