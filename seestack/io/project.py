@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     coverage_thin_frac REAL,
     uncovered_frac REAL,
     coverage_shares_version INTEGER,
-    coverage_median_depth REAL
+    coverage_median_depth REAL,
+    duration_s REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -1420,9 +1421,9 @@ class Project:
             "  rejection_fraction, rejection_mode, n_roughly_aligned, stack_fwhm_px,"
             "  seam_residual, capture_start_utc, capture_end_utc,"
             "  capture_hours_json, coverage_thin_frac, uncovered_frac,"
-            "  coverage_shares_version, coverage_median_depth"
+            "  coverage_shares_version, coverage_median_depth, duration_s"
             ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            "         ?, ?, ?, ?, ?, ?, ?, ?)",
+            "         ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -1443,6 +1444,7 @@ class Project:
                  else int(run.coverage_shares_version)),
                 (None if run.coverage_median_depth is None
                  else float(run.coverage_median_depth)),
+                (None if run.duration_s is None else float(run.duration_s)),
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -1553,6 +1555,10 @@ class Project:
                 coverage_median_depth=(
                     row["coverage_median_depth"]
                     if "coverage_median_depth" in row.keys() else None
+                ),
+                duration_s=(
+                    row["duration_s"]
+                    if "duration_s" in row.keys() else None
                 ),
             )
 
@@ -1876,6 +1882,20 @@ class StackRunRow:
     # column existed and when nothing was covered; readers then fall back to the
     # peak, which is what they did before it existed.
     coverage_median_depth: float | None = None
+    # How long this run took, in seconds of wall clock, measured by the stacker
+    # around its own work. Added **without** a ``SCHEMA_VERSION`` bump — it
+    # reaches an existing project through ``_reconcile_table_columns`` on open,
+    # so a build that has never heard of it can still open a DB this one wrote
+    # (a version bump would make that a refusal, i.e. no rollback). None for runs
+    # recorded before the column existed, for a run whose row was written by
+    # something other than the
+    # stacker (an editor export, a channel combine — neither of which is a stack
+    # and so neither of which predicts one), and whenever the timing could not be
+    # taken. It exists so the Stack form can answer "about how long will this
+    # take?" from the target's own past runs instead of leaving a beginner to
+    # start a six-hour job at midnight to find out — see
+    # :mod:`seestack.stacktime`.
+    duration_s: float | None = None
     # How many contributing subs sub-pixel refine had to leave *only roughly
     # aligned* (its measured shift exceeded the cap, so the frame stacked
     # unshifted → possibly soft/doubled stars). None when refine was off, not

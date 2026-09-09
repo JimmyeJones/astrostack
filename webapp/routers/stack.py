@@ -52,6 +52,13 @@ _STRETCH_DEFAULT, _BLACK_DEFAULT = 0.5, 0.35
 #: drizzle fit at all?" rather than "would it fit at whatever the form holds?".
 DRIZZLE_PROBE_SCALE = 1.5
 
+#: How many of a target's newest stack runs ``/stack-estimate`` reads when
+#: timing the next one. Only the newest ``stacktime.MAX_BASIS_RUNS`` *comparable*
+#: runs are used, and a run of different settings is skipped — so this is the
+#: window in which those matches are looked for, generous enough to see past a
+#: few experiments with drizzle without walking a long History.
+_TIME_ESTIMATE_SCAN_RUNS = 50
+
 
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
@@ -556,16 +563,18 @@ def stack_estimate(
     (``drizzle_probe``) from the same canvas. That used to be a second request to
     this endpoint, and the canvas — one WCS read per sub — is the whole cost of a
     sizing, so the form paid for it twice on every load."""
-    from dataclasses import replace
+    from dataclasses import asdict, replace
+    from itertools import islice
 
     from seestack.stack.stacker import (
         StackOptions,
-        auto_reject_method,
+        _resolve_auto_reject,
         auto_reject_switch_frames,
         estimate_stack_basis,
         estimate_stack_from_basis,
         rejection_reach,
     )
+    from seestack.stacktime import estimate_from_runs, stack_cost_class
 
     settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
@@ -588,6 +597,11 @@ def stack_estimate(
             basis = estimate_stack_basis(proj, options.mosaic_canvas)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # This target's own past runs, read while the project is open — the time
+        # estimate below is *measured* from them rather than modelled. Newest
+        # first, and bounded: only a handful of comparable runs are ever used, so
+        # a target with hundreds of them doesn't pay for the whole list.
+        past_runs = list(islice(proj.iter_stack_runs(), _TIME_ESTIMATE_SCAN_RUNS))
     finally:
         proj.close()
         lib.close()
@@ -607,6 +621,26 @@ def stack_estimate(
     # trail?" line answers for the pixels the picture will actually have. On a
     # single field ``panel_depth`` is None and this is the frame count, as before.
     reach = rejection_reach(options, est.n_frames, depth=est.panel_depth)
+    # "About how long will this take?" — the third question a person has before
+    # the button, beside how big the picture will be and whether it will fit in
+    # memory. Answered from this target's own comparable finished runs (see
+    # ``seestack.stacktime``), which means the *effective* options decide which
+    # runs count: ``auto_reject`` is resolved through the engine's own picker, so
+    # a run about to combine with min/max is not compared against κ-σ runs.
+    # ``None`` — and no line on the form — whenever nothing comparable is timed.
+    # The options that will actually run: with "Auto outlier removal" on, the
+    # engine's own picker resolves the concrete method — and it sizes that
+    # decision from a mosaic's *per-pixel depth*, not the target's frame count.
+    # Everything below that describes what will run reads this rather than
+    # re-deriving the rule, which is how the two came to disagree on a mosaic.
+    eff_options = _resolve_auto_reject(options, est.n_frames,
+                                       depth=est.panel_depth)
+    time_estimate = estimate_from_runs(
+        past_runs,
+        n_frames=est.n_frames,
+        canvas_px=int(est.canvas_w) * int(est.canvas_h),
+        cost_class=stack_cost_class(asdict(eff_options), est.n_frames),
+    )
     # And the sibling question the form has to answer when the user has turned
     # rejection *off*: "would any setting take this trail out?" Asked of the same
     # helper with the app let loose — ``auto_reject`` so it picks min/max below
@@ -673,6 +707,22 @@ def stack_estimate(
             "peak_gb": round(probe.peak_bytes / 1e9, 2),
             "would_exceed": probe.would_exceed,
         },
+        # About how long a run of these settings would take, measured from this
+        # target's own comparable finished stacks — the question the Jobs page's
+        # per-step ETA answers only once the evening is already committed.
+        # ``null`` (and nothing on the form) when no comparable run has been
+        # timed: a target stacked for the first time, or a library upgraded from
+        # before runs recorded their duration. ``basis_runs`` is how many runs
+        # the median rate came from, so the form can say what it is standing on.
+        "time_estimate": (
+            {
+                "seconds": round(time_estimate.seconds),
+                "basis_runs": time_estimate.basis_runs,
+                "basis_frames": time_estimate.basis_frames,
+            }
+            if time_estimate is not None
+            else None
+        ),
         # What "Auto outlier removal" actually resolves to for this many frames.
         # With it on, the engine *overrides* the sigma-clip / min-max toggles, so
         # a form that still shows them as live tells the beginner the opposite of
@@ -682,9 +732,21 @@ def stack_estimate(
         # own two-pass rejection and auto leaves the toggles alone).
         "auto_reject_resolved": (
             {
-                "method": auto_reject_method(options.sigma_kappa, est.n_frames),
+                # Read off the *resolved* options rather than re-derived from the
+                # frame count. Every threshold in this decision is a statement
+                # about how many samples land on one pixel, and on a mosaic that
+                # is a panel's depth — so a 21-sub mosaic 3 deep runs min/max
+                # while the count alone said sigma clipping. Re-deriving it here
+                # is exactly how the form came to name a method the run would
+                # not use, on the shape this owner shoots most.
+                "method": "sigma_clip" if eff_options.sigma_clip else "min_max",
                 "switch_at_frames": auto_reject_switch_frames(options.sigma_kappa),
                 "n_frames": est.n_frames,
+                # Subs on one spot of a mosaic — the number the method was
+                # actually chosen from. ``null`` on a single field, where it *is*
+                # the frame count. Additive: an older frontend ignores it and
+                # keeps wording the note in frames, which stays true there.
+                "panel_depth": est.panel_depth,
             }
             if options.auto_reject and not options.drizzle
             else None

@@ -454,3 +454,201 @@ def test_estimate_builds_the_canvas_once_per_request(
     assert r.status_code == 200
     assert r.json()["drizzle_probe"] is not None
     assert calls["n"] == 1
+
+
+# --- "about how long will this take?" ----------------------------------------
+
+
+def _record_timed_run(data_root, safe: str, *, n_frames: int, duration_s: float,
+                      options: dict, canvas: tuple[int, int] = (320, 480)) -> None:
+    """Put one finished, timed run in a target's History — what the estimate
+    below measures from. The real writer is ``run_stack``; this is the same row."""
+    import json
+
+    from seestack.io.library import Library
+    from seestack.io.project import StackRunRow
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="master", fits_path=None, tiff_path=None,
+                preview_path=None, n_frames_used=n_frames,
+                canvas_h=canvas[0], canvas_w=canvas[1],
+                coverage_min=1, coverage_max=n_frames,
+                options_json=json.dumps(options), duration_s=duration_s,
+            ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_estimate_says_nothing_about_time_on_a_target_never_stacked(
+        client, solved_library):
+    """The honest answer with no history — and the state every library is in
+    right after the upgrade that added the timing column."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    r = client.get(f"/api/targets/{safe}/stack-estimate")
+    assert r.status_code == 200
+    assert r.json()["time_estimate"] is None
+
+
+def test_estimate_times_the_next_run_from_this_target_s_own_runs(
+        client, solved_library):
+    """One past min/max run of 40 subs in 80 s → 2 s a sub, and the 3 subs this
+    fixture would stack are quoted at that rate. Fails before v0.399.0: the
+    response carried no answer to "how long?" at all.
+
+    Min/max on both sides on purpose: this fixture has three frames, and κ-σ
+    does not dispatch below four — so a κ-σ *request* here really would combine
+    as a plain mean, and matching it against 40-sub κ-σ history would be the
+    very mistake the cost class exists to prevent."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _record_timed_run(solved_library, safe, n_frames=40, duration_s=80.0,
+                      options={"min_max_reject": True, "sigma_clip": False})
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"min_max_reject": "true"}).json()
+    assert data["time_estimate"] is not None
+    assert data["time_estimate"]["basis_runs"] == 1
+    assert data["time_estimate"]["basis_frames"] == 40
+    assert data["time_estimate"]["seconds"] == round(2.0 * data["n_frames"])
+
+
+def test_a_drizzle_run_is_not_timed_from_a_plain_stack_s_rate(
+        client, solved_library):
+    """Drizzle does several times the per-sub work, so history of a different
+    shape must not be spent on it — the form then says nothing rather than
+    quoting a number that is wrong by a multiple."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _record_timed_run(solved_library, safe, n_frames=40, duration_s=80.0,
+                      options={"min_max_reject": True, "sigma_clip": False})
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"drizzle": "true"}).json()
+    assert data["time_estimate"] is None
+
+
+def test_auto_reject_is_resolved_before_the_past_runs_are_matched(
+        client, solved_library):
+    """With "Auto outlier removal" on, this 3-frame stack resolves to min/max —
+    so a κ-σ history is *not* its evidence, and a min/max history is. The match
+    has to run on the options that will actually run, not on the toggles."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _record_timed_run(solved_library, safe, n_frames=40, duration_s=80.0,
+                      options={"sigma_clip": True})
+    params = {"auto_reject": "true"}
+    assert client.get(f"/api/targets/{safe}/stack-estimate",
+                      params=params).json()["time_estimate"] is None
+    _record_timed_run(solved_library, safe, n_frames=40, duration_s=120.0,
+                      options={"min_max_reject": True, "sigma_clip": False})
+    data = client.get(f"/api/targets/{safe}/stack-estimate", params=params).json()
+    assert data["time_estimate"] is not None
+    assert data["time_estimate"]["seconds"] == round(3.0 * data["n_frames"])
+
+
+# --- what "Auto outlier removal" will actually do ----------------------------
+
+
+def _repoint(data_root, safe: str, pointings: list[tuple[float, float, int]]) -> None:
+    """Re-point a target's frames into ``[(ra, dec, count), …]`` panels.
+
+    Rows are cloned from the fixture's own frames, so each keeps a real
+    ``source_path`` and WCS — the sizing path only reads the DB. Same helper
+    shape as ``tests/webapp/test_rejection_outlook.py``."""
+    from dataclasses import replace
+
+    from seestack.io.library import Library
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            rows = list(proj.iter_frames())
+            template = rows[0]
+            for r in rows:
+                proj.update_frame(r.id, accept=False)
+            n = 0
+            for ra, dec, count in pointings:
+                for _ in range(count):
+                    n += 1
+                    proj.add_frame(replace(
+                        template, id=None, accept=True,
+                        source_path=f"{template.source_path}.{n:03d}",
+                        ra_center_deg=ra, dec_center_deg=dec,
+                    ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_auto_reject_resolved_reads_a_mosaic_by_its_panel_depth(
+        client, solved_library):
+    """The bug, found in a running app on the owner's own shape: four panels 5
+    subs deep is 20 frames, so resolving from the *frame count* says sigma
+    clipping — while the stack, which sizes the same decision from the per-pixel
+    depth (5), runs min/max. The form named a method the run would not use, and
+    every method-specific hint and greyed toggle followed it.
+
+    Fails before v0.399.1: ``method`` was ``"sigma_clip"`` here."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _repoint(solved_library, safe, [
+        (83.6, -5.4, 5), (84.4, -5.4, 5), (83.6, -4.6, 5), (84.4, -4.6, 5),
+    ])
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"auto_reject": "true"}).json()
+    assert data["n_frames"] == 20
+    resolved = data["auto_reject_resolved"]
+    assert resolved["panel_depth"] == 5
+    assert resolved["method"] == "min_max"
+    # …and it agrees with what the engine's own picker resolves for this stack,
+    # asserted against the picker rather than against a copy of its answer.
+    from seestack.io.library import Library
+    from seestack.stack.stacker import (
+        StackOptions,
+        _resolve_auto_reject,
+        estimate_stack_basis,
+    )
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            basis = estimate_stack_basis(proj, "auto")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    eff = _resolve_auto_reject(StackOptions(auto_reject=True),
+                               basis.n_frames, depth=basis.panel_depth)
+    assert eff.min_max_reject is True and eff.sigma_clip is False
+
+
+def test_auto_reject_resolved_on_a_single_field_is_unchanged(
+        client, solved_library):
+    """The single-field answer must be byte-for-byte what it was: no depth, and
+    the method the frame count implies — 3 subs is below every κ-σ floor."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"auto_reject": "true"}).json()
+    resolved = data["auto_reject_resolved"]
+    assert resolved["panel_depth"] is None
+    assert resolved["method"] == "min_max"
+    assert resolved["n_frames"] == 3
+    assert resolved["switch_at_frames"] == 11
+
+
+def test_a_deep_mosaic_still_resolves_to_sigma_clipping(client, solved_library):
+    """The other direction, so the fix is not just "always min/max on a mosaic":
+    panels 20 deep clear the floor on the pixels that make the picture."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _repoint(solved_library, safe, [
+        (83.6, -5.4, 20), (84.4, -5.4, 20), (83.6, -4.6, 20), (84.4, -4.6, 20),
+    ])
+    resolved = client.get(f"/api/targets/{safe}/stack-estimate",
+                          params={"auto_reject": "true"}).json()["auto_reject_resolved"]
+    assert resolved["panel_depth"] == 20
+    assert resolved["method"] == "sigma_clip"

@@ -14,6 +14,219 @@ Newest first.
 
 ---
 
+## v0.399.1 — 2026-09-09 — the Stack form named a method the run would not use, on a mosaic (`/stack-estimate` → `auto_reject_resolved`, `autoRejectNote.ts`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-4yit4y`. A bug found by
+**running the app**, not by reading it — the live check of v0.399.0 happened to
+put the two numbers side by side.)**
+
+**The bug, reproduced end to end on the dogfood mosaic.** With "Auto outlier
+removal" on, `GET /stack-estimate` answered `auto_reject_resolved.method` from
+`auto_reject_method(sigma_kappa, n_frames)` — the *target's frame count*. The
+engine's own picker, `_resolve_auto_reject`, sizes the identical decision from a
+mosaic's **per-pixel panel depth**, because every threshold in it is a statement
+about how many samples land on one pixel. On the generated 2×2 sample those
+disagree: 21 subs, panel depth 3 → the endpoint said **`sigma_clip`**, and the
+stack that had just run recorded **`min_max_reject: True, sigma_clip: False`**.
+
+This is the A6 class of bug (v0.326.7, "auto_reject reading the target's frame
+count where the honest number is a panel's depth") surviving in the *reporting*
+path after the engine half was fixed — and on the shape §1 says the owner shoots
+most.
+
+**It is not only a sentence.** `Stack.tsx` derives `sigmaClipEffective` /
+`minMaxEffective` from this field, and those drive which of the two toggles is
+greyed as overridden, which dependent knob (κ vs. the min/max count) reads as
+live, and every method-specific advisory on the form. So on a mosaic the form
+greyed the wrong switch, offered κ for a run that would not use it, and coached
+about the wrong method — all consistently, which is why it reads as intended
+behaviour rather than a fault.
+
+**The fix is to stop re-deriving it.** The endpoint already had to resolve the
+effective options for v0.399.0's cost class; `auto_reject_resolved.method` is now
+read off *those* (`eff_options.sigma_clip`), i.e. from the same
+`_resolve_auto_reject` the run will use, depth and all. One definition, so they
+cannot drift again. `panel_depth` joins the object as an additive field —
+`rejection_reach` beside it has carried the same number since v0.326.7 — so the
+copy can give the reason instead of quoting a count that did not decide anything.
+
+**The wording follows the number.** `autoRejectMethodNote` moved out of
+`Stack.tsx` into `frontend/src/autoRejectNote.ts` (pure, so the branch that only
+appears on a mosaic is testable without a form) and gained a depth voice: *"it
+picks the method from how many subs land on each pixel: your 21 subs are spread
+across a mosaic that is only 3 deep where it is thinnest, so it will use min/max
+rejection… It switches to sigma clipping once about 11 subs overlap on one
+spot."* The frame wording is **byte-for-byte unchanged** wherever the depth says
+nothing new — a single field (`null`), an older backend (absent), and a mosaic
+whose panels fully overlap (`depth == n_frames`) — because quoting the same
+number twice is noise, not honesty.
+
+**Upgrade-safe (§9):** one additive optional response field and one optional
+client field; no config, schema, on-disk, default or existing-shape change. An
+older frontend ignores `panel_depth` and keeps today's frame wording; an older
+backend omitting it lands on the same branch.
+
+**Tests (+9, three failing before):** `tests/webapp/test_stack_estimate.py` (+3)
+— the mosaic resolving to min/max **and agreeing with `_resolve_auto_reject`
+itself** rather than with a copy of its answer, the single-field answer
+unchanged, and a 20-deep mosaic still resolving to sigma clipping so the fix is
+not "always min/max on a mosaic"; `autoRejectNote.test.ts` (6) over both voices
+and the three cases that must keep the frame wording. The 106 existing
+`Stack.test.tsx` cases pass untouched.
+
+---
+
+## CLOSED, NOT BUILT — 2026-09-09 — `GET /api/gallery/best` does not need a cache: measured at owner scale (`webapp/routers/gallery.py`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-4yit4y`. The 2026-08-04 entry
+below set its own gate — *"time the endpoint on a realistic library first"* — and
+this is that measurement, so the entry is closed rather than left to cost another
+run its slot.)**
+
+**The measurement.** A synthetic library seeded straight into the registry and
+project DBs, one preview file per run, timed through a `TestClient` (best of 3,
+on this container, *while a full pytest run was competing for CPU* — so these are
+upper bounds):
+
+| library | `/api/gallery/best` | `/api/gallery` |
+|---|---|---|
+| 40 targets × 20 runs (800 runs) | **97 ms** | 96 ms |
+| 80 targets × 40 runs (3,200 runs) | **235 ms** | 296 ms |
+
+**The verdict.** Not the single-digit milliseconds the entry's own gate would
+have closed it on — but not a problem either, and the entry's premise ("this may
+already be the most expensive read on the Dashboard") is wrong: it costs about
+the same as `/api/gallery`, which sits beside it and has never been flagged, and
+both are two orders of magnitude off the 13.8 s endpoints that justified
+v0.374.7–v0.374.9. Against that, a cache here buys ~0.1–0.25 s twice per
+Dashboard path and pays for it in staleness on the one wall whose whole point is
+*"the picture I pinned"* — `cover_stack_run_id` and a pruned preview file are
+both changes a registry signature does not see, and the existing tests pin an
+**immediate** fallback when a cover's preview disappears.
+
+**If it is ever reopened** (a much larger library, or a real complaint): the
+machinery is already there — `webapp/registry_cache.cached_for_registry` — and
+the safe shape is to cache only the per-target *candidate collection* (the loop
+that builds `by_key`/`entries`), not the ranked answer, because `rank_portfolio`
+takes the caller's `limit` and only truncates with it; the signature must carry
+`registry_signature(targets)`, the observer's longitude **and** each target's
+`cover_stack_run_id`. Do not cache the ranked list keyed on `limit`.
+
+- **NEW IDEA (Builder 2026-08-04, spotted while shipping the pinned-cover wall v0.230.0) — `GET /api/gallery/best`
+  opens *every* target's `project.sqlite` on every request, uncached, and the Dashboard hits it on every load.**
+  *(Performance — PRIORITY 2/6; size S–M; **measure first, per this section's rule — do not optimise on suspicion**.)*
+  `get_best_pictures` (`webapp/routers/gallery.py`) walks `lib.list_targets()` and does `Project.open` +
+  `iter_stack_runs` + a `Path.exists()` per candidate run for **each** target, with no cache — and there are two
+  callers per Dashboard render path: `BestPicturesStrip` (`limit=4`) and the full wall, on distinct query keys, so
+  visiting the Dashboard and then the wall pays the whole walk twice. Contrast `_rollup_stacks` and the calibration
+  coverage endpoint, which both cache (60 s TTL) precisely because they do this kind of cross-target walk. On the
+  owner's library (dozens of targets, hundreds of runs) this may already be the most expensive read on the
+  Dashboard. **Idea:** give the endpoint the same short-TTL cache the roll-up uses, keyed on a cheap Library-level
+  signature (target count + newest `last_stack_utc` + the covers), and have the strip slice the cached full result
+  rather than issuing its own request. **Care:** the cache must invalidate promptly on "Set as cover" — the wall's
+  representative now depends on it (the frontend already invalidates its own query, but a server-side TTL would
+  hold a stale answer for up to the TTL), so either include `cover_stack_run_id` in the signature or keep the TTL
+  short. **Gate:** time the endpoint on a realistic library first; if it's already single-digit milliseconds, don't
+  build this — the current code is simpler and correct.
+
+---
+
+## v0.399.0 — 2026-09-09 — a new beginner feature: about how long this stack will take, measured from the target's own past runs (`seestack/stacktime.py`, `stack_runs.duration_s`, `/stack-estimate` → `time_estimate`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-4yit4y`. Not from an entry —
+the feature list is drained; this is the third question the Stack form's own
+panel was silent about, found by walking the journey a beginner actually
+walks.)**
+
+**The gap.** The Jobs page has been able to say how much longer a **running**
+stack has to go since the per-step ETA shipped — but the decision that needs a
+number comes *before* the button: a night's subs are in, it is late, and "start
+it now or in the morning?" had no answer anywhere in the app. The Stack form
+already tells you how big the picture will be (`print_plan`) and whether it will
+fit in memory (`peak_gb` / `would_exceed`); how long it will take is the third
+thing a person wants and the only one nothing knew. On the owner's scale — a
+5,477-sub mosaic — that is the difference between a coffee and an evening.
+
+**It is measured, never modelled.** A run's cost per sub depends on the frame
+size, the storage it is read from, the masters applied and the CPU it lands on,
+so no formula in this repo could have been trusted. Instead every finished run
+now records its own wall clock — additive `stack_runs.duration_s`, stamped by
+`run_stack` from a `time.monotonic()` taken around the whole run — and the
+estimate is the **median seconds-per-sub of this target's own comparable past
+runs**, multiplied by the subs the new run would combine.
+
+**Most of the new module is refusals, because a wrong number costs more trust
+than no number.** `seestack/stacktime.py` counts a past run as evidence only
+when it is:
+
+- **the same cost class** — `stack_cost_class` is `stacker.combine_method` (the
+  app's one answer to "which combine actually runs?", its silent fall-throughs
+  included) plus the single split that function has no reason to draw: two-pass
+  drizzle rejection re-drizzles every contribution and is not evidence for a
+  single-pass drizzle. No scaling factor between classes is offered anywhere —
+  the ratios would be invented;
+- **a similar canvas** (`MAX_CANVAS_RATIO`, ×2 either way) — the same subs cost
+  more reprojected onto a mosaic's union canvas than onto one reference frame;
+- **big enough to generalise from** (`MIN_BASIS_FRAMES`, 8) — below that a run is
+  mostly start-up cost, so its seconds-per-sub describes the setup, not the
+  stack.
+
+When nothing qualifies it returns `None` and the form shows **no line at all**:
+on a target's first stack, on settings this target has never run, and on every
+library the moment it upgrades — the column is new, so nothing is timed yet.
+That silence is the honest state, not a gap to be filled with a hedge.
+
+**The match runs on the options that will actually run.** `/stack-estimate`
+resolves `auto_reject` through the engine's own `_resolve_auto_reject` (which
+needs a mosaic's `panel_depth`, not just the frame count) before asking for the
+class, so a run about to combine with min/max is not timed from κ-σ history. The
+alternative — re-deriving the rule from the options mapping — is the
+hand-mirroring this project keeps finding bugs in.
+
+**Wording carries the caveat the number cannot.** `stackTimeLine` says what it is
+standing on (*"About 45 min to run — from your last 2 stacks of this target."*)
+and softens *About* to *Roughly* when the run being sized is `FAR_EXTRAPOLATION`
+(×4) bigger than the runs the rate was learned on. It formats through
+`jobEta.formatEtaSeconds`, so a stack quoted at "40 min" before the button counts
+down in the same unit once it is running rather than in a second dialect.
+
+**Upgrade-safe (§9), and the red test that made it so.** The column was first
+added with a `SCHEMA_VERSION` bump and a migration step — the pattern most of
+this table's columns use — and `test_uncovered_fraction.py`'s rollback guard went
+red: an older build **refuses** to open a project stamped newer than itself, so a
+bump would have made this feature unrollbackable. It now reaches an existing
+project the way `uncovered_frac` and `targets.folder_name` do — it is in
+`SCHEMA_SQL`, and `_reconcile_table_columns` adds it on open, at an unchanged
+`SCHEMA_VERSION` (22). Every existing run stays NULL, i.e. "never timed". Plus
+one additive optional response field and one optional client field. No config, on-disk, default
+or existing-response-shape change; an older frontend ignores the field and an
+older backend omitting it reads as "nothing to say", which is exactly right. The
+editor-export and channel-combine writers of `stack_runs` leave the column NULL
+deliberately — neither is a stack, so neither may teach the estimate a rate no
+stack runs at.
+
+**Cost:** one bounded read of the target's newest 50 run rows on a request that
+already opens the project (`_TIME_ESTIMATE_SCAN_RUNS`); the estimate itself is a
+median over at most five of them.
+
+**Tests (+35).** `tests/test_stack_time_estimate.py` (24): the median rate and
+its projection, one run being enough, only the newest handful counting, and one
+refusal each for a different cost class, a run below the floor, a canvas outside
+the window (both directions) and an empty history; the row reader skipping an
+untimed run, a non-stack row and six kinds of unusable row without raising; and —
+the guard that matters — `stack_cost_class` asserted **equal to
+`combine_method`** across four option sets × four frame counts, so the two
+cannot drift into different answers. Plus the end-to-end that a real `run_stack`
+records a positive duration, and the two upgrade guards — a project missing the
+column gains it on open with its rows intact and its `user_version` untouched,
+and a build that has never heard of the column still reads a DB this one wrote. `tests/webapp/test_stack_estimate.py` (+4): silence with no
+history, the rate applied, a drizzle request refusing a plain stack's history,
+and auto-reject resolved before the match. Frontend: `stackTimeEstimate.test.ts`
+(6) over the wording and its refusals, and `Stack.test.tsx` (+1, +1 assertion)
+for the line on the real form and its absence when the backend sends none.
+
+---
+
 ## v0.398.1 — 2026-09-08 — the Lucky-imaging knob is typed as the percent the picture is badged with (`StackOptionField.unit`, `StackOptionControl.percentFromFraction`)
 
 **(Builder 2026-09-08, branch `claude/sweet-babbage-yzhopm`. The Scout's
