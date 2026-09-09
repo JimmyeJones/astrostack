@@ -229,6 +229,80 @@ class UploadResponse(BaseModel):
     folders: list[str] = []
 
 
+class UploadDestination(BaseModel):
+    """One folder under ``incoming/`` that already holds a target's subs."""
+    target: str            # the library target those subs became
+    folder: str            # the folder under incoming/ they actually live in
+    n_frames: int          # how many of this target's subs are already there
+
+
+class UploadDestinations(BaseModel):
+    destinations: list[UploadDestination] = []
+
+
+@router.get("/api/upload-destinations", response_model=UploadDestinations)
+def upload_destinations(request: Request) -> UploadDestinations:
+    """The folders under ``incoming/`` that already hold subs, and the target
+    each one became — so the upload form can offer *"add to a target you already
+    have"* instead of a blank box.
+
+    A blank box is where two beginner mistakes live, and neither is guessable
+    from the field itself. Typing ``M31`` when the library holds *M 31* makes a
+    **second** target and splits the subs across two thinner stacks. Worse,
+    typing the target's own name when its subs live in ``M 31_sub/`` writes them
+    to the bare ``M 31/`` beside it — which the scanner deliberately skips as the
+    Seestar's own on-device output
+    (:func:`seestack.io.scanner._apply_seestar_convention`), so the upload lands
+    and never ingests. Both are answerable only from what the library already
+    knows, which is what this returns.
+
+    **Nothing under ``incoming/`` is walked, opened or ``stat``ed** — the folder
+    is strictly read-only (AGENTS.md §10) and every answer here comes from the
+    ``frames`` rows (:meth:`Project.source_folders_under`).
+
+    Only single-component folders are offered, because ``safe_target_dir`` writes
+    exactly one level: a target whose subs sit deeper (a whole-device container
+    drop, ``incoming/MyWorks/M 31_sub/``) is left out rather than offered a
+    destination the upload would refuse. A target whose subs sit loose in
+    ``incoming/`` itself is left out for the same reason — its "folder" is the
+    blank one the form already offers as *Unsorted*.
+
+    Read-only and best-effort per target: an unreadable project DB drops that one
+    row rather than 500-ing the form, exactly as the storage/gallery pages do.
+    """
+    from seestack.io.project import Project
+
+    settings = deps.get_settings(request)
+    # The trailing separator matters: without it a sibling like `incoming2/`
+    # matches (same reasoning as ``source_frames_under``'s callers).
+    prefix = os.path.join(str(settings.resolved_incoming_dir), "")
+    lib = deps.open_library(request)
+    rows: list[UploadDestination] = []
+    try:
+        for t in lib.list_targets():
+            try:
+                proj = Project.open(lib.target_dir(t))
+            except Exception:  # noqa: BLE001 — one broken target must not 500
+                continue
+            try:
+                folders = proj.source_folders_under(prefix)
+            except Exception:  # noqa: BLE001
+                folders = []
+            finally:
+                proj.close()
+            for folder, n in folders:
+                if not folder or os.sep in folder or "/" in folder:
+                    continue
+                rows.append(UploadDestination(
+                    target=t.name, folder=folder, n_frames=n))
+    finally:
+        lib.close()
+    # Busiest first, so the target a beginner is most likely adding to is the
+    # first suggestion; ties by folder name so the order is stable to look at.
+    rows.sort(key=lambda d: (-d.n_frames, d.folder.lower()))
+    return UploadDestinations(destinations=rows)
+
+
 async def _stream_to_disk(upload: UploadFile, dest: Path) -> int:
     """Stream an upload to ``dest`` via a ``.part`` sidecar, atomically renamed.
 

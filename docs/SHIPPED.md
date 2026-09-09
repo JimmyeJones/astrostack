@@ -14,6 +14,87 @@ Newest first.
 
 ---
 
+## v0.403.0 — 2026-09-09 — the upload box knows which targets you already have (`Project.source_folders_under`, `/api/upload-destinations`, `uploadDestination.ts`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-dto79f`. The "in-UI destination
+target picker" residue of the 2026-07 bulk-upload block — slice (c), open since
+v0.115.0 and named again in the 2026-09-08 archive pass.)**
+
+**What was wrong.** "Target folder (optional)" was a blank text box, and two
+beginner mistakes lived in it — neither guessable from the field, and one of them
+silent.
+
+1. **A near-miss makes a second target.** Typing `M31` when the library holds
+   *M 31* splits one object's subs across two thinner stacks. Nothing says so
+   until the Library shows two rows.
+2. **The obvious name is the one the app skips.** A Seestar's raw subs live in
+   `M 31_sub/`; the bare `M 31/` beside it is the device's *own* finished
+   picture, which `scanner._apply_seestar_convention` deliberately passes over
+   (`(parent, low + "_sub") in sibling_names`). So typing the target's own name —
+   the obvious thing to type — lands every file and ingests none of them. It is
+   *reported* (v0.329.2 made that skip non-silent), but reporting a lost upload
+   after the fact is not the same as not losing it.
+
+**What ships.** The box is an `Autocomplete` seeded with the folders that already
+hold subs, and one sentence under it says what the typed name will actually do —
+carrying a one-click fix where there is exactly one right answer, the app's usual
+"copy that names a value some reachable control would accept gets that control"
+idiom. Five states, all pure and all tested (`frontend/src/uploadDestination.ts`):
+an exact folder confirms (*"Adds to M 31 — 3,110 subs of it already live in
+M 31_sub"*), the bare-sibling trap warns and offers the `_sub` folder, a
+near-miss warns that it would start a second target and offers the real folder,
+a `_video`/`_photo`/`batch_stack_tmp` name warns that the scanner never ingests
+it, and anything else says plainly what new target it will become.
+
+**The two comparisons are deliberately different, because the scanner's are.**
+The skip warning compares **exactly** (lower-cased), because that is the
+comparison `_apply_seestar_convention` makes — `M31` beside `M 31_sub` would
+*not* be skipped, it would make a second target, which is the other warning. And
+`_mosaic_sub` also ends in `_sub`, but the sibling test appends exactly `"_sub"`,
+so a bare `M 31/` next to `M 31_mosaic_sub/` is ingested, not skipped; a test pins
+that the copy does not claim otherwise. Only the "did you mean" nudge folds case,
+spaces, underscores and hyphens.
+
+**The folder is read, never reconstructed — that is the whole point.** The folder
+name and the target name are related by the convention and are therefore *not*
+interchangeable, so new `Project.source_folders_under(prefix)` groups the
+`frames` rows by the directory their `source_path` actually sits in. **Nothing
+under `incoming/` is walked, opened or `stat`ed** (AGENTS.md §10) — pinned by a
+test that makes those calls fatal *and* proves the trap armed first, the same
+shape v0.383.0 used. It reports the **whole** relative directory, not the first
+component: a test caught the first implementation collapsing
+`incoming/MyWorks/M 31_sub/` to `MyWorks`, which reads exactly like a folder you
+*could* upload into and would have landed the subs a level above their own
+target. `GET /api/upload-destinations` therefore offers only single-component
+folders, because `safe_target_dir` writes exactly one level.
+
+**Withheld where it would be a different claim.** For a folder drop (or a `.zip`,
+which always keeps its structure) the typed name is a *parent* the folders land
+inside — `folderPreserveNote`/`zipNote` already say that truthfully — so the
+advice stands aside rather than promising "adds to M 31".
+
+**Found by running it, not by reading it.** At 420 px the `nowrap` row squeezed
+the fix button until its label clipped to `Use “N` — the one word it exists to
+say. The row wraps now; the browser pass also confirmed all four states, the
+button, no console errors and no horizontal overflow at 420 px and 1440 px.
+
+**Upgrade-safe (§9):** one new read-only endpoint, one new pure engine query, one
+new frontend module; no config, schema, on-disk, API-shape or default change. An
+older backend (or any failed read) yields no destinations, and the box then
+behaves exactly as it did — it never warns on no evidence, which is its own test.
+
+**Tests (+29):** 8 `tests/test_project_source_folders.py` (busiest-first, the
+loose-in-incoming case, the nested-container case that found the bug, the
+`incoming2/` prefix guard, and the armed no-filesystem trap), 6 in
+`tests/webapp/test_upload.py` (the folder not the target name, `M 31_sub` vs
+*M 31*, ordering, the nested container left out, empty on an empty library, one
+unreadable target not sinking the answer), 3
+`tests/test_upload_destination_mirror.py` (the suffix/skip constants against
+`seestack.io.scanner`, the drift guard this needs because TypeScript cannot
+import them), 16 `uploadDestination.test.ts` and 5 in `UploadFits.test.tsx`.
+
+---
+
 ## v0.401.0 — 2026-09-09 — "here's how it fills your field": the framing hint gets a picture (`framing.field_fill`, `FieldFillDiagram`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-7w0m19`. Cut from
@@ -10427,7 +10508,7 @@ owner's one-sitting list in `IMPROVEMENTS.md` → "Needs owner sign-off".
   _(M–L, split as above; PRIORITY 2–3, beginner feature — keeps the pipeline stocked; builds directly on
   shipped `session_recap` infra so it's low-risk.)_
 
-### the 2026-07 beginner-feature block — bulk upload (v0.115.0, .zip v0.229.0), "Last night" (v0.112.0), "Is it enough yet?" (v0.111.0), share card (v0.114.0; the caption strip became the keepsake), ⭐ Tonight (v0.95.0/v0.96.0; (c) weather stays under sign-off), "What's in this picture?" (v0.141.0), "How's my stack?" (v0.120.0/v0.121.0; the highlight cue is in the owner's list), progress goals (v0.117.0), "Will it fit?" (v0.130.0) — residue worth knowing: an in-UI destination picker for uploads
+### the 2026-07 beginner-feature block — bulk upload (v0.115.0, .zip v0.229.0), "Last night" (v0.112.0), "Is it enough yet?" (v0.111.0), share card (v0.114.0; the caption strip became the keepsake), ⭐ Tonight (v0.95.0/v0.96.0; (c) weather stays under sign-off), "What's in this picture?" (v0.141.0), "How's my stack?" (v0.120.0/v0.121.0; the highlight cue is in the owner's list), progress goals (v0.117.0), "Will it fit?" (v0.130.0) — residue worth knowing: ~~an in-UI destination picker for uploads~~ *(shipped v0.403.0, 2026-09-09)*
 
 - **⭐ OWNER-REQUESTED — Bulk upload FITS through the web interface (no NAS share
   needed).** — **SLICE (a) SHIPPED v0.115.0** (Builder 2026-07-13, branch
