@@ -18,6 +18,57 @@ is a queue.
 
 ---
 
+## 2026-09-09 (latest) — Builder run (branch `claude/sweet-babbage-u828ql`): D1's fourth instalment closed, and a clean `--mosaic --editor` dogfood pass on top of it
+
+**The run.** Baseline green before any change (**5,389 passed / 2 skipped**, full
+suite headless, 27:58). Final green on the branch: **5,395 passed / 2 skipped**,
+26:11. Shipped **v0.399.3 + v0.399.4** — the fourth D1 instalment, filed the same
+morning by the run before this one with five candidate fixes measured and
+rejected. One backlog entry cut to `SHIPPED.md`; one short measured residual filed
+in its place, so the working list is shorter than it was found.
+
+**Why the sixth attempt worked where five levers had not.** The five rejected ones
+were all *scalar* — move a fraction, move a ratio, compare two areas. The entry's
+own closing note was that the failure is spatial, and that is where the answer
+was: a reprojection ramp is **attached to the outline** and is a **band**, while a
+thin panel is neither, and both of those are facts about the map rather than
+thresholds over its depth histogram. The one number the rule does carry
+(`FRINGE_OUTSIDE_FRAC`) is a loose pre-filter that the shape test stands behind,
+not the discriminator — which is why it could be moved from 0.20 to 0.25 to clear
+a fixture without moving the fix.
+
+**A method note worth keeping: the fixture with the knife edge was the webapp's,
+not the engine's.** At 0.20 the whole engine suite passed and six `test_editor.py`
+tests failed, because `_ragged_border_coverage` ramps 1→2→3→4 against a panel
+depth of **5**, so its outermost ring is *exactly* a fifth of a panel. On a real
+Seestar panel of tens of subs the same ring is 3 %. The lesson is not "raise the
+constant" — it is that a five-sub fixture cannot vouch for a fraction-of-a-panel
+threshold at all, and the only reason this was caught is that the change was run
+against the **webapp** suite and not only the module's own.
+
+**Dogfood: CLEAN, and on the mosaic, which is what §1 asks for.**
+`scripts/agent-dogfood.sh --mosaic --editor` on the fix:
+
+- **`mosaic trim: Auto would cut 7.9% of the canvas`** — the *same* 7.9 % v0.386.0
+  recorded before any of this, which is the result to want: the mosaic sample has a
+  genuinely ragged union outline (4.8 % uncovered), so the honest trim is unchanged
+  and the new rule only stands down where there is no border at all. Well under the
+  "above ~15 % is a bug" bar.
+- Editor driven on the **mosaic** run: all **21** ops the Add menu offers added one
+  at a time, every one re-rendering the live preview, undo and redo applied, **no
+  console errors and no failed requests**.
+- Page probe on the mosaic target: nothing overflowing, tallest page
+  `[phone] /targets/Sample_M42_mosaic_2_2` at **3,407 px**.
+
+**What the run did not do: a second feature task.** The "Features that serve real
+workflows" list was read end to end and every entry in it is shipped, closed,
+declined, or gated on something an agent cannot supply; the top of "Autonomy &
+friendliness" is the same. Rather than manufacture work (AGENTS.md §2), the run
+went deep on the one priority-1 bug and stopped. Ready feature work for a Builder
+is genuinely thin right now — that is a note for the **Scout**.
+
+---
+
 ## 2026-09-09 (later) — Builder run (branch `claude/sweet-babbage-c9vw1a`): one shipped fix, one verified bug filed with five rejected fixes, and a lead whose own measurement was taken on the wrong map
 
 **The run.** Baseline green before any change (**5,350 passed / 2 skipped**, full

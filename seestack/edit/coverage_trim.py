@@ -174,6 +174,60 @@ TRIM_KEEP_RATIO = 0.8
 # on. Bounded so this can never loop on a pathological map.
 _TRIM_LADDER_RUNGS = 8
 
+# Below this fraction of one panel's depth a pixel is treated as **effectively
+# uncovered** — the far end of a reprojection ramp rather than a panel.
+#
+# This is the third instalment of D1, and the one the ladder above could not
+# reach. The ladder bounds the trim by what the *coverage* allows, which is worth
+# nothing on a canvas that is **fully tiled**: there the bound is 1.0, and a
+# rectangle keeping 0.80-0.91 of it passes and is accepted. Measured over 147
+# synthetic rasters shaped like the owner's shooting (3x3 … 12x8, 10 % overlap,
+# panel depths spanning 3-15 up to 50-500 subs, three seeds each, weighted and
+# integer), **19 of them were cropped, the worst keeping 0.802 of a canvas with no
+# ragged edge anywhere**. AGENTS.md §1 puts the bar at "a trim above ~15 % of the
+# canvas is a bug".
+#
+# Four scalar levers were measured and rejected before this one (lower the panel
+# reference; read the frame-count map; tighten TRIM_KEEP_RATIO; refuse a crop that
+# discards well-covered pixels) — each either non-monotone, or a case where the
+# honest and the broken shapes collide outright. The discriminator that does
+# separate them is **spatial**, and it is the one the module has been circling
+# since D1 was filed: *a border is where the data runs out; a thin panel is data.*
+# So the trim's job is not "drop everything shallow", it is "drop the shallow
+# stuff that is **attached to where the data runs out**" — which needs a notion of
+# where that is on a canvas whose outline is not NaN.
+#
+# A reprojection ramp falls to *nothing* at the union outline: the outermost pixel
+# is reached by whichever single frame stretched furthest, so on a real panel of
+# tens of subs it holds a few percent of one. A panel — however few subs it got —
+# holds a panel's worth, because a panel is a whole frame's footprint. A quarter
+# sits above every ramp foot the fixtures in this repo hold (a ragged 2x2 mosaic's
+# outermost ring is 9 % of its panel depth, and `tests/webapp/test_editor.py`'s
+# five-sub ramp foot is 20 %) and it is deliberately *not* `DEFAULT_MIN_FRAC`:
+# "well covered" (half a panel) and "no data at all" (a quarter) are different
+# questions, and the trim needs both.
+#
+# This is a **pre-filter, not the discriminator** — the shape test below is — so it
+# is chosen loose on purpose. Everything it lets through that is really a panel is
+# a block, and blocks are refused; what it must not do is exclude a genuine ramp
+# foot, because that is unrecoverable.
+FRINGE_OUTSIDE_FRAC = 0.25
+# …and a depth alone is not enough to say "no data here", because on a raster
+# whose depths span 10-100 subs the reference lands near the mode and a genuine
+# 10-sub panel is under a fifth of it. Measured: with the depth test alone, 9 of
+# 147 fully tiled rasters were still cropped, the worst still keeping 80.4 %.
+#
+# So the shape has to agree with the depth. A ramp is a **thin** structure — a
+# band a few pixels wide hugging the outline, because its width is the pointing
+# spread; a panel is a whole frame's footprint, as thick as it is long. A region
+# counts as "the data ran out here" only when it is nowhere thicker than a quarter
+# of its own longest extent, which a ramp clears by an order of magnitude (a
+# ragged 2x2's ring is 5 px across 400) and a panel fails outright (a 12x8's panel
+# is 40 px across 40). Measured over the same 147: **0 of 147 cropped, on both the
+# weighted and the frame-count map**, with every ramp fixture in this module's
+# tests still trimmed exactly as before.
+FRINGE_MAX_THICKNESS_FRAC = 0.25
+
 
 def _largest_hist_rect(heights: np.ndarray, base_row: int):
     """Largest rectangle in a 1-D histogram, as ``(r0, c0, r1, c1, area)``.
@@ -285,20 +339,15 @@ def panel_coverage_level(covered: np.ndarray,
     return min(level, peak) if level > 0 else peak
 
 
-def _coverage_threshold(coverage: np.ndarray,
-                        min_frac: float = DEFAULT_MIN_FRAC,
-                        *, level_min_frac: float | None = None) -> float | None:
-    """The coverage value at or above which a pixel is "well covered", or ``None``
-    when the map has no opinion to offer (non-2-D, empty, nothing finite/positive).
+def _panel_reference(coverage: np.ndarray,
+                     *, level_min_frac: float | None = None) -> float | None:
+    """One panel's coverage depth for a whole map, or ``None`` when the map has no
+    opinion to offer (non-2-D, empty, nothing finite/positive).
 
-    Factored out of :func:`well_covered_mask` so :func:`largest_covered_rect` can
-    walk the same number *down* without re-deriving the reference depth by hand.
-
-    ``level_min_frac`` overrides how substantial a coverage level has to be before
-    :func:`panel_coverage_level` will call it a panel. ``None`` — every caller but
-    the mask — is :data:`PANEL_LEVEL_MIN_FRAC`, i.e. unchanged; see
-    :data:`MASK_LEVEL_MIN_FRAC` for why the mask asks for a lower one.
-    """
+    The reference every fraction in this module is *of*: :data:`DEFAULT_MIN_FRAC`
+    for "well covered", :data:`FRINGE_OUTSIDE_FRAC` for "effectively no data".
+    Falls back to the peak when :func:`panel_coverage_level` declines, which is the
+    behaviour that predates D1."""
     cov = np.asarray(coverage, dtype=np.float32)
     if cov.ndim != 2 or cov.size == 0:
         return None
@@ -314,6 +363,26 @@ def _coverage_threshold(coverage: np.ndarray,
                   else float(level_min_frac)))
     if reference is None or not (reference > 0):
         reference = peak
+    return reference
+
+
+def _coverage_threshold(coverage: np.ndarray,
+                        min_frac: float = DEFAULT_MIN_FRAC,
+                        *, level_min_frac: float | None = None) -> float | None:
+    """The coverage value at or above which a pixel is "well covered", or ``None``
+    when the map has no opinion to offer (non-2-D, empty, nothing finite/positive).
+
+    Factored out of :func:`well_covered_mask` so :func:`largest_covered_rect` can
+    walk the same number *down* without re-deriving the reference depth by hand.
+
+    ``level_min_frac`` overrides how substantial a coverage level has to be before
+    :func:`panel_coverage_level` will call it a panel. ``None`` — every caller but
+    the mask — is :data:`PANEL_LEVEL_MIN_FRAC`, i.e. unchanged; see
+    :data:`MASK_LEVEL_MIN_FRAC` for why the mask asks for a lower one.
+    """
+    reference = _panel_reference(coverage, level_min_frac=level_min_frac)
+    if reference is None:
+        return None
     frac = min(0.95, max(0.05, float(min_frac)))
     return frac * reference
 
@@ -402,17 +471,128 @@ def largest_covered_rect(coverage: np.ndarray,
     So the rectangle the coverage alone allows is computed too, and when the depth
     threshold does far worse than that bound the threshold is halved and asked
     again. It can only ever keep **more** than it did before this guard existed.
-    """
-    threshold = _coverage_threshold(coverage, min_frac)
-    if threshold is None:
+
+    **And it is bounded by where the data actually runs out**
+    (:func:`_border_trim_rect`, :data:`FRINGE_OUTSIDE_FRAC`). The bound above is
+    worth nothing on a **fully tiled** canvas, where it is 1.0 by definition and a
+    rectangle keeping four fifths of it still passes — which is where the last 19
+    of 147 measured over-crops lived. So a second rectangle is computed by removing
+    only the shallow region that is *attached to the outline*, and the more
+    generous of the two answers wins. Both halves can only ever keep more, so the
+    worst case of this function remains leaving fringe in, never cropping a panel
+    away."""
+    reference = _panel_reference(coverage)
+    if reference is None:
         return None
+    frac = min(0.95, max(0.05, float(min_frac)))
+    threshold = frac * reference
     cov = np.asarray(coverage, dtype=np.float32)
     covered = np.isfinite(cov) & (cov > 0)
     # What the coverage alone allows: the honest ceiling on a border trim.
     bound = _rect_area(_rect_from_mask(covered))
+    ladder = _rect_from_mask(covered)
     for _ in range(_TRIM_LADDER_RUNGS):
         rect = _rect_from_mask(np.isfinite(cov) & (cov >= threshold))
         if _rect_area(rect) >= TRIM_KEEP_RATIO * bound:
-            return rect
+            ladder = rect
+            break
         threshold *= 0.5
-    return _rect_from_mask(covered)
+    has_opinion, border = _border_trim_rect(cov, covered, reference, frac)
+    if not has_opinion or _rect_area(ladder) >= _rect_area(border):
+        return ladder
+    return border
+
+
+def _thin_labels(mask: np.ndarray, labels: np.ndarray, n: int) -> np.ndarray:
+    """Which of ``labels``' connected regions are **bands rather than blocks** —
+    nowhere thicker than :data:`FRINGE_MAX_THICKNESS_FRAC` of their own longest
+    extent. Indexed by label, so entry 0 (the background) is always ``False``.
+
+    Thickness is the widest disc that fits inside a region (its distance
+    transform's peak, doubled), measured against how far the region reaches. It
+    is deliberately relative to the region rather than to the canvas: a ramp is
+    thin *because it is a ramp*, at any canvas size and any panel count, whereas a
+    canvas-relative fraction would have to sit below one panel of a 12x8 raster
+    and above the ramp of a single field — a two-fold gap. Against its own extent
+    a ramp measures ~0.02 and a panel ~1.0.
+    """
+    from scipy import ndimage
+
+    thin = np.zeros(n + 1, dtype=bool)
+    if n == 0:
+        return thin
+    index = np.arange(1, n + 1)
+    thickness = 2.0 * np.asarray(
+        ndimage.maximum(ndimage.distance_transform_edt(mask), labels, index),
+        dtype=np.float64)
+    extent = np.array(
+        [max(sl[0].stop - sl[0].start, sl[1].stop - sl[1].start)
+         for sl in ndimage.find_objects(labels)], dtype=np.float64)
+    thin[1:] = thickness <= FRINGE_MAX_THICKNESS_FRAC * np.maximum(extent, 1.0)
+    return thin
+
+
+def _thin_regions(mask: np.ndarray) -> np.ndarray:
+    """:func:`_thin_labels` as a boolean mask of the same shape as ``mask``."""
+    from scipy import ndimage
+
+    labels, n = ndimage.label(mask)
+    return _thin_labels(mask, labels, n)[labels]
+
+
+def _outline_mask(cov: np.ndarray, covered: np.ndarray,
+                  reference: float) -> np.ndarray:
+    """Where the data **runs out**: the uncovered pixels, plus the thin, nearly
+    empty ramp along the union outline that is uncovered in all but name.
+
+    Both halves are needed and neither is enough alone. A union canvas is a
+    bounding box, so a mosaic that happens to reach the box on a side has no NaN
+    there at all — only a ramp falling to a few percent of a panel — and a trim
+    that waited for NaN would never trim it. But depth alone mistakes a genuinely
+    thin *panel* for a ramp on a raster whose panels span 10-100 subs, which is
+    what :func:`_thin_regions` refuses: a ramp is a band, a panel is a block."""
+    shallow = covered & (cov < FRINGE_OUTSIDE_FRAC * reference)
+    if not shallow.any():
+        return ~covered
+    return ~covered | _thin_regions(shallow)
+
+
+def _border_trim_rect(cov: np.ndarray, covered: np.ndarray, reference: float,
+                      frac: float):
+    """``(has_opinion, rect)`` — the rectangle left once the **border fringe**,
+    and only it, is removed.
+
+    The border is where the data runs out (:func:`_outline_mask`) plus the thin
+    shallow band attached to it. Everything else a depth threshold calls poorly
+    covered is a **panel** — real data, fewer subs — and a border trim is not
+    entitled to it, wherever on the canvas it happens to sit. Two facts do the
+    separating, and neither is a tuned number: a ramp is *attached* to the
+    outline and a thin panel in the middle of a raster is not, and a ramp is a
+    *band* while a panel is a block (:func:`_thin_regions`).
+
+    **When it declines to answer.** A ramp that runs into a shallow edge panel is
+    one connected region that is neither purely fringe nor purely panel, and this
+    rule keeps the whole thing rather than eat the panel — so on such a canvas it
+    can end up proposing *no trim at all* while the picture visibly has a border.
+    When that happens it says ``(False, None)`` and the depth ladder's answer
+    stands. An **absent** outline is the opposite case and a real answer: a canvas
+    that never runs out of data has no border to trim, which is the whole of the
+    fourth D1 instalment."""
+    from scipy import ndimage
+
+    outside = _outline_mask(cov, covered, reference)
+    if not outside.any():
+        return True, _rect_from_mask(covered)
+    poor = covered & (cov < frac * reference)
+    fringe = np.zeros(covered.shape, dtype=bool)
+    if poor.any():
+        labels, n = ndimage.label(poor)
+        attached = np.unique(labels[ndimage.binary_dilation(outside) & poor])
+        is_fringe = np.zeros(n + 1, dtype=bool)
+        is_fringe[attached[attached > 0]] = True
+        is_fringe &= _thin_labels(poor, labels, n)
+        fringe = is_fringe[labels]
+    rect = _rect_from_mask(covered & ~fringe)
+    if rect is None:
+        return False, None
+    return True, rect

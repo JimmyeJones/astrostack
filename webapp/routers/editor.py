@@ -35,6 +35,7 @@ from seestack.edit.ops.stars import star_reduce_differs_on_proxy
 from seestack.edit.pipeline import apply_recipe
 from seestack.edit.proxy import (
     coverage_path_for,
+    frame_coverage_path_for,
     get_proxy,
     load_coverage,
     load_frame_coverage,
@@ -231,17 +232,43 @@ def _load_run_coverage_strided(run):
     cov_path = coverage_path_for(run.fits_path)
     if not cov_path.exists():
         return None
-    step = 1
+    return load_coverage(run.fits_path, step=_trim_step_for(cov_path))
+
+
+def _trim_step_for(cov_path) -> int:
+    """How far to stride a coverage sibling so the O(h·w) sweeps stay cheap."""
     try:
         from astropy.io import fits as _fits
 
         hdr = _fits.getheader(cov_path)
         dim = max(int(hdr.get("NAXIS1", 0)), int(hdr.get("NAXIS2", 0)))
         if dim > _TRIM_MAX_DIM:
-            step = -(-dim // _TRIM_MAX_DIM)  # ceil division
+            return -(-dim // _TRIM_MAX_DIM)  # ceil division
     except (OSError, ValueError):
-        step = 1
-    return load_coverage(run.fits_path, step=step)
+        return 1
+    return 1
+
+
+def _load_run_frame_counts_strided(run):
+    """The run's honest per-pixel **frame count**, strided like the map above, or
+    ``None`` for a run recorded before the ``_framecov.fits`` sibling existed.
+
+    What the border trim should measure a panel's depth in. A coverage value is a
+    sum of per-frame *weights* once ``quality_weighted`` is on — the walk-away
+    default, so it is what the owner's own maps hold — and that spreads one real
+    panel across a band of values, which is the input D1 kept being wrong on. The
+    frame count is flat inside a panel by construction: "bin by panel geometry,
+    not by how good a panel's subs happened to be", the same lesson the mosaic
+    sky-leveling pass and :func:`seestack.render.thumbnail.stack_detail_mask`
+    already learned. Measured over 147 fully tiled rasters, the trim over-cropped
+    2 of them on the weighted map and **none** on the frame-count map.
+
+    ``None`` falls back to the weighted map, i.e. exactly today's behaviour for
+    every run that has no sibling."""
+    cov_path = frame_coverage_path_for(run.fits_path)
+    if not cov_path.exists():
+        return None
+    return load_frame_coverage(run.fits_path, step=_trim_step_for(cov_path))
 
 
 def _run_is_mosaic(run, coverage=None, *, load: bool = False) -> bool:
@@ -267,8 +294,14 @@ def _trim_rect_for_run(run, min_frac: float = 0.5
     """Fractional ``(x0, y0, x1, y1)`` bounds of the largest well-covered rectangle
     of a run's coverage map (the ragged mosaic border trimmed away), or ``None``
     when there's no coverage sibling or nothing worth trimming (a full-frame
-    result). Shared by the "Trim border" suggestion and Auto-process."""
-    cov = _load_run_coverage_strided(run)
+    result). Shared by the "Trim border" suggestion and Auto-process.
+
+    Measured on the **frame count** where the run wrote one
+    (:func:`_load_run_frame_counts_strided`), falling back to the weighted
+    coverage map for runs recorded before that sibling existed."""
+    cov = _load_run_frame_counts_strided(run)
+    if cov is None:
+        cov = _load_run_coverage_strided(run)
     if cov is None:
         return None
     rect = largest_covered_rect(cov, min_frac=min_frac)
