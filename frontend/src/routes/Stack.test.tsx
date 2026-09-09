@@ -1515,6 +1515,34 @@ describe("StackView", () => {
     await waitFor(() =>
       expect(screen.getByText(/2 accepted, solved frames · output 480×320/)).toBeInTheDocument());
     expect(screen.getByText(/GB peak memory/)).toBeInTheDocument();
+    // …and nothing about time: this target has never been stacked, so the
+    // backend sends no estimate and the form must not invent one.
+    expect(screen.queryByText(/to run —/)).not.toBeInTheDocument();
+  });
+
+  it("says about how long the run will take, once this target has been stacked before", async () => {
+    // The question a beginner has *before* the button — the Jobs page's ETA
+    // only helps once the evening is already committed. Measured by the backend
+    // from this target's own past runs; the form only words it.
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue({
+      n_frames: 2, canvas_w: 480, canvas_h: 320, output_w: 480, output_h: 320,
+      is_mosaic: false, peak_bytes: 7e6, peak_gb: 0.01,
+      budget_bytes: 8e9, budget_gb: 8, would_exceed: false,
+      suggested_drizzle_scale: null, suggested_reference_canvas: false, memory_fix: null,
+      auto_reject_resolved: null,
+      time_estimate: { seconds: 45 * 60, basis_runs: 2, basis_frames: 40 },
+    });
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(
+        /About 45 min to run — from your last 2 stacks of this target\./))
+        .toBeInTheDocument());
   });
 
   // The print line — the canvas said in a unit a human has an intuition for,
