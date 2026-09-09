@@ -138,3 +138,34 @@ def test_the_sky_grid_separates_patches_a_degree_apart_and_the_two_poles():
     assert keys[0] != keys[1]
     poles = _sky_cell_keys(np.array([10.0, 10.0]), np.array([89.9, -89.9]), 0.05)
     assert poles[0] != poles[1]
+
+
+def _uneven_raster_counts(nx=6, ny=4, *, lo=10, hi=100, seed=1, overlap=0.10):
+    """The per-pixel **frame count** of a fully tiled mosaic raster whose panels
+    are not equally deep — the owner's shape, and the one where the "well
+    covered" reference used to land near the mode of the depth distribution and
+    call every thinner panel fringe."""
+    rng = np.random.default_rng(seed)
+    counts = np.zeros((_H, _W), dtype=np.float32)
+    pw, ph = _W / (nx - (nx - 1) * overlap), _H / (ny - (ny - 1) * overlap)
+    for j in range(ny):
+        for i in range(nx):
+            x0 = int(round(i * pw * (1 - overlap)))
+            y0 = int(round(j * ph * (1 - overlap)))
+            counts[y0:min(_H, int(round(y0 + ph))),
+                   x0:min(_W, int(round(x0 + pw)))] += float(rng.integers(lo, hi + 1))
+    return counts
+
+
+def test_a_fully_tiled_mosaic_counts_every_panel_it_photographed(tmp_path):
+    """Regression: a raster whose panels differ in depth is covered edge to edge,
+    so its area is the whole canvas — but the thin panels were being read as
+    ragged fringe and left out of the tally. Fail-before: 0.2231 deg² of the
+    0.24 deg² this picture actually holds — **7.0 % of the owner's photographed
+    sky uncounted**, on a canvas with no fringe anywhere."""
+    path = _master(tmp_path, "raster")
+    counts = _uneven_raster_counts()
+    assert np.count_nonzero(counts > 0) == counts.size    # fully tiled, no fringe
+    fits.PrimaryHDU(data=counts).writeto(tmp_path / "raster_framecov.fits")
+
+    assert stack_sky_area_deg2(path) == pytest.approx(_AREA_DEG2, rel=1e-9)

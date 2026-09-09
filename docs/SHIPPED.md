@@ -14,6 +14,92 @@ Newest first.
 
 ---
 
+## v0.399.2 — 2026-09-09 — BUG FIX: a thin mosaic panel is not a ragged fringe on the map either (`coverage_trim.MASK_LEVEL_MIN_FRAC`, `well_covered_mask(level_min_frac=)`, `thumbnail.stack_detail_mask`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-c9vw1a`. Picked up as the
+2026-09-08 "low value, display only" lead; both halves of that framing turned
+out to be wrong, which is most of what is worth recording here.)**
+
+**Symptom.** On a mosaic **raster of dozens of panels whose depths differ** — the
+owner's shape; he shoots 5x5, 10x10 and 12x8 across many nights, so a panel holds
+however many subs that night allowed — the all-sky "My map" faded whole thin
+panels out of the picture, and `seestack.skyarea` left the same sky out of the
+"how much have I photographed?" tally. On canvases covered edge to edge, with no
+ragged border anywhere. Measured over 147 fully tiled rasters (3x3 … 12x8 × seven
+depth spreads from 3-15 up to 50-500 subs × three seeds): **90 of them fade
+something, the worst 26.3 % of the canvas.**
+
+**Root cause — D1 once more, one consumer further along.** `well_covered_mask`
+asks `panel_coverage_level` how deep one panel is, and *substantial* there is
+`PANEL_LEVEL_MIN_FRAC` = 8 % of the covered canvas. That is one panel of a
+**twelve**-panel mosaic. On a 96-panel raster a panel is ~1 %, no depth is ever
+substantial, and the search walks past every thin panel and settles near the
+**mode** of the depth distribution — after which everything below half of *that*
+is fringe. An evenly-deep mosaic is fine (all panels are the mode) and a 1x2 at
+400/150 subs is fine (each panel is half the canvas), which is why every existing
+fixture missed it.
+
+**Why the trim's own fix could not be reused.** v0.391.1 bounds the *rectangle*
+by the one the coverage alone allows and walks the threshold down when it does
+far worse. A per-pixel mask has no rectangle to compare against, and the area
+comparison that looks like the analogue does not separate the cases: a genuinely
+ragged 2x2 fades 8.2 % of its canvas and a broken 12x8 fades 11.4 %. So the mask
+is fixed at the **reference**, which is the only lever it has — a mask-only
+`MASK_LEVEL_MIN_FRAC` (0.03) passed by `stack_detail_mask`, with
+`largest_covered_rect` left reading `PANEL_LEVEL_MIN_FRAC` exactly as before.
+
+**Chosen, not tuned.** Over the same 147 rasters: 0.08 fades something on **90**
+of them (worst 26.3 %), 0.04 on **10** (worst 12.8 %), 0.03 on **none**. And it
+costs nothing on the shapes that have a real fringe: a single field with a dither
+ramp fades 2.50 % before *and* after, a ragged 2x2 8.17 % before *and* after —
+byte-identical, because on those shapes one level really does hold 8 % and the
+reference does not move at all. A raster that is *both* many-panelled and
+genuinely ragged fades 11.2 % instead of 22.1 %: it loses its border and keeps
+its panels. Below ~0.02 the reference starts landing on the dither ramp itself
+and the honest fades erode too (a ragged 12x8 goes 5.4 % → 3.7 %), so 0.03 is the
+middle of the band between two failures rather than the bottom of a slope.
+
+**Safe by construction, and that is a test rather than a sentence.**
+`panel_coverage_level` is monotone in this fraction — a smaller fraction admits
+every window the larger one did, so the level can only fall — and a lower
+reference can only keep *more* of the picture. The worst case of this constant is
+leaving fringe in, never fading a panel away; pinned over 40 random maps.
+
+**Two corrections to the lead this came from, both from re-measuring.** It filed
+the defect as *"cosmetic/display — a fade on a map, not the picture itself"*: but
+`stack_detail_mask` is also what `seestack.skyarea` counts, so the owner's
+photographed-sky figure was short by the same fraction (**7.0 %** on the 6x4
+regression). And its `9.3 %` was measured on the **weighted** coverage map, which
+this code path never reads — `stack_detail_mask` loads the `_framecov.fits`
+*frame-count* sibling and falls back to the plain has-data footprint when there is
+none. Re-measured on count maps the defect is real and larger. A lead's severity
+and its measurement are both worth re-deriving before building from it.
+
+**Upgrade-safe (§9).** One new module constant and one keyword-only parameter
+defaulting to today's behaviour; no config, schema, on-disk, API or engine-default
+change. Nothing is recomputed or rewritten on upgrade — the mask is derived per
+request from a sibling that already exists.
+
+**Tests (+6, three failing before).**
+`test_a_fully_tiled_raster_fades_no_panel_at_the_mask_reference` and
+`test_the_mask_reference_fades_nothing_on_any_fully_tiled_raster` are the engine
+regressions (the second is the whole 147-shape family);
+`test_skyarea.py::test_a_fully_tiled_mosaic_counts_every_panel_it_photographed`
+and `test_my_map.py::test_a_fully_tiled_raster_keeps_every_panel_on_the_map` are
+the two consumers, each fail-before; plus
+`test_the_fringe_fade_the_mask_exists_for_still_fires` (this must not become
+"fade nothing"), the monotonicity property, and
+`test_the_trim_keeps_its_own_reference_and_the_default_is_unmoved`. No existing
+test was weakened, moved or rewritten.
+
+**And the bigger thing this run found on the way, filed not fixed:** the *trim*
+still crops fully tiled rasters by up to 19.8 % — the residual band just inside
+v0.391.1's 0.8 allowance. Five candidate fixes were measured and all five
+rejected. See "Bugs (fix these first)" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md);
+it is a priority-1 entry, not a footnote to this one.
+
+---
+
 ## v0.399.1 — 2026-09-09 — the Stack form named a method the run would not use, on a mosaic (`/stack-estimate` → `auto_reject_resolved`, `autoRejectNote.ts`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-4yit4y`. A bug found by
