@@ -14,6 +14,36 @@ Newest first.
 
 ---
 
+## CLOSED (idea, not built) — 2026-09-07 — data-driven target difficulty: the gap it exists to fill is measured at zero
+
+*(Cut from `IMPROVEMENTS.md` → Ideas by the Scout 2026-09-09 under the three-file
+rule; it was a closed idea sitting in the working list. Full text preserved here.)*
+
+- **NEW IDEA (Builder 2026-07-24, follow-on to the v0.192.0 target-difficulty badge) — make the galaxy/nebula
+  difficulty split *data-driven* by adding an optional `mag` (and/or `surface_brightness`) field to the bundled
+  catalog, so difficulty can be computed instead of hand-curated.** *(Friendliness / image-quality-trust, PRIORITY
+  3–4; size M; offline, additive.)* **Why:** the shipped `target_difficulty` hand-curates ~90 galaxies/nebulae/PNe/SNRs
+  because `messier.json`/`deepsky_popular.json` carry no magnitude or surface brightness — the very quantities that
+  decide "hard for a Seestar". A curated table is honest but doesn't scale to a growing catalog and encodes one person's
+  judgement calls. **Shape:** add an optional `mag` (integrated) and, better, an estimated **surface brightness**
+  (mag/arcsec², derivable from `mag` + `size_arcmin`) to the catalog entries where a reliable value exists; then a pure
+  `difficulty_from_surface_brightness(sb, type)` blends SB + type into the same easy/moderate/challenging bucket, with
+  the curated table kept as an override/fallback for entries lacking a value. Keeps the cluster type-rule. Self-hides when
+  neither SB nor a curated tag exists. **Feasibility:** static data-file addition + a pure function; no network, no
+  schema/config/API/default change (the `DifficultyHint` shape is unchanged). Validate the SB→bucket thresholds against
+  the existing curated table (they should broadly agree) before trusting them over curation. (S–M.)
+  **⚪ CLOSED — THE GAP IT EXISTS TO FILL IS MEASURED AT ZERO (Builder 2026-09-07). Do not build it.** The entry's
+  premise is that curation "doesn't scale to a growing catalog", i.e. that objects are going unbadged. Ran the real
+  resolver over the real bundled catalog: **157 of 157 objects get a verdict** — the ~90-entry `_CURATED` table plus
+  the "clusters and star fields are uniformly easy" type rule cover `messier.json` and `deepsky_popular.json`
+  completely, and `target_difficulty` returns `None` for nothing. So the proposal would replace a hand-vetted answer
+  that is 100 % covered with a derived one, on data (`mag` / surface brightness) that is **not in the catalog** and
+  would have to be written from memory by an agent — a real chance of putting a wrong number in front of the owner
+  for no coverage gain. The one thing worth keeping was the measurement, so it is now a test rather than a sentence:
+  `tests/test_target_difficulty.py::test_the_bundled_catalog_is_covered_end_to_end_today` names any object that would
+  show no badge, so the gap can't re-open unnoticed if the catalog grows. If it ever *does* re-open, curating the new
+  entries is still the cheaper and more honest answer; reopen this only with a real magnitude source, not from
+  recall.
 ## v0.406.2 — 2026-09-09 — the mosaic panel map drew a hole where the thin panel was, then said nothing was being held back (`mosaicmap._thin_panels_on_the_grid`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-ilfabz`. A verified bug,
