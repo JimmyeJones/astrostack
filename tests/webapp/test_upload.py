@@ -800,3 +800,118 @@ def test_uploaded_zip_becomes_the_right_targets(client, data_root, tmp_path) -> 
         lib.close()
     assert {"M 31", "M 13"} <= names
     assert "Unsorted" not in names
+
+
+# ---------------------------------------------------------------------------
+# GET /api/upload-destinations — "add to a target you already have"
+# ---------------------------------------------------------------------------
+
+def test_destinations_are_empty_on_a_library_with_nothing_in_it(client) -> None:
+    r = client.get("/api/upload-destinations")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"destinations": []}
+
+
+def test_destinations_name_the_folder_each_target_came_from(built_library, client) -> None:
+    """The point of the endpoint: the *folder* under ``incoming/``, not the
+    target's own name — offering the latter is how subs land in the bare
+    ``<T>/`` the scanner skips as the Seestar's own output."""
+    rows = client.get("/api/upload-destinations").json()["destinations"]
+    by_target = {d["target"]: d for d in rows}
+    assert set(by_target) == {"M_42", "NGC_7000"}
+    for name in ("M_42", "NGC_7000"):
+        assert by_target[name]["folder"] == name
+        assert by_target[name]["n_frames"] == 3
+
+
+def test_a_sub_folder_target_reports_the_sub_folder_not_the_target_name(
+    data_root, client
+) -> None:
+    """``M 31_sub/`` → target *M 31*, and the destination offered is
+    ``M 31_sub`` — the two names differ, which is the whole reason this is read
+    from the frame rows rather than derived from the target."""
+    from seestack.io.library import Library
+    from seestack.io.scanner import scan_and_organize
+
+    d = data_root / "incoming" / "M 31_sub"
+    d.mkdir(parents=True, exist_ok=True)
+    for i in range(2):
+        write_seestar_fits(d / f"Light_{i}.fit", width=64, height=64,
+                           n_stars=5, seed=200 + i)
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        scan_and_organize(lib, data_root / "incoming", copy_to_cache=False)
+    finally:
+        lib.close()
+
+    rows = client.get("/api/upload-destinations").json()["destinations"]
+    m31 = [d for d in rows if d["target"] == "M 31"]
+    assert m31 == [{"target": "M 31", "folder": "M 31_sub", "n_frames": 2}]
+
+
+def test_destinations_come_back_busiest_first(built_library, data_root, client) -> None:
+    from seestack.io.library import Library
+    from seestack.io.scanner import scan_and_organize
+
+    d = data_root / "incoming" / "Deep_sub"
+    d.mkdir(parents=True, exist_ok=True)
+    for i in range(5):
+        write_seestar_fits(d / f"Light_{i}.fit", width=64, height=64,
+                           n_stars=5, seed=300 + i)
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        scan_and_organize(lib, data_root / "incoming", copy_to_cache=False)
+    finally:
+        lib.close()
+
+    rows = client.get("/api/upload-destinations").json()["destinations"]
+    assert [d["folder"] for d in rows][0] == "Deep_sub"
+    assert [d["n_frames"] for d in rows] == sorted(
+        (d["n_frames"] for d in rows), reverse=True)
+
+
+def test_a_nested_container_target_is_not_offered_as_a_destination(
+    data_root, client
+) -> None:
+    """``incoming/MyWorks/M 31_sub/`` — the upload endpoint writes exactly one
+    folder level (``safe_target_dir``), so offering ``MyWorks`` would be offering
+    a destination that lands the subs somewhere else entirely. Left out instead."""
+    from seestack.io.library import Library
+    from seestack.io.scanner import scan_and_organize
+
+    d = data_root / "incoming" / "MyWorks" / "M 31_sub"
+    d.mkdir(parents=True, exist_ok=True)
+    for i in range(2):
+        write_seestar_fits(d / f"Light_{i}.fit", width=64, height=64,
+                           n_stars=5, seed=400 + i)
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        scan_and_organize(lib, data_root / "incoming", copy_to_cache=False)
+    finally:
+        lib.close()
+
+    rows = client.get("/api/upload-destinations").json()["destinations"]
+    assert all(d["folder"] != "MyWorks" for d in rows), rows
+    assert all("/" not in d["folder"] for d in rows)
+
+
+def test_one_unreadable_target_does_not_sink_the_whole_answer(
+    built_library, client, monkeypatch
+) -> None:
+    """Same per-target resilience the storage/gallery pages apply: a broken
+    project DB drops its own row rather than 500-ing the upload form."""
+    from seestack.io import project as project_mod
+
+    real_open = project_mod.Project.open.__func__
+
+    def flaky(cls, project_dir, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        # Named, not counted: the app opens projects for its own reasons, so
+        # "fail the first call" would fail whichever call happened to run first.
+        if "m_42" in str(project_dir).lower():
+            raise OSError("dataset unmounted")
+        return real_open(cls, project_dir, *a, **k)
+
+    monkeypatch.setattr(project_mod.Project, "open", classmethod(flaky))
+    r = client.get("/api/upload-destinations")
+    assert r.status_code == 200, r.text
+    assert [d["target"] for d in r.json()["destinations"]] == ["NGC_7000"]
