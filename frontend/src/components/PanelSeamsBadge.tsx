@@ -13,14 +13,29 @@ import { Badge, Tooltip } from "@mantine/core";
  * single-field stack, every run made before the measurement existed, and the
  * ambiguous middle band where large-scale structure puts a floor under the
  * figure. So it's safe to drop in unconditionally beside the other run chips.
+ *
+ * `grain` is the second verdict on the same picture
+ * (`seestack.stackhealth.grain_verdict`), and it changes only what "even"
+ * *means* here. A panel differs from its neighbours in its sky **level**, which
+ * levelling removes and this chip measures, or in its **grain**, because a
+ * panel shot with fewer subs is noisier and no processing puts those photons
+ * back. A mosaic can be perfectly flat and still show an obvious rectangle, and
+ * telling its owner "you shouldn't see seams between them" while they are
+ * looking straight at one is the untruth this argument exists to remove. The
+ * chip stays green and still says the panels evened out — nothing is taken
+ * away — it just says which of the two things it measured.
  */
-export function seamsLabel(verdict?: string | null): { label: string; color: string; help: string } | null {
+export function seamsLabel(
+  verdict?: string | null, grain?: string | null,
+): { label: string; color: string; help: string } | null {
   switch (verdict) {
     case "flat":
       return {
         label: "Panels even",
         color: "teal",
-        help: "This mosaic's panels evened out — the sky matches across the joins, so you shouldn't see seams between them.",
+        help: grain === "uneven"
+          ? "This mosaic's panels evened out — the sky matches across the joins, so where the picture looks grainier that's a difference in depth (fewer subs on that panel), not a step in the sky."
+          : "This mosaic's panels evened out — the sky matches across the joins, so you shouldn't see seams between them.",
       };
     case "check":
       return {
@@ -34,9 +49,11 @@ export function seamsLabel(verdict?: string | null): { label: string; color: str
 }
 
 export function PanelSeamsBadge(
-  { verdict, size = "xs" }: { verdict?: string | null; size?: string },
+  { verdict, grain, size = "xs" }: {
+    verdict?: string | null; grain?: string | null; size?: string;
+  },
 ) {
-  const v = seamsLabel(verdict);
+  const v = seamsLabel(verdict, grain);
   if (!v) return null;
   return (
     <Tooltip label={v.help} multiline w={260}>

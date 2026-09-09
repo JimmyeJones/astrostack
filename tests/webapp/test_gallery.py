@@ -85,6 +85,34 @@ def test_gallery_carries_the_panel_flatness_verdict(client, solved_library):
     assert items[single]["seam_verdict"] is None
 
 
+def test_gallery_carries_the_grain_verdict_beside_the_flatness_one(
+        client, solved_library):
+    """The chip's wording depends on *both*: a mosaic can be perfectly level and
+    still show a grainier rectangle where one panel got fewer subs, and the card
+    must not tell its owner there is nothing to see. Read off the column like
+    the flatness verdict is — this listing opens no files."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    uneven = _register_run(solved_library, safe, {"sigma_clip": True},
+                           is_mosaic=True, seam_residual=0.3,
+                           grain_ratio=1.43, grain_thin_frames=3,
+                           grain_deep_frames=6, grain_thin_share=0.23)
+    even = _register_run(solved_library, safe, {"sigma_clip": True},
+                         is_mosaic=True, seam_residual=0.3, grain_ratio=1.02,
+                         grain_thin_frames=5, grain_deep_frames=6,
+                         grain_thin_share=0.3)
+    unmeasured = _register_run(solved_library, safe, {"sigma_clip": True},
+                               is_mosaic=True, seam_residual=0.3)
+
+    items = {it["run_id"]: it for it in client.get("/api/gallery").json()["items"]}
+    # Level either way — it is only what "even" *means* that changes.
+    assert items[uneven]["seam_verdict"] == "flat"
+    assert items[uneven]["grain_verdict"] == "uneven"
+    assert items[even]["grain_verdict"] is None
+    # A run stacked before the measurement existed says nothing rather than
+    # claiming its panels are equally deep.
+    assert items[unmeasured]["grain_verdict"] is None
+
+
 def test_gallery_reusable_flag_excludes_combine_and_editor(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     stack_id = _register_run(solved_library, safe, {"sigma_clip": True})

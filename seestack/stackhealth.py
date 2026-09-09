@@ -149,6 +149,25 @@ _SOFT_STARS_MIN_SUB_FWHM = 5
 _SEAM_FLAT_RATIO = 1.0
 _SEAM_VISIBLE_RATIO = 1.5
 
+# How much grainier a thinly-covered region has to measure before the app says
+# so. ``grain_ratio`` is a ratio of two sky σ, so 1.25 is "that part of the
+# picture is a quarter noisier" — which, since grain falls as 1/√depth, is what
+# roughly 1.6× the subs would close.
+#
+# It reads on the conservative side of what is visible, deliberately, because
+# the measurement itself does: the σ behind it is sigma-clipped rather than
+# taken from adjacent-pixel differences (so it survives the decimated read an
+# older run is healed from — see
+# :class:`seestack.bg.coverage_leveling.CoverageGrain`), and whatever faint
+# structure survives the object mask inflates *both* regions and pulls the ratio
+# toward 1. Measured on the mosaic sample — four panels at 6/6/6/3 subs, the
+# uneven depth this owner's multi-night mosaics actually have — the finished
+# picture shows an obvious grainier rectangle over 23 % of the canvas and this
+# ratio reads 1.43, while the seam residual reads 0.70, i.e. "the panels
+# matched". Both numbers are true; only one of them is what the owner is
+# looking at.
+_GRAIN_UNEVEN_RATIO = 1.25
+
 # Fewest frames for which √N is a meaningful yardstick at all. Below this a
 # single unlucky reference sub swings the measured ratio more than the physics
 # does, so we say nothing rather than judge a five-frame stack.
@@ -276,6 +295,33 @@ def seam_verdict(seam_residual: float | None) -> str | None:
     if seam < _SEAM_FLAT_RATIO:
         return "flat"
     return None
+
+
+def grain_verdict(grain_ratio: float | None) -> str | None:
+    """``"uneven"`` when a canvas's thinly-covered region is measurably grainier
+    than the depth most of it was shot at, else ``None``.
+
+    The companion to :func:`seam_verdict`, and the half it cannot see. A seam is
+    a *level* step, which levelling removes; this is a *grain* step, which
+    nothing removes — a panel shot with fewer subs is noisier, and the two
+    numbers routinely disagree on the same picture (the mosaic sample reads
+    "flat" at 0.70 and "uneven" at 1.43). ``None`` for a run with no measurement
+    — a single-field stack, an evenly covered mosaic, or a run recorded before
+    the columns existed — so every surface self-hides rather than guessing.
+
+    Public and shared for the same reason ``seam_verdict`` is: any second
+    surface that wants to say this must read the one threshold rather than
+    re-type it.
+    """
+    if grain_ratio is None:
+        return None
+    try:
+        ratio = float(grain_ratio)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(ratio):
+        return None
+    return "uneven" if ratio >= _GRAIN_UNEVEN_RATIO else None
 
 
 # κ-σ rejection is *mathematically* blind to a lone outlier below a frame count
@@ -785,6 +831,36 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # recorded, so both notes self-hide by construction.
     # Both the wording here and the History card's chip read the verdict from the
     # one shared :func:`seam_verdict`, so they can't drift apart.
+    # The *other* way a panel shows, measured beside it: a region shot with
+    # fewer subs is grainier than the rest however flat its sky came out. Only
+    # spoken when all four figures are present, so a note can never quote a
+    # ratio it has no depths to explain.
+    grain = (
+        grain_verdict(run.grain_ratio)
+        if (run.grain_thin_frames and run.grain_deep_frames
+            and run.grain_thin_share is not None)
+        else None
+    )
+    if grain == "uneven":
+        thin = int(run.grain_thin_frames or 0)
+        deep = int(run.grain_deep_frames or 0)
+        scored.append((42, HealthNote(
+            kind="grain_uneven",
+            severity="info",
+            message=(
+                "Part of this mosaic is thinner than the rest — about "
+                f"{float(run.grain_thin_share or 0.0):.0%} of the picture has "
+                f"{thin} sub{'' if thin == 1 else 's'} on it where most of it "
+                f"has {deep}, so that part looks about "
+                f"{float(run.grain_ratio or 0.0):.1f}× grainier. That isn't "
+                "something processing can fix — grain only comes down with more "
+                "light — so another night on that panel is what evens it out."),
+            # No in-app fix exists, and offering one would be the untruth this
+            # note is here to remove. The panel map on the Target page already
+            # says *which* panel is behind.
+            action=None,
+        )))
+
     seam = run.seam_residual
     verdict = seam_verdict(seam)
     if verdict is not None:
@@ -806,9 +882,22 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
             scored.append((62, HealthNote(
                 kind="seams_flat",
                 severity="good",
+                # The claim is about the *sky level*, and it stays exactly as it
+                # was on a canvas where that is the whole story. But on one that
+                # is also unevenly deep, "you shouldn't see seams between them"
+                # is read by someone looking straight at a grainier rectangle —
+                # so there it says which of the two things it measured. Written
+                # to stand alone rather than to point at the grain note: the
+                # card renders only the top two, and at 42 against this note's
+                # 62 they are rarely both on screen. Nothing removed: both
+                # sentences say the panels evened out.
                 message=("The panels of this mosaic evened out — the sky matches "
-                         "across the joins, so you shouldn't see seams between "
-                         "them."),
+                         + ("across the joins, so where the picture looks "
+                            "grainier that is a difference in depth, not a step "
+                            "in the sky."
+                            if grain == "uneven" else
+                            "across the joins, so you shouldn't see seams "
+                            "between them.")),
                 action=None,
             )))
 
@@ -869,8 +958,14 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # both praise and warn. On the old ``coverage_min`` test this praise was
     # *unreachable*: a dithered stack always has a one-frame fringe pixel, so no
     # real stack could earn it. None (an older run) stays silent either way.
+    # ...but never on a canvas the grain measurement has just called uneven. The
+    # thin-share test asks whether the *border* is ragged against one panel's
+    # depth, so a mosaic whose thinnest panel is simply shallower than its
+    # neighbours passes it — and "even coverage" is then praise for the exact
+    # thing the note above is explaining away. One picture, one answer.
     if (run.coverage_max > 0 and run.coverage_thin_frac is not None
-            and run.coverage_thin_frac < _COVERAGE_THIN_SHARE):
+            and run.coverage_thin_frac < _COVERAGE_THIN_SHARE
+            and grain != "uneven"):
         strengths.append("even coverage")
     if strengths:
         scored.append((70, HealthNote(

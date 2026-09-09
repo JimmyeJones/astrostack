@@ -1227,6 +1227,7 @@ def target_stack_health(
     ``null`` when there's no matching genuine stack. Read-only; never a gate.
     """
     from seestack.coverage_backfill import (
+        backfill_coverage_grain,
         backfill_coverage_shares,
         backfill_seam_residual,
     )
@@ -1264,6 +1265,11 @@ def target_stack_health(
         # Free on a single-field run — it never opens a file — and a no-op on
         # every run stacked since.
         backfill_seam_residual(proj, run)
+        # ...and the grain step beside it, off the same two files in the same
+        # request, so an existing mosaic explains its grainier panel without
+        # having to be stacked again. Free on a single-field run, and a no-op on
+        # every run stacked since the columns existed.
+        backfill_coverage_grain(proj, run)
         frames = list(proj.iter_frames())
         # The √N yardstick note reads the measurement the "One frame vs your
         # stack" reveal already stamped — it never measures one. A run nobody has

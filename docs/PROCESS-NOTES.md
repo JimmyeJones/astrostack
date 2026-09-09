@@ -18,6 +18,82 @@ is a queue.
 
 ---
 
+## 2026-09-09 — Builder run (`claude/sweet-babbage-8j2dwm` → v0.406.0, v0.406.1): the rectangle a CLEAN dogfood and a flat seam number both missed
+
+**The run.** One finding, shipped in two slices (both in [`SHIPPED.md`](SHIPPED.md)):
+**v0.406.0** (`measure_coverage_grain` + `grain_verdict` + the `grain_uneven`
+health note + the backfill) and **v0.406.1** (the same untruth on the
+History/Gallery/Compare chip). Tests **+30** (24 Python, 6 across Python and
+vitest). Baseline before any change: **5,446 passed / 2 skipped**, full suite
+headless, 30:12.
+
+**How the work was chosen.** Triage agreed with the previous two runs: "Bugs
+(fix these first)" holds no open, ungated bug, and the Ideas sections are mostly
+measured stand-downs. Sized and declined the two that read as live engine work —
+**per-pixel rejection dispatch on a mosaic** (the entry's own gate is a
+measurement of the owner's library nobody has, and every workable shape holds a
+second accumulator alive on the one path §6 calls out for its OOM history) and
+**weighting the min/max path** (2+2k canvas planes → 3+4k, i.e. a 75 % memory
+jump on the hot path for a second-order gain). So the run took §2's big-picture
+pass instead, and the pass paid.
+
+**Dogfood: CLEAN, and the finding was in the pixels it photographed**
+(`scripts/agent-dogfood.sh --mosaic --editor`).
+- **Mosaic trim: 7.9 %** — the same figure as the last five passes, well under
+  the ~15 % §1 calls a bug.
+- **Page probes clean, both samples.** Field: `/life-list` 3,094 px,
+  `/targets/<field>` 3,078 px, editor 3,055 px on a phone. Mosaic: target
+  3,407 px, editor 3,085 px. In line with the standing baselines — **no IA slice
+  indicated (sixth measurement agreeing)**.
+- **Editor drive clean on both samples**: all **21** ops added one at a time,
+  each re-rendering the live preview, then undo/redo, with no console error and
+  no failed request.
+
+**The lesson, and it extends the last run's.** That run learned a CLEAN dogfood
+is a statement about *errors*, not about *sentences*, and recommended reading the
+screenshots. This one adds: it is not a statement about **pixels** either. The
+mosaic sample's finished picture has an obvious grainier rectangle over 23 % of
+its canvas — the "grid of tiles" this app exists to avoid — and no screenshot
+review would settle whether that is a bug, because the app's own number said it
+was not. What settled it was rendering the master and Auto's output out of the
+scratch library and **measuring per coverage level**:
+
+| | 3 subs (23 % of canvas) | 6 subs (63 %) |
+|---|---|---|
+| sky mode | 0.115 | −0.363 |
+| clipped σ | 7.79 | 5.20 |
+
+The **level** difference is 0.478 ADU = **0.09× the grain** — levelling worked
+perfectly, and `SEAMRES` 0.70 ("flat") is telling the truth. The **grain** ratio
+is **1.43**, and nothing measured it. So the health panel answered a question
+about the level to someone looking at a difference in depth, and the answer read
+as *"you shouldn't see seams between them"*; the same run was praised for
+**"even coverage"**, and the History/Gallery chip repeated the sentence
+verbatim. Three surfaces, one true-but-wrong measurement.
+
+**Recommendation for future passes: on a mosaic claim, measure the master per
+coverage level, not only the trim.** It is a dozen lines against the scratch
+library the pass already built (`_level_context` → `_level_sky_mask` →
+`_robust_stats`), and it is the only way to tell "the app is wrong" from "the
+app is right about something else".
+
+**A second-order note worth keeping: the estimator was chosen by an existing
+docstring.** `coverage_backfill`'s audit paragraph says `noise_sigma` cannot be
+healed because adjacent-pixel differences do not survive a decimated read. That
+sentence decided this measurement's estimator before a line was written — a
+sigma-clipped σ instead — which is what makes the ratio healable off an older
+run's strided master. Measured: **1.43 / 1.40 / declines** at strides 1 / 2 / 4,
+where the adjacent-difference form gives **1.50 / 1.36 / unmeasurable**. The
+clipped σ is inflated on both sides by whatever structure survives the object
+mask, so it can only understate — which is the right direction for a claim the
+app makes out loud.
+
+**Green gates on the merged tree:** **5,473 passed / 2 skipped** (full suite
+headless, 29:47), frontend **253 files / 3,550 tests**, `tsc --noEmit` clean and
+`vite build` green. The Python delta is exactly the +27 collected items this run
+added (24 in `tests/test_coverage_grain.py`, 3 on the wire) against the 5,446
+baseline, and the frontend delta exactly the +3 in `PanelSeamsBadge.test.tsx`.
+
 ## 2026-09-09 — Builder run (`claude/sweet-babbage-pu1q6v` → v0.405.0, v0.405.1): the library-wide "new subs waiting" note, and the bug a CLEAN dogfood was hiding
 
 **The run.** Two shipped items, both in [`SHIPPED.md`](SHIPPED.md): **v0.405.0**
