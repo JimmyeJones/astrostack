@@ -107,7 +107,7 @@ schema, on-disk layout, API shape or default change. A run with no `_framecov.fi
 sibling is read exactly as it is today. `well_covered_mask` — the all-sky map and
 the sky-area tally — is untouched; this instalment is the rectangle's alone.
 
-**Tests: +6 engine / +2 webapp,** all failing before. `tests/shapes.py` gains
+**Tests: +4 engine / +2 webapp,** all failing before. `tests/shapes.py` gains
 `assert_fully_tiled` / `assert_has_a_ragged_outline` / `uncovered_share`, the
 vocabulary for the distinction this instalment turned on — a fixture with uneven
 panel depth cannot say "there is no border here", and without that said out loud

@@ -585,13 +585,15 @@ def test_the_trim_keeps_its_own_reference_and_the_default_is_unmoved():
 # ragged edge anywhere. AGENTS.md §1 puts the bar at "a trim above ~15 % of the
 # canvas is a bug, not a ragged edge".
 #
-# Four scalar levers were measured and rejected before this one — lower the panel
-# reference, read the frame-count map, tighten `TRIM_KEEP_RATIO`, refuse a crop
-# that discards well-covered pixels — each either non-monotone or a case where
-# the honest and the broken shapes collide outright (the numbers are on
-# `FRINGE_OUTSIDE_FRAC`). What separates them is **spatial**, and it is a fact
-# rather than a threshold: a reprojection ramp is *attached to the outline*; a
-# thin panel in the middle of a raster is not.
+# Four levers were measured and rejected before this one — lower the panel
+# reference, tighten `TRIM_KEEP_RATIO`, refuse a crop that discards well-covered
+# pixels, and demand a canvas with no uncovered pixel at all — each either
+# non-monotone, or a case where the honest and the broken shapes collide outright
+# (the numbers are in `SHIPPED.md`, under `FRINGE_OUTSIDE_FRAC`). A fifth, reading
+# the frame-count map instead of the sum of weights, was measured as insufficient
+# *alone* and shipped alongside this rule as `editor._load_run_frame_counts_strided`.
+# What separates the two shapes is **spatial**: a reprojection ramp is attached to
+# the outline and is a band; a thin panel in the middle of a raster is neither.
 
 
 def _ladder_only_rect(coverage, min_frac=0.5):
