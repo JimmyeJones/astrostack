@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type DifficultyHint, type FramingHint, type MosaicPlan } from "../api/client";
 import { loadDismissedSig, saveDismissedSig } from "../dismissal";
+import { FieldFillDiagram } from "./FieldFillDiagram";
 
 /** Where a dismissed "use this name?" offer is remembered, per target. The
  *  stored signature is the suggested *name*, following the app's dismissal
@@ -161,6 +162,17 @@ export function ObjectInfoCard(
             <Text size="sm" c={framingColor(d.framing.level)}>
               {framingWithMosaic(d.name || d.id, d.framing, d.mosaic)}
             </Text>
+          ) : null}
+          {/* …and the same answer as a picture. "Fits comfortably in a single
+              Seestar frame" is true of a nebula filling two thirds of the frame
+              and of a planetary that is a dot in the middle of it, and those are
+              very different shots to plan. Sits directly under the sentence it
+              illustrates — inside the card's existing grouping, not as another
+              always-on block — and is drawn from the same payload, so the two can
+              never disagree. Hidden with the sentence on a page already showing
+              the *measured* verdict for a finished picture. */}
+          {d.field_fill && !hideFraming ? (
+            <FieldFillDiagram fill={d.field_fill} name={d.name || d.id} />
           ) : null}
           {/* "How big is it, really?" — arcminutes mean nothing to a beginner,
               but "as wide as 6 full Moons" lands instantly. Pairs with the

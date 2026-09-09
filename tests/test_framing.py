@@ -711,3 +711,159 @@ def test_the_fallback_field_is_exactly_the_constants_it_replaces():
 
     assert FALLBACK_FIELD.long_arcmin == SEESTAR_FOV_LONG_ARCMIN
     assert FALLBACK_FIELD.short_arcmin == SEESTAR_FOV_SHORT_ARCMIN
+
+
+# ---------------------------------------------------------------------------
+# "Here's how it fills your field" — the to-scale numbers behind the diagram.
+
+
+def test_field_fill_never_guesses_without_a_vetted_size():
+    # Same gate as the textual hint, so the drawing and the sentence appear and
+    # disappear together — a card must never show one without the other.
+    from seestack.framing import field_fill
+
+    for bad in (None, 0, -1.0):
+        assert field_fill(bad) is None
+        assert framing_hint(bad) is None
+    # A non-finite size can't reach here from the catalogue, but if one ever did
+    # the drawing declines rather than asking for an infinite viewport (the
+    # sentence, which has never guarded it, would still print — a missing picture
+    # beside a sentence is a benign degradation; a broken one is not).
+    assert field_fill(float("nan")) is None
+    assert field_fill(float("inf")) is None
+
+
+def test_field_fill_is_the_object_over_the_frame_on_each_edge():
+    from seestack.framing import FrameField, field_fill
+
+    s30 = FrameField(128.0, 72.0)
+    fill = field_fill(64.0, 36.0, field=s30)
+    assert fill is not None
+    assert fill.frac_long == pytest.approx(0.5)
+    assert fill.frac_short == pytest.approx(0.5)
+    # The field rides along so a drawing gets the frame's *shape* right without
+    # re-deriving which telescope this was measured against.
+    assert (fill.field_long_arcmin, fill.field_short_arcmin) == (128.0, 72.0)
+
+
+def test_field_fill_reads_the_owners_own_telescope_not_an_assumed_model():
+    """The whole reason `field` exists: an S30's 128' frame is half-filled by the
+    64' object that overflows an S50's 77' one. A diagram drawn against the wrong
+    telescope is wrong by the field ratio in both axes."""
+    from seestack.framing import FALLBACK_FIELD, FrameField, field_fill
+
+    s30 = field_fill(64.0, 36.0, field=FrameField(128.0, 72.0))
+    s50 = field_fill(64.0, 36.0, field=FALLBACK_FIELD)
+    assert s30 is not None and s50 is not None
+    assert s30.frac_long < s50.frac_long
+    # …and omitting the field is byte-for-byte the module default.
+    assert field_fill(64.0, 36.0) == s50
+
+
+def test_field_fill_agrees_with_the_sentence_it_sits_under():
+    """The one invariant that matters: the picture must not contradict the words.
+    An object the hint calls `fits` must not overflow the drawn frame, and one it
+    calls `mosaic` must."""
+    from seestack.framing import FrameField, field_fill
+
+    s30 = FrameField(128.0, 72.0)
+    for size in (2.0, 20.0, 60.0, 71.0, 72.0, 100.0, 127.0, 128.0, 200.0, 400.0):
+        hint = framing_hint(size, field=s30)
+        fill = field_fill(size, field=s30)  # square box, as the hint assumes
+        assert hint is not None and fill is not None
+        overflows = fill.frac_long > 1.0 or fill.frac_short > 1.0
+        if hint.level == "fits":
+            assert not overflows, size
+        if hint.level == "mosaic":
+            assert overflows, size
+
+
+def test_field_fill_overflow_is_reported_not_clipped():
+    """A clamped fraction would hide exactly the thing the picture exists to
+    show. M 31 at 178' is well over an S30's 128' frame and must say so."""
+    from seestack.framing import FrameField, field_fill
+
+    fill = field_fill(178.0, 63.0, field=FrameField(128.0, 72.0))
+    assert fill is not None
+    assert fill.frac_long > 1.0
+    assert "Bigger than one frame" in fill.text
+
+
+def test_field_fill_without_a_minor_axis_assumes_a_square_box():
+    # The same generous convention `mosaic_plan` uses: err toward "you'll need
+    # more room", never toward promising a tighter fit than they'll get. And a
+    # nonsense minor axis (bigger than the major) is clamped, not trusted.
+    from seestack.framing import field_fill
+
+    assert field_fill(100.0) == field_fill(100.0, 100.0)
+    assert field_fill(100.0, 400.0) == field_fill(100.0, 100.0)
+
+
+def test_field_fill_calls_out_a_target_that_will_need_hard_cropping():
+    """"Fits comfortably in a single frame" is true of a two-thirds-of-the-frame
+    nebula and of a dot in the middle of it, and those are different shots to
+    plan. The small case has to say so."""
+    from seestack.framing import FrameField, field_fill
+
+    s30 = FrameField(128.0, 72.0)
+    dot = field_fill(3.0, 3.0, field=s30)       # a planetary, ~2% of the width
+    big = field_fill(70.0, 50.0, field=s30)     # over half the frame across
+    assert dot is not None and big is not None
+    # Both are "fits comfortably in a single Seestar frame" — the sentence
+    # genuinely cannot tell these two apart, which is why the picture exists.
+    assert framing_hint(3.0, field=s30).level == "fits"
+    assert framing_hint(70.0, field=s30).level == "fits"
+    assert "crop in close" in dot.text
+    assert "2%" in dot.text
+    assert "55%" in big.text and "crop" not in big.text
+
+
+def test_field_fill_percentages_stay_honest_at_both_ends():
+    """Rounding to the nearest 5 would turn a 3 % object into "5 %" or, worse,
+    "0 % of the width" — a sentence that contradicts its own drawing."""
+    from seestack.framing import FrameField, field_fill
+
+    tiny = FrameField(100.0, 100.0)
+    assert "1%" in field_fill(1.0, 1.0, field=tiny).text
+    assert "3%" in field_fill(3.0, 3.0, field=tiny).text
+    # Well under a whole percent still rounds up to something visible rather
+    # than to zero.
+    assert "1%" in field_fill(0.2, 0.2, field=tiny).text
+    # Above the coarse threshold it reads in fives, like the rest of the app.
+    assert "35%" in field_fill(34.0, 34.0, field=tiny).text
+
+
+def test_field_fill_declines_a_degenerate_field_rather_than_dividing_by_it():
+    from seestack.framing import FrameField, field_fill
+
+    assert field_fill(30.0, field=FrameField(0.0, 0.0)) is None
+    assert field_fill(30.0, field=FrameField(float("inf"), 10.0)) is None
+
+
+def test_field_fill_is_bounded_so_a_corrupt_size_cannot_ask_for_an_absurd_view():
+    from seestack.framing import FrameField, field_fill
+
+    fill = field_fill(1e9, field=FrameField(128.0, 72.0))
+    assert fill is not None
+    assert fill.frac_long <= 20.0 and fill.frac_short <= 20.0
+
+
+def test_every_catalog_object_gets_a_drawable_fill():
+    """The data half: any object the card would draw must produce finite,
+    positive fractions — a NaN or a zero would render an invisible or broken
+    diagram beside a perfectly confident sentence."""
+    import math
+
+    from seestack.framing import FrameField, field_fill
+
+    s30 = FrameField(128.0, 72.0)
+    for obj in load_catalog():
+        fill = field_fill(obj.size_arcmin, obj.size_minor_arcmin, field=s30)
+        if obj.size_arcmin is None or obj.size_arcmin <= 0:
+            assert fill is None, obj.id
+            continue
+        assert fill is not None, obj.id
+        assert math.isfinite(fill.frac_long) and fill.frac_long > 0, obj.id
+        assert math.isfinite(fill.frac_short) and fill.frac_short > 0, obj.id
+        assert fill.frac_short <= fill.frac_long * (128.0 / 72.0) + 1e-9, obj.id
+        assert fill.text

@@ -153,6 +153,66 @@ describe("ObjectInfoCard", () => {
     expect(screen.getByText(/nearest large spiral galaxy/)).toBeInTheDocument();
   });
 
+  it("draws the to-scale field-fill diagram under the framing sentence", async () => {
+    // The sentence cannot tell a frame-filling nebula from a dot in the middle
+    // of the frame; the picture can. It sits inside the card's existing grouping
+    // rather than as another always-on block.
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+      size_arcmin: 178,
+      framing: { level: "mosaic", text: "is bigger than the Seestar's single frame — shoot it in mosaic mode to capture all of it." },
+      field_fill: {
+        frac_long: 178 / 128, frac_short: 63 / 72,
+        field_long_arcmin: 128, field_short_arcmin: 72,
+        text: "Bigger than one frame — the outline shows how far it spills over the edges.",
+      },
+    });
+    const { container } = renderCard();
+    await waitFor(() =>
+      expect(screen.getByText("Andromeda Galaxy")).toBeInTheDocument());
+    expect(container.querySelector("svg[role='img']")).toBeTruthy();
+    expect(screen.getByText(/the outline shows how far it spills over/))
+      .toBeInTheDocument();
+  });
+
+  it("draws nothing when the catalogue has no vetted size", async () => {
+    // Same gate as the sentence: no drawing beside no words, ever.
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "NGC1", name: "", type: "galaxy",
+      constellation: "Pegasus", constellation_abbr: "Peg",
+      ra_deg: 1, dec_deg: 27, matched_by: "name",
+    });
+    const { container } = renderCard("NGC_1");
+    await waitFor(() =>
+      expect(screen.getByText("NGC1", { selector: "p" })).toBeInTheDocument());
+    expect(container.querySelector("svg[role='img']")).toBeNull();
+  });
+
+  it("hides the diagram with the sentence it illustrates", async () => {
+    // A page already showing the *measured* verdict for a finished picture drops
+    // the prediction — and the picture of the prediction goes with it, or the
+    // card shows a drawing with nothing to explain it.
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+      size_arcmin: 178,
+      framing: { level: "mosaic", text: "is bigger than the Seestar's single frame — shoot it in mosaic mode to capture all of it." },
+      field_fill: {
+        frac_long: 178 / 128, frac_short: 63 / 72,
+        field_long_arcmin: 128, field_short_arcmin: 72,
+        text: "Bigger than one frame — the outline shows how far it spills over the edges.",
+      },
+    });
+    const { container } = renderCard("M_31", true);
+    await waitFor(() =>
+      expect(screen.getByText("Andromeda Galaxy")).toBeInTheDocument());
+    expect(container.querySelector("svg[role='img']")).toBeNull();
+    expect(container.textContent).not.toContain("spills over");
+  });
+
   it("renders the difficulty badge and honest sentence when vetted", async () => {
     vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
       id: "M33", name: "Triangulum Galaxy", type: "galaxy",

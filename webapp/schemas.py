@@ -94,6 +94,24 @@ class MosaicPlanOut(BaseModel):
     text: str   # a complete sentence, e.g. "About a 3×2 mosaic (6 panels) covers all of it."
 
 
+class FieldFillOut(BaseModel):
+    """"How much of your frame does it fill?" — the to-scale numbers for the
+    little "here's how it fits" diagram on the identity card.
+
+    ``frac_long``/``frac_short`` are the object's major/minor axes as fractions
+    of the frame's long/short edges, deliberately **unclamped** (a value above 1
+    is a real overflow the drawing has to show). The field's own edges ride along
+    so the drawing gets the frame's *shape* right without re-deriving which
+    telescope the fractions were measured against.
+    """
+
+    frac_long: float
+    frac_short: float
+    field_long_arcmin: float
+    field_short_arcmin: float
+    text: str
+
+
 class DifficultyHintOut(BaseModel):
     """A "how hard is this for a Seestar?" verdict for a matched target."""
 
@@ -147,6 +165,11 @@ class ObjectInfoOut(BaseModel):
     # ``null`` when it fits or has no vetted size. Old backends omit it, so the
     # UI treats absent as "nothing to say".
     mosaic: MosaicPlanOut | None = None
+    # "How much of the frame does it fill?" — the to-scale numbers behind the
+    # framing sentence, for the card's little "here's how it fits" diagram.
+    # ``null`` exactly when ``framing`` is null (no vetted size). Old backends
+    # omit it, so the UI simply draws nothing.
+    field_fill: FieldFillOut | None = None
     # A plain-language, beginner-friendly one-liner about the object ("what am I
     # looking at?"), for the popular targets; ``""`` when the catalog has none.
     # Old backends omit it, so the UI treats absent/empty as "no blurb".
