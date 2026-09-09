@@ -430,3 +430,92 @@ describe("UploadFits folder preservation", () => {
     expect(spy.mock.calls[0][3]).toBe(false);
   });
 });
+
+describe("the destination box knows which targets you already have", () => {
+  const dests = {
+    destinations: [
+      { target: "M 31", folder: "M 31_sub", n_frames: 3110 },
+      { target: "NGC 6888", folder: "NGC 6888", n_frames: 42 },
+    ],
+  };
+
+  function mockDests(data = dests) {
+    return vi.spyOn(client.api, "uploadDestinations").mockResolvedValue(data);
+  }
+
+  async function typeTarget(value: string) {
+    const box = await screen.findByTestId("upload-target-folder");
+    fireEvent.change(box, { target: { value } });
+  }
+
+  it("warns that the obvious folder name is the one the app skips, and fixes it", async () => {
+    // The whole reason this exists: typing the target's own name lands the subs
+    // in the bare `M 31/` beside `M 31_sub/`, which the scanner passes over as
+    // the Seestar's own finished picture. The upload succeeds and nothing
+    // stacks.
+    mockDests();
+    renderUpload();
+    await typeTarget("M 31");
+
+    const note = await screen.findByTestId("upload-destination-advice");
+    expect(note.textContent).toMatch(/skip/);
+    fireEvent.click(screen.getByRole("button", { name: /Use “M 31_sub”/ }));
+    await waitFor(() =>
+      expect((screen.getByTestId("upload-target-folder") as HTMLInputElement).value)
+        .toBe("M 31_sub"));
+    await waitFor(() =>
+      expect(screen.getByTestId("upload-destination-advice").textContent)
+        .toMatch(/Adds to M 31/));
+  });
+
+  it("warns that a near-miss spelling would split the target in two", async () => {
+    mockDests();
+    renderUpload();
+    await typeTarget("M31");
+    const note = await screen.findByTestId("upload-destination-advice");
+    expect(note.textContent).toMatch(/second target/);
+  });
+
+  it("offers the folders you already have as suggestions", async () => {
+    mockDests();
+    renderUpload();
+    await typeTarget("M");
+    // Mantine renders the dropdown on focus/typing; the option text is what
+    // matters — the folder, never the target name, because they differ.
+    await waitFor(() => expect(screen.getAllByText("M 31_sub").length)
+      .toBeGreaterThan(0));
+  });
+
+  it("says nothing at all when the backend has no destinations to give", async () => {
+    // An older backend or a failed read: the box must behave exactly as it did,
+    // and must never warn on no evidence.
+    vi.spyOn(client.api, "uploadDestinations").mockRejectedValue(new Error("404"));
+    renderUpload();
+    await typeTarget("M 31");
+    await waitFor(() =>
+      expect(screen.getByTestId("upload-destination-advice").textContent)
+        .toMatch(/Starts a new target/));
+    expect(screen.queryByRole("button", { name: /^Use/ })).toBeNull();
+  });
+
+  it("withholds the advice for a folder drop, which lands inside the name instead",
+     async () => {
+    // With preserved folders the typed name is a *parent* the structure lands
+    // in, so "adds to M 31" would be a different (and wrong) claim.
+    // `folderPreserveNote` already says the true thing there.
+    mockDests();
+    renderUpload();
+    await typeTarget("M 31");
+    await screen.findByTestId("upload-destination-advice");
+
+    fireEvent.drop(screen.getByText(/Drag your Seestar FITS files/), {
+      dataTransfer: dtWithEntries([
+        dirEntry([fileEntry("Light_0001.fit", "/M 31_sub/Light_0001.fit")]),
+      ]),
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(/Keeping your folder/)).toBeInTheDocument());
+    expect(screen.queryByTestId("upload-destination-advice")).toBeNull();
+  });
+});

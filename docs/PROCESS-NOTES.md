@@ -18,6 +18,81 @@ is a queue.
 
 ---
 
+## 2026-09-09 — Builder run (`claude/sweet-babbage-dto79f` → v0.403.0): the upload destination picker, plus a clean editor proxy-scaling sweep
+
+**The run.** Baseline green before any change: **5,417 passed / 2 skipped**, full
+suite headless, 28:13. One shipped item (v0.403.0, the bulk-upload destination
+picker — full entry in [`SHIPPED.md`](SHIPPED.md)), verified in a real browser as
+well as jsdom.
+
+**Environment note, and it is the one AGENTS.md §7 already warns about.**
+`scripts/agent-setup.sh` completed and the venv held nothing but `pip`
+(`No module named pytest` from `.venv/bin/python`) — a PyPI read that timed out
+mid-resolve. `pip install --timeout 120 --retries 5 -e ".[dev,web]"` fixed it in
+one go, exactly as documented. Worth repeating only because the failure looks
+like a broken checkout and is not.
+
+**QA SWEEP — the A2 class (a pixel-unit editor parameter not scaled by the proxy
+factor), across every op in `seestack/edit/ops/`: CLEAN.** The 2026-09-02
+external audit's A2 was fixed "every named instance", which is a claim about the
+instances it named, not about the class — so this enumerated every
+`params.get(...)` in `tone.py`, `detail.py`, `background.py`, `geometry.py` and
+`stars.py` and asked of each whether its unit is pixels and whether it passes
+through `ctx.scaled_px` / `_scaled_box`. Every pixel-unit parameter does:
+`detail.sharpen` `radius`, `detail.chroma_denoise` `radius`, `deconvolve`
+`psf_sigma`, `background`'s two `box_size`s and `dilate_px`. The two that *look*
+unscaled are not — `stars.reduce` and `stars.boost_nebula` hand their `size` to
+`starmask.star_mask`, which divides by `ctx.proxy_scale` itself
+(`starmask.py:56`), and `_reduce` additionally scales its own erosion footprint
+(`ctx.scaled_px(size)`) rather than relying on the mask alone. The remaining
+non-scaled numbers are genuinely unitless: σ thresholds, iteration counts,
+fractional crop bounds, an angle. **No bug found; recorded here so the class is
+not re-swept from scratch, and so the next run knows what "closed" rests on.**
+
+**A test found a bug in the implementation before the implementation was
+finished, which is the point of writing the awkward fixture.** The first
+`Project.source_folders_under` returned the *first* path component under
+`incoming/`, which is the obvious reading of "which folder did this come from" —
+and `test_a_nested_container_target_is_not_offered_as_a_destination` failed,
+because a whole-device drop (`incoming/MyWorks/M 31_sub/`) then reports
+`MyWorks`, which is indistinguishable from a folder you could actually upload
+into. It now reports the whole relative directory and the endpoint filters on the
+separator. The lesson is the fixture, not the fix: the test was written for the
+shape the owner's share actually has (§1 says his layout is the one to test), and
+the single-folder fixture the code was written against could not have caught it.
+
+**The browser found the other one, and code review could not have.** Every jsdom
+assertion passed with `wrap="nowrap"` on the advice row — jsdom has no layout. At
+420 px the real browser squeezed the fix button until its label read `Use “N`:
+the one word the button exists to say, clipped. This is the same class as
+v0.401.1 (a diagram whose geometry was right and whose meaning was unreadable),
+two runs in a row. **Generalisation worth keeping: an assertion that an element
+is in the document is not an assertion that it can be read.** Any run adding a
+control beside text should photograph it at 420 px before believing the suite.
+
+**First-run (`--empty`-shaped) probe: CLEAN, and the new control costs zero
+height.** An app with no data at all, measured against the 2026-09-07 first-run
+baseline in this file: `/` (Dashboard) **1,402 px phone / 1,028 px desktop** and
+`/library` **1,252 / 923** — identical to the baseline in all four numbers,
+with nothing overflowing and no console errors. The destination advice is the
+sentence a beginner most needs on that screen and it self-hides until something
+is typed, so the first-run Library is byte-for-byte the page it was. The empty
+Library also gains a small honest improvement for free: the field's placeholder
+is now `e.g. M 31_sub` rather than `e.g. M31`, which teaches the folder
+convention at the moment it matters instead of modelling the near-miss.
+
+**Playwright note for the next run.** `scripts/agent-dogfood.sh` installs
+playwright on demand, and the version it pulls now expects
+`chromium_headless_shell-1243` while the image ships `chromium-1194` /
+`chromium_headless_shell-1194`. Launching with
+`chromium.launch({ executablePath: "/opt/pw-browsers/chromium" })` works and is
+what the environment brief already recommends; a bare `chromium.launch()` fails
+with "Executable doesn't exist … run npx playwright install" (which must not be
+run). If the dogfood script's browser half ever starts skipping silently, this is
+why.
+
+---
+
 ## 2026-09-09 — Builder run (`claude/sweet-babbage-x2ai9f` → v0.402.0, v0.402.1): the phone-unreachable explanations, and a clean `--mosaic --editor` dogfood
 
 **The run.** Baseline green before any change: **5,417 passed / 2 skipped**, full

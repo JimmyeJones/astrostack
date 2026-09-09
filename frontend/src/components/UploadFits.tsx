@@ -1,12 +1,13 @@
 import {
-  Alert, Box, Button, Card, FileButton, Group, Progress, Stack, Text, TextInput,
+  Alert, Autocomplete, Box, Button, Card, FileButton, Group, Progress, Stack, Text,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconFileUpload, IconFolder, IconUpload } from "@tabler/icons-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type UploadResult } from "../api/client";
+import { destinationAdvice, type UploadDestination } from "../uploadDestination";
 
 // Match the server's accepted FITS suffixes (seestack.io.ingest.FITS_SUFFIXES),
 // plus the .zip the server unpacks for us.
@@ -253,6 +254,23 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
   // server always keeps the structure *inside* an archive, and this says so.
   const zipNote = zipUnpackNote(files, target);
 
+  // The folders under `incoming/` that already hold subs. Read-only, and cheap
+  // enough to ask for whenever the card is on screen; an older backend (or a
+  // failed read) simply yields none and the box behaves exactly as it did.
+  const destinations = useQuery({
+    queryKey: ["upload-destinations"],
+    queryFn: () => api.uploadDestinations(),
+    // The answer only changes when subs land, and the upload itself invalidates
+    // it — so don't re-open every project DB because a tab regained focus.
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const dests: UploadDestination[] = destinations.data?.destinations ?? [];
+  // What the app can say about what has been typed — "adds to M 31", or the two
+  // ways a plausible-looking name silently costs you subs. Null when there is
+  // nothing worth a sentence (see `destinationAdvice`).
+  const advice = destinationAdvice(target, dests);
+
   const upload = useMutation({
     mutationFn: () =>
       api.uploadFits(files, target, (loaded, total) => setProgress({ loaded, total }),
@@ -265,6 +283,8 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
       // New subs → new/updated targets + a running scan job.
       qc.invalidateQueries({ queryKey: ["targets"] });
       qc.invalidateQueries({ queryKey: ["jobs"] });
+      // …and a folder that didn't exist a moment ago is a destination now.
+      qc.invalidateQueries({ queryKey: ["upload-destinations"] });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
@@ -352,13 +372,20 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
         >
           Choose a folder…
         </Button>
-        <TextInput
+        {/* An Autocomplete rather than a plain box: the folders you already have
+            are the answer most of the time, and typing one freehand is where a
+            near-miss quietly makes a second target. It stays free text, so
+            naming a brand-new object is unchanged. */}
+        <Autocomplete
           label="Target folder (optional)"
-          placeholder="e.g. M31"
+          placeholder="e.g. M 31_sub"
+          data={dests.map((d) => d.folder)}
           value={target}
-          onChange={(e) => setTarget(e.currentTarget.value)}
-          w={{ base: "100%", xs: 180 }}
+          onChange={setTarget}
+          w={{ base: "100%", xs: 200 }}
           size="sm"
+          error={advice?.tone === "warn" ? true : undefined}
+          data-testid="upload-target-folder"
         />
         <Button
           onClick={() => upload.mutate()}
@@ -369,6 +396,31 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
           Upload {files.length ? `${files.length} ${files.length === 1 ? "file" : "files"}` : ""}
         </Button>
       </Group>
+
+      {/* What that folder name will actually do. Withheld for a drop that keeps
+          its own folders (and for a .zip, which always does): there the typed
+          name is a *parent* the structure lands inside, which is a different
+          sentence — `folderPreserveNote`/`zipNote` below already say it.
+          The row wraps deliberately: at 420 px `nowrap` squeezed the button
+          until its own folder name was clipped to “Use “N”, which is the one
+          word it exists to say. */}
+      {advice && !upload.isPending && folders.length === 0 && !zipNote ? (
+        <Group gap="xs" align="center" data-testid="upload-destination-advice">
+          <Text size="xs" c={advice.tone === "warn" ? "orange" : "dimmed"}>
+            {advice.message}
+          </Text>
+          {advice.fixFolder ? (
+            <Button
+              size="compact-xs"
+              variant="light"
+              style={{ flexShrink: 0 }}
+              onClick={() => setTarget(advice.fixFolder as string)}
+            >
+              Use “{advice.fixFolder}”
+            </Button>
+          ) : null}
+        </Group>
+      ) : null}
 
       {files.length > 0 && !upload.isPending ? (
         <Stack gap={2}>
