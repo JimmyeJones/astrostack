@@ -32,6 +32,7 @@ import {
   NorthUpViewToggle, loadNorthUpView, saveNorthUpView,
 } from "../components/NorthUpViewToggle";
 import { ShowRemovedToggle } from "../components/ShowRemovedToggle";
+import { HintIcon } from "../components/HintIcon";
 import { removedOverlayCaption } from "../removed";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
@@ -637,8 +638,14 @@ export function GalleryView() {
             maw={420}
             style={{ flex: 1, minWidth: 220 }}
           />
+          {/* Each filter's explanation sits *beside* it rather than wrapped
+              around it. A tooltip on a segmented control is unreachable on a
+              phone — the only gesture available is the tap that picks a segment
+              — and these three are where the Gallery's jargon lives ("σ",
+              "drizzle", "calibrated"), so on the device the owner reads this app
+              on the words were, in practice, not written at all. */}
           {showCalFilter ? (
-            <Tooltip label="Filter by whether a stack had calibration masters (dark/flat/bias) applied to its lights.">
+            <Group gap={4} wrap="nowrap">
               <SegmentedControl
                 size="xs"
                 value={calFilter}
@@ -649,10 +656,11 @@ export function GalleryView() {
                   { label: "Uncalibrated", value: "uncalibrated" },
                 ]}
               />
-            </Tooltip>
+              <HintIcon hint="Filter by whether a stack had calibration masters (dark/flat/bias) applied to its lights." />
+            </Group>
           ) : null}
           {showMethodFilter ? (
-            <Tooltip label="Filter by how each stack was combined (drizzle / min-max / σ-clip / mean).">
+            <Group gap={4} wrap="nowrap">
               <SegmentedControl
                 size="xs"
                 value={methodFilter}
@@ -662,10 +670,11 @@ export function GalleryView() {
                   ...presentMethods.map((m) => ({ label: COMBINE_METHOD_LABELS[m], value: m })),
                 ]}
               />
-            </Tooltip>
+              <HintIcon hint="Filter by how each stack was combined (drizzle / min-max / σ-clip / mean)." />
+            </Group>
           ) : null}
           {showSort ? (
-            <Tooltip label="Cleanest sorts by lowest background noise across every target — the σ is normalized so it's comparable between images.">
+            <Group gap={4} wrap="nowrap">
               <SegmentedControl
                 size="xs"
                 value={sort}
@@ -675,7 +684,8 @@ export function GalleryView() {
                   { label: "Cleanest", value: "cleanest" },
                 ]}
               />
-            </Tooltip>
+              <HintIcon hint="Cleanest sorts by lowest background noise across every target — the σ is normalized so it's comparable between images." />
+            </Group>
           ) : null}
         </Group>
       ) : null}

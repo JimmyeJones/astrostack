@@ -69,6 +69,35 @@ describe("JobsView", () => {
     }
   });
 
+  it("explains the notify toggle without asking the browser for permission",
+    async () => {
+      // The sentence used to be a Tooltip *wrapped around the switch*, so on a
+      // phone the only way to reach it was the tap that flips the switch — which
+      // here also fires the browser's permission prompt. Reading what a control
+      // does must not be the same gesture as agreeing to it.
+      const requestPermission = vi.fn().mockResolvedValue("granted");
+      vi.stubGlobal("Notification", Object.assign(
+        vi.fn(), { permission: "default", requestPermission }));
+      try {
+        vi.spyOn(client.api, "listJobs").mockResolvedValue([mkJob()]);
+        renderJobs();
+        await waitFor(() => expect(screen.getByText("Stacking")).toBeInTheDocument());
+
+        // Whatever the stored preference is when this test runs, reading the
+        // hint must leave it exactly there.
+        const was = (screen.getByLabelText("Notify me when done") as HTMLInputElement)
+          .checked;
+        fireEvent.click(screen.getByRole("button", { name: "What does this do?" }));
+        expect(await screen.findByText(/desktop notification when a job finishes/))
+          .toBeInTheDocument();
+        expect(requestPermission).not.toHaveBeenCalled();
+        expect((screen.getByLabelText("Notify me when done") as HTMLInputElement)
+          .checked).toBe(was);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
   it("hides the notify toggle where the browser has no Notification API", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([mkJob()]);
     renderJobs();

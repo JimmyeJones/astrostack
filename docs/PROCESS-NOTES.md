@@ -18,6 +18,69 @@ is a queue.
 
 ---
 
+## 2026-09-09 — Builder run (`claude/sweet-babbage-x2ai9f` → v0.402.0, v0.402.1): the phone-unreachable explanations, and a clean `--mosaic --editor` dogfood
+
+**The run.** Baseline green before any change: **5,417 passed / 2 skipped**, full
+suite headless, 26:37. Two shipped items, each with its own full Python suite
+(5,417 / 2 both times), its own `vitest` (3,488 → 3,497 across 249 files) and its
+own `vite build`; `tsc` clean throughout. `ruff` unchanged (446 pre-existing;
+the only Python line this run touched is `__version__`).
+
+**Both items are slices of one backlog entry** — *"a Tooltip is invisible on the
+device the owner actually reads this app on"* — whose first two slices shipped as
+v0.270.0 and v0.374.11. What made them worth a run rather than a tidy-up is that
+the entry's own second slice had already turned out to be a **bug**, and so did
+this run's second one.
+
+**How the work was chosen.** The Bugs section holds no open, ungated bug; the
+Ideas sections are mostly measured stand-downs (I extracted every top-level entry
+across all six sections and filtered out the closed ones — ~55 remain, of which
+most are explicitly real-data-gated, need owner sign-off, or carry a recorded
+"probably not worth building"). The tooltip entry is one of the few with a
+concrete, unbuilt, measurable "still open" line naming the editor.
+
+**The measurement that scoped slice three.** Counting `<Tooltip` per route put
+the editor at **24**, against Gallery 9 and Target 7 — and the ones that matter
+are the eight-button row under the picture, four of which carried a real sentence
+only on hover. The `FrameColumnGuide` idiom (v0.270.0) transfers to it exactly.
+
+**The enumeration that found slice four, and it is the transferable part.**
+While placing the guide I noticed the `Auto-crop edges` switch is a `<Tooltip>`
+wrapped around a **control**, which is v0.374.11's defect one level up: there the
+icon leaked its tap through to the control; here the tap *is* the control, and
+there is no icon at all. That is a shape a grep can enumerate exhaustively — a
+`Tooltip` whose first child is a `Switch`/`SegmentedControl`/input — and it found
+**five sites, all of them live**: the editor's auto-crop switch, the Jobs notify
+switch (whose tap also fires the browser permission prompt), and the Gallery's
+three filters. **Generalises to:** when a fix lands on a *component*, ask what
+the same mistake looks like one level up, at the call sites the component was
+extracted from. A defect class rarely lives at only one altitude.
+
+**Dogfood: CLEAN, and on a mosaic** (`scripts/agent-dogfood.sh --build --mosaic
+--editor`, run against the v0.402.0 build). Nothing overflowing, no console
+errors on either sample; the mosaic trim **7.9 %**, unchanged; the editor drive
+clean on **both** the field and the mosaic run — all 21 ops re-rendered the live
+preview, undo and redo applied. Page heights, phone: field editor **3,072 px**
+(3,047 px before this run's guide line, +25 px), Target 3,078 px (unchanged),
+`/life-list` 3,094 px; mosaic Target 3,407 px, mosaic editor 3,102 px. Desktop:
+field editor 1,984 px, mosaic 2,113 px. **Re-probed after v0.402.1**
+(`--build --no-stack`, which picks the newest target, i.e. the mosaic): the same
+four numbers to the pixel — 3,407 / 3,102 / 2,113 / 2,104 — so the five hint
+icons cost no height at all, including in the Gallery's wrapping filter row.
+Still nothing overflowing, still no console errors.
+
+**One process note on the two commits.** Both are frontend-only, and the second
+was written before the first was committed, so the first commit's *full* Python
+suite ran on a tree that also carried the second's non-`Editor.tsx` files. Rather
+than claim "independently green" loosely, v0.402.0 was re-verified in a detached
+worktree at its own commit: `tsc` clean, **248 files / 3,488 tests** green, and
+the seven Python tests that actually read `frontend/` (the mirror tests,
+`test_editor_op_placement.py` among them) **108 passed**. Cheaper than a second
+25-minute suite for the same guarantee — but the ordering that made it necessary
+is worth avoiding: commit the first slice before starting the second.
+
+---
+
 ## 2026-09-09 — Builder run (`claude/sweet-babbage-7w0m19` → v0.401.0, `agent/dogfood-9w0m` → v0.401.1): the field-fill diagram, and the legibility bug only the browser had
 
 **Dogfood pass: CLEAN on the field sample** (`scripts/agent-dogfood.sh --build`,
