@@ -151,6 +151,95 @@ def _axis_bins(values: list[float], tol: float) -> list[int]:
     return bins
 
 
+def _axis_lines(bin_of: list[int], values: list[float]) -> dict[int, float]:
+    """Where each grid line sits on its axis: ``{bin index: mean coordinate}``.
+
+    :func:`_axis_bins` hands back which line each panel landed on; this is the
+    line's own position, so a pointing that was *not* one of those panels can be
+    asked "are you on this grid?" in the same coordinates and at the same
+    tolerance."""
+    lines: dict[int, list[float]] = {}
+    for index, value in zip(bin_of, values, strict=True):
+        lines.setdefault(index, []).append(value)
+    return {index: sum(vals) / len(vals) for index, vals in lines.items()}
+
+
+def _thin_panels_on_the_grid(
+    folded: list[tuple[float, float, int, float]],
+    labels: list[int],
+    panels: list[MosaicPanel],
+    *,
+    row_lines: dict[int, float],
+    col_lines: dict[int, float],
+    tol: float,
+    ra0: float,
+    dec0: float,
+    cos_dec: float,
+) -> list[MosaicPanel]:
+    """The panels the substantial-panel gate threw away but the grid says are real.
+
+    ``pointing_groups`` labels a cluster carrying fewer than
+    :data:`MIN_PANEL_FRAMES` subs ``-1``, and that floor is right for what it was
+    written for — *strays*, a handful of mis-solved subs a degree off the mosaic,
+    which must not become a thirteenth panel. But it also catches a panel that is
+    thin **because it is thin**: a corner the owner started and lost to cloud
+    after three subs is discarded outright, so the map drew a hole exactly where
+    the grain is and the verdict — computed over the survivors — called the
+    mosaic even. That is the one thing this whole module exists to say, said
+    backwards. (Reproduced on the 2×2 sample: three 6-sub panels and one 3-sub
+    panel read as "All 3 panels of your 2×2 mosaic … no part of the picture is
+    being held back", while the stack-health panel on the same run said 23 % of
+    it was 1.4× grainier.)
+
+    So the dropped pointings get **one** more hearing, against the geometry
+    rather than against a population: a cluster is a thin panel when it lands on
+    the grid the substantial panels already define — within the same ``tol`` of
+    an existing row line *and* an existing column line — and its cell is still
+    empty. Everything else stays out:
+
+    * a stray is not on a grid line (that is what makes it a stray), so the
+      floor's original job is untouched;
+    * a thin cluster can never *extend* the grid, only fill a cell inside it —
+      letting three subs define where the mosaic is would hand geometry to
+      exactly the population the floor distrusts;
+    * an **occupied** cell is left alone rather than merged into, so no panel
+      that exists today changes its frame count, its integration or its centre.
+      The map can only gain a panel it was previously blind to.
+
+    Dropped pointings sharing one cell are summed into a single panel, and its
+    centre is their frame-weighted direction — the same construction the
+    substantial panels' centres use.
+    """
+    if not row_lines or not col_lines:
+        return []
+    occupied = {(p.row, p.col) for p in panels}
+    cells: dict[tuple[int, int], list[float]] = {}
+    for (ra, dec, n, seconds), label in zip(folded, labels, strict=True):
+        if label >= 0:
+            continue
+        dra = _wrap180(ra - ra0) * cos_dec
+        ddec = dec - dec0
+        row = min(row_lines, key=lambda k: abs(row_lines[k] - ddec))
+        col = min(col_lines, key=lambda k: abs(col_lines[k] - dra))
+        if abs(row_lines[row] - ddec) > tol or abs(col_lines[col] - dra) > tol:
+            continue                     # not on this mosaic's grid — a stray
+        if (row, col) in occupied:
+            continue                     # a real panel already answers for this cell
+        x, y, z = _to_vec(ra, dec)
+        cell = cells.setdefault((row, col), [0.0, 0.0, 0.0, 0.0, 0.0])
+        cell[0] += n
+        cell[1] += seconds
+        cell[2] += x * n
+        cell[3] += y * n
+        cell[4] += z * n
+    out = []
+    for (row, col), (n, seconds, x, y, z) in sorted(cells.items()):
+        ra, dec = _direction((x, y, z))
+        out.append(MosaicPanel(row=row, col=col, n_frames=int(n),
+                               exposure_s=seconds, ra_deg=ra, dec_deg=dec))
+    return out
+
+
 def _band(index: int, count: int, low: str, high: str) -> str:
     """The word for one axis position: ``""`` on a single line, else the edge's
     name or "middle"."""
@@ -207,10 +296,26 @@ def aim_hint(m: MosaicDepthMap | None) -> str | None:
 
 
 def _verdict_text(panels: list[MosaicPanel], rows: int, cols: int,
-                  median_s: float, thin: MosaicPanel | None) -> str:
+                  median_s: float, thin: MosaicPanel | None,
+                  behind: MosaicPanel | None = None) -> str:
+    """The card's sentence.
+
+    ``thin`` is the panel worth acting on — materially thinner *and* behind by
+    enough to be worth a night. ``behind`` is the panel that failed only the
+    second of those: thinner by the same fraction, but by minutes rather than by
+    hours. It used to fall into the "all similar" branch, which was a small
+    untruth nobody could see, because such a panel was usually below
+    :data:`MIN_PANEL_FRAMES` and not on the map at all. Now that it is drawn — a
+    visibly paler cell — an all-clear written under it is a sentence arguing with
+    its own picture, so it gets its own line: the fact, without the nag."""
     from seestack.sharecard import format_duration
 
-    shape = f"{rows}×{cols}" if rows > 1 and cols > 1 else f"{len(panels)}-panel"
+    # "2×2" only when the mosaic really is one — four panels on a 2×2 grid. A
+    # partly-shot mosaic (or a genuine L-shape) has a 2×2 *bounding* grid and
+    # three panels, and calling that "All 3 panels of your 2×2 mosaic" is a
+    # sentence that contradicts itself in its own six words.
+    shape = (f"{rows}×{cols}" if rows > 1 and cols > 1 and len(panels) == rows * cols
+             else f"{len(panels)}-panel")
     if thin is not None:
         where = panel_position_words(thin.row, thin.col, rows, cols)
         return (
@@ -219,6 +324,15 @@ def _verdict_text(panels: list[MosaicPanel], rows: int, cols: int,
             f"{format_duration(median_s)} on a typical panel. That part of the "
             f"picture will look grainier than the rest until it catches up — "
             f"more time on this mosaic is what evens it out."
+        )
+    if behind is not None:
+        where = panel_position_words(behind.row, behind.col, rows, cols)
+        return (
+            f"Your {shape} mosaic is a little behind at the {where}: about "
+            f"{format_duration(behind.exposure_s)} there against "
+            f"{format_duration(median_s)} on a typical panel. It's only a few "
+            f"minutes' difference at this stage, so it evens out on its own as "
+            f"you keep shooting."
         )
     return (
         f"All {len(panels)} panels of your {shape} mosaic have had a similar "
@@ -359,6 +473,12 @@ def mosaic_depth_map(
         )
         for i, label in enumerate(order)
     ]
+    panels += _thin_panels_on_the_grid(
+        folded, labels, panels,
+        row_lines=_axis_lines(row_of, ddecs),
+        col_lines=_axis_lines(col_of, dras),
+        tol=tol, ra0=ra0, dec0=dec0, cos_dec=cos_dec,
+    )
     panels.sort(key=lambda p: (p.row, p.col))
 
     times = sorted(p.exposure_s for p in panels)
@@ -366,16 +486,18 @@ def mosaic_depth_map(
     median_s = times[mid] if len(times) % 2 else 0.5 * (times[mid - 1] + times[mid])
 
     thinnest = min(panels, key=lambda p: (p.exposure_s, p.row, p.col))
-    thin = (
-        thinnest
-        if median_s > 0.0
-        and thinnest.exposure_s < THIN_FRACTION * median_s
-        and (median_s - thinnest.exposure_s) >= THIN_MIN_SHORTFALL_S
-        else None
-    )
+    materially_thinner = (median_s > 0.0
+                          and thinnest.exposure_s < THIN_FRACTION * median_s)
+    worth_a_night = (median_s - thinnest.exposure_s) >= THIN_MIN_SHORTFALL_S
+    thin = thinnest if materially_thinner and worth_a_night else None
+    # Thinner by the fraction but not yet by enough minutes to be worth going
+    # out for. `thin` stays None — no highlight, no aim hint, no nag, exactly as
+    # before — but the sentence stops calling the panels "similar" when the card
+    # is drawing one of them visibly paler than the rest.
+    behind = thinnest if materially_thinner and not worth_a_night else None
 
     return MosaicDepthMap(
         panels=panels, rows=rows, cols=cols,
         median_exposure_s=median_s, thin=thin,
-        text=_verdict_text(panels, rows, cols, median_s, thin),
+        text=_verdict_text(panels, rows, cols, median_s, thin, behind),
     )
