@@ -264,8 +264,12 @@ def field_fill(
     frac_short = min(_FILL_MAX, minor / fov_short_arcmin)
 
     if frac_long >= 1.0 or frac_short >= 1.0:
-        text = ("Bigger than one frame — the outline shows how far it spills "
-                "over the edges.")
+        # Name the *frame* rather than "the outline": on this branch the object
+        # is drawn over the frame, so a reader meeting two shapes at once has to
+        # be told which one is their field. (Found by looking at the rendered
+        # card, not by reading the string — the ambiguity is invisible in code.)
+        text = ("Bigger than one frame — it spills over the dashed edge of "
+                "your field.")
     elif frac_long < _FILL_TINY:
         text = (f"Small in the frame — it spans about {_fill_pct(frac_long)}% of "
                 "the width, so expect to crop in close afterwards.")

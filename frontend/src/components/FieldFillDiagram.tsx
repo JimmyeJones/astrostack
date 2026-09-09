@@ -77,6 +77,15 @@ export function FieldFillDiagram({ fill, name }: { fill: FieldFill; name: string
       <svg width={g.width} height={g.height} viewBox={g.viewBox}
         role="img" aria-label={`${name} against one Seestar frame. ${fill.text}`}
         style={{ display: "block", overflow: "visible" }}>
+        {/* The object, to scale and centred — where it would sit if you pointed
+            straight at it. Drawn *first* so the frame's edge stays crisp on top
+            of it: on an overflowing object the frame is inside the fill, and
+            underneath a translucent wash it reads as a smudge rather than as
+            the edge of your field. */}
+        <ellipse cx={0} cy={0} rx={g.object.rx} ry={g.object.ry}
+          fill="var(--mantine-color-indigo-5)" fillOpacity={overflows ? 0.22 : 0.3}
+          stroke="var(--mantine-color-indigo-5)" strokeWidth={1.4}
+          vectorEffect="non-scaling-stroke" />
         {/* One frame of sky. Dashed so it reads as "the edge of what you get"
             rather than as a border around the drawing. The stroke is
             non-scaling, so its width and dashes are CSS pixels — constants, not
@@ -85,12 +94,6 @@ export function FieldFillDiagram({ fill, name }: { fill: FieldFill; name: string
         <rect x={g.frame.x} y={g.frame.y} width={g.frame.w} height={g.frame.h}
           fill="none" stroke="var(--mantine-color-dimmed)" strokeWidth={1.2}
           strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
-        {/* The object, to scale and centred — where it would sit if you pointed
-            straight at it. */}
-        <ellipse cx={0} cy={0} rx={g.object.rx} ry={g.object.ry}
-          fill="var(--mantine-color-indigo-5)" fillOpacity={overflows ? 0.22 : 0.3}
-          stroke="var(--mantine-color-indigo-5)" strokeWidth={1.4}
-          vectorEffect="non-scaling-stroke" />
       </svg>
       <Text size="xs" c="dimmed" mt={2}>{fill.text}</Text>
     </Box>

@@ -18,6 +18,43 @@ is a queue.
 
 ---
 
+## 2026-09-09 — Builder run (`claude/sweet-babbage-7w0m19` → v0.401.0, `agent/dogfood-9w0m` → v0.401.1): the field-fill diagram, and the legibility bug only the browser had
+
+**Dogfood pass: CLEAN on the field sample** (`scripts/agent-dogfood.sh --build`,
+then again with `--no-stack` after the fix). Nothing overflowing, no console
+errors, both times. Page heights on the sample-loaded app, phone: `/life-list`
+3,094 px, Target 3,078 px (3,024 px unstacked), editor 3,047 px; desktop Target
+2,057 px. The Target page is **+64 px** against the v0.338.1 baseline of 3,014 px
+— that is this run's diagram, added *inside* the identity card rather than as
+another banner, which is what the §1 standing IA rule asks for. No `--mosaic`
+run: this run makes no Auto/editor claim, and the identity card's numbers are
+catalogue-and-field arithmetic that a canvas shape cannot reach.
+
+**The lesson worth keeping: a new *drawing* has a failure mode a new *string*
+doesn't, and only a browser shows it.** `field_fill`'s overflow caption shipped as
+*"Bigger than one frame — the outline shows how far it spills over the edges."*
+Every test passed, the geometry was measured correct (the drawn ellipse is
+`frac_long` × the drawn frame on each axis, verified off the screenshot's own
+pixels), and the sentence is true. It is still **unreadable**, and the rendered
+card is the only place that shows why: on the overflow branch there are suddenly
+**two** shapes, the object covers the frame, and "the outline" names neither of
+them. The reader cannot tell which shape is their field.
+
+Two fixes, both invisible to a code read (v0.401.1): the ellipse is painted
+**before** the frame, because SVG paints in document order and a dashed grey edge
+under a translucent indigo wash reads as a smudge rather than as an edge; and the
+caption names the frame — *"Bigger than one frame — it spills over the dashed edge
+of your field."* Both are pinned (`test_field_fill_overflow_is_reported_not_clipped`
+asserts the sentence says "dashed"/"your field"; the component test asserts the
+`ellipse` precedes the `rect` in the DOM).
+
+**Generalises to:** any future run adding a *picture* to a card. The tests can
+only pin what you already know to look for, and "which of these two shapes am I
+looking at?" is not a question that occurs to you while writing the shapes. Take
+the screenshot.
+
+---
+
 ## 2026-09-09 (Builder, branch `claude/sweet-babbage-8td9m9`) — two share-resolution items, one measured closure, and a clean `--mosaic` dogfood
 
 **The run.** Baseline green before any change: **5,395 passed / 2 skipped**, full
