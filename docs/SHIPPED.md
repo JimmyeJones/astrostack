@@ -14,6 +14,49 @@ Newest first.
 
 ---
 
+## v0.407.0 — 2026-09-09 — a *shareable* labelled picture: the names were already baked, and nothing offered them on their own
+
+*(Cut from `IMPROVEMENTS.md` → Ideas → "Features that serve real workflows" by the Builder that shipped it.
+The Scout filed this on 2026-09-09 as an unbuilt slice (d) of the v0.141.0 "What's in this picture?" feature.
+It was 90 % built: **grep found the whole engine half already shipped**, and the filed entry did not, which is
+worth recording as much as the change is.)*
+
+**What already existed, and where.** `seestack/objectlabels.py` (v0.293.0) is exactly the "pure engine render"
+the entry asks someone to write — `place_labels` (pure geometry, anchors as *fractions* so they survive the
+share re-render) plus `draw_object_labels` (the pixel work, the label budget, the deconfliction), sharing
+`MARK_RGB`/`HALO_RGB` with `seestack/skymarks.py` so a picture carrying both reads as one visual set. It is
+wired into `stack/output.py::png_bytes_to_jpeg` and reached by `download_stack_run`'s **`label_objects=true`**
+query flag, which follows the picture's own crop and North-up turns (`_object_labels_for_run`) and saves the
+file under its own `_labelled.jpg` name. `tests/webapp/test_share_object_labels.py` covers it in seventeen
+cases, including the unsolved run, the cropped preview and the turned one. So the entry's proposed
+`annotate_render.py` / `annotated.jpg` would have been a **second** implementation of a shipped one.
+
+**What was genuinely missing — the download.** The only surface that ever set the flag was *"Share the
+keepsake"*, which sets `keepsake=true&scale=true&label_objects=true` together. So the names could leave the app
+only bundled with the dark matte, the caption and the scale bar — and the one thing a beginner most wants to
+post ("M 42, with the Running Man just above") had no plain form. The Target hero's own on-screen toggle says
+*"What’s in it?"*, and the answer vanished the moment the picture was saved.
+
+**The change is one menu item, deliberately.** `SavePictureMenu` (v0.385.0 — one component, both pages) gains
+**"With object names"** in the Download group, directly under its sibling *"With scale & compass"*, hinted
+*"What’s in it, named on the picture — so the labels travel with the file"*. It asks for `label_objects` and
+**not** `scale`: the two marks and the names stay separate downloads rather than one item growing a second
+flag, which is what "With scale & compass" would have become. It follows the page's North-up toggle exactly as
+its sibling does, and degrades the same way — an unsolved run, or a field with nothing catalogued in it, gets
+the plain picture back rather than an error, so the item never becomes a download that fails.
+
+**Upgrade-safe (§9):** frontend-only. No config, DB, on-disk, default, endpoint or response-shape change — the
+query flag it sets has been served since v0.293.0, so an older backend behind a newer frontend is the one case
+that cannot arise here, and the reverse (older frontend) simply doesn't offer the item.
+
+**Tests (+1 case, +4 assertions; the union-of-items one fails before).** `SavePictureMenu.test.tsx` pins the
+item into the union list every page must offer, and pins its href three ways: byte-equal to
+`stackArtifactUrl(..., northUp, false, false, false, true)`, containing `label_objects=true`, and **not**
+containing `scale=true`. `label_objects` is the last of five positional booleans on that helper, which is
+precisely the transposition a screenshot cannot show.
+
+---
+
 ## CLOSED (idea, not built) — 2026-09-07 — data-driven target difficulty: the gap it exists to fill is measured at zero
 
 *(Cut from `IMPROVEMENTS.md` → Ideas by the Scout 2026-09-09 under the three-file
