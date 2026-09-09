@@ -6,9 +6,13 @@ import numpy as np
 import pytest
 
 from seestack.edit.coverage_trim import (
+    _TRIM_LADDER_RUNGS,
     MASK_LEVEL_MIN_FRAC,
     PANEL_LEVEL_MIN_FRAC,
+    TRIM_KEEP_RATIO,
     _coverage_threshold,
+    _outline_mask,
+    _rect_area,
     _rect_from_mask,
     coverage_is_mosaic,
     largest_covered_rect,
@@ -16,6 +20,8 @@ from seestack.edit.coverage_trim import (
     well_covered_mask,
 )
 from tests.shapes import (
+    assert_fully_tiled,
+    assert_has_a_ragged_outline,
     assert_panels_thinner_than_the_reference,
     assert_reference_is_the_thinnest_panel,
     assert_weighted,
@@ -564,3 +570,144 @@ def test_the_trim_keeps_its_own_reference_and_the_default_is_unmoved():
         well_covered_mask(raster, level_min_frac=MASK_LEVEL_MIN_FRAC))
     assert _coverage_threshold(raster) > _coverage_threshold(
         raster, level_min_frac=MASK_LEVEL_MIN_FRAC)
+
+
+# --- D1, fourth instalment: a border is where the data runs out ---------------
+#
+# v0.391.1 bounded the trim by what the *coverage* allows, which rescued the
+# catastrophic cases (25 % of a canvas kept). It is worth nothing on a canvas
+# that is **fully tiled**: there the bound is 1.0 by definition, so a rectangle
+# keeping four fifths of it clears `TRIM_KEEP_RATIO` and is accepted — and that
+# is exactly the band a dense raster with uneven panel depth lands in. Measured
+# over 147 synthetic rasters shaped like the owner's shooting (3x3 … 12x8, 10 %
+# overlap, depths spanning 3-15 up to 50-500 subs, three seeds each, weighted and
+# integer), 19 were cropped, the worst keeping **80.2 %** of a canvas with no
+# ragged edge anywhere. AGENTS.md §1 puts the bar at "a trim above ~15 % of the
+# canvas is a bug, not a ragged edge".
+#
+# Four scalar levers were measured and rejected before this one — lower the panel
+# reference, read the frame-count map, tighten `TRIM_KEEP_RATIO`, refuse a crop
+# that discards well-covered pixels — each either non-monotone or a case where
+# the honest and the broken shapes collide outright (the numbers are on
+# `FRINGE_OUTSIDE_FRAC`). What separates them is **spatial**, and it is a fact
+# rather than a threshold: a reprojection ramp is *attached to the outline*; a
+# thin panel in the middle of a raster is not.
+
+
+def _ladder_only_rect(coverage, min_frac=0.5):
+    """v0.399.2's `largest_covered_rect`, kept here as an independent copy.
+
+    The safety property below is "the border rule can only ever keep more than
+    the depth ladder alone did", and a property about the previous behaviour
+    needs the previous behaviour to compare against — asserting it against the
+    current implementation would be asserting nothing.
+    """
+    threshold = _coverage_threshold(coverage, min_frac)
+    if threshold is None:
+        return None
+    cov = np.asarray(coverage, dtype=np.float32)
+    covered = np.isfinite(cov) & (cov > 0)
+    bound = _rect_area(_rect_from_mask(covered))
+    for _ in range(_TRIM_LADDER_RUNGS):
+        rect = _rect_from_mask(np.isfinite(cov) & (cov >= threshold))
+        if _rect_area(rect) >= TRIM_KEEP_RATIO * bound:
+            return rect
+        threshold *= 0.5
+    return _rect_from_mask(covered)
+
+
+def test_a_fully_tiled_raster_is_not_cropped_however_uneven_its_panels():
+    """The repro, at the owner's shape. Fail-before: `5x4 10-100 s1` kept 80.4 %,
+    `5x4 50-500 s1` 83.1 % and `6x4 10-100 s1` 82.2 % of a canvas that is covered
+    edge to edge — no ragged border anywhere, so the honest answer is no crop."""
+    for nx, ny in [(5, 4), (6, 4), (8, 6), (12, 8)]:
+        for lo, hi in [(10, 101), (50, 501)]:
+            for seed in (0, 1, 2):
+                name = f"{nx}x{ny} {lo}-{hi} s{seed}"
+                cov = _raster_with_uneven_depth(nx, ny, h=320, w=480, seed=seed,
+                                                lo=lo, hi=hi)
+                # The fixture's own claims: no border to trim, coverage really is
+                # a sum of weights, and real panels sit below the depth threshold
+                # — without which this would pass for the wrong reason.
+                assert_fully_tiled(cov, what=name)
+                assert_weighted(cov, what=name)
+                assert_panels_thinner_than_the_reference(cov, what=name)
+                rect = largest_covered_rect(cov)
+                assert rect is None, (
+                    f"{name}: kept {100 * _kept_fraction(rect):.1f}% of a fully "
+                    f"tiled canvas -- {describe_coverage(cov)}")
+
+
+def test_the_same_raster_with_a_real_outline_still_loses_its_border():
+    """The other half: the rule must not become "never trim a mosaic". Give those
+    rasters an honest union outline — four uncovered corners, which is what a
+    real bounding-box canvas has — and the trim comes back and removes it."""
+    for nx, ny in [(5, 4), (8, 6)]:
+        for seed in (0, 1):
+            name = f"{nx}x{ny} s{seed}"
+            cov = _raster_with_uneven_depth(nx, ny, h=320, w=480, seed=seed,
+                                            lo=10, hi=101)
+            h, w = cov.shape
+            bh, bw = int(0.08 * h), int(0.08 * w)
+            for ys, xs in [(slice(0, bh), slice(0, bw)),
+                           (slice(0, bh), slice(w - bw, w)),
+                           (slice(h - bh, h), slice(0, bw)),
+                           (slice(h - bh, h), slice(w - bw, w))]:
+                cov[ys, xs] = 0.0
+            assert_has_a_ragged_outline(cov, what=name)
+            rect = largest_covered_rect(cov)
+            assert rect is not None, f"{name}: {describe_coverage(cov)}"
+            # Sharper than "a trim happened": the rectangle is *exactly* the one
+            # the coverage alone allows, so the uncovered corners are all that
+            # was removed and not one panel went with them. Fail-before on
+            # `5x4 s1`: 73.3 % kept against a bound of 84.4 %.
+            bound = _rect_area(_rect_from_mask(np.isfinite(cov) & (cov > 0)))
+            assert _kept_fraction(rect) == pytest.approx(bound), (
+                f"{name}: kept {100 * _kept_fraction(rect):.1f}% of a canvas "
+                f"whose coverage allows {100 * bound:.1f}% -- "
+                f"{describe_coverage(cov)}")
+
+
+def test_a_ramp_is_an_outline_and_a_thin_panel_is_not():
+    """The discriminator itself, on two maps you can read by eye. Both hold a
+    region at a twentieth of a panel's depth touching the canvas edge; in one it
+    is a 4 px band (a reprojection ramp), in the other a whole 100x120 panel that
+    simply got very few subs. Only the band is "where the data ran out"."""
+    ramp = np.full((120, 300), 30.0, dtype=np.float32)
+    ramp[:2, :] = ramp[-2:, :] = ramp[:, :2] = ramp[:, -2:] = 1.5
+    panel = np.full((120, 300), 30.0, dtype=np.float32)
+    panel[:, :100] = 1.5
+    for cov, want, what in [(ramp, True, "a 2 px ramp"),
+                            (panel, False, "a 100 px panel")]:
+        covered = np.isfinite(cov) & (cov > 0)
+        assert bool(_outline_mask(cov, covered, 30.0).any()) is want, what
+    # …and the consequence for the trim on the ramp map: it goes, exactly.
+    # (The panel map's own consequence is the raster test above — a shallow
+    # region a third of the canvas wide is a substantial coverage *level*, so
+    # `panel_coverage_level` already takes it as the reference and nothing is
+    # below the threshold at all. That is D1's first instalment doing its job,
+    # and it is why this failure only appears on rasters of dozens of panels.)
+    assert largest_covered_rect(ramp) == (2 / 300, 2 / 120, 298 / 300, 118 / 120)
+
+
+def test_the_border_rule_can_only_ever_keep_more_than_the_ladder_alone():
+    """The safety property, over random maps *and* over every raster shape above:
+    the answer is never smaller than v0.399.2's. So the worst this instalment can
+    do is leave fringe in — it can never crop a panel away."""
+    rng = np.random.default_rng(19)
+    maps = []
+    for _ in range(30):
+        cov = rng.gamma(2.0, 8.0, size=(60, 80)).astype(np.float32)
+        cov[rng.random((60, 80)) < 0.1] = np.nan
+        maps.append(cov)
+    maps.append(_single_field_with_fringe())
+    maps.append(_tiled_mosaic(2, 2, overlap=0.15))
+    for seed in (0, 1, 2):
+        maps.append(_raster_with_uneven_depth(6, 4, h=320, w=480, seed=seed,
+                                              lo=10, hi=101))
+        maps.append(_counts_raster(8, 6, lo=5, hi=60, seed=seed))
+    for i, cov in enumerate(maps):
+        # `_rect_area`, not `_kept_fraction`: `None` here means "keep the whole
+        # picture", which is the most generous answer of all, not the least.
+        assert (_rect_area(largest_covered_rect(cov))
+                >= _rect_area(_ladder_only_rect(cov)) - 1e-9), i

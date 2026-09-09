@@ -150,6 +150,40 @@ def assert_panels_thinner_than_the_reference(cov, *, share: float = 0.02,
         f"rule that crops thin panels away")
 
 
+def uncovered_share(cov) -> float:
+    """Share of the canvas no frame reached (NaN or zero coverage)."""
+    a = np.asarray(cov)
+    if a.ndim != 2 or a.size == 0:
+        return 0.0
+    return float(1.0 - covered_values(a).size / a.size)
+
+
+def assert_fully_tiled(cov, *, what: str = "fixture") -> None:
+    """Assert the canvas has **no uncovered pixel at all**.
+
+    The distinction the fourth D1 instalment turned on. A border trim exists to
+    remove the ragged edge where the data runs out — so on a canvas where it never
+    runs out, the honest answer is *no crop*, and every pixel a trim removes is
+    real picture. A fixture that merely has uneven panel depth cannot say that: it
+    may also have a ragged outline, in which case a crop is expected and the test
+    cannot tell an honest trim from a panel being eaten.
+    """
+    got = uncovered_share(cov)
+    assert got == 0.0, (
+        f"{what}: {describe_coverage(cov)} -- {100 * got:.2f}% of the canvas is "
+        f"uncovered, so this fixture cannot vouch for 'there is no border here'")
+
+
+def assert_has_a_ragged_outline(cov, *, share: float = 0.005,
+                                what: str = "fixture") -> None:
+    """The opposite claim: the canvas really does run out of data somewhere, so a
+    border trim has something honest to remove."""
+    got = uncovered_share(cov)
+    assert got >= share, (
+        f"{what}: {describe_coverage(cov)} -- only {100 * got:.2f}% of the canvas "
+        f"is uncovered, so this fixture has no ragged border to trim")
+
+
 def assert_reference_is_the_thinnest_panel(cov, *, what: str = "fixture") -> None:
     """The opposite claim, for a fixture whose panels *are* individually
     substantial: the reference depth lands on the thinnest panel, so nothing real
