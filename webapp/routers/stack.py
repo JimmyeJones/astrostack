@@ -8,7 +8,7 @@ import os
 from collections.abc import Sequence
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
@@ -2170,12 +2170,56 @@ async def deepening_reel(safe: str, request: Request) -> FileResponse:
 # A short looping push-in on ONE finished picture, for posting. Unlike the two
 # animations above (the progress reel and the deepening reel, both of which show a
 # stack accumulating *over time*) this is a purely spatial camera move over the
-# finished frame — see seestack.render.zoomclip. Rendered on demand from the run's
-# stored preview PNG (the same bytes the wallpaper/share exports use, so it matches
-# the picture on screen for every kind of run) and cached beside the outputs with a
-# content signature, so a repeat download is a plain file read.
+# finished frame — see seestack.render.zoomclip. Rendered on demand from a
+# native-resolution re-render of the run's own picture where one can be made
+# faithfully (`_native_picture_source`, the same source the wallpaper and the share
+# JPEG use) and from the stored preview PNG otherwise, then cached beside the
+# outputs with a content signature, so a repeat download is a plain file read.
 
 _ZOOM_CLIP_SUFFIXES = ("_zoom.webp", "_zoom.png")
+
+
+def zoom_clip_min_source_long_edge() -> int:
+    """The smallest source that lets the clip come out at its full
+    :data:`~seestack.render.zoomclip.CLIP_LONG_EDGE`.
+
+    :func:`~seestack.render.zoomclip.zoom_clip_size` never upsamples, so the clip
+    is sized at ``source_long / CLIP_ZOOM`` whenever that is under
+    ``CLIP_LONG_EDGE``. The stored preview is capped at 1024 px, which always is
+    — and is why a clip that asks for 640 px came out at **569**, with its deepest
+    frame the preview at 1:1. Above this figure the output size stops growing and
+    the extra pixels are spent supersampling instead, which is why the source is
+    not decimated to it (see :func:`_zoom_clip_source_long_edge`).
+    """
+    import math
+
+    from seestack.render.zoomclip import CLIP_LONG_EDGE, CLIP_ZOOM
+
+    return int(math.ceil(CLIP_LONG_EDGE * CLIP_ZOOM))
+
+
+#: How big a source the clip asks for, as a multiple of
+#: :func:`zoom_clip_min_source_long_edge`. At 1× the deepest frame is drawn 1:1;
+#: above it the output size is already fixed at ``CLIP_LONG_EDGE`` and the extra
+#: pixels are spent *supersampling* — each frame averaged down from more real
+#: pixels, which is a cleaner picture rather than a bigger one. 2× buys that from
+#: a plain 2×2 average and stops there because the cost is not paid once: the move
+#: is 24 separate crop-and-resize passes over the source, so its area is paid 24
+#: times, on a NAS, for a button someone taps to post one picture.
+ZOOM_CLIP_SOURCE_OVERSAMPLE = 2
+
+
+def _zoom_clip_source_long_edge(run: Any, preview_size: tuple[int, int]) -> int:
+    """How big a picture to ask :func:`_native_picture_source` for.
+
+    Bounded by :data:`ZOOM_CLIP_SOURCE_OVERSAMPLE`, and otherwise the size the
+    run's cached share render is already kept at (:func:`_share_source_long_edge`)
+    — so an ordinary stack costs no render the share JPEG and the wallpaper were
+    not already paying for, and only a canvas far bigger than the clip can use is
+    decimated on the way in.
+    """
+    return min(_share_source_long_edge(run, preview_size[0], preview_size[1]),
+               ZOOM_CLIP_SOURCE_OVERSAMPLE * zoom_clip_min_source_long_edge())
 
 
 def _target_pixel_in_preview(run: Any, entry: Any,
@@ -2214,33 +2258,82 @@ def _target_pixel_in_preview(run: Any, entry: Any,
     return target_px
 
 
-def _zoom_clip_signature(preview_path: Path,
+def _zoom_clip_signature(run: Any, preview_path: Path, recipe_json: str | None,
                          focus_xy: tuple[float, float] | None) -> str:
-    """Content signature of a run's clip — the preview bytes it was made from plus
-    the point it zooms onto, so a re-edited preview (or a target that has since
-    been plate-solved) rebuilds rather than serving yesterday's move."""
+    """Content signature of a run's clip — everything the move is made of, so a
+    re-edited preview (or a target that has since been plate-solved) rebuilds
+    rather than serving yesterday's move.
+
+    Beyond the preview bytes and the focus point, it carries what the *native*
+    source depends on — the master, the saved recipe that decides what a
+    display-space run's picture is, the size asked for, and the app version —
+    exactly as :func:`_share_source_signature` does, because since v0.400.0 the
+    clip is usually rendered from that and not from the stored preview.
+    """
     import hashlib
+
+    from webapp import __version__
 
     # Version tag: bump when the *render output* changes for an unchanged preview,
     # so cached clips are rebuilt in place instead of serving the old schedule.
-    parts = ["v1"]
+    parts = ["v2"]
     try:
         st = os.stat(preview_path)
         parts.append(f"{st.st_mtime_ns}:{st.st_size}")
     except OSError:
         parts.append("0:0")
+    parts.append(_file_stamp(run.fits_path))
+    parts.append(hashlib.sha1((recipe_json or "").encode()).hexdigest())
+    parts.append(__version__)
     parts.append("centre" if focus_xy is None
                  else f"{focus_xy[0]:.1f},{focus_xy[1]:.1f}")
     return hashlib.sha1("|".join(parts).encode()).hexdigest()
 
 
-def _build_or_get_zoom_clip(preview_path: Path, basename: str,
+def _zoom_clip_source(run: Any, entry: Any, preview_png: bytes,
+                      recipe_json: str | None,
+                      ) -> tuple[bytes, tuple[float, float] | None]:
+    """``(png_bytes, focus_xy)`` for the picture the camera actually moves over.
+
+    The stored preview is capped at 1024 px, and the clip's own "never upsample"
+    rule then sizes the whole move from it — so a 640 px clip came out **569 px**
+    and its deepest frame was the preview at 1:1. Where the same picture can be
+    re-rendered from the run's own master faithfully, that is the source instead
+    (:func:`_native_picture_source`, which declines on exactly the cases where the
+    render would be a *different* picture from the one on screen), and the stored
+    bytes otherwise — so an ordinary run is byte-for-byte as it was.
+
+    The focus point is measured against whichever bytes won, the way the wallpaper
+    already does it: both are the same picture on the same grid, so only the scale
+    differs, and framing the move on the other grid's pixel would push the camera
+    onto empty sky.
+
+    Blocking (it may render the master); callers dispatch it to a threadpool.
+    """
+    from seestack.wallpaper import png_size
+
+    size = png_size(preview_png)
+    native = _native_picture_source(
+        run, preview_png, baked_north_up_deg(run),
+        _zoom_clip_source_long_edge(run, size), recipe_json) if size else None
+    if native is None:
+        return (preview_png, _target_pixel_in_preview(run, entry, preview_png))
+    return (native, _target_pixel_in_preview(run, entry, native))
+
+
+def _build_or_get_zoom_clip(run: Any, entry: Any, preview_path: Path,
+                            basename: str, recipe_json: str | None,
                             focus_xy: tuple[float, float] | None) -> Path | None:
-    """Return the cached zoom clip for this run's preview, rebuilding it when the
-    signature has changed. Blocking (decodes + encodes an animation), so callers
-    dispatch it to a threadpool."""
+    """Return the cached zoom clip for this run, rebuilding it when the signature
+    has changed. Blocking (may render the master, then decodes + encodes an
+    animation), so callers dispatch it to a threadpool.
+
+    ``focus_xy`` is the *preview-grid* focus the signature is keyed on; the point
+    the move is actually framed on is re-measured against the source
+    :func:`_zoom_clip_source` picks, which is only reached on a cache miss.
+    """
     out_dir = preview_path.parent
-    sig = _zoom_clip_signature(preview_path, focus_xy)
+    sig = _zoom_clip_signature(run, preview_path, recipe_json, focus_xy)
     sig_file = out_dir / f"{basename}_zoom.sig"
     for suffix in _ZOOM_CLIP_SUFFIXES:
         cand = out_dir / f"{basename}{suffix}"
@@ -2256,10 +2349,11 @@ def _build_or_get_zoom_clip(preview_path: Path, basename: str,
     from seestack.render.zoomclip import build_zoom_clip
 
     try:
-        data = preview_path.read_bytes()
+        preview_png = preview_path.read_bytes()
     except OSError:
         return None
-    path = build_zoom_clip(data, out_dir, basename, focus_xy=focus_xy)
+    data, focus = _zoom_clip_source(run, entry, preview_png, recipe_json)
+    path = build_zoom_clip(data, out_dir, basename, focus_xy=focus)
     if path is None:
         return None
     with contextlib.suppress(OSError):
@@ -2267,28 +2361,52 @@ def _build_or_get_zoom_clip(preview_path: Path, basename: str,
     return path
 
 
-def _zoom_clip_inputs(request: Request, safe: str,
-                      run_id: int) -> tuple[Any, Path | None, tuple[float, float] | None]:
-    """``(run, preview_path, focus_xy)`` for a run's zoom clip — the one DB read
-    both endpoints below need. ``preview_path`` is ``None`` when the run has no
-    stored picture to move the camera over, which is what makes the card self-hide
-    rather than 404 at the user."""
+class _ZoomClipInputs(NamedTuple):
+    """Everything both zoom-clip endpoints need from one DB read.
+
+    ``preview_path`` is ``None`` when the run has no stored picture to move the
+    camera over, which is what makes the card self-hide rather than 404 at the
+    user. ``focus_xy`` is measured in the **stored preview's** grid: it is what
+    ``info`` reports and what the cache is keyed on. The point the move is framed
+    on is re-measured against whatever source :func:`_zoom_clip_source` picks.
+    """
+
+    run: Any
+    entry: Any
+    preview_path: Path | None
+    preview_png: bytes
+    recipe_json: str | None
+    focus_xy: tuple[float, float] | None
+
+
+def _zoom_clip_inputs(request: Request, safe: str, run_id: int) -> _ZoomClipInputs:
+    """The one DB read both zoom-clip endpoints below need — see
+    :class:`_ZoomClipInputs`. Reads the stored preview's bytes but renders
+    nothing, so ``info`` stays lightweight."""
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
         entry = lib.find_target(safe)
+        # The saved editor recipe when the preview is a baked display-space edit —
+        # read here because only here is the project open. It is what lets a
+        # "Process target" picture be re-rendered instead of moving the camera
+        # over the 1024 px preview.
+        recipe_json = _run_recipe_json(proj, run, run_id) if run is not None else None
     finally:
         proj.close()
         lib.close()
     if run is None:
         raise HTTPException(status_code=404, detail="No such run")
     if not run.preview_path or not Path(run.preview_path).exists():
-        return (run, None, None)
+        return _ZoomClipInputs(run, entry, None, b"", None, None)
     preview_path = Path(run.preview_path)
+    preview_png = b""
     focus_xy = None
     with contextlib.suppress(OSError):
-        focus_xy = _target_pixel_in_preview(run, entry, preview_path.read_bytes())
-    return (run, preview_path, focus_xy)
+        preview_png = preview_path.read_bytes()
+        focus_xy = _target_pixel_in_preview(run, entry, preview_png)
+    return _ZoomClipInputs(run, entry, preview_path, preview_png,
+                           recipe_json, focus_xy)
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/zoom-clip/info")
@@ -2299,9 +2417,13 @@ def zoom_clip_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
 
     ``centred_on_target`` says whether the move aims at the plate-solved object or
     at the picture's own brightest part, so the UI can be honest about it in one
-    short line rather than implying a solve it doesn't have."""
-    _run, preview_path, focus_xy = _zoom_clip_inputs(request, safe, run_id)
-    if preview_path is None:
+    short line rather than implying a solve it doesn't have.
+
+    ``width``/``height`` are the finished clip's, measured against the source the
+    download will actually use — the native re-render where there is one, so the
+    figure follows the file instead of quoting the stored preview's cap at it."""
+    inputs = _zoom_clip_inputs(request, safe, run_id)
+    if inputs.preview_path is None:
         return {"available": False}
     from PIL import features
 
@@ -2313,14 +2435,17 @@ def zoom_clip_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     )
     from seestack.wallpaper import png_size
 
-    size = None
-    with contextlib.suppress(OSError):
-        size = png_size(preview_path.read_bytes())
+    size = png_size(inputs.preview_png)
+    if size is not None:
+        size = _native_picture_size(
+            inputs.run, inputs.preview_png, baked_north_up_deg(inputs.run),
+            _zoom_clip_source_long_edge(inputs.run, size),
+            inputs.recipe_json) or size
     out = zoom_clip_size(*size) if size else None
     return {
         "available": True,
         "format": "webp" if features.check("webp") else "png",
-        "centred_on_target": focus_xy is not None,
+        "centred_on_target": inputs.focus_xy is not None,
         "zoom": CLIP_ZOOM,
         # The whole loop: in, hold, and back out again.
         "seconds": round(2 * CLIP_IN_SECONDS + CLIP_HOLD_SECONDS, 1),
@@ -2333,12 +2458,13 @@ def zoom_clip_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
 async def zoom_clip(safe: str, run_id: int, request: Request) -> FileResponse:
     """Serve this run's looping zoom clip (WEBP, or APNG where Pillow has no WEBP),
     building and caching it on demand. 404 when the run has no stored preview."""
-    run, preview_path, focus_xy = _zoom_clip_inputs(request, safe, run_id)
-    if preview_path is None:
+    inputs = _zoom_clip_inputs(request, safe, run_id)
+    if inputs.preview_path is None:
         raise HTTPException(status_code=404, detail="No preview for this run")
-    basename = run.output_basename or "master"
-    clip = await run_in_threadpool(_build_or_get_zoom_clip, preview_path,
-                                   basename, focus_xy)
+    basename = inputs.run.output_basename or "master"
+    clip = await run_in_threadpool(
+        _build_or_get_zoom_clip, inputs.run, inputs.entry, inputs.preview_path,
+        basename, inputs.recipe_json, inputs.focus_xy)
     if clip is None:
         raise HTTPException(status_code=404, detail="Could not build a zoom clip")
     media = _PROGRESS_MEDIA.get(clip.suffix, "application/octet-stream")
@@ -3948,6 +4074,136 @@ def _run_recipe_json(proj: Any, run: Any, run_id: int) -> str | None:
     return proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}")
 
 
+def _native_picture_gate(run: Any, preview_png: bytes, baked_north_up: float,
+                         needed_long_edge: int,
+                         recipe_json: str | None = None) -> tuple[int, int] | None:
+    """The stored preview's ``(width, height)`` when a native re-render of this run
+    is both faithful and worth making — ``None`` wherever
+    :func:`_native_picture_source` declines.
+
+    Every decline below is *the* decline: `_native_picture_source` is this
+    function plus the render, so a caller that has to answer "how big will the
+    picture be?" **before** paying for one (the zoom clip's ``info``) asks here and
+    cannot drift from the code that makes it. Two stats and a PNG header — no
+    render, no FITS pixel read.
+    """
+    from seestack.previewcrop import parse_preview_crop
+    from seestack.wallpaper import png_size
+
+    if baked_north_up:
+        return None
+    if _preview_is_display_space(run.options_json) and not recipe_json:
+        return None
+    crop = parse_preview_crop(run.preview_crop_json)
+    if crop is not None and not _render_reproduces_the_crop(run, crop, recipe_json):
+        return None                       # a trimmed preview isn't the whole canvas
+    fits_path = run.fits_path
+    if not fits_path or not Path(fits_path).exists():
+        return None
+    size = png_size(preview_png)
+    if size is None:
+        return None
+    preview_long = max(size)
+    # Cheap gate before any render: the canvas the preview came from is recorded on
+    # the run, so a stack that never had more pixels than its preview is skipped
+    # without touching the FITS. Measured against the part of the canvas the
+    # picture actually shows, since that is what the render will hand back.
+    canvas = _visible_canvas(run, crop)
+    if canvas and max(canvas) <= preview_long:
+        return None
+    if int(needed_long_edge) <= preview_long:
+        return None
+    return size
+
+
+def _render_reproduces_the_crop(run: Any, crop: Any,
+                                recipe_json: str | None) -> bool:
+    """Will a full-res render of this run come back cropped the way its stored
+    preview is?
+
+    Yes exactly when the picture **is** the recipe — a display-space preview with
+    a saved recipe, which :func:`webapp.pipeline.render_run_full_res_png` renders
+    through ``render_run_recipe_fullres_png`` — and that recipe's own composed
+    geometry is the crop that was recorded. Auto's border trim is a
+    ``geometry.crop`` op *inside that very recipe*, and the crop is expressed in
+    fractions, so replaying it on the master yields the same rectangle of sky:
+    the picture on screen, larger. Everything downstream (the target pixel, the
+    scale bar, object labels) is measured in fractions of the bytes it is handed,
+    so a bigger cropped picture needs nothing else.
+
+    ``preview_crop_of_recipe`` is the same function that recorded the value in the
+    first place (``pipeline._rendered_preview_crop``), so the two cannot drift —
+    and a disagreement between them means the stored bytes are not what a render
+    would produce, which is a *no*: better a small honest picture than a big
+    wrongly-framed one. So is ``UNKNOWN`` on either side, which means the render
+    is not a crop of the canvas at all.
+    """
+    from seestack.edit.recipe import preview_crop_of_recipe, recipe_from_json
+    from seestack.previewcrop import PreviewCrop
+
+    if not recipe_json or not _preview_is_display_space(run.options_json):
+        return False
+    if not isinstance(crop, PreviewCrop):
+        return False
+    try:
+        recipe_crop = preview_crop_of_recipe(recipe_from_json(recipe_json))
+    except Exception:  # noqa: BLE001 — an unreadable recipe reproduces nothing
+        return False
+    if not isinstance(recipe_crop, PreviewCrop):
+        return False
+    # Both sides came from the same function; the tolerance is for the JSON
+    # round-trip the recorded one made, not for a real difference in framing.
+    return all(abs(a - b) < 1e-9 for a, b in
+               zip(recipe_crop.as_tuple(), crop.as_tuple(), strict=True))
+
+
+def _visible_canvas(run: Any, crop: Any) -> list[int]:
+    """The recorded canvas dimensions, narrowed to the part the picture shows —
+    ``[]`` when the run records no canvas. A trimmed picture's render is the
+    *cropped* rectangle, so sizing decisions have to be made against that and not
+    against the whole stack."""
+    from seestack.previewcrop import PreviewCrop, crop_pixel_box
+
+    canvas = [int(d) for d in (run.canvas_w, run.canvas_h) if d]
+    if len(canvas) != 2 or not isinstance(crop, PreviewCrop):
+        return canvas
+    x0, y0, x1, y1 = crop_pixel_box(crop, canvas[0], canvas[1])
+    return [x1 - x0, y1 - y0]
+
+
+def _native_picture_size(run: Any, preview_png: bytes, baked_north_up: float,
+                         needed_long_edge: int,
+                         recipe_json: str | None = None) -> tuple[int, int] | None:
+    """The ``(width, height)`` a :func:`_native_picture_source` render would come
+    back at, or ``None`` where it would decline — answered from the run's own
+    record, with nothing rendered.
+
+    The render is the canvas the picture shows — narrowed by a reproduced crop
+    (:func:`_visible_canvas`) — decimated to ``needed_long_edge`` and never
+    upscaled, so the answer is that rectangle scaled so its long edge is
+    ``min(needed_long_edge, its own long edge)``, the same arithmetic
+    :func:`_decimate_png` finishes with. A run with no recorded canvas falls back
+    to the stored preview's shape, which has the same aspect.
+
+    **Best-effort, and deliberately so:** it is answered from the record rather
+    than from the pixels, so it can sit a pixel from the render's own two-step
+    rounding, and a legacy run whose master is smaller than its recorded canvas
+    would be over-stated. Nothing here decides *what* is served — only what a
+    caller says about it in advance.
+    """
+    from seestack.previewcrop import parse_preview_crop
+
+    size = _native_picture_gate(run, preview_png, baked_north_up,
+                                needed_long_edge, recipe_json)
+    if size is None:
+        return None
+    canvas = _visible_canvas(run, parse_preview_crop(run.preview_crop_json))
+    w, h = (canvas[0], canvas[1]) if len(canvas) == 2 else size
+    long_edge = min(int(needed_long_edge), max(w, h))
+    scale = long_edge / max(w, h)
+    return (max(1, round(w * scale)), max(1, round(h * scale)))
+
+
 def _native_picture_source(run: Any, preview_png: bytes, baked_north_up: float,
                            needed_long_edge: int,
                            recipe_json: str | None = None) -> bytes | None:
@@ -3988,32 +4244,14 @@ def _native_picture_source(run: Any, preview_png: bytes, baked_north_up: float,
     * a run with no readable FITS, or one whose canvas is no bigger than the
       preview already is — where there is nothing to gain.
     """
-    from seestack.previewcrop import parse_preview_crop
     from seestack.wallpaper import png_size
 
-    if baked_north_up:
-        return None
-    if _preview_is_display_space(run.options_json) and not recipe_json:
-        return None
-    crop = parse_preview_crop(run.preview_crop_json)
-    if crop is not None:
-        return None                       # a trimmed preview isn't the whole canvas
-    fits_path = run.fits_path
-    if not fits_path or not Path(fits_path).exists():
-        return None
-    size = png_size(preview_png)
+    size = _native_picture_gate(run, preview_png, baked_north_up,
+                                needed_long_edge, recipe_json)
     if size is None:
         return None
     preview_long = max(size)
-    # Cheap gate before any render: the canvas the preview came from is recorded on
-    # the run, so a stack that never had more pixels than its preview is skipped
-    # without touching the FITS.
-    canvas = [d for d in (run.canvas_w, run.canvas_h) if d]
-    if canvas and max(canvas) <= preview_long:
-        return None
     needed = int(needed_long_edge)
-    if needed <= preview_long:
-        return None
     png = _build_or_get_share_source(
         run, recipe_json if _preview_is_display_space(run.options_json) else None,
         _share_source_long_edge(run, size[0], size[1]))
