@@ -63,7 +63,7 @@ the History / Gallery / Compare `PanelSeamsBadge` tooltip v0.406.1 built on it i
 an exposure keeps today's wording — the smallness is a claim about minutes, and one we cannot measure there
 is one we do not make.
 
-**Tests (+4 cases, 3 fail before).** In `tests/test_coverage_grain.py`: the sample's own figures no longer
+**Tests (+7 collected — three new cases plus a four-case parametrize; three of them fail before).** In `tests/test_coverage_grain.py`: the sample's own figures no longer
 prescribe a night and do say how far behind they are; a genuinely-behind mosaic (30 subs against 120 at 10 s
 = 15 min) still gets the old sentence, asserted whole; an unrecorded sub exposure keeps it too; and a
 parametrized **agreement** pin over four shortfalls that runs `mosaic_depth_map` on a real 2×2 pointing set

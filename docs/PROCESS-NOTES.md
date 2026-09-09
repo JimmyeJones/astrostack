@@ -18,6 +18,96 @@ is a queue.
 
 ---
 
+## 2026-09-09 (Builder, branch `claude/sweet-babbage-p5vpyp`) — the fourth finding in the gap between two sentences, a "new" feature that was 90 % already built, and a two-pytest disk lesson
+
+**The run.** Two tasks, both shipped: **v0.407.0** (the Scout's shareable-labelled-picture
+feature) and **v0.407.1** (a verified bug found by dogfooding). One
+`scripts/agent-dogfood.sh --build --mosaic --editor` pass, which is where the
+bug came from.
+
+### The finding: two surfaces, one panel, opposite instructions
+
+The pass's step-4c block printed these one line under the other, about the same
+panel of the same run on the bundled mosaic sample:
+
+```
+[panel map]  ... It's only a few minutes' difference at this stage, so it evens
+             out on its own as you keep shooting.
+[health/grain_uneven]  ... so another night on that panel is what evens it out.
+```
+
+Both render on the Target page. **The pass reported CLEAN** — the fourth
+consecutive finding to sit in the *gap between* two of the app's own claims
+rather than inside either (v0.406.0, v0.406.1, v0.406.2, and now this), and the
+fourth to survive a pass that reported clean, because a clean pass is a
+statement about console errors.
+
+**The generalisable shape, for whoever reads this next.** Both of these
+sentences were *true*. What differed was that one of them had asked a second
+question and the other had not: the map asks a thin panel both "thinner by the
+fraction?" **and** "behind by `THIN_MIN_SHORTFALL_S`?", while `grain_uneven`
+fired on `grain_ratio ≥ 1.25` alone. So the identifying test for the next one is
+not "is either sentence wrong?" but **"do these two answer the same question,
+and if not, does the one with fewer terms still get to prescribe an action?"** A
+depth cannot answer "is this worth going out for": 3 subs against 6 reads 1.4×
+grainier whether that is 30 s or three hours behind. The fix was to import the
+map's own constant rather than invent a second one — which is the shape this
+project keeps converging on, and the reason the fix is six lines.
+
+**Verified end to end on the run that exposed it**, not only in the suite: the
+dogfood scratch library survives the pass, so `stack_health` and
+`mosaic_depth_map` were re-run against
+`/tmp/astrostack-dogfood/data/library/targets/Sample_M42_mosaic_2_2/project.sqlite`
+with the fix in place, and the three mosaic sentences now read as one paragraph.
+
+### The other lesson: grep found the "new" feature already built
+
+The Scout filed the shareable labelled picture on 2026-09-09 asking for a new
+`seestack/annotate_render.py` and an `annotated.jpg` endpoint. **Both already
+existed** — `seestack/objectlabels.py` and `download_stack_run`'s
+`label_objects=true` have shipped since v0.293.0, with seventeen tests. What was
+missing was one menu item. The entry's own "grep-checked — every ingredient
+already exists" line was right about the ingredients and wrong about the dish,
+because it grepped for the *idea's* nouns ("annotated") and the code is spelled
+`objectlabels` / `label_objects`. **Grep the feature's likely identifiers, not
+its name.**
+
+### Measurements from the pass (both samples, exit 0)
+
+- **Mosaic trim: Auto would cut 7.9 %** of the union canvas — unchanged across
+  five passes now, well under the ~15 % §1 calls a bug.
+- **Editor drive clean on both samples**: all 21 ops added one at a time, each
+  re-rendering the live preview, then undo/redo — no console error, no failed
+  request.
+- **Page probes clean, nothing overflowing.** Tallest phone pages on the mosaic
+  run: `/targets/<mosaic>` **3,407 px**, `/targets/<mosaic>/edit/1` 3,146 px,
+  `/life-list` 3,094 px. In line with the standing baselines (the mosaic Target
+  page carries the extra mosaic cards, and the recorded real-data figure is
+  3,853 px), **so no IA slice is indicated** — measure before opening one.
+
+### Green gates (on the merged tree, `origin/main` merged in first)
+
+Full suite headless: **5,487 passed / 2 skipped** in 30 m 42 s — exactly **+7**
+over main's 5,480, which is the arithmetic this run's new tests predict (three
+new cases plus a four-case parametrize). Frontend: **253 files / 3,550 tests**,
+unchanged, because v0.407.0's four assertions went inside two existing cases —
+and that unchanged count is what caught the commit message claiming "+1 case".
+`npx tsc --noEmit` clean and `npx vite build` clean, both run from `frontend/`.
+
+### Disk: do not run two full pytest suites at once on this box
+
+Both were started in parallel to save wall-clock. `/tmp/pytest-of-root` reached
+**13 GB across two live `pytest-N` trees** (11 GB + 2.2 GB) with 15 GB free, and
+the older run started emitting errors at 95 %. This is the same failure mode
+recorded on 2026-09-09 ("a long run's fourth pytest dies on a full /tmp"), reached
+a different way: two at once rather than four in sequence. The pre-change
+baseline was killed at 95 % (clean to that point) and its tree deleted, freeing
+11 GB, and the **branch** run on the merged tree is what gated the merge. If you
+want a second suite for a pre/post comparison, run them one after another, or
+delete the finished one's `pytest-N` before starting the next.
+
+---
+
 ## 2026-09-09 (Scout, branch `claude/admiring-brahmagupta-gmlwfo`) — a clean `--mosaic --editor` dogfood, four subsystems swept clean, the router-audit lead traced to non-reachable, and one deferred beginner feature re-filed
 
 **The run.** Baseline green before any change: full suite headless started at
