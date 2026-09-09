@@ -146,6 +146,95 @@ def test_the_median_is_the_yardstick_not_the_mean():
     assert m.thin.exposure_s < THIN_FRACTION * m.median_exposure_s
 
 
+def test_a_panel_cut_short_by_cloud_is_on_the_map_rather_than_missing_from_it():
+    """The bug this module existed to prevent, arrived at from inside.
+
+    `MIN_PANEL_FRAMES` is there to keep *strays* out, but it also caught a panel
+    that is thin **because it is thin**: three panels at an hour and a fourth
+    lost to cloud after four subs came back as a three-panel map that called the
+    mosaic even — the hole drawn exactly where the grain is, and an all-clear
+    written over it. (Reproduced on the bundled 2×2 sample, whose panels are
+    6/6/6/3: the stack-health panel said 23 % of the picture was 1.4× grainier
+    while this map said no part of it was being held back.)"""
+    m = mosaic_depth_map(_grid(2, 2, subs=360, per_panel={(0, 1): MIN_PANEL_FRAMES - 1}))
+
+    assert m is not None
+    assert len(m.panels) == 4
+    assert {(p.row, p.col) for p in m.panels} == {(0, 0), (0, 1), (1, 0), (1, 1)}
+
+    starved = next(p for p in m.panels if (p.row, p.col) == (0, 1))
+    assert starved.n_frames == MIN_PANEL_FRAMES - 1
+    assert starved.exposure_s == pytest.approx((MIN_PANEL_FRAMES - 1) * SUB_S)
+
+    assert m.thin is not None and (m.thin.row, m.thin.col) == (0, 1)
+    assert "top-right" in m.text
+    assert "held back" not in m.text
+    assert aim_hint(m) is not None and "top-right" in aim_hint(m)
+
+
+def test_admitting_a_thin_panel_leaves_every_real_panel_exactly_as_it_was():
+    """Strictly additive: the map may only *gain* a cell it was blind to. A
+    panel that already existed keeps its frame count, its integration and its
+    centre, so nothing on the card moves for a reason the reader can't see."""
+    even = mosaic_depth_map(_grid(2, 2, subs=360))
+    with_starved = mosaic_depth_map(
+        _grid(2, 2, subs=360, per_panel={(0, 1): MIN_PANEL_FRAMES - 1}))
+
+    assert even is not None and with_starved is not None
+    unchanged = {(p.row, p.col): p for p in with_starved.panels}
+    for panel in even.panels:
+        if (panel.row, panel.col) == (0, 1):
+            continue
+        same = unchanged[(panel.row, panel.col)]
+        assert (same.n_frames, same.exposure_s) == (panel.n_frames, panel.exposure_s)
+        assert (same.ra_deg, same.dec_deg) == (panel.ra_deg, panel.dec_deg)
+
+
+def test_a_stray_off_the_grid_is_still_not_a_panel():
+    """The floor's original job, untouched. A handful of subs a degree off the
+    mosaic is a mis-solve or a slew — it lands on no grid line, so it stays out
+    even now that sub-threshold clusters get a second hearing."""
+    frames = _grid(2, 2, subs=60)
+    frames += [(203.0, 33.0, SUB_S)] * (MIN_PANEL_FRAMES - 1)
+
+    m = mosaic_depth_map(frames)
+    assert m is not None
+    assert (m.rows, m.cols) == (2, 2)
+    assert len(m.panels) == 4
+    assert m.thin is None
+
+
+def test_a_thin_cluster_cannot_extend_the_grid():
+    """Deliberate limit, not an oversight: a thin cluster may fill a cell inside
+    the grid the real panels define, never add a new row or column to it. Three
+    subs are exactly the population the floor distrusts, and letting them decide
+    *where the mosaic is* would hand geometry back to a stray."""
+    frames = _grid(1, 2, subs=60, ra0=200.0, dec0=30.0)
+    step = 0.5 / math.cos(math.radians(30.0))
+    frames += [(200.0 - step, 30.0, SUB_S)] * (MIN_PANEL_FRAMES - 1)
+
+    m = mosaic_depth_map(frames)
+    assert m is not None
+    assert (m.rows, m.cols) == (1, 2)
+    assert len(m.panels) == 2
+
+
+def test_the_shape_never_claims_a_grid_the_panels_do_not_fill():
+    """"All 3 panels of your 2×2 mosaic" contradicts itself in its own six
+    words. An L-shaped set has a 2×2 *bounding* grid and three panels, so it is
+    a three-panel mosaic."""
+    m = mosaic_depth_map(_grid(2, 2, subs=60, per_panel={(0, 1): 0}))
+
+    assert m is not None
+    assert (m.rows, m.cols, len(m.panels)) == (2, 2, 3)
+    assert "3-panel mosaic" in m.text
+    assert "2×2" not in m.text
+
+    # ...and a mosaic that *does* fill its grid still says so.
+    full = mosaic_depth_map(_grid(2, 2, subs=60))
+    assert full is not None and "2×2 mosaic" in full.text
+
+
 def test_a_mosaic_across_the_ra_wrap_still_lays_out_side_by_side():
     """RA 359°→1° is one step, not a 358° one. Averaged and differenced on the
     unit sphere it has to stay a two-cell row."""

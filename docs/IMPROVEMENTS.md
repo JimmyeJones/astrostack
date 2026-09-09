@@ -76,8 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- `claude/sweet-babbage-ilfabz` — the mosaic panel map drops the thin panel and then says nothing
-  is being held back (`mosaicmap.mosaic_depth_map`). Filed as a bug directly below.
+*No live claims.*
 
 ---
 
@@ -90,37 +89,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > rather than skimmed. **Grep those two files for anything older than v0.352.3**, including
 > the target of any "see above" / "see below" in the entries below that no longer resolves
 > here.
-
-- **🔴 WRONG REASSURANCE ON THE OWNER'S OWN SHOOTING SHAPE (Builder 2026-09-09, reproduced end-to-end on the
-  generated mosaic sample) — the Target page's mosaic panel map DROPS a thin panel and then tells the owner
-  "no part of the picture is being held back", while the stack-health panel on the same target says a quarter
-  of the picture is 1.4× grainier.** *(Severity: high for trust — the harmful direction, a false all-clear, on
-  priority 2–3; the owner is a heavy mosaic user shooting one target across many nights. Confidence: HIGH,
-  reproduced through the real endpoint path. Size: S–M.)*
-  **Repro** (`scripts/agent-dogfood.sh --mosaic`, then `accepted_solved_pointings()` → `mosaic_depth_map`, on
-  the bundled 2×2 sample whose panels are 6/6/6/**3** subs):
-  - panel map: `panels: [(0,0,6), (1,0,6), (1,1,6)]`, `thin: None`,
-    text *"All 3 panels of your 2×2 mosaic have had a similar amount of time — around 1 min each — so no part
-    of the picture is being held back."*
-  - `stack_health` on the same run, same moment: *"Part of this mosaic is thinner than the rest — about 23% of
-    the picture has 3 subs on it where most of it has 6, so that part looks about 1.4× grainier … another
-    night on that panel is what evens it out."*
-  **Mechanism.** `mosaic_depth_map` labels its folded pointings with `pointing_groups(min_members=MIN_PANEL_FRAMES=5)`
-  and then does `if label < 0: continue` — so a cluster that is thin *because it is thin* is discarded by the very
-  floor that exists to discard **strays**, and the map is blind to exactly the case it was built to report. Everything
-  downstream is then computed over the survivors: the grid, the median, the `thin` verdict and the sentence. Two
-  consequences, both live: the map shows a **hole where the thin panel is** (so "which panel?" is unanswerable —
-  and the grain note's `action=None` is justified in `stackhealth.py` by "the panel map on the Target page already
-  says which panel is behind", which is false in this case), and the sentence reads **"All 3 panels of your 2×2
-  mosaic"**, which is self-contradictory on its face. Realistic severity: three panels at 300 subs and a fourth cut
-  short by cloud at 4 subs is dropped outright, and the map calls that mosaic even.
-  **Fix shape (kept conservative on purpose):** leave `pointing_groups` as the *substantial-panel* gate and the
-  mosaic-or-not gate — unchanged — and, after the grid is laid out from the substantial panels, re-offer the
-  dropped pointings **once**: admit one as a thin panel only when it lands on the grid those panels already define
-  (within the same `tol` of an existing row line *and* an existing column line) and its cell is **empty**. A stray a
-  degree off the mosaic is not on a grid line, so it stays out; an occupied cell is left byte-for-byte alone, so no
-  existing panel's figures move. A thin cluster must never be allowed to *extend* the grid — that would let a stray
-  define geometry, which is what the floor is for.
 
 - **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** ~~No validator
   stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
@@ -2914,6 +2882,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.406.2** — 🐛 BUG (trust / friendliness, PRIORITY 2–3; Builder-verified by reproduction on the `--mosaic` sample): **the mosaic panel map dropped the thin panel and then reassured the owner that nothing was being held back.** `mosaic_depth_map` discards every `pointing_groups(min_members=`MIN_PANEL_FRAMES`=5)` cluster labelled `-1` — right for *strays*, wrong for a panel that is thin **because it is thin** — so on the 6/6/6/**3**-sub sample it drew a **hole exactly where the grain is** and wrote *"All 3 panels of your 2×2 mosaic … no part of the picture is being held back"* over it, while `stack_health` on the same run said 23 % of the picture was 1.4× grainier (and `stackhealth.py` justifies that note's `action=None` with "the panel map already says which panel is behind"). New `_thin_panels_on_the_grid` + `_axis_lines` give the dropped clusters **one** more hearing against the *geometry*: admitted only on an existing row line **and** column line, into an **empty** cell — so a stray (not on a grid line) stays out, a thin cluster can never *extend* the grid, and no panel that exists today moves a single figure. `_verdict_text` also stops calling a grid "2×2" unless the panels fill it. `THIN_MIN_SHORTFALL_S` deliberately untouched. Engine-only, additive. Tests +6, two fail-before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.406.1** — 🐛 same bug, the two surfaces v0.406.0 left: **the History / Gallery / Compare `PanelSeamsBadge` tooltip still promised *"you shouldn't see seams between them"*** on a mosaic showing a grainier rectangle. `seamsLabel(verdict, grain)` now reads both verdicts and says *"…where the picture looks grainier that's a difference in depth (fewer subs on that panel), not a step in the sky"*; the chip stays green, keeps "Panels even", and a `"check"` verdict is untouched. `grain_verdict` rides on `StackRunOut`/`GalleryItem` as an additive optional field from the same shared `stackhealth.grain_verdict`, read off the column so neither listing opens a file. An older backend omitting it gives today's tooltip character-for-character (pinned). Tests +6. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.406.0** — 🐛 BUG + NEW MEASUREMENT (trust / friendliness, PRIORITY 3; found by measuring a `--mosaic` dogfood pass's pixels, which the pass itself reported CLEAN): **a mosaic can be perfectly levelled and still show an obvious rectangle, and the app said it couldn't.** On the mosaic sample (4 panels, 6/6/6/3 subs — §1's shape) the finished picture shows a visibly grainier quadrant over **23 %** of the canvas, while `seam_residual` reads **0.70** → *"the sky matches across the joins, so **you shouldn't see seams between them**"*, and the same panel praises the run for **"even coverage"**. Both statements were true and both were answering the wrong question: a panel differs from its neighbours in **level** (0.478 ADU here, **0.09× the grain** — levelling worked) or in **grain** (σ **7.79 vs 5.20 = 1.43×** — nobody measured it). New `measure_coverage_grain` compares each substantial coverage level **below the modal one** against the mode — anchoring on the *deepest* level would fire on every mosaic ever shot, since overlap strips are always deeper — and stamps `GRAINRAT/THN/DEP/SHR` plus four additive `stack_runs` columns. `stackhealth` now says *"about 23% of the picture has 3 subs on it where most of it has 6, so that part looks about 1.4× grainier … another night on that panel is what evens it out"*, with `action=None` because there is no in-app fix, and the two over-claims stand down (nothing removed — the flat note still says the panels evened out). σ is **sigma-clipped, not adjacent-difference**, so the same number survives the decimated read `backfill_coverage_grain` heals an existing library from — no re-stack needed. No `SCHEMA_VERSION` bump (rollback-safe), no frontend change. Tests +24, one fail-before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.405.1** — 🐛 BUG (friendliness / trust, PRIORITY 1 editor), found by *looking at* a `--mosaic --editor` dogfood pass rather than by reading its exit code: **the editor told a mosaic's owner to "shoot it in mosaic mode".** The Target page says *"It's bigger than **this mosaic** — only about 55% of it is in this picture. Adding more panels next session would capture the rest."*; the editor of that same run said *"is bigger than the Seestar's single frame — shoot it in mosaic mode to capture all of it."* — the pre-capture *catalogue prediction*, which cannot know what was shot. `ObjectInfoCard.hideFraming` and its own docstring have carried the rule since the measured verdict shipped (*"on a page carrying both, the prediction is the copy to drop"*); Target passes it and History renders no card, so **the editor was the third surface nobody listed**. It now reads the verdict through the shared `useStackFraming(safe, rid)` — the query key the editor was *already* fetching for its re-centre offer, so **no new request** — passes `hideFraming`, and renders `FramingVerdictNote` for the run it is editing. Where nothing measured the picture the verdict self-hides and the catalogue line stays exactly as it was: nothing removed, single-field editors unchanged. Frontend-only. Tests +2 (1 fails before). Full entry in [`SHIPPED.md`](SHIPPED.md).
