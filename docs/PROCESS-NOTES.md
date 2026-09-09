@@ -24,7 +24,11 @@ is a queue.
 (new beginner feature — `GET /api/new-subs-waiting` + `NewSubsWaitingNote`) and
 **v0.405.1** (a friendliness/trust bug on the priority-1 editor). Tests **+20**
 (9 Python, 11 frontend); one of the two editor tests was verified **fail-before**
-against `795f3c32`.
+against `795f3c32`. Green on the merged tree, after syncing with `main`:
+**5,446 passed / 2 skipped** (full suite headless, 37:58 — slower than the usual
+~23 min only because a dogfood pass and the frontend suite were sharing the four
+cores), **253 frontend files / 3,547 tests**, `tsc --noEmit` clean and
+`vite build` green.
 
 **Why a feature rather than a backlog item, and how long that took to establish.**
 The triage was long because the answer was "nothing here is ready", which takes as
