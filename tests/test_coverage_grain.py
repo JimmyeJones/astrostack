@@ -17,6 +17,8 @@ one of them is what the owner is looking at.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -172,7 +174,10 @@ def test_grain_verdict_cases(ratio, expected):
 # what the app says
 # --------------------------------------------------------------------------
 
-def test_the_health_panel_explains_the_grainier_panel_and_what_fixes_it():
+def test_the_health_panel_explains_the_grainier_panel():
+    """The measurement half, on the bundled sample's own figures. What the note
+    *prescribes* about them is the two tests below — those numbers are 3 subs
+    against 6 at a 10 s sub, i.e. half a minute behind."""
     notes = stack_health(_run(grain_ratio=1.43, grain_thin_frames=3,
                               grain_deep_frames=6, grain_thin_share=0.2257),
                          _frames())
@@ -183,7 +188,109 @@ def test_the_health_panel_explains_the_grainier_panel_and_what_fixes_it():
     # The only thing that changes it is more light — so the note must not offer
     # an in-app fix, which is the untruth it exists to remove.
     assert note.action is None
-    assert "another night" in note.message.lower()
+    # …and it says so, in both endings.
+    assert "grain only comes down with more light" in note.message
+
+
+def test_a_panel_only_minutes_behind_is_not_sent_out_for_another_night():
+    """The bug, reproduced on the running app by the `--mosaic` dogfood pass and
+    on the sample's own figures here.
+
+    The panel map and this note were printed one under the other, about the same
+    panel of the same run, giving **opposite** instructions: the map's *"it's
+    only a few minutes' difference at this stage, so it evens out on its own as
+    you keep shooting"*, and this note's *"another night on that panel is what
+    evens it out"*. The map asks whether the shortfall clears
+    ``THIN_MIN_SHORTFALL_S``; this note asked nothing at all, because a *depth*
+    cannot answer it — 3 subs against 6 reads 1.4× grainier whether that is
+    half a minute or three hours behind.
+
+    Nothing is removed: the picture really is 1.4× grainier over a quarter of
+    itself and the note still says so. Only the prescription follows the same
+    threshold the map uses — the shape v0.406.2 gave the map's own ``behind``
+    branch, which kept the fact and dropped the nag."""
+    notes = stack_health(_run(grain_ratio=1.43, grain_thin_frames=3,
+                              grain_deep_frames=6, grain_thin_share=0.2257),
+                         _frames())          # 10 s subs → 3 × 10 s = 30 s behind
+    note = next(n for n in notes if n.kind == "grain_uneven")
+    assert "another night" not in note.message.lower()
+    assert "30 s behind" in note.message
+    assert "evens out on its own as you keep shooting" in note.message
+    # The measurement is untouched.
+    assert "23%" in note.message and "1.4×" in note.message
+
+
+def test_a_panel_genuinely_behind_still_says_to_go_and_shoot_it():
+    """The other side, byte for byte: a mosaic whose thin panel is 15 minutes
+    down really does need a night on that panel, and the sentence for that case
+    is exactly the one the note has always said."""
+    notes = stack_health(_run(grain_ratio=1.43, grain_thin_frames=30,
+                              grain_deep_frames=120, grain_thin_share=0.2257),
+                         _frames())          # 90 × 10 s = 15 min behind
+    note = next(n for n in notes if n.kind == "grain_uneven")
+    assert note.message == (
+        "Part of this mosaic is thinner than the rest — about 23% of the "
+        "picture has 30 subs on it where most of it has 120, so that part "
+        "looks about 1.4× grainier. That isn't something processing can fix — "
+        "grain only comes down with more light — so another night on that "
+        "panel is what evens it out.")
+
+
+def test_a_sub_exposure_nobody_recorded_keeps_the_sentence_it_had():
+    """The shortfall is a claim about minutes, so a run whose subs never
+    recorded an exposure cannot make it. Silence in the safe direction: keep
+    today's wording rather than assert a smallness we can't measure."""
+    bare = [FrameRow(id=i, source_path=f"/incoming/s{i}.fit", accept=True,
+                     fwhm_px=2.1, exposure_s=None) for i in range(12)]
+    notes = stack_health(_run(grain_ratio=1.43, grain_thin_frames=3,
+                              grain_deep_frames=6, grain_thin_share=0.2257),
+                         bare)
+    note = next(n for n in notes if n.kind == "grain_uneven")
+    assert "another night on that panel" in note.message
+
+
+@pytest.mark.parametrize("thin_subs,deep_subs,expect_a_night", [
+    (3, 6, False),        # the bundled sample: 30 s behind
+    (6, 24, False),       # 3 min behind — the map's "young mosaic" case
+    (30, 120, True),      # 15 min behind
+    (90, 360, True),      # 45 min behind
+])
+def test_the_grain_note_and_the_panel_map_never_give_opposite_instructions(
+        thin_subs, deep_subs, expect_a_night):
+    """The agreement pin, asserted against the map itself rather than against a
+    copy of its answer: for one mosaic, at one sub exposure, "go and shoot that
+    panel" must be said by both surfaces or by neither.
+
+    The two measure different things on purpose — the map clusters *pointings*,
+    the note reads the finished canvas's *coverage* — so this cannot be one
+    function. What it can be, and now is, is one threshold applied to one
+    quantity: how far behind, in seconds."""
+    from seestack.mosaicmap import mosaic_depth_map
+
+    sub_s = 10.0
+    # A 2×2 mosaic whose bottom-right panel holds `thin_subs` where the rest
+    # hold `deep_subs`, at the same sub exposure the run's frames report.
+    frames = []
+    for r in range(2):
+        for c in range(2):
+            n = thin_subs if (r, c) == (1, 1) else deep_subs
+            dec = 30.0 + (1 - r) * 0.5
+            ra = 200.0 + (1 - c) * 0.5 / math.cos(math.radians(dec))
+            frames.extend([(ra, dec, sub_s)] * n)
+
+    m = mosaic_depth_map(frames)
+    assert m is not None
+    map_says_go = m.thin is not None
+    assert map_says_go is expect_a_night
+
+    notes = stack_health(
+        _run(grain_ratio=1.43, grain_thin_frames=thin_subs,
+             grain_deep_frames=deep_subs, grain_thin_share=0.2257),
+        [FrameRow(id=i, source_path=f"/incoming/s{i}.fit", accept=True,
+                  fwhm_px=2.1, exposure_s=sub_s) for i in range(12)])
+    note = next(n for n in notes if n.kind == "grain_uneven")
+    note_says_go = "another night on that panel" in note.message
+    assert note_says_go is map_says_go
 
 
 def test_the_panel_flatness_praise_stops_claiming_there_is_nothing_to_see():
