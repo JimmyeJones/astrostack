@@ -129,20 +129,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   cheaper and more useful fix for a real install is a re-stack, and the whole population shrinks every night the
   owner shoots.
 
-- **⚪ ✅ CLOSED, SHIPPED AS v0.399.2 — the all-sky "My map" fade (and the sky-area tally) faded whole thin
-  panels out of a fully tiled raster.** *(Was filed 2026-09-08 as a low-value display lead. It was worth
-  more than that, and its measurement was taken on the wrong map — both corrected below; kept here rather
-  than cut so the correction is findable.)* Two things the original entry got wrong, both found by
-  re-measuring: **(1) it is not only a fade.** The same `stack_detail_mask` drives `seestack.skyarea`, so the
-  "how much sky have I photographed?" tally *under-reported the owner's real sky* by the same fraction —
-  measured 7.0 % on a 6x4 raster. **(2) its 9.3 % was measured on the weighted coverage map, which this code
-  path never reads**: `stack_detail_mask` loads the `_framecov.fits` *frame-count* sibling and falls back to
-  the plain has-data footprint when there is none. Re-measured on integer count maps, the defect is real and
-  **larger** — 90 of 147 fully tiled rasters fade something, the worst 26.3 % of a fully covered canvas. And
-  the entry's "do not simply lower the fraction, it changes the trim too" was answered by making it the
-  mask's own constant (`MASK_LEVEL_MIN_FRAC`), leaving the trim's reference untouched. Full entry in
-  [`SHIPPED.md`](SHIPPED.md).
-
 - **🟡 BROKEN-UX / AUTONOMY (Scout QA audit 2026-08-26 #4, traced + verified end-to-end) — PARTIALLY FIXED
   (misleading-copy half shipped v0.272.2; optional behavioural half open) — the `astap_timeout_s` setting bounds
   ONE solve *attempt*, not one frame, so an unsolvable sub can burn up to 3× the configured seconds; the Settings
@@ -2019,6 +2005,31 @@ problems. Dogfood it every big-picture run and fix root causes.
   even after the detector improves.
 
 ### Features that serve real workflows
+
+- **NEW IDEA (Scout 2026-09-09, dogfood pass — the *visual* half of the framing hint that has only ever been
+  words) — "here's how it fills your field": a small to-scale diagram of the object inside the S30 frame,
+  drawn *before* you shoot.** *(Pillar: plan + understand — PRIORITY 2–3; size S–M; frontend-mostly, no new
+  data. Beginner bar: cleared — a non-expert instantly reads "M42 fills about a third of my frame" from a
+  picture, sane default, no knobs.)* The app already tells a beginner *in words* whether a target fits one
+  Seestar frame or needs a mosaic (`framing_hint` / `ObjectInfoCard`'s panel line: *"fits comfortably in one
+  frame"* / *"about a 3×3 mosaic covers all of it"*, v0.352.x). What it has never *shown* is the one thing a
+  picture answers better than a sentence — **how much of the frame the object actually fills, and where it
+  sits** — which is exactly the question a beginner has when deciding "point straight at it, or offset for a
+  mosaic?". Draw the S30 field as a rectangle and the catalogue object's angular extent as a to-scale
+  ellipse/box centred in it, with a one-line caption (*"M42 fills about 35 % of your field"* or *"bigger than
+  one frame — a 2×2 mosaic catches it all"*). **The ingredients already exist on the identify response**:
+  `ObjectInfo.angular_size.size_arcmin` (the object's vetted major-axis size, `seestack/objectinfo.py`, already
+  carried onto `targets.py`'s `AngularSizeOut`) and the owner's *derived* field (the S30 FOV the panel plan is
+  already computed against, v0.352.0 — from the frame's own `FOCALLEN`/`XPIXSZ`, never an assumed model per
+  §1). So this is a pure `<svg>` in `ObjectInfoCard` fed by numbers the card already fetches — no new endpoint,
+  no network, additive, reversible. **Sane default:** render only when `angular_size` is vetted (the same gate
+  the textual hint uses) and stay silent otherwise, exactly like the panel line. **Grep first** — confirm the
+  identify/framing payload already carries *both* the object size and the field size before building (the
+  panel-plan text computes the ratio somewhere already; reuse that one ratio so the diagram and the sentence can
+  never disagree, the recurring lesson in this file). Tests: a component test that the box scales with the
+  size/field ratio and hides on a sizeless object; the geometry helper is pure and unit-testable. Deliberately
+  **pre-capture only** — the *post*-stack "did I frame it well?" verdict (`framing_payload`) already draws on
+  the solved WCS and is a different question.
 
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
