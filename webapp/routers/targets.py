@@ -23,6 +23,7 @@ from webapp.schemas import (
     CleanupSuggestionOut,
     DarkSpecOut,
     DifficultyHintOut,
+    FieldFillOut,
     FocusTrendOut,
     FocusTrendPointOut,
     FramingHintOut,
@@ -433,6 +434,12 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
         mosaic=(MosaicPlanOut(cols=info.mosaic.cols, rows=info.mosaic.rows,
                               panels=info.mosaic.panels, text=info.mosaic.text)
                 if info.mosaic is not None else None),
+        field_fill=(FieldFillOut(frac_long=info.field_fill.frac_long,
+                                 frac_short=info.field_fill.frac_short,
+                                 field_long_arcmin=info.field_fill.field_long_arcmin,
+                                 field_short_arcmin=info.field_fill.field_short_arcmin,
+                                 text=info.field_fill.text)
+                    if info.field_fill is not None else None),
         blurb=info.blurb,
         difficulty=(DifficultyHintOut(level=info.difficulty.level,
                                       label=info.difficulty.label,
