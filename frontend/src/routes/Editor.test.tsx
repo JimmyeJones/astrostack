@@ -7,6 +7,7 @@ import { EditorView } from "./Editor";
 import * as client from "../api/client";
 import type { EditOp } from "../api/client";
 import { allPlacementMismatches, placementMismatches } from "../test/editorOpPlacement";
+import { PREVIEW_TOOLS } from "../components/editor/previewTools";
 
 const STRETCH: EditOp = {
   id: "tone.stretch", label: "Stretch", group: "tone", stage: "any",
@@ -3098,6 +3099,37 @@ describe("EditorView", () => {
       await screen.findAllByRole("button", { name: /Auto-process/ });
       await waitFor(() => expect(client.api.trimSuggestion).toHaveBeenCalled());
       expect(screen.queryByLabelText("Auto-crop edges")).not.toBeInTheDocument();
+    });
+
+  // --- the preview toolbar, explained without a mouse ----------------------
+
+  it("explains the preview buttons in text, not only in hover tooltips",
+    async () => {
+      // A tap on one of those buttons *runs* it, so on a phone hover was the
+      // only way to ask what "Coverage", "Star mask" or "Split" meant — i.e.
+      // there was no way at all, on the screen the editor is used from.
+      mockMosaicWithRaggedBorder();
+      renderEditor();
+
+      const toggle = await screen.findByTestId("preview-tool-guide-toggle");
+      expect(screen.queryByText(PREVIEW_TOOLS.split.hint)).not.toBeInTheDocument();
+      fireEvent.click(toggle);
+      expect(screen.getByText(PREVIEW_TOOLS.split.hint)).toBeVisible();
+      // Mosaic, so the coverage heatmap really is one of the buttons above.
+      expect(screen.getByText(PREVIEW_TOOLS.coverage.hint)).toBeVisible();
+    });
+
+  it("does not explain the mosaic-only coverage button on a single-field stack",
+    async () => {
+      mockMosaicWithRaggedBorder();
+      vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+        { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+          b: [0, 0, 0, 0], is_mosaic: false });
+      renderEditor();
+
+      fireEvent.click(await screen.findByTestId("preview-tool-guide-toggle"));
+      expect(screen.getByText(PREVIEW_TOOLS.mask.hint)).toBeVisible();
+      expect(screen.queryByText(PREVIEW_TOOLS.coverage.hint)).not.toBeInTheDocument();
     });
 });
 

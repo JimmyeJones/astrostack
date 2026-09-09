@@ -76,7 +76,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **The fourth slice of the "a tooltip is invisible on the device the owner reads this app on" entry — the
+  five `Tooltip`s wrapped around a *form control*** (the editor's Auto-crop switch, the Jobs notify switch, the
+  three Gallery filters), where the one gesture a phone has operates the control instead of answering the
+  question — branch `claude/sweet-babbage-x2ai9f`.
 
 ---
 
@@ -1512,9 +1515,39 @@ problems. Dogfood it every big-picture run and fix root causes.
   both open it, Enter and Space open it, a field with no help renders nothing at all, and the switch still
   toggles when you actually click the switch.
 
-  **Still open:** the *route-specific* tooltips on History, Stack, the editor and the Dashboard — the shared
-  descriptor control is done, but each route's own hand-written `<Tooltip>`s still need their own
-  measurement, and this slice deliberately doesn't guess at them.
+  **▶ THIRD SLICE SHIPPED — v0.402.0, the editor's preview toolbar** (Builder 2026-09-09, branch
+  `claude/sweet-babbage-x2ai9f`). The route with by far the most hand-written tooltips is the editor (24, against
+  Gallery's 9 and Target's 7), and the ones that matter are the eight-button row **directly under the picture** —
+  the row that decides what the preview is showing. Four of them carried a good sentence each and carried it only
+  as a `Tooltip`: `Coverage`, `Star mask`, `Drag to crop` and `Split`. A phone has no hover and a tap on one of
+  those buttons *runs* it, so the one gesture available spends the question on the answer — and the answers are
+  not guessable from what appears (a yellow-to-dark-blue heatmap, a white-on-black mask, a divider you are
+  supposed to drag). Three more (`Compare`, `Refresh`, `Zoom`) had no explanation anywhere, of which `Compare` is
+  the one that needed it: it is the twin of `Split` and its label never says what it compares *against*.
+  **The shape is v0.270.0's `FrameColumnGuide`, deliberately** — a `PreviewToolGuide` disclosure
+  (*"What do these buttons do? →"*) under the row, built from the same `PREVIEW_TOOLS` array the tooltips now take
+  their labels from, so the two cannot drift and a tool added later gets an entry in both surfaces or in neither.
+  `visiblePreviewTools({isMosaic, cropDrag})` takes the same two booleans the row itself renders from, so the guide
+  can never explain a button that is not on the screen — the mosaic-only coverage heatmap and the crop handles are
+  absent on an ordinary single-field stack, where naming them would send a beginner hunting for controls that do
+  not exist. **Measured, as the entry's "don't make the pages taller" caution demands** (`agent-dogfood.sh
+  --build --mosaic --editor`): the editor at 420 px goes **3,047 px → 3,072 px (+25 px, +0.8 %)** closed, desktop
+  1,984 px; nothing overflowing, no console errors, and the mosaic trim still 7.9 %. The body is mounted only
+  while open. Tooltips are byte-for-byte what they were for anyone with a mouse; nothing was removed.
+  **Tests (+12):** `previewTools.test.ts` (+5 — the two conditional tools appear only under their own condition,
+  the row order, every entry carrying a real sentence, and each entry keyed by its own name) and
+  `PreviewToolGuide.test.tsx` (+5 — one line until asked for, every offered tool explained in one tap driven off
+  the array itself, never explaining an absent button, open/close with its `aria-expanded`, and nothing at all for
+  an empty row), plus 2 in `Editor.test.tsx` on the real page (the split hint readable without hover; the
+  mosaic-only coverage hint absent on a single field) — both fail before.
+
+  **Still open:** the *route-specific* tooltips on History, Stack and the Dashboard, and — the named next slice on
+  the editor — its **header** row: `Trim border`, `Re-centre`, `Crop` and, the one that actually hides behaviour
+  rather than meaning, the **`Auto-crop edges` switch**, whose tooltip is the only place that says the library-wide
+  default lives in Settings → Automation. That switch is the `HintLabel` case, not the guide's: it is a labelled
+  control, so the tap-able info icon v0.374.11 already built is the idiom, and the guide under the picture is the
+  wrong place for a control in the header. Each remaining route still needs its own measurement; this slice
+  deliberately doesn't guess at them.
 
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — surface calibration-master mismatches (and a *never-applied* wrong-shaped
   bias) at *bind time* in the calibration UI, not only buried in the stack log.** *(Friendliness + trust; size S–M;
@@ -2825,6 +2858,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.402.0** — PRIORITY 1 (editor) × PRIORITY 3 (friendliness), the third slice of the "a tooltip is invisible on the device the owner reads this app on" entry: **the editor's preview toolbar now explains itself in text.** Four of the eight buttons directly under the picture (`Coverage`, `Star mask`, `Drag to crop`, `Split`) carried a plain-language sentence each and carried it *only* as a hover `Tooltip` — and a tap on one of those buttons runs it, so on a phone the one gesture available spends the question on the answer. New `PreviewToolGuide` disclosure (*"What do these buttons do? →"*), built from the same `PREVIEW_TOOLS` array the tooltips now take their labels from, and shown for exactly the tools `visiblePreviewTools({isMosaic, cropDrag})` says are on the screen. `Compare` gains the sentence it never had (it is `Split`'s twin and its label never says what it compares against). Measured with `agent-dogfood.sh --build --mosaic --editor`: editor at 420 px **3,047 → 3,072 px** closed, nothing overflowing, no console errors. Tooltips unchanged for anyone with a mouse; nothing removed. Tests +12, two fail-before. Full entry under the tooltip idea above.
 - **v0.401.1** — PRIORITY 3 (friendliness), found by **running** the app right after shipping v0.401.0 and invisible to every code read of it: **the new field-fill diagram's overflow case could not be read.** On that branch the card suddenly shows *two* shapes, the object covers the frame, and the caption said "the outline" — which names neither. Two fixes: `FieldFillDiagram` now paints the `ellipse` **before** the `rect` (SVG paints in document order, and a dashed grey edge under a translucent indigo wash reads as a smudge, not as the edge of your field), and `field_fill`'s overflow text names the frame — *"Bigger than one frame — it spills over the dashed edge of your field."* Both pinned by tests. The geometry was already correct and measured so off the screenshot's own pixels; the defect was purely "which shape am I looking at?", which is not a question that occurs to you while writing the shapes. Dogfood record and the generalisation in [`PROCESS-NOTES.md`](PROCESS-NOTES.md) (2026-09-09).
 - **v0.401.0** — NEW BEGINNER FEATURE, PRIORITY 2–3 (plan/understand), the Scout's 2026-09-09 idea filed the same day: **the "will it fit?" sentence gets a picture.** The identity card now draws the object to scale inside one frame, under the sentence it illustrates — because "fits comfortably in a single Seestar frame" is true of a nebula filling two thirds of the frame *and* of a planetary that is a dot in the middle of it, and those are different shots to plan (a test pins that pair: 3′ and 70′ through an S30 field, both `fits`, one captioned "expect to crop in close"). New pure `seestack.framing.field_fill` returns the object's axes as fractions of the frame's edges plus the field's own edges and one sentence; `objectinfo._to_info` fills it from the **same** catalogue size, the same square-box convention for a missing minor axis and the same *derived* field `framing_hint` and `mosaic_plan` already read, so the picture and the words cannot disagree. Three decisions worth keeping: the fractions are **not clamped** (`fieldFillGeometry` grows its `viewBox` instead, so an overflowing object is drawn whole outside the dashed frame — clipping it would hide the one thing the picture exists to show); the **field travels in the payload** rather than being re-derived in the frontend, pinned on both the derived-S30 and S50-fallback paths; and `_fill_pct` rounds to fives only above 20 %, because the app's usual idiom turns a 3 % object into "5 %" and a 0.2 % one into "0 % of the width". Additive: one optional response field, one optional engine dataclass, one component; `hideFraming` hides the drawing with the sentence, and an older backend draws nothing. Tests +24. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **CLOSED, not built (no version)** — the 2026-08-30 idea *"a corner target can't be centred in its own zoom clip"*: **the observation is right and the fix it names is backwards.** It asked for the largest zoom in [1.3×, 1.8×] at which the focus can be the crop's true centre — "a **gentler** push-in that genuinely lands on it" — but the crop is `W/s` wide, so centring on `cx` needs `W/(2s) ≤ min(cx, W−cx)`: the further out the object, the **more** zoom, not less. Measured on `crop_box_for_scale` itself at W=1000: today's 1.8× already lands exactly on anything inside [0.278 W, 0.722 W]; 0.90 W needs 5×, and the entry's own 0.96 W case needs **12.5×** — an 80 px crop blown up to the clip's 640 px edge, the 3.5× upscale `zoom_clip_size`'s never-upsample rule exists to prevent. So the bounded-zoom shape is closed; reopening it needs a different idea (re-aim the whole move, or accept a margin). Table and reasoning in [`SHIPPED.md`](SHIPPED.md).
