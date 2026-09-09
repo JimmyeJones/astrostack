@@ -173,7 +173,7 @@ function CardMeta({ item }: { item: GalleryItem }) {
       <Group gap={4}>
         <RejectionBadge options={item.options} />
         <HazyNightBadge ratio={item.transparency_ratio} />
-        <PanelSeamsBadge verdict={item.seam_verdict} />
+        <PanelSeamsBadge verdict={item.seam_verdict} grain={item.grain_verdict} />
         <CalibrationBadge calstat={item.calstat} />
         <Badge variant="light">{item.n_frames_used} frames</Badge>
       </Group>

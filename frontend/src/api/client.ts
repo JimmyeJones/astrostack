@@ -1367,6 +1367,12 @@ export interface StackRun {
   // verdict is computed server-side from the same thresholds the "How's my
   // stack?" seam notes use, so the chip and the note can never disagree.
   seam_verdict?: string | null;
+  // The second verdict on the same picture: "uneven" when a substantial part of
+  // the canvas was shot with fewer subs than the rest and measures grainier for
+  // it. A mosaic can be perfectly level and still show a rectangle, so the chip
+  // reads both and says which of the two it is looking at. Absent on an older
+  // backend, which reads as "not measured" — today's wording.
+  grain_verdict?: string | null;
   calstat?: string | null;
   options?: Record<string, unknown>;
   engine_version?: string | null;
@@ -1968,6 +1974,8 @@ export interface GalleryItem {
   // when there's nothing honest to say. Resolved server-side from the same
   // thresholds the "How's my stack?" seam notes use — see `StackRun`.
   seam_verdict?: string | null;
+  // Grain-evenness verdict beside it ("uneven" | null) — see `StackRun`.
+  grain_verdict?: string | null;
   // True when an edit was saved for this run but never exported, so this card's
   // thumbnail isn't the user's version. Same server-side decision as `StackRun`;
   // absent on an older backend, which reads as "no unfinished edit".

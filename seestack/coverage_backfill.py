@@ -43,11 +43,21 @@ having to be stacked again.
     card alike, so a mosaic stacked before the upgrade simply never says whether
     its panels matched.
 
-Both heals are deliberately **lazy**: one read for one run, on the request that
+``grain_ratio`` + ``grain_thin_frames`` / ``grain_deep_frames`` /
+``grain_thin_share`` (additive, no version bump)
+    The *other* way a mosaic panel shows, and the one ``seam_residual`` is blind
+    to: a region shot with fewer subs is grainier than the rest however flat its
+    sky came out. Healable for the same reason the seam is — it is a measurement
+    over the master and coverage map already on disk — and specifically because
+    its σ is sigma-clipped rather than taken from adjacent-pixel differences,
+    which is exactly the property that keeps ``noise_sigma`` off this list (see
+    the audit below).
+
+All three heals are deliberately **lazy**: one read for one run, on the request that
 is already grading it. A sweep over the library at startup would turn the first
 "How's my stack?" on a big library into a stall, for advice about runs nobody is
-looking at. And neither ever *substitutes* a different measurement — when the
-input is gone the row stays NULL and the app stays silent.
+looking at. And none of them ever *substitutes* a different measurement — when
+the input is gone the row stays NULL and the app stays silent.
 
 **Audited, 2026-09-01 — the other later-added columns and why they are not here.**
 ``stack_fwhm_px`` (14) needs a star fit over the master: real work, and it
@@ -57,7 +67,9 @@ belongs behind an explicit action rather than a lazy read. ``capture_start_utc``
 from today's accepted frames would be a guess wearing a fact's clothes.
 ``noise_sigma`` (6) is recomputable from the master but is measured from
 adjacent-pixel differences, so it cannot be taken off a decimated read, and the
-runs affected predate every column below it. And the tempting shortcut —
+runs affected predate every column below it. (That constraint is why the grain
+ratio above is measured with a *clipped* σ instead: the same reasoning, applied
+in the other direction, to a measurement that had a free choice of estimator.) And the tempting shortcut —
 reading the number off the master's own FITS header — does **not** work: the
 ``BKGSIGMA``/``STKFWHM``/``SEAMRES``/``CALSTAT`` cards were each added in the
 same change as their column (``NROUGHAL`` leads its column by one patch release,
