@@ -2192,6 +2192,20 @@ export interface UnexportedEditItem {
   timestamp_utc: string;
 }
 
+// One target whose newest picture no longer includes every sub it has: subs
+// accepted and plate-solved *after* that stack ran. Same definition as the
+// Target page's own "N new subs since your last stack" nudge — see
+// `/api/new-subs-waiting`. Every field is optional-safe (defaulted server-side)
+// so an older backend simply reports nothing.
+export interface NewSubsWaitingItem {
+  safe: string;
+  target_name: string;
+  run_id?: number | null;
+  stacked_utc?: string;
+  n_frames_used?: number;
+  n_new_subs: number;
+}
+
 export interface LogEntry {
   seq: number;
   ts: string;
@@ -3554,6 +3568,13 @@ export const api = {
   exportUnexportedEdits: () =>
     req<{ job_id: string; count: number }>("/api/gallery/unexported-edits/export",
       { method: "POST" }),
+  // Which targets have light their newest picture doesn't include yet. Its own
+  // endpoint for the same reason as the one above: the Dashboard asks it, and
+  // the only other surface that knows is the per-target page you'd have to visit
+  // to find out. Read-only — it never starts a stack.
+  getNewSubsWaiting: () =>
+    req<{ count: number; total_new_subs: number; items: NewSubsWaitingItem[] }>(
+      "/api/new-subs-waiting"),
 
   // logs
   getLogs: (level?: string, limit = 1000) =>

@@ -364,6 +364,43 @@ describe("Dashboard information architecture (IA slice (e))", () => {
     await waitFor(() => expect(client.api.getUnexportedEdits).toHaveBeenCalled());
     expect(screen.queryByTestId("unexported-edits-note")).not.toBeInTheDocument();
   });
+
+  it("tells you which targets you've shot more of since their last stack", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    // The per-target nudge has existed since v0.90.0; what nobody could answer
+    // from anywhere was *which* target to open after a night's capture.
+    vi.spyOn(client.api, "getNewSubsWaiting").mockResolvedValue({
+      count: 2, total_new_subs: 62,
+      items: [
+        { safe: "M_31", target_name: "M 31", run_id: 4,
+          stacked_utc: "2026-08-15T21:00:00Z", n_frames_used: 200, n_new_subs: 45 },
+        { safe: "M_42", target_name: "M 42", run_id: 9,
+          stacked_utc: "2026-08-10T21:00:00Z", n_frames_used: 80, n_new_subs: 17 },
+      ],
+    });
+
+    renderDashboard();
+
+    // It joins the board rather than becoming one more always-on banner.
+    const notes = await screen.findByTestId("dashboard-notes");
+    await waitFor(() => expect(notes)
+      .toHaveTextContent("62 subs you've shot aren't in your pictures yet"));
+    expect(screen.getByRole("link", { name: "M 31 · +45" }))
+      .toHaveAttribute("href", "/targets/M_31/stack");
+  });
+
+  it("says nothing when every picture already has all its subs", async () => {
+    vi.spyOn(client.api, "getStats").mockResolvedValue(mkStats());
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+    vi.spyOn(client.api, "getNewSubsWaiting")
+      .mockResolvedValue({ count: 0, total_new_subs: 0, items: [] });
+
+    renderDashboard();
+
+    await waitFor(() => expect(client.api.getNewSubsWaiting).toHaveBeenCalled());
+    expect(screen.queryByTestId("new-subs-waiting-note")).not.toBeInTheDocument();
+  });
 });
 
 describe("Dashboard integration stat", () => {

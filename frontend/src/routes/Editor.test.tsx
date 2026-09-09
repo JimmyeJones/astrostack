@@ -3456,3 +3456,71 @@ describe("EditorView — the unsaved-changes guard", () => {
     expect(dirty.defaultPrevented).toBe(true);
   });
 });
+
+// --- "will it fit?" is answered once, by whichever surface actually measured it
+// The editor carried the catalogue *prediction* ("… is bigger than the Seestar's
+// single frame — shoot it in mosaic mode") while the Target page, one click away,
+// carried the *measurement* of the very picture on screen ("… is bigger than this
+// mosaic — only about 55% of it is in this picture"). On a target already shot as
+// a mosaic the prediction is advice the owner has taken, so two screens disagreed
+// about one picture. The editor now shows the measured verdict and stands the
+// prediction down — the rule the Target page has always followed.
+describe("Editor framing verdict", () => {
+  const CATALOGUE_LINE = "is bigger than the Seestar's single frame — shoot it in "
+    + "mosaic mode to capture all of it.";
+
+  function mockFramingEditor(measured: object | null) {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getDefaultRecipe").mockResolvedValue({ ops: [], count: 0 });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M42", name: "Orion Nebula", type: "nebula",
+      constellation: "Orion", constellation_abbr: "Ori",
+      ra_deg: 83.8, dec_deg: -5.4, matched_by: "name", size_arcmin: 85,
+      framing: { level: "mosaic", text: CATALOGUE_LINE },
+    } as never);
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(measured as never);
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+  }
+
+  it("says 'it's bigger than this mosaic' once, in the words that measured it",
+    async () => {
+      mockFramingEditor({
+        level: "partial", canvas: "mosaic",
+        text: "is bigger than this mosaic — only about 55% of it is in this picture. "
+          + "Adding more panels next session would capture the rest.",
+        coverage: 0.55, off_centre: 0.1,
+        object_name: "Orion Nebula", size_arcmin: 85,
+      });
+
+      renderEditor();
+
+      expect(await screen.findByText(/^Orion Nebula is bigger than this mosaic/))
+        .toBeInTheDocument();
+      // …and the pre-capture prediction — advice this owner has already taken —
+      // is not also on the page.
+      await waitFor(() => expect(client.api.identifyTarget).toHaveBeenCalledWith("M_42"));
+      expect(screen.queryByText(new RegExp(CATALOGUE_LINE.slice(0, 40))))
+        .not.toBeInTheDocument();
+      // The rest of the card is untouched: only its duplicate line stood down.
+      expect(screen.getByText("Orion Nebula")).toBeInTheDocument();
+    });
+
+  it("keeps the catalogue line when nothing measured this picture", async () => {
+    // No honest verdict (no vetted size, no usable WCS, or an older backend):
+    // the prediction is then the only answer there is, and it stays.
+    mockFramingEditor(null);
+
+    renderEditor();
+
+    await waitFor(() => expect(client.api.identifyTarget).toHaveBeenCalledWith("M_42"));
+    expect(await screen.findByText(new RegExp(CATALOGUE_LINE.slice(0, 40))))
+      .toBeInTheDocument();
+    expect(screen.queryByTestId("framing-verdict")).not.toBeInTheDocument();
+  });
+});

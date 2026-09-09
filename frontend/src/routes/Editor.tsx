@@ -17,6 +17,9 @@ import { api, type AutoAnalysis, type EditOp, type OpInstance, type Recipe } fro
 import { useUndoable } from "../hooks/useUndoable";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { ObjectInfoCard } from "../components/ObjectInfoCard";
+import {
+  FramingVerdictNote, useStackFraming,
+} from "../components/target/FramingVerdictNote";
 import { SampleTourNote } from "../components/SampleTourNote";
 import { StackHealthCard } from "../components/StackHealthCard";
 import { ProgressReelCard } from "../components/ProgressReelCard";
@@ -130,6 +133,11 @@ export function EditorView() {
   // target screen uses, so arriving from History (or the Target page) is a cache
   // hit rather than a fetch, and a failure just leaves the old `safe` heading.
   const target = useQuery({ queryKey: ["target", safe], queryFn: () => api.getTarget(safe) });
+  // The *measured* framing verdict for the run being edited — the same answer the
+  // Target page and History show, from the same query key (so this is a cache hit
+  // arriving from either). It decides which of two sentences about "will it fit?"
+  // the card below is allowed to say: see the `hideFraming` note at `ObjectInfoCard`.
+  const measuredFraming = useStackFraming(safe, Number.isFinite(rid) ? rid : null);
   const opsSchema = useQuery({ queryKey: ["editor-ops"], queryFn: api.editorOps, staleTime: 60_000 });
   const saved = useQuery({ queryKey: ["recipe", safe, rid], queryFn: () => api.getRecipe(safe, rid) });
   // Carry-over: the newest *other* run's saved edit, offered as a one-click seed
@@ -1632,8 +1640,26 @@ export function EditorView() {
 
       {/* "What am I looking at?" — the same offline catalog card as the Target
           page, shown here where a beginner is admiring the finished picture and
-          most wants to know what it is. Renders nothing unless it matches. */}
-      <ObjectInfoCard safe={safe} />
+          most wants to know what it is. Renders nothing unless it matches.
+
+          `hideFraming` for the same reason the Target page passes it: the card's
+          catalogue line is a *prediction* made before the shoot ("… is bigger than
+          the Seestar's single frame — shoot it in mosaic mode"), and on a target
+          that has already been shot as a mosaic that is advice the owner has taken.
+          The measured verdict below knows the picture it is judging — it says "is
+          bigger than **this mosaic** — only about 55% of it is in this picture", and
+          carries the same panel plan — so where it speaks, the prediction steps
+          aside. Both self-hide, so a target with no catalogue match, no vetted size
+          or no usable WCS is exactly as it was. */}
+      <ObjectInfoCard safe={safe} hideFraming={!!measuredFraming} />
+
+      {/* The measured "did I frame it well?" verdict for *this* run. The Target
+          page and History have carried it since it shipped; the editor — the one
+          screen that is looking at a single finished picture — was left with only
+          the pre-capture prediction, so the two screens disagreed about one
+          mosaic. Self-hiding, and it is the only surface here that can offer the
+          re-centre crop, which lands in this very editor. */}
+      {measuredFraming ? <FramingVerdictNote safe={safe} runId={rid} /> : null}
 
       {/* "How's my stack?" — the same plain-language health check the Target and
           History pages show, surfaced here on the result the beginner is actually
