@@ -4095,7 +4095,7 @@ def _native_picture_gate(run: Any, preview_png: bytes, baked_north_up: float,
     if _preview_is_display_space(run.options_json) and not recipe_json:
         return None
     crop = parse_preview_crop(run.preview_crop_json)
-    if crop is not None:
+    if crop is not None and not _render_reproduces_the_crop(run, crop, recipe_json):
         return None                       # a trimmed preview isn't the whole canvas
     fits_path = run.fits_path
     if not fits_path or not Path(fits_path).exists():
@@ -4106,13 +4106,69 @@ def _native_picture_gate(run: Any, preview_png: bytes, baked_north_up: float,
     preview_long = max(size)
     # Cheap gate before any render: the canvas the preview came from is recorded on
     # the run, so a stack that never had more pixels than its preview is skipped
-    # without touching the FITS.
-    canvas = [d for d in (run.canvas_w, run.canvas_h) if d]
+    # without touching the FITS. Measured against the part of the canvas the
+    # picture actually shows, since that is what the render will hand back.
+    canvas = _visible_canvas(run, crop)
     if canvas and max(canvas) <= preview_long:
         return None
     if int(needed_long_edge) <= preview_long:
         return None
     return size
+
+
+def _render_reproduces_the_crop(run: Any, crop: Any,
+                                recipe_json: str | None) -> bool:
+    """Will a full-res render of this run come back cropped the way its stored
+    preview is?
+
+    Yes exactly when the picture **is** the recipe — a display-space preview with
+    a saved recipe, which :func:`webapp.pipeline.render_run_full_res_png` renders
+    through ``render_run_recipe_fullres_png`` — and that recipe's own composed
+    geometry is the crop that was recorded. Auto's border trim is a
+    ``geometry.crop`` op *inside that very recipe*, and the crop is expressed in
+    fractions, so replaying it on the master yields the same rectangle of sky:
+    the picture on screen, larger. Everything downstream (the target pixel, the
+    scale bar, object labels) is measured in fractions of the bytes it is handed,
+    so a bigger cropped picture needs nothing else.
+
+    ``preview_crop_of_recipe`` is the same function that recorded the value in the
+    first place (``pipeline._rendered_preview_crop``), so the two cannot drift —
+    and a disagreement between them means the stored bytes are not what a render
+    would produce, which is a *no*: better a small honest picture than a big
+    wrongly-framed one. So is ``UNKNOWN`` on either side, which means the render
+    is not a crop of the canvas at all.
+    """
+    from seestack.edit.recipe import preview_crop_of_recipe, recipe_from_json
+    from seestack.previewcrop import PreviewCrop
+
+    if not recipe_json or not _preview_is_display_space(run.options_json):
+        return False
+    if not isinstance(crop, PreviewCrop):
+        return False
+    try:
+        recipe_crop = preview_crop_of_recipe(recipe_from_json(recipe_json))
+    except Exception:  # noqa: BLE001 — an unreadable recipe reproduces nothing
+        return False
+    if not isinstance(recipe_crop, PreviewCrop):
+        return False
+    # Both sides came from the same function; the tolerance is for the JSON
+    # round-trip the recorded one made, not for a real difference in framing.
+    return all(abs(a - b) < 1e-9 for a, b in
+               zip(recipe_crop.as_tuple(), crop.as_tuple(), strict=True))
+
+
+def _visible_canvas(run: Any, crop: Any) -> list[int]:
+    """The recorded canvas dimensions, narrowed to the part the picture shows —
+    ``[]`` when the run records no canvas. A trimmed picture's render is the
+    *cropped* rectangle, so sizing decisions have to be made against that and not
+    against the whole stack."""
+    from seestack.previewcrop import PreviewCrop, crop_pixel_box
+
+    canvas = [int(d) for d in (run.canvas_w, run.canvas_h) if d]
+    if len(canvas) != 2 or not isinstance(crop, PreviewCrop):
+        return canvas
+    x0, y0, x1, y1 = crop_pixel_box(crop, canvas[0], canvas[1])
+    return [x1 - x0, y1 - y0]
 
 
 def _native_picture_size(run: Any, preview_png: bytes, baked_north_up: float,
@@ -4122,9 +4178,10 @@ def _native_picture_size(run: Any, preview_png: bytes, baked_north_up: float,
     back at, or ``None`` where it would decline — answered from the run's own
     record, with nothing rendered.
 
-    The render is the whole canvas decimated to ``needed_long_edge`` and never
-    upscaled, so the answer is the canvas the run recorded, scaled so its long edge
-    is ``min(needed_long_edge, canvas long edge)`` — the same arithmetic
+    The render is the canvas the picture shows — narrowed by a reproduced crop
+    (:func:`_visible_canvas`) — decimated to ``needed_long_edge`` and never
+    upscaled, so the answer is that rectangle scaled so its long edge is
+    ``min(needed_long_edge, its own long edge)``, the same arithmetic
     :func:`_decimate_png` finishes with. A run with no recorded canvas falls back
     to the stored preview's shape, which has the same aspect.
 
@@ -4134,11 +4191,13 @@ def _native_picture_size(run: Any, preview_png: bytes, baked_north_up: float,
     would be over-stated. Nothing here decides *what* is served — only what a
     caller says about it in advance.
     """
+    from seestack.previewcrop import parse_preview_crop
+
     size = _native_picture_gate(run, preview_png, baked_north_up,
                                 needed_long_edge, recipe_json)
     if size is None:
         return None
-    canvas = [int(d) for d in (run.canvas_w, run.canvas_h) if d]
+    canvas = _visible_canvas(run, parse_preview_crop(run.preview_crop_json))
     w, h = (canvas[0], canvas[1]) if len(canvas) == 2 else size
     long_edge = min(int(needed_long_edge), max(w, h))
     scale = long_edge / max(w, h)
