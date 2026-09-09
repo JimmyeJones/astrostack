@@ -18,6 +18,90 @@ is a queue.
 
 ---
 
+## 2026-09-09 — Builder run (`claude/sweet-babbage-pu1q6v` → v0.405.0, v0.405.1): the library-wide "new subs waiting" note, and the bug a CLEAN dogfood was hiding
+
+**The run.** Two shipped items, both in [`SHIPPED.md`](SHIPPED.md): **v0.405.0**
+(new beginner feature — `GET /api/new-subs-waiting` + `NewSubsWaitingNote`) and
+**v0.405.1** (a friendliness/trust bug on the priority-1 editor). Tests **+20**
+(9 Python, 11 frontend); one of the two editor tests was verified **fail-before**
+against `795f3c32`. Green on the merged tree, after syncing with `main`:
+**5,446 passed / 2 skipped** (full suite headless, 37:58 — slower than the usual
+~23 min only because a dogfood pass and the frontend suite were sharing the four
+cores), **253 frontend files / 3,547 tests**, `tsc --noEmit` clean and
+`vite build` green.
+
+**Why a feature rather than a backlog item, and how long that took to establish.**
+The triage was long because the answer was "nothing here is ready", which takes as
+much reading as a hit. Walked the whole of "Bugs (fix these first)" — every open
+entry is gated on data no agent has, or is a stand-down that already carries its
+measurements — and the four Ideas subsections top-down. Of the entries that read
+as live: **"one voice" for the marginal-return sentence** is effectively already
+shipped (`readiness.noiseReductionHint` and `nightplan._depth_sentence` compute
+`1 − √(t/(t+1))` and round to a whole percent — the same number by the same
+formula, so there is nothing to reconcile); the Scout's 2026-09-09 **field-fill
+diagram** idea shipped as v0.401.0 the same day it was filed; the **dark/light
+exposure mismatch**, the **min/max `k` auto-scale**, the **mixed-pointings
+pre-flight** and the **catalog-magnitude difficulty split** all carry closure
+notes. So the run took AGENTS.md §1's standing allocation ("ship a genuine
+beginner feature on a regular cadence") rather than manufacturing work.
+
+**Dogfood: CLEAN, and that is the point of the second item**
+(`scripts/agent-dogfood.sh --mosaic --editor`, then again with `--build` after
+the change).
+- **Mosaic trim: 7.9 %** of the union canvas — the same figure as the last four
+  passes, well under the ~15 % §1 calls a bug.
+- **Page probes clean, both samples**, nothing overflowing, no console errors.
+  Field: `/life-list` 3,094 px, `/targets/<field>` 3,078 px, editor 3,072 px on a
+  phone. Mosaic: target 3,407 px, editor 3,102 px. All in line with the standing
+  baselines — **no IA slice indicated (fifth measurement agreeing)**.
+- **Editor drive clean on both samples**: all **21** ops added one at a time,
+  each re-rendering the live preview, then undo/redo, with no console error and
+  no failed request. (The 900 s wall-clock the 2026-09-09 Scout run hit is
+  avoidable: the scratch data root persists, so a second pass with `--no-stack`
+  reuses the stacked samples and the whole pass finishes in a couple of minutes.)
+
+**The lesson, and it is a new one: a CLEAN dogfood is a statement about
+*errors*, not about *sentences*.** The probe checks overflow and the console; it
+cannot read. Every finding of this pass came from opening the PNGs it wrote and
+*looking* at them — which is how v0.405.1 was found: the **Target** page said
+*"It's bigger than **this mosaic** — only about 55% of it is in this picture"*
+and the **editor of that same run**, one click away, said *"is bigger than the
+Seestar's single frame — shoot it in mosaic mode"*. Two surfaces, one fact,
+opposite usefulness, on a target already shot as four panels. Nothing overflowed
+and nothing logged, so the pass was reported CLEAN — twice, by two runs.
+**Recommendation for future passes: read the screenshots, at least for the
+Target page and the editor on the mosaic sample.** They are cheap to look at and
+they are the only place the app's *words* are on trial.
+
+**The second-order lesson: the gap was in a rule the code already stated.**
+`ObjectInfoCard.hideFraming` documents "on a page carrying both, the prediction
+is the copy to drop", and `FramingVerdictNote`'s own comment enumerates the
+surfaces — "the Target page hides the catalogue line … and History never renders
+that card at all". The **editor** renders that card and was in neither list. When
+a comment enumerates the callers of a rule, the enumeration is the thing to
+re-grep, not to trust.
+
+**Version collision #14 — the number, not the work.** A concurrent Builder
+merged PR #805 (`claude/sweet-babbage-03ba9j`) while this run was testing, and
+took **v0.404.0** for its own item. Nothing was duplicated — their two are the
+whole-recipe Auto parity guard and the `auto_stack` switch nudge; this run's are
+the new-subs note and the editor framing divergence — so this is the cheap kind
+of collision, caught by §11's "set the version at merge time, from the latest
+`main`". Both of this run's items were **renumbered at merge time to v0.405.0 and
+v0.405.1**; the two commit subjects still read `v0.404.0` / `v0.404.1`, because
+they were written before the other PR landed and rewriting a pushed branch to fix
+a number is the worse trade. **Grep the docs, not the log, for a version.** Their
+`AutoStackOffNote` and this run's `NewSubsWaitingNote` both join the Dashboard's
+`NoticeBoard` at `advisory`; the conflict was a two-line union and both notes are
+on the board.
+
+**Measured, as the standing IA rule demands** (`--build --mosaic --editor`
+against the same scratch): the mosaic **editor** goes **2,113 → 2,096 px on
+desktop and 3,102 → 3,085 px on a phone — 17 px *shorter* at both widths**,
+because the catalogue line and its field-fill diagram (a *pre-capture* "will it
+fit in one frame?" picture, equally stale on a mosaic) stand down together, as
+they already do on the Target page. The mosaic Target page is byte-identical at
+3,407 / 2,104 px. Nothing overflowing, no console errors, trim still 7.9 %.
 ## 2026-09-09 — Builder run (`claude/sweet-babbage-03ba9j` → v0.403.1, v0.404.0): a whole-recipe Auto parity guard, the auto-stack switch nobody had mentioned, and two clean sweeps
 
 **The run.** Baseline green before any change: **5,433 passed / 2 skipped**, full
