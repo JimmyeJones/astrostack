@@ -109,7 +109,7 @@ the plain picture back rather than an error, so the item never becomes a downloa
 query flag it sets has been served since v0.293.0, so an older backend behind a newer frontend is the one case
 that cannot arise here, and the reverse (older frontend) simply doesn't offer the item.
 
-**Tests (+1 case, +4 assertions; the union-of-items one fails before).** `SavePictureMenu.test.tsx` pins the
+**Tests (+4 assertions inside two existing cases — no new `it()`, so the frontend count stays 3,550; both cases fail before).** `SavePictureMenu.test.tsx` pins the
 item into the union list every page must offer, and pins its href three ways: byte-equal to
 `stackArtifactUrl(..., northUp, false, false, false, true)`, containing `label_objects=true`, and **not**
 containing `scale=true`. `label_objects` is the last of five positional booleans on that helper, which is
