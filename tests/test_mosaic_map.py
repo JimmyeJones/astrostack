@@ -132,6 +132,21 @@ def test_a_young_mosaic_is_not_nagged_about_minutes():
     assert m.thin is not None
 
 
+def test_a_young_mosaic_is_told_the_fact_without_the_nag():
+    """The middle case, and the one the panel-admission fix made visible: a panel
+    thinner by the fraction but only minutes behind. It must not be nagged about
+    (`thin` stays None — no highlight, no aim hint), and it must not be called
+    "similar" either, because the card is drawing that cell visibly paler."""
+    m = mosaic_depth_map(_grid(1, 3, subs=24, per_panel={(0, 2): 6}))
+
+    assert m is not None
+    assert m.thin is None and aim_hint(m) is None
+    assert "similar amount of time" not in m.text
+    assert "a little behind at the right" in m.text
+    assert "grainier" not in m.text                   # the fact, not the nag
+    assert "1 min" in m.text and "4 min" in m.text
+
+
 def test_the_median_is_the_yardstick_not_the_mean():
     """Two starved panels out of five must not drag the comparison down to where
     they look normal. With the mean, 3×60 subs and 2×5 would put the bar at 38

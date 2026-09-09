@@ -296,7 +296,18 @@ def aim_hint(m: MosaicDepthMap | None) -> str | None:
 
 
 def _verdict_text(panels: list[MosaicPanel], rows: int, cols: int,
-                  median_s: float, thin: MosaicPanel | None) -> str:
+                  median_s: float, thin: MosaicPanel | None,
+                  behind: MosaicPanel | None = None) -> str:
+    """The card's sentence.
+
+    ``thin`` is the panel worth acting on — materially thinner *and* behind by
+    enough to be worth a night. ``behind`` is the panel that failed only the
+    second of those: thinner by the same fraction, but by minutes rather than by
+    hours. It used to fall into the "all similar" branch, which was a small
+    untruth nobody could see, because such a panel was usually below
+    :data:`MIN_PANEL_FRAMES` and not on the map at all. Now that it is drawn — a
+    visibly paler cell — an all-clear written under it is a sentence arguing with
+    its own picture, so it gets its own line: the fact, without the nag."""
     from seestack.sharecard import format_duration
 
     # "2×2" only when the mosaic really is one — four panels on a 2×2 grid. A
@@ -313,6 +324,15 @@ def _verdict_text(panels: list[MosaicPanel], rows: int, cols: int,
             f"{format_duration(median_s)} on a typical panel. That part of the "
             f"picture will look grainier than the rest until it catches up — "
             f"more time on this mosaic is what evens it out."
+        )
+    if behind is not None:
+        where = panel_position_words(behind.row, behind.col, rows, cols)
+        return (
+            f"Your {shape} mosaic is a little behind at the {where}: about "
+            f"{format_duration(behind.exposure_s)} there against "
+            f"{format_duration(median_s)} on a typical panel. It's only a few "
+            f"minutes' difference at this stage, so it evens out on its own as "
+            f"you keep shooting."
         )
     return (
         f"All {len(panels)} panels of your {shape} mosaic have had a similar "
@@ -466,16 +486,18 @@ def mosaic_depth_map(
     median_s = times[mid] if len(times) % 2 else 0.5 * (times[mid - 1] + times[mid])
 
     thinnest = min(panels, key=lambda p: (p.exposure_s, p.row, p.col))
-    thin = (
-        thinnest
-        if median_s > 0.0
-        and thinnest.exposure_s < THIN_FRACTION * median_s
-        and (median_s - thinnest.exposure_s) >= THIN_MIN_SHORTFALL_S
-        else None
-    )
+    materially_thinner = (median_s > 0.0
+                          and thinnest.exposure_s < THIN_FRACTION * median_s)
+    worth_a_night = (median_s - thinnest.exposure_s) >= THIN_MIN_SHORTFALL_S
+    thin = thinnest if materially_thinner and worth_a_night else None
+    # Thinner by the fraction but not yet by enough minutes to be worth going
+    # out for. `thin` stays None — no highlight, no aim hint, no nag, exactly as
+    # before — but the sentence stops calling the panels "similar" when the card
+    # is drawing one of them visibly paler than the rest.
+    behind = thinnest if materially_thinner and not worth_a_night else None
 
     return MosaicDepthMap(
         panels=panels, rows=rows, cols=cols,
         median_exposure_s=median_s, thin=thin,
-        text=_verdict_text(panels, rows, cols, median_s, thin),
+        text=_verdict_text(panels, rows, cols, median_s, thin, behind),
     )

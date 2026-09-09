@@ -73,29 +73,40 @@ its bounding grid — a partly-shot mosaic, or a genuine L-shape — read *"All 
 panels of your 2×2 mosaic"*. The shape is now `rows×cols` only when the panels
 actually fill it, and `N-panel` otherwise.
 
+**And the middle case the fix itself made visible.** With the panel drawn, a
+mosaic that is thinner by the *fraction* but only minutes behind fell into the
+"all similar" branch — an all-clear written underneath a visibly paler cell, a
+sentence arguing with its own picture. `THIN_MIN_SHORTFALL_S` (300 s) is
+deliberately **not** touched: its reasoning (don't nag a mosaic in its first half
+hour) is intact, and moving it would be the blind hot-path flip AGENTS.md §1
+forbids. Instead `_verdict_text` gains a third branch fed by a `behind` panel —
+the thinnest, when *only* the absolute floor held it back. `thin` stays `None`,
+so there is no highlight, no `aim_hint` and no nag, exactly as before; the
+sentence just stops claiming "similar". Verified against the running app on the
+scratch library: *"Your 2×2 mosaic is a little behind at the top-right: about
+30 s there against 1 min on a typical panel. It's only a few minutes' difference
+at this stage, so it evens out on its own as you keep shooting."*
+
 **Measured on the sample after the fix:** `panels: [(0,0,6), (0,1,3), (1,0,6),
 (1,1,6)]` — the fourth cell is on the map with its real 3 subs, so the owner can
-*see* which corner the grain note is about. Its `thin` verdict still stands down
-there only because `THIN_MIN_SHORTFALL_S` (300 s) says half of one minute is not
-worth a night — the sample's synthetic 10 s subs, not the owner's hours — and
-that threshold is deliberately **not** touched: its stated reasoning (don't nag a
-mosaic in its first half hour) is intact, and moving it would be the blind
-hot-path flip AGENTS.md §1 forbids. On real data the shortfall clears easily and
-the two surfaces agree.
+*see* which corner the grain note is about. On real data (hours a panel, not the
+sample's synthetic 10 s subs) the shortfall clears the floor easily and the map
+names the thin panel outright.
 
 **Upgrade-safe (§9):** engine-only, one endpoint's existing `panels` list gains
 an entry. No config, DB schema, on-disk layout, default or API-*shape* change;
 the frontend card already draws gaps and shades against the mosaic's own range,
 so it needed no change at all.
 
-**Tests (+6; two fail before, verified by stashing the fix).** `tests/test_mosaic_map.py`:
+**Tests (+7; two fail before, verified by stashing the fix).** `tests/test_mosaic_map.py`:
 the cloud-shortened panel reaches the map and is named (**fails before**);
 admitting it leaves every real panel byte-identical; a stray off the grid is
 still not a panel; a thin cluster cannot extend the grid; the shape never claims
-a grid the panels do not fill (**fails before**). `tests/webapp/test_mosaic_map.py`:
-the same case end to end through the endpoint, including the `aim_hint`. Nothing
-weakened or rewritten — all 19 existing engine cases and 9 webapp cases pass
-untouched.
+a grid the panels do not fill (**fails before**); and the young mosaic gets the
+fact without the nag (`thin` and `aim_hint` both still `None`, "similar amount of
+time" gone). `tests/webapp/test_mosaic_map.py`: the cloud-shortened case end to
+end through the endpoint, including the `aim_hint`. Nothing weakened or
+rewritten — all 19 existing engine cases and 9 webapp cases pass untouched.
 
 ---
 
