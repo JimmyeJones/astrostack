@@ -14,6 +14,60 @@ Newest first.
 
 ---
 
+## v0.404.1 — 2026-09-09 — the editor told a mosaic's owner to shoot it in mosaic mode (`useStackFraming` + `FramingVerdictNote` on `Editor.tsx`, `hideFraming`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-pu1q6v`. Found by *looking at*
+a `--mosaic --editor` dogfood pass rather than by reading its exit code — the
+probe reported CLEAN, because nothing overflowed and no console error fired.)**
+
+**The bug, read off two screenshots of one target in one running app.** On the
+**Target** page the mosaic sample says, in a heading the code chose because the
+canvas is a mosaic: *"**It's bigger than this mosaic** — Orion Nebula is bigger
+than this mosaic — only about 55% of it is in this picture. Adding more panels
+next session would capture the rest."* One click away, the **editor** of that
+same run said: *"Orion Nebula is bigger than the Seestar's single frame — **shoot
+it in mosaic mode** to capture all of it."* — advice the owner has already taken,
+about a picture that is already four panels. Two surfaces, one fact, different
+answers; the second is the pre-capture *prediction* from the catalogue, which
+cannot know what was shot.
+
+**It was a gap in an existing rule, not a new one.** `ObjectInfoCard` has carried
+`hideFraming` since the measured verdict shipped, and its own docstring states
+the rule: *"on a page carrying both, the prediction is the copy to drop"*. The
+Target page passes it; History never renders the card at all —
+`FramingVerdictNote`'s own comment says exactly that. **The editor was the third
+surface nobody listed**: it renders `ObjectInfoCard` with the default
+(`hideFraming: false`) and never rendered the verdict, so it kept the weaker
+sentence and lost the stronger one.
+
+**The fix is the rule, applied.** The editor now reads the measured verdict
+through the shared `useStackFraming(safe, rid)` and, when there is one, passes
+`hideFraming` and renders `FramingVerdictNote` for the run it is editing. **No
+new request**: the editor has *already* fetched `["stack-framing", safe, rid]`
+since the re-centre offer shipped, so this is the same query key and react-query
+serves both from one response. Where nothing measured the picture — no catalogue
+match, no vetted size, no usable WCS, or an older backend — the verdict
+self-hides and the catalogue line stays exactly as it was, so nothing is removed
+(the owner's standing constraint) and an ordinary single-field editor is
+unchanged in every case where the prediction was the only answer there was.
+
+The editor also gains, for free, the verdict's own re-centre offer — which
+deep-links into this very editor — and its mosaic-aware headings.
+
+**Measured, as the standing IA rule requires** (`scripts/agent-dogfood.sh
+--build --mosaic --editor`): see the run's block in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md) for the before/after page heights.
+
+**Upgrade-safe (§9):** frontend-only; no endpoint, schema, config, on-disk or
+default change.
+
+**Tests (+2, one fail-before):** `Editor.test.tsx` — the measured mosaic sentence
+on the page with the catalogue prediction gone and the rest of the card intact
+(fails before: the verdict was never rendered), and the catalogue line still
+shown, with no verdict element, when nothing measured this picture.
+
+---
+
 ## v0.404.0 — 2026-09-09 — which targets you've shot more of since their picture was made (`Project.count_accepted_solved_after`, `/api/new-subs-waiting`, `NewSubsWaitingNote`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-pu1q6v`. A new beginner
