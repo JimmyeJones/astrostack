@@ -22,6 +22,7 @@ import { MissingFilesNote } from "../components/dashboard/MissingFilesNote";
 import { NewSubsWaitingNote } from "../components/dashboard/NewSubsWaitingNote";
 import { StackFailuresNote } from "../components/dashboard/StackFailuresNote";
 import { PointHereTonightCard } from "../components/dashboard/PointHereTonightCard";
+import { AutoStackOffNote } from "../components/dashboard/AutoStackOffNote";
 import { UnexportedEditsNote } from "../components/dashboard/UnexportedEditsNote";
 import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import { ImagingCalendarCard } from "../components/ImagingCalendarCard";
@@ -246,6 +247,13 @@ export function Dashboard() {
           // ordinary install it costs nothing and the board folds nothing.
           { key: "unexported-edits", priority: NOTICE_PRIORITY.advisory,
             node: <UnexportedEditsNote /> },
+          // Not a fault — an offer. `auto_stack` ships on, but an install that
+          // has ever run carries an explicit `false` no upgrade may overwrite
+          // (§9), so the whole walk-away chain waits on one switch nothing in
+          // the app ever mentioned. Speaks only on a night that was captured and
+          // stacked nothing, and never again once dismissed.
+          { key: "auto-stack-off", priority: NOTICE_PRIORITY.advisory,
+            node: <AutoStackOffNote /> },
           // The same shape for the other direction: not work of theirs the app
           // isn't showing, but light of theirs the picture doesn't have yet.
           // The Target page has said this per target since v0.90.0; with
