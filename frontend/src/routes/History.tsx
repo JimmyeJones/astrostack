@@ -1210,7 +1210,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
           <FocusChip verdict={focus} />
           <RejectionBadge options={run.options} />
           <HazyNightBadge ratio={run.transparency_ratio} />
-          <PanelSeamsBadge verdict={run.seam_verdict} />
+          <PanelSeamsBadge verdict={run.seam_verdict} grain={run.grain_verdict} />
           <CalibrationBadge calstat={run.calstat} />
           {/* Same honesty as the Target page's hero: this card's thumbnail is the
               baked preview, so a saved-but-never-exported edit isn't in it. The

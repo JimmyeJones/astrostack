@@ -14,6 +14,47 @@ Newest first.
 
 ---
 
+## v0.406.1 — 2026-09-09 — finish the sweep: the History/Gallery/Compare chip made the same promise (`seamsLabel(verdict, grain)`, `grain_verdict` on `StackRunOut`/`GalleryItem`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-8j2dwm`, immediately after
+v0.406.0 — the same untruth, on the two surfaces where the owner is actually
+looking at the thumbnail.)**
+
+v0.406.0 fixed the "How's my stack?" note and stopped there. But
+`PanelSeamsBadge` renders on **History rows, Gallery cards and the Compare
+view**, and its tooltip was a verbatim copy of the sentence that had just been
+corrected: *"This mosaic's panels evened out — the sky matches across the joins,
+so **you shouldn't see seams between them**."* Half a fix on the surface a
+beginner reads *least* is not a fix.
+
+`seamsLabel` now takes the grain verdict as well, and with it `"uneven"` says
+*"…so where the picture looks grainier that's a difference in depth (fewer subs
+on that panel), not a step in the sky."* The chip stays **green**, keeps the
+word **"Panels even"**, and still says the panels evened out — the level claim
+was never wrong, and nothing is removed. A `"check"` verdict is untouched
+whatever the grain says: a real sky step is still the more useful thing to say.
+
+`grain_verdict` is an additive optional field on `StackRunOut` and `GalleryItem`,
+resolved server-side by the same `seestack.stackhealth.grain_verdict` the health
+note reads, so a chip and a note can never disagree — the rule `seam_verdict`
+already ships under. Both listings read the **column**, opening no files, so a
+run stacked before the measurement stays silent until the health panel heals it;
+identical to how `seam_verdict` behaves on those same listings.
+
+**Upgrade-safe (§9):** one additive optional response field on two shapes and one
+optional prop. An older backend omitting it reads as "not measured", which is
+character-for-character today's tooltip — pinned by a test that walks
+`null`/`undefined`/`""`/an unknown word.
+
+**Tests (+6):** four in `PanelSeamsBadge.test.tsx` (the corrected wording, the
+colour and label unchanged, the old sentence preserved exactly when nothing
+measured the grain, and `"check"` left alone) and two on the wire
+(`tests/webapp/test_grain_verdict_endpoint.py` for the run listing, plus a
+Gallery case), each asserting the *unmeasured* and *even* runs stay `None`
+rather than claiming their panels are equally deep.
+
+---
+
 ## v0.406.0 — 2026-09-09 — a levelled mosaic can still show a panel, and the app said it couldn't (`measure_coverage_grain`, `grain_verdict`, `stackhealth` `grain_uneven`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-8j2dwm`. Found by measuring a

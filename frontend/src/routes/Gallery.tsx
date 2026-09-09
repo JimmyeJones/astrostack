@@ -388,7 +388,7 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
       <Group gap={4} mt={4}>
         <RejectionBadge options={item.options} />
         <HazyNightBadge ratio={item.transparency_ratio} />
-        <PanelSeamsBadge verdict={item.seam_verdict} />
+        <PanelSeamsBadge verdict={item.seam_verdict} grain={item.grain_verdict} />
         <CalibrationBadge calstat={item.calstat} />
         {/* This card's thumbnail is the run's baked preview, so a saved-but-
             never-exported edit isn't in it — say so here too, not just on
