@@ -14,6 +14,71 @@ Newest first.
 
 ---
 
+## v0.403.1 — 2026-09-09 — one-click Auto is measured end to end against its own export, on a mosaic (`tests/test_auto_recipe_proxy_parity.py`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-03ba9j`. Test-only; no
+engine, webapp or frontend line changed.)**
+
+**The gap.** `tests/test_edit_proxy_parity.py` measures the A2 class — *"a
+pixel-unit editor parameter not scaled by the proxy factor"* — **one op at a
+time**, and a 2026-09-09 sweep confirmed every current op passes it. Nothing
+rendered the recipe Auto actually *builds*. That matters because the recipe is
+eleven ops long and several of them **measure the image and hand the answer to
+the next one**: an op can scale its own parameter perfectly and still be fed a
+differently-fitted input, and a per-op assertion cannot see that. AGENTS.md §1
+re-opened priority 1 precisely because two A2 instances survived exactly such
+per-component reads, and it judges every Auto claim on a tiled mosaic at the
+owner's scale — which no parity test had ever rendered whole.
+
+**What shipped.** Four tests around one ragged, unevenly-deep mosaic strip
+(600×3000, five panels at depths 12/12/6/9/15, an 8.3 % genuinely uncovered
+border, ~3 px stars, a warm sky over a differently-tinted sensor cast). The
+recipe is built from the **proxy**, exactly as the editor builds it, then
+rendered twice — on the proxy at `proxy_scale=5` and on the native canvas — and
+the two are compared as pictures: per-channel median, 1st and 99th percentile,
+and overall mean, with the export strided down the same way so the comparison is
+of one sky rather than of two sizes.
+
+**Measured, on this fixture: the worst statistic differs by 0.0034** — well
+inside the ~2 % decimation floor the editor has always carried, which is the
+budget the test asserts. Two heavier canvases were measured while scoping it and
+are recorded here rather than run every time: a 1500×6000 strip at
+`proxy_scale=4` diverges by **0.0043**, and a 900×12000 strip at
+`proxy_scale=8` — heavy stride, the regime where the coverage-levelling floor
+bug lived until v0.237.2 — by **0.0076**. So the whole-recipe claim holds at
+every stride the owner's canvases can reach.
+
+**The test that makes the other one worth having.** A budget nothing can exceed
+is not a gate, so the trap is armed on every run:
+`test_the_parity_check_can_see_a_pixel_parameter_that_forgot_the_proxy_scale`
+monkeypatches `EditContext.scaled_px` to the identity — which *is* the A2 defect,
+a preview applying full-resolution pixel measures to a decimated image — and
+asserts the same measurement then lands far outside the budget. It measures
+**0.1085**, a **32×** separation from the honest 0.0034. Without it, a future
+change that made the fixture blind would leave a green test asserting nothing.
+
+**And the fixture states its own claim** (the `tests/shapes.py` idiom, v0.391.1):
+ragged outline, uneven depth with `peak_over_panel > 2`, and — the distinction
+that mattered — `assert_reference_is_the_thinnest_panel`, **not**
+`assert_panels_thinner_than_the_reference`. The first draft asserted the latter
+out of habit and `shapes.py` failed it: these five panels are each a fifth of the
+canvas, so the reference depth lands on the thinnest and nothing real sits below
+it. That is the honest claim for a file about *render parity* (the trim it feeds
+Auto is a real border trim, not the D1 shape), and the vocabulary exists exactly
+so a file cannot imply the claim it does not have. A fourth test pins that Auto
+still emits `background.level_coverage` first and `geometry.crop` last on this
+canvas, so a future change cannot quietly reduce the file to a single-field test
+that still passes.
+
+**Cost.** Two native-resolution render pairs, ~23 s, shared through a
+module-scoped fixture (the ops test builds the recipe without rendering; the trap
+cannot share the honest render because it changes the pipeline).
+
+**Upgrade-safe:** a new test file and a version bump. No config, schema,
+on-disk, API, default or engine-behaviour change. Tests +4.
+
+---
+
 ## v0.403.0 — 2026-09-09 — the upload box knows which targets you already have (`Project.source_folders_under`, `/api/upload-destinations`, `uploadDestination.ts`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-dto79f`. The "in-UI destination
