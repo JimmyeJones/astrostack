@@ -326,8 +326,10 @@ export function SavePictureMenu({
               <span style={MENU_HINT}>A ready-to-post sentence about this picture</span>
             </Menu.Item>
             {/* Motion, for the places a still gets swiped past. Built and cached
-                server-side from this run's own preview, so it costs no extra
-                request to offer: every run with a picture has one. */}
+                server-side from this run's own picture — the same native render
+                the wallpaper and the share JPEG come off, where one can be made
+                faithfully — so it costs no extra request to offer: every run with
+                a picture has one. */}
             <DownloadMenuItem
               icon={<IconVideo size={16} />}
               url={api.stackZoomClipUrl(safe, run.id)}

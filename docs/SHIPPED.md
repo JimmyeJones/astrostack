@@ -14,6 +14,88 @@ Newest first.
 
 ---
 
+## v0.400.0 — 2026-09-09 — The zoom clip stops being a 1024 px preview blown into a share (`_zoom_clip_source`, `zoom_clip_min_source_long_edge`, `ZOOM_CLIP_SOURCE_OVERSAMPLE`, `_native_picture_gate`, `_native_picture_size`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-8td9m9`. The last open **size**
+item of the download-copy sweep filed 2026-08-30 — "the zoom clip (built from the
+same preview, and the cap sets its resolution directly — 569 px where 640 was
+available)".)**
+
+**Symptom.** The zoom clip is the one thing this app makes for the places a
+beginner actually posts, and it was cut out of `run.preview_path` — the stored
+preview, capped at 1024 px. `zoom_clip_size` never upsamples, so that cap did not
+merely soften the clip, it *sized* it: `CLIP_LONG_EDGE` is 640 and the clip came
+out at `1024 / CLIP_ZOOM` = **569 px**, with its deepest frame the preview at 1:1.
+Two of the three properties the sweep says keep drifting were in play at once —
+the file was smaller than the constant that names it, and `…/zoom-clip/info`
+reported that smaller number as if it were the ask.
+
+**Fix.** The clip is now cut from the **same cached share render every other
+hand-out already uses**. `_zoom_clip_source` asks `_native_picture_source` — the
+v0.310.0/v0.311.0 machinery behind the wallpaper and the share JPEG, which
+declines on exactly the cases where a re-render would be a *different* picture
+from the one on screen (a baked North-up turn, a display-space preview with no
+saved recipe, a trimmed preview, no readable master, a canvas no bigger than the
+preview) — and falls back to the stored bytes otherwise, so an ordinary run is
+byte-for-byte the clip it was. The focus point is re-measured against whichever
+bytes win, the way the wallpaper already does it: framing the move on the other
+grid's pixel would push the camera onto empty sky.
+
+**How big a source, and why not simply "the biggest".** Past
+`zoom_clip_min_source_long_edge()` (= `CLIP_LONG_EDGE × CLIP_ZOOM` = 1152) the
+output size stops growing and further pixels are spent **supersampling** — each
+frame averaged down from more real pixels, a cleaner picture rather than a bigger
+one. That is worth having, but it is not paid once: the move is 24 separate
+crop-and-resize passes, so the source's area is paid 24 times over, on a NAS, for
+one tap. `ZOOM_CLIP_SOURCE_OVERSAMPLE = 2` takes the plain 2×2 average and stops
+there; the ask is `min(that, _share_source_long_edge(...))`, so an ordinary stack
+costs **no render the share JPEG and the wallpaper were not already paying for**
+(same `<basename>_share.png` cache, same signature), and only a canvas far bigger
+than the clip can use is decimated on the way in.
+
+**The cache had to grow with the source.** `_zoom_clip_signature` was keyed on the
+preview's stamp alone, which *was* the whole source. It now also carries the
+master's stamp, the saved recipe's hash and the app version — the same set
+`_share_source_signature` uses — and the version tag goes `v1` → `v2` so every
+cached clip is rebuilt in place rather than serving the old move. A re-stack that
+rewrites the master under an unchanged preview no longer serves a clip of pixels
+that are gone.
+
+**`info` follows the file, which is the whole point of the sweep.** It answers
+before anything is rendered, so it cannot look at the source — instead
+`_native_picture_source`'s cheap gates were lifted verbatim into
+`_native_picture_gate`, which that function now *is* (plus the render), and
+`_native_picture_size` reads the size off the run's own record through the same
+gate. So the number `info` prints and the file the download builds cannot drift
+apart by construction, and a test asserts they agree **on both paths** by decoding
+the served animation rather than by comparing strings. It is explicitly
+best-effort and documented as such: it is answered from the record, so it can sit
+a pixel from the render's own two-step rounding, and a legacy run whose master is
+smaller than its recorded canvas would be over-stated.
+
+**Measured.** On a 1600×1200 canvas with a 400 px stored preview the clip goes
+**222×167 → 640×480**, and its deepest frame carries detail the preview never
+held: against the same scene served as a display-space run with no recipe (which
+declines the render and so moves over the capped preview exactly as before),
+high-frequency energy in the deepest frame is over 1.5× — compared at one size,
+where upscaling invents nothing.
+
+**Upgrade-safe (§9).** No config, DB-schema, on-disk-layout, default or
+API-*shape* change; two response fields (`width`/`height`) that already existed
+report a bigger number for the same picture. The clip and its `.sig` are the
+already-registered `RUN_ARTEFACT_SUFFIXES` files, deleted and archived with the
+run as before. Nothing renders that the share surfaces did not already render.
+
+**Tests (+4 in `tests/webapp/test_zoom_clip.py`, three fail before):** the clip is
+sized by the master and not by the capped preview; it carries detail the stored
+preview could not hold; `info` reports the size the download actually comes out at,
+on the native path *and* the declined one; and the clip is rebuilt when the master
+it is now made from changes. Nothing loosened — the eight existing cases are
+untouched and still pass, because their fixture's canvas *is* its preview, which
+is exactly the case the gate declines.
+
+---
+
 ## v0.399.4 — 2026-09-09 — BUG FIX: D1's fourth instalment — a border is where the data runs out (`coverage_trim.FRINGE_OUTSIDE_FRAC`, `_border_trim_rect`, `_thin_labels`, `editor._load_run_frame_counts_strided`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-u828ql`. Two commits: the
