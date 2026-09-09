@@ -14,6 +14,112 @@ Newest first.
 
 ---
 
+## v0.399.4 — 2026-09-09 — BUG FIX: D1's fourth instalment — a border is where the data runs out (`coverage_trim.FRINGE_OUTSIDE_FRAC`, `_border_trim_rect`, `_thin_labels`, `editor._load_run_frame_counts_strided`)
+
+**(Builder 2026-09-09, branch `claude/sweet-babbage-u828ql`. Two commits: the
+engine rule, then the input it reads.)**
+
+**Symptom.** Auto's on-by-default border trim (`auto_crop_border`) cropped a
+**fully tiled** mosaic — no ragged edge anywhere — by up to 19.8 % of its canvas.
+Reproduced over 147 synthetic rasters shaped like the owner's shooting (3x3 …
+12x8, 10 % overlap, panel depths spanning 3-15 up to 50-500 subs, three seeds
+each). AGENTS.md §1 puts the bar at "a trim above ~15 % of the canvas is a bug,
+not a ragged edge", and the failure is silent: the owner's picture is quietly
+smaller.
+
+**Why the v0.391.1 guard did not reach it.** That fix bounds the trim by what the
+*coverage* allows and walks the depth threshold down when it does worse than
+`TRIM_KEEP_RATIO` (0.8) of that bound. On a fully tiled canvas the bound is
+**1.0 by definition**, so a rectangle keeping 0.80-0.91 clears the ladder and is
+accepted — exactly the band these land in.
+
+**The rule that separates them is spatial, and it is two facts rather than a
+tuned number.** The pixels a *border* trim is entitled to remove are the ones
+where the data runs out. So:
+
+1. **`_outline_mask` — where does the data run out?** The uncovered pixels, plus
+   the nearly-empty band along the union outline that is uncovered in all but
+   name. A union canvas is a bounding box, so a mosaic that reaches the box on a
+   side has no NaN there at all — only a ramp falling to a few percent of a panel
+   — and a rule that waited for NaN would never trim it (that is why lever (e),
+   "a canvas with no uncovered pixel has no border", was worth nothing on its
+   own).
+2. **`_thin_labels` — a ramp is a band, a panel is a block.** A region counts as
+   outline only when it is nowhere thicker than a quarter of its own longest
+   extent (thickness = its distance transform's peak, doubled). Measured against
+   its *own* extent, not the canvas: a ramp reads ~0.02 and a panel ~1.0, at any
+   canvas size and any panel count. A canvas-relative fraction would have had to
+   sit below one panel of a 12x8 raster and above the ramp of a single field — a
+   two-fold gap.
+3. **`_border_trim_rect`** then removes only the poorly-covered regions that are
+   *attached* to that outline and are themselves bands. Everything else a depth
+   threshold calls poor is a **panel** — real data, fewer subs — wherever on the
+   canvas it sits.
+
+**It can only ever keep more.** The border rectangle is a *second* answer, and
+the more generous of it and the depth ladder's wins — pinned as a property over
+random maps and every raster shape in the suite. And where a ramp runs *into* a
+shallow edge panel, the two are one connected region that is neither purely
+fringe nor purely panel: the rule then keeps the whole thing rather than eat the
+panel, and when that leaves it proposing no trim at all on a canvas that visibly
+has a border, it says so (`has_opinion=False`) and the ladder's answer stands.
+
+**Measured, over the same 147 rasters in three outline shapes** (exactly tiled;
+four uncovered corners; a genuinely ragged perimeter from jittered panel
+positions), as "how many keep less than 95 % of what their own coverage allows",
+worst case in brackets:
+
+| map | shape | before | after |
+| --- | --- | --- | --- |
+| frame counts | exactly tiled | 4 (0.902) | **0 (1.000)** |
+| frame counts | corner outline | 0 (0.955) | **0 (1.000)** |
+| frame counts | ragged outline | 34 (0.803) | **0 (1.000)** |
+| weighted | exactly tiled | 13 (0.804) | 4 (0.822) |
+| weighted | corner outline | 14 (0.817) | 4 (0.817) |
+| weighted | ragged outline | 39 (0.801) | 10 (0.801) |
+
+…and **not one map of any shape kept less than it did before** (the safety
+property above, checked on every one).
+
+**The second commit is why the frame-count column is the one that matters.**
+`_trim_rect_for_run` now reads `{stem}_framecov.fits` — the honest per-pixel
+frame count — where the run wrote one, falling back to the weighted coverage map
+for runs recorded before that sibling existed. A coverage value is a sum of
+per-frame *weights* once `quality_weighted` is on, which is the walk-away default
+and so is what the owner's own maps hold; that spreads one real panel across a
+band of values, and is the input D1 kept being wrong on. The frame count is flat
+inside a panel by construction — "bin by panel geometry, not by how good a
+panel's subs happened to be", the lesson `stack_detail_mask` and the mosaic
+sky-leveling pass already learned. This was lever (b) in the filed entry, which
+measured it alone at 19 → 14 and said it was "arguably the more honest input and
+could ride along with a real one". It does.
+
+**Four of the five levers the entry recorded stay rejected** and none of them is
+what shipped: lowering `PANEL_LEVEL_MIN_FRAC` (non-monotone), tightening
+`TRIM_KEEP_RATIO` (honest 0.912 vs broken 0.912 — no ratio separates them),
+refusing a crop that discards well-covered pixels (an axis-aligned rectangle over
+any irregular footprint necessarily does), and the exact-coverage predicate (a
+real raster is *nearly* tiled, never exactly). The fifth, (b), rode along as
+above.
+
+**Upgrade-safe (§9):** engine logic plus one preferred input file; no config,
+schema, on-disk layout, API shape or default change. A run with no `_framecov.fits`
+sibling is read exactly as it is today. `well_covered_mask` — the all-sky map and
+the sky-area tally — is untouched; this instalment is the rectangle's alone.
+
+**Tests: +6 engine / +2 webapp,** all failing before. `tests/shapes.py` gains
+`assert_fully_tiled` / `assert_has_a_ragged_outline` / `uncovered_share`, the
+vocabulary for the distinction this instalment turned on — a fixture with uneven
+panel depth cannot say "there is no border here", and without that said out loud
+the raster test would pass for the wrong reason. The new
+`test_the_border_rule_can_only_ever_keep_more_than_the_ladder_alone` carries an
+independent copy of v0.399.2's function to compare against, the same way v0.386.1
+pinned its bit-parity claim. No existing test was weakened, rewritten or skipped;
+all 31 in `test_coverage_trim.py` and all 107 in `tests/webapp/test_editor.py`
+pass.
+
+---
+
 ## v0.399.2 — 2026-09-09 — BUG FIX: a thin mosaic panel is not a ragged fringe on the map either (`coverage_trim.MASK_LEVEL_MIN_FRAC`, `well_covered_mask(level_min_frac=)`, `thumbnail.stack_detail_mask`)
 
 **(Builder 2026-09-09, branch `claude/sweet-babbage-c9vw1a`. Picked up as the
