@@ -18,6 +18,75 @@ is a queue.
 
 ---
 
+## 2026-09-09 — Builder run (`claude/sweet-babbage-pu1q6v` → v0.404.0, v0.404.1): the library-wide "new subs waiting" note, and the bug a CLEAN dogfood was hiding
+
+**The run.** Two shipped items, both in [`SHIPPED.md`](SHIPPED.md): **v0.404.0**
+(new beginner feature — `GET /api/new-subs-waiting` + `NewSubsWaitingNote`) and
+**v0.404.1** (a friendliness/trust bug on the priority-1 editor). Tests **+20**
+(9 Python, 11 frontend); one of the two editor tests was verified **fail-before**
+against `795f3c32`.
+
+**Why a feature rather than a backlog item, and how long that took to establish.**
+The triage was long because the answer was "nothing here is ready", which takes as
+much reading as a hit. Walked the whole of "Bugs (fix these first)" — every open
+entry is gated on data no agent has, or is a stand-down that already carries its
+measurements — and the four Ideas subsections top-down. Of the entries that read
+as live: **"one voice" for the marginal-return sentence** is effectively already
+shipped (`readiness.noiseReductionHint` and `nightplan._depth_sentence` compute
+`1 − √(t/(t+1))` and round to a whole percent — the same number by the same
+formula, so there is nothing to reconcile); the Scout's 2026-09-09 **field-fill
+diagram** idea shipped as v0.401.0 the same day it was filed; the **dark/light
+exposure mismatch**, the **min/max `k` auto-scale**, the **mixed-pointings
+pre-flight** and the **catalog-magnitude difficulty split** all carry closure
+notes. So the run took AGENTS.md §1's standing allocation ("ship a genuine
+beginner feature on a regular cadence") rather than manufacturing work.
+
+**Dogfood: CLEAN, and that is the point of the second item**
+(`scripts/agent-dogfood.sh --mosaic --editor`, then again with `--build` after
+the change).
+- **Mosaic trim: 7.9 %** of the union canvas — the same figure as the last four
+  passes, well under the ~15 % §1 calls a bug.
+- **Page probes clean, both samples**, nothing overflowing, no console errors.
+  Field: `/life-list` 3,094 px, `/targets/<field>` 3,078 px, editor 3,072 px on a
+  phone. Mosaic: target 3,407 px, editor 3,102 px. All in line with the standing
+  baselines — **no IA slice indicated (fifth measurement agreeing)**.
+- **Editor drive clean on both samples**: all **21** ops added one at a time,
+  each re-rendering the live preview, then undo/redo, with no console error and
+  no failed request. (The 900 s wall-clock the 2026-09-09 Scout run hit is
+  avoidable: the scratch data root persists, so a second pass with `--no-stack`
+  reuses the stacked samples and the whole pass finishes in a couple of minutes.)
+
+**The lesson, and it is a new one: a CLEAN dogfood is a statement about
+*errors*, not about *sentences*.** The probe checks overflow and the console; it
+cannot read. Every finding of this pass came from opening the PNGs it wrote and
+*looking* at them — which is how v0.404.1 was found: the **Target** page said
+*"It's bigger than **this mosaic** — only about 55% of it is in this picture"*
+and the **editor of that same run**, one click away, said *"is bigger than the
+Seestar's single frame — shoot it in mosaic mode"*. Two surfaces, one fact,
+opposite usefulness, on a target already shot as four panels. Nothing overflowed
+and nothing logged, so the pass was reported CLEAN — twice, by two runs.
+**Recommendation for future passes: read the screenshots, at least for the
+Target page and the editor on the mosaic sample.** They are cheap to look at and
+they are the only place the app's *words* are on trial.
+
+**The second-order lesson: the gap was in a rule the code already stated.**
+`ObjectInfoCard.hideFraming` documents "on a page carrying both, the prediction
+is the copy to drop", and `FramingVerdictNote`'s own comment enumerates the
+surfaces — "the Target page hides the catalogue line … and History never renders
+that card at all". The **editor** renders that card and was in neither list. When
+a comment enumerates the callers of a rule, the enumeration is the thing to
+re-grep, not to trust.
+
+**Measured, as the standing IA rule demands** (`--build --mosaic --editor`
+against the same scratch): the mosaic **editor** goes **2,113 → 2,096 px on
+desktop and 3,102 → 3,085 px on a phone — 17 px *shorter* at both widths**,
+because the catalogue line and its field-fill diagram (a *pre-capture* "will it
+fit in one frame?" picture, equally stale on a mosaic) stand down together, as
+they already do on the Target page. The mosaic Target page is byte-identical at
+3,407 / 2,104 px. Nothing overflowing, no console errors, trim still 7.9 %.
+
+---
+
 ## 2026-09-09 — Builder run (`claude/sweet-babbage-dto79f` → v0.403.0): the upload destination picker, plus a clean editor proxy-scaling sweep
 
 **The run.** Baseline green before any change: **5,417 passed / 2 skipped**, full
