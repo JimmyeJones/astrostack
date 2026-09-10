@@ -18,6 +18,78 @@ is a queue.
 
 ---
 
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-m85zjk`) — one task: the top 🔴🔴 bug, both halves; and a self-inflicted "measure the mosaic, not the picture" trap
+
+**The run.** One task, deliberately: **v0.408.2**, the Scout's 🔴🔴 solar-CFA
+entry filed in the commit immediately before this run started
+(`7d172752`). It was the only entry in "Bugs (fix these first)" that was neither
+a recorded stand-down nor gated on data no agent has, so there was no second
+pick worth making — the Ideas list's top entries sampled during the wait were
+either already **Shipped** (the "calibration match confidence" entry, #17, still
+sits in the Autonomy section carrying its own ✅ SHIPPED v0.321.0 block), or
+explicitly down-weighted by a later Builder note (the editor's "Original"
+compare; the plateaued→fresh-target nudge, most of which v0.209.0 already
+delivered). Ending at one finished task beat starting a second on any of those.
+
+### The bug had a second half the entry did not name
+
+The filed entry was about the engine constant, and fixing that alone would have
+left the owner's actual picture untouched and unmentioned. `webapp/video.py`'s
+`colour_is_stale` — the surface that exists *precisely* to tell him a still needs
+re-stacking — short-circuits on `meta.colour_current`, and **v0.347.0 stamped
+that True on every still it made**, wrong phase and all. So the advisory built
+for the first version of this bug was structurally blind to the second.
+
+The generalisable shape: **a "we handled X" boolean cannot survive a correction
+to *how* X is handled.** It answers "did some build do this?" when the question
+is "did a build that got it *right* do this?". It is now `colour_build`, a
+generation number (`_COLOUR_PIPELINE_BUILD`), so the next correction to the
+colour path can tell its predecessors' output apart from its own. Any future
+staleness advisory should be born as a generation, not as a flag.
+
+### The trap: detecting a CFA phase on a frame that has already been demosaiced
+
+Dogfooding the fix end to end, the first script reported `detected='GBRG'` for a
+capture the fixture had recorded in **`RGGB`** — which reads exactly like a
+detector that does not work, or an ffmpeg row-flip in the AVI round trip (the
+very coupling the entry warns about, so it was the obvious suspect).
+
+It was neither. The script asked
+`detect_cfa_pattern(next(iter(iter_frames(path)))[..., 0])` — and `iter_frames`
+**already demosaics**. That is the R channel of a finished picture, whose 2×2
+sub-lattice structure has been interpolated away and reshuffled; reading a CFA
+phase off it is meaningless, and it happened to answer `GBRG` either way.
+Measured properly — the raw `rgb24` plane straight off ffmpeg, before the
+demosaic — the four sub-lattice means are exactly what the fixture laid down,
+the round trip flips **nothing**, and detection answers `RGGB` for `RGGB` and
+`GBRG` for `GBRG`.
+
+Worth knowing because the mistake is invisible: both readings are plausible
+numbers from a real array, nothing errors, and the wrong one accuses the code.
+**Anything that reads a CFA phase must take the plane from before
+`_demosaic_frame`, not from `iter_frames`' output** — which is the whole reason
+detection lives inside the generator, on the frame off the wire, rather than in
+a caller.
+
+### What the fix was actually verified on
+
+Not only the 64×48 test fixture. A 480×360, 24-frame capture in **each** phase,
+stacked end to end through `stack_video` at `keep_percent=40`: both came back
+`R > G > B` with the mesh at 0.007 (a replicated mosaic reads ~0.58), and
+detection answered each phase correctly off the wire. The `RGGB` half of that is
+the upgrade-safety half — reading the phase must not regress the captures that
+already worked — and it is pinned in the suite as the second half of a
+parametrized test.
+
+### Green gates
+
+Baseline on `origin/main` before any change: **5,500 passed / 2 skipped**
+(26m16s). After: the same suite plus this task's **+9**. Frontend, because
+`MoonSun.tsx` changed: `npx tsc --noEmit` clean, **3,550 tests** in 253 files,
+`npx vite build` succeeds. `ruff check` clean on every file touched.
+
+---
+
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-blnqnh`) — two verified mosaic bugs from *auditing a bug class* rather than dogfooding, and a clean sixth mosaic pass
 
 **The run.** Two tasks, both verified bugs, both shipped: **v0.408.0**
