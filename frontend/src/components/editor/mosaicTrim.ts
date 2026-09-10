@@ -140,8 +140,13 @@ export interface OverTrimVerdict {
 }
 
 /** "about 3%" / "under 1%" — an honest share, never rounded up to a number that
- * overstates a sliver. Pure. */
-function sharePctLabel(frac: number): string {
+ * overstates a sliver. Pure.
+ *
+ * Exported so the Target-page and Dashboard over-trim notes say the *same* share
+ * the editor says. Three surfaces reporting one measurement in three roundings
+ * is how a beginner ends up unsure which number to believe — and "3%" where the
+ * editor says "under 1%" would read as a second, different problem. */
+export function sharePctLabel(frac: number): string {
   const pct = frac * 100;
   if (pct < 1) return "under 1%";
   return `about ${Math.round(pct)}%`;
