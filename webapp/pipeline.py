@@ -478,6 +478,23 @@ def _pipeline_body(
                             {"target": safe, "frames": attempt_n,
                              "min": settings.auto_stack_min_frames})
                         continue
+                    depth = _auto_stack_panel_depth(
+                        lib, safe, settings.auto_stack_min_frames)
+                    if depth is not None:
+                        # Same floor, asked of the number that actually describes
+                        # a pixel. A mosaic's subs are spread over its panels, so
+                        # a count that clears the floor can still be a picture
+                        # that is one sub deep everywhere — speckle, published
+                        # and auto-edited as the target's newest picture. Held
+                        # with the same discipline as the count case: no attempt
+                        # marker, so the next scan stacks it the moment the
+                        # panels are deep enough (or the owner stacks by hand).
+                        held_thin.append(
+                            {"target": safe, "frames": attempt_n,
+                             "min": settings.auto_stack_min_frames,
+                             "panel_depth": depth["depth"],
+                             "panels": depth["panels"]})
+                        continue
                     unread_hold = _auto_stack_readability_hold(
                         lib, safe, attempt_n, settings.auto_stack_min_frames)
                     if unread_hold is not None:
@@ -2319,6 +2336,51 @@ def _detect_mixed_pointings(proj: Any) -> MixedPointings | None:
         if f.wcs_json
     ]
     return detect_mixed_pointings(radecs)
+
+
+def _auto_stack_panel_depth(
+    lib: Library, safe: str, min_frames: int,
+) -> dict[str, int] | None:
+    """Why a walk-away stack of ``safe`` would still be speckle, or ``None``.
+
+    The minimum-frames floor above compares the target's **frame count** to
+    ``auto_stack_min_frames``, which is the right number on a single field —
+    every sub lands on every pixel there — and the wrong one on a mosaic, where
+    the subs are spread across the panels. A 3x3 mosaic one pass in has nine
+    subs and a picture one sub deep *everywhere*: the count clears the floor of
+    3, the scan publishes it, the auto-edit adopts it, and the owner (a heavy
+    mosaic user — AGENTS.md §1) gets exactly the single-frame colour speckle the
+    floor exists to prevent.
+
+    So ask the floor of :func:`~seestack.stack.stacker.typical_panel_depth` —
+    how deep a typical sub's own panel is — and return the numbers for the note
+    when that is below the floor. ``None`` means "nothing to add": a single
+    field (the depth *is* the count, already checked), a mosaic whose panels
+    clear the floor, or a floor of 1, which is the documented opt-out back to
+    stacking from the first frame and must stay exactly that.
+
+    Read-only, and cheap: the pointings are grid-snapped before clustering
+    (sub-millisecond on the owner's largest target), and it is asked once per
+    target per scan, only for a target that is otherwise about to stack.
+    """
+    if min_frames <= 1:
+        return None
+    from seestack.stack.stacker import panel_frame_counts, typical_panel_depth
+
+    proj = lib.open_target(safe)
+    try:
+        radecs = [
+            (f.ra_center_deg, f.dec_center_deg)
+            for f in proj.iter_frames(accepted_only=True)
+            if f.wcs_json
+        ]
+    finally:
+        proj.close()
+    counts = panel_frame_counts(radecs)
+    depth = typical_panel_depth(counts)
+    if depth is None or depth >= min_frames:
+        return None
+    return {"depth": int(depth), "panels": len(counts)}
 
 
 def _mixed_pointing_check(lib: Library, safe: str) -> MixedPointings | None:

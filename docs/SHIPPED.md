@@ -14,6 +14,68 @@ Newest first.
 
 ---
 
+## v0.415.0 — 2026-09-10 — the walk-away minimum-frames floor counts a mosaic's subs, not its depth
+
+*(Builder, a bug verified in this run — repro'd end-to-end against the real pipeline, fails before / passes
+after. Pillar: autonomy + image quality — PRIORITY 2/4. Additive; a single-field target is byte-for-byte
+unchanged, and `auto_stack_min_frames = 1` stays the documented opt-out.)*
+
+**The bug.** `auto_stack_min_frames` (v0.183.0) exists to stop the hands-off scan publishing — and the
+auto-edit adopting — single-frame colour speckle as a target's newest picture: the owner-reported
+"gibberish". `webapp/pipeline._pipeline_body` asks that question of `_auto_stack_frame_count`, the target's
+**accepted+solved frame count**, which is exactly the right number on a single field, where every sub lands
+on every pixel — and the wrong one on a **mosaic**, where the subs are spread across the panels. A 3×3
+mosaic one pass in has nine subs and a picture that is one sub deep *everywhere*; `9 >= 3` waves it through.
+The floor was therefore defeated precisely by the owner's own shooting style (AGENTS.md §1: heavy mosaic
+user, `<T>_mosaic_sub/`), and the guard's one job — don't publish speckle — went undone on the canvases
+where it matters most. This is the "a threshold taken from a whole-target number that is really per-panel"
+class the Scout rotation names, and the sibling of the A6 `auto_reject` fix (v0.326.7).
+
+**The number.** `seestack/stack/stacker.panel_frame_counts(radecs)` — the grid-snapped clustering
+`auto_reject_depth` already used, split out and made public, so the two callers cannot drift — plus
+`typical_panel_depth(panel_counts)`: the **frame-weighted median** panel depth, i.e. how deep the panel a
+randomly chosen sub belongs to is. `None` on anything that does not split into panels, which is what makes a
+single field bit-for-bit unchanged.
+
+**Why frame-weighted, and not the thinnest panel.** The thinnest panel is right for `auto_reject_depth`
+("can the rejection method bite anywhere?"), and wrong here ("is the *picture* speckle?"): a mosaic with
+eight deep panels and a corner lost to cloud after three subs is a good picture with a grainy corner, and
+the thinnest-panel rule would strand the whole target. Weighting the median by frames also disposes of the
+population that would otherwise wreck it — one stray mis-solved sub forms a one-frame "panel" that moves an
+unweighted median to 1 and a frame-weighted one not at all (measured in the tests: `[200, 1] → 200`).
+
+**The hold.** Same discipline as every sibling: reported in `auto_stack_held_thin` (now carrying additive
+`panel_depth`/`panels`), and held **without** stamping the attempt marker, so the next scan stacks it the
+moment the panels deepen — nothing is skipped, nothing is deleted, and "Stack" / "Process this target" still
+make one by hand at any time. Gated on `min_frames > 1`, so the documented "restore stacking from the first
+frame" opt-out is not re-armed by the depth check.
+
+**And three sentences that would have argued with their own numbers.** A mosaic held on *depth* has every
+sub located and a count well past the floor, so the existing copy — *"9 of your subs located so far — needs
+3"* — reads as nonsense there, and pointing that owner at Plate Solve sends them at a job with nothing to
+do. Jobs' `heldForSubsLine` and the Dashboard's `describeNeedsLook` now word the mosaic case about panels
+(`NeedsLook`/`NeedsLookOut` gained the same additive fields), and the Target page — where a beginner looks
+when their picture stops updating, and where this hold was previously *invisible*, since its own note can
+only see the "not located yet" half — gained `MosaicThinHoldNote`, fed by a new read-only
+`GET /api/targets/{safe}/autostack-thin-hold` (the sibling of `autostack-hold`, same newest-finished-scan
+read, same self-clearing, no state of its own).
+
+**Upgrade-safe (§9):** one new read-only endpoint; additive, defaulted response fields on `/api/stats`'s
+`needs_look` and on the job summary (an older frontend ignores them, an older backend omitting them reads as
+"not a mosaic", which is right for every hold recorded before this existed). No config, DB-schema, on-disk
+or API-shape change, and no stored default flipped.
+
+**Tests (+30, three failing before):** `tests/test_autostack_mosaic_depth.py` (11 — the counts, the dither
+that stays one panel, unsolved/non-finite pointings skipped, the nine-subs-one-deep case, the thin corner
+that must *not* speak for the mosaic, the stray that must not hold back a single field, and the ordering
+invariant), `tests/webapp/test_auto_stack_pipeline.py` (+3 — the mosaic held with no attempt marker
+*(fails before: it was auto-stacked)*, the single field still stacking at the floor, and the floor-of-1
+opt-out still stacking a one-deep mosaic *(fails before)*), `tests/webapp/test_autostack_thin_hold.py` (5),
+`tests/webapp/test_overnight_digest.py` (+1), plus `MosaicThinHoldNote.test.tsx` (5),
+`LastNightCard.test.tsx` (+2, one fails before), `Jobs.test.tsx` (+2) and `Target.test.tsx` (+1).
+
+---
+
 ## v0.414.2 — 2026-09-10 — the app refused to boot over a missing *frontend*
 
 *(Builder, branch `claude/sweet-babbage-bhkhl1`. A bug this run reproduced 14 times by accident, filed and
