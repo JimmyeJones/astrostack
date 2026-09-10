@@ -2396,6 +2396,21 @@ describe("StackView — what a saved default will do overnight", () => {
     lone_outlier_min_frames: 11, reaches: false, user_chose: true,
   };
 
+  it("says what Save-as-defaults does without saving anything — a phone has no hover", async () => {
+    // The sentence is the only place the app says this button also drives
+    // *auto-stacking for this target*, and it lived on a `<Tooltip>` wrapped
+    // around the button — so the one gesture a phone has for "what does this
+    // do?" performed the persistent save instead (v0.413.1).
+    const { put } = mockSaveForm(blind);
+
+    renderStack();
+    await screen.findByRole("button", { name: "Save as defaults" });
+    fireEvent.click(screen.getByRole("button", { name: "What does this do?" }));
+
+    expect(await screen.findByText(/used when auto-stacking is on/)).toBeInTheDocument();
+    expect(put).not.toHaveBeenCalled();
+  });
+
   it("warns, on the save, that the saved rejection is blind overnight", async () => {
     const show = vi.spyOn(notifications, "show").mockImplementation(() => "");
     const { put, ask } = mockSaveForm(blind);
