@@ -1448,11 +1448,14 @@ def crop_health_for_run(proj, run) -> CropHealthOut:  # noqa: ANN001
     stored = stale_crop.enabled_crop_op(recipe_from_json(raw).ops)
     if stored is None:
         return CropHealthOut()
-    # Only now is the coverage map worth loading. `_trim_rect_for_run` answers
+    # Only now is the coverage map worth reading. `_trim_rect_for_run` answers
     # `None` both for "the rule wants the full frame" and for "there is no map to
     # measure" — only the first is a judgement, so resolve measurability first.
-    measurable = _load_run_frame_counts_strided(run) is not None \
-        or _load_run_coverage_strided(run) is not None
+    # By path rather than by loading: the two `_load_run_*` helpers start with the
+    # same existence check, and loading a strided mosaic map twice per run is real
+    # I/O on the library-wide scan.
+    measurable = (frame_coverage_path_for(run.fits_path).exists()
+                  or coverage_path_for(run.fits_path).exists())
     rect = _trim_rect_for_run(run) if measurable else None
     suggested = (None if rect is None
                  else {"x0": rect[0], "y0": rect[1], "x1": rect[2], "y1": rect[3]})
