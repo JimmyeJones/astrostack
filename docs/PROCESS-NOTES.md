@@ -18,6 +18,90 @@ is a queue.
 
 ---
 
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-lb5kzt`) — two verified bugs from one class, and three dogfood passes that all came back clean
+
+**The run.** Two tasks, both verified bugs, both shipped: **v0.409.0**
+(`edit/presets.analyze_proxy`'s sky level) and **v0.409.1**
+(`edit/presets.classify_target`'s geometry cues). Baseline on `origin/main`:
+**5,511 passed / 2 skipped** (25m37s). After v0.409.0: **5,519 / 2**, exactly +8.
+
+### The backlog really is drained, and this is what that looks like
+
+Every entry left in "Bugs (fix these first)" is a recorded stand-down, a measured
+residual marked *probably not worth building*, or gated on data no agent has (the
+`astap_timeout_s` budget is explicitly declined with numbers; the `CROTA2` sign
+needs one real solved sub; the colour-chain bisect needs the owner to deploy). The
+one-sitting list's item 9 (`batch_stack_tmp`) is **already shipped as v0.393.0**
+and the row is struck — do not re-pick it. Sampling the Ideas sections found the
+same pattern the last three runs found: the top entries are shipped, closed as
+already-built, or carry a later Builder note down-weighting them.
+
+### Three dogfood passes, all clean — recorded so nobody re-runs them today
+
+- `scripts/agent-dogfood.sh --build --mosaic --editor`: mosaic trim **7.9 %**
+  (unchanged across seven passes), the step-4c block reads as one paragraph, all
+  21 ops re-render on **both** the field and the mosaic run, undo/redo clean, no
+  console errors, nothing overflowing. Tallest phone pages `/life-list` 3,094 px
+  and `/targets/<field>` 3,078 px — the standing baselines to the pixel.
+- `scripts/agent-dogfood.sh --empty`: `/life-list` 2,779 px phone / 1,224
+  desktop, `/` 1,402 / 1,028, `/library` 1,252 / 923 — identical to the
+  2026-09-07 first-run baseline. No IA slice is indicated.
+
+### Where the bugs came from: the class, not the browser
+
+Same lesson as the run before this one. The pass that finds things is not the
+browser but a *class*, and the class this run used was new:
+
+> **A number measured on one image and used on another** — where the recipe's own
+> ops change the picture between the measurement and the consumption.
+
+`auto_recipe` measures the raw proxy and then emits `background.final_gradient` as
+the **first** op of every recipe it builds. So every cue it takes is a statement
+about an image that no longer exists by the time the cue is spent. Rendering the
+recipe *up to but not including* `tone.stretch` and re-measuring is the whole
+diagnostic, and it took ten lines: the stretch's real input read sky
+**0.1749 / 0.1751 / 0.1751** at gradients 0 / 0.03 / 0.08 while Auto had measured
+**0.047 / 0.195 / 0.357** of the same stack. That is the bug, visible in one table.
+
+**Both bugs were in a *level*, and the fix for both was v0.225.0's, applied late.**
+v0.225.0 made the sky **σ** structure-blind and stopped there. The sky **level**
+next to it, and `classify_target`'s `sky + 6·sky_sigma` threshold, both still used
+the global-median-and-level-MAD estimator that fix exists to replace. Worth
+carrying forward: **when a measurement is fixed, grep for its siblings** — the
+same arithmetic under a different variable name, in the same file.
+
+### The line this run did NOT cross, and why
+
+The obvious "complete" fix is to measure *everything* on the flattened image. Doing
+that to `sky_sigma` moves it **0.007 → 0.023** on the same scene, which lands
+squarely in `_NOISE_LO`/`_NOISE_HI` and would swing the denoise/sharpen crossfade
+on every image the owner owns. Those constants are calibrated in raw-proxy units,
+so re-basing the measurement without re-calibrating them is the blind threshold
+flip AGENTS.md §1 forbids — dressed up as a bug fix. The σ therefore stays where it
+is, deliberately, and the entry says so. **Only the numbers that were wrong moved.**
+
+Running the real `background.final_gradient` for the measurement was also declined,
+on cost measured rather than guessed: **2.48 s** on a 1500×1000 proxy (0.47 s at
+907×615), paid on every Auto build — including the editor's first-open auto-seed —
+and paid *twice*, since the pipeline then runs the same op again. `fit_sky_poly` is
+**~40 ms** and is the primitive both background passes already detrend with.
+
+### A measured lead this run chose not to build
+
+`edit/noise.estimate_noise_sigma` takes the **median** of adjacent-pixel
+differences over the whole canvas, so a mosaic panel that is genuinely grainier is
+invisible to it: on a synthetic canvas whose left quarter carried 1.4× the noise,
+the whole-canvas σ read **0.1233** against the thin region's own **0.1618** — under
+1 % away from the deep region's answer. Auto then sharpens that quarter at the
+strength the deep three-quarters asked for, on the very run where the health panel
+says *"about 23 % of the picture … looks about 1.4× grainier. Processing can't fix
+that."* It is **not filed as a bug** because there is one global strength and no
+non-arbitrary way to pick it from two populations; a fix here is a policy decision
+on the on-by-default path with no owner data behind it. Recorded so the next run
+can start from the numbers instead of re-measuring them.
+
+---
+
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-m85zjk`) — one task: the top 🔴🔴 bug, both halves; and a self-inflicted "measure the mosaic, not the picture" trap
 
 **The run.** One task, deliberately: **v0.408.2**, the Scout's 🔴🔴 solar-CFA
