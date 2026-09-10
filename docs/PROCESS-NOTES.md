@@ -18,6 +18,57 @@ is a queue.
 
 ---
 
+## 2026-09-10 — collision #14, and the one kind of collision the §11 rules do not cover
+
+**What happened.** Two Builders picked the fourth external audit's ⭐🔴 "owner hits
+this first" entry inside the same hour. `claude/sweet-babbage-puusez` shipped the
+**editor** half as v0.416.0 at 21:51; this run (`claude/sweet-babbage-fx172f`) was
+about forty minutes into the same entry when it fetched `main` before its version
+bump and found it there.
+
+**§11's advice was followed and did not help, for the documented reason.** This run
+fetched at task start, read the backlog, and picked the top open bug — the correct
+procedure. The other run had already chosen by then. That is exactly what §11 says
+about claiming being "a publication, not a lock", and it is the fourteenth time.
+
+**What was actually salvageable, and this is the useful part.** The collision cost
+one component (a duplicate editor note, deleted unmerged) rather than the whole
+task, because the two runs had split the entry differently: the entry asks for a note
+on **the editor, the Target page and the Dashboard**, and the other run built the
+first while this one had built all three. So the recovery was: revert the two files
+that overlapped (`Editor.tsx`, `Editor.test.tsx`), rebase onto their merge, and ship
+the two surfaces they had not built — which their own commit message names as still
+open. Total loss ~30 minutes of frontend work.
+
+**The lesson worth writing down: a multi-part entry is a collision *magnet*, and the
+next agent should say which part it is taking.** Every other item in the backlog is
+one thing; this one was three surfaces plus an auto-note fix, and nothing in the
+claim protocol distinguishes "I am doing the entry" from "I am doing part (a)". Both
+runs would have claimed it identically. **If you pick an entry whose fix direction is
+lettered or listed, put the letters in your In-progress line** — "(a) editor" reads
+differently from "(b) Dashboard count", and it is the only signal that would have
+caught this one before a line was written.
+
+**The second-order hazard, which nearly shipped.** Recovering by "keep both halves"
+quietly created **two implementations of one rule** — the other run's pure-frontend
+`mosaicTrim.overTrimmedVerdict` and this run's server-side `webapp/stale_crop.py`,
+needed because a frontend rule cannot scan a library for the Dashboard count. They
+started out disagreeing in three ways: threshold (0.5 vs 0.25), what a null trim
+suggestion means, and whether multiple enabled crops multiply. Every one of those
+would have shown as *the Dashboard naming a picture the editor is then silent about*
+— invisible until the owner clicked through, and unfalsifiable by either run's own
+tests. Resolved by adopting the shipped rule verbatim in all three respects and
+adding a **cross-language drift test** that greps `OVER_TRIM_KEEP_RATIO` out of the
+TypeScript and fails if the constants diverge.
+
+That drift test does not catch the other two divergences, which is why they were
+found by reading the other run's code rather than by a test. **If a collision
+recovery leaves you re-implementing a rule the other run already shipped, read their
+implementation line by line before writing yours, and pin what you can.** "Both are
+green" is not the same as "both agree".
+
+---
+
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-puusez`) — a test that passed for the wrong reason, and the class that found it
 
 **The run.** Two tasks. **v0.415.1**, a bug I verified myself by reproduction —
