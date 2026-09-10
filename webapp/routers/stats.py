@@ -172,6 +172,12 @@ class NeedsLookOut(BaseModel):
     kind: str          # 'missing_files' | 'too_thin'
     n_frames: int
     n_other: int
+    # The mosaic shape of a 'too_thin' hold (0/0 on a single field) — see
+    # :class:`webapp.overnight.NeedsLook`. Additive and defaulted, so an older
+    # frontend ignores them and an older backend omitting them reads as
+    # "not a mosaic", which is the right answer for every hold it recorded.
+    panel_depth: int = 0
+    panels: int = 0
 
 
 class LastNightResponse(BaseModel):
@@ -891,7 +897,8 @@ def get_last_night(request: Request) -> LastNightResponse | None:
         ],
         needs_look=[
             NeedsLookOut(name=h.name, safe=h.safe, kind=h.kind,
-                         n_frames=h.n_frames, n_other=h.n_other)
+                         n_frames=h.n_frames, n_other=h.n_other,
+                         panel_depth=h.panel_depth, panels=h.panels)
             for h in held
         ],
     )

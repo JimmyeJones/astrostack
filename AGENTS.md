@@ -651,6 +651,20 @@ the repo.
 > scratch dir, never the repo. Whatever it finds still needs a real regression
 > test in the suite — it is a finder, not a test.
 >
+> **⚠️ Never run it at the same time as `pytest`** *(added 2026-09-10, after it
+> cost a run an hour)*. It runs `npx vite build`, and `frontend/vite.config.ts`
+> sets `emptyOutDir: true` on an `outDir` of `../webapp/static` — so a dogfood
+> pass **deletes `webapp/static/` and rebuilds it**, and every `tests/webapp`
+> test that calls `create_app()` inside that window fails at fixture setup. The
+> tell is fourteen `RuntimeError: Directory '…/webapp/static/assets' does not
+> exist` **errors** (not failures) in an otherwise-passing suite, which reads
+> exactly like "`main` is red, and fixing it is task #1" (§2). Serialise them:
+> dogfood first, `pytest` after. (It only builds on `--build` or when
+> `webapp/static/index.html` is missing, so the *second* pass of a run is
+> usually safe and the first is not.) *(The same accident found a real §9 bug —
+> the app used to refuse to boot in that state; fixed in v0.414.2, so today it
+> degrades to "Frontend not built" instead. The test collision remains.)*
+>
 > **On any run making an Auto/editor claim, add `--mosaic`** *(v0.386.0)*. §1
 > judges those claims on a tiled mosaic at the owner's scale, never on the
 > 6-frame single field — and until now the tooling could not produce one, so

@@ -10,6 +10,7 @@ process.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -230,22 +231,80 @@ STATIONARY_MIN_FRAMES = 4
 #: session long enough to be worth rescuing clears this easily.
 STATIONARY_MIN_SPAN_S = 3600.0
 
+#: How likely a cluster may be to have happened by chance and still count as an
+#: object. Anchoring on one median asked "are the flagged frames at *this* one
+#: place?" once; searching every candidate centre asks it once per flagged frame,
+#: and that many tries turns the radius's own "four trails agreeing is a
+#: one-in-a-million coincidence" into something that happens — measured, twenty
+#: trails scattered over a night throw up a chance four in about one set in eight.
+#: So a cluster is also scored against the null that the flagged components are
+#: scattered at random over the frame (see :func:`_chance_cluster_p`), and one
+#: that is not surprising under it decides nothing. Inert on a real object, which
+#: is in *essentially every* sub of its pointing rather than four of them.
+STATIONARY_CLUSTER_MAX_P = 0.05
+
+#: How many distinct stationary objects one target may be credited with. A
+#: **mosaic** is why this is not 1: its panels point at different sky, so an
+#: elongated nebula spanning the mosaic forms its component at a *different*
+#: place in each panel's frames, and a target can honestly carry one cluster per
+#: panel. The cap exists only to bound the work (each round is a pass over the
+#: flagged set), and clusters are taken largest-first so it can only ever drop
+#: the least significant ones — comfortably above the panel count of any Seestar
+#: mosaic (a 3×3 is 9), and far below "this flagged set is just trails".
+STATIONARY_MAX_CLUSTERS = 16
+
+
+def _chance_cluster_p(size: int, n_flagged: int) -> float:
+    """How often ``size`` of ``n_flagged`` scattered marks land in one radius.
+
+    The null model is the one that describes real trails: each flagged component
+    lands somewhere independent and uniform in the frame, so the number joining a
+    given mark inside :data:`STATIONARY_CLUSTER_RADIUS` is Poisson with mean
+    ``(n_flagged - 1) × the disc's share of the frame``. The returned figure is
+    that tail multiplied by ``n_flagged`` — the number of centres the search
+    tries — because a coincidence anywhere is a coincidence, and forgetting to
+    pay for the tries is exactly how a searched cluster fools itself. It is
+    therefore an expected count, not a probability: it can exceed 1, which simply
+    means "expect one of these by chance".
+    """
+    if size < 2 or n_flagged < 2:
+        return 1.0
+    lam = (n_flagged - 1) * math.pi * STATIONARY_CLUSTER_RADIUS ** 2
+    # P(X >= size - 1), the neighbours a member needs beyond itself.
+    term = math.exp(-lam)
+    below = term
+    for i in range(1, size - 1):
+        term *= lam / i
+        below += term
+    return n_flagged * max(0.0, 1.0 - below)
+
 
 def stationary_streak_frames(
     marks: list[tuple[int, float | None, float | None, str | None]],
 ) -> list[int]:
-    """Which of these flagged frames show one *stationary* object.
+    """Which of these flagged frames show a *stationary* object.
 
     ``marks`` is ``(frame_id, cx, cy, timestamp_utc)`` for the frames under
-    consideration. Returns the ids whose flagged component clusters around the
-    set's median position **and** whose cluster spans
-    :data:`STATIONARY_MIN_SPAN_S`; ``[]`` when there is no such cluster, which is
-    the answer for real trails, for too small a sample, and for anything
-    undated.
+    consideration. Returns the ids whose flagged component sits in a cluster of
+    at least :data:`STATIONARY_MIN_FRAMES` frames within
+    :data:`STATIONARY_CLUSTER_RADIUS` of one place in the frame **and** whose
+    cluster spans :data:`STATIONARY_MIN_SPAN_S`; ``[]`` when there is no such
+    cluster, which is the answer for real trails, for too small a sample, and
+    for anything undated.
 
-    The centre is the **median** position rather than the mean so a minority of
-    genuine trails among the object's frames can't drag the cluster onto empty
-    sky — they simply fall outside the radius and keep their rejection.
+    Each cluster's centre is the **median** of its own members rather than their
+    mean, so a genuine trail that happens to sit near the object can't drag the
+    centre off it.
+
+    **Clusters are found, not assumed** — the set may hold more than one, and
+    this is what a mosaic needs. Its panels point at different sky, so one
+    extended object spanning the mosaic lands in a different part of the frame in
+    each panel's subs; anchoring on a single centre for the whole target then
+    finds nothing at all (the centre falls between the panels' clusters and no
+    frame is within the radius of it), and every panel stays rejected. Rounds are
+    taken largest-cluster-first, up to :data:`STATIONARY_MAX_CLUSTERS`, with each
+    round's members removed before the next — so a set holding exactly one
+    cluster gives byte-for-byte the previous answer.
 
     Pure and side-effect free, so the rule can be tested without a database.
     """
@@ -264,19 +323,65 @@ def stationary_streak_frames(
     if len(usable) < STATIONARY_MIN_FRAMES:
         return []
 
-    mid_x = float(np.median([m[1] for m in usable]))
-    mid_y = float(np.median([m[2] for m in usable]))
-    cluster = [
-        m for m in usable
-        if ((m[1] - mid_x) ** 2 + (m[2] - mid_y) ** 2) ** 0.5
-        <= STATIONARY_CLUSTER_RADIUS
-    ]
-    if len(cluster) < STATIONARY_MIN_FRAMES:
+    xs = np.asarray([m[1] for m in usable], dtype=float)
+    ys = np.asarray([m[2] for m in usable], dtype=float)
+    # Squared radius, so the search never takes a square root: the flagged sets
+    # this runs on are per *target*, and on a mosaic of an elongated nebula that
+    # is essentially every sub the owner has shot of it.
+    r2 = STATIONARY_CLUSTER_RADIUS ** 2
+    live = np.ones(len(usable), dtype=bool)
+
+    def _members(cx: float, cy: float) -> np.ndarray:
+        """Indices of the still-unclaimed marks within the radius of a centre."""
+        within = ((xs - cx) ** 2 + (ys - cy) ** 2) <= r2
+        return np.flatnonzero(within & live)
+
+    keep: list[int] = []
+    for _ in range(STATIONARY_MAX_CLUSTERS):
+        n_live = int(live.sum())
+        if n_live < STATIONARY_MIN_FRAMES:
+            break
+        # The floor for this round: the absolute minimum, raised to whatever size
+        # stops being a coincidence in a set this big (see
+        # :data:`STATIONARY_CLUSTER_MAX_P`). Solved once per round by walking up
+        # from the minimum rather than tested per candidate, so the scan below can
+        # reject most centres on their raw count alone.
+        floor = STATIONARY_MIN_FRAMES
+        while (floor <= n_live
+               and _chance_cluster_p(floor, n_live) > STATIONARY_CLUSTER_MAX_P):
+            floor += 1
+        best: np.ndarray | None = None
+        seen: set[tuple[float, float]] = set()
+        # Every remaining mark is a candidate centre. Anchoring on one global
+        # median instead is what missed the multi-panel case above.
+        for i in np.flatnonzero(live):
+            near = _members(xs[i], ys[i])
+            if near.size < floor:
+                continue
+            # Re-centre on the candidate cluster's own median and re-collect, so
+            # the accepted set is the same "median centre" one as before.
+            centre = (float(np.median(xs[near])), float(np.median(ys[near])))
+            if centre in seen:
+                continue  # every mark of one cluster re-centres on the same spot
+            seen.add(centre)
+            group = _members(*centre)
+            if group.size < floor:
+                continue
+            times = sorted(usable[j][3] for j in group)
+            if (times[-1] - times[0]).total_seconds() < STATIONARY_MIN_SPAN_S:
+                continue  # a Starlink train at one spot, not a tracked object
+            if best is None or group.size > best.size:
+                best = group
+        if best is None:
+            break
+        keep.extend(int(j) for j in best)
+        live[best] = False
+
+    if not keep:
         return []
-    times = sorted(m[3] for m in cluster)
-    if (times[-1] - times[0]).total_seconds() < STATIONARY_MIN_SPAN_S:
-        return []
-    return [m[0] for m in cluster]
+    # Back in the order the caller handed them over, so the verdict reads the
+    # same way whichever cluster was found first.
+    return [usable[j][0] for j in sorted(keep)]
 
 
 def reconcile_streak_rejections(project) -> list[int]:

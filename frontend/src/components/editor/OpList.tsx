@@ -1,6 +1,7 @@
-import { ActionIcon, Anchor, Badge, Group, Paper, Stack, Switch, Text, Tooltip } from "@mantine/core";
+import { ActionIcon, Anchor, Badge, Group, Paper, Stack, Switch, Text } from "@mantine/core";
 import { IconAlertTriangle, IconChevronDown, IconChevronUp, IconX } from "@tabler/icons-react";
 import type { EditOp, OpInstance } from "../../api/client";
+import { HintAnchor } from "../HintAnchor";
 import { opModified } from "./opModified";
 import { stageConflicts, type WrongStage } from "./stageConflicts";
 
@@ -57,24 +58,24 @@ export function OpList({ ops, specs, selected, onSelect, onMove, onToggle, onRem
                       {spec?.label ?? op.id}
                     </Text>
                     {opModified(op, spec) ? (
-                      <Tooltip
+                      <HintAnchor
                         label="Edited — one or more settings differ from this op's defaults."
-                        withArrow>
+                        withArrow stopPropagation>
                         <Text component="span" c="grape.6" fw={700} lh={1}
                           aria-label="Edited from defaults" style={{ cursor: "help" }}>
                           •
                         </Text>
-                      </Tooltip>
+                      </HintAnchor>
                     ) : null}
                     {spec?.heavy ? (
-                      <Tooltip
+                      <HintAnchor
                         label="This op is slow to render, so the live preview updates after a short pause when you change its settings — it's not stuck."
-                        multiline w={240} withArrow>
+                        multiline w={240} withArrow stopPropagation>
                         <Badge size="xs" variant="light" color="grape"
                           style={{ flexShrink: 0, cursor: "help" }}>
                           slower preview
                         </Badge>
-                      </Tooltip>
+                      </HintAnchor>
                     ) : null}
                   </Group>
                   {spec?.help ? (
@@ -82,7 +83,8 @@ export function OpList({ ops, specs, selected, onSelect, onMove, onToggle, onRem
                   ) : null}
                   {conflicts[op.uid] ? (
                     <Group gap={4} wrap="nowrap" mt={2}>
-                      <Tooltip label={CONFLICT_MSG[conflicts[op.uid]]} multiline w={240} withArrow>
+                      <HintAnchor label={CONFLICT_MSG[conflicts[op.uid]]} multiline w={240}
+                        withArrow stopPropagation>
                         <Group gap={2} wrap="nowrap" style={{ cursor: "help" }}>
                           <IconAlertTriangle size={12} color="var(--mantine-color-orange-6)" />
                           <Text size="10px" c="orange.6">
@@ -91,7 +93,7 @@ export function OpList({ ops, specs, selected, onSelect, onMove, onToggle, onRem
                               : "should be after the stretch"}
                           </Text>
                         </Group>
-                      </Tooltip>
+                      </HintAnchor>
                       {onFix ? (
                         <Anchor component="button" type="button" size="10px" c="orange.6"
                           onClick={(e) => { e.stopPropagation(); onFix(op.uid); }}>

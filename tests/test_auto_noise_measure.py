@@ -12,6 +12,12 @@ counts a mosaic's per-panel level/colour offsets (and any residual light-polluti
 gradient) as if they were noise — so a genuinely clean mosaic read as one of the
 noisiest images the app had seen and got the wide-kernel chroma smoothing at full
 strength, smearing colour across the seams.
+
+The same property is owed to the **sky level** ``analyze_proxy`` reports beside
+it — the number ``auto_recipe`` turns into the stretch's target grey — and it did
+not have it until v0.409.0: a light-pollution gradient that Auto's own first op
+removes used to drag the level up and the finished picture down. Those tests live
+at the bottom of this file, on the same scene, because it is the same claim.
 """
 
 from __future__ import annotations
@@ -19,12 +25,16 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from seestack.edit.pipeline import apply_recipe
 from seestack.edit.presets import (
     _AUTO_CHROMA_MAX,
+    _delevelled_luminance,
+    _detrended_luminance,
     _noise_fraction,
     analyze_proxy,
     auto_recipe,
 )
+from seestack.edit.registry import EditContext
 
 H, W = 300, 600
 _PANEL_OFFSETS = (0.0, 0.012, -0.008, 0.016)
@@ -226,3 +236,277 @@ def test_an_unmeasurable_image_still_reads_as_clean():
     all_nan = analyze_proxy(np.full((40, 40, 3), np.nan, np.float32))
     assert all_nan["sky_sigma"] == 0.0
     assert all_nan["noisy"] is False
+
+
+# --------------------------------------------------------------------------
+# The same claim, for the sky *level* (v0.409.0)
+#
+# ``analyze_proxy``'s ``sky`` is the *only* input to Auto's stretch target
+# (``target_bg = 0.24 - sky*0.4``), and it read the whole-image normalized
+# median — which a residual light-pollution gradient moves bodily, exactly the
+# way the old level-MAD moved the σ above. The gradient is gone before the
+# stretch sees a pixel (``background.final_gradient`` is the recipe's first op),
+# so the same picture with and without one must be measured, and finished, the
+# same.
+# --------------------------------------------------------------------------
+
+
+def _target_bg(img: np.ndarray) -> float:
+    """The grey Auto aims this stack's sky at, off its own recipe."""
+    stretch = next(op for op in auto_recipe(img, median_fwhm=2.5).ops
+                   if op.id == "tone.stretch")
+    return float(stretch.params["target_bg"])
+
+
+def _finished_sky(img: np.ndarray) -> float:
+    """A low percentile of the finished one-click picture's luminance — i.e. how
+    dark the sky the owner is handed actually came out."""
+    out = apply_recipe(img, auto_recipe(img, median_fwhm=2.5), EditContext())
+    return float(np.percentile(out[..., :3].mean(axis=2), 30.0))
+
+
+@pytest.mark.parametrize("gradient", [0.02, 0.05, 0.08])
+def test_a_light_pollution_gradient_does_not_move_the_measured_sky_level(gradient):
+    """The level owes the same "structure is not a sky" property the σ has.
+
+    Before v0.409.0 the same scene read 0.024 flat and 0.153 at gradient 0.08 —
+    a six-fold move caused entirely by a tilt Auto removes itself.
+    """
+    flat = analyze_proxy(_scene(0.004, seed=13))["sky"]
+    tilted = analyze_proxy(_scene(0.004, seed=13, gradient=gradient))["sky"]
+    assert tilted == pytest.approx(flat, rel=0.10), f"{gradient=} {tilted=} {flat=}"
+
+
+def test_a_gradient_does_not_pull_down_the_one_click_stretch_target():
+    """One step downstream, in the number the recipe actually carries: the
+    stretch target went 0.230 → 0.179 for the same picture."""
+    flat = _target_bg(_scene(0.004, seed=13))
+    tilted = _target_bg(_scene(0.004, seed=13, gradient=0.08))
+    assert tilted == pytest.approx(flat, rel=0.02), f"{tilted=} {flat=}"
+
+
+def test_a_gradient_does_not_darken_the_finished_one_click_picture():
+    """And the consequence the owner would actually see: the finished picture's
+    sky came out 23 % darker (p30 0.190 → 0.147) purely because the stack had a
+    gradient in it — one the recipe's own first op takes straight back out."""
+    flat = _finished_sky(_scene(0.004, seed=13))
+    tilted = _finished_sky(_scene(0.004, seed=13, gradient=0.08))
+    assert tilted == pytest.approx(flat, rel=0.05), f"{tilted=} {flat=}"
+
+
+def test_detrending_leaves_a_stack_with_no_gradient_where_it_already_was():
+    """The upgrade-safety half, stated as a property rather than a promise: the
+    detrend removes a *shape*, so a stack that has no shape to remove is
+    measured exactly as it was before this existed — while a tilted one really
+    is flattened. (Measured: 0.17 % of the image's own robust range against
+    13.6 %.)"""
+    def lum_of(img):
+        return np.asarray(img, np.float32)[..., :3].mean(axis=2)
+
+    flat = lum_of(_scene(0.004, seed=13))
+    span = float(np.percentile(flat, 99.5) - np.percentile(flat, 0.5))
+    assert float(np.max(np.abs(_detrended_luminance(flat) - flat))) < 0.01 * span
+
+    tilted = lum_of(_scene(0.004, seed=13, gradient=0.08))
+    assert float(np.max(np.abs(_detrended_luminance(tilted) - tilted))) > 0.05 * span
+
+
+def test_the_detrend_declines_rather_than_inventing_a_surface():
+    """It stands aside wherever the shared sky fit does, so an image it cannot
+    measure keeps today's number instead of a fabricated one."""
+    tiny = np.linspace(0.0, 1.0, 64, dtype=np.float32).reshape(8, 8)
+    assert np.array_equal(_detrended_luminance(tiny), tiny)
+
+    all_nan = np.full((40, 40), np.nan, np.float32)
+    out = _detrended_luminance(all_nan)
+    assert out.shape == all_nan.shape and not np.isfinite(out).any()
+
+
+def test_a_genuinely_bright_sky_is_still_reported_as_bright():
+    """The fix must not swing the other way and flatten every stack to "dark
+    sky": a thin, bright-sky stack still reads bright and still gets the low
+    stretch target that goes with it."""
+    bright = analyze_proxy(_scene(0.05, seed=11, mosaic=True))["sky"]
+    assert bright > 0.2
+    assert _target_bg(_scene(0.05, seed=11, mosaic=True)) < 0.16
+
+
+# --------------------------------------------------------------------------
+# ...and for the *mosaic* half of the same claim (v0.410.0)
+#
+# v0.409.0 took the smooth, frame-scale sky shape out of the plane the level is
+# read from, and said explicitly what it had *not* answered: a mosaic's per-panel
+# offsets are steps, not a degree-2 surface, so the identical stack still read
+# 0.075 laid out as a mosaic against 0.024 as a single field. Those steps are
+# removed by ``background.level_coverage``, which ``auto_recipe`` prepends on
+# every mosaic — i.e. before ``tone.stretch`` sees a pixel, exactly like the
+# gradient. So the level is now measured with them taken out too, by binning on
+# the run's own coverage map the way that op does.
+# --------------------------------------------------------------------------
+
+#: Frame counts for the four panels of ``_scene(mosaic=True)`` — uneven, the way
+#: a real mosaic's panels are (the bundled ``--mosaic`` sample is 6/6/6/3).
+_PANEL_FRAMES = (12, 9, 15, 6)
+
+
+def _panel_coverage(frames: tuple[int, ...] = _PANEL_FRAMES) -> np.ndarray:
+    """The coverage map that describes ``_scene(mosaic=True)``: one integer frame
+    count per panel, on the same grid as the proxy."""
+    cov = np.zeros((H, W), dtype=np.float32)
+    pw = W // len(frames)
+    for i, n in enumerate(frames):
+        cov[:, i * pw:(i + 1) * pw] = float(n)
+    return cov
+
+
+def _mosaic_target_bg(img: np.ndarray, coverage: np.ndarray | None) -> float:
+    """The grey Auto aims a *mosaic's* sky at, off its own recipe."""
+    stretch = next(op for op in auto_recipe(img, median_fwhm=2.5, is_mosaic=True,
+                                            coverage=coverage).ops
+                   if op.id == "tone.stretch")
+    return float(stretch.params["target_bg"])
+
+
+def _finished_mosaic_sky(img: np.ndarray, coverage: np.ndarray | None) -> float:
+    """A low percentile of the finished one-click picture, rendered the way a
+    mosaic actually is — with the coverage map the leveling op needs in the
+    context, so the steps really are gone by the time the stretch runs."""
+    recipe = auto_recipe(img, median_fwhm=2.5, is_mosaic=True, coverage=coverage)
+    ctx = EditContext(coverage=_panel_coverage(), frame_coverage=_panel_coverage())
+    out = apply_recipe(img, recipe, ctx)
+    return float(np.percentile(out[..., :3].mean(axis=2), 30.0))
+
+
+@pytest.mark.parametrize("seed", [13, 5, 21])
+def test_a_mosaics_panel_steps_do_not_move_the_measured_sky_level(seed):
+    """The residual v0.409.0 filed rather than guessed at: the *same stack*, laid
+    out as a mosaic, must report the same sky level.
+
+    Before this, the panel offsets alone took it 0.024 → 0.075 (seed 13) — a
+    layout artefact deciding how bright the owner's picture comes out.
+    """
+    single = analyze_proxy(_scene(0.004, seed=seed))["sky"]
+    mosaic = analyze_proxy(_scene(0.004, seed=seed, mosaic=True),
+                           _panel_coverage())["sky"]
+    assert mosaic == pytest.approx(single, rel=0.05), f"{seed=} {mosaic=} {single=}"
+
+
+def test_panel_steps_do_not_pull_down_the_one_click_stretch_target():
+    """One step downstream, in the number the recipe carries: the stretch target
+    read 0.210 for the mosaic against 0.230 for the identical single field."""
+    single = _target_bg(_scene(0.004, seed=13))
+    mosaic = _mosaic_target_bg(_scene(0.004, seed=13, mosaic=True), _panel_coverage())
+    assert mosaic == pytest.approx(single, rel=0.02), f"{mosaic=} {single=}"
+
+
+def test_panel_steps_do_not_darken_the_finished_one_click_picture():
+    """And the consequence the owner would see on the shape he actually shoots:
+    the finished mosaic's sky came out **11.2 %** darker than the identical stack
+    laid out as a single field (p30 0.190 → 0.169). After, 1.1 %."""
+    single = _finished_sky(_scene(0.004, seed=13))
+    mosaic = _finished_mosaic_sky(_scene(0.004, seed=13, mosaic=True),
+                                  _panel_coverage())
+    assert mosaic == pytest.approx(single, rel=0.05), f"{mosaic=} {single=}"
+
+
+def test_a_single_field_stacks_auto_is_untouched_by_a_coverage_map():
+    """Upgrade safety, as the property rather than a promise: the steps are only
+    measured out where the recipe removes them, so a run that gets no
+    ``background.level_coverage`` gets byte-for-byte the recipe it got before this
+    existed — whatever map is handed in."""
+    img = _scene(0.004, seed=13, mosaic=True)
+    without = auto_recipe(img, median_fwhm=2.5)
+    withmap = auto_recipe(img, median_fwhm=2.5, coverage=_panel_coverage())
+    assert [(o.id, o.params) for o in withmap.ops] == [
+        (o.id, o.params) for o in without.ops]
+
+
+def test_delevelling_leaves_a_mosaic_with_no_steps_where_it_already_was():
+    """The other half of upgrade safety: it removes *steps*, so a canvas whose
+    panels are already level is measured exactly as it was — while a stepped one
+    really is flattened."""
+    cov = _panel_coverage()
+
+    def panel_medians(plane):
+        pw = W // len(_PANEL_FRAMES)
+        return [float(np.median(plane[:, i * pw:(i + 1) * pw]))
+                for i in range(len(_PANEL_FRAMES))]
+
+    level = _scene(0.004, seed=13)[..., :3].mean(axis=2)
+    span = float(np.percentile(level, 99.5) - np.percentile(level, 0.5))
+    # Nothing to remove: the plane comes back where it was.
+    assert float(np.max(np.abs(_delevelled_luminance(level, cov) - level))) < 0.01 * span
+
+    # Something to remove: the panels really do end up on one level. `_scene`
+    # injects offsets spanning 0.024 (−0.008 … +0.016).
+    stepped = _scene(0.004, seed=13, mosaic=True)[..., :3].mean(axis=2)
+    before = panel_medians(stepped)
+    after = panel_medians(_delevelled_luminance(stepped, cov))
+    assert max(before) - min(before) > 0.02, before
+    assert max(after) - min(after) < 0.002, after
+
+
+def test_a_canvas_the_object_fills_is_left_alone_rather_than_flattened():
+    """The stand-down that makes the correction safe to run at all.
+
+    A panel a nebula genuinely *fills* has a median that is the **nebula's**, so
+    shifting the panel by it subtracts real flux. Measured on an early version:
+    the per-panel means of a canvas-filling object went 0.109/0.299/0.283/0.128 →
+    0.166/0.183/0.184/0.167 — the object's own profile levelled into the sky, and
+    ``classify_target`` stopped reading it as a nebula at all.
+
+    Each level's retained sample is therefore checked against the image's own
+    **grain**, measured structure-blind: an object-dominated canvas inflates a
+    sigma-clipped spread until the guard can never fire (that is why the yardstick
+    is not the one the op next door uses), while the grain stays the grain.
+    """
+    rng = np.random.default_rng(3)
+    yy, xx = np.mgrid[0:H, 0:W]
+    blob = np.exp(-(((xx - W / 2) / (W / 3)) ** 2 + ((yy - H / 2) / (H / 2)) ** 2))
+    filled = (_scene(0.004, seed=13, mosaic=True)[..., :3].mean(axis=2)
+              + (0.6 * blob).astype(np.float32)
+              + rng.normal(0.0, 0.002, (H, W)).astype(np.float32))
+    out = _delevelled_luminance(filled, _panel_coverage())
+    assert np.array_equal(out, filled), "a canvas that is object was 'levelled'"
+
+
+def test_the_delevel_declines_rather_than_inventing_a_step():
+    """It stands aside wherever it cannot honestly bin: no map, a map of the
+    wrong shape, a canvas with only one level, and an unmeasurable one."""
+    lum = _scene(0.004, seed=13, mosaic=True)[..., :3].mean(axis=2)
+    assert _delevelled_luminance(lum, None) is lum
+    assert np.array_equal(_delevelled_luminance(lum, np.ones((5, 5), np.float32)), lum)
+    # One coverage level is not a mosaic, however big the canvas.
+    flat = np.full((H, W), 8.0, dtype=np.float32)
+    assert np.array_equal(_delevelled_luminance(lum, flat), lum)
+    # Uncovered pixels are no-data, never a level of their own.
+    assert np.array_equal(_delevelled_luminance(lum, np.zeros((H, W), np.float32)), lum)
+    all_nan = np.full((H, W), np.nan, np.float32)
+    out = _delevelled_luminance(all_nan, _panel_coverage())
+    assert out.shape == all_nan.shape and not np.isfinite(out).any()
+
+
+def test_two_panels_that_share_a_frame_count_are_one_bin():
+    """The limit of this fix, pinned so nobody reads more into it than it does.
+
+    It removes the steps ``background.level_coverage`` removes, by binning the way
+    that op bins — so two panels that happen to be equally deep are one bin here
+    exactly as they are one bin there, and a step between them survives both. The
+    honest claim is "Auto measures the picture its own recipe will hand the
+    stretch", not "Auto sees every seam".
+    """
+    img = _scene(0.004, seed=13, mosaic=True)
+    # Every panel the same depth: nothing to bin by, nothing removed.
+    same = analyze_proxy(img, _panel_coverage((10, 10, 10, 10)))["sky"]
+    assert same == pytest.approx(analyze_proxy(img)["sky"], rel=1e-6)
+    # Distinguishable depths: the steps go.
+    apart = analyze_proxy(img, _panel_coverage())["sky"]
+    assert apart < 0.5 * same
+
+
+def test_a_genuinely_bright_sky_mosaic_is_still_reported_as_bright():
+    """The fix must not swing the other way either: a thin, bright-sky mosaic
+    still reads bright and still gets the low stretch target that goes with it."""
+    bright = _scene(0.05, seed=11, mosaic=True)
+    assert analyze_proxy(bright, _panel_coverage())["sky"] > 0.2
+    assert _mosaic_target_bg(bright, _panel_coverage()) < 0.16

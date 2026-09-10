@@ -1370,6 +1370,24 @@ describe("TargetView streaked badge", () => {
       expect(screen.getByText("2 streaked")).toBeInTheDocument());
   });
 
+  it("says what a streak is on a tap — the badge sits beside a bulk reject", async () => {
+    // "2 streaked" is a count with a "Reject all" button next to it, and what a
+    // streak *is* (and that Auto outlier removal keeps the frame) lives only in
+    // the badge's tooltip. On a phone that made the destructive button the more
+    // reachable of the two.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { streak_detected: true }),
+      mkFrame(2, { streak_detected: true }),
+    ]);
+    renderTarget();
+    const badge = await screen.findByText("2 streaked");
+    expect(screen.queryByText(/Stack with Auto outlier removal/)).not.toBeInTheDocument();
+    fireEvent.click(badge);
+    expect(await screen.findByText(/Stack with Auto outlier removal/)).toBeInTheDocument();
+  });
+
   it("rejects all streaked frames in one gesture from the badge action", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
@@ -1983,6 +2001,26 @@ describe("TargetView reject breakdown + undo", () => {
     expect(screen.getByText(
       /516 of 787 subs couldn't be read on the last scan/,
     )).toBeInTheDocument();
+  });
+
+  it("says on the Target page when a mosaic is held back for being one sub deep",
+    async () => {
+    // The count sentence cannot speak for this one: all nine subs ARE located,
+    // and nine clears the floor of three. Without this note the scan's decision
+    // is invisible and the app reads as idle on a target it deliberately held.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 9, n_frames_accepted: 9 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "autoStackThinHold").mockResolvedValue({
+      frames: 9, min_frames: 3, panel_depth: 1, panels: 9,
+      when_utc: "2026-09-10T02:00:00Z",
+    });
+    renderTarget();
+    await waitFor(() =>
+      expect(screen.getByTestId("mosaic-thin-hold-note")).toBeInTheDocument());
+    expect(screen.getByText(/spread over 9 panels/)).toBeInTheDocument();
   });
 
   it("does not show the auto-stack waiting note when Auto-stack is off", async () => {

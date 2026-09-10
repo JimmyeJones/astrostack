@@ -14,6 +14,849 @@ Newest first.
 
 ---
 
+## v0.415.0 — 2026-09-10 — the walk-away minimum-frames floor counts a mosaic's subs, not its depth
+
+*(Builder, a bug verified in this run — repro'd end-to-end against the real pipeline, fails before / passes
+after. Pillar: autonomy + image quality — PRIORITY 2/4. Additive; a single-field target is byte-for-byte
+unchanged, and `auto_stack_min_frames = 1` stays the documented opt-out.)*
+
+**The bug.** `auto_stack_min_frames` (v0.183.0) exists to stop the hands-off scan publishing — and the
+auto-edit adopting — single-frame colour speckle as a target's newest picture: the owner-reported
+"gibberish". `webapp/pipeline._pipeline_body` asks that question of `_auto_stack_frame_count`, the target's
+**accepted+solved frame count**, which is exactly the right number on a single field, where every sub lands
+on every pixel — and the wrong one on a **mosaic**, where the subs are spread across the panels. A 3×3
+mosaic one pass in has nine subs and a picture that is one sub deep *everywhere*; `9 >= 3` waves it through.
+The floor was therefore defeated precisely by the owner's own shooting style (AGENTS.md §1: heavy mosaic
+user, `<T>_mosaic_sub/`), and the guard's one job — don't publish speckle — went undone on the canvases
+where it matters most. This is the "a threshold taken from a whole-target number that is really per-panel"
+class the Scout rotation names, and the sibling of the A6 `auto_reject` fix (v0.326.7).
+
+**The number.** `seestack/stack/stacker.panel_frame_counts(radecs)` — the grid-snapped clustering
+`auto_reject_depth` already used, split out and made public, so the two callers cannot drift — plus
+`typical_panel_depth(panel_counts)`: the **frame-weighted median** panel depth, i.e. how deep the panel a
+randomly chosen sub belongs to is. `None` on anything that does not split into panels, which is what makes a
+single field bit-for-bit unchanged.
+
+**Why frame-weighted, and not the thinnest panel.** The thinnest panel is right for `auto_reject_depth`
+("can the rejection method bite anywhere?"), and wrong here ("is the *picture* speckle?"): a mosaic with
+eight deep panels and a corner lost to cloud after three subs is a good picture with a grainy corner, and
+the thinnest-panel rule would strand the whole target. Weighting the median by frames also disposes of the
+population that would otherwise wreck it — one stray mis-solved sub forms a one-frame "panel" that moves an
+unweighted median to 1 and a frame-weighted one not at all (measured in the tests: `[200, 1] → 200`).
+
+**The hold.** Same discipline as every sibling: reported in `auto_stack_held_thin` (now carrying additive
+`panel_depth`/`panels`), and held **without** stamping the attempt marker, so the next scan stacks it the
+moment the panels deepen — nothing is skipped, nothing is deleted, and "Stack" / "Process this target" still
+make one by hand at any time. Gated on `min_frames > 1`, so the documented "restore stacking from the first
+frame" opt-out is not re-armed by the depth check.
+
+**And three sentences that would have argued with their own numbers.** A mosaic held on *depth* has every
+sub located and a count well past the floor, so the existing copy — *"9 of your subs located so far — needs
+3"* — reads as nonsense there, and pointing that owner at Plate Solve sends them at a job with nothing to
+do. Jobs' `heldForSubsLine` and the Dashboard's `describeNeedsLook` now word the mosaic case about panels
+(`NeedsLook`/`NeedsLookOut` gained the same additive fields), and the Target page — where a beginner looks
+when their picture stops updating, and where this hold was previously *invisible*, since its own note can
+only see the "not located yet" half — gained `MosaicThinHoldNote`, fed by a new read-only
+`GET /api/targets/{safe}/autostack-thin-hold` (the sibling of `autostack-hold`, same newest-finished-scan
+read, same self-clearing, no state of its own).
+
+**Upgrade-safe (§9):** one new read-only endpoint; additive, defaulted response fields on `/api/stats`'s
+`needs_look` and on the job summary (an older frontend ignores them, an older backend omitting them reads as
+"not a mosaic", which is right for every hold recorded before this existed). No config, DB-schema, on-disk
+or API-shape change, and no stored default flipped.
+
+**Tests (+30, three failing before):** `tests/test_autostack_mosaic_depth.py` (11 — the counts, the dither
+that stays one panel, unsolved/non-finite pointings skipped, the nine-subs-one-deep case, the thin corner
+that must *not* speak for the mosaic, the stray that must not hold back a single field, and the ordering
+invariant), `tests/webapp/test_auto_stack_pipeline.py` (+3 — the mosaic held with no attempt marker
+*(fails before: it was auto-stacked)*, the single field still stacking at the floor, and the floor-of-1
+opt-out still stacking a one-deep mosaic *(fails before)*), `tests/webapp/test_autostack_thin_hold.py` (5),
+`tests/webapp/test_overnight_digest.py` (+1), plus `MosaicThinHoldNote.test.tsx` (5),
+`LastNightCard.test.tsx` (+2, one fails before), `Jobs.test.tsx` (+2) and `Target.test.tsx` (+1).
+
+---
+
+## v0.414.2 — 2026-09-10 — the app refused to boot over a missing *frontend*
+
+*(Builder, branch `claude/sweet-babbage-bhkhl1`. A bug this run reproduced 14 times by accident, filed and
+fixed in the same run. Pillar: upgrade-safety — AGENTS.md §9, "the container still builds and boots".)*
+
+**The bug.** `webapp/main._mount_spa` decided "is the frontend built?" from `STATIC_DIR.exists()` — the
+*directory* — and then did `app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"))`
+unconditionally. `StaticFiles` raises `RuntimeError: Directory '…' does not exist` in its constructor when
+`check_dir` is on, which it is by default. So a `webapp/static/` that exists but is **empty** takes the
+"built" branch and raises out of `create_app()`: no API, no Settings page, no job queue, no way for the
+owner to see why — over a missing *frontend*, which the function's own placeholder branch one line above
+already knows how to survive.
+
+**How it is reachable, which is the part that makes it worth fixing.** `frontend/vite.config.ts` sets
+`emptyOutDir: true` on an `outDir` of `../webapp/static`, so **every build deletes that tree before it
+writes it**, and the directory is recreated before its contents are. Anything that starts the app inside
+that window meets the empty directory, not a missing one: an interrupted build, a half-copied image layer,
+a rebuild on a running dev box. This run met it 14 times — a `pytest` session overlapping the `vite build`
+inside `scripts/agent-dogfood.sh` failed every `tests/webapp` test that constructs the app, with a
+`RuntimeError` that reads exactly like a red baseline. (See the collision note in `PROCESS-NOTES.md`; the
+run's own first reading of it was "main is red".)
+
+**The fix, three lines.** `index.html` is the honest test for "is the frontend built?", not the directory —
+so the placeholder branch is taken whenever it is absent, which now also covers an `assets/` with no shell
+(where the SPA fallback would have `FileResponse`d a file that does not exist on every client route). And
+the `/assets` mount is made conditional. **Nothing is lost when it is skipped:** the SPA catch-all below it
+already serves any *file* under the static root, with the same resolved-path confinement the traversal fix
+added — so a build that emitted its chunks elsewhere still works.
+
+**A complete build is served byte-for-byte as before**, which is the test that matters most here and is the
+one test in the new file that passes before the change.
+
+**Upgrade-safe (§9):** this *is* a §9 fix. No config, schema, on-disk layout, response shape, endpoint or
+default changed; the only behaviour that moves is in states where the app previously did not start.
+
+**Tests (+6 in new `tests/webapp/test_static_boot.py`; five fail before):** an emptied `static/` boots and
+says the frontend is not built; `assets/` with no `index.html` takes the same branch; an `index.html` with
+no `assets/` still serves the shell *and* a sibling file, proving the catch-all covers the skipped mount; a
+complete build is unchanged; and both half-built states answer with no 5xx. The existing
+`test_spa_static.py` traversal contract and `test_spa_serving_e2e.py` pass untouched.
+
+---
+
+## v0.414.1 — 2026-09-10 — asking what "Save as defaults" does no longer saves your defaults
+
+*(Builder, branch `claude/sweet-babbage-bhkhl1`. The **ninth slice** of the "a Tooltip is invisible on the
+device the owner actually reads this app on" entry — the one *interactive* site the run's own measurement
+said was worth doing. Pillar: friendliness — PRIORITY 3. Frontend-only.)*
+
+The eighth slice and the three before it swept the **non-interactive** anchors and left the interactive ones
+to be judged site by site, as the entry asks. Of every `Button`/`ActionIcon` under a `<Tooltip>` in the app,
+exactly one failed that judgement: the Stack form's **"Save as defaults"**.
+
+**Why this one and not the others.** Most interactive tooltips are category (b) — they repeat the control's
+own label, or the page already says it (the editor's preview-tool row has `PreviewToolGuide` since v0.402.0;
+`IncomingCalibrationCard`'s tip only names the file its card already describes; History's "Reuse settings"
+and "Compare" navigate, which is reversible, and would need one icon **per run card** — the "one more
+always-on element" the standing IA priority exists to prevent; Stack's disabled "Start stacking" tip repeats,
+word for word, the yellow "No plate-solved frames yet" alert at the top of the same page, and a disabled
+`<button>` receives no pointer events, so it was never reachable on a mouse either). This one is neither.
+Its sentence —
+
+> "Remember what you changed (and your calibration picks) for this target — it pre-fills this form and is
+> used when auto-stacking is on. Anything left at your global setting keeps following it."
+
+— is the **only** statement anywhere in the app that this button also decides what the *unattended*
+walk-away stack does for that target. And the button's effect is persistent: the saved blob wins over
+`default_stack_options` in both readers (see v0.372.0). So the one gesture a phone has for "what does this
+do?" was the gesture that did it, on a control whose consequence outlives the page. That is exactly the
+defect v0.402.1 fixed on five `Switch`/`SegmentedControl` sites, on a button rather than a switch. The
+explanation *does* exist — in the success notification, i.e. after the save.
+
+**The fix is v0.402.1's own shape.** A `HintIcon` beside the button inside a `Group gap={6}`, so the
+button's label, action and accessible name are all untouched — the four existing assertions that find it by
+`getByRole("button", { name: "Save as defaults" })` pass unchanged — and hover keeps the words for anyone
+with a mouse.
+
+**Upgrade-safe (§9):** frontend-only, one row's layout. No API, response shape, schema, config, on-disk
+layout or default changed.
+
+**Tests (+1, fails before):** `Stack.test.tsx` — tapping the hint shows *"used when auto-stacking is on"*
+**and** `putStackDefaults` is never called. Before the change the same tap saved the defaults, which is the
+bug stated as a test rather than described.
+
+---
+
+## v0.414.0 — 2026-09-10 — the last chips a phone could not ask about, and the guard that stops a ninth sweep
+
+*(Builder, branch `claude/sweet-babbage-bhkhl1`. The **eighth slice** of the "a Tooltip is invisible on the
+device the owner actually reads this app on" entry. Pillar: friendliness — PRIORITY 3. Frontend-only.)*
+
+**Read the collision note first** (`PROCESS-NOTES.md`, 2026-09-10, collision #14). Two Builders swept this
+entry in the same hour from opposite ends of the same measurement: branch `claude/sweet-babbage-w1qz43`
+built `components/HintAnchor.tsx` and 28 anchors, this branch built an equivalent component and 33, and 24
+of the sites were the same file and the same line. **Theirs landed on `main` first and is the record; mine
+was dropped rather than re-applied** (§11, and the precedent of collision #12) — the overlapping files were
+resolved to theirs, my component and its test deleted, and `HintIcon.tsx` restored to main's version. On the
+one point where the two designs differed theirs is better and is what ships: an opt-in `stopPropagation`
+for an anchor sitting inside something clickable, which mine did not have.
+
+**What this slice is, then: the "still open" list their own entry ends with.** Four surfaces, one line each,
+all converted to `HintAnchor`:
+
+- **`NightsCard` ×3** — a night's *"ended early"*, *"bright Moon"* and its verdict badge. This is the
+  Target page's own per-night table, i.e. the busiest page in the app, where the tooltip exists precisely
+  *because* another column was refused.
+- **`Calibration` ×2** — the broken-pixel repair state and each master's defect note: the two sentences on
+  that page that are not restatements of a control beside them.
+- **`BestPictures` ×2 and `Gallery` ×1** — the "why is this picture here" and "what is this count" chips.
+
+`NightsCard`'s verdict badge **skips the anchor entirely when it has no sentence**, rather than passing
+`disabled`: a `HintAnchor` makes its child a tab stop with `role="button"`, and a verdict with nothing to
+say must not advertise itself as answerable.
+
+**The durable half is the guard.** `frontend/src/components/hintAnchorDrift.test.ts` reads every non-test
+`.tsx` in the app — through Vite's own `import.meta.glob`, so it sees exactly the files the bundler compiles
+and needs no `@types/node` — and fails if any `<Tooltip>`'s first child element is a `<Badge>`. Eight sweeps
+of this entry have each fixed the sites that existed on the day, and nothing stopped the next one being
+written the old way; that is precisely how the badges survived the first four, since the entry lists its
+open work by *route* and they live in shared components no route owns. It is proven **armed** two ways
+rather than trusted: against a synthetic bad site, whose `file:line` it reports, and by asserting the sweep
+really walked the tree (>80 files, two named ones present) — an empty result is what a clean tree and a
+broken scanner both look like. It deliberately says nothing about a `Tooltip` on a *control*: that half is a
+judgement per site (a button that only previews something is a safe way to find out), which is not a
+guard's business.
+
+**And the rule it enforces was narrowed honestly rather than quietly, because it caught a non-defect on its
+first real run.** It flagged the one site the other Builder had deliberately left — the frames table's
+`Rejected — …` badge, whose tooltip repeats the badge's own text (it adds only the word "Rejected"). They
+were right to leave it: making that a `HintAnchor` would put a tab stop on every rejected row for a
+sentence that says nothing new, and deleting the tooltip would remove a feature. So the rule is *a
+`<Tooltip>` around a `Badge` is a defect **when the tooltip says something the badge does not***, and a
+site that is the other case opts out with a `hint-anchor-exempt:` marker carrying its reason, on the tag's
+own line or in the comment block above it. The marker makes the next author write the reason down, and a
+second test pins the exempt list **by file** — so a second exemption cannot be added silently, while an
+edit above the first does not redden the suite.
+
+**Upgrade-safe (§9):** frontend-only. No API, response shape, schema, config, on-disk layout or default
+changed. `frontend/tsconfig.json` gains `"vite/client"` to its `types` array so the guard's
+`import.meta.glob` is typed; `vite` was already a devDependency and nothing new is installed.
+
+**No page gets taller** — `HintAnchor` clones its child rather than wrapping it, so nothing is added to the
+DOM. Measured anyway: `scripts/agent-dogfood.sh --mosaic --editor` returns the mosaic page-height table
+byte-identical, 3,407 / 3,166 / 3,094 / 2,432 px on a phone and 2,116 / 2,104 / 1,699 / 1,637 px on the
+desktop, nothing overflowing, no console errors, Auto's trim still 7.9 %.
+
+**Tests (+3):** the drift guard's three cases. The converted sites are covered by their components' existing
+tests, which pass unchanged — which is the point of the accessible name staying the badge's own words.
+
+---
+
+
+## v0.412.0 — 2026-09-10 — the faint-field rescue anchors on a sub that already solved
+
+*(Builder, the 2026-07-25 backlog item "let the bootstrap anchor on an already-solved sub when a few (but
+< min_frames) subs did solve, instead of always re-solving the deep image". Pillar: autonomy + image quality
+— PRIORITY 2. Additive, on the opt-in `astap_bootstrap_solve` path only.)*
+
+**The gap.** The stack-then-solve bootstrap engages when the per-sub pass left **fewer than `min_frames`**
+subs solved — a band that includes "a handful did solve". In that band it nonetheless always built a deep
+image and asked ASTAP to solve *that*: a synthetic frame with no optics headers, on the very field that had
+just defeated the solver sub by sub. Meanwhile 1–7 real, ASTAP-verified plate solutions of that same pointing
+were sitting in the project DB, unused.
+
+**The change.** When such a sub can serve as the registration reference, the burst is registered against
+**it** and takes **its** WCS. Everything downstream is identical — the same phase-correlation shifts, the
+same `propagate_wcs` CRPIX offsets (the reference's pixel grid is what both paths propagate from) — but the
+integration, the temp FITS, the extra ASTAP call and that call's own failure risk all disappear. The
+deep-image path is untouched for the zero-solved case, which is what it was measured for.
+
+**`pick_solved_anchor(frames, shape)` is deliberately picky**, because a bad anchor would mis-place a whole
+burst:
+* the candidate's WCS must be **usable** — `wcs_text_is_usable`, the same bar the solve path applies, since a
+  truncated sidecar reads back truthy and locates nothing;
+* its pixels must be the members' own **shape** — a reference of another size correlates against nothing;
+* candidates are tried in `_order_members` order (star-richest, sharpest first — the best correlation
+  target), and only the first `ANCHOR_LOAD_ATTEMPTS` (3) are actually loaded, since a load is a debayer.
+Failing all that, it returns `None` and the deep-image path runs exactly as before.
+
+**The gates still mean what they meant.** The anchor is prepended as member 0 and every count below it —
+readability, registration, `n_members`, `n_registered` — counts only the **unsolved** members, so a target
+too thin to bootstrap cannot be made to look thick enough by the presence of an anchor (pinned by a test).
+The anchor is skipped in the propagation loop: it is already solved, and the module's contract is that an
+already-solved sub is never touched.
+
+**Honest about which path ran:** a new `BootstrapResult.anchored_on_solved_sub` (and `bootstrap_anchored` on
+the scan summary) says so, `deep_solved` stays False where no deep image was ever built, and `reason` reads
+*"rescued N sub(s) by registering to an already-solved sub"*.
+
+**Upgrade-safe (§9):** engine-only, additive, and on a path that is **off by default**. No config, DB-schema,
+on-disk, endpoint or existing-response-shape change; the two new keys are additive and nothing reads
+`bootstrap_solved` today.
+
+**Tests (+5, four fail before):** `tests/test_bootstrap_solve.py` — the anchored rescue lands every member on
+its **ground-truth** CRPIX with a `deep_solver` that raises if called at all (so "no deep solve happened" is
+proved, not asserted); the anchor is not among the rescued ids; an anchor cannot inflate the engagement gate;
+a differently-shaped solved sub and an unusable-WCS solved sub each fall back to the deep-image path; and
+`pick_solved_anchor` returns `None` when nothing has solved. The fifteen existing bootstrap cases pass
+untouched.
+
+---
+
+## v0.411.1 — 2026-09-10 — 🐛 a successful bootstrap rescue reported itself as a failure
+
+*(Builder, tripped over while writing the v0.411.0 second solve pass in the same block; reproduced by test.
+Severity: log-level only, but on the opt-in path a beginner turns on *because* their faint targets aren't
+stacking. Confidence: certain — the traceback is in the test's fail-before.)*
+
+**The bug.** `Project` keeps the target's name in its meta table and has no `.name` attribute. The
+stack-then-solve bootstrap's credit line read `project.name` **inside** the block's own
+`try: … except Exception as exc: log.warning("stack-then-solve bootstrap failed: %s", exc)` — so on every run
+where the bootstrap actually **rescued** subs (`bres.n_propagated` truthy, the one branch that reads it), the
+attribute raised and the rescue was logged as *"stack-then-solve bootstrap failed: 'Project' object has no
+attribute 'name'"*. The reverse of the truth, and the only place a walk-away run's log says what the
+bootstrap did.
+
+**Not user-visible beyond the log:** `summary["bootstrap_engaged"/"bootstrap_solved"/"bootstrap_propagated"]`
+are all written before the raise, so the Jobs page's *"Located N more subs by combining your un-located
+frames…"* note was correct throughout — which is exactly why this survived: nothing on screen disagreed.
+
+**Fix.** `project.get_meta("name")`, the accessor the rest of the codebase uses (`gui/main_window.py`), with a
+comment saying why the attribute isn't there. One line.
+
+**Tests (+1, fails before):** `tests/test_scanner.py::test_a_successful_bootstrap_rescue_is_not_logged_as_a_failure`
+— a stubbed bootstrap that rescues 3 subs, asserting via `caplog` that **no** warning is emitted and that the
+info line names the target. It fails before with the verbatim warning above.
+
+---
+
+## v0.411.0 — 2026-09-10 — a second solve pass reaches the subs a Seestar's own header hint kept blind
+
+*(Builder, backlog slice (c) of the v0.180.0 sibling-hint fill-in, filed 2026-07-23 and open since. Pillar:
+autonomy + image quality — PRIORITY 2/4. Additive; can only ever add solves.)*
+
+**The gap.** `run_stack` combines only frames that are accepted **and** solved, so every sub ASTAP fails to
+locate is silently left out of the picture — the mechanism behind the owner's thin/gibberish stacks on faint
+fields. v0.180.0 already borrows the centre the target's *solved* subs agree on and searches a tight
+`SIBLING_HINT_RADIUS_DEG` (5°) around it — but only for a frame that has **no** usable header hint. A Seestar
+writes `RA`/`DEC` into every sub, so on the owner's own data that rescue **never fires**: each unsolved sub
+carries its own loose hint and is searched blind-wide at the configured 30°, even after a dozen of its
+siblings have pinned the pointing to within a degree.
+
+**The fix — one extra pass, over the failures only.** After the round finishes, `run_qc_and_solve` re-offers
+each frame it failed to locate with the now-known sibling centre at the tight radius: a *smaller, correct*
+search region than the one that just failed, which is exactly what the 2026-07-24 ASTAP measurement said
+moves the needle (a failed search costs ~4 s at 30° and ~0.2 s at 5°; a wider radius and a longer timeout are
+non-levers). ASTAP still verifies the star pattern, so a second pass cannot invent a wrong solution — it can
+only add solves.
+
+**What it deliberately does not retry**, so a hopeless night pays almost nothing:
+* a **setup** failure (ASTAP or its star database missing) — the same error on every frame, and no search
+  region fixes it (so a library with no star database costs exactly zero extra attempts);
+* a **timeout** — that frame already burned up to 3× `astap_timeout_s` on the ladder, the one cost the
+  Settings hint warns about, and it is the single shape where a second full attempt genuinely doubles the
+  wait. It keeps its "Ran out of time being located" bucket (v0.276.4) untouched;
+* a job that **raised** rather than returning a result (no error text to judge, and a crashed worker is not a
+  search-region problem);
+* a frame whose first attempt was **already** this same search — same centre, radius already at or inside the
+  sibling radius — which would re-run an identical solve. This is what keeps the pass off the frames
+  v0.180.0 already rescues.
+
+And it stands down entirely when **nothing** has solved yet (with no sibling centre there is nothing to
+offer, so a night where every sub failed is attempted once, exactly as today), and when the caller passed
+`use_solve_hints=False` — a user who turned hints off asked for a blind solve, and this pass is nothing but a
+hint, so it follows that setting the way `build_solve_arglist`'s own sibling fallback does rather than
+reinstating hinting behind their back.
+
+**Shape.** The decision is a pure, testable
+`solve/runner.build_sibling_retry_arglist(project, solve_args, failures)`, which reuses the round's own arg
+tuples (so a caller that overrode ASTAP path/FOV/timeout gets those same values back) and takes the failures
+as `(frame_id, error_text)` rather than whole `SolveResult`s — a thousand-sub target's results carry a WCS
+blob each, and this pass must not hold the round in memory to schedule its retry. It honours
+`build_solve_arglist`'s own rule that a user who tightened `astap_hint_radius_deg` below 5° is never widened.
+`scanner.run_qc_and_solve` gains `retry_unsolved_with_sibling_hint=True` beside the existing
+`use_solve_hints` / `auto_reject_streaks` defaults; the pass runs **before** the opt-in stack-then-solve
+bootstrap, so a real per-sub solve is preferred over a propagated one and the bootstrap engages on fewer
+targets.
+
+**What the user sees, without a new surface.** `solve_ok` is the app's honest "how many did we locate?" figure
+and a rescued sub counts there, so the Jobs page's existing *"Located 38 of 40 in the sky"* sentence and its
+mostly-failed nudge both get better with no frontend change; `solve_done`/`solve_total` stay the progress
+counters they were (the retry is a subset of the frames already attempted). `solve_retry_total` /
+`solve_retry_ok` are added to the summary only when the pass actually ran.
+
+**Upgrade-safe (§9):** engine-only, additive. No config, DB-schema, on-disk, endpoint, response-shape or
+existing-default change; the new summary keys are additive and every existing consumer reads the same keys it
+did. No new setting to migrate, and nothing to turn on.
+
+**Tests (+8, three fail before on behaviour):** `tests/test_solve_hints.py` (+4 — a header-hinted failure is
+retried at the tight radius around the sibling centre; setup failures, timeouts and an identical search are
+each skipped in one case; nothing is retried until something has solved; a tightened radius is never widened)
+and `tests/test_scanner.py` (+4 — end-to-end through `run_qc_and_solve` with a solver that only finds the
+field when searched tight: three subs rescued, `solve_ok` counts them, exactly one extra attempt per frame
+and never a loop; the same target left unsolved with the pass switched off, which is the fail-before; a night
+where nothing solved at all paying no extra attempts; and `use_solve_hints=False` leaving every attempt
+blind).
+
+---
+
+## v0.410.1 — 2026-09-10 — 🐛 the same panel steps decided what your target *was*
+
+*(Builder-verified by reproduction, found by taking v0.410.0's bug class to the other cue `auto_recipe`
+consumes — exactly as v0.409.1 was found from v0.409.0's. Severity: a wrong preset chip and a mis-routed
+Adaptive-Auto taste bias on the shape the owner shoots. Confidence: measured in both directions and pinned by
+a test that fails before.)*
+
+**The bug.** `classify_target` thresholds its geometry cues at `sky + max(0.06, 6·sky_sigma)`, built from a
+**global** level median and the MAD of the levels beneath it. v0.409.1 fixed the light-pollution half of that
+by reading the cues off `_detrended_luminance`. A mosaic's panel offsets break the same threshold the same way
+and worse — they are **steps**, so a degree-2 surface barely touches them.
+
+**Measured, on `tests/test_auto_noise_measure.py`'s four-panel scene** — the identical stack, only the layout
+differing: `ext_frac` **0.0215 → 0.0030**, `star_share` **0.597 → 0.889**, and the verdict **`None` → star
+cluster at confidence 0.89** (0.86–0.92 across seeds 5/7/13/21). On this file's own
+`_star_field_with_faint_nebulosity` with residual panel steps of 0.024/−0.016/0.032 on a 0.10 sky, the same
+flip reads **cluster at 0.98**, `ext_frac` 0.013 → 0.002. It is read by the editor's one-click "try this
+preset?" chip and by `auto_recipe`'s `object_type`, so a taste bias learned on one archetype could be spent on
+a stack the *layout* had renamed.
+
+**The fix is the same line, in the same place.** `classify_target` takes an optional `coverage` and reads its
+geometry off `_detrended_luminance(_delevelled_luminance(lum, coverage))` — v0.410.0's de-stepper, so "a
+coverage level's own sky" still means one thing across the app. The **colour** cue still reads the untouched
+`arr` (`_extended_chroma` is scale-invariant by construction), so only the geometry moves and no threshold or
+floor changes. After: `None` on all four seeds, matching the single field exactly.
+
+**Every archetype that was already stable stays stable**, which is the guard against over-correcting: a
+coloured nebula, a galaxy (with its preset) and a star cluster all keep their verdicts under the same panel
+steps plus the same map. The nebula case is the one that matters — it is a canvas the object *fills*, and it
+survives because of v0.410.0's grain-based stand-down, not by luck.
+
+**Wired at all three call sites, and only for a mosaic.** `webapp/routers/editor._auto_measure_coverage` gains
+the `is_mosaic` gate it was already being given by hand, so `build_preset_suggestion_for_run` (the chip) and
+`_classify_run` (which archetype a piece of feedback is filed under) get the map on the same terms
+`build_auto_recipe_for_run` does, and `auto_recipe` passes its own through for `object_type`. A single-field
+run reads no sibling and is classified exactly as it is today.
+
+**Upgrade-safe (§9) and additive.** One new optional engine parameter defaulting to `None`; no config, schema,
+on-disk, endpoint, response-shape or default change, and nothing is persisted by any of this.
+
+**Tests (+3, one failing before).** In `tests/test_target_classify.py`, extending the gradient section
+directly above with the same three claims for panel steps: the layout does not invent a confident verdict
+(fails before — `cluster`); it does not move a nebula, a galaxy or a cluster; and a single-level map leaves
+every cue byte-identical. Three existing `monkeypatch` stubs of `classify_target` in
+`tests/webapp/test_editor.py` gained the new keyword — their assertions are untouched; without it the stub
+raised `TypeError` into `_classify_run`'s deliberately broad `except`, which is a fair reminder that that
+`except` hides signature drift.
+
+---
+
+## v0.410.0 — 2026-09-10 — 🐛 a mosaic's panel steps darkened the one-click picture — by steps Auto removes itself
+
+*(Builder-verified by reproduction against `origin/main`'s own `analyze_proxy`/`auto_recipe`, on the scene
+`tests/test_auto_noise_measure.py` already ships. Severity: **wrong picture on the on-by-default, one-click,
+PRIORITY-1 path, on the shape the owner actually shoots**. Confidence: measured end to end, and now pinned by
+tests that fail before. Closes the residual v0.409.0 filed rather than guessed at.)*
+
+**The bug.** v0.409.0 took the smooth, frame-scale sky *shape* out of the plane `presets.analyze_proxy` reads
+the sky level from, and said explicitly what it had not answered: **a mosaic's per-panel offsets are steps, not
+a degree-2 surface**, so the identical stack still read **0.075** laid out as a mosaic against **0.024** as a
+single field. That level is the only input to Auto's stretch target (`target_bg = 0.24 - sky*0.4`), so the
+layout of the canvas — not anything about the data — was deciding how bright the owner's picture came out.
+
+**Why it is a bug and not a trade-off: the steps are gone before the stretch ever sees a pixel.** `auto_recipe`
+prepends `background.level_coverage` on **every** mosaic, ahead of the gradient pass, precisely to equalise
+those panel steps. So this is the same mistake v0.409.0 fixed, in the other structure Auto removes itself:
+choosing the goal for one image by measuring another.
+
+**Measured, on the fixture the gradient half already uses** (`_scene(0.004, seed=13)`, the four-panel layout the
+file has shipped since v0.225.0, with an uneven 12/9/15/6 frame count per panel):
+
+| | single field | as a mosaic (before) | as a mosaic (after) |
+|---|---|---|---|
+| reported sky | 0.0240 | **0.0749** | 0.0240 |
+| `target_bg` | 0.2304 | **0.2100** | 0.2304 |
+| finished picture, sky p30 | 0.1899 | **0.1687** (−11.2 %) | 0.1877 (−1.1 %) |
+
+Same at seeds 5 and 21 (0.0247 → 0.0795 → 0.0247; 0.0266 → 0.0831 → 0.0266).
+
+**The fix corrects a measurement; it moves no threshold.** New `presets._delevelled_luminance(lum, coverage)`
+removes the steps **the way the recipe removes them**: bin by the integer coverage value and shift each bin by
+its own robust sky median, which is exactly `bg.coverage_leveling`'s `rough_sky`, measured with that module's
+own `_robust_stats` so "a coverage level's own sky" means one thing across the app. Only the *shape* is
+subtracted — the canvas's own robust median is put back — so, like the detrend beside it, it changes how flat
+the plane is and never how bright it is. It runs **before** `_detrended_luminance`, matching the recipe's own
+order (`level_coverage` then `final_gradient`) and because a polynomial fitted through unremoved steps is not
+the gradient. `0.24 - sky*0.4`, `_NOISE_LO`/`_NOISE_HI`, the `> 0.02` verdict and the `× 6.0` saturation term
+are all untouched, and the σ stays measured on the raw pixels for the reason v0.409.0 recorded.
+
+**A canvas the object fills is left alone, and that guard is the hard part.** A panel a nebula genuinely
+*fills* has a median that is the **nebula's**, so shifting the panel by it subtracts real flux — measured on a
+first implementation, `_coloured_nebula_field`'s own radial profile flattened (per-panel means
+0.109/0.299/0.283/0.128 → 0.166/0.183/0.184/0.167) and `classify_target` stopped reading it as a nebula at all.
+So each level's retained sample is checked against `_LEVEL_MAX_SIGMA_RATIO` (3.0) times the image's own
+**grain**, and a level that does not look like sky is refused. The yardstick is deliberately **not** the one
+`coverage_leveling` uses: on exactly the image the guard exists for, a sigma-clipped canvas spread *is* the
+object, so it floats above everything and the guard could never fire. Measured structure-blind instead (the
+adjacent-pixel-difference estimator `analyze_proxy` already reports σ with), the ratio reads **0.24–0.36**
+across six scenes that are sky carrying an object and **5.1–12.5** across ones that are object — two
+populations, not a tuned margin. No measurable grain ⇒ no yardstick ⇒ stand down.
+
+**The map is asked for only where the recipe carries the pass, which is what makes it upgrade-safe.**
+`auto_recipe`/`analyze_auto_inputs` pass the coverage on to `analyze_proxy` only when `is_mosaic` — one place
+decides both — so a single-field stack's Auto is byte-for-byte what it was **whatever map is handed in**
+(pinned as a recipe-equality test, not as a promise). That is not merely conservative: a single-field run gets
+no `level_coverage` pass, so measuring its coverage steps *out* would be the same bug pointing the other way.
+Measured on the bundled samples, where the fix is correctly inert: the mosaic sample's sky 0.00309 → 0.00312,
+and the field sample's **unchanged to five decimals at 0.00285** even when handed its own map (its rim slivers
+never clear the panel floor).
+
+**New `webapp/routers/editor._auto_measure_coverage`** supplies it, with the same precedence and for the same
+reason as the border trim and the leveling op itself: the honest per-pixel **frame count** (`_framecov.fits`)
+where the run wrote one, falling back to the weighted map for every run recorded before that sibling existed. A
+coverage value is a sum of per-frame *weights* once quality weighting is on, which splits one real panel across
+a band of values; the frame count is flat inside a panel by construction.
+
+**Not over-claimed.** It removes the steps `level_coverage` removes, by binning the way that op bins — so two
+panels that happen to be equally deep are one bin here exactly as they are one bin there, and a step between
+them survives both. The honest claim is "Auto measures the picture its own recipe will hand the stretch", not
+"Auto sees every seam", and there is a test named for it.
+
+**Constants.** `_LEVEL_MIN_SHARE` (1 % of the covered canvas) and `_LEVEL_MIN_PIXELS` (64) are the floor a
+coverage value must clear to count as a *panel* rather than a dithered rim sliver. The share is not on a cliff:
+the reported level is 0.0240 at every share from 0.002 to 0.05. It is a *share*, not a pixel count, so it means
+the same thing at every proxy stride — the op next door has to scale its own floor by 1/step² for exactly that
+reason.
+
+**Upgrade-safe (§9) and additive.** Engine-only plus one webapp helper: no config, schema, on-disk, endpoint,
+response-shape or default change; the new engine parameter defaults to `None`, so every existing caller is
+unchanged, and no saved recipe is touched (Auto is recomputed on request, never replayed from a stored number).
+
+**Tests (+14 collected — 11 engine, 3 webapp — 7 failing before).** In `tests/test_auto_noise_measure.py`, whose thesis this extends:
+the level is unmoved by the layout (parametrized ×3, all fail before); the stretch target is unmoved; the
+**finished picture's** sky is unmoved, rendered with the coverage map in the `EditContext` so the leveling op
+really runs; the de-level leaves an already-level canvas where it was *and* really does flatten a stepped one;
+it declines rather than inventing a step (no map, wrong shape, one level, all-uncovered, all-NaN); a canvas the
+object fills is left alone rather than flattened; equally-deep panels are one bin (the limit, stated as a
+test); and a genuinely bright-sky mosaic still reads bright. In
+`tests/webapp/test_editor.py`: a mosaic run is measured on its frame-count map, falls back to the weighted map
+without the sibling, and a single-field run is never asked for one — each asserted for **both** Auto builders,
+so the recipe and the cues it reports can't drift apart.
+
+---
+
+## v0.409.1 — 2026-09-10 — 🐛 the same gradient decided *what your target was*: `classify_target`'s cues read the tilt
+
+*(Builder-verified by reproduction, found by taking v0.409.0's bug class — "a number measured on an image the
+pipeline changes before it is used" — to the other cue `auto_recipe` consumes. Severity: a confidently **wrong**
+archetype, shown to a beginner as a one-click "try this preset?" chip and used to route the Adaptive-Auto taste
+profile. Confidence: reproduced in both directions, three seeds, and pinned by two tests that fail before.)*
+
+**The bug.** `presets.classify_target` thresholds its geometry cues at
+`thr = sky + max(0.06, 6·sky_sigma)`, where `sky` is a **global** level median and `sky_sigma` the MAD of the
+levels beneath it. That is precisely the estimator v0.225.0 removed from `analyze_proxy` — it counts a smooth
+light-pollution gradient as spread. A tilt therefore inflates the σ, the threshold climbs, and the faint diffuse
+half of the picture disappears under it, leaving a frame that reads as nothing but stars.
+
+**Measured, in both directions.** On a star-rich field with broad faint nebulosity (a real Seestar frame's
+shape) at a 0.10 sky, adding a left-to-right ramp:
+
+| tilt | `ext_frac` | `star_share` | verdict |
+|---|---|---|---|
+| 0.00 | 0.0589 | 0.671 | *(declines — nothing clear)* |
+| 0.02 | 0.0169 | 0.875 | *(declines)* |
+| 0.05 | 0.0010 | 0.989 | **globular cluster, confidence 0.99** |
+| 0.08 | 0.0000 | 1.000 | **globular cluster, confidence 1.00** |
+
+Same flip on three independent seeds of `tests/test_auto_noise_measure.py`'s scene (decline → cluster 1.00 at
+gradient 0.05). And the other way: `_coloured_nebula_field` is called a **nebula** at tilts 0 / 0.05 / 0.08 and
+at 0.15 is **lost entirely** — no chip, no verdict.
+
+**Who reads it.** The editor's preset-suggestion chip (`build_preset_suggestion_for_run`), which is what a
+beginner is invited to click; and `auto_recipe`'s `object_type`, which is the archetype the Adaptive-Auto taste
+profile is applied under — so a bias learned on galaxies could be spent on a stack the tilt had renamed.
+
+**The fix is one line and the same principle as v0.409.0:** the geometry cues are read off
+`_detrended_luminance(lum)`. The **colour** cue still reads the untouched `arr` — `_extended_chroma` is
+scale-invariant by construction — so only the geometry moves, and no threshold, floor or constant changes.
+
+**Nothing that was right moves.** Every existing verdict is byte-identical on the gradient-free fixtures the
+file already ships (galaxy 1.00, coloured nebula 1.00, star field → cluster 1.00, neutral large object →
+declines, blank → declines), all thirteen existing tests pass untouched, and the guard test pins that a galaxy
+and a cluster — the two archetypes that were already tilt-stable — stay stable and keep their presets.
+
+**Tests (+3, 2 failing before).** In `tests/test_target_classify.py`: a tilt does not invent a confident verdict
+(the false positive, at three tilts); a tilt does not lose a real nebula (the false negative); and a tilt moves
+neither a galaxy nor a cluster (the over-correction guard, which passes both ways by design). Engine-only and
+additive — no config, schema, on-disk, endpoint, response-shape or default change.
+
+---
+
+## v0.409.0 — 2026-09-10 — 🐛 a light-pollution gradient darkened the one-click picture — by a gradient Auto removes itself
+
+*(Builder-verified by reproduction against `origin/main`'s own `analyze_proxy`/`auto_recipe`, on the scene
+`tests/test_auto_noise_measure.py` already ships. Severity: **wrong picture on the on-by-default, one-click,
+PRIORITY-1 path**. Confidence: measured end to end, and now pinned by six tests that fail before.)*
+
+**The bug.** v0.225.0 fixed the owner's "multicolour grid" by making the sky **noise** structure-blind: it
+stopped being the MAD of the sky's *levels* — which counts a gradient and a mosaic's panel offsets as if they
+were grain — and became the MAD of adjacent-pixel differences. That fix was never carried to the number sitting
+next to it. `presets.analyze_proxy`'s **sky level** stayed the median of the *whole-image-normalized*
+luminance, which a residual light-pollution gradient moves bodily — and that level is the only input to Auto's
+stretch target (`target_bg = 0.24 - sky*0.4`, "darker sky → lift a little more, brighter → less").
+
+**Why it is a bug and not a trade-off: the gradient is gone before the stretch ever sees a pixel.**
+`background.final_gradient` is the **first** op `auto_recipe` emits, on every stack, mosaic or not. Rendering
+the recipe up to (not including) `tone.stretch` and re-measuring shows the stretch's actual input is the *same
+picture* whatever gradient the proxy carried — sky **0.1749 / 0.1751 / 0.1751** at gradients 0 / 0.03 / 0.08 —
+while Auto's own measurement of that stack read **0.047 / 0.195 / 0.357**, a 7.6× spread. Auto was choosing the
+goal for one image by measuring another.
+
+**Measured, on the fixture the noise half of this file already uses** (`_scene(0.004, seed=13)`, gradient added
+in the same units as the sky):
+
+| gradient | sky (before) | sky (after) | `target_bg` before → after | finished picture, sky p30 |
+|---|---|---|---|---|
+| none  | 0.0240 | 0.0240 | 0.2304 → 0.2304 | 0.1899 → 0.1899 |
+| 0.02  | 0.0543 | 0.0240 | 0.2183 → 0.2304 | — |
+| 0.05  | 0.1064 | 0.0240 | 0.1974 → 0.2304 | — |
+| 0.08  | 0.1527 | 0.0240 | 0.1789 → 0.2304 | **0.1467 → 0.1898** |
+
+So the same stack, with a tilt the recipe takes straight back out, was handed back with a sky **23 % darker**.
+
+**The fix corrects a measurement; it moves no threshold.** New `presets._detrended_luminance` takes the smooth,
+frame-scale sky shape out of the luminance the *level* is read from, using the same
+`seestack.bg.sky_poly.fit_sky_poly` primitive both background passes detrend with — so "the smooth shape light
+pollution has" means one thing across the app, at degree 2 over ~600 tile medians (≈40 ms on a 700×1000 proxy,
+not the 2.5 s running the real gradient op would cost). It subtracts only the *shape*: the surface's own median
+is kept, so the plane gets flatter and never brighter, and the sky level being measured is still this stack's.
+`0.24 - sky*0.4`, `_NOISE_LO`/`_NOISE_HI`, the `> 0.02` "noisy" verdict and the `× 6.0` saturation term are all
+untouched.
+
+**The sky σ is deliberately still measured on the raw pixels.** Its estimator is already blind to this
+structure (pinned in the same file, within 25 % across gradients) and its thresholds are calibrated in
+raw-proxy units — re-measuring it on the detrended plane would move it 0.007 → 0.023 and swing the
+denoise/sharpen crossfade on every image, which is exactly the blind threshold flip AGENTS.md §1 forbids.
+Only the level moved, because only the level was wrong.
+
+**Upgrade-safe, and inert where there is nothing to fix.** A stack with no gradient has no shape to remove:
+sky **0.0240 → 0.0240** on the synthetic scene, **0.00298 → 0.00298** on the bundled sample's real proxy, and
+**0.00327 → 0.00339** on the bundled `--mosaic` sample's. The largest pixel the detrend changes on a
+gradient-free scene is **0.17 %** of that image's own robust range, against **13.6 %** on the tilted one. It
+declines — returns the plane unchanged — wherever `fit_sky_poly` declines (too little sky, a non-finite
+surface), so an image it cannot measure keeps today's number rather than a fabricated one. Engine-only and
+additive: no config, schema, on-disk, endpoint, response-shape or default change, and no saved recipe is
+touched (Auto is recomputed on request, never replayed from a stored number).
+
+**Not over-claimed: a mosaic's panel *steps* are only partly answered.** They are not a smooth degree-2 shape,
+so the level still reads 0.075 for a mosaic against 0.024 for the identical single field (it was 0.082). That
+half belongs to `background.level_coverage`, which runs ahead of the stretch on exactly those stacks and which
+`analyze_proxy` cannot see because it is handed no coverage map — filed as the residual under "Bugs" rather
+than guessed at here.
+
+**Tests (+8 collected, 6 failing before).** In `tests/test_auto_noise_measure.py`, whose thesis this extends:
+the level is unmoved by a gradient (parametrized ×3, all three fail before); the stretch target is unmoved; the
+**finished picture's** sky is unmoved (the user-visible one); the detrend leaves a gradient-free scene where it
+was *and* really does flatten a tilted one; it declines rather than inventing a surface (a too-small plane and
+an all-NaN one); and — the guard against swinging the other way — a genuinely bright-sky stack still reads
+bright and still gets the low stretch target that goes with it.
+
+---
+
+## v0.408.2 — 2026-09-10 — 🐛 the Sun came back green: the video path debayered in the deep-sky path's CFA phase
+
+*(Builder-fixed the same run the Scout filed it. Severity: **wrong picture on a shipped feature the owner was
+actively looking at**. Confidence: MEASURED on his own file, reproduced exactly from those numbers, and now
+pinned by tests that fail before.)*
+
+**The bug.** v0.347.0 was right that a raw solar/planetary capture reaches the stack as an undebayered sensor
+mosaic and has to be demosaiced. It was wrong about *which pattern*. It took `RGGB` from
+`seestack/io/fits_loader.py` — where that name is the **fallback** for a `BAYERPAT` header the deep-sky path
+actually reads — and hard-coded it as `video/ffmpeg.CFA_PATTERN`. Video carries no header, so the constant was
+an assumption dressed as a device fact. The owner's Sun came back **green** (it had been grey) and **still
+covered in the fine mesh** the fix existed to remove. Both symptoms, one cause.
+
+**The measurement.** Decoding one frame of `incoming/Solar_video/2026-06-19-175558-Solar-RAW.avi` and taking
+the mean of each 2×2 sub-lattice inside the disk:
+
+| site | mean |
+|---|---|
+| `(0,0)` | **40.7** |
+| `(0,1)` | 10.2 |
+| `(1,0)` | 131.7 |
+| `(1,1)` | **40.7** |
+
+The two **matched** values are the two green photosites — they see the same filter — and they sit on the
+**main** diagonal. `RGGB` puts green on the *anti*-diagonal, i.e. on the 10.2 and 131.7 sites, which are 13:1
+apart. Reproduced through the real `bilinear_debayer` from exactly those four numbers:
+
+| pattern | R:G:B | cast | residual (mesh) |
+|---|---|---|---|
+| `RGGB` (**was shipped**) | 40.7 : **71.0** : 40.7 | **GREEN** | **40.50** |
+| `GBRG` (**correct**) | **131.7** : 40.7 : 10.2 | red/orange | **0.00** |
+
+`RGGB` averages the darkest and brightest sites together to make "green" — which is *both* the cast and a huge
+alternating residual. `GBRG` gives a red/orange Sun (physically right for a white-light solar filter) and zero
+residual.
+
+**The fix, in two halves.**
+
+**(a) Read the phase, don't assert it** (`seestack/video/ffmpeg.py`). The backlog's first trap was "do not just
+swap one hard-coded guess for another", and this doesn't: new `detect_cfa_pattern` takes the four sub-lattice
+means off the stream's **first frame** and identifies the green **diagonal** objectively — the matched pair is
+green by construction. Green on the anti-diagonal is `RGGB`; green on the main diagonal is `GBRG`. Red-vs-blue
+*within* the winning pair cannot be read from a mosaic at all (`GBRG` and `GRBG` differ only by swapping them
+and both leave zero residual), so that stays the device fact the owner's measurement establishes. Two guards
+stop it inventing an answer: the unmatched diagonal must be separated by at least `_CFA_DETECT_MIN_SPREAD_DN`
+(1.0 DN — each mean averages a quarter of the frame, so its noise is well under a tenth of that), and the
+matched pair must be at least `_CFA_DETECT_MATCH_RATIO` (0.5) better matched than the other; a frame that fails
+either — a dark, a blank sky, a blown disk — falls back to `CFA_PATTERN`, which is now the **measured** `GBRG`
+rather than the deep-sky path's name. The phase is **latched on the first frame off the wire** beside the
+existing "is this really a mosaic" decision, and for a stronger reason: re-reading it per frame would let one
+flat frame flip a capture's colours halfway through a stack.
+
+**(b) Tell the owner his existing Sun is wrong** (`webapp/video.py`). `colour_is_stale` short-circuited on
+`meta.colour_current`, a boolean meaning *"a build that knew about colour made this"* — and v0.347.0 stamped it
+True on every still it made. So after (a) alone the owner's green Sun would have stayed on disk, unmentioned,
+forever: there is no auto-stack path for video and nothing re-derives itself. `colour_current` is now joined by
+`colour_build`, a **generation number** gated on `_COLOUR_PIPELINE_BUILD` (0 = no colour handling at all,
+pre-v0.347.0; 1 = demosaiced in the wrong phase; 2 = the phase is read). A still from an older generation is
+offered the re-stack however confidently it was stamped. An ordinary colour capture carries no CFA phase, so no
+generation of the demosaic can have got it wrong — it is re-probed once to pick up the new stamp and then left
+alone for good, which keeps the "never nag someone whose picture is fine" rule intact.
+
+The alert's copy followed: it said *"came out grey with a fine mesh over it"*, true of the pre-v0.347.0 stills
+and false of the v0.347.0 ones, which are green. It now names the symptom both share — *"its colours came out
+wrong and it has a fine mesh over it"* — since the owner can see which he has.
+
+**⚠️ CFA phase and frame orientation are one coupled invariant, and the code now says so.** `RGGB` row-flipped
+is *exactly* `GBRG`, which is almost certainly why the two paths disagree at all: AVI is conventionally stored
+bottom-up, so the rows reach this demosaic in the opposite order from the FITS path. If a future change ever
+flips a video frame vertically to fix its orientation, **the pattern flips with it** and the green Sun comes
+straight back. Detection makes that self-correcting, and
+`test_the_two_patterns_are_one_row_flip_apart` pins the relationship so neither constant can be changed alone.
+
+**Upgrade-safe (§9).** `colour_build` is additive on a result `meta.json` — `read_meta` already filters to known
+fields, so an old file reads as generation 0 (pinned by a test) and an older build ignores the new key. No
+config, DB schema, on-disk layout, endpoint or response-shape change; nothing under `incoming/` is touched.
+The one deliberate behaviour change is the point of the fix: a raw capture now debayers in its own phase, and a
+still made by generation 0 or 1 is offered a re-stack it was not offered before.
+
+**Tests +11 collected — 7 in `test_video_cfa_mosaic.py` (one of them parametrized ×2) and 4 in `tests/webapp/test_video_api.py` — five of which fail before *on behaviour*** (the others reference symbols this change introduces). Suite 5,500 → 5,511 passed / 2 skipped, exactly +11., including the
+owner's four measured numbers as a fixture, an end-to-end decode of a `GBRG`-recorded capture (red-dominant,
+mesh-free — green and meshed before), the `RGGB` case pinned so reading the phase cannot regress the captures
+that already worked, the latch, the flat-frame fallback, the row-flip invariant, the v0.347.0-shaped `meta.json`
+that must now be called stale, and the old `meta.json` that must still load. `tests/videosynth.py`'s
+`solar_mosaic_frame` / `solar_raw_video` gained a `pattern` argument, defaulting to `RGGB` so every existing
+fixture is byte-identical — a fixture that can only be built in one phase cannot show the difference between
+reading the phase and assuming it.
+
+---
+
+## v0.408.1 — 2026-09-10 — 🐛 a mosaic panel too thin to be its own population was condemned by its richer neighbours
+
+*(Builder-verified by reproduction against `origin/main`'s own `grade_frames`. Filed and fixed in the same run.
+Severity: HIGH on a mosaic — a whole panel's subs auto-rejected as "likely cloud" on the by-default auto-grade
+path. The same "a threshold taken from a whole-target number that is really per-panel" class as v0.408.0, A6,
+v0.270.2 and v0.406.x.)*
+
+**The bug.** v0.270.2 made the flux-like metrics per-panel, because a mosaic's panels are different patches of
+sky: a panel framing sparser sky really does detect fewer stars, and grading it against the whole target reads
+that as cloud. It fixed panels big enough to be a population. What it left — measured here for the first time —
+is that a panel below `MIN_FRAMES_FOR_GRADING` (10) is *not* a population, so `pointing_groups` labels its
+frames `-1` and they fell back to **the whole target's** yardstick: the very reading the split exists to refuse.
+And because a thin panel's subs are alike, the fallback does not flag one of them, it flags **all** of them.
+
+Measured on three healthy 12-sub panels plus a fourth 6-sub panel at a star-poor pointing, with a perfectly
+normal sky level and normal star flux:
+
+| thin panel | pre-fix | metric |
+|---|---|---|
+| star-poor pointing, sky and transparency normal | **6 of 6 rejected** | `star_count` alone |
+| star-poor pointing, fainter stars too | **6 of 6 rejected** | `star_count` |
+| genuinely clouded (sky 9000 vs 1200) | 6 of 6 rejected | `sky_adu_median`, `star_count`, `transparency_score` |
+
+The reason string on the first row is *"far fewer stars than typical (120 vs 404) — likely cloud"* — verbatim
+the sentence AGENTS.md §1 quotes as the v0.270.2 bug. This is the owner's shape: the bundled mosaic sample runs
+6/6/6/**3** subs, and a panel cut short by cloud, or a new mosaic's first night, is thin by definition.
+
+**Why the fix is narrow rather than "never grade a thin panel".** `tests/test_qc_grading.py::
+test_a_panel_too_thin_to_grade_falls_back_to_the_whole_target` deliberately pins that a genuinely *clouded*
+thin panel is still caught, and it is right to. The table above is what separates the two causes, and it is
+physical rather than statistical: **cloud raises the sky level; a different pointing does not.** Over one
+mosaic's few degrees `sky_adu_median` is a property of the *night* — moon, cloud, twilight — while star count
+and median star flux are properties of *what you framed*. So a new `_MetricSpec.pointing_scale` flag marks
+`star_count` and `transparency_score` only, and those two may never borrow another panel's population: a frame
+with no yardstick of its own is left **ungraded on them** instead of judged by a neighbour. `sky_adu_median`
+keeps today's target-wide fallback untouched, which is what the existing test's clouded panel actually trips —
+so **no test was weakened**; that test now also asserts the reason set is exactly `{"sky_adu_median"}`, pinning
+the two rules apart.
+
+Post-fix, same fixtures: the star-poor thin panel is **0 of 6** flagged (and nothing else is disturbed), the
+merely-fainter one is 0 of 6, and the clouded one is still **6 of 6** — on the sky level alone.
+
+**Nothing else moves.** A panel *with* a population of its own still grades its members against it on every
+metric, a single-pointing target is untouched (no split, so no per-panel yardsticks, so no `pointing_scale`
+branch), and `bulk_select` — the other reader of `PER_POINTING_METRICS` — already gave the unclustered frames a
+bucket of their own rather than merging them into a panel, which is the pattern this brings grading in line
+with. Grading only ever *recommends* rejections, so withholding a verdict is the safe degradation.
+
+Engine-only and additive: no config, DB-schema, on-disk, API-shape or default change, and nothing about *what*
+QC measures moved.
+
+**Tests (+5, three failing before):** a thin star-poor panel not condemned by its richer neighbours; the same
+for merely-fainter stars; a genuinely clouded thin panel still caught **and only on `sky_adu_median`**; a
+single-pointing target still graded on star count; a bad sub inside a healthy panel still graded on star count.
+Plus the strengthened assertion on the existing fallback test.
+
+---
+
+## v0.408.0 — 2026-09-10 — 🐛 the streak guard anchored on one median, so a mosaic rescued nothing
+
+*(Builder-verified by reproduction against `origin/main`'s own `stationary_streak_frames`, run verbatim on the
+new fixtures. Filed and fixed in the same run, so it never sat in "Bugs (fix these first)". Severity: HIGH on a
+mosaic — every flagged sub of every affected panel silently stays out of the stack, on the by-default path.
+Found by auditing the "a threshold taken from a whole-target number that is really per-panel" class that
+produced A6, v0.270.2, v0.271.0 and v0.406.x — AGENTS.md §1 "test mosaic-shaped cases".)*
+
+**The bug.** `qc/runner.stationary_streak_frames` is the position half of the streak guardrail: streak detection
+is a shape-only Hough decision, so a bright *stationary* extended object — an edge-on galaxy, an elongated
+nebula — trips it on essentially every sub, and without a rescue those good subs are discarded to `auto:streak`.
+The fraction tiers above it can only ask "was a majority of the **target** flagged?", which a minority-flagged
+object slips under; this guard is what catches it, by asking whether the flagged component sits in *one place in
+the frame across hours*.
+
+It asked that of **one** place: the median of the whole flagged set. On a single field that is the object, and
+it works. On a **mosaic** the panels point at different sky, so one object spanning the mosaic forms its
+component at a *different* place in each panel's frames — and the median of two clusters lands **between** them,
+where no frame is within `STATIONARY_CLUSTER_RADIUS` of it. Measured on `origin/main`'s function, verbatim:
+
+| flagged set | pre-fix | post-fix |
+|---|---|---|
+| one panel, 8 subs at one spot | **8 rescued** | 8 |
+| **two** panels, 8 subs each | **0** | 16 |
+| four panels (2×2), 6 subs each | **0** | 24 |
+| two panels + one real trail between them | **0** | 12 (the trail stays rejected) |
+| two panels, 60 subs each (the owner's scale) | **0** | 120 |
+
+So adding a *second* stationary object made the detector **strictly worse than one** — the case it exists for,
+at the scale the owner actually shoots (§1: heavy mosaic user, thousands of subs).
+
+**The fix — find the clusters instead of assuming one.** Every remaining mark is a candidate centre; each
+candidate re-centres on the **median of its own neighbours** (so the accepted set is still the same
+median-centred one, and a trail sitting near the object still cannot drag the centre off it), the largest
+qualifying cluster is taken, its members are removed, and the round repeats up to `STATIONARY_MAX_CLUSTERS`
+(16 — comfortably above a 3×3 mosaic's 9 panels; a work bound, and largest-first, so it can only ever drop the
+least significant). A set holding exactly one cluster gives byte-for-byte the previous answer — all 21 existing
+tests pass unchanged.
+
+**The price of searching, paid explicitly.** Anchoring on one median asks "is anything at *this* place?" once;
+searching every centre asks it once per flagged frame, and enough tries turn the radius's own "four trails
+agreeing is a one-in-a-million coincidence" into an event: **measured, twenty scattered trails threw up a chance
+four in 39 of 300 sets (13 %)** on the first draft. So each cluster is now scored against the null that describes
+real trails — components landing independent and uniform over the frame, giving a Poisson count within the
+radius — and the tail is multiplied by the number of centres tried (`_chance_cluster_p`); a cluster that is not
+surprising under it decides nothing (`STATIONARY_CLUSTER_MAX_P = 0.05`). Re-measured over 1,800 scattered sets
+at n = 12/20/40/80/200/500: **2 false verdicts, all at n = 80** (0.1 %), against 39/300 for a plain density floor
+and 0 for the pre-fix anchor. It is inert on real objects, which is the point — a tracked feature is in
+*essentially every* sub of its pointing, not four of them — and the mosaic-sized case (60 per panel) sails
+through.
+
+**Bounded work.** The scan is vectorised (squared radius, no square root) and memoises re-centred groups on
+their centre, since every mark of one cluster re-centres on the same spot: **0.37 s for 3,000 flagged frames**
+(two 1,200-frame clusters plus 600 trails), down from 1.85 s for the unmemoised first draft. This runs once in
+the reconcile pass after QC, not per frame.
+
+**Contract unchanged.** Still un-reject-only, still per frame (a genuine trail among the object's frames keeps
+its rejection on its own evidence), still never a user override, still no verdict for an undated or
+positionless frame, still the same `STATIONARY_MIN_FRAMES` / `STATIONARY_CLUSTER_RADIUS` /
+`STATIONARY_MIN_SPAN_S` constants. Engine-only and additive: no config, DB-schema, on-disk, API-shape or
+default change, and nothing about *what* the detector flags moved — only which of the already-flagged frames
+can be given back.
+
+**Tests (+8, every multi-cluster one failing before):** `tests/test_qc_streak_stationary.py` — two mosaic
+panels each with their own object (and the single-panel half still working), a 2×2 rescuing every panel, a real
+trail between two clusters keeping its rejection, the cluster cap taking the biggest first, a 200-scatter
+statistical pin that a chance cluster decides nothing, the `_chance_cluster_p` correction pinned in both
+directions plus its degenerate inputs, a mosaic-sized cluster sailing through the chance test, and the whole
+thing end to end through the database (24 flagged of 60 frames, 40 % — the band the fraction tiers cannot see).
+
+---
+
 ## v0.407.1 — 2026-09-09 — 🐛 the panel map and the health panel gave opposite instructions about the same panel
 
 *(Builder-verified by reproduction on the running app: `scripts/agent-dogfood.sh --build --mosaic --editor`,

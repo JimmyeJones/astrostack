@@ -388,3 +388,126 @@ def test_wcs_image_center_is_none_for_unusable_input():
                                dec_center_deg=DEC0, pixscale_arcsec=PIXSCALE)
     assert wcs_image_center_deg_from_text(good, width=0, height=H) is None
     assert wcs_image_center_deg_from_text(good, width=W, height=-1) is None
+
+
+def _mark_first_sub_solved(proj, truth):
+    """Give the first sub the real WCS a per-sub ASTAP solve would have written.
+
+    That is the case this path exists for: a *few* subs solved on their own —
+    fewer than ``min_frames``, so the bootstrap still engages — and one of them is
+    a stronger reference than a fresh solve of a synthetic deep image.
+    """
+    first = next(iter(proj.iter_frames()))
+    dx, dy = truth[first.id]
+    proj.update_frame(
+        first.id,
+        wcs_json=make_synth_wcs_text(
+            width=W, height=H, ra_center_deg=RA0, dec_center_deg=DEC0,
+            pixscale_arcsec=PIXSCALE, crpix_shift=(float(dx), float(dy)),
+        ),
+        ra_center_deg=RA0, dec_center_deg=DEC0,
+        pixscale_arcsec=PIXSCALE, rotation_deg=0.0,
+    )
+    return first.id
+
+
+def _exploding_solver(*args, **kwargs):
+    raise AssertionError("the deep image should not have been solved")
+
+
+def test_bootstrap_anchors_on_an_already_solved_sub_instead_of_solving_a_deep_image(tmp_path):
+    """A verified per-sub solve beats a fresh solve of a synthetic image — and
+    skips the integration, the temp FITS and the extra ASTAP call entirely."""
+    from seestack.io.wcs_io import wcs_from_text
+
+    proj, truth = _make_project_with_faint_subs(tmp_path, n=8)
+    try:
+        anchor_id = _mark_first_sub_solved(proj, truth)
+        res = bootstrap_solve(proj, min_frames=4, deep_solver=_exploding_solver)
+
+        assert res.engaged
+        assert res.anchored_on_solved_sub
+        assert not res.deep_solved  # no deep image was built, let alone solved
+        assert "already-solved sub" in res.reason
+        # The anchor is not one of the subs it rescued, and its own row is untouched.
+        assert anchor_id not in res.propagated_frame_ids
+        assert res.n_propagated >= 6
+        # …and the members still land on their true dither, read off the anchor's
+        # real WCS rather than a solved deep image.
+        for f in proj.iter_frames():
+            if f.id == anchor_id or f.wcs_json is None:
+                continue
+            dx, dy = truth[f.id]
+            w = wcs_from_text(f.wcs_json)
+            truth_w = wcs_from_text(make_synth_wcs_text(
+                width=W, height=H, ra_center_deg=RA0, dec_center_deg=DEC0,
+                pixscale_arcsec=PIXSCALE, crpix_shift=(float(dx), float(dy)),
+            ))
+            assert np.allclose(w.wcs.crpix, truth_w.wcs.crpix, atol=1.5)
+            assert f.ra_center_deg is not None and f.dec_center_deg is not None
+    finally:
+        proj.close()
+
+
+def test_the_already_solved_anchor_does_not_count_towards_the_engagement_gate(tmp_path):
+    """The gates still mean "enough *unsolved* subs to rescue" — an anchor can't
+    make a target that is too thin to bootstrap look thick enough."""
+    proj, truth = _make_project_with_faint_subs(tmp_path, n=4)
+    try:
+        _mark_first_sub_solved(proj, truth)  # leaves 3 unsolved
+        res = bootstrap_solve(proj, min_frames=4, deep_solver=_exploding_solver)
+        assert not res.engaged
+        assert "too few unsolved" in res.reason
+    finally:
+        proj.close()
+
+
+def test_a_solved_sub_of_a_different_shape_is_not_used_as_the_anchor(tmp_path):
+    """A reference of another size correlates against nothing, so the deep-image
+    path must still be taken rather than the burst quietly failing to register."""
+    proj, _truth = _make_project_with_faint_subs(tmp_path, n=8)
+    try:
+        odd = tmp_path / "other_size.fit"
+        write_seestar_fits(odd, width=W // 2, height=H // 2, n_stars=25, seed=7)
+        proj.add_frame(FrameRow(
+            source_path=str(odd),
+            wcs_json=make_synth_wcs_text(
+                width=W // 2, height=H // 2, ra_center_deg=RA0, dec_center_deg=DEC0,
+                pixscale_arcsec=PIXSCALE),
+            ra_center_deg=RA0, dec_center_deg=DEC0,
+        ))
+        res = bootstrap_solve(proj, min_frames=4, deep_solver=_ref_wcs_solver)
+        assert res.engaged
+        assert not res.anchored_on_solved_sub
+        assert res.deep_solved
+        assert res.n_propagated >= 6
+    finally:
+        proj.close()
+
+
+def test_a_solved_sub_whose_wcs_is_unusable_is_not_used_as_the_anchor(tmp_path):
+    """``wcs_text_is_usable`` is the same bar the solve path applies: a truncated
+    sidecar reads back truthy and locates nothing, so it may not anchor a burst."""
+    proj, _truth = _make_project_with_faint_subs(tmp_path, n=8)
+    try:
+        first = next(iter(proj.iter_frames()))
+        proj.update_frame(first.id, wcs_json="END")
+        res = bootstrap_solve(proj, min_frames=4, deep_solver=_ref_wcs_solver)
+        assert res.engaged
+        assert not res.anchored_on_solved_sub
+        assert res.deep_solved
+    finally:
+        proj.close()
+
+
+def test_pick_solved_anchor_returns_nothing_when_no_sub_has_solved(tmp_path):
+    """The zero-solved case — the one the deep-image solve exists for — is
+    untouched: there is no anchor to pick."""
+    from seestack.solve.bootstrap import pick_solved_anchor
+
+    proj, _truth = _make_project_with_faint_subs(tmp_path, n=4)
+    try:
+        frames = list(proj.iter_frames())
+        assert pick_solved_anchor(frames, (H, W)) is None
+    finally:
+        proj.close()

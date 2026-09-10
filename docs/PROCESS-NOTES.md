@@ -128,6 +128,785 @@ does; `shm_size` is inert (no shared memory used); TZ-independence (all UTC);
 sidecar near `incoming/`); the skipped-folder report is silent on the bare device
 folder *by design* (its files are device-named); S30 FOV derived from `FOCALLEN`
 (2.13° search window in ASTAP's own log). — the fourth finding in the gap between two sentences, a "new" feature that was 90 % already built, and a two-pytest disk lesson
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-dg6420`) — one task: a floor that counted the wrong thing, and where the bug was actually found
+
+**The run.** One task, deliberately: **v0.415.0**, a bug I verified myself —
+`auto_stack_min_frames` asked its "would this be speckle?" question of the
+target's *frame count*, so a mosaic one pass in (nine subs, one sub deep
+everywhere) cleared a floor of three and was published. Repro'd end-to-end
+against the real pipeline: `test_auto_stack_holds_back_a_mosaic_that_is_one_sub_deep_everywhere`
+fails before with `assert ['?', '?'] == []` — i.e. `run_stack` was called twice
+on data that is single-frame noise at every pixel.
+
+**Where it came from, since that is the reusable part.** Not from the backlog —
+the "Bugs (fix these first)" section is currently five entries, every one of them
+gated on data no agent has, deliberately stood down with numbers, or measured and
+closed. It came from taking the Scout rotation's item (2) as a *reading* brief
+rather than a sweep: **"any threshold taken from a whole-target or peak number
+that is really per-panel"**. Grep the walk-away path for the numbers it makes
+decisions from, then ask of each one "what does this describe on a mosaic?".
+`_afford_drizzle_reject` (already filed, memory-only consequence) and this floor
+were the two that answered "nothing". A2/A6/D1 and now this are the same class
+four times over; the brief is not exhausted, and the next place to point it is
+the surfaces that *report* depth rather than decide from it.
+
+**The design call worth carrying forward: the thinnest panel is not always the
+honest panel.** `auto_reject_depth` (A6, v0.326.7) answers "can the rejection
+method bite anywhere?" and is right to take the **minimum**. Reusing it here
+would have been the obvious move and would have been wrong twice over: it
+returns `None` unless *two* panels clear `AUTO_REJECT_PANEL_MIN_FRAMES`, so the
+all-one-deep mosaic — the exact case — is invisible to it; and its minimum would
+strand a mosaic with eight deep panels for one corner lost to cloud. The
+question here is "is the *picture* speckle?", whose honest statistic is the
+**frame-weighted median**: the depth of the panel a randomly chosen sub belongs
+to. It also disposes of the population that kills an unweighted median — one
+stray mis-solved sub is a one-frame "panel", `[200, 1] → 1` unweighted and
+`→ 200` weighted, i.e. the difference between holding a good deep target back
+for ever and doing nothing.
+
+**Then the three sentences.** Fixing the hold created a silence: a mosaic held on
+depth has every sub located and a count past the floor, so the Target page's
+"waiting for more of your subs to be located" note — computed frontend-side from
+`unsolvedCount` — cannot fire, and the page would have looked idle on a target
+the scan had deliberately held. That is the AGENTS.md §7 dogfood question ("could
+a beginner hold all of these at once?") arriving *before* the browser rather than
+after it, and it is most of the diff: `GET /api/targets/{safe}/autostack-thin-hold`
++ `MosaicThinHoldNote`, and the mosaic wording in `heldForSubsLine` (Jobs) and
+`describeNeedsLook` (the Dashboard's overnight digest), both of which would
+otherwise have printed "only 9 of its subs are located — needs 3".
+
+**A process slip to not repeat.** I started editing while the baseline suite was
+still running, which makes that run worthless as a baseline (already-imported
+modules are the old code, lazily-imported ones are the new). The gate that
+actually held was the full suite re-run on the finished branch, plus the
+fail-before check done by stashing the two source files and re-running the new
+tests — which is the check that matters anyway. But the baseline is cheap
+insurance against inheriting someone else's red `main`, and it only works if the
+run is *finished* before the first edit. On this container the suite takes ~80
+minutes, not the ~25 earlier notes record, so "read the backlog while it runs"
+is the wrong plan: pick the task first, then start the baseline, then read.
+
+**Green gates on the merged tree** (this branch, after taking `origin/main`'s
+own v0.414.0–.2): Python **5,579 passed / 2 skipped** (28m20s), `npx tsc
+--noEmit` clean, vitest **256 files / 3,580 tests**, `npx vite build` ✓ — run
+*after* pytest finished, per the §7 rule main added this hour.
+
+**Dogfood.** `--empty` (the first-run app): CLEAN — nothing overflowing, no
+console errors, tallest page `/life-list` at 2,779 px on a phone. Not a mosaic
+pass, and no Auto/editor claim is made in this run.
+
+---
+
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-w1qz43`) — half the app's explanations were never written on the device it is read on
+
+**The run.** Three tasks, all shipped, all one class: **v0.413.0**
+(`components/HintAnchor.tsx` + the stack card's eleven verdict chips),
+**v0.413.1** (the nine planning verdicts on Tonight and its cards) and
+**v0.413.2** (the Target page's three header badges and the editor's four op
+chips, which carried a bug). Baseline on `origin/main`: **5,553 passed / 2
+skipped** (40m18s) — exactly the number the previous run recorded for this same
+`origin/main`, which has not moved. The work is frontend-only; its gates are
+`tsc` clean, `vitest` 254 files, and `vite build`, re-run per commit.
+
+### The finding, and why it is bigger than the entry that pointed at it
+
+The backlog's "a Tooltip is invisible on a phone" entry has produced four slices,
+and all four are about a tooltip on a **control** — where the tap does the *wrong*
+thing (it operates the control). Counting the anchors rather than the routes
+turns up the other half of the class, which is larger and had never been named:
+of the app's **105** `<Tooltip>`s, **53 hang off an anchor that is not a control
+at all** — a `Badge`, a `Text`, a `Box`. There the tap does not do the wrong
+thing, it does *nothing at all*, and the sentence is simply absent on the device
+the owner reads this app on. Half of what the app has to say about itself.
+
+**The one-line fix does not work, and knowing why is the useful part.** Mantine's
+`Tooltip` ships `events={{ hover: true, focus: false, touch: false }}`, so
+`events={{…, touch: true}}` looks like the whole answer. It is not: floating-ui's
+`useHover` opens on `pointerenter` and closes on `pointerleave`, and a lifted
+finger fires `pointerleave` — the answer flashes and goes. Mantine defaults it off
+for that reason. The affordance that does work is the one this repo already built
+twice for controls (`HintLabel` v0.374.11, `HintIcon` v0.402.1): a **controlled**
+tooltip with an explicit tap toggle.
+
+### Two design points worth carrying forward
+
+**Clone the child; do not wrap it.** The obvious shape for "make this anchor
+tappable" is a wrapper `<span>`, and it is wrong here for the same reason the
+v0.312.0 lightbox overlay could not be a wrapper: an inserted box changes what
+`max-width`/flex/`Group` gaps resolve against, and this entry's own standing
+caution is that *no page may get taller*. `HintAnchor` clones its single child and
+adds handlers to it, so the DOM is byte-for-byte what it was plus attributes —
+which is pinned by a test asserting the anchor is still a direct child of the
+render root.
+
+**`stopPropagation` is opt-in, and that is the safer default.** Three of the
+eight sites in the third slice sit inside something clickable, where asking the
+question would also run the container — in the worst case, tapping the "slower
+preview" chip in the Add menu **added the very op it warns about**. The flag
+fixes that, but defaulting it on would have made every one of the other 17 sites
+silently swallow a click the page might expect. Swallowing is the worse failure,
+so the flag is off unless the site says otherwise.
+
+### What was deliberately left, and why
+
+Not every non-control anchor is a hit. Two on the Target page were checked and
+left: the frames table's **column headings** (the tap *sorts*, which is the
+primary action — and v0.270.0 already gave those exact sentences a reachable home
+in `FrameColumnGuide`), and the per-frame **`Rejected — …`** badge, whose tooltip
+repeats the badge's own text. That is category (b) of the entry: "it repeats what
+the control already says — leave it".
+
+### Two sweeps that came back clean (recorded so nobody re-walks them)
+
+**The "log line inside its own `except`" class** the previous run filed. Swept
+with an AST scan over `seestack/` + `webapp/` — every broad `try` whose handler
+logs a failure, checked for a success-shaped `log.info`/`log.warning` in its body.
+**Six sites, all safe**: `stacker.py`'s two sub-pixel-refine lines (locals,
+already computed), `pipeline.py`'s two auto-grade lines (the eager `", ".join`
+touches `FrameGrade.name` and `primary_metric`, and the latter is guarded
+`if self.reasons else "unknown"`), `watcher.py`'s stranded-batch line, and
+`scanner.py`'s bootstrap line — which is the one v0.411.1 already fixed. So the
+class has one known instance and it is closed.
+
+**A `--mosaic --editor` dogfood pass on this branch's own code: CLEAN.** Auto's
+trim on the mosaic canvas is **7.9 %** (AGENTS.md §1's bug line is ~15 %), nothing
+overflowing and no console errors on either target, and the editor drive added all
+**21** ops with the preview re-rendering each time, on the field run *and* on the
+mosaic run, then undid and redid. Page heights: phone Target **3,078 px** (field) /
+**3,407 px** (mosaic), phone editor 3,055 / 3,166 px, desktop 2,057 / 2,104 px —
+unchanged by this run's work by construction, since `HintAnchor` adds no element
+and no padding. The mosaic's own three sentences (panel map, `grain_uneven`,
+`seams_flat`) still cohere: all three now say the thin panel is ~30 s behind and
+evens out on its own.
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-bhkhl1`) — collision #14: two Builders swept the same entry in the same hour, and a green baseline that read as red
+
+**The run.** Three tasks shipped: **v0.414.0** (the "still open" remainder of the
+`HintAnchor` sweep, plus the drift guard that stops a ninth), **v0.414.1**
+(Stack's *"Save as defaults"* — the one interactive site the measurement said was
+worth doing) and **v0.414.2** (a verified §9 bug this run reproduced 14 times by
+accident: the app refusing to boot over a missing *frontend*). Baseline on
+`origin/main` (`a59ee928`): **5,553 collected, 5,539 passed / 2 skipped / 14
+errors**, and the 14 were self-inflicted — see below. 5,553 is exactly the number
+the two runs either side recorded for that head. On the finished branch:
+**5,559 passed / 2 skipped** (38m15s) — exactly **+6**, the six `test_static_boot.py`
+cases v0.414.2 claims, with no test's status changed. Frontend: `tsc` clean,
+`vite build` clean, `vitest` **3,570 passed / 255 files** against main's 3,564 —
+exactly the +5 drift-guard cases and the +1 Stack regression. `ruff check` on both
+touched Python files is clean apart from the `I001` `webapp/main.py` already carries
+on `main` (verified against `origin/main`'s own copy).
+
+### Collision #14, and it is the most complete one yet
+
+Branch `claude/sweet-babbage-w1qz43` and this one picked the **same backlog
+entry**, in the same hour, from opposite ends of the same measurement. They built
+`components/HintAnchor.tsx`; I built `components/HintTooltip.tsx`. Same
+controlled-tooltip state machine, same `cloneElement`-not-wrap decision, same
+"a `Badge` is the half of the class with no gesture at all" reading, and
+overlapping anchor sets — of my 33 sites and their 28, **24 were the same file
+and the same line**. Their PR (#818) merged first.
+
+**Theirs ships; mine was dropped rather than re-applied**, per §11 and the
+precedent of collision #12. Nothing of mine was layered on top of a file they had
+already converted: I merged `origin/main`, resolved every overlapping frontend
+file to *theirs*, deleted my component and its test, and restored `HintIcon.tsx`
+to main's version (my refactor had pointed it at my component). What remains on
+this branch is only what theirs did not reach.
+
+**On the one point where the two designs differed, theirs is better and that is
+worth carrying forward.** `HintAnchor` has an opt-in `stopPropagation` for an
+anchor sitting *inside* something clickable; mine did not, and I had explicitly
+noted the risk (a badge inside a card-link would open the hint *and* navigate)
+and then deferred it as "don't change existing behaviour". They found it as a
+live bug instead — the editor's `SlowPreviewChip` sits inside a `Menu.Item`, so
+asking what "slower preview" meant **added the very op it warns about**. The
+generalisable lesson is not about tooltips: **when you defer a risk because
+acting on it would change behaviour, check whether the current behaviour is
+already wrong somewhere.**
+
+**What made this collision cost a whole task rather than a minute** is the same
+thing §11 already says and this run did anyway: I fetched at the start of the
+run, spent the session building, and fetched again only at merge time. The entry
+was sized S/M per site and did not feel like an "L" that §11 tells you to
+re-fetch after the design read — but the *sweep* was long even though each site
+was short. **Re-fetch by elapsed time, not by the item's size label.**
+
+### The trap: a green baseline that reads as red
+
+The baseline run reported `5539 passed, 2 skipped, 14 errors`, the errors being
+fourteen `tests/webapp` tests raising
+`RuntimeError: Directory '…/webapp/static/assets' does not exist` at fixture
+setup. Read cold, that is "main is red, and fixing it is task #1" (AGENTS.md §2).
+
+It was self-inflicted. **`scripts/agent-dogfood.sh` runs `npx vite build`, and
+`frontend/vite.config.ts` sets `emptyOutDir: true` on an `outDir` of
+`../webapp/static`** — so a dogfood pass *deletes* `webapp/static/` and rebuilds
+it, and any `tests/webapp` test that calls `create_app()` inside that window
+fails. Both had been started in the background to save wall-clock.
+
+**Do not run `agent-dogfood.sh` concurrently with `pytest`** unless the dogfood
+will not build (it builds only on `--build`, or when
+`webapp/static/index.html` is missing — so the *second* pass of a run is usually
+safe and the first is not). Serialise them: dogfood first, pytest after.
+
+**And the trap was a real bug**, which is why it is not only a process note.
+`_mount_spa` guarded on the *directory* and then mounted `static/assets`
+unconditionally, so the empty-directory state every build passes through did not
+degrade to the "Frontend not built" placeholder the same function already
+implements — it raised out of `create_app()` and the whole app failed to start,
+API and Settings page included. On a box upgraded in place that is a §9
+violation. Shipped as **v0.414.2**. The generalisable shape: **a guard that asks
+whether the *container* exists, when the question is whether the *contents* do.**
+
+### Two sweeps that came back clean — do not re-walk them
+
+- **Every editor op parameter measured in pixels is already proxy-scaled.**
+  Enumerated from the registry rather than by reading: `background.subtract`
+  (`box_size`), `background.final_gradient` (`box_size`, `dilate_px`),
+  `detail.chroma_denoise`, `detail.sharpen`, `detail.deconvolve`,
+  `stars.reduce` and `stars.boost_nebula` all scale — the last two inside
+  `starmask.star_mask` rather than in the op, which is why grepping `stars.py`
+  for `scaled_px` under-reports. `detail.hot_pixels`'s `sigma` is a statistical
+  threshold, not a length.
+- **The "a `log.info` inside a `try` whose `except` logs a failure" sweep the
+  previous run asked for is clean.** Six candidate blocks across `seestack/` and
+  `webapp/` (AST-scanned, not grepped); every one logs plain locals. The one that
+  did bite — `scanner.run_qc_and_solve`'s `project.name` — is already fixed as
+  v0.411.1. The closest remaining shape is
+  `pipeline._auto_grade_target`'s success line, which reads `r.name` /
+  `r.primary_metric` off `FrameGrade` **after** the DB writes have committed, so
+  a raise there would report `AutoGradeCounts(0, 0)` for work that happened —
+  both attributes were checked against the dataclass and exist.
+
+### Dogfood record — `--mosaic --editor`, three times, byte-identical
+
+Run on `origin/main` (`a59ee928`), on the branch's own build of the work that was
+later dropped, and again on the **final merged tree** that ships. **Auto's
+trim on the mosaic sample: 7.9 %**, unchanged and well under the ~15 % D1 bar.
+The mosaic page-height table is **identical to the pixel** across the change —
+`[phone]` 3,407 / 3,166 / 3,094 / 2,432 px, `[desktop]` 2,116 / 2,104 / 1,699 /
+1,637 px — nothing overflowing, no console errors, and the editor drive added all
+21 ops on the mosaic run with the live preview re-rendering each time, undo and
+redo applied. That is the measurement the entry demands ("don't make the pages
+taller"), and an exact match rather than "within noise", because the change adds
+no DOM node and no style. The third pass also exercises **v0.414.2** end to end:
+the app boots and serves its SPA through the rewritten `_mount_spa`, with a real
+build present, exactly as before. The app's three claims about that mosaic still
+cohere, unchanged from the previous run's record.
+
+### One implementation detail worth keeping
+
+**Mantine's `Badge` puts its words in an inner element.** `getByText("Hazy
+night")` returns the label `<span>`; a cloned anchor's `role`/`tabIndex` land on
+the Badge's *root*. A click on the words still reaches the root by bubbling —
+which is why nine of ten component assertions passed while the `tabindex` one did
+not. Assert attributes on `getByRole("button", { name: … })` and fire gestures on
+`getByText`. A test that only fired events would have looked entirely green while
+the keyboard path did not exist.
+
+---
+
+
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-mudy09`) — the plate-solve rescue chain, and the reason the owner's own subs never got the sibling hint
+
+**The run.** Three tasks, all shipped: **v0.411.0** (a sibling-hint second solve
+pass), **v0.411.1** (a bug tripped over while writing it — a *successful*
+bootstrap rescue logging itself as a failure) and **v0.412.0** (the bootstrap
+anchoring on an already-solved sub). On the finished branch: **5,553 passed / 2
+skipped** (39m07s), against the **5,539 / 2** the previous run recorded for this
+same `origin/main` (which has not moved since) — exactly **+14**, the 4 + 5 + 5
+the three entries claim, with no test's status changed. **Be precise about the
+baseline:** my own `origin/main` run was started first and killed at 51 % (under
+`-x`, so green that far) to free the CPU for the branch run rather than let two
+39-minute suites contend; the number above it is compared against is the previous
+run's recorded one, not one I finished. The frontend is untouched, so its gates
+were not re-run; `ruff check` on every touched file is clean apart from the four
+E702s `test_solve_hints.py` already carried.
+
+### Why this run went to the solve path rather than to the editor
+
+The bug list is in the state the last three refreshes describe: everything open
+in "Bugs (fix these first)" is gated on data no agent has, is measured and stood
+down, or is explicitly "probably not worth building". The Ideas list scans to 67
+entries without a closed marker, but most carry their own stand-down. Of what is
+genuinely open and ungated, the plate-solve family is the one that still has
+mechanism left in it, and it is a **priority 2** family: an un-located sub is
+silently dropped by `run_stack`, which is the mechanism behind the owner's
+reported thin/gibberish stacks on faint fields.
+
+### The finding that made v0.411.0 worth building
+
+`build_solve_arglist` offers the solved siblings' centre **only to a frame with
+no usable header hint**. A Seestar writes `RA`/`DEC` into every sub. So on the
+owner's own data — the exact user this app is for — the v0.180.0 sibling-hint
+rescue has *never fired once*: every unsolved sub carries its own loose hint and
+is searched blind-wide at the configured 30°, even after a dozen of its siblings
+have pinned the pointing to within a degree. The backlog entry (2026-07-23,
+slice (c)) had named this precisely and sat unbuilt for seven weeks.
+
+The measurement that made the shape safe was already in the backlog too, from
+the 2026-07-24 ASTAP audit: a *failed* search costs ~4 s at 30° and ~0.2 s at
+5°. So a second pass over the failures at the tight radius is a ~5 % time
+premium on the case where it does nothing, which is what made "on by default,
+no new setting" defensible rather than a blind flip.
+
+### Two design points worth carrying forward
+
+**A retry pass must inherit the *setting it is made of*.** The first version ran
+the retry regardless of `use_solve_hints`. That setting is the app's "solve
+blind" switch, and the whole second pass is nothing but a hint — so it was
+quietly reinstating hinting for a user who had switched it off. Caught in
+self-review before the merge (the tell was reading the four `run_qc_and_solve`
+call sites in `webapp/pipeline.py`, every one of which threads
+`settings.astap_use_solve_hints` into the first pass and could not thread it
+into the second). Generalisable: **when you add a second pass beside an existing
+one, list the flags the first pass reads and answer for each of them.**
+
+**What not to retry is most of the value.** Retrying a *timeout* is the one
+shape that genuinely doubles a hopeless night's wall-clock — the ladder has
+already burned up to 3× `astap_timeout_s` on that frame, the cost the Settings
+hint warns about since v0.272.2. Retrying a *setup* failure (no star database)
+would multiply a whole library's wasted attempts by two for a problem no search
+region can fix. Excluding both is what keeps the pass honest about its own cost,
+and it is why the entry could ship without the "blind threshold flip on the
+on-by-default hot path" that AGENTS.md §1 forbids and that the sibling
+`astap_timeout_s` entry was declined for.
+
+### v0.411.1 — the bug the new code walked into
+
+Writing the retry's own log line, I copied the bootstrap's `project.name` two
+blocks below. It raised: `Project` keeps the target's name in its meta table and
+has no such attribute. The pre-existing line has the same defect, and it sits
+**inside** the bootstrap's `try: … except Exception: log.warning("stack-then-solve
+bootstrap failed")` — so the one branch that fires when the bootstrap actually
+*rescued* subs turned the success into a logged failure. It survived because
+nothing on screen disagreed: every summary key is written before the raise, so
+the Jobs page's rescue note was right throughout.
+
+**The generalisable shape:** a log line inside a broad `except` that reports the
+*success* of the block it lives in. If it throws, the block reports the opposite
+of what happened, and no test that asserts on the summary will ever notice. Worth
+a sweep some time: `log.info` calls inside a `try` whose `except` logs a failure.
+
+### v0.412.0 — and the question it settles about the two rescues
+
+The bootstrap engages when fewer than `min_frames` subs solved, a band that
+includes "a handful did". In that band it was building a deep image and asking
+ASTAP to solve *that* — a synthetic frame with no optics headers, on the field
+that had just defeated the solver sub by sub — while 1–7 real verified solutions
+of the same pointing sat in the DB. Anchoring on one of them is strictly less
+work and strictly less risk, and everything downstream (the phase-correlation
+shifts, the CRPIX propagation) is unchanged, which is why the ground-truth test
+could be written with a `deep_solver` that **raises if it is called at all**:
+"no deep solve happened" is proved rather than asserted.
+
+Ordering matters and is deliberate: the v0.411.0 retry runs **before** the
+bootstrap, so a real per-sub solve is always preferred over a propagated one,
+and a run that the retry rescues never reaches the bootstrap at all.
+
+### One thing measured and deliberately left
+
+`build_sibling_retry_arglist` skips a frame whose first attempt was already the
+same search — same centre, radius at or inside 5°. The centre is compared
+exactly, so a frame that *did* get the sibling centre in round 1 is retried when
+the round's own successes moved the median even slightly. That is a real cost
+(~0.2 s each) for a marginal gain, and it was left rather than papered over with
+a tolerance constant: the population is frames with **no** header hint, i.e. not
+the owner's, and when the median has genuinely moved the new centre is the
+better one. If a non-Seestar library ever makes this visible, the fix is a
+tolerance in degrees, justified against `SIBLING_HINT_RADIUS_DEG` rather than
+picked.
+
+---
+
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-1nfpr0`) — the same bug class again, one step further out, and the trap that nearly made the fix worse than the bug
+
+**The run.** Two tasks, both verified bugs, both shipped: **v0.410.0**
+(`edit/presets.analyze_proxy`'s sky level under a mosaic's panel steps — the
+residual the previous run filed rather than guessed at) and **v0.410.1**
+(`classify_target`'s geometry cues, the same steps). Baseline on `origin/main`:
+**5,522 passed / 2 skipped** (26m25s); on the finished branch, **5,539 / 2** (26m27s) — exactly **+17**, the +14 and +3 the two entries claim. The frontend is untouched, so its
+gates were not re-run; `vite build` ran anyway inside the dogfood pass below and succeeded.
+
+### The class is now four cues deep, and it is worth naming precisely
+
+The class the last run named is *"a number measured on an image the recipe
+changes before the number is used."* It has now produced four fixes in a row,
+each one the same shape with a different structure and a different cue:
+
+| | structure removed by | cue that was measuring it anyway |
+|---|---|---|
+| v0.409.0 | `background.final_gradient` | `analyze_proxy`'s sky **level** |
+| v0.409.1 | `background.final_gradient` | `classify_target`'s **geometry** |
+| v0.410.0 | `background.level_coverage` | `analyze_proxy`'s sky **level** |
+| v0.410.1 | `background.level_coverage` | `classify_target`'s **geometry** |
+
+That is a 2×2, and it is now **full**. The rest of what `auto_recipe` measures
+was checked this run rather than assumed, and comes back clean:
+`suggest_denoise_strength`/`estimate_noise_sigma` are the adjacent-pixel-difference
+estimator, structure-blind by construction (measured across the layout: σ 0.0092 →
+0.0089, and one seed of four moved the *slider* by one step, 0.20 → 0.15 — the
+noise floor's own scatter, not a step response); the sharpen radius comes off the
+frames' FWHM, not the image; and `tone.curves`'s auto lift and
+`tone.color_calibrate` both derive their anchors **at apply time**, from their own
+input, which is the right place by construction. **So do not go looking for a
+fifth instance of this exact 2×2** — extend it only if a *new* op is prepended
+ahead of the stretch.
+
+**One measured residual, deliberately not fixed.** `classify_target`'s **colour**
+cue reads the untouched array on purpose (`_extended_chroma` is scale-invariant),
+and a per-panel offset is added to all three channels, so the region's mean moves
+and the chroma with it. Measured across the layout on four seeds: **−1.4 % to
+−5.5 %** (0.293 → 0.286 at seed 13). The nebula bar is 0.06 against values near
+0.29, so this cannot change a verdict; fixing it would mean de-levelling per
+channel, which is real work on the on-by-default path for an effect an order of
+magnitude below the thing it decides. Recorded so it is declined once rather than
+re-derived.
+
+### The trap: the guard the fix needed was not the guard the op next door uses
+
+The first implementation of `_delevelled_luminance` was the obvious one — bin by
+coverage value, shift each bin by its own robust median — and it reproduced the
+target numbers exactly on the four-panel scene. It also **flattened a nebula into
+the sky**: on `test_target_classify._coloured_nebula_field`, a canvas the object
+genuinely fills, the per-panel means went 0.109/0.299/0.283/0.128 →
+0.166/0.183/0.184/0.167 and the verdict stopped being `nebula` at all. A panel a
+nebula fills has a median that is the *nebula's*.
+
+The natural fix is the one `bg/coverage_leveling` already uses: mask objects at
+`median + 2σ` and refuse a level whose retained sample is more than
+`_RESCUE_MAX_SIGMA_RATIO` (3×) the canvas's own sigma-clipped sky spread. **It does
+not work here, and the reason is worth carrying forward:** on exactly the image
+the guard exists for, the canvas's sigma-clipped spread *is the object*. Measured,
+the mask retained **95 %** of that nebula canvas as "sky" — the threshold had
+floated above the whole nebula — and every level then looked equally
+un-spread-out, so the ratio test could never fire.
+
+What works is the v0.225.0 lesson applied one level up: judge flatness against a
+**structure-blind** yardstick. Using the image's own grain (the adjacent-pixel-
+difference σ `analyze_proxy` already reports, put back into pixel units), the
+level-σ/grain ratio reads **0.24–0.36** across scenes that are sky carrying an
+object and **5.1–12.5** across scenes that *are* object — two populations far
+enough apart that 3.0 is a separation rather than a tuning. The generalisable
+rule: **whenever a guard has to ask "is this structure?", it must not be
+calibrated on a statistic that the structure itself sets.**
+
+### Dogfood record — `--mosaic --editor`, on this branch's code, CLEAN
+
+Run after both fixes were committed, because both are Auto/editor claims and §1
+judges those on a mosaic canvas. **Auto's trim on the mosaic sample: 7.9 %** —
+unchanged by either fix and well under the ~15 % D1 bar. Nothing overflowing and
+no console errors on either target; the editor drive added all 21 ops on the
+**mosaic** run as well as the field one, each re-rendering the live preview, and
+undo/redo applied. Tallest page [phone] `/targets/Sample_M42_mosaic_2_2` at
+3,407 px.
+
+Read as one paragraph, per §7, the app's three claims about that mosaic now
+**cohere** — the panel map's "a little behind at the top-right… about 30 s
+there against 1 min", `grain_uneven`'s "about 23 % of the picture has 3 subs
+where most of it has 6, so that part looks about 1.4× grainier… only about 30 s
+behind", and `seams_flat`'s "where the picture looks grainier that is a
+difference in depth, not a step in the sky". A beginner can hold all three at
+once: one panel is thinner, that is why a quarter of the picture is grainier, it
+is not a seam, and it closes itself. That is what v0.406.x/v0.407.1 were for, and
+this is the first pass to say so after all of them landed.
+
+### Two smaller things this run learned
+
+- **A no-op simulation is a fair fail-before when the test imports the new
+  symbol.** Stashing the fix makes the new tests fail at *import*, which proves
+  nothing. Editing the new function's first line to `return lum` and re-running
+  gives an honest 7-of-31 failure list. Kept here because the alternative — not
+  checking — is how a test that asserts today's numbers gets written.
+- **A broad `except Exception` hides signature drift.**
+  `editor._classify_run` swallows everything by design ("classification is
+  advisory; never sink feedback"), so when `classify_target` gained a parameter,
+  three `monkeypatch` stubs in `tests/webapp/test_editor.py` started raising
+  `TypeError` *into that except* and the endpoint quietly returned the global
+  taste. One assertion caught it. Nothing to fix in the code — the swallow is
+  right — but worth knowing that this call site cannot fail loudly.
+
+---
+
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-lb5kzt`) — two verified bugs from one class, and three dogfood passes that all came back clean
+
+**The run.** Two tasks, both verified bugs, both shipped: **v0.409.0**
+(`edit/presets.analyze_proxy`'s sky level) and **v0.409.1**
+(`edit/presets.classify_target`'s geometry cues). Baseline on `origin/main`:
+**5,511 passed / 2 skipped** (25m37s). After v0.409.0: **5,519 / 2**, exactly +8.
+
+### The backlog really is drained, and this is what that looks like
+
+Every entry left in "Bugs (fix these first)" is a recorded stand-down, a measured
+residual marked *probably not worth building*, or gated on data no agent has (the
+`astap_timeout_s` budget is explicitly declined with numbers; the `CROTA2` sign
+needs one real solved sub; the colour-chain bisect needs the owner to deploy). The
+one-sitting list's item 9 (`batch_stack_tmp`) is **already shipped as v0.393.0**
+and the row is struck — do not re-pick it. Sampling the Ideas sections found the
+same pattern the last three runs found: the top entries are shipped, closed as
+already-built, or carry a later Builder note down-weighting them.
+
+### Three dogfood passes, all clean — recorded so nobody re-runs them today
+
+- `scripts/agent-dogfood.sh --build --mosaic --editor`: mosaic trim **7.9 %**
+  (unchanged across seven passes), the step-4c block reads as one paragraph, all
+  21 ops re-render on **both** the field and the mosaic run, undo/redo clean, no
+  console errors, nothing overflowing. Tallest phone pages `/life-list` 3,094 px
+  and `/targets/<field>` 3,078 px — the standing baselines to the pixel.
+- `scripts/agent-dogfood.sh --empty`: `/life-list` 2,779 px phone / 1,224
+  desktop, `/` 1,402 / 1,028, `/library` 1,252 / 923 — identical to the
+  2026-09-07 first-run baseline. No IA slice is indicated.
+
+### Where the bugs came from: the class, not the browser
+
+Same lesson as the run before this one. The pass that finds things is not the
+browser but a *class*, and the class this run used was new:
+
+> **A number measured on one image and used on another** — where the recipe's own
+> ops change the picture between the measurement and the consumption.
+
+`auto_recipe` measures the raw proxy and then emits `background.final_gradient` as
+the **first** op of every recipe it builds. So every cue it takes is a statement
+about an image that no longer exists by the time the cue is spent. Rendering the
+recipe *up to but not including* `tone.stretch` and re-measuring is the whole
+diagnostic, and it took ten lines: the stretch's real input read sky
+**0.1749 / 0.1751 / 0.1751** at gradients 0 / 0.03 / 0.08 while Auto had measured
+**0.047 / 0.195 / 0.357** of the same stack. That is the bug, visible in one table.
+
+**Both bugs were in a *level*, and the fix for both was v0.225.0's, applied late.**
+v0.225.0 made the sky **σ** structure-blind and stopped there. The sky **level**
+next to it, and `classify_target`'s `sky + 6·sky_sigma` threshold, both still used
+the global-median-and-level-MAD estimator that fix exists to replace. Worth
+carrying forward: **when a measurement is fixed, grep for its siblings** — the
+same arithmetic under a different variable name, in the same file.
+
+### The line this run did NOT cross, and why
+
+The obvious "complete" fix is to measure *everything* on the flattened image. Doing
+that to `sky_sigma` moves it **0.007 → 0.023** on the same scene, which lands
+squarely in `_NOISE_LO`/`_NOISE_HI` and would swing the denoise/sharpen crossfade
+on every image the owner owns. Those constants are calibrated in raw-proxy units,
+so re-basing the measurement without re-calibrating them is the blind threshold
+flip AGENTS.md §1 forbids — dressed up as a bug fix. The σ therefore stays where it
+is, deliberately, and the entry says so. **Only the numbers that were wrong moved.**
+
+Running the real `background.final_gradient` for the measurement was also declined,
+on cost measured rather than guessed: **2.48 s** on a 1500×1000 proxy (0.47 s at
+907×615), paid on every Auto build — including the editor's first-open auto-seed —
+and paid *twice*, since the pipeline then runs the same op again. `fit_sky_poly` is
+**~40 ms** and is the primitive both background passes already detrend with.
+
+### A measured lead this run chose not to build
+
+`edit/noise.estimate_noise_sigma` takes the **median** of adjacent-pixel
+differences over the whole canvas, so a mosaic panel that is genuinely grainier is
+invisible to it: on a synthetic canvas whose left quarter carried 1.4× the noise,
+the whole-canvas σ read **0.1233** against the thin region's own **0.1618** — under
+1 % away from the deep region's answer. Auto then sharpens that quarter at the
+strength the deep three-quarters asked for, on the very run where the health panel
+says *"about 23 % of the picture … looks about 1.4× grainier. Processing can't fix
+that."* It is **not filed as a bug** because there is one global strength and no
+non-arbitrary way to pick it from two populations; a fix here is a policy decision
+on the on-by-default path with no owner data behind it. Recorded so the next run
+can start from the numbers instead of re-measuring them.
+
+---
+
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-m85zjk`) — one task: the top 🔴🔴 bug, both halves; and a self-inflicted "measure the mosaic, not the picture" trap
+
+**The run.** One task, deliberately: **v0.408.2**, the Scout's 🔴🔴 solar-CFA
+entry filed in the commit immediately before this run started
+(`7d172752`). It was the only entry in "Bugs (fix these first)" that was neither
+a recorded stand-down nor gated on data no agent has, so there was no second
+pick worth making — the Ideas list's top entries sampled during the wait were
+either already **Shipped** (the "calibration match confidence" entry, #17, still
+sits in the Autonomy section carrying its own ✅ SHIPPED v0.321.0 block), or
+explicitly down-weighted by a later Builder note (the editor's "Original"
+compare; the plateaued→fresh-target nudge, most of which v0.209.0 already
+delivered). Ending at one finished task beat starting a second on any of those.
+
+### The bug had a second half the entry did not name
+
+The filed entry was about the engine constant, and fixing that alone would have
+left the owner's actual picture untouched and unmentioned. `webapp/video.py`'s
+`colour_is_stale` — the surface that exists *precisely* to tell him a still needs
+re-stacking — short-circuits on `meta.colour_current`, and **v0.347.0 stamped
+that True on every still it made**, wrong phase and all. So the advisory built
+for the first version of this bug was structurally blind to the second.
+
+The generalisable shape: **a "we handled X" boolean cannot survive a correction
+to *how* X is handled.** It answers "did some build do this?" when the question
+is "did a build that got it *right* do this?". It is now `colour_build`, a
+generation number (`_COLOUR_PIPELINE_BUILD`), so the next correction to the
+colour path can tell its predecessors' output apart from its own. Any future
+staleness advisory should be born as a generation, not as a flag.
+
+### The trap: detecting a CFA phase on a frame that has already been demosaiced
+
+Dogfooding the fix end to end, the first script reported `detected='GBRG'` for a
+capture the fixture had recorded in **`RGGB`** — which reads exactly like a
+detector that does not work, or an ffmpeg row-flip in the AVI round trip (the
+very coupling the entry warns about, so it was the obvious suspect).
+
+It was neither. The script asked
+`detect_cfa_pattern(next(iter(iter_frames(path)))[..., 0])` — and `iter_frames`
+**already demosaics**. That is the R channel of a finished picture, whose 2×2
+sub-lattice structure has been interpolated away and reshuffled; reading a CFA
+phase off it is meaningless, and it happened to answer `GBRG` either way.
+Measured properly — the raw `rgb24` plane straight off ffmpeg, before the
+demosaic — the four sub-lattice means are exactly what the fixture laid down,
+the round trip flips **nothing**, and detection answers `RGGB` for `RGGB` and
+`GBRG` for `GBRG`.
+
+Worth knowing because the mistake is invisible: both readings are plausible
+numbers from a real array, nothing errors, and the wrong one accuses the code.
+**Anything that reads a CFA phase must take the plane from before
+`_demosaic_frame`, not from `iter_frames`' output** — which is the whole reason
+detection lives inside the generator, on the frame off the wire, rather than in
+a caller.
+
+### What the fix was actually verified on
+
+Not only the 64×48 test fixture. A 480×360, 24-frame capture in **each** phase,
+stacked end to end through `stack_video` at `keep_percent=40`: both came back
+`R > G > B` with the mesh at 0.007 (a replicated mosaic reads ~0.58), and
+detection answered each phase correctly off the wire. The `RGGB` half of that is
+the upgrade-safety half — reading the phase must not regress the captures that
+already worked — and it is pinned in the suite as the second half of a
+parametrized test.
+
+### Green gates
+
+Baseline on `origin/main` before any change: **5,500 passed / 2 skipped**
+(26m16s). After: **5,511 passed / 2 skipped** (26m31s), exactly **+11**. Frontend, because
+`MoonSun.tsx` changed: `npx tsc --noEmit` clean, **3,550 tests** in 253 files,
+`npx vite build` succeeds. `ruff check` clean on every file touched.
+
+---
+
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-blnqnh`) — two verified mosaic bugs from *auditing a bug class* rather than dogfooding, and a clean sixth mosaic pass
+
+**The run.** Two tasks, both verified bugs, both shipped: **v0.408.0**
+(`qc/runner.stationary_streak_frames`) and **v0.408.1**
+(`qc/grading.grade_frames`). One `scripts/agent-dogfood.sh --build --mosaic
+--editor` pass, which came back **clean and found nothing** — and that is the
+note worth keeping.
+
+### Where the bugs came from: the class, not the browser
+
+The last four findings all came out of the dogfood pass's step-4c block (two of
+the app's own sentences disagreeing). This run ran that pass and it was clean:
+mosaic trim **7.9 %** (unchanged across six passes), the three mosaic sentences
+now read as one paragraph after v0.406.2/v0.407.1, editor drive clean on all 21
+ops, page probes clean, nothing overflowing, no console errors. Tallest phone
+pages: `/life-list` 3,094 px, `/targets/<sample>` 3,078 px — in line with the
+standing baselines, so no IA slice is indicated.
+
+Both bugs instead came from grepping the **class** AGENTS.md §1 keeps naming —
+*a threshold taken from a whole-target number that is really per-panel* — which
+has now produced A6, v0.270.2, v0.271.0, v0.406.x, v0.407.1 and these two. The
+search was literally `grep -rn "min_frames\|MIN_FRAMES" seestack/ webapp/`, then
+reading each hit and asking "**whose** population is this, and what happens to a
+frame that isn't in one?"
+
+**The generalisable shape, for whoever reads this next.** Both bugs were in the
+*fallback*, not in the rule. Each module had already been fixed to judge a
+mosaic panel against itself; each then wrote "…and a frame with no population of
+its own falls back to the target-wide one, so nothing is left unjudged". That
+sentence sounds careful and is the bug: for a position-dependent measure the
+target-wide answer is not a *weaker* yardstick, it is the *wrong* one, and
+because a thin panel's frames are alike it condemns all of them at once. So the
+question to ask of the next one is **"what does this do with the leftovers?"** —
+`-1`, `None`, "too thin to cluster", "no cluster found". `bulk_select` is the
+counter-example that shows the right answer was available all along: it gives
+the unclustered frames a **bucket of their own** and never merges them into a
+panel.
+
+### v0.408.0 — a second stationary object made the detector worse than one
+
+`stationary_streak_frames` anchored on the median of the *whole* flagged set. On
+a mosaic the panels point at different sky, so one elongated object spanning the
+mosaic lands at a different place in each panel's frames, and that median falls
+**between** the clusters, within the radius of nothing. Reproduced by `exec`-ing
+`origin/main`'s own function verbatim on the new fixtures: one panel of 8 → 8
+rescued; **two panels of 8 → 0**; a 2×2 of 6 → 0; two panels of 60 → **0**.
+
+**The part that cost the most thought was the price of searching.** Replacing one
+anchor with "try every candidate centre" is obviously right and quietly changes
+the statistics: the radius's own "four trails agreeing is a one-in-a-million
+coincidence" is a statement about *one* centre. Measured, the first draft called
+**39 of 300** scattered-trail sets a tracked object at n = 20. A plain density
+floor (`k ≥ 5 × the chance occupancy`) does **not** fix it — it cannot separate
+"4 of 20" from "6 of 24", which are genuinely different under a Poisson tail and
+identical under a linear floor. Scoring each cluster against the null the trails
+actually obey, with the tail multiplied by the number of centres tried, gives
+**2 false verdicts in 1,800 sets** while a 60-per-panel mosaic cluster sails
+through. If you touch this again: the sweep is the test, not one seed.
+
+### v0.408.1 — and the test that was right to stop the first fix
+
+The first version of the grading fix said "a frame with no panel of its own is
+never graded on a per-pointing metric", and
+`test_a_panel_too_thin_to_grade_falls_back_to_the_whole_target` failed. That test
+is correct: a genuinely *clouded* thin panel must still be caught. §5 forbids
+weakening it, and the failure was the useful signal — the first fix was too
+broad.
+
+What separates the two causes turned out to be **physical, not statistical**:
+cloud raises the sky level, a different pointing does not. Over one mosaic's few
+degrees `sky_adu_median` is a property of the night; star count and median star
+flux are properties of what you framed. So only those two got the new
+`pointing_scale` flag, `sky_adu_median` kept its fallback, the existing test
+passed unchanged — and it now also asserts its reason set is exactly
+`{"sky_adu_median"}`, so the two rules can't merge back into one. **A failing
+test that pins the opposite of your fix is usually telling you the fix is the
+wrong width, not that the test is wrong.**
+
+### The rest of the class is swept — all eleven `pointing_groups` callers, checked
+
+Recorded so nobody re-walks them. `grep -rn "pointing_groups(" seestack/ webapp/`
+gives eleven call sites; the two fixed above were the only ones that handed a
+leftover frame another panel's yardstick.
+
+- `stack/photometric.py::_panel_transparency_refs` — **right already**, and says
+  so in its own docstring: a frame in no substantial group "gets no reference and
+  stays neutral rather than being scaled against a yardstick from another patch
+  of sky".
+- `session_recap.py::_panel_rescale_factors` — **right**: a sub in no substantial
+  panel is left at 1.0, and it declines entirely below two measurable panels
+  because rescaling one against un-rescaled neighbours is worse than nothing.
+- `qc/bulk_select.py::_buckets` — **right**, and it is the pattern the grading fix
+  copied: `-1` is "a bucket of its own, never merged into a panel and never
+  counted as one".
+- `stack/stacker.py::_panel_transparency_ratios` — **right**: `-1` frames are
+  skipped, and below two measurable panels it returns `[]` so the whole target
+  falls back together rather than mixing the two rules.
+- `stack/weighting.py::_positional_medians` — carries the *same* thin-panel
+  fallback in words, and is fine in practice: its `_MIN_PANEL_FRAMES` is **3**,
+  not 10, so only a one- or two-frame "panel" falls back — a stray solve rather
+  than a panel, for which the target-wide median is the right answer.
+- `mosaicmap.py` and the two `stacker.py` canvas/auto-reject sites are about
+  *geometry* (which panels exist, how deep each is), not about judging a frame
+  against a population, so the question doesn't arise.
+
+### Green gates
+
+Full suite headless, baseline on `origin/main` before any change: **5,487
+passed / 2 skipped** in 36 m 47 s — identical to the figure the 2026-09-09 run
+recorded, so `main` was green. Re-run on the branch (already up to date with
+`origin/main`, nothing new to merge): **5,500 passed / 2 skipped** in 36 m 03 s
+— exactly **+13**, which is the arithmetic the new tests predict (8 in
+`test_qc_streak_stationary.py`, 5 in `test_qc_grading.py`). Frontend untouched
+this run — no file under `frontend/` changed — so tsc/vitest/vite build were not
+re-run. `ruff check` on the four touched files reports one finding, pre-existing
+(`timezone.utc` on a fixture line that predates this run); nothing new added.
+
+The two suites were run **one after the other**, not in parallel, and
+`/tmp/pytest-of-root` (7.2 GB) was deleted between them — the disk lesson the
+2026-09-09 block records.
+
+---
+
+## 2026-09-09 (Builder, branch `claude/sweet-babbage-p5vpyp`) — the fourth finding in the gap between two sentences, a "new" feature that was 90 % already built, and a two-pytest disk lesson
 
 **The run.** Two tasks, both shipped: **v0.407.0** (the Scout's shareable-labelled-picture
 feature) and **v0.407.1** (a verified bug found by dogfooding). One
