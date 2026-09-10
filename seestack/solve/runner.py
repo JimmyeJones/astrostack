@@ -246,6 +246,80 @@ def build_solve_arglist(
     return out
 
 
+def _same_hint(a: float | None, b: float | None) -> bool:
+    """True when two hint coordinates are the same number (or both absent)."""
+    if a is None or b is None:
+        return a is None and b is None
+    return abs(float(a) - float(b)) <= 1e-9
+
+
+def build_sibling_retry_arglist(
+    project,
+    solve_args: list[tuple],
+    failures: list[tuple[int, str | None]],
+) -> list[tuple[int, str, str | None, float, float, float | None, float | None, float]]:
+    """Second-pass args: re-offer this round's *failures* around the sibling centre.
+
+    :func:`build_solve_arglist` offers the solved siblings' centre only to a frame
+    that has **no** usable header hint — but a Seestar *does* write RA/Dec headers,
+    so the owner's subs all carry a (loose, 30°) hint and are searched blind-wide
+    even after other subs of the same target have solved to within a degree. This
+    builds the one extra pass that closes that gap: after the round finishes, every
+    frame it failed to locate is re-offered with the now-known sibling centre at the
+    tight :data:`SIBLING_HINT_RADIUS_DEG`, which is a *smaller, correct* search
+    region than the one that just failed. ASTAP still verifies the star pattern, so
+    a second pass can only ever **add** solves.
+
+    ``solve_args`` is the arg list the round actually ran (so a caller that
+    overrode ASTAP path/FOV/timeout gets those same values back), and ``failures``
+    is ``[(frame_id, error_text), …]`` for the frames that came back unlocated —
+    ids and messages rather than whole :class:`SolveResult` objects, because a
+    thousand-sub target's results carry a WCS blob each and this pass must not hold
+    the round in memory to schedule its retry.
+
+    Four kinds of failure are deliberately **not** retried, so the pass costs
+    almost nothing on a night that is simply unsolvable:
+
+    * a **setup** failure (ASTAP or its star database missing) — the same error on
+      every frame, and nothing about where we search will fix it;
+    * a **timeout** — the ladder already burned up to 3× ``astap_timeout_s`` on that
+      frame (the cost the Settings hint warns about), and a frame that ran out of
+      time is the one shape where a second full attempt genuinely doubles the wait;
+    * a job that **raised** rather than returning a result (no error text to judge,
+      and a crashed worker is not a search-region problem);
+    * a frame whose first attempt was **already** this same search — same centre,
+      radius already at or inside the sibling radius — which would re-run an
+      identical solve.
+
+    Returns ``[]`` when no sub has solved yet (there is no sibling centre to offer)
+    or when nothing is left to retry.
+    """
+    fallback = fallback_solve_hint([f for f in project.iter_frames() if f.wcs_json])
+    if fallback is None:
+        return []
+    ra_hint, dec_hint = fallback
+
+    by_id = {args[0]: args for args in solve_args}
+    out: list[tuple[int, str, str | None, float, float, float | None, float | None, float]] = []
+    for frame_id, error_text in failures:
+        args = by_id.get(frame_id)
+        if args is None:
+            continue
+        if classify_solve_setup_error(error_text) is not None:
+            continue
+        if is_solve_timeout_error(error_text):
+            continue
+        fid, path, astap_path, fov_deg, timeout_s, prev_ra, prev_dec, prev_radius = args
+        # Never widen a search the caller (or the user's configured radius) had
+        # already tightened — the same rule ``build_solve_arglist`` follows.
+        radius = min(float(prev_radius), SIBLING_HINT_RADIUS_DEG)
+        if (_same_hint(prev_ra, ra_hint) and _same_hint(prev_dec, dec_hint)
+                and float(prev_radius) <= radius):
+            continue
+        out.append((fid, path, astap_path, fov_deg, timeout_s, ra_hint, dec_hint, radius))
+    return out
+
+
 def _store_solve_failed_reason(project, frame_id, reason: str) -> None:
     """Stamp a ``solve_failed:<reason>`` reject reason **without clobbering a real
     prior reason.**

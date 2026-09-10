@@ -14,6 +14,153 @@ Newest first.
 
 ---
 
+## v0.412.0 — 2026-09-10 — the faint-field rescue anchors on a sub that already solved
+
+*(Builder, the 2026-07-25 backlog item "let the bootstrap anchor on an already-solved sub when a few (but
+< min_frames) subs did solve, instead of always re-solving the deep image". Pillar: autonomy + image quality
+— PRIORITY 2. Additive, on the opt-in `astap_bootstrap_solve` path only.)*
+
+**The gap.** The stack-then-solve bootstrap engages when the per-sub pass left **fewer than `min_frames`**
+subs solved — a band that includes "a handful did solve". In that band it nonetheless always built a deep
+image and asked ASTAP to solve *that*: a synthetic frame with no optics headers, on the very field that had
+just defeated the solver sub by sub. Meanwhile 1–7 real, ASTAP-verified plate solutions of that same pointing
+were sitting in the project DB, unused.
+
+**The change.** When such a sub can serve as the registration reference, the burst is registered against
+**it** and takes **its** WCS. Everything downstream is identical — the same phase-correlation shifts, the
+same `propagate_wcs` CRPIX offsets (the reference's pixel grid is what both paths propagate from) — but the
+integration, the temp FITS, the extra ASTAP call and that call's own failure risk all disappear. The
+deep-image path is untouched for the zero-solved case, which is what it was measured for.
+
+**`pick_solved_anchor(frames, shape)` is deliberately picky**, because a bad anchor would mis-place a whole
+burst:
+* the candidate's WCS must be **usable** — `wcs_text_is_usable`, the same bar the solve path applies, since a
+  truncated sidecar reads back truthy and locates nothing;
+* its pixels must be the members' own **shape** — a reference of another size correlates against nothing;
+* candidates are tried in `_order_members` order (star-richest, sharpest first — the best correlation
+  target), and only the first `ANCHOR_LOAD_ATTEMPTS` (3) are actually loaded, since a load is a debayer.
+Failing all that, it returns `None` and the deep-image path runs exactly as before.
+
+**The gates still mean what they meant.** The anchor is prepended as member 0 and every count below it —
+readability, registration, `n_members`, `n_registered` — counts only the **unsolved** members, so a target
+too thin to bootstrap cannot be made to look thick enough by the presence of an anchor (pinned by a test).
+The anchor is skipped in the propagation loop: it is already solved, and the module's contract is that an
+already-solved sub is never touched.
+
+**Honest about which path ran:** a new `BootstrapResult.anchored_on_solved_sub` (and `bootstrap_anchored` on
+the scan summary) says so, `deep_solved` stays False where no deep image was ever built, and `reason` reads
+*"rescued N sub(s) by registering to an already-solved sub"*.
+
+**Upgrade-safe (§9):** engine-only, additive, and on a path that is **off by default**. No config, DB-schema,
+on-disk, endpoint or existing-response-shape change; the two new keys are additive and nothing reads
+`bootstrap_solved` today.
+
+**Tests (+5, four fail before):** `tests/test_bootstrap_solve.py` — the anchored rescue lands every member on
+its **ground-truth** CRPIX with a `deep_solver` that raises if called at all (so "no deep solve happened" is
+proved, not asserted); the anchor is not among the rescued ids; an anchor cannot inflate the engagement gate;
+a differently-shaped solved sub and an unusable-WCS solved sub each fall back to the deep-image path; and
+`pick_solved_anchor` returns `None` when nothing has solved. The fifteen existing bootstrap cases pass
+untouched.
+
+---
+
+## v0.411.1 — 2026-09-10 — 🐛 a successful bootstrap rescue reported itself as a failure
+
+*(Builder, tripped over while writing the v0.411.0 second solve pass in the same block; reproduced by test.
+Severity: log-level only, but on the opt-in path a beginner turns on *because* their faint targets aren't
+stacking. Confidence: certain — the traceback is in the test's fail-before.)*
+
+**The bug.** `Project` keeps the target's name in its meta table and has no `.name` attribute. The
+stack-then-solve bootstrap's credit line read `project.name` **inside** the block's own
+`try: … except Exception as exc: log.warning("stack-then-solve bootstrap failed: %s", exc)` — so on every run
+where the bootstrap actually **rescued** subs (`bres.n_propagated` truthy, the one branch that reads it), the
+attribute raised and the rescue was logged as *"stack-then-solve bootstrap failed: 'Project' object has no
+attribute 'name'"*. The reverse of the truth, and the only place a walk-away run's log says what the
+bootstrap did.
+
+**Not user-visible beyond the log:** `summary["bootstrap_engaged"/"bootstrap_solved"/"bootstrap_propagated"]`
+are all written before the raise, so the Jobs page's *"Located N more subs by combining your un-located
+frames…"* note was correct throughout — which is exactly why this survived: nothing on screen disagreed.
+
+**Fix.** `project.get_meta("name")`, the accessor the rest of the codebase uses (`gui/main_window.py`), with a
+comment saying why the attribute isn't there. One line.
+
+**Tests (+1, fails before):** `tests/test_scanner.py::test_a_successful_bootstrap_rescue_is_not_logged_as_a_failure`
+— a stubbed bootstrap that rescues 3 subs, asserting via `caplog` that **no** warning is emitted and that the
+info line names the target. It fails before with the verbatim warning above.
+
+---
+
+## v0.411.0 — 2026-09-10 — a second solve pass reaches the subs a Seestar's own header hint kept blind
+
+*(Builder, backlog slice (c) of the v0.180.0 sibling-hint fill-in, filed 2026-07-23 and open since. Pillar:
+autonomy + image quality — PRIORITY 2/4. Additive; can only ever add solves.)*
+
+**The gap.** `run_stack` combines only frames that are accepted **and** solved, so every sub ASTAP fails to
+locate is silently left out of the picture — the mechanism behind the owner's thin/gibberish stacks on faint
+fields. v0.180.0 already borrows the centre the target's *solved* subs agree on and searches a tight
+`SIBLING_HINT_RADIUS_DEG` (5°) around it — but only for a frame that has **no** usable header hint. A Seestar
+writes `RA`/`DEC` into every sub, so on the owner's own data that rescue **never fires**: each unsolved sub
+carries its own loose hint and is searched blind-wide at the configured 30°, even after a dozen of its
+siblings have pinned the pointing to within a degree.
+
+**The fix — one extra pass, over the failures only.** After the round finishes, `run_qc_and_solve` re-offers
+each frame it failed to locate with the now-known sibling centre at the tight radius: a *smaller, correct*
+search region than the one that just failed, which is exactly what the 2026-07-24 ASTAP measurement said
+moves the needle (a failed search costs ~4 s at 30° and ~0.2 s at 5°; a wider radius and a longer timeout are
+non-levers). ASTAP still verifies the star pattern, so a second pass cannot invent a wrong solution — it can
+only add solves.
+
+**What it deliberately does not retry**, so a hopeless night pays almost nothing:
+* a **setup** failure (ASTAP or its star database missing) — the same error on every frame, and no search
+  region fixes it (so a library with no star database costs exactly zero extra attempts);
+* a **timeout** — that frame already burned up to 3× `astap_timeout_s` on the ladder, the one cost the
+  Settings hint warns about, and it is the single shape where a second full attempt genuinely doubles the
+  wait. It keeps its "Ran out of time being located" bucket (v0.276.4) untouched;
+* a job that **raised** rather than returning a result (no error text to judge, and a crashed worker is not a
+  search-region problem);
+* a frame whose first attempt was **already** this same search — same centre, radius already at or inside the
+  sibling radius — which would re-run an identical solve. This is what keeps the pass off the frames
+  v0.180.0 already rescues.
+
+And it stands down entirely when **nothing** has solved yet (with no sibling centre there is nothing to
+offer, so a night where every sub failed is attempted once, exactly as today), and when the caller passed
+`use_solve_hints=False` — a user who turned hints off asked for a blind solve, and this pass is nothing but a
+hint, so it follows that setting the way `build_solve_arglist`'s own sibling fallback does rather than
+reinstating hinting behind their back.
+
+**Shape.** The decision is a pure, testable
+`solve/runner.build_sibling_retry_arglist(project, solve_args, failures)`, which reuses the round's own arg
+tuples (so a caller that overrode ASTAP path/FOV/timeout gets those same values back) and takes the failures
+as `(frame_id, error_text)` rather than whole `SolveResult`s — a thousand-sub target's results carry a WCS
+blob each, and this pass must not hold the round in memory to schedule its retry. It honours
+`build_solve_arglist`'s own rule that a user who tightened `astap_hint_radius_deg` below 5° is never widened.
+`scanner.run_qc_and_solve` gains `retry_unsolved_with_sibling_hint=True` beside the existing
+`use_solve_hints` / `auto_reject_streaks` defaults; the pass runs **before** the opt-in stack-then-solve
+bootstrap, so a real per-sub solve is preferred over a propagated one and the bootstrap engages on fewer
+targets.
+
+**What the user sees, without a new surface.** `solve_ok` is the app's honest "how many did we locate?" figure
+and a rescued sub counts there, so the Jobs page's existing *"Located 38 of 40 in the sky"* sentence and its
+mostly-failed nudge both get better with no frontend change; `solve_done`/`solve_total` stay the progress
+counters they were (the retry is a subset of the frames already attempted). `solve_retry_total` /
+`solve_retry_ok` are added to the summary only when the pass actually ran.
+
+**Upgrade-safe (§9):** engine-only, additive. No config, DB-schema, on-disk, endpoint, response-shape or
+existing-default change; the new summary keys are additive and every existing consumer reads the same keys it
+did. No new setting to migrate, and nothing to turn on.
+
+**Tests (+8, three fail before on behaviour):** `tests/test_solve_hints.py` (+4 — a header-hinted failure is
+retried at the tight radius around the sibling centre; setup failures, timeouts and an identical search are
+each skipped in one case; nothing is retried until something has solved; a tightened radius is never widened)
+and `tests/test_scanner.py` (+4 — end-to-end through `run_qc_and_solve` with a solver that only finds the
+field when searched tight: three subs rescued, `solve_ok` counts them, exactly one extra attempt per frame
+and never a loop; the same target left unsolved with the pass switched off, which is the fail-before; a night
+where nothing solved at all paying no extra attempts; and `use_solve_hints=False` leaving every attempt
+blind).
+
+---
+
 ## v0.410.1 — 2026-09-10 — 🐛 the same panel steps decided what your target *was*
 
 *(Builder-verified by reproduction, found by taking v0.410.0's bug class to the other cue `auto_recipe`
