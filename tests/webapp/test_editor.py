@@ -902,7 +902,7 @@ def test_auto_feedback_with_run_context_is_scoped_to_the_object_type(
 
     # Force the classifier so the test doesn't depend on the synthetic proxy's
     # content — the classifier itself is covered by its own unit tests.
-    monkeypatch.setattr(presets, "classify_target", lambda rgb: {"cls": "galaxy"})
+    monkeypatch.setattr(presets, "classify_target", lambda rgb, coverage=None: {"cls": "galaxy"})
 
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, basename="scoped")
@@ -935,9 +935,9 @@ def test_auto_feedback_with_run_context_is_scoped_to_the_object_type(
             f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()["ops"]
         return next(o for o in ops if o["id"] == "tone.stretch")["params"]["target_bg"]
 
-    monkeypatch.setattr(presets, "classify_target", lambda rgb: {"cls": "cluster"})
+    monkeypatch.setattr(presets, "classify_target", lambda rgb, coverage=None: {"cls": "cluster"})
     cluster_bg = stretch_target_bg()  # a cluster is untouched by the galaxy taste
-    monkeypatch.setattr(presets, "classify_target", lambda rgb: {"cls": "galaxy"})
+    monkeypatch.setattr(presets, "classify_target", lambda rgb, coverage=None: {"cls": "galaxy"})
     galaxy_bg = stretch_target_bg()
     assert galaxy_bg > cluster_bg
 
@@ -2579,3 +2579,111 @@ def test_histogram_colour_check_is_silent_on_an_unidentified_target(
     # …but the same pixels on a target with no vetted family say nothing.
     monkeypatch.setattr(editor_router, "_target_nebula_class", lambda *_a: "")
     assert client.get(url).json()["colour_check"] is None
+
+
+# --- Auto measures the sky level on the plane its own recipe will hand the
+#     stretch: a mosaic run's coverage map goes with its proxy (v0.410.0) -------
+
+def _run_and_dir(data_root, safe, rid):
+    """``(project_dir, StackRunRow)`` for a run, the two things the Auto builders
+    take."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == rid)
+            return Path(proj.project_dir), run
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+#: Which engine entry point each webapp Auto builder is a wrapper around — the
+#: pair that has to be handed the *same* coverage map, or the reported cues
+#: describe a different plane from the one the recipe was built on.
+_AUTO_BUILDERS = {
+    "build_auto_recipe_for_run": "auto_recipe",
+    "build_auto_analysis_for_run": "analyze_auto_inputs",
+}
+
+
+def _captured_coverage(monkeypatch, build, data_root, safe, rid):
+    """Run one of the Auto builders and return the ``coverage`` it handed the
+    engine (``None`` when it passed none)."""
+    from webapp.routers import editor as editor_mod
+
+    seen: dict = {}
+    name = _AUTO_BUILDERS[build.__name__]
+    real = getattr(editor_mod.presets_mod, name)
+
+    def spy(*args, **kwargs):
+        seen["coverage"] = kwargs.get("coverage")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(editor_mod.presets_mod, name, spy)
+    project_dir, run = _run_and_dir(data_root, safe, rid)
+    build(project_dir, run, None)
+    return seen["coverage"]
+
+
+def test_auto_measures_a_mosaic_on_its_frame_count_map(monkeypatch, client,
+                                                       solved_library):
+    """A mosaic's panel steps are removed by the ``background.level_coverage``
+    pass Auto prepends, so the sky level that sets the stretch target has to be
+    read with them out — which needs the run's own coverage map. It must be the
+    honest **frame count** where the run wrote one, for the same reason the border
+    trim reads that map: a weighted coverage value splits one panel across a band
+    of values."""
+    from webapp.routers.editor import build_auto_analysis_for_run, build_auto_recipe_for_run
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    counts = np.full((80, 100), 4.0, dtype="float32")
+    counts[:, 50:] = 7.0
+    _write_coverage(solved_library, safe, np.full((80, 100), 5.0, dtype="float32"))
+    _write_frame_coverage(solved_library, safe, counts)
+
+    for build in (build_auto_recipe_for_run, build_auto_analysis_for_run):
+        cov = _captured_coverage(monkeypatch, build, solved_library, safe, rid)
+        assert cov is not None, f"{build.__name__} measured no coverage at all"
+        assert np.array_equal(cov, counts), (
+            f"{build.__name__} measured the weighted map, not the frame count")
+
+
+def test_auto_falls_back_to_the_weighted_map_without_a_frame_count_sibling(
+        monkeypatch, client, solved_library):
+    """Every run recorded before ``_framecov.fits`` existed still gets measured —
+    on the map it has."""
+    from webapp.routers.editor import build_auto_recipe_for_run
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    weighted = _ragged_border_coverage()
+    _write_coverage(solved_library, safe, weighted)
+    assert not (_output_dir(solved_library, safe) / "master_framecov.fits").exists()
+
+    cov = _captured_coverage(monkeypatch, build_auto_recipe_for_run,
+                             solved_library, safe, rid)
+    assert cov is not None and np.array_equal(cov, weighted)
+
+
+def test_auto_measures_a_single_field_exactly_as_it_always_did(monkeypatch, client,
+                                                               solved_library):
+    """Upgrade safety at the seam that decides it: a single-field run gets no
+    ``background.level_coverage`` pass, so measuring its coverage steps *out*
+    would describe a different picture from the one its stretch will see. It is
+    never asked for a map — even when one is sitting there."""
+    from webapp.routers.editor import build_auto_analysis_for_run, build_auto_recipe_for_run
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="single", h=80, w=100,
+                    is_mosaic=False)
+    _write_coverage(solved_library, safe, _ragged_border_coverage(),
+                    basename="single")
+    _write_frame_coverage(solved_library, safe, _ragged_border_coverage(),
+                          basename="single")
+
+    for build in (build_auto_recipe_for_run, build_auto_analysis_for_run):
+        assert _captured_coverage(monkeypatch, build, solved_library, safe,
+                                  rid) is None, build.__name__

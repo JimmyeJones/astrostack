@@ -382,3 +382,83 @@ def test_a_gradient_does_not_move_a_galaxy_or_a_cluster_either():
     cluster = np.repeat(lum[..., None], 3, axis=2).astype("float32")
     for amount in (0.0, 0.05, 0.15):
         assert classify_target(_tilted(cluster, amount))["cls"] == "cluster"
+
+
+# ---------------------------------------------------------------------------
+# …and the same for a MOSAIC's panel steps (v0.410.1)
+#
+# Panel offsets break the same `sky + max(0.06, 6·sky_sigma)` threshold the
+# gradient above breaks, and worse: they are not a smooth surface, so
+# ``_detrended_luminance`` can barely touch them. They are removed by
+# ``background.level_coverage``, which ``auto_recipe`` prepends on every mosaic —
+# so, exactly like the tilt, they must not decide the archetype. The caller hands
+# in the run's coverage map; ``_delevelled_luminance`` bins on it the way that op
+# does.
+# ---------------------------------------------------------------------------
+
+#: Per-panel level offsets, and the frame counts that identify the panels — the
+#: uneven depth a real mosaic has (the bundled ``--mosaic`` sample is 6/6/6/3).
+_PANEL_STEPS = (0.0, 0.024, -0.016, 0.032)
+_PANEL_FRAMES = (12, 9, 15, 6)
+
+
+def _panelled(rgb: np.ndarray, steps=_PANEL_STEPS) -> np.ndarray:
+    """``rgb`` laid out as vertical panels, each carrying its own residual level
+    offset — what photometric matching leaves behind at a mosaic's seams."""
+    out = np.asarray(rgb, np.float32).copy()
+    pw = out.shape[1] // len(steps)
+    for i, off in enumerate(steps):
+        out[:, i * pw:(i + 1) * pw] += np.float32(off)
+    return out
+
+
+def _panel_coverage(shape, frames=_PANEL_FRAMES) -> np.ndarray:
+    """The coverage map that describes that layout: one frame count per panel."""
+    h, w = shape[:2]
+    cov = np.zeros((h, w), dtype=np.float32)
+    pw = w // len(frames)
+    for i, n in enumerate(frames):
+        cov[:, i * pw:(i + 1) * pw] = float(n)
+    return cov
+
+
+def test_panel_steps_do_not_invent_a_confident_verdict():
+    """The false positive, on the shape the owner actually shoots: the steps erase
+    the diffuse half of the picture, so what is left looks like nothing but stars.
+
+    Measured before the fix on this file's own field: ``cluster`` at confidence
+    **0.98**, with ``ext_frac`` 0.013 → 0.002 and ``star_share`` 0.90 → 0.98, for
+    a stack whose only difference is how its panels were laid out.
+    """
+    field = _star_field_with_faint_nebulosity()
+    assert classify_target(field)["cls"] is None, "fixture must decline unpanelled"
+    stepped = _panelled(field)
+    out = classify_target(stepped, _panel_coverage(field.shape))
+    assert out["cls"] is None, f"the layout invented {out['cls']}: {out['cues']}"
+    assert out["preset_id"] is None
+
+
+def test_panel_steps_do_not_move_a_nebula_a_galaxy_or_a_cluster():
+    """The guard against over-correcting: every archetype that was stable across
+    the layout must stay stable, and keep its preset."""
+    nebula = _panelled(_coloured_nebula_field(0.01))
+    assert classify_target(nebula, _panel_coverage(nebula.shape))["cls"] == "nebula"
+
+    galaxy = _panelled(_galaxy_field(0.01))
+    out = classify_target(galaxy, _panel_coverage(galaxy.shape))
+    assert out["cls"] == "galaxy" and out["preset_id"] == "galaxy_broadband"
+
+    rng = np.random.default_rng(4)
+    h = w = 220
+    lum = (np.full((h, w), 0.02, np.float32) + _stars((h, w), 180, rng, sigma=1.0))
+    cluster = _panelled(np.repeat(lum[..., None], 3, axis=2).astype("float32")
+                        + rng.normal(0, 0.004, (h, w, 3)).astype("float32"))
+    assert classify_target(cluster, _panel_coverage(cluster.shape))["cls"] == "cluster"
+
+
+def test_a_verdict_is_untouched_by_a_single_level_coverage_map():
+    """Upgrade safety: a map with one level is not a mosaic, so nothing about the
+    verdict — or any cue behind it — moves."""
+    field = _star_field_with_faint_nebulosity()
+    flat = np.full(field.shape[:2], 8.0, dtype=np.float32)
+    assert classify_target(field, flat)["cues"] == classify_target(field)["cues"]

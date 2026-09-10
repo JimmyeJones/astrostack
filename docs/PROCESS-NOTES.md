@@ -18,6 +18,115 @@ is a queue.
 
 ---
 
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-1nfpr0`) — the same bug class again, one step further out, and the trap that nearly made the fix worse than the bug
+
+**The run.** Two tasks, both verified bugs, both shipped: **v0.410.0**
+(`edit/presets.analyze_proxy`'s sky level under a mosaic's panel steps — the
+residual the previous run filed rather than guessed at) and **v0.410.1**
+(`classify_target`'s geometry cues, the same steps). Baseline on `origin/main`:
+**5,522 passed / 2 skipped** (26m25s); on the finished branch, **5,539 / 2** (26m27s) — exactly **+17**, the +14 and +3 the two entries claim. The frontend is untouched, so its
+gates were not re-run; `vite build` ran anyway inside the dogfood pass below and succeeded.
+
+### The class is now four cues deep, and it is worth naming precisely
+
+The class the last run named is *"a number measured on an image the recipe
+changes before the number is used."* It has now produced four fixes in a row,
+each one the same shape with a different structure and a different cue:
+
+| | structure removed by | cue that was measuring it anyway |
+|---|---|---|
+| v0.409.0 | `background.final_gradient` | `analyze_proxy`'s sky **level** |
+| v0.409.1 | `background.final_gradient` | `classify_target`'s **geometry** |
+| v0.410.0 | `background.level_coverage` | `analyze_proxy`'s sky **level** |
+| v0.410.1 | `background.level_coverage` | `classify_target`'s **geometry** |
+
+That is a 2×2, and it is now **full**. The rest of what `auto_recipe` measures
+was checked this run rather than assumed, and comes back clean:
+`suggest_denoise_strength`/`estimate_noise_sigma` are the adjacent-pixel-difference
+estimator, structure-blind by construction (measured across the layout: σ 0.0092 →
+0.0089, and one seed of four moved the *slider* by one step, 0.20 → 0.15 — the
+noise floor's own scatter, not a step response); the sharpen radius comes off the
+frames' FWHM, not the image; and `tone.curves`'s auto lift and
+`tone.color_calibrate` both derive their anchors **at apply time**, from their own
+input, which is the right place by construction. **So do not go looking for a
+fifth instance of this exact 2×2** — extend it only if a *new* op is prepended
+ahead of the stretch.
+
+**One measured residual, deliberately not fixed.** `classify_target`'s **colour**
+cue reads the untouched array on purpose (`_extended_chroma` is scale-invariant),
+and a per-panel offset is added to all three channels, so the region's mean moves
+and the chroma with it. Measured across the layout on four seeds: **−1.4 % to
+−5.5 %** (0.293 → 0.286 at seed 13). The nebula bar is 0.06 against values near
+0.29, so this cannot change a verdict; fixing it would mean de-levelling per
+channel, which is real work on the on-by-default path for an effect an order of
+magnitude below the thing it decides. Recorded so it is declined once rather than
+re-derived.
+
+### The trap: the guard the fix needed was not the guard the op next door uses
+
+The first implementation of `_delevelled_luminance` was the obvious one — bin by
+coverage value, shift each bin by its own robust median — and it reproduced the
+target numbers exactly on the four-panel scene. It also **flattened a nebula into
+the sky**: on `test_target_classify._coloured_nebula_field`, a canvas the object
+genuinely fills, the per-panel means went 0.109/0.299/0.283/0.128 →
+0.166/0.183/0.184/0.167 and the verdict stopped being `nebula` at all. A panel a
+nebula fills has a median that is the *nebula's*.
+
+The natural fix is the one `bg/coverage_leveling` already uses: mask objects at
+`median + 2σ` and refuse a level whose retained sample is more than
+`_RESCUE_MAX_SIGMA_RATIO` (3×) the canvas's own sigma-clipped sky spread. **It does
+not work here, and the reason is worth carrying forward:** on exactly the image
+the guard exists for, the canvas's sigma-clipped spread *is the object*. Measured,
+the mask retained **95 %** of that nebula canvas as "sky" — the threshold had
+floated above the whole nebula — and every level then looked equally
+un-spread-out, so the ratio test could never fire.
+
+What works is the v0.225.0 lesson applied one level up: judge flatness against a
+**structure-blind** yardstick. Using the image's own grain (the adjacent-pixel-
+difference σ `analyze_proxy` already reports, put back into pixel units), the
+level-σ/grain ratio reads **0.24–0.36** across scenes that are sky carrying an
+object and **5.1–12.5** across scenes that *are* object — two populations far
+enough apart that 3.0 is a separation rather than a tuning. The generalisable
+rule: **whenever a guard has to ask "is this structure?", it must not be
+calibrated on a statistic that the structure itself sets.**
+
+### Dogfood record — `--mosaic --editor`, on this branch's code, CLEAN
+
+Run after both fixes were committed, because both are Auto/editor claims and §1
+judges those on a mosaic canvas. **Auto's trim on the mosaic sample: 7.9 %** —
+unchanged by either fix and well under the ~15 % D1 bar. Nothing overflowing and
+no console errors on either target; the editor drive added all 21 ops on the
+**mosaic** run as well as the field one, each re-rendering the live preview, and
+undo/redo applied. Tallest page [phone] `/targets/Sample_M42_mosaic_2_2` at
+3,407 px.
+
+Read as one paragraph, per §7, the app's three claims about that mosaic now
+**cohere** — the panel map's "a little behind at the top-right… about 30 s
+there against 1 min", `grain_uneven`'s "about 23 % of the picture has 3 subs
+where most of it has 6, so that part looks about 1.4× grainier… only about 30 s
+behind", and `seams_flat`'s "where the picture looks grainier that is a
+difference in depth, not a step in the sky". A beginner can hold all three at
+once: one panel is thinner, that is why a quarter of the picture is grainier, it
+is not a seam, and it closes itself. That is what v0.406.x/v0.407.1 were for, and
+this is the first pass to say so after all of them landed.
+
+### Two smaller things this run learned
+
+- **A no-op simulation is a fair fail-before when the test imports the new
+  symbol.** Stashing the fix makes the new tests fail at *import*, which proves
+  nothing. Editing the new function's first line to `return lum` and re-running
+  gives an honest 7-of-31 failure list. Kept here because the alternative — not
+  checking — is how a test that asserts today's numbers gets written.
+- **A broad `except Exception` hides signature drift.**
+  `editor._classify_run` swallows everything by design ("classification is
+  advisory; never sink feedback"), so when `classify_target` gained a parameter,
+  three `monkeypatch` stubs in `tests/webapp/test_editor.py` started raising
+  `TypeError` *into that except* and the endpoint quietly returned the global
+  taste. One assertion caught it. Nothing to fix in the code — the swallow is
+  right — but worth knowing that this call site cannot fail loudly.
+
+---
+
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-lb5kzt`) — two verified bugs from one class, and three dogfood passes that all came back clean
 
 **The run.** Two tasks, both verified bugs, both shipped: **v0.409.0**
