@@ -51,7 +51,8 @@ import { PREVIEW_TOOLS, visiblePreviewTools } from "../components/editor/preview
 import { PreviewToolGuide } from "../components/editor/PreviewToolGuide";
 import { HintIcon } from "../components/HintIcon";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, geometryOpsKey, previewBoxStyle,
-  cropCoveragePct, removeCropOps, type TrimCrop }
+  cropCoveragePct, removeCropOps, overTrimmedVerdict, overTrimmedSentence,
+  type TrimCrop }
   from "../components/editor/mosaicTrim";
 import { splitFraction, splitClipLeft, splitLeftPct, lookCompareOps, reshapesFrame }
   from "../components/editor/splitCompare";
@@ -1262,6 +1263,12 @@ export function EditorView() {
   // The trim-border crop is only offered when this run is a mosaic and a
   // well-covered rectangle worth cropping to was found.
   const trimCrop = trim.data?.is_mosaic ? trim.data.crop : null;
+  // Is the crop this run *opened with* an older version's over-trim rather than
+  // a framing choice? Read off the live `ops` (not the saved recipe) so removing
+  // or widening the crop makes the notice go away, and off the trim suggestion
+  // already fetched above — no extra request, and nothing at all on a single
+  // field, where the over-trim never happened.
+  const overTrim = overTrimmedVerdict(ops, trimCrop);
   // "Re-centre this picture": the crop that brings an off-centre object back to
   // the middle. Offered only when the framing verdict is exactly that and the
   // crop is honestly worth taking — the endpoint declines otherwise, so on most
@@ -2244,6 +2251,36 @@ export function EditorView() {
                   : null}
               </Menu.Dropdown>
             </Menu>
+
+            {/* A crop saved by a version that over-trimmed a mosaic's ragged edge:
+                the picture on every surface (hero, Library card, share sheet) is a
+                sliver of the stack, and this is the one screen that can put it
+                right. Conditional on something rare — a mosaic whose *saved* crop
+                keeps under a quarter of what the current border rule offers — so it
+                is not another always-on banner, and it is an offer rather than an
+                action because a tight crop can be the user's own. */}
+            {overTrim ? (
+              <Alert color="orange" variant="light" py={8}
+                icon={<IconCrop size={16} />}
+                title="This picture was trimmed by an older version">
+                <Text size="xs" c="dimmed">{overTrimmedSentence(overTrim)}</Text>
+                {/* The stored "what Auto did" note was written by that same older
+                    version, so its trim figure describes the crop being replaced,
+                    not this picture. Said only when that note is actually on
+                    screen below — two sentences a beginner has to hold at once. */}
+                {!autoSummary && seedKey !== null && recipeKey === seedKey
+                  && autoNote.data?.note ? (
+                  <Text size="xs" c="dimmed" mt={4}>
+                    The "what Auto did" note below was written by that older
+                    version, so the edge it says it trimmed is this crop, not the
+                    one above.
+                  </Text>
+                ) : null}
+                <Button size="xs" mt={8} variant="default" color="orange"
+                  leftSection={<IconCrop size={14} />}
+                  onClick={() => enterCropPreview("trim")}>Re-trim border</Button>
+              </Alert>
+            ) : null}
 
             {/* A recipe a *background* job auto-edited (Process-target / reprocess /
                 watcher auto-stack): explain it — the user landed here on an edit
