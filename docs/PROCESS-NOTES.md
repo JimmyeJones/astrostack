@@ -18,6 +18,118 @@ is a queue.
 
 ---
 
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-mudy09`) — the plate-solve rescue chain, and the reason the owner's own subs never got the sibling hint
+
+**The run.** Three tasks, all shipped: **v0.411.0** (a sibling-hint second solve
+pass), **v0.411.1** (a bug tripped over while writing it — a *successful*
+bootstrap rescue logging itself as a failure) and **v0.412.0** (the bootstrap
+anchoring on an already-solved sub). On the finished branch: **5,553 passed / 2
+skipped** (39m07s), against the **5,539 / 2** the previous run recorded for this
+same `origin/main` (which has not moved since) — exactly **+14**, the 4 + 5 + 5
+the three entries claim, with no test's status changed. **Be precise about the
+baseline:** my own `origin/main` run was started first and killed at 51 % (under
+`-x`, so green that far) to free the CPU for the branch run rather than let two
+39-minute suites contend; the number above it is compared against is the previous
+run's recorded one, not one I finished. The frontend is untouched, so its gates
+were not re-run; `ruff check` on every touched file is clean apart from the four
+E702s `test_solve_hints.py` already carried.
+
+### Why this run went to the solve path rather than to the editor
+
+The bug list is in the state the last three refreshes describe: everything open
+in "Bugs (fix these first)" is gated on data no agent has, is measured and stood
+down, or is explicitly "probably not worth building". The Ideas list scans to 67
+entries without a closed marker, but most carry their own stand-down. Of what is
+genuinely open and ungated, the plate-solve family is the one that still has
+mechanism left in it, and it is a **priority 2** family: an un-located sub is
+silently dropped by `run_stack`, which is the mechanism behind the owner's
+reported thin/gibberish stacks on faint fields.
+
+### The finding that made v0.411.0 worth building
+
+`build_solve_arglist` offers the solved siblings' centre **only to a frame with
+no usable header hint**. A Seestar writes `RA`/`DEC` into every sub. So on the
+owner's own data — the exact user this app is for — the v0.180.0 sibling-hint
+rescue has *never fired once*: every unsolved sub carries its own loose hint and
+is searched blind-wide at the configured 30°, even after a dozen of its siblings
+have pinned the pointing to within a degree. The backlog entry (2026-07-23,
+slice (c)) had named this precisely and sat unbuilt for seven weeks.
+
+The measurement that made the shape safe was already in the backlog too, from
+the 2026-07-24 ASTAP audit: a *failed* search costs ~4 s at 30° and ~0.2 s at
+5°. So a second pass over the failures at the tight radius is a ~5 % time
+premium on the case where it does nothing, which is what made "on by default,
+no new setting" defensible rather than a blind flip.
+
+### Two design points worth carrying forward
+
+**A retry pass must inherit the *setting it is made of*.** The first version ran
+the retry regardless of `use_solve_hints`. That setting is the app's "solve
+blind" switch, and the whole second pass is nothing but a hint — so it was
+quietly reinstating hinting for a user who had switched it off. Caught in
+self-review before the merge (the tell was reading the four `run_qc_and_solve`
+call sites in `webapp/pipeline.py`, every one of which threads
+`settings.astap_use_solve_hints` into the first pass and could not thread it
+into the second). Generalisable: **when you add a second pass beside an existing
+one, list the flags the first pass reads and answer for each of them.**
+
+**What not to retry is most of the value.** Retrying a *timeout* is the one
+shape that genuinely doubles a hopeless night's wall-clock — the ladder has
+already burned up to 3× `astap_timeout_s` on that frame, the cost the Settings
+hint warns about since v0.272.2. Retrying a *setup* failure (no star database)
+would multiply a whole library's wasted attempts by two for a problem no search
+region can fix. Excluding both is what keeps the pass honest about its own cost,
+and it is why the entry could ship without the "blind threshold flip on the
+on-by-default hot path" that AGENTS.md §1 forbids and that the sibling
+`astap_timeout_s` entry was declined for.
+
+### v0.411.1 — the bug the new code walked into
+
+Writing the retry's own log line, I copied the bootstrap's `project.name` two
+blocks below. It raised: `Project` keeps the target's name in its meta table and
+has no such attribute. The pre-existing line has the same defect, and it sits
+**inside** the bootstrap's `try: … except Exception: log.warning("stack-then-solve
+bootstrap failed")` — so the one branch that fires when the bootstrap actually
+*rescued* subs turned the success into a logged failure. It survived because
+nothing on screen disagreed: every summary key is written before the raise, so
+the Jobs page's rescue note was right throughout.
+
+**The generalisable shape:** a log line inside a broad `except` that reports the
+*success* of the block it lives in. If it throws, the block reports the opposite
+of what happened, and no test that asserts on the summary will ever notice. Worth
+a sweep some time: `log.info` calls inside a `try` whose `except` logs a failure.
+
+### v0.412.0 — and the question it settles about the two rescues
+
+The bootstrap engages when fewer than `min_frames` subs solved, a band that
+includes "a handful did". In that band it was building a deep image and asking
+ASTAP to solve *that* — a synthetic frame with no optics headers, on the field
+that had just defeated the solver sub by sub — while 1–7 real verified solutions
+of the same pointing sat in the DB. Anchoring on one of them is strictly less
+work and strictly less risk, and everything downstream (the phase-correlation
+shifts, the CRPIX propagation) is unchanged, which is why the ground-truth test
+could be written with a `deep_solver` that **raises if it is called at all**:
+"no deep solve happened" is proved rather than asserted.
+
+Ordering matters and is deliberate: the v0.411.0 retry runs **before** the
+bootstrap, so a real per-sub solve is always preferred over a propagated one,
+and a run that the retry rescues never reaches the bootstrap at all.
+
+### One thing measured and deliberately left
+
+`build_sibling_retry_arglist` skips a frame whose first attempt was already the
+same search — same centre, radius at or inside 5°. The centre is compared
+exactly, so a frame that *did* get the sibling centre in round 1 is retried when
+the round's own successes moved the median even slightly. That is a real cost
+(~0.2 s each) for a marginal gain, and it was left rather than papered over with
+a tolerance constant: the population is frames with **no** header hint, i.e. not
+the owner's, and when the median has genuinely moved the new centre is the
+better one. If a non-Seestar library ever makes this visible, the fix is a
+tolerance in degrees, justified against `SIBLING_HINT_RADIUS_DEG` rather than
+picked.
+
+---
+
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-1nfpr0`) — the same bug class again, one step further out, and the trap that nearly made the fix worse than the bug
 
 **The run.** Two tasks, both verified bugs, both shipped: **v0.410.0**
