@@ -18,6 +18,108 @@ is a queue.
 
 ---
 
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-bhkhl1`) — the phone-invisible explanation was a *badge* problem, and a green baseline that read as red
+
+**The run.** Three tasks, all shipped: **v0.413.0** (a `Badge`'s only explanation
+unreachable on a phone — `components/HintTooltip` + `useHintDisclosure`),
+**v0.413.1** (the one interactive site that measurement said was worth doing:
+Stack's *"Save as defaults"*), and **v0.413.2** (a verified bug this run
+reproduced 14 times by accident — the app refusing to boot over a missing
+*frontend*). Baseline on `origin/main`: **5,539 passed / 2 skipped** (40m45s),
+exactly the number the previous run recorded for this same head. Frontend
+baseline **3,550 passed**, after v0.413.0 **3,564**.
+
+### The trap worth carrying forward: a green baseline that reads as red
+
+The baseline run reported `5539 passed, 2 skipped, 14 errors`, and the errors
+were fourteen `tests/webapp` tests raising
+`RuntimeError: Directory '…/webapp/static/assets' does not exist` at fixture
+setup. Read cold, that is "main is red, and fixing it is task #1" (AGENTS.md §2).
+
+It was self-inflicted, and the mechanism is worth knowing before it costs
+someone a run: **`scripts/agent-dogfood.sh` runs `npx vite build`, and
+`frontend/vite.config.ts` sets `emptyOutDir: true` on an `outDir` of
+`../webapp/static`.** So a dogfood pass *deletes* `webapp/static/` and rebuilds
+it, and any `tests/webapp` test that calls `create_app()` inside that window
+fails. Both were started in the background to save wall-clock; they overlapped.
+
+**Do not run `agent-dogfood.sh` concurrently with `pytest`** unless the dogfood
+is invoked without a build (it only builds on `--build` or when
+`webapp/static/index.html` is missing — so the *second* dogfood pass of a run is
+usually safe, and the first is not). Serialise them: dogfood first, pytest
+after.
+
+**And the trap turned out to be a real bug**, which is why it is not only a
+process note. `_mount_spa` guarded on the *directory* and then mounted
+`static/assets` unconditionally — so the empty-directory state every build
+passes through does not degrade to the "Frontend not built" placeholder the same
+function already implements, it raises out of `create_app()` and the whole app
+fails to start. That is a §9 violation on a box upgraded in place, and it
+shipped as **v0.413.2**. The generalisable shape: **a guard that asks whether
+the *container* exists, when the question is whether the *contents* do.**
+
+### Why the badge population had survived four slices of its own entry
+
+The "a Tooltip is invisible on the device the owner actually reads this app on"
+entry lists its still-open work by **route** (History, Stack, Dashboard). Those
+three routes carry nine hand-written tooltips between them, and by the entry's
+own (a)/(b) split most are category (b). Walking every `.tsx` instead found the
+real population: **27 `<Tooltip>`s wrapped a `Badge`**, and they live in *shared
+components* that render on six routes at once. No route owns them, so a
+route-by-route sweep could never reach them.
+
+Two more things were checked rather than assumed, and both come back clean —
+recorded so nobody re-walks them:
+
+- **Every editor op parameter measured in pixels is already proxy-scaled.**
+  Enumerated from the registry rather than by reading: `background.subtract`
+  (`box_size`), `background.final_gradient` (`box_size`, `dilate_px`),
+  `detail.chroma_denoise`, `detail.sharpen`, `detail.deconvolve`,
+  `stars.reduce` and `stars.boost_nebula` all scale, the last two inside
+  `starmask.star_mask` rather than in the op (which is why a grep for
+  `scaled_px` in `stars.py` under-reports). `detail.hot_pixels`'s `sigma` is a
+  statistical threshold, not a length.
+- **The "a `log.info` inside a `try` whose `except` logs a failure" sweep the
+  previous run asked for is clean.** Six candidate blocks across `seestack/` and
+  `webapp/` (AST-scanned, not grepped); every one logs only plain locals. The
+  one that did bite — `scanner.run_qc_and_solve`'s `project.name` — is the one
+  already fixed as v0.411.1. `pipeline._auto_grade_target`'s success line is the
+  closest remaining shape (it reads `r.name` / `r.primary_metric` off
+  `FrameGrade` **after** the DB writes have committed, so a raise there would
+  report `AutoGradeCounts(0, 0)` for work that happened) — checked against the
+  dataclass, both attributes exist.
+
+### Dogfood record — `--mosaic --editor`, before and after, byte-identical
+
+Run on `origin/main` and again on the branch's own build. **Auto's trim on the
+mosaic sample: 7.9 %**, unchanged and well under the ~15 % D1 bar. The mosaic
+page-height table is **identical to the pixel** across the change — `[phone]`
+3,407 / 3,166 / 3,094 / 2,432 px, `[desktop]` 2,116 / 2,104 / 1,699 / 1,637 px —
+nothing overflowing, no console errors, and the editor drive added all 21 ops on
+the mosaic run with the live preview re-rendering each time, undo and redo
+applied. That is the measurement v0.413.0's entry demands ("don't make the pages
+taller"), and an exact match rather than "within noise", because the change adds
+no DOM node and no style.
+
+Read as one paragraph (§7), the app's three claims about that mosaic still
+cohere, unchanged from the previous run's record: the panel map's "a little
+behind at the top-right", `grain_uneven`'s "about 23 % … about 1.4× grainier …
+only about 30 s behind", and `seams_flat`'s "that is a difference in depth, not
+a step in the sky".
+
+### One design point from v0.413.0 worth keeping
+
+**Mantine's `Badge` puts the words in an inner element.** `getByText("Hazy
+night")` returns the label `<span>`; the cloned trigger props (`role`,
+`tabIndex`) land on the Badge's *root*. A click on the words still reaches the
+root by bubbling — which is why nine of ten component assertions passed while
+the `tabindex` one did not, and why the test now asserts attributes on
+`getByRole("button", { name: … })` and gestures on `getByText`. A test that had
+only fired events would have looked entirely green while the keyboard path did
+not exist.
+
+---
+
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-mudy09`) — the plate-solve rescue chain, and the reason the owner's own subs never got the sibling hint
 
 **The run.** Three tasks, all shipped: **v0.411.0** (a sibling-hint second solve
