@@ -18,7 +18,116 @@ is a queue.
 
 ---
 
-## 2026-09-09 (Builder, branch `claude/sweet-babbage-p5vpyp`) — the fourth finding in the gap between two sentences, a "new" feature that was 90 % already built, and a two-pytest disk lesson
+## 2026-09-10 (fourth external audit, branch `claude/astrostack-verification-audit-gl564j`) — the shipped image was built and run for the first time, and "green" was measured against it
+
+**Subject.** Not the app: the apparatus that certifies it. Thesis under test: a green
+CI does not mean the owner's install works. Baseline audited **cc27c41 (v0.407.1)**;
+re-verified against **7d17275 (v0.408.1)** at the end — no file any finding rests on
+changed in between.
+
+**What was actually done (nothing in the repo was changed).** The image was built
+and run with the owner's exact command (`docker compose --env-file .env -f
+docker/docker-compose.yml up -d --build`, a gitignored `.env` at the repo root),
+Dockerfile and compose file verbatim. Two deviations forced by this sandbox's egress
+policy, stated so the next audit knows what was *not* exercised: the base images came
+from `mirror.gcr.io` (a pull-through cache — same image IDs `ec7d6c95cd36` /
+`9da6b4e352d0` as Docker Hub), and every Debian archive is blocked here, so the two
+`apt-get` layers ran against a no-op shim over a base pre-seeded with the same
+packages (libgl1/libglib2.0/libgomp1 from Ubuntu noble .debs, a static ffmpeg, a
+static curl, unzip, file) plus the sandbox proxy CA. Everything downstream — the
+frontend stage, `install-astap.sh` fetching ASTAP + the d05 database from
+SourceForge, `pip install .[web]`, the SPA copy, `PYTHONPATH`, the healthcheck, the
+`CMD` — ran as written. Build 2 m 17 s; image 1.89 GB.
+
+**Data shaped like the owner's**, generated from `tests/synth.py` at full S30 size
+(1920×1080, `FOCALLEN` 150): `M 31_sub/` (3 nights × 20) beside the device's bare
+`M 31/` output, `NGC 7000_mosaic_sub/` (2×3 raster, depths 12/12/8/12/4/12, one hazy
+panel, two nights) beside `NGC 7000_mosaic/`, `Moon_video/` (an mp4), and
+`Planetary_photo/`. Synthetic stars cannot plate-solve, so ASTAP was really invoked
+on all 120 frames (failing in 0.46 s each, sidecars confined to its scratch copy) and
+the true WCS was then injected DB-side exactly as `webapp/sample_data.py` does.
+
+**Artifact verdict — it builds, boots, serves and survives.** Healthy in 22 s;
+`/api/system` reports ASTAP `CLI-2026.09.01` + 1,476 d05 files runnable, ffmpeg on
+PATH, 4 workers. The watcher found the pre-existing folders on its own (127 files
+stable after 70 s); the auto pipeline ingested/QC'd/solve-attempted 120 frames in
+52 s; the scanner skipped the bare device folders and the photo folder and listed
+the video capture. Single-field stack 60 × 1920×1080: **170 s, peak 1.24 GB**
+(≈2.8 s/frame → ~4.3 h for the owner's 5,477-sub target). Mosaic stack onto a
+5089×2045 union canvas: **317 s, peak 1.87 GB**; Auto's trim on that canvas
+**7.6 %**; the panel map and the grain note both named the 4-sub panel (11 % of the
+picture, 2.3× grainier) and agreed with each other. Lunar video stacked with the
+image's ffmpeg (30 graded / 9 kept). `docker restart`: back in 3 s, all four jobs,
+both targets and both runs persisted; a second `up -d` was a no-op. The running
+container opened **no outbound socket at all** (loopback health probe only).
+**§10 held under Docker's mount semantics:** sha256 + size + mtime + inode + mode of
+every file under `incoming/` byte-identical after ingest+QC+solve, after both stacks
+and the video stack, and on a second tree through a v0.277 → v0.407.1 upgrade.
+
+**The upgrade as the image performs it.** A second data root was written by
+**v0.277.0** (schema 15, run from a worktree) — ingest, QC, both stacks, Auto —
+then the owner's compose command re-run over it: 19 s, all 15 layers CACHED (ASTAP
+not refetched), config 42 → 44 keys with **`auto_stack: false` and
+`auto_edit_on_autostack: false` kept** exactly as §9 promises, projects migrated
+15 → 22 on first touch. A synthetic 12-target / 23,102-row schema-15 library (largest
+5,477) migrated in **0.38 s total** — the migration is not what he will notice.
+
+**What he will notice — the one real finding, and it is a "works for the owner"
+failure that every green check passes (filed ⭐ in Bugs).** v0.277 Auto-edited the
+same mosaic with D1's crop (`geometry.crop` x0 0.6228 y0 0.0341 x1 0.6896 y1 0.5463 —
+**3.4 % of the canvas**) baked into the saved recipe. On v0.407.1 the
+trim-suggestion for that run correctly says 7.6 % — but nothing reads it against
+the stored recipe: the editor opens the run as saved (preview **85×263 px**, "Cropped
+view — showing 3% of the frame"), the Target hero and the Library card show the
+same sliver (stretched to card width), and "This picture was auto-edited" still
+reads *"97% of ragged mosaic edge to trim"* as if that were right. A Playwright
+sweep of those very pages reported **"nothing overflowing, no console errors"**.
+Beside it, every pre-v0.313 run also carries "This picture can't say which night
+it's from" + *Stack it again* (v0.277 runs have no capture window), which on his
+library is twelve offers of a multi-hour re-stack at once.
+
+**Checks vs reality — the class behind incident 1, generalised.** `ci.yml` has two
+jobs, both against the checkout; nothing builds from the Dockerfile's file set.
+Verified clean *today* (so the next regression is a matter of time, not code):
+no non-test frontend file imports outside `frontend/`; no runtime Python imports
+`tests/`; the two `seestack/data/*.json` files and `webapp/static/**` are the only
+non-`.py` runtime data and both are inside the image (and, incidentally, in the
+wheel copy in site-packages that `PYTHONPATH=/app` shadows). Real divergences found:
+`npm install` in the image vs `npm ci` in CI (no lock drift today; TypeScript
+5.9.3 / Vite 5.4.21 resolved identically); **PySide6 6.11.2 is installed into the
+image — 650 MB, a third of it — despite the `web` extra's comment**, unused by any
+webapp path; the editor offers a "Gaia catalogue" colour-cal mode whose
+`astroquery` import is absent from the image (and forbidden by the LOCAL rule), so it
+silently falls back to gray-star; `ENV ASTROSTACK_PORT` in the Dockerfile is dead
+(`CMD` hardcodes 8000); a mistyped `ASTRO_DATA` is silently created as an empty
+directory by Docker and the app boots with an empty library; the container runs as
+root, so every file it writes to the dataset is root-owned; the watcher re-fires
+one full scan of `incoming/` on every boot (0 s here; a `stat` of every sub on his
+NAS). Not exercised, and still unverified by anything: a real ASTAP solve on a real
+sub, the apt package names on real Debian, arm64, SMB ownership on TrueNAS, the
+`--editor` drive against the image.
+
+**Fixtures that cannot exhibit their bug (both re-run, numbers reproduced).**
+`tests/test_edit_curve.py::test_the_sky_stays_put_at_every_stack_depth[very-deep]`:
+at noise 0.0006 the zero-clip spike is no longer the tallest histogram bin, so the
+pre-fix `_sky_mode` returns the right sky (rel. error 0.048 vs 0.996 at the three
+shallower depths) and the test passes on the A1 bug — the guard checks the clip is
+*present* (>0.5 %), not *dominant*. `tests/test_coverage_trim.py::
+test_a_ragged_mosaic_still_gets_its_fringe_trimmed`: with `panel_coverage_level`
+reverted to the peak, the v0.391.1 `TRIM_KEEP_RATIO` ladder still lands at kept
+0.902, inside the asserted 0.90–0.99 band (fixed code: 0.975). Both filed. Twenty-nine
+other Auto/editor/mosaic/upgrade test files were checked and are sound; the
+`--mosaic` dogfood flag exists, and 27 recorded passes since 2026-09-08 use it —
+note that its sample is 480×320, so "owner scale" there means shape, not size.
+
+**Checked and clean, so nobody re-chases it:** `/api/health` route + auth exemption;
+`.dockerignore` excludes nothing the runtime needs; `POST /api/sample` reads nothing
+from the repo; CWD-relative paths — none; TestClient runs the same lifespan uvicorn
+does; `shm_size` is inert (no shared memory used); TZ-independence (all UTC);
+`astap.py` solves a `copy2` scratch copy (real binary, real run, confirmed no
+sidecar near `incoming/`); the skipped-folder report is silent on the bare device
+folder *by design* (its files are device-named); S30 FOV derived from `FOCALLEN`
+(2.13° search window in ASTAP's own log). — the fourth finding in the gap between two sentences, a "new" feature that was 90 % already built, and a two-pytest disk lesson
 
 **The run.** Two tasks, both shipped: **v0.407.0** (the Scout's shareable-labelled-picture
 feature) and **v0.407.1** (a verified bug found by dogfooding). One
