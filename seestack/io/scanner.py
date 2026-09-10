@@ -1254,9 +1254,14 @@ def run_qc_and_solve(
                     summary["bootstrap_solved"] = bres.deep_solved
                     summary["bootstrap_propagated"] = bres.n_propagated
                     if bres.n_propagated:
+                        # ``Project`` has no ``.name`` attribute — the target's name
+                        # lives in its meta table. Reading the attribute raised
+                        # *inside* this try, so the one line that reports a
+                        # **successful** rescue turned into the "bootstrap failed"
+                        # warning below it.
                         log.info(
                             "stack-then-solve bootstrap rescued %d sub(s) for %s",
-                            bres.n_propagated, project.name,
+                            bres.n_propagated, project.get_meta("name"),
                         )
             except Exception as exc:  # noqa: BLE001 — a bootstrap failure is non-fatal
                 log.warning("stack-then-solve bootstrap failed: %s", exc)

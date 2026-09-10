@@ -14,6 +14,33 @@ Newest first.
 
 ---
 
+## v0.411.1 — 2026-09-10 — 🐛 a successful bootstrap rescue reported itself as a failure
+
+*(Builder, tripped over while writing the v0.411.0 second solve pass in the same block; reproduced by test.
+Severity: log-level only, but on the opt-in path a beginner turns on *because* their faint targets aren't
+stacking. Confidence: certain — the traceback is in the test's fail-before.)*
+
+**The bug.** `Project` keeps the target's name in its meta table and has no `.name` attribute. The
+stack-then-solve bootstrap's credit line read `project.name` **inside** the block's own
+`try: … except Exception as exc: log.warning("stack-then-solve bootstrap failed: %s", exc)` — so on every run
+where the bootstrap actually **rescued** subs (`bres.n_propagated` truthy, the one branch that reads it), the
+attribute raised and the rescue was logged as *"stack-then-solve bootstrap failed: 'Project' object has no
+attribute 'name'"*. The reverse of the truth, and the only place a walk-away run's log says what the
+bootstrap did.
+
+**Not user-visible beyond the log:** `summary["bootstrap_engaged"/"bootstrap_solved"/"bootstrap_propagated"]`
+are all written before the raise, so the Jobs page's *"Located N more subs by combining your un-located
+frames…"* note was correct throughout — which is exactly why this survived: nothing on screen disagreed.
+
+**Fix.** `project.get_meta("name")`, the accessor the rest of the codebase uses (`gui/main_window.py`), with a
+comment saying why the attribute isn't there. One line.
+
+**Tests (+1, fails before):** `tests/test_scanner.py::test_a_successful_bootstrap_rescue_is_not_logged_as_a_failure`
+— a stubbed bootstrap that rescues 3 subs, asserting via `caplog` that **no** warning is emitted and that the
+info line names the target. It fails before with the verbatim warning above.
+
+---
+
 ## v0.411.0 — 2026-09-10 — a second solve pass reaches the subs a Seestar's own header hint kept blind
 
 *(Builder, backlog slice (c) of the v0.180.0 sibling-hint fill-in, filed 2026-07-23 and open since. Pillar:
