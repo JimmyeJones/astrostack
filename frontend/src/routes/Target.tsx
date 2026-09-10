@@ -58,6 +58,7 @@ import { missingFilesNote } from "../components/target/missingFiles";
 import { SharpestYetBadge } from "../components/target/SharpestYetBadge";
 import { NextBestMoveBadge } from "../components/target/NextBestMoveBadge";
 import { FramingVerdictNote, useStackFraming } from "../components/target/FramingVerdictNote";
+import { OverTrimmedTargetNote } from "../components/target/OverTrimmedTargetNote";
 import { LatestPictureCard } from "../components/target/LatestPictureCard";
 import { FrameColumnGuide } from "../components/target/FrameColumnGuide";
 import { FRAME_COLUMNS, type SortKey } from "../components/target/frameColumns";
@@ -1127,6 +1128,13 @@ export function TargetView() {
               if they expanded History's Info panel. Self-hides on a clean run. */
           { key: "calibration-skipped", priority: NOTICE_PRIORITY.warning, node: latestRun ? (
             <CalibrationSkippedNote safe={safe} runId={latestRun.id} />
+          ) : null },
+          /* An older build's border trim is still cropping this picture to a
+              sliver, because the crop it chose lives in the run's saved recipe
+              and nothing re-derives that. Self-hides on every correctly-trimmed
+              picture and on every run with no coverage map to check against. */
+          { key: "over-trimmed", priority: NOTICE_PRIORITY.warning, node: latestRun ? (
+            <OverTrimmedTargetNote safe={safe} runId={latestRun.id} />
           ) : null },
           /* Per-target personal-record beat: celebrate when the newest stack came
               out sharper than any previous stack of this target (self-hides on the

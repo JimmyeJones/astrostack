@@ -2637,6 +2637,35 @@ export interface TrimSuggestion {
   crop: { x0: number; y0: number; x1: number; y1: number } | null;
 }
 
+/** Whether a run's **saved** recipe still carries a crop an older build's border
+ * trim got wrong — see `/api/…/editor/crop-health` and `webapp/stale_crop.py`.
+ *
+ * The D1 fixes re-derive the *trim*; nothing re-derives a crop already written
+ * into a stored recipe, and that recipe is what the editor, the hero image, the
+ * Library card and the share sheet all replay. Read-only: a small crop may be the
+ * owner's own framing, so this only ever reports. */
+export interface CropHealth {
+  stale: boolean;
+  /** Share of the canvas the saved crop keeps (0..1), or null if it has none. */
+  stored_keep_fraction: number | null;
+  /** Share the current border rule would keep, or null when it can't be measured
+   * (no coverage map beside the run) — which is never reported as stale. */
+  suggested_keep_fraction: number | null;
+  /** The crop a one-click re-seed would write; null means "remove the crop
+   * entirely" (the rule wants the full frame). Only meaningful when `stale`. */
+  suggested_crop: { x0: number; y0: number; x1: number; y1: number } | null;
+}
+
+/** One target whose newest saved edit carries an older build's over-trim —
+ * see `/api/over-trimmed-pictures`. */
+export interface OverTrimmedItem {
+  safe: string;
+  target_name: string;
+  run_id: number;
+  stored_keep_fraction?: number | null;
+  suggested_keep_fraction?: number | null;
+}
+
 export interface CalibrationMaster {
   id: number;
   name: string;
@@ -3606,6 +3635,14 @@ export const api = {
     req<{ count: number; total_new_subs: number; items: NewSubsWaitingItem[] }>(
       "/api/new-subs-waiting"),
 
+  // Which targets' saved edits still carry an older version's over-trim. Its own
+  // endpoint for the same reason as the two above: a saved recipe is replayed on
+  // the Library card and the share sheet, not only in the editor, so the question
+  // "which pictures do I need to look at" had no surface at all. Read-only — it
+  // never rewrites a recipe.
+  getOverTrimmedPictures: () =>
+    req<{ count: number; items: OverTrimmedItem[] }>("/api/over-trimmed-pictures"),
+
   // logs
   getLogs: (level?: string, limit = 1000) =>
     req<{ logs: LogEntry[]; last_seq: number }>(
@@ -3706,6 +3743,11 @@ export const api = {
     ),
   trimSuggestion: (safe: string, runId: number) =>
     req<TrimSuggestion>(`/api/targets/${safe}/stack-runs/${runId}/editor/trim-suggestion`),
+  // Does this run's *saved* recipe still carry an older build's over-trim? The
+  // sibling of `trimSuggestion` above: that one says what the border rule wants
+  // now, this one says whether what was stored disagrees with it.
+  cropHealth: (safe: string, runId: number) =>
+    req<CropHealth>(`/api/targets/${safe}/stack-runs/${runId}/editor/crop-health`),
   levelsSuggestion: (safe: string, runId: number, recipe: Recipe, uid: string) =>
     req<LevelsSuggestion>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/levels-suggestion` +
