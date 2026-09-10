@@ -952,6 +952,25 @@ def auto_reject_depth(
     :func:`~seestack.stack.pointings.pointing_groups`' own, applied here to the
     summed counts so the two cannot drift apart.
     """
+    substantial = [c for c in panel_frame_counts(radecs)
+                   if c >= AUTO_REJECT_PANEL_MIN_FRAMES]
+    if len(substantial) < 2:
+        return None                             # no sound split; use the frame count
+    return min(substantial)
+
+
+def panel_frame_counts(
+    radecs: list[tuple[float | None, float | None]],
+) -> list[int]:
+    """How many subs sit on each distinct patch of sky, largest first.
+
+    The shared half of :func:`auto_reject_depth` and :func:`typical_panel_depth`:
+    snap the pointings to ``_POINTING_GRID_DEG`` so the O(n²) single-linkage runs
+    over the handful of *places* a target points rather than its thousands of
+    subs, cluster them at ``PANEL_LINK_DIST_DEG``, then sum each cluster's real
+    frame count back. Unsolved subs (no pointing) are skipped, as is anything
+    ``cluster_pointings`` refuses to label. An empty list means "nothing to say".
+    """
     grid: dict[tuple[int, int], int] = {}      # snapped pointing -> frame count
     for ra, dec in radecs:
         if (ra is None or dec is None
@@ -961,7 +980,7 @@ def auto_reject_depth(
                round(float(dec) / _POINTING_GRID_DEG))
         grid[key] = grid.get(key, 0) + 1
     if not grid:
-        return None
+        return []
     keys = list(grid)
     labels = cluster_pointings(
         [(kx * _POINTING_GRID_DEG, ky * _POINTING_GRID_DEG) for kx, ky in keys],
@@ -971,14 +990,60 @@ def auto_reject_depth(
     for key, label in zip(keys, labels, strict=True):
         if label >= 0:
             counts[label] = counts.get(label, 0) + grid[key]
-    substantial = [c for c in counts.values() if c >= AUTO_REJECT_PANEL_MIN_FRAMES]
-    if len(substantial) < 2:
-        return None                             # no sound split; use the frame count
-    return min(substantial)
+    return sorted(counts.values(), reverse=True)
+
+
+def typical_panel_depth(panel_counts: list[int]) -> int | None:
+    """How many subs a *typical* sub's own patch of sky has, or ``None`` when the
+    target is a single field (then the frame count already is that number).
+
+    Takes the per-panel counts :func:`panel_frame_counts` measured, rather than
+    the pointings themselves, so a caller that also wants to say *how many*
+    panels there are pays for the clustering once.
+
+    **Why this exists.** The walk-away auto-stack's minimum-frames floor asks
+    "would stacking now publish anything but single-frame colour speckle?" and
+    answers it with the target's *frame count*. On a single field that is exactly
+    right — every sub lands on every pixel. On a mosaic it is not: the panels are
+    different patches of sky, so a 3x3 mosaic one pass in has nine subs and a
+    picture that is one sub deep **everywhere**. The floor sees ``9 >= 3``, the
+    scan publishes it, and the auto-edit makes it the target's newest picture —
+    the very "gibberish" the floor was added (v0.183.0) to prevent, arriving
+    through the door it left open for the owner's own shooting style (AGENTS.md
+    §1: heavy mosaic user).
+
+    **Why the *frame-weighted median* and not the thinnest panel.** The thinnest
+    panel is the right number for :func:`auto_reject_depth`, whose question is
+    "can the rejection method bite anywhere?" — one shallow panel really does
+    decide that. It is the wrong number here, where the question is "is the
+    *picture* speckle?": a mosaic with eight deep panels and a corner the owner
+    lost to cloud after three subs is a good picture with a grainy corner, and
+    holding it back would strand the whole target on account of one cell. Taking
+    the median *weighted by frames* answers the honest question — the depth of
+    the panel a randomly chosen sub belongs to — and is robust by construction to
+    the population that would otherwise wreck it: a single stray mis-solved sub
+    forms a one-frame "panel" that moves an unweighted median to 1 and a
+    frame-weighted one not at all.
+
+    ``None`` (a single field, an unsolved target, or pointings too tightly packed
+    to separate) means "nothing changes" — the caller keeps using the frame count
+    it always has.
+    """
+    counts = sorted((int(c) for c in panel_counts), reverse=True)
+    if len(counts) < 2:
+        return None                             # a single field: use the count
+    total = sum(counts)
+    seen = 0
+    for c in counts:                            # largest panel first
+        seen += c
+        if seen * 2 >= total:
+            return int(c)
+    return int(counts[-1])                      # unreachable; total > 0 above
 
 
 def _frame_radecs(frames) -> list[tuple[float | None, float | None]]:
-    """``(ra, dec)`` per frame in ``frames`` order, for :func:`auto_reject_depth`."""
+    """``(ra, dec)`` per frame in ``frames`` order, for :func:`auto_reject_depth`
+    and :func:`typical_panel_depth`."""
     return [(getattr(f, "ra_center_deg", None), getattr(f, "dec_center_deg", None))
             for f in frames]
 

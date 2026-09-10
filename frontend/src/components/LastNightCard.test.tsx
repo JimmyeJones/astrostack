@@ -291,6 +291,29 @@ describe("describeNeedsLook", () => {
     expect(text).toContain("stack itself once more subs come in");
     expect(text).not.toContain("drive");
   });
+
+  it("words a mosaic held on depth about its panels, not about locating subs", () => {
+    // Fail-before: "only 9 of its subs are located so far, and it needs 3" —
+    // a sentence arguing with its own numbers, on a target whose every sub is
+    // located and whose count is three times the floor.
+    const text = describeNeedsLook({
+      name: "M 31", safe: "M_31", kind: "too_thin",
+      n_frames: 9, n_other: 3, panel_depth: 1, panels: 9,
+    });
+    expect(text).toContain("its 9 subs are spread over 9 panels");
+    expect(text).toContain("only 1 sub on it");
+    expect(text).toContain("needs 3");
+    expect(text).not.toContain("are located so far");
+    expect(text).toContain("shot the mosaic a few more times");
+  });
+
+  it("keeps the single-field wording against a backend that sends no panels", () => {
+    const text = describeNeedsLook({
+      name: "NGC 7000", safe: "NGC_7000", kind: "too_thin",
+      n_frames: 3, n_other: 8, panel_depth: 0, panels: 0,
+    });
+    expect(text).toContain("only 3 of its subs are located");
+  });
 });
 
 describe("LastNightCard overnight digest", () => {

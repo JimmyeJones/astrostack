@@ -23,6 +23,7 @@ import { AutoStackHoldNote } from "../components/AutoStackHoldNote";
 import { CaptureQuietNote } from "../components/CaptureQuietNote";
 import { CleanestShotNote } from "../components/CleanestShotNote";
 import { GrainierNewestNote } from "../components/GrainierNewestNote";
+import { MosaicThinHoldNote } from "../components/MosaicThinHoldNote";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { RestackGainNote } from "../components/RestackGainNote";
 import { RestoredSubsNote } from "../components/RestoredSubsNote";
@@ -960,6 +961,13 @@ export function TargetView() {
             node: <GrainierNewestNote safe={safe} /> },
           { key: "autostack-hold", priority: NOTICE_PRIORITY.warning,
             node: <AutoStackHoldNote safe={safe} /> },
+          /* The other walk-away hold, in the words that fit a mosaic: its subs
+              are all located, they are just spread over the panels, so no part
+              of the picture is deep enough to be worth publishing yet. The
+              "waiting for more of your subs to be located" note below cannot
+              say this — nothing is waiting to be located. Self-hides. */
+          { key: "mosaic-thin-hold", priority: NOTICE_PRIORITY.advisory,
+            node: <MosaicThinHoldNote safe={safe} /> },
           /* "N subs came back after this picture was made" — automation put
               set-aside subs back *after* the newest stack ran, so the picture is
               thinner than the owner's data and nothing else can tell them: the

@@ -127,6 +127,25 @@ def test_holds_are_reported_with_the_scans_own_numbers():
     assert held[0].name == "M 42"
 
 
+def test_a_mosaic_hold_carries_its_depth_so_the_card_can_word_it_honestly():
+    """A mosaic held on *depth* has every sub located and a count well past the
+    floor, so the plain "only N of its subs are located, and it needs M" line
+    argues with its own numbers. The digest must carry what makes it a mosaic."""
+    held = needs_a_look({
+        "auto_stack_held_thin": [
+            {"target": "M_31", "frames": 9, "min": 3, "panel_depth": 1, "panels": 9},
+        ],
+    })
+    assert [(h.n_frames, h.n_other, h.panel_depth, h.panels) for h in held] == [
+        (9, 3, 1, 9),
+    ]
+    # A single field (and a scan recorded before the depth existed) reads as 0/0,
+    # which is what the copy keys off to keep its old wording.
+    plain = needs_a_look({
+        "auto_stack_held_thin": [{"target": "M_42", "frames": 2, "min": 3}]})
+    assert (plain[0].panel_depth, plain[0].panels) == (0, 0)
+
+
 def test_missing_files_leads_and_a_doubly_held_target_is_reported_once():
     held = needs_a_look({
         "auto_stack_held_thin": [{"target": "M_42", "frames": 3, "min": 8}],

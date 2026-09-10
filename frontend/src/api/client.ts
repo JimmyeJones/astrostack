@@ -570,6 +570,19 @@ export interface AutoStackHold {
   when_utc?: string | null;
 }
 
+/** Why the last hands-off scan judged this target too thin to publish
+ * (`GET /api/targets/{safe}/autostack-thin-hold`; `null` when the newest scan
+ * didn't hold it). `panel_depth`/`panels` are the **mosaic** case — the subs are
+ * located, they are just spread over the panels, so no one part of the picture
+ * is deep enough yet. Both 0 on a single field. */
+export interface AutoStackThinHold {
+  frames: number;
+  min_frames: number;
+  panel_depth: number;
+  panels: number;
+  when_utc?: string | null;
+}
+
 /** The newest stack is materially cleaner than the target's pinned cover
  * (`GET /api/targets/{safe}/cleanest-shot`; `null` when there's nothing to say
  * — nothing pinned, the newest already *is* the cover, or the gap is small).
@@ -919,6 +932,13 @@ export interface NeedsLook {
   n_frames: number;
   /** Subs that were missing, or the minimum the setting asks for. */
   n_other: number;
+  /** The **mosaic** shape of a `too_thin` hold: how many subs a typical part of
+   * the picture has, and how many panels they are spread over. Both 0 (or
+   * absent, against an older backend) on a single field — and that is what the
+   * copy must key off, because "only 9 of its subs are located, and it needs 3"
+   * argues with itself on a mosaic, where every sub is located. */
+  panel_depth?: number;
+  panels?: number;
 }
 
 export interface EarlyStop {
@@ -2968,6 +2988,8 @@ export const api = {
     req<LiveSession | null>(`/api/targets/${safe}/live-session`),
   autoStackHold: (safe: string) =>
     req<AutoStackHold | null>(`/api/targets/${safe}/autostack-hold`),
+  autoStackThinHold: (safe: string) =>
+    req<AutoStackThinHold | null>(`/api/targets/${safe}/autostack-thin-hold`),
   cleanestShot: (safe: string) =>
     req<CleanestShot | null>(`/api/targets/${safe}/cleanest-shot`),
   grainierNewest: (safe: string) =>

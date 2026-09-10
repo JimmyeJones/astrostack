@@ -17,6 +17,7 @@ from webapp.schemas import (
     AutoEditPrefOut,
     AutoEditPrefPatch,
     AutoStackHoldOut,
+    AutoStackThinHoldOut,
     BackgroundModeHintOut,
     BestFrameOut,
     CleanestShotOut,
@@ -496,6 +497,48 @@ def target_autostack_hold(safe: str, request: Request) -> AutoStackHoldOut | Non
                     unreadable=int(entry.get("unreadable") or 0),
                     reason=(entry.get("reason") if isinstance(
                         entry.get("reason"), str) else None),
+                    when_utc=job.finished_utc,
+                )
+        return None
+    return None
+
+
+@router.get("/{safe}/autostack-thin-hold",
+            response_model=AutoStackThinHoldOut | None)
+def target_autostack_thin_hold(
+    safe: str, request: Request,
+) -> AutoStackThinHoldOut | None:
+    """Whether the most recent hands-off scan held *this* target's stack back as
+    too thin to be worth publishing, or ``null``.
+
+    The sibling of :func:`target_autostack_hold`, reading
+    ``auto_stack_held_thin`` from the same newest-finished-scan record with the
+    same self-clearing discipline. The Target page used to infer this state from
+    its own frame counts, which could only ever see one of the two reasons a
+    scan holds a target back — so a **mosaic** whose panels are one sub deep
+    (its subs all located, its count well past the floor) showed nothing at all
+    where the scan had made a deliberate decision. Read-only.
+    """
+    lib = deps.open_library(request)
+    try:
+        if lib.find_target(safe) is None:
+            raise HTTPException(status_code=404, detail=f"No target '{safe}'")
+    finally:
+        lib.close()
+    jm = deps.get_job_manager(request)
+    for job in jm.list(limit=200):  # newest first
+        if job.kind != "pipeline" or job.state != "done":
+            continue
+        held = (job.result or {}).get("auto_stack_held_thin")
+        if not isinstance(held, list):
+            return None  # the newest scan reported no hold — nothing to say
+        for entry in held:
+            if isinstance(entry, dict) and entry.get("target") == safe:
+                return AutoStackThinHoldOut(
+                    frames=int(entry.get("frames") or 0),
+                    min_frames=int(entry.get("min") or 0),
+                    panel_depth=int(entry.get("panel_depth") or 0),
+                    panels=int(entry.get("panels") or 0),
                     when_utc=job.finished_utc,
                 )
         return None

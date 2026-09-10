@@ -8,7 +8,8 @@ import {
   JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
   bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobHeaderNote,
   jobKindLabel,
-  calibrationMismatchNote, missingSubsNote, readErrorsNote, storageTroubleAlert,
+  calibrationMismatchNote, heldForSubsLine, missingSubsNote, readErrorsNote,
+  storageTroubleAlert,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
   skippedFolders, videoFoldersNote, broughtFolderInNote,
 } from "./Jobs";
@@ -426,8 +427,8 @@ describe("pipelineSummary", () => {
     });
     expect(line).toBe("Imported 10 new frames · held 2 for more subs.");
     expect(held).toEqual([
-      { target: "M 42", frames: 2, min: 3 },
-      { target: "NGC 7000", frames: 1, min: 3 },
+      { target: "M 42", frames: 2, min: 3, panelDepth: 0, panels: 0 },
+      { target: "NGC 7000", frames: 1, min: 3, panelDepth: 0, panels: 0 },
     ]);
   });
 
@@ -460,10 +461,42 @@ describe("pipelineSummary", () => {
     }).line).toBe("Imported 5 new frames · auto-stacked 1 target · 2 couldn't finish.");
   });
 
+  it("carries the mosaic depth a scan measured, so the copy can tell the two holds apart", () => {
+    // A mosaic held on *depth* has every sub located — its count is well past
+    // the floor — so the count sentence would be nonsense there ("9 of your
+    // subs located so far — needs 3").
+    const { held } = pipelineSummary({
+      auto_stack_held_thin: [
+        { target: "M 31", frames: 9, min: 3, panel_depth: 1, panels: 9 },
+      ],
+    });
+    expect(held).toEqual([
+      { target: "M 31", frames: 9, min: 3, panelDepth: 1, panels: 9 },
+    ]);
+  });
+
+  it("words a mosaic hold about its panels and a plain one about locating subs", () => {
+    expect(heldForSubsLine({ target: "M 42", frames: 2, min: 3 }))
+      .toBe(": 2 of your subs located so far — needs 3.");
+    expect(heldForSubsLine({
+      target: "M 31", frames: 9, min: 3, panelDepth: 1, panels: 9,
+    })).toBe(
+      ": your 9 subs are spread over 9 panels, so a typical part of the picture "
+      + "has only 1 sub on it — needs 3.",
+    );
+    // Plural, and a panel count it can't trust degrades to the bare word.
+    expect(heldForSubsLine({
+      target: "M 31", frames: 8, min: 3, panelDepth: 2, panels: 0,
+    })).toContain("spread over panels");
+    expect(heldForSubsLine({
+      target: "M 31", frames: 8, min: 3, panelDepth: 2, panels: 4,
+    })).toContain("only 2 subs on it");
+  });
+
   it("tolerates a bare/empty summary and malformed held entries", () => {
     expect(pipelineSummary({}).line).toBe("No new frames.");
     const { held } = pipelineSummary({ auto_stack_held_thin: [null, "junk", { target: "X" }] });
-    expect(held).toEqual([{ target: "X", frames: 0, min: 0 }]);
+    expect(held).toEqual([{ target: "X", frames: 0, min: 0, panelDepth: 0, panels: 0 }]);
   });
 
   it("surfaces targets held back because their subs aren't on disk", () => {
