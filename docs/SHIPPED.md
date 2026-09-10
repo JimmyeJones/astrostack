@@ -14,6 +14,53 @@ Newest first.
 
 ---
 
+## v0.409.1 — 2026-09-10 — 🐛 the same gradient decided *what your target was*: `classify_target`'s cues read the tilt
+
+*(Builder-verified by reproduction, found by taking v0.409.0's bug class — "a number measured on an image the
+pipeline changes before it is used" — to the other cue `auto_recipe` consumes. Severity: a confidently **wrong**
+archetype, shown to a beginner as a one-click "try this preset?" chip and used to route the Adaptive-Auto taste
+profile. Confidence: reproduced in both directions, three seeds, and pinned by two tests that fail before.)*
+
+**The bug.** `presets.classify_target` thresholds its geometry cues at
+`thr = sky + max(0.06, 6·sky_sigma)`, where `sky` is a **global** level median and `sky_sigma` the MAD of the
+levels beneath it. That is precisely the estimator v0.225.0 removed from `analyze_proxy` — it counts a smooth
+light-pollution gradient as spread. A tilt therefore inflates the σ, the threshold climbs, and the faint diffuse
+half of the picture disappears under it, leaving a frame that reads as nothing but stars.
+
+**Measured, in both directions.** On a star-rich field with broad faint nebulosity (a real Seestar frame's
+shape) at a 0.10 sky, adding a left-to-right ramp:
+
+| tilt | `ext_frac` | `star_share` | verdict |
+|---|---|---|---|
+| 0.00 | 0.0589 | 0.671 | *(declines — nothing clear)* |
+| 0.02 | 0.0169 | 0.875 | *(declines)* |
+| 0.05 | 0.0010 | 0.989 | **globular cluster, confidence 0.99** |
+| 0.08 | 0.0000 | 1.000 | **globular cluster, confidence 1.00** |
+
+Same flip on three independent seeds of `tests/test_auto_noise_measure.py`'s scene (decline → cluster 1.00 at
+gradient 0.05). And the other way: `_coloured_nebula_field` is called a **nebula** at tilts 0 / 0.05 / 0.08 and
+at 0.15 is **lost entirely** — no chip, no verdict.
+
+**Who reads it.** The editor's preset-suggestion chip (`build_preset_suggestion_for_run`), which is what a
+beginner is invited to click; and `auto_recipe`'s `object_type`, which is the archetype the Adaptive-Auto taste
+profile is applied under — so a bias learned on galaxies could be spent on a stack the tilt had renamed.
+
+**The fix is one line and the same principle as v0.409.0:** the geometry cues are read off
+`_detrended_luminance(lum)`. The **colour** cue still reads the untouched `arr` — `_extended_chroma` is
+scale-invariant by construction — so only the geometry moves, and no threshold, floor or constant changes.
+
+**Nothing that was right moves.** Every existing verdict is byte-identical on the gradient-free fixtures the
+file already ships (galaxy 1.00, coloured nebula 1.00, star field → cluster 1.00, neutral large object →
+declines, blank → declines), all thirteen existing tests pass untouched, and the guard test pins that a galaxy
+and a cluster — the two archetypes that were already tilt-stable — stay stable and keep their presets.
+
+**Tests (+3, 2 failing before).** In `tests/test_target_classify.py`: a tilt does not invent a confident verdict
+(the false positive, at three tilts); a tilt does not lose a real nebula (the false negative); and a tilt moves
+neither a galaxy nor a cluster (the over-correction guard, which passes both ways by design). Engine-only and
+additive — no config, schema, on-disk, endpoint, response-shape or default change.
+
+---
+
 ## v0.409.0 — 2026-09-10 — 🐛 a light-pollution gradient darkened the one-click picture — by a gradient Auto removes itself
 
 *(Builder-verified by reproduction against `origin/main`'s own `analyze_proxy`/`auto_recipe`, on the scene
