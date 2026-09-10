@@ -902,7 +902,7 @@ def test_auto_feedback_with_run_context_is_scoped_to_the_object_type(
 
     # Force the classifier so the test doesn't depend on the synthetic proxy's
     # content — the classifier itself is covered by its own unit tests.
-    monkeypatch.setattr(presets, "classify_target", lambda rgb: {"cls": "galaxy"})
+    monkeypatch.setattr(presets, "classify_target", lambda rgb, coverage=None: {"cls": "galaxy"})
 
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, basename="scoped")
@@ -935,9 +935,9 @@ def test_auto_feedback_with_run_context_is_scoped_to_the_object_type(
             f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()["ops"]
         return next(o for o in ops if o["id"] == "tone.stretch")["params"]["target_bg"]
 
-    monkeypatch.setattr(presets, "classify_target", lambda rgb: {"cls": "cluster"})
+    monkeypatch.setattr(presets, "classify_target", lambda rgb, coverage=None: {"cls": "cluster"})
     cluster_bg = stretch_target_bg()  # a cluster is untouched by the galaxy taste
-    monkeypatch.setattr(presets, "classify_target", lambda rgb: {"cls": "galaxy"})
+    monkeypatch.setattr(presets, "classify_target", lambda rgb, coverage=None: {"cls": "galaxy"})
     galaxy_bg = stretch_target_bg()
     assert galaxy_bg > cluster_bg
 

@@ -254,7 +254,7 @@ def _delevelled_luminance(lum: np.ndarray,
     # panel-to-panel offsets. Verbatim the shape ``_level_context`` uses, and for
     # the same reason it gives.
     rough = np.zeros(lum.shape, dtype=np.float32)
-    for level, region in regions.items():
+    for region in regions.values():
         med, _sigma = _robust_stats(lum[region])
         if np.isfinite(med):
             rough[region] = np.float32(med)
@@ -512,7 +512,8 @@ def _extended_chroma(arr: np.ndarray, ext_sig: np.ndarray) -> float:
     return float(np.median(chroma))
 
 
-def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
+def classify_target(rgb: np.ndarray | None,
+                    coverage: np.ndarray | None = None) -> dict[str, Any]:
     """Coarsely classify a proxy as a *star cluster*, *nebula*, or *galaxy* and
     suggest the matching built-in preset — or decline (``preset_id=None``) when the
     content isn't clearly one archetype. A pure hint used by the editor's
@@ -524,8 +525,10 @@ def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
     (``_GEOM_SMOOTH_PX``) so that one unchanging sky gives one answer however
     many subs went into it — see that constant for the two mechanisms that made
     them depth-dependent before — and on a **detrended** one
-    (:func:`_detrended_luminance`) so that one unchanging sky gives one answer
-    however much light pollution was sitting on top of it:
+    (:func:`_detrended_luminance`, plus :func:`_delevelled_luminance` when the
+    caller supplies a mosaic's ``coverage`` map) so that one unchanging sky gives
+    one answer however much light pollution was sitting on top of it, and however
+    the panels carrying it were laid out:
 
     * ``star_share`` — how much of the above-sky *signal* is compact point sources
       (from the same white-top-hat ``star_mask`` the editor uses). A field that is
@@ -566,7 +569,17 @@ def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
     # the other way too: a real coloured nebula under a strong tilt was lost
     # entirely. The colour cue below still reads the untouched ``arr`` (it is
     # scale-invariant by construction), so only the geometry moves.
-    lum = _detrended_luminance(lum)
+    #
+    # A **mosaic's panel steps** break the same threshold the same way, and worse:
+    # they are not a smooth surface, so the detrend can barely touch them. Measured
+    # on this file's own four-panel scene, the identical stack laid out as a mosaic
+    # took ``ext_frac`` 0.0215 → 0.0030 and ``star_share`` 0.597 → 0.889, turning
+    # "nothing clear" into **star cluster at confidence 0.89** (0.86–0.92 on four
+    # seeds) — a verdict about the *layout*, not about what was photographed. So
+    # the steps come out first, exactly as they do for the sky level next door, and
+    # for the same reason: ``background.level_coverage`` has already removed them
+    # from the picture this verdict is about.
+    lum = _detrended_luminance(_delevelled_luminance(lum, coverage))
 
     lum_c = lum[cover]
     lo, hi = float(np.percentile(lum_c, 0.5)), float(np.percentile(lum_c, 99.5))
@@ -778,7 +791,8 @@ def auto_recipe(rgb: np.ndarray | None = None,
         # Per-object-type taste: classify this image (galaxy/nebula/cluster) so a
         # bias learned on one archetype only shifts that archetype. An unclassified
         # image (cls None) falls back to the global taste — see auto_prefs.
-        object_type = classify_target(rgb).get("cls") if rgb is not None else None
+        object_type = (classify_target(rgb, coverage if is_mosaic else None)
+                       .get("cls") if rgb is not None else None)
         adj = auto_prefs.apply_profile(
             prefs,
             target_bg=target_bg,
