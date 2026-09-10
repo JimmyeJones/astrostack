@@ -194,6 +194,28 @@ describe("TonightView", () => {
     expect(screen.getByText("Needs mosaic")).toBeInTheDocument();
   });
 
+  it("answers a tap on a planning badge — this page is read outdoors, on a phone",
+    async () => {
+      // Every badge in this table explains itself in a tooltip and nowhere else,
+      // and Mantine's tooltip opens on `mouseenter` only. On the one device this
+      // page is actually used on there is no hover, so a hover-only "Needs
+      // mosaic" is a two-word verdict with no reason attached.
+      vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+        targets: [target({
+          id: "M31", name: "Andromeda Galaxy", already_targeted: false, score: 70,
+          size_arcmin: 178,
+          framing: { level: "mosaic", text: "is bigger than the Seestar's single frame." },
+        })],
+      }));
+      renderTonight();
+      const badge = await screen.findByText("Needs mosaic");
+      expect(screen.queryByText(/bigger than the Seestar's single frame/))
+        .not.toBeInTheDocument();
+      fireEvent.click(badge);
+      expect(await screen.findByText(/bigger than the Seestar's single frame/))
+        .toBeInTheDocument();
+    });
+
   it("shows the active minimum-altitude floor even when it isn't a round preset", async () => {
     // A 45° floor is reachable from the step-5 Settings input but isn't one of
     // the picker's presets — the Select must still render it, not blank out.
