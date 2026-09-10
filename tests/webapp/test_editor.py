@@ -2687,3 +2687,150 @@ def test_auto_measures_a_single_field_exactly_as_it_always_did(monkeypatch, clie
     for build in (build_auto_recipe_for_run, build_auto_analysis_for_run):
         assert _captured_coverage(monkeypatch, build, solved_library, safe,
                                   rid) is None, build.__name__
+
+
+# ---- "an older version trimmed this picture too far" ------------------------
+#
+# The D1 border-trim bugs (v0.386–v0.399) are fixed, and every one of those fixes
+# re-derives the *trim*. Nothing re-derives a crop that was already **saved** —
+# so a mosaic Auto-edited on an affected build still shows the sliver, on every
+# surface that replays its recipe, under a stored auto-note calling it right.
+# That is the state the 2026-09-10 external audit reproduced in the shipped image
+# (v0.277.0 wrote `geometry.crop {0.6228, 0.0341, 0.6896, 0.5463}` = 3.4 % of a
+# 5089x2045 canvas). These pin the note that finally says so.
+
+#: The exact rectangle the audit found in the owner's saved recipe.
+_AUDIT_SLIVER = {"x0": 0.6228, "y0": 0.0341, "x1": 0.6896, "y1": 0.5463}
+
+
+def _save_recipe(client, safe, rid, ops):
+    r = client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe",
+                   json={"ops": ops})
+    assert r.status_code == 200, r.text
+
+
+def _crop_op(rect, enabled=True):
+    return {"id": "geometry.crop", "enabled": enabled, "params": dict(rect)}
+
+
+def test_crop_health_flags_the_audits_saved_sliver_on_a_mosaic(client, solved_library):
+    """The regression this whole feature exists for.
+
+    A mosaic whose coverage map says ~91 % of the canvas is well covered, carrying
+    a saved crop that keeps 3.4 % of it. The picture the owner sees is the sliver;
+    nothing anywhere said so."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    _write_frame_coverage(solved_library, safe, _ragged_border_coverage())
+    _save_recipe(client, safe, rid, [
+        {"id": "tone.stretch", "enabled": True, "params": {}},
+        _crop_op(_AUDIT_SLIVER),
+    ])
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/crop-health").json()
+    assert body["stale"] is True
+    assert body["stored_keep_fraction"] == pytest.approx(0.034, abs=0.002)
+    # What re-seeding buys back: the border rule's own answer, the same rect the
+    # "Trim border" suggestion offers — so the two can never differ by a pixel.
+    trim = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/trim-suggestion").json()["crop"]
+    assert body["suggested_crop"] == trim
+    assert body["suggested_keep_fraction"] == pytest.approx(0.912, abs=0.01)
+
+
+def test_a_crop_that_matches_the_border_rule_is_not_flagged(client, solved_library):
+    """The picture a *fixed* build produces. Auto-edited on today's code, the
+    saved crop is the border rule's own answer — the note must stay silent, or
+    every correctly-trimmed mosaic on the owner's install starts nagging."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    _write_frame_coverage(solved_library, safe, _ragged_border_coverage())
+    trim = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/trim-suggestion").json()["crop"]
+    _save_recipe(client, safe, rid, [_crop_op(trim)])
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/crop-health").json()
+    assert body["stale"] is False
+
+
+def test_a_hand_crop_that_keeps_most_of_the_frame_is_not_flagged(client,
+                                                                 solved_library):
+    """The owner's own framing. Half the canvas is a crop someone chose, not a
+    bug — and this note never rewrites a recipe, so it must not accuse one."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    _write_frame_coverage(solved_library, safe, _ragged_border_coverage())
+    _save_recipe(client, safe, rid,
+                 [_crop_op({"x0": 0.1, "y0": 0.1, "x1": 0.9, "y1": 0.9})])
+
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/crop-health"
+    ).json()["stale"] is False
+
+
+def test_a_disabled_crop_is_not_what_the_viewer_is_looking_at(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    _write_frame_coverage(solved_library, safe, _ragged_border_coverage())
+    _save_recipe(client, safe, rid, [_crop_op(_AUDIT_SLIVER, enabled=False)])
+
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/crop-health"
+    ).json()["stale"] is False
+
+
+def test_a_run_with_no_coverage_sibling_is_never_accused(client, solved_library):
+    """Unmeasurable is not the same as wrong. A legacy run with no coverage map
+    beside it cannot have its trim re-derived, so there is nothing to compare the
+    saved crop against — and a note that fires on "I don't know" would fire on
+    the oldest half of the owner's library."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    _save_recipe(client, safe, rid, [_crop_op(_AUDIT_SLIVER)])
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/crop-health").json()
+    assert body["stale"] is False
+    assert body["suggested_keep_fraction"] is None
+
+
+def test_a_picture_with_no_saved_recipe_answers_silently(client, solved_library):
+    """The whole library on a healthy install, and the cheap path: no recipe
+    means no crop means no coverage read at all."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    _write_frame_coverage(solved_library, safe, _ragged_border_coverage())
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/crop-health").json()
+    assert body == {"stale": False, "stored_keep_fraction": None,
+                    "suggested_keep_fraction": None, "suggested_crop": None}
+
+
+def test_a_run_the_rule_would_not_trim_is_left_alone(client, solved_library):
+    """With uniform coverage the border rule proposes no trim, and this declines
+    to judge — the same answer the editor's own note gives (``overTrimmedVerdict``
+    returns null on a null suggestion, v0.416.0).
+
+    A sliver saved on such a run does go unreported. That is the deliberate cost
+    of one rule across three surfaces: the share a crop is weighed against is what
+    the canvas *offers*, and with no measured proposal the only yardstick left is
+    the whole frame — which a legitimately tight hand-crop is also a small share
+    of. The case this feature exists for carries a proposal (92.4 % on the audit's
+    own run), and a Dashboard that named pictures the editor then stayed silent
+    about would be worse than this gap."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    _write_frame_coverage(solved_library, safe,
+                          np.full((80, 100), 5.0, dtype="float32"))
+    _save_recipe(client, safe, rid, [_crop_op(_AUDIT_SLIVER)])
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/trim-suggestion"
+    ).json()["crop"] is None, "the fixture must give the rule nothing to propose"
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/crop-health").json()
+    assert body["stale"] is False
+    assert body["suggested_keep_fraction"] is None

@@ -47,6 +47,7 @@ from seestack.edit import auto_prefs as auto_prefs_mod
 from seestack.edit import presets as presets_mod
 from webapp import deps
 from webapp import edit_fit_cache
+from webapp import stale_crop
 from webapp.schemas import EditOpOut, editor_ops_schema
 
 router = APIRouter(tags=["editor"])
@@ -1401,6 +1402,91 @@ async def trim_suggestion(safe: str, run_id: int, request: Request,
         crop = None if rect is None else TrimCrop(x0=rect[0], y0=rect[1],
                                                   x1=rect[2], y1=rect[3])
         return TrimSuggestionOut(is_mosaic=True, crop=crop)
+
+    return await run_in_threadpool(work)
+
+
+class CropHealthOut(BaseModel):
+    """Whether this run's **saved** recipe carries a crop an older build's border
+    trim got wrong (see :mod:`webapp.stale_crop`).
+
+    ``stale`` is the only field a surface needs to decide whether to speak; the
+    rest exist so the sentence beside the picture can name real numbers instead of
+    repeating the stored auto-note's frozen percentage — which is the half of the
+    2026-09-10 audit finding that made the wrong picture read as the right one.
+
+    Every field is safely absent: a run with no saved crop, no coverage sibling,
+    or no recipe at all answers ``stale=False`` with nulls, which is what every
+    picture on a healthy install answers."""
+
+    stale: bool = False
+    #: Share of the canvas the saved crop keeps (0..1), or ``None`` if it has none.
+    stored_keep_fraction: float | None = None
+    #: Share the current border rule would keep, or ``None`` if it can't be measured.
+    suggested_keep_fraction: float | None = None
+    #: The crop a one-click re-seed would write, or ``None`` for "no crop at all"
+    #: (the rule wants the full frame). Only meaningful when ``stale``.
+    suggested_crop: TrimCrop | None = None
+
+
+def crop_health_for_run(proj, run) -> CropHealthOut:  # noqa: ANN001
+    """The stale-crop verdict for one run, given an **open** project handle.
+
+    Factored out of the endpoint so the library-wide Dashboard count
+    (:mod:`webapp.routers.overtrim`) reaches the same answer through the same
+    code, rather than the two surfaces naming different pictures — the mistake
+    ``scan_new_subs_waiting`` was written to avoid for its own note.
+
+    Cheap on the common case: a run with no saved ``geometry.crop`` returns before
+    any coverage I/O, so a library of ordinary single-field pictures costs one
+    metadata read per target."""
+    from seestack.edit.recipe import recipe_from_json
+
+    raw = proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}")
+    if not raw:
+        return CropHealthOut()
+    ops = recipe_from_json(raw).ops
+    if not stale_crop.enabled_crop_ops(ops):
+        return CropHealthOut()
+    # Only now is the coverage map worth reading. `_trim_rect_for_run` answers
+    # `None` both for "the rule wants the full frame" and for "there is no map to
+    # measure" — only the first is a judgement, so resolve measurability first.
+    # By path rather than by loading: the two `_load_run_*` helpers start with the
+    # same existence check, and loading a strided mosaic map twice per run is real
+    # I/O on the library-wide scan.
+    measurable = (frame_coverage_path_for(run.fits_path).exists()
+                  or coverage_path_for(run.fits_path).exists())
+    rect = _trim_rect_for_run(run) if measurable else None
+    suggested = (None if rect is None
+                 else {"x0": rect[0], "y0": rect[1], "x1": rect[2], "y1": rect[3]})
+    v = stale_crop.stale_crop_verdict(ops, suggested, measurable=measurable)
+    sc = v["suggested_crop"]
+    return CropHealthOut(
+        stale=v["stale"],
+        stored_keep_fraction=v["stored_keep_fraction"],
+        suggested_keep_fraction=v["suggested_keep_fraction"],
+        suggested_crop=None if sc is None else TrimCrop(**sc),
+    )
+
+
+@router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/crop-health",
+            response_model=CropHealthOut)
+async def crop_health(safe: str, run_id: int, request: Request) -> CropHealthOut:
+    """Does this picture's saved recipe still carry an older build's over-trim?
+
+    Read-only, and it never touches the stored recipe: the crop may be the
+    owner's own framing, so this only ever reports (see :mod:`webapp.stale_crop`).
+    The editor turns a ``stale`` answer into one note and a button that replaces
+    the crop op alone."""
+    _project_dir, run = _run_info(request, safe, run_id)
+
+    def work() -> CropHealthOut:
+        lib, proj = deps.open_target_project(request, safe)
+        try:
+            return crop_health_for_run(proj, run)
+        finally:
+            proj.close()
+            lib.close()
 
     return await run_in_threadpool(work)
 
