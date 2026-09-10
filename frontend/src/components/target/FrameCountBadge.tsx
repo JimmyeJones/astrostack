@@ -1,7 +1,7 @@
 import { Badge } from "@mantine/core";
-
-import { HintTooltip } from "../HintTooltip";
 import { IconAlertTriangle } from "@tabler/icons-react";
+
+import { HintAnchor } from "../HintAnchor";
 
 import { thinStackWarning } from "./thinStack";
 
@@ -37,7 +37,7 @@ export function FrameCountBadge({
     );
   }
   return (
-    <HintTooltip label={warn.message} multiline w={260} withArrow>
+    <HintAnchor label={warn.message} multiline w={260} withArrow>
       <Badge
         variant="light"
         color={warn.level === "single" ? "orange" : "yellow"}
@@ -45,6 +45,6 @@ export function FrameCountBadge({
       >
         {label}
       </Badge>
-    </HintTooltip>
+    </HintAnchor>
   );
 }

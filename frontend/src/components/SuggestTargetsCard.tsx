@@ -1,15 +1,14 @@
 import {
   Anchor, Badge, Group, Paper, Stack, Text, ThemeIcon,
 } from "@mantine/core";
-
 import { IconCalendarPlus, IconSparkles } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type SuggestedTarget } from "../api/client";
+import { HintAnchor } from "./HintAnchor";
 import { withMosaicEffort } from "../mosaicEffort";
 import { difficultyRowBadge, framingRowBadge } from "../tonight";
 import { describeSuggestion, suggestionHeading } from "./suggestTargets";
-import { HintTooltip } from "./HintTooltip";
 
 /**
  * "Try something new tonight" — a gentle discovery nudge on the Dashboard.
@@ -43,18 +42,18 @@ function SuggestionRow(
             <Text size="sm" fw={600}>{suggestionHeading(s)}</Text>
             <Text size="xs" c="dimmed">{[s.type, s.con].filter(Boolean).join(" · ")}</Text>
             {difficultyBadge ? (
-              <HintTooltip label={difficultyBadge.tooltip} multiline w={240} withArrow>
+              <HintAnchor label={difficultyBadge.tooltip} multiline w={240} withArrow>
                 <Badge size="xs" variant="light" color={difficultyBadge.color}>
                   {difficultyBadge.label}
                 </Badge>
-              </HintTooltip>
+              </HintAnchor>
             ) : null}
             {framingBadge ? (
-              <HintTooltip label={framingBadge.tooltip} multiline w={240} withArrow>
+              <HintAnchor label={framingBadge.tooltip} multiline w={240} withArrow>
                 <Badge size="xs" variant="light" color={framingBadge.color}>
                   {framingBadge.label}
                 </Badge>
-              </HintTooltip>
+              </HintAnchor>
             ) : null}
           </Group>
           {s.blurb ? <Text size="xs" c="dimmed">{s.blurb}</Text> : null}

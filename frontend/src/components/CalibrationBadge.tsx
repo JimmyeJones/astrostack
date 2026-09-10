@@ -1,6 +1,6 @@
 import { Badge } from "@mantine/core";
 
-import { HintTooltip } from "./HintTooltip";
+import { HintAnchor } from "./HintAnchor";
 
 // A stack records which calibration masters were actually applied to its lights
 // as a compact "calstat" string ("dark+flat", "bias+flat", "flat", …). This
@@ -34,7 +34,7 @@ export function CalibrationBadge({
   const label = calibrationLabel(calstat);
   if (!label) return null;
   return (
-    <HintTooltip
+    <HintAnchor
       label={`Calibrated with a ${label} — this stack had its calibration masters applied.`}
       multiline
       w={260}
@@ -42,6 +42,6 @@ export function CalibrationBadge({
       <Badge color="teal" variant="light" size={size}>
         {calstat}
       </Badge>
-    </HintTooltip>
+    </HintAnchor>
   );
 }

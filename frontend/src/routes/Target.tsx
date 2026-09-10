@@ -16,6 +16,7 @@ import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
 import { formatCaptureNights, formatFrameStamp, formatIntegration } from "../format";
 import { integrationReadiness, readinessColor, noiseReductionHint, fmtGoal } from "../readiness";
+import { HintAnchor } from "../components/HintAnchor";
 import { QueryError } from "../components/QueryError";
 import { settingsLink } from "../settingsSections";
 import { AutoStackHoldNote } from "../components/AutoStackHoldNote";
@@ -65,7 +66,6 @@ import { nextBestMove } from "../components/target/nextBestMove";
 import { softerThanUsual } from "../components/target/softStars";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { SavePictureMenu } from "../components/SavePictureMenu";
-import { HintTooltip } from "../components/HintTooltip";
 
 // Re-exported for existing tests that import it from this route module.
 export { describeObject };
@@ -1167,12 +1167,12 @@ export function TargetView() {
               Library card and Dashboard already show it; surface it here on the
               page where a user decides whether to keep shooting this target. */}
           {target.data?.total_exposure_s ? (
-            <HintTooltip label="Total light collected across all accepted subs"
-              withArrow openDelay={200}>
+            <HintAnchor label="Total light collected across all accepted subs"
+              withArrow>
               <Badge variant="light" color="teal" style={{ cursor: "help" }}>
                 {formatIntegration(target.data.total_exposure_s)} integration
               </Badge>
-            </HintTooltip>
+            </HintAnchor>
           ) : null}
           {rejectedCount > 0 || unsolvedCount > 0 ? (
             <HoverCard width={300} shadow="md" withArrow openDelay={100}>
@@ -1246,7 +1246,7 @@ export function TargetView() {
           ) : null}
           {streakedAccepted > 0 ? (
             <Group gap={4}>
-              <HintTooltip
+              <HintAnchor
                 multiline
                 w={260}
                 label={`${streakedAccepted} accepted frame${streakedAccepted === 1 ? "" : "s"} carry a satellite/plane trail. Stack with Auto outlier removal to take the trail out while keeping the frame — it picks a method that works at your stack's depth. Or reject them all here.`}
@@ -1254,7 +1254,7 @@ export function TargetView() {
                 <Badge variant="light" color="orange">
                   {streakedAccepted} streaked
                 </Badge>
-              </HintTooltip>
+              </HintAnchor>
               <Button
                 size="compact-xs"
                 variant="subtle"
@@ -1277,7 +1277,7 @@ export function TargetView() {
           ) : null}
           {trailedAccepted > 0 ? (
             <Group gap={4}>
-              <HintTooltip
+              <HintAnchor
                 multiline
                 w={260}
                 label={`${trailedAccepted} accepted frame${trailedAccepted === 1 ? "" : "s"} have unusually elongated stars for this target — a sign of tracking error, wind or a bumped mount on that whole sub. Rejecting them can sharpen the stack.`}
@@ -1285,7 +1285,7 @@ export function TargetView() {
                 <Badge variant="light" color="yellow">
                   {trailedAccepted} trailed
                 </Badge>
-              </HintTooltip>
+              </HintAnchor>
               <Button
                 size="compact-xs"
                 variant="subtle"
@@ -1584,11 +1584,11 @@ export function TargetView() {
                               picture above for anyone west of Greenwich. */}
                           <span>{formatFrameStamp(f.night_date, f.timestamp_utc)}</span>
                           {!f.accept && f.reject_reason ? (
-                            <HintTooltip label={`Rejected — ${rejectReasonLabel(f.reject_reason)}`}>
+                            <Tooltip label={`Rejected — ${rejectReasonLabel(f.reject_reason)}`}>
                               <Badge size="xs" color="gray" variant="light" style={{ flexShrink: 0 }}>
                                 {rejectReasonLabel(f.reject_reason)}
                               </Badge>
-                            </HintTooltip>
+                            </Tooltip>
                           ) : null}
                         </Group>
                       </Table.Td>

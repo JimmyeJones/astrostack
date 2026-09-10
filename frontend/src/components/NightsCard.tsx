@@ -17,7 +17,7 @@ import { useState } from "react";
 import { api, type NightSummary } from "../api/client";
 import { formatIntegration, formatNightDate } from "../format";
 import { earlyStopClause } from "./LastNightCard";
-import { HintTooltip } from "./HintTooltip";
+import { HintAnchor } from "./HintAnchor";
 
 // `formatNightDate` moved to `format.ts` (so the night-recency helpers there can
 // share its month table) and is re-exported here for its long-standing callers.
@@ -158,24 +158,24 @@ function NightRow({
             // Target page is the "extremely busy" one, so the explanation lives
             // in the tooltip (and in `aria-label`, so it is reachable without a
             // pointer) exactly as the verdict badge's does.
-            <HintTooltip label={earlyTip} multiline w={260}>
+            <HintAnchor label={earlyTip} multiline w={260}>
               <Badge size="xs" variant="light" color="orange"
                 aria-label={`ended early: ${earlyTip}`}>
                 ended early
               </Badge>
-            </HintTooltip>
+            </HintAnchor>
           ) : null}
           {moonTip ? (
             // Same idiom as the two markers above: a dimmed word on the row it
             // describes, with the sentence in the tooltip (and in `aria-label`,
             // so it is reachable without a pointer). Ten rows of prose would be a
             // wall on the page the owner already calls busy.
-            <HintTooltip label={moonTip} multiline w={280}>
+            <HintAnchor label={moonTip} multiline w={280}>
               <Badge size="xs" variant="light" color="gray"
                 aria-label={`bright Moon: ${moonTip}`}>
                 bright Moon
               </Badge>
-            </HintTooltip>
+            </HintAnchor>
           ) : null}
         </Group>
       </Table.Td>
@@ -194,16 +194,22 @@ function NightRow({
         {badge ? (
           // A tooltip, deliberately not another column: the Target page is the
           // "extremely busy" one, so the explanation is there when asked for.
-          <HintTooltip label={tip} multiline w={240} disabled={!tip}>
-            <Badge
-              size="sm"
-              variant="light"
-              color={badge.color}
-              aria-label={tip ? `${badge.label}: ${tip}` : undefined}
-            >
+          // The anchor is skipped entirely when there is no sentence, rather
+          // than `disabled`: a `HintAnchor` makes its child a tab stop and gives
+          // it `role="button"`, and a verdict with nothing to say must not
+          // advertise itself as answerable.
+          tip ? (
+            <HintAnchor label={tip} multiline w={240}>
+              <Badge size="sm" variant="light" color={badge.color}
+                aria-label={`${badge.label}: ${tip}`}>
+                {badge.label}
+              </Badge>
+            </HintAnchor>
+          ) : (
+            <Badge size="sm" variant="light" color={badge.color}>
               {badge.label}
             </Badge>
-          </HintTooltip>
+          )
         ) : null}
       </Table.Td>
       <Table.Td>

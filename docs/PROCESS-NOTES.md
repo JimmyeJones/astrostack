@@ -18,107 +18,206 @@ is a queue.
 
 ---
 
-## 2026-09-10 (Builder, branch `claude/sweet-babbage-bhkhl1`) — the phone-invisible explanation was a *badge* problem, and a green baseline that read as red
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-w1qz43`) — half the app's explanations were never written on the device it is read on
 
-**The run.** Three tasks, all shipped: **v0.413.0** (a `Badge`'s only explanation
-unreachable on a phone — `components/HintTooltip` + `useHintDisclosure`),
-**v0.413.1** (the one interactive site that measurement said was worth doing:
-Stack's *"Save as defaults"*), and **v0.413.2** (a verified bug this run
-reproduced 14 times by accident — the app refusing to boot over a missing
-*frontend*). Baseline on `origin/main`: **5,539 passed / 2 skipped** (40m45s),
-exactly the number the previous run recorded for this same head. Frontend
-baseline **3,550 passed**, after v0.413.0 **3,564**.
+**The run.** Three tasks, all shipped, all one class: **v0.413.0**
+(`components/HintAnchor.tsx` + the stack card's eleven verdict chips),
+**v0.413.1** (the nine planning verdicts on Tonight and its cards) and
+**v0.413.2** (the Target page's three header badges and the editor's four op
+chips, which carried a bug). Baseline on `origin/main`: **5,553 passed / 2
+skipped** (40m18s) — exactly the number the previous run recorded for this same
+`origin/main`, which has not moved. The work is frontend-only; its gates are
+`tsc` clean, `vitest` 254 files, and `vite build`, re-run per commit.
 
-### The trap worth carrying forward: a green baseline that reads as red
+### The finding, and why it is bigger than the entry that pointed at it
 
-The baseline run reported `5539 passed, 2 skipped, 14 errors`, and the errors
-were fourteen `tests/webapp` tests raising
+The backlog's "a Tooltip is invisible on a phone" entry has produced four slices,
+and all four are about a tooltip on a **control** — where the tap does the *wrong*
+thing (it operates the control). Counting the anchors rather than the routes
+turns up the other half of the class, which is larger and had never been named:
+of the app's **105** `<Tooltip>`s, **53 hang off an anchor that is not a control
+at all** — a `Badge`, a `Text`, a `Box`. There the tap does not do the wrong
+thing, it does *nothing at all*, and the sentence is simply absent on the device
+the owner reads this app on. Half of what the app has to say about itself.
+
+**The one-line fix does not work, and knowing why is the useful part.** Mantine's
+`Tooltip` ships `events={{ hover: true, focus: false, touch: false }}`, so
+`events={{…, touch: true}}` looks like the whole answer. It is not: floating-ui's
+`useHover` opens on `pointerenter` and closes on `pointerleave`, and a lifted
+finger fires `pointerleave` — the answer flashes and goes. Mantine defaults it off
+for that reason. The affordance that does work is the one this repo already built
+twice for controls (`HintLabel` v0.374.11, `HintIcon` v0.402.1): a **controlled**
+tooltip with an explicit tap toggle.
+
+### Two design points worth carrying forward
+
+**Clone the child; do not wrap it.** The obvious shape for "make this anchor
+tappable" is a wrapper `<span>`, and it is wrong here for the same reason the
+v0.312.0 lightbox overlay could not be a wrapper: an inserted box changes what
+`max-width`/flex/`Group` gaps resolve against, and this entry's own standing
+caution is that *no page may get taller*. `HintAnchor` clones its single child and
+adds handlers to it, so the DOM is byte-for-byte what it was plus attributes —
+which is pinned by a test asserting the anchor is still a direct child of the
+render root.
+
+**`stopPropagation` is opt-in, and that is the safer default.** Three of the
+eight sites in the third slice sit inside something clickable, where asking the
+question would also run the container — in the worst case, tapping the "slower
+preview" chip in the Add menu **added the very op it warns about**. The flag
+fixes that, but defaulting it on would have made every one of the other 17 sites
+silently swallow a click the page might expect. Swallowing is the worse failure,
+so the flag is off unless the site says otherwise.
+
+### What was deliberately left, and why
+
+Not every non-control anchor is a hit. Two on the Target page were checked and
+left: the frames table's **column headings** (the tap *sorts*, which is the
+primary action — and v0.270.0 already gave those exact sentences a reachable home
+in `FrameColumnGuide`), and the per-frame **`Rejected — …`** badge, whose tooltip
+repeats the badge's own text. That is category (b) of the entry: "it repeats what
+the control already says — leave it".
+
+### Two sweeps that came back clean (recorded so nobody re-walks them)
+
+**The "log line inside its own `except`" class** the previous run filed. Swept
+with an AST scan over `seestack/` + `webapp/` — every broad `try` whose handler
+logs a failure, checked for a success-shaped `log.info`/`log.warning` in its body.
+**Six sites, all safe**: `stacker.py`'s two sub-pixel-refine lines (locals,
+already computed), `pipeline.py`'s two auto-grade lines (the eager `", ".join`
+touches `FrameGrade.name` and `primary_metric`, and the latter is guarded
+`if self.reasons else "unknown"`), `watcher.py`'s stranded-batch line, and
+`scanner.py`'s bootstrap line — which is the one v0.411.1 already fixed. So the
+class has one known instance and it is closed.
+
+**A `--mosaic --editor` dogfood pass on this branch's own code: CLEAN.** Auto's
+trim on the mosaic canvas is **7.9 %** (AGENTS.md §1's bug line is ~15 %), nothing
+overflowing and no console errors on either target, and the editor drive added all
+**21** ops with the preview re-rendering each time, on the field run *and* on the
+mosaic run, then undid and redid. Page heights: phone Target **3,078 px** (field) /
+**3,407 px** (mosaic), phone editor 3,055 / 3,166 px, desktop 2,057 / 2,104 px —
+unchanged by this run's work by construction, since `HintAnchor` adds no element
+and no padding. The mosaic's own three sentences (panel map, `grain_uneven`,
+`seams_flat`) still cohere: all three now say the thin panel is ~30 s behind and
+evens out on its own.
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-bhkhl1`) — collision #14: two Builders swept the same entry in the same hour, and a green baseline that read as red
+
+**The run.** Three tasks shipped: **v0.414.0** (the "still open" remainder of the
+`HintAnchor` sweep, plus the drift guard that stops a ninth), **v0.414.1**
+(Stack's *"Save as defaults"* — the one interactive site the measurement said was
+worth doing) and **v0.414.2** (a verified §9 bug this run reproduced 14 times by
+accident: the app refusing to boot over a missing *frontend*). Baseline on
+`origin/main` (`a59ee928`): **5,553 collected, 5,539 passed / 2 skipped / 14
+errors**, and the 14 were self-inflicted — see below. 5,553 is exactly the number
+the two runs either side recorded for that head.
+
+### Collision #14, and it is the most complete one yet
+
+Branch `claude/sweet-babbage-w1qz43` and this one picked the **same backlog
+entry**, in the same hour, from opposite ends of the same measurement. They built
+`components/HintAnchor.tsx`; I built `components/HintTooltip.tsx`. Same
+controlled-tooltip state machine, same `cloneElement`-not-wrap decision, same
+"a `Badge` is the half of the class with no gesture at all" reading, and
+overlapping anchor sets — of my 33 sites and their 28, **24 were the same file
+and the same line**. Their PR (#818) merged first.
+
+**Theirs ships; mine was dropped rather than re-applied**, per §11 and the
+precedent of collision #12. Nothing of mine was layered on top of a file they had
+already converted: I merged `origin/main`, resolved every overlapping frontend
+file to *theirs*, deleted my component and its test, and restored `HintIcon.tsx`
+to main's version (my refactor had pointed it at my component). What remains on
+this branch is only what theirs did not reach.
+
+**On the one point where the two designs differed, theirs is better and that is
+worth carrying forward.** `HintAnchor` has an opt-in `stopPropagation` for an
+anchor sitting *inside* something clickable; mine did not, and I had explicitly
+noted the risk (a badge inside a card-link would open the hint *and* navigate)
+and then deferred it as "don't change existing behaviour". They found it as a
+live bug instead — the editor's `SlowPreviewChip` sits inside a `Menu.Item`, so
+asking what "slower preview" meant **added the very op it warns about**. The
+generalisable lesson is not about tooltips: **when you defer a risk because
+acting on it would change behaviour, check whether the current behaviour is
+already wrong somewhere.**
+
+**What made this collision cost a whole task rather than a minute** is the same
+thing §11 already says and this run did anyway: I fetched at the start of the
+run, spent the session building, and fetched again only at merge time. The entry
+was sized S/M per site and did not feel like an "L" that §11 tells you to
+re-fetch after the design read — but the *sweep* was long even though each site
+was short. **Re-fetch by elapsed time, not by the item's size label.**
+
+### The trap: a green baseline that reads as red
+
+The baseline run reported `5539 passed, 2 skipped, 14 errors`, the errors being
+fourteen `tests/webapp` tests raising
 `RuntimeError: Directory '…/webapp/static/assets' does not exist` at fixture
 setup. Read cold, that is "main is red, and fixing it is task #1" (AGENTS.md §2).
 
-It was self-inflicted, and the mechanism is worth knowing before it costs
-someone a run: **`scripts/agent-dogfood.sh` runs `npx vite build`, and
+It was self-inflicted. **`scripts/agent-dogfood.sh` runs `npx vite build`, and
 `frontend/vite.config.ts` sets `emptyOutDir: true` on an `outDir` of
-`../webapp/static`.** So a dogfood pass *deletes* `webapp/static/` and rebuilds
+`../webapp/static`** — so a dogfood pass *deletes* `webapp/static/` and rebuilds
 it, and any `tests/webapp` test that calls `create_app()` inside that window
-fails. Both were started in the background to save wall-clock; they overlapped.
+fails. Both had been started in the background to save wall-clock.
 
 **Do not run `agent-dogfood.sh` concurrently with `pytest`** unless the dogfood
-is invoked without a build (it only builds on `--build` or when
-`webapp/static/index.html` is missing — so the *second* dogfood pass of a run is
-usually safe, and the first is not). Serialise them: dogfood first, pytest
-after.
+will not build (it builds only on `--build`, or when
+`webapp/static/index.html` is missing — so the *second* pass of a run is usually
+safe and the first is not). Serialise them: dogfood first, pytest after.
 
-**And the trap turned out to be a real bug**, which is why it is not only a
-process note. `_mount_spa` guarded on the *directory* and then mounted
-`static/assets` unconditionally — so the empty-directory state every build
-passes through does not degrade to the "Frontend not built" placeholder the same
-function already implements, it raises out of `create_app()` and the whole app
-fails to start. That is a §9 violation on a box upgraded in place, and it
-shipped as **v0.413.2**. The generalisable shape: **a guard that asks whether
-the *container* exists, when the question is whether the *contents* do.**
+**And the trap was a real bug**, which is why it is not only a process note.
+`_mount_spa` guarded on the *directory* and then mounted `static/assets`
+unconditionally, so the empty-directory state every build passes through did not
+degrade to the "Frontend not built" placeholder the same function already
+implements — it raised out of `create_app()` and the whole app failed to start,
+API and Settings page included. On a box upgraded in place that is a §9
+violation. Shipped as **v0.414.2**. The generalisable shape: **a guard that asks
+whether the *container* exists, when the question is whether the *contents* do.**
 
-### Why the badge population had survived four slices of its own entry
-
-The "a Tooltip is invisible on the device the owner actually reads this app on"
-entry lists its still-open work by **route** (History, Stack, Dashboard). Those
-three routes carry nine hand-written tooltips between them, and by the entry's
-own (a)/(b) split most are category (b). Walking every `.tsx` instead found the
-real population: **27 `<Tooltip>`s wrapped a `Badge`**, and they live in *shared
-components* that render on six routes at once. No route owns them, so a
-route-by-route sweep could never reach them.
-
-Two more things were checked rather than assumed, and both come back clean —
-recorded so nobody re-walks them:
+### Two sweeps that came back clean — do not re-walk them
 
 - **Every editor op parameter measured in pixels is already proxy-scaled.**
   Enumerated from the registry rather than by reading: `background.subtract`
   (`box_size`), `background.final_gradient` (`box_size`, `dilate_px`),
   `detail.chroma_denoise`, `detail.sharpen`, `detail.deconvolve`,
-  `stars.reduce` and `stars.boost_nebula` all scale, the last two inside
-  `starmask.star_mask` rather than in the op (which is why a grep for
-  `scaled_px` in `stars.py` under-reports). `detail.hot_pixels`'s `sigma` is a
-  statistical threshold, not a length.
+  `stars.reduce` and `stars.boost_nebula` all scale — the last two inside
+  `starmask.star_mask` rather than in the op, which is why grepping `stars.py`
+  for `scaled_px` under-reports. `detail.hot_pixels`'s `sigma` is a statistical
+  threshold, not a length.
 - **The "a `log.info` inside a `try` whose `except` logs a failure" sweep the
   previous run asked for is clean.** Six candidate blocks across `seestack/` and
-  `webapp/` (AST-scanned, not grepped); every one logs only plain locals. The
-  one that did bite — `scanner.run_qc_and_solve`'s `project.name` — is the one
-  already fixed as v0.411.1. `pipeline._auto_grade_target`'s success line is the
-  closest remaining shape (it reads `r.name` / `r.primary_metric` off
-  `FrameGrade` **after** the DB writes have committed, so a raise there would
-  report `AutoGradeCounts(0, 0)` for work that happened) — checked against the
-  dataclass, both attributes exist.
+  `webapp/` (AST-scanned, not grepped); every one logs plain locals. The one that
+  did bite — `scanner.run_qc_and_solve`'s `project.name` — is already fixed as
+  v0.411.1. The closest remaining shape is
+  `pipeline._auto_grade_target`'s success line, which reads `r.name` /
+  `r.primary_metric` off `FrameGrade` **after** the DB writes have committed, so
+  a raise there would report `AutoGradeCounts(0, 0)` for work that happened —
+  both attributes were checked against the dataclass and exist.
 
-### Dogfood record — `--mosaic --editor`, before and after, byte-identical
+### Dogfood record — `--mosaic --editor`, twice, byte-identical
 
-Run on `origin/main` and again on the branch's own build. **Auto's trim on the
-mosaic sample: 7.9 %**, unchanged and well under the ~15 % D1 bar. The mosaic
-page-height table is **identical to the pixel** across the change — `[phone]`
-3,407 / 3,166 / 3,094 / 2,432 px, `[desktop]` 2,116 / 2,104 / 1,699 / 1,637 px —
-nothing overflowing, no console errors, and the editor drive added all 21 ops on
-the mosaic run with the live preview re-rendering each time, undo and redo
-applied. That is the measurement v0.413.0's entry demands ("don't make the pages
+Run on `origin/main` and again on the branch's own build (of the work that was
+later dropped, but the anchor mechanism is the same one that shipped). **Auto's
+trim on the mosaic sample: 7.9 %**, unchanged and well under the ~15 % D1 bar.
+The mosaic page-height table is **identical to the pixel** across the change —
+`[phone]` 3,407 / 3,166 / 3,094 / 2,432 px, `[desktop]` 2,116 / 2,104 / 1,699 /
+1,637 px — nothing overflowing, no console errors, and the editor drive added all
+21 ops on the mosaic run with the live preview re-rendering each time, undo and
+redo applied. That is the measurement the entry demands ("don't make the pages
 taller"), and an exact match rather than "within noise", because the change adds
-no DOM node and no style.
+no DOM node and no style. The app's three claims about that mosaic still cohere,
+unchanged from the previous run's record.
 
-Read as one paragraph (§7), the app's three claims about that mosaic still
-cohere, unchanged from the previous run's record: the panel map's "a little
-behind at the top-right", `grain_uneven`'s "about 23 % … about 1.4× grainier …
-only about 30 s behind", and `seams_flat`'s "that is a difference in depth, not
-a step in the sky".
+### One implementation detail worth keeping
 
-### One design point from v0.413.0 worth keeping
-
-**Mantine's `Badge` puts the words in an inner element.** `getByText("Hazy
-night")` returns the label `<span>`; the cloned trigger props (`role`,
-`tabIndex`) land on the Badge's *root*. A click on the words still reaches the
-root by bubbling — which is why nine of ten component assertions passed while
-the `tabindex` one did not, and why the test now asserts attributes on
-`getByRole("button", { name: … })` and gestures on `getByText`. A test that had
-only fired events would have looked entirely green while the keyboard path did
-not exist.
+**Mantine's `Badge` puts its words in an inner element.** `getByText("Hazy
+night")` returns the label `<span>`; a cloned anchor's `role`/`tabIndex` land on
+the Badge's *root*. A click on the words still reaches the root by bubbling —
+which is why nine of ten component assertions passed while the `tabindex` one did
+not. Assert attributes on `getByRole("button", { name: … })` and fire gestures on
+`getByText`. A test that only fired events would have looked entirely green while
+the keyboard path did not exist.
 
 ---
+
 
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-mudy09`) — the plate-solve rescue chain, and the reason the owner's own subs never got the sibling hint
 

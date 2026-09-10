@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { fireEvent, render, screen, cleanup } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { NoiseReadout, CleanestBadge, cleanestRunId, hasNoise } from "./NoiseBadge";
 import type { StackRun } from "../api/client";
@@ -46,6 +46,15 @@ describe("NoiseBadge", () => {
     cleanup();
     wrap(<CleanestBadge isCleanest={false} />);
     expect(screen.queryByText("Cleanest")).not.toBeInTheDocument();
+  });
+
+  it("says what \"Noise 0.021\" means on a tap, not only on a hover", async () => {
+    // A phone has no hover, and this read-out is a bare number: without the
+    // sentence it is not an explanation of anything.
+    wrap(<NoiseReadout sigma={0.021} />);
+    expect(screen.queryByText(/normalized so it's comparable/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Noise 0.021"));
+    expect(await screen.findByText(/normalized so it's comparable/)).toBeInTheDocument();
   });
 
   it("hasNoise guards missing/negative values", () => {

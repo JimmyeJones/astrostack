@@ -2,11 +2,11 @@ import { Anchor, Group, List, Paper, Stack, Text, ThemeIcon } from "@mantine/cor
 import { IconCalendarPlus, IconCalendarStar } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { HintAnchor } from "./HintAnchor";
 import {
   WINDOWS_SHOWN, describeGap, describeWindow, finishForecast, windowUtcTooltip,
   windowsIntro, windowsWanted,
 } from "./nextSession";
-import { HintTooltip } from "./HintTooltip";
 
 /**
  * "Plan your next night" — the forward-looking companion to the retrospective
@@ -72,9 +72,9 @@ export function NextSessionCard({
           <List size="xs" spacing={2} c="dimmed" listStyleType="none" withPadding={false}>
             {shown.map((w) => (
               <List.Item key={w.dark_start_utc}>
-                <HintTooltip label={windowUtcTooltip(w)} withArrow position="top-start">
+                <HintAnchor label={windowUtcTooltip(w)} withArrow position="top-start">
                   <span>{describeWindow(w)}</span>
-                </HintTooltip>
+                </HintAnchor>
               </List.Item>
             ))}
           </List>

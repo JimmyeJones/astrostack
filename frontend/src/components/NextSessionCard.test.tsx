@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextSessionCard } from "./NextSessionCard";
 import type { NextSession } from "../api/client";
@@ -60,8 +60,21 @@ describe("NextSessionCard", () => {
     expect(screen.getByText(/About 2 more clear hours.*720 more subs/)).toBeInTheDocument();
     expect(screen.getByText("Your next good window:")).toBeInTheDocument();
     // Local wall-clock (TZ=UTC on CI, so local == UTC), no "UTC" suffix — that
-    // anchor now lives in the hover tooltip instead.
+    // anchor now lives in the line's own hint instead (tapped or hovered).
     expect(screen.getByText(/Thu 15 Jan.*22:40 → 02:10/)).toBeInTheDocument();
+  });
+
+  it("gives up its UTC anchor to a tap, not only to a hover", async () => {
+    // The local wall-clock line is the readable one; the UTC it is derived from
+    // — the same anchor the .ics carries — lives only in the tooltip. A phone
+    // has no hover, so without this the UTC is unreachable on the device someone
+    // checks a window on.
+    vi.spyOn(client.api, "nextSession").mockResolvedValue(session());
+    renderCard({ gapSeconds: 2 * 3600, subExposureSeconds: 10 });
+    const line = await screen.findByText(/Thu 15 Jan.*22:40 → 02:10/);
+    expect(screen.queryByText(/In UTC:/)).not.toBeInTheDocument();
+    fireEvent.click(line);
+    expect(await screen.findByText(/In UTC:/)).toBeInTheDocument();
   });
 
   it("offers an 'Add to calendar' .ics download pointing at the target's endpoint", async () => {

@@ -1,7 +1,6 @@
 import { Tooltip, UnstyledButton } from "@mantine/core";
 import { IconInfoCircle } from "@tabler/icons-react";
-
-import { useHintDisclosure } from "./HintTooltip";
+import { useState } from "react";
 
 /**
  * A small info icon whose explanation can be **tapped** open, not only hovered.
@@ -28,15 +27,15 @@ export function HintIcon({ hint, position = "top-start" }: {
   /** Where the bubble sits, for an icon near the right edge of the screen. */
   position?: "top-start" | "top-end" | "bottom-start" | "bottom-end" | "top";
 }) {
-  // The tap/hover/focus state machine is shared with `HintTooltip`, which puts
-  // the same gestures on a trigger that is not an icon (a `Badge`), so the two
-  // affordances cannot drift apart. `preventDefault` is what this site needs
-  // and that one does not: `HintLabel` renders this inside a control's own
-  // <label>, where an un-prevented tap is forwarded to the control it labels.
-  const { opened, triggerProps } = useHintDisclosure({ preventDefault: true });
+  // Two reasons a hint can be showing, kept apart so a pointer leaving doesn't
+  // dismiss one the user deliberately tapped open. Blur closes both: on touch,
+  // tapping anything else takes focus away, which is how a tapped hint is
+  // dismissed without a second, precise tap on a 14 px target.
+  const [tapped, setTapped] = useState(false);
+  const [pointed, setPointed] = useState(false);
   return (
     <Tooltip label={hint} multiline w={260} withArrow position={position}
-      opened={opened}>
+      opened={tapped || pointed}>
       <UnstyledButton
         // A <span> carrying the role explicitly, not a <button>: `HintLabel`
         // renders this inside a control's own <label>, where a <button> is a
@@ -48,7 +47,22 @@ export function HintIcon({ hint, position = "top-start" }: {
         // label is how it is found, by a screen reader and by a test alike, so
         // repeating it here would collide with it.
         aria-label="What does this do?"
-        {...triggerProps}
+        onClick={(e) => {
+          // Harmless beside a control; load-bearing inside a <label>, where the
+          // tap would otherwise be forwarded to the control it labels — reading
+          // the hint would change the setting.
+          e.preventDefault();
+          setTapped((open) => !open);
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();   // Space would scroll the panel
+          setTapped((open) => !open);
+        }}
+        onMouseEnter={() => setPointed(true)}
+        onMouseLeave={() => setPointed(false)}
+        onFocus={() => setPointed(true)}
+        onBlur={() => { setPointed(false); setTapped(false); }}
         style={{ display: "inline-flex", lineHeight: 0, flexShrink: 0,
           cursor: "pointer" }}
       >
