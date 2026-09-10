@@ -13,6 +13,7 @@ import {
   masterCoverageLine, masterMissesTooltip, uncoveredTargetsNote,
 } from "../components/calibrationCoverage";
 import { IncomingCalibrationCard } from "../components/IncomingCalibrationCard";
+import { HintTooltip } from "../components/HintTooltip";
 
 const KIND_COLORS: Record<string, string> = { dark: "indigo", flat: "teal", bias: "grape" };
 
@@ -193,11 +194,11 @@ export function CalibrationView() {
                 page-level banner (AGENTS.md §1, the standing IA rule). */}
             {repair ? (
               <Group justify="space-between" gap="sm" wrap="nowrap" p="sm">
-                <Tooltip label={repair.detail} multiline w={320}>
+                <HintTooltip label={repair.detail} multiline w={320}>
                   <Text size="sm" c={repair.state === "on" ? "teal.7" : undefined}>
                     {repair.message}
                   </Text>
-                </Tooltip>
+                </HintTooltip>
                 <Button size="xs" variant={repair.state === "on" ? "subtle" : "light"}
                   color={repair.state === "on" ? "gray" : "teal"}
                   loading={setRepair.isPending}
@@ -273,12 +274,12 @@ export function CalibrationView() {
                         const note = defectsById.get(m.id)?.note;
                         if (!note) return null;
                         return (
-                          <Tooltip label={note.detail} multiline w={320}>
+                          <HintTooltip label={note.detail} multiline w={320}>
                             <Text size="xs"
                               c={note.severity === "warn" ? "yellow.7" : "dimmed"}>
                               {note.message}
                             </Text>
-                          </Tooltip>
+                          </HintTooltip>
                         );
                       })()}
                     </Table.Td>

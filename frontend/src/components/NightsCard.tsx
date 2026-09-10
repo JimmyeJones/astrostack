@@ -8,8 +8,8 @@ import {
   Table,
   Text,
   ThemeIcon,
-  Tooltip,
 } from "@mantine/core";
+
 import { notifications } from "@mantine/notifications";
 import { IconCalendarStar } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,6 +17,7 @@ import { useState } from "react";
 import { api, type NightSummary } from "../api/client";
 import { formatIntegration, formatNightDate } from "../format";
 import { earlyStopClause } from "./LastNightCard";
+import { HintTooltip } from "./HintTooltip";
 
 // `formatNightDate` moved to `format.ts` (so the night-recency helpers there can
 // share its month table) and is re-exported here for its long-standing callers.
@@ -157,24 +158,24 @@ function NightRow({
             // Target page is the "extremely busy" one, so the explanation lives
             // in the tooltip (and in `aria-label`, so it is reachable without a
             // pointer) exactly as the verdict badge's does.
-            <Tooltip label={earlyTip} multiline w={260}>
+            <HintTooltip label={earlyTip} multiline w={260}>
               <Badge size="xs" variant="light" color="orange"
                 aria-label={`ended early: ${earlyTip}`}>
                 ended early
               </Badge>
-            </Tooltip>
+            </HintTooltip>
           ) : null}
           {moonTip ? (
             // Same idiom as the two markers above: a dimmed word on the row it
             // describes, with the sentence in the tooltip (and in `aria-label`,
             // so it is reachable without a pointer). Ten rows of prose would be a
             // wall on the page the owner already calls busy.
-            <Tooltip label={moonTip} multiline w={280}>
+            <HintTooltip label={moonTip} multiline w={280}>
               <Badge size="xs" variant="light" color="gray"
                 aria-label={`bright Moon: ${moonTip}`}>
                 bright Moon
               </Badge>
-            </Tooltip>
+            </HintTooltip>
           ) : null}
         </Group>
       </Table.Td>
@@ -193,7 +194,7 @@ function NightRow({
         {badge ? (
           // A tooltip, deliberately not another column: the Target page is the
           // "extremely busy" one, so the explanation is there when asked for.
-          <Tooltip label={tip} multiline w={240} disabled={!tip}>
+          <HintTooltip label={tip} multiline w={240} disabled={!tip}>
             <Badge
               size="sm"
               variant="light"
@@ -202,7 +203,7 @@ function NightRow({
             >
               {badge.label}
             </Badge>
-          </Tooltip>
+          </HintTooltip>
         ) : null}
       </Table.Td>
       <Table.Td>

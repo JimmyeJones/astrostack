@@ -194,6 +194,26 @@ describe("TonightView", () => {
     expect(screen.getByText("Needs mosaic")).toBeInTheDocument();
   });
 
+  it("explains that badge on a tap — a phone has no hover to explain it with", async () => {
+    // "Needs mosaic" is two words a beginner has never met, and the sentence
+    // saying what it means lived on a hover `<Tooltip>` around a `Badge`. A
+    // Badge has no action, so on the device this page is read on there was no
+    // gesture that could reach the words at all (v0.413.0).
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [target({
+        id: "M31", name: "Andromeda Galaxy", already_targeted: false, score: 70,
+        size_arcmin: 178,
+        framing: { level: "mosaic", text: "is bigger than the Seestar's single frame." },
+      })],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Needs mosaic")).toBeInTheDocument());
+    expect(screen.queryByText(/bigger than the Seestar/)).toBeNull();
+    fireEvent.click(screen.getByText("Needs mosaic"));
+    expect(await screen.findByText(/bigger than the Seestar/)).toBeInTheDocument();
+  });
+
   it("shows the active minimum-altitude floor even when it isn't a round preset", async () => {
     // A 45° floor is reachable from the step-5 Settings input but isn't one of
     // the picker's presets — the Select must still render it, not blank out.

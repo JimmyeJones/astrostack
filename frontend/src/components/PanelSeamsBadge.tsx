@@ -1,4 +1,6 @@
-import { Badge, Tooltip } from "@mantine/core";
+import { Badge } from "@mantine/core";
+
+import { HintTooltip } from "./HintTooltip";
 
 /**
  * "Did my mosaic's panels line up?" as a small History/Gallery chip.
@@ -56,10 +58,10 @@ export function PanelSeamsBadge(
   const v = seamsLabel(verdict, grain);
   if (!v) return null;
   return (
-    <Tooltip label={v.help} multiline w={260}>
+    <HintTooltip label={v.help} multiline w={260}>
       <Badge color={v.color} variant="light" size={size}>
         {v.label}
       </Badge>
-    </Tooltip>
+    </HintTooltip>
   );
 }

@@ -77,6 +77,7 @@ import {
 } from "../components/editor/backgroundModeAdvice";
 import { PresetMenu } from "../components/editor/PresetMenu";
 import { HintLabel } from "../components/StackOptionControl";
+import { HintTooltip } from "../components/HintTooltip";
 
 const GROUP_LABELS: Record<string, string> = {
   background: "Background", tone: "Tone & color", detail: "Detail",
@@ -109,11 +110,11 @@ function toOpInstances(
  * adding the op why its live preview updates after a beat rather than instantly. */
 function SlowPreviewChip() {
   return (
-    <Tooltip label="Slow to render — the live preview updates after a short pause" withArrow>
+    <HintTooltip label="Slow to render — the live preview updates after a short pause" withArrow>
       <Badge size="xs" variant="light" color="grape" style={{ flexShrink: 0, cursor: "help" }}>
         slower preview
       </Badge>
-    </Tooltip>
+    </HintTooltip>
   );
 }
 
@@ -1526,10 +1527,10 @@ export function EditorView() {
           <div>
             <Title order={2}>Editor — {target.data?.name ?? safe}</Title>
             {measuredText ? (
-              <Tooltip multiline w={260} withArrow
+              <HintTooltip multiline w={260} withArrow
                 label="What the editor measured from this stack — the same values behind the 'From your data' suggestion buttons.">
                 <Text size="xs" c="dimmed">{measuredText}</Text>
-              </Tooltip>
+              </HintTooltip>
             ) : null}
           </div>
         </Group>

@@ -41,6 +41,7 @@ import { removedOverlayCaption } from "../removed";
 import { Sparkline } from "../components/Sparkline";
 import { MENU_HINT, SavePictureMenu } from "../components/SavePictureMenu";
 import { sameTargetCompareHref } from "../compareWithLast";
+import { HintTooltip } from "../components/HintTooltip";
 
 export type RunSort = "newest" | "cleanest";
 
@@ -1639,12 +1640,12 @@ export function HistoryView() {
             <div>
               <Group gap={6}>
                 <Text size="sm" fw={600}>Noise trend</Text>
-                <Tooltip
+                <HintTooltip
                   label="Background-noise σ of each measured stack, oldest → newest. Lower is cleaner; a downward line means your results are improving as you add nights."
                   multiline w={260} withArrow>
                   <Text span size="xs" c="dimmed" style={{ cursor: "help" }}
                     td="underline dotted">what's this?</Text>
-                </Tooltip>
+                </HintTooltip>
               </Group>
               <Text size="xs" c="dimmed">
                 {trend[trend.length - 1] < trend[0]

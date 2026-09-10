@@ -1551,11 +1551,57 @@ problems. Dogfood it every big-picture run and fix root causes.
   not move: `Editor.test.tsx` (the switch stays checked and `autoProcess` still gets `undefined`),
   `Jobs.test.tsx` (`requestPermission` not called), `Gallery.test.tsx` (still sorted by Newest).
 
-  **Still open:** the *route-specific* tooltips on History, Stack and the Dashboard, and the editor's **header**
-  row buttons — `Trim border`, `Re-centre`, `Crop`. Those three are the weaker half of the class and should be
-  judged before being swept: pressing them only *previews* a crop behind an Apply/Cancel, so the tap is a safe
-  way to find out, unlike the five above. Each remaining route still needs its own measurement; these slices
-  deliberately don't guess at them.
+  **▶ FIFTH SLICE SHIPPED — v0.413.0, the badge vocabulary, and it is the biggest instance of the class by
+  far** (Builder 2026-09-10, branch `claude/sweet-babbage-bhkhl1`). Measuring the three routes this entry
+  named found the population is not route-shaped: **27 `<Tooltip>`s wrapped a `Badge`**, in shared components
+  that appear on Target, History, Gallery, Tonight, the Dashboard and the editor at once. A `Badge` is the
+  *worse* half of the v0.402.1 class, not a lesser one — a switch at least has an action for the tap to leak
+  into, so a phone user gets *something*; a badge has none, so "Hazy night", "seams flat", "min-max",
+  "Needs mosaic", "σ-clip κ3", "ended early", "bright Moon", "softer than usual", "slower preview" and
+  "24 streaked" are words with no gesture at all that reaches their meaning. Several even set
+  `cursor: "help"`, an affordance a phone cannot render.
+  **New `components/HintTooltip.tsx`**: the same tap / hover / focus state machine as `HintIcon`, attached to
+  the caller's own trigger instead of to an icon — and **shared with `HintIcon` through `useHintDisclosure`**,
+  so the two affordances cannot drift into two different gestures (`HintIcon` keeps its `preventDefault`,
+  which is what it needs inside a control's `<label>` and this one does not). The presentation props are
+  pass-through with **no defaults of their own**, so every bubble is the one that site already had: this
+  change is about the gestures that reach the words and nothing else. `label: null` / `disabled` leave the
+  trigger exactly the element it was — no role, no tab stop — so a badge with nothing to say does not
+  advertise itself as answerable.
+  **No page can get taller, and that is structural rather than measured**: nothing is added to the DOM and no
+  style changes — the trigger *is* the badge that was already there, gaining `role="button"` and `tabIndex`.
+  The badge's own words stay its accessible name, so nothing that looks one up by its text (a screen reader,
+  or any of the 3,550 existing frontend tests) has to know the hint exists — all of them passed unchanged.
+  Keyboard users reach these sentences for the first time.
+  **Applied to 33 triggers across 20 files** — every `Badge`, plus the non-interactive `Text`/`span` triggers
+  in the same idiom (`NoiseReadout`, the editor's op-list markers and its "what the editor measured" line,
+  Calibration's repair/defect notes, the History noise-trend sparkline's *"what's this?"*, which was a
+  question a phone could ask and never get answered).
+  **Tests (+14, three failing before):** `HintTooltip.test.tsx` (+12 — tap opens, second tap and blur dismiss,
+  hover and focus still open it, Enter/Space with the scroll swallowed, the tab stop and the unchanged
+  accessible name, `null`/`disabled` leaving the trigger inert, a trigger's own `onClick` still running, plus
+  the **drift guard**: no `<Tooltip>` in the app may wrap a `Badge`, proven armed against a synthetic bad
+  site *and* proven to have really walked the tree), and one fail-before regression at a component
+  (`HazyNightBadge.test.tsx`) and at a route (`Tonight.test.tsx`).
+  **Frontend-only**; no API, schema, config, on-disk or default change. `tsconfig.json` gains `vite/client`
+  to its `types` so the guard can read the app's own sources through `import.meta.glob` rather than adding
+  `@types/node`.
+
+  **Still open:** the editor's **header** row buttons — `Trim border`, `Re-centre`, `Crop` — and the
+  *interactive* triggers this slice deliberately did not touch (`Button`/`ActionIcon` under a `Tooltip`).
+  Those are the weaker half of the class and should be judged before being swept: pressing them only
+  *previews* a crop behind an Apply/Cancel, so the tap is a safe way to find out, unlike the five in
+  v0.402.1. **Three of the named routes were measured this run and are category (b) — leave them, recorded
+  so nobody re-walks them:** the **Dashboard**'s single tooltip labels a download icon that already carries
+  an `aria-label` and opens a menu naming its own formats; **Stack**'s disabled *"Start stacking"* tooltip
+  repeats, word for word, the yellow *"No plate-solved frames yet"* alert at the top of the same page (and a
+  disabled `<button>` receives no pointer events, so it was never reachable on a mouse either); and
+  **History**'s per-card *"Reuse settings"* / *"Compare"* buttons would need one hint icon **per run card**,
+  which is the "one more always-on element" the standing IA priority exists to prevent — the honest shape
+  there is one page-level disclosure in the `FrameColumnGuide` idiom, if it is ever worth it. **Stack's
+  *"Save as defaults"* is the one interactive site that is genuinely worth doing** and is left for that
+  slice: its sentence is the only statement anywhere that the button also drives *auto-stacking for this
+  target*, and the tap that would ask the question performs the persistent save instead.
 
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — surface calibration-master mismatches (and a *never-applied* wrong-shaped
   bias) at *bind time* in the calibration UI, not only buried in the stack log.** *(Friendliness + trust; size S–M;
@@ -2855,6 +2901,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.413.0** — FRIENDLINESS (PRIORITY 3, the fifth slice of the "a Tooltip is invisible on the device the owner actually reads this app on" entry): **a badge's only explanation stops being unreachable on a phone.** Measuring the three routes that entry named turned up a population that is not route-shaped — **27 `<Tooltip>`s wrapped a `Badge`**, in shared components that appear on Target, History, Gallery, Tonight, the Dashboard and the editor at once. A `Badge` is the *worse* half of the v0.402.1 class: a switch at least has an action for the tap to leak into, a badge has none, so "Hazy night", "seams flat", "min-max", "Needs mosaic", "ended early" and "24 streaked" were words with no gesture at all that reached their meaning (several even set `cursor: "help"`, which a phone cannot render). New `components/HintTooltip.tsx` puts `HintIcon`'s tap/hover/focus state machine on the caller's own trigger, **sharing it through `useHintDisclosure`** so the two affordances cannot drift; the presentation props pass through with no defaults, so every bubble is the one that site already had. Applied to 33 triggers across 20 files (every Badge, plus the `Text`/`span` twins — `NoiseReadout`, the op-list markers, Calibration's notes, and History's *"what's this?"*, a question a phone could ask and never get answered). **No page can get taller and that is structural, not measured**: nothing is added to the DOM and no style changes — the badge's own words stay its accessible name, so all 3,550 existing frontend tests passed unchanged. Keyboard users reach these sentences for the first time. Frontend-only; no API, schema, config, on-disk or default change. Tests +14, three fail before, including a **drift guard** (no `<Tooltip>` may wrap a `Badge`) proven armed against a synthetic bad site and proven to have walked the real tree. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.412.0** — AUTONOMY (PRIORITY 2, the 2026-07-25 backlog item, opt-in `astap_bootstrap_solve` path): **the faint-field rescue now anchors on a sub that already solved, instead of always re-solving a deep image.** The bootstrap engages when fewer than `min_frames` subs solved — a band that includes "a handful did" — and in that band it still built a deep image and asked ASTAP to solve *that*: a synthetic frame with no optics headers, on the field that had just defeated the solver sub by sub, while 1–7 real verified solutions of the same pointing sat unused in the DB. New `bootstrap.pick_solved_anchor` picks one (usable WCS by `wcs_text_is_usable`, same pixel shape as the members, star-richest first, at most `ANCHOR_LOAD_ATTEMPTS`=3 loaded since a load is a debayer) and the burst registers against it and takes its WCS — same phase-correlation shifts, same `propagate_wcs` CRPIX offsets, but no integration, no temp FITS, no extra ASTAP call and none of that call's failure risk. The deep-image path is untouched for the zero-solved case it was measured for, and for a target whose solved subs are unreadable or the wrong shape. The anchor is member 0 and every count below it (readability, registration, `n_members`, `n_registered`) counts only the **unsolved** members, so it cannot inflate the engagement gate; it is skipped in the propagation loop, because an already-solved sub is never touched. `BootstrapResult.anchored_on_solved_sub` / `bootstrap_anchored` say which path ran. Engine-only, additive, off-by-default path — no config, schema, on-disk, endpoint, response-shape or default change. Tests +5, four fail before, including a ground-truth CRPIX check with a deep solver that raises if it is called at all. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.411.1** — 🐛 BUG (trust / logging, found while writing v0.411.0 in the same block; reproduced by test): **a *successful* stack-then-solve bootstrap rescue logged itself as a failure.** `Project` has no `.name` attribute (the target's name lives in its meta table), and the bootstrap's credit line read it **inside** the block's own `except Exception` — so the one branch that fires when the bootstrap actually rescued subs raised, and the walk-away log said *"stack-then-solve bootstrap failed: 'Project' object has no attribute 'name'"* about a run that had just worked. The summary keys are written before the raise, so the Jobs page's rescue note was right all along — which is why nothing on screen ever disagreed. Fixed to `project.get_meta("name")`, the accessor the rest of the codebase uses. One line; no config, schema, on-disk, endpoint, response-shape or default change. Tests +1, fails before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.411.0** — AUTONOMY (PRIORITY 2/4, the 2026-07-23 backlog slice (c) of the v0.180.0 sibling-hint fill-in): **a second solve pass now reaches the subs a Seestar's own header hint kept blind.** v0.180.0 offers the solved siblings' centre at the tight `SIBLING_HINT_RADIUS_DEG` (5°) only to a frame with **no** header hint — and a Seestar writes `RA`/`DEC` into every sub, so on the owner's data that rescue never fires: each unsolved sub is searched blind-wide at 30° even after a dozen siblings pinned the pointing to within a degree, and an unlocated sub is silently left out of the stack. New pure `solve/runner.build_sibling_retry_arglist` re-offers **only this round's failures** around the now-known centre at the tight radius — a smaller *correct* search than the one that just failed, which is what the 2026-07-24 ASTAP measurement said moves the needle (~4 s failed at 30°, ~0.2 s at 5°); ASTAP still verifies the pattern, so it can only ever **add** solves. Bounded to one extra attempt and skipping the four cases it cannot help — a **setup** failure (no star database costs zero extra attempts), a **timeout** (already 3× the configured seconds, and it keeps its own "ran out of time" bucket), a job that **raised**, and a frame that already searched exactly there — plus standing down entirely when nothing has solved yet **or** when `use_solve_hints` is off (a blind solve was asked for, and this pass is nothing but a hint). `scanner.run_qc_and_solve` gains `retry_unsolved_with_sibling_hint=True`, running before the opt-in bootstrap so a real per-sub solve beats a propagated one. A rescued sub counts in `solve_ok`, so the Jobs page's existing "Located N of M" sentence improves with **no frontend change**; `solve_done`/`solve_total` stay the progress counters. Engine-only, additive — no config, schema, on-disk, endpoint, response-shape or default change. Tests +8, three fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).
