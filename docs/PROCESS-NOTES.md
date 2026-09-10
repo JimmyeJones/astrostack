@@ -192,10 +192,10 @@ whether the *container* exists, when the question is whether the *contents* do.*
   a raise there would report `AutoGradeCounts(0, 0)` for work that happened —
   both attributes were checked against the dataclass and exist.
 
-### Dogfood record — `--mosaic --editor`, twice, byte-identical
+### Dogfood record — `--mosaic --editor`, three times, byte-identical
 
-Run on `origin/main` and again on the branch's own build (of the work that was
-later dropped, but the anchor mechanism is the same one that shipped). **Auto's
+Run on `origin/main` (`a59ee928`), on the branch's own build of the work that was
+later dropped, and again on the **final merged tree** that ships. **Auto's
 trim on the mosaic sample: 7.9 %**, unchanged and well under the ~15 % D1 bar.
 The mosaic page-height table is **identical to the pixel** across the change —
 `[phone]` 3,407 / 3,166 / 3,094 / 2,432 px, `[desktop]` 2,116 / 2,104 / 1,699 /
@@ -203,8 +203,10 @@ The mosaic page-height table is **identical to the pixel** across the change —
 21 ops on the mosaic run with the live preview re-rendering each time, undo and
 redo applied. That is the measurement the entry demands ("don't make the pages
 taller"), and an exact match rather than "within noise", because the change adds
-no DOM node and no style. The app's three claims about that mosaic still cohere,
-unchanged from the previous run's record.
+no DOM node and no style. The third pass also exercises **v0.414.2** end to end:
+the app boots and serves its SPA through the rewritten `_mount_spa`, with a real
+build present, exactly as before. The app's three claims about that mosaic still
+cohere, unchanged from the previous run's record.
 
 ### One implementation detail worth keeping
 
