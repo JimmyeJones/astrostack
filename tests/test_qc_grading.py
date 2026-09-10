@@ -641,7 +641,14 @@ def test_a_panel_cannot_lose_more_than_the_rail_allows():
 def test_a_panel_too_thin_to_grade_falls_back_to_the_whole_target():
     """A panel with too few subs to carry a robust population must not be left
     ungraded — it falls back to the target-wide yardstick, i.e. exactly today's
-    behaviour for those frames."""
+    behaviour for those frames.
+
+    Which metric carries that fallback was narrowed later (see the thin-panel
+    tests at the foot of this file): the ones whose *scale* a pointing chooses —
+    star count and star flux — no longer borrow another panel's population, so
+    what still condemns this clouded panel is its **sky level**, the night's own
+    metric. Asserted below so the two rules can't quietly merge back into one.
+    """
     frames = mosaic_population(n_per_panel=40, panel_seps_deg=(0.0, 1.0, 2.0))
     # A fourth, barely-started panel: below MIN_FRAMES_FOR_GRADING.
     tail = [
@@ -656,3 +663,105 @@ def test_a_panel_too_thin_to_grade_falls_back_to_the_whole_target():
     flagged = {g.frame_id for g in report.recommendations}
     assert flagged & {f.id for f in tail}, (
         "clouded subs in a thin panel must still be graded, target-wide")
+    reasons = {r.metric for g in report.recommendations
+               if g.frame_id in {f.id for f in tail} for r in g.reasons}
+    assert reasons == {"sky_adu_median"}, (
+        "and on the night's own metric, not on how rich the panel's field is")
+
+
+# --- the thin panel: too few subs to be its own population -------------------
+#
+# v0.270.2 made the flux-like metrics per-panel, which fixed the star-poor panel
+# above. It left a residual nobody had measured: a panel below
+# ``MIN_FRAMES_FOR_GRADING`` is not a population, so its frames fell back to the
+# *whole target's* yardstick — the very reading the per-panel split exists to
+# refuse — and because a thin panel's subs are alike, the fallback condemns all
+# of them at once. That is the owner's shape (a mosaic sample runs 6/6/6/3 subs;
+# a panel cut short by cloud, or a new mosaic's first night, is thin by
+# definition).
+
+def _thin_panel_mosaic(*, stars: int, sky: float, transp: float, n_thin: int = 6):
+    """Three healthy 12-sub panels plus a fourth, barely-started one."""
+    frames = mosaic_population(n_per_panel=12, panel_seps_deg=(0.0, 1.0, 2.0))
+    thin = [
+        make_frame_like(
+            make_frame(900 + i, stars=stars, sky=sky, transp=transp),
+            ra_center_deg=83.6, dec_center_deg=-5.4 + 3.0 + 0.005 * i,
+        )
+        for i in range(n_thin)
+    ]
+    return frames, thin
+
+
+def test_a_thin_star_poor_panel_is_not_condemned_by_its_richer_neighbours():
+    """**The bug.** A fourth panel with only six subs, pointed at emptier sky,
+    on a night whose sky level and star flux are perfectly normal. Nothing about
+    those subs is bad — they simply frame sparser sky.
+
+    Fail-before: all six recommended for rejection, "far fewer stars than
+    typical (120 vs 404) — likely cloud", because a panel too thin to be its own
+    population borrowed the whole target's.
+    """
+    frames, thin = _thin_panel_mosaic(stars=120, sky=1200.0, transp=5000.0)
+    report = grade_frames(frames + thin)
+    assert report.pointing_groups == 3, "the thin panel isn't a population"
+    flagged = {g.frame_id for g in report.recommendations}
+    assert not (flagged & {f.id for f in thin}), (
+        "a thin panel framing sparser sky is not a clouded panel")
+    assert not flagged, "and nothing else was disturbed either"
+
+
+def test_a_thin_panel_whose_stars_are_merely_fainter_is_left_alone_too():
+    """The same for ``transparency_score``: the median flux of the stars a panel
+    happens to contain is a property of that field, so a thin panel full of
+    intrinsically fainter stars must not read as haze."""
+    frames, thin = _thin_panel_mosaic(stars=400, sky=1200.0, transp=2600.0)
+    report = grade_frames(frames + thin)
+    flagged = {g.frame_id for g in report.recommendations}
+    assert not (flagged & {f.id for f in thin})
+
+
+def test_a_thin_panel_that_really_was_clouded_is_still_caught():
+    """The other side, and the reason this fix is narrow rather than "never
+    grade a thin panel": cloud raises the **sky level**, which over one mosaic's
+    few degrees is the night's property and not the pointing's. So
+    ``sky_adu_median`` keeps its target-wide fallback and still condemns a
+    genuinely clouded thin panel — pinned here beside the case above so the two
+    can't drift into one rule."""
+    frames, thin = _thin_panel_mosaic(stars=8, sky=9000.0, transp=300.0)
+    report = grade_frames(frames + thin)
+    flagged = {g.frame_id for g in report.recommendations}
+    assert flagged >= {f.id for f in thin}, "a clouded thin panel is still graded"
+    reasons = {r.metric for g in report.recommendations for r in g.reasons}
+    assert reasons == {"sky_adu_median"}, (
+        "and on the night's own metric, not on how rich its field is")
+
+
+def test_the_thin_panel_rule_only_applies_where_the_target_really_splits():
+    """A single-pointing target has no panels, so nothing changes for it: a
+    genuinely clouded sub is still graded on every metric, star count included.
+    """
+    frames = clean_population(30)
+    bad = make_frame_like(frames[4], star_count=40, transparency_score=900.0)
+    frames[4] = bad
+    report = grade_frames(frames)
+    assert report.pointing_groups == 0, "no split, so no per-panel yardsticks"
+    flagged = {g.frame_id for g in report.recommendations}
+    assert bad.id in flagged
+    reasons = {r.metric for g in report.recommendations
+               if g.frame_id == bad.id for r in g.reasons}
+    assert "star_count" in reasons
+
+
+def test_a_bad_sub_inside_a_healthy_panel_is_still_graded_on_star_count():
+    """And the split itself is unchanged: a panel *with* a population of its own
+    still judges its members against it, on every metric."""
+    frames = mosaic_population(n_per_panel=20, panel_seps_deg=(0.0, 1.0, 2.0))
+    victim = frames[3]
+    frames[3] = make_frame_like(victim, star_count=30, transparency_score=800.0)
+    report = grade_frames(frames)
+    flagged = {g.frame_id for g in report.recommendations}
+    assert victim.id in flagged
+    reasons = {r.metric for g in report.recommendations
+               if g.frame_id == victim.id for r in g.reasons}
+    assert "star_count" in reasons

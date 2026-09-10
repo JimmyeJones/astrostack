@@ -123,6 +123,14 @@ class _MetricSpec:
     min_ratio: float | None = None
     min_delta: float | None = None
     per_pointing: bool = False
+    #: Set only where the metric's *scale* is chosen by where the scope pointed
+    #: rather than by the night. A panel framing sparser sky really does detect
+    #: fewer, fainter stars — nothing about that sub is bad — while the sky
+    #: level over one mosaic's few degrees is the night's, not the pointing's.
+    #: So these two may never be judged against another panel's population: a
+    #: frame with no yardstick of its own is left ungraded on them instead of
+    #: borrowing a neighbour's. See the fallback in :func:`grade_frames`.
+    pointing_scale: bool = False
 
 
 _METRICS: list[_MetricSpec] = [
@@ -135,10 +143,10 @@ _METRICS: list[_MetricSpec] = [
                 min_ratio=1.5, per_pointing=True),
     # ≥30% of the stars gone: cloud, not detection jitter.
     _MetricSpec("star_count", _LOW, True, "star count",
-                min_ratio=1.0 / 0.7, per_pointing=True),
+                min_ratio=1.0 / 0.7, per_pointing=True, pointing_scale=True),
     # Bright stars ≥30% dimmer: haze/thin cloud.
     _MetricSpec("transparency_score", _LOW, True, "transparency",
-                min_ratio=1.0 / 0.7, per_pointing=True),
+                min_ratio=1.0 / 0.7, per_pointing=True, pointing_scale=True),
 ]
 
 METRIC_LABELS: dict[str, str] = {m.attr: m.label for m in _METRICS}
@@ -433,8 +441,24 @@ def grade_frames(
             if raw is None or not math.isfinite(float(raw)):
                 continue
             fstats = stats
-            if per_group and f.id is not None:
-                fstats = per_group.get(groups.get(f.id, -1), stats)  # type: ignore[union-attr]
+            own = (per_group.get(groups.get(f.id, -1))
+                   if per_group and f.id is not None else None)
+            if own is not None:
+                fstats = own
+            elif spec.pointing_scale and groups is not None:
+                # No yardstick of this frame's own, on a target that really is
+                # several patches of sky. For a ``pointing_scale`` metric the
+                # target-wide population is not a weaker yardstick, it is the
+                # wrong one — it reads "this panel frames sparser sky" as "this
+                # sub is clouded", and because a thin panel's subs are alike it
+                # condemns *all* of them. Measured on a 3×12-sub mosaic with a
+                # fourth 6-sub panel at a star-poor pointing, perfectly normal
+                # sky and transparency: 6 of 6 recommended for rejection, "far
+                # fewer stars than typical (120 vs 404) — likely cloud".
+                # So say nothing here and let the night's own metrics decide:
+                # ``sky_adu_median`` still falls back target-wide below, and it
+                # is what a genuinely clouded thin panel actually trips.
+                continue
             med_d, scale, med_linear = (
                 fstats.med_domain, fstats.scale, fstats.med_linear)
             value = float(raw)
