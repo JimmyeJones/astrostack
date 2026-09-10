@@ -18,6 +18,90 @@ is a queue.
 
 ---
 
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-w1qz43`) — half the app's explanations were never written on the device it is read on
+
+**The run.** Three tasks, all shipped, all one class: **v0.413.0**
+(`components/HintAnchor.tsx` + the stack card's eleven verdict chips),
+**v0.413.1** (the nine planning verdicts on Tonight and its cards) and
+**v0.413.2** (the Target page's three header badges and the editor's four op
+chips, which carried a bug). Baseline on `origin/main`: **5,553 passed / 2
+skipped** (40m18s) — exactly the number the previous run recorded for this same
+`origin/main`, which has not moved. The work is frontend-only; its gates are
+`tsc` clean, `vitest` 254 files, and `vite build`, re-run per commit.
+
+### The finding, and why it is bigger than the entry that pointed at it
+
+The backlog's "a Tooltip is invisible on a phone" entry has produced four slices,
+and all four are about a tooltip on a **control** — where the tap does the *wrong*
+thing (it operates the control). Counting the anchors rather than the routes
+turns up the other half of the class, which is larger and had never been named:
+of the app's **105** `<Tooltip>`s, **53 hang off an anchor that is not a control
+at all** — a `Badge`, a `Text`, a `Box`. There the tap does not do the wrong
+thing, it does *nothing at all*, and the sentence is simply absent on the device
+the owner reads this app on. Half of what the app has to say about itself.
+
+**The one-line fix does not work, and knowing why is the useful part.** Mantine's
+`Tooltip` ships `events={{ hover: true, focus: false, touch: false }}`, so
+`events={{…, touch: true}}` looks like the whole answer. It is not: floating-ui's
+`useHover` opens on `pointerenter` and closes on `pointerleave`, and a lifted
+finger fires `pointerleave` — the answer flashes and goes. Mantine defaults it off
+for that reason. The affordance that does work is the one this repo already built
+twice for controls (`HintLabel` v0.374.11, `HintIcon` v0.402.1): a **controlled**
+tooltip with an explicit tap toggle.
+
+### Two design points worth carrying forward
+
+**Clone the child; do not wrap it.** The obvious shape for "make this anchor
+tappable" is a wrapper `<span>`, and it is wrong here for the same reason the
+v0.312.0 lightbox overlay could not be a wrapper: an inserted box changes what
+`max-width`/flex/`Group` gaps resolve against, and this entry's own standing
+caution is that *no page may get taller*. `HintAnchor` clones its single child and
+adds handlers to it, so the DOM is byte-for-byte what it was plus attributes —
+which is pinned by a test asserting the anchor is still a direct child of the
+render root.
+
+**`stopPropagation` is opt-in, and that is the safer default.** Three of the
+eight sites in the third slice sit inside something clickable, where asking the
+question would also run the container — in the worst case, tapping the "slower
+preview" chip in the Add menu **added the very op it warns about**. The flag
+fixes that, but defaulting it on would have made every one of the other 17 sites
+silently swallow a click the page might expect. Swallowing is the worse failure,
+so the flag is off unless the site says otherwise.
+
+### What was deliberately left, and why
+
+Not every non-control anchor is a hit. Two on the Target page were checked and
+left: the frames table's **column headings** (the tap *sorts*, which is the
+primary action — and v0.270.0 already gave those exact sentences a reachable home
+in `FrameColumnGuide`), and the per-frame **`Rejected — …`** badge, whose tooltip
+repeats the badge's own text. That is category (b) of the entry: "it repeats what
+the control already says — leave it".
+
+### Two sweeps that came back clean (recorded so nobody re-walks them)
+
+**The "log line inside its own `except`" class** the previous run filed. Swept
+with an AST scan over `seestack/` + `webapp/` — every broad `try` whose handler
+logs a failure, checked for a success-shaped `log.info`/`log.warning` in its body.
+**Six sites, all safe**: `stacker.py`'s two sub-pixel-refine lines (locals,
+already computed), `pipeline.py`'s two auto-grade lines (the eager `", ".join`
+touches `FrameGrade.name` and `primary_metric`, and the latter is guarded
+`if self.reasons else "unknown"`), `watcher.py`'s stranded-batch line, and
+`scanner.py`'s bootstrap line — which is the one v0.411.1 already fixed. So the
+class has one known instance and it is closed.
+
+**A `--mosaic --editor` dogfood pass on this branch's own code: CLEAN.** Auto's
+trim on the mosaic canvas is **7.9 %** (AGENTS.md §1's bug line is ~15 %), nothing
+overflowing and no console errors on either target, and the editor drive added all
+**21** ops with the preview re-rendering each time, on the field run *and* on the
+mosaic run, then undid and redid. Page heights: phone Target **3,078 px** (field) /
+**3,407 px** (mosaic), phone editor 3,055 / 3,166 px, desktop 2,057 / 2,104 px —
+unchanged by this run's work by construction, since `HintAnchor` adds no element
+and no padding. The mosaic's own three sentences (panel map, `grain_uneven`,
+`seams_flat`) still cohere: all three now say the thin panel is ~30 s behind and
+evens out on its own.
+
+---
+
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-mudy09`) — the plate-solve rescue chain, and the reason the owner's own subs never got the sibling hint
 
 **The run.** Three tasks, all shipped: **v0.411.0** (a sibling-hint second solve

@@ -1,7 +1,8 @@
-import { Anchor, Group, List, Paper, Stack, Text, ThemeIcon, Tooltip } from "@mantine/core";
+import { Anchor, Group, List, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconCalendarPlus, IconCalendarStar } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { HintAnchor } from "./HintAnchor";
 import {
   WINDOWS_SHOWN, describeGap, describeWindow, finishForecast, windowUtcTooltip,
   windowsIntro, windowsWanted,
@@ -71,9 +72,9 @@ export function NextSessionCard({
           <List size="xs" spacing={2} c="dimmed" listStyleType="none" withPadding={false}>
             {shown.map((w) => (
               <List.Item key={w.dark_start_utc}>
-                <Tooltip label={windowUtcTooltip(w)} withArrow position="top-start">
+                <HintAnchor label={windowUtcTooltip(w)} withArrow position="top-start">
                   <span>{describeWindow(w)}</span>
-                </Tooltip>
+                </HintAnchor>
               </List.Item>
             ))}
           </List>

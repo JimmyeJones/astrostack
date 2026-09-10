@@ -1558,6 +1558,30 @@ describe("EditorView", () => {
     expect(screen.getByText("slower preview")).toBeInTheDocument();
   });
 
+  it("explains 'slower preview' in the Add menu without adding the slow op", async () => {
+    // The chip is a *warning before you add it*, and its sentence lived only in a
+    // hover tooltip — so on a phone the one gesture available for "what does this
+    // mean?" was the gesture that added the very op being warned about.
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES, DECONVOLVE]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Add operation"));
+    fireEvent.click(await screen.findByText("More operations"));
+    fireEvent.click(await screen.findByText("slower preview"));
+    expect(await screen.findByText(/live preview updates after a short pause/))
+      .toBeInTheDocument();
+    // …and the op list is still empty: asking did not add Deconvolution.
+    expect(screen.queryByLabelText("Select Deconvolution")).not.toBeInTheDocument();
+  });
+
   it("previews the recipe without the selected op via 'Without this op'", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({
