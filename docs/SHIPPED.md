@@ -14,6 +14,77 @@ Newest first.
 
 ---
 
+## v0.409.0 — 2026-09-10 — 🐛 a light-pollution gradient darkened the one-click picture — by a gradient Auto removes itself
+
+*(Builder-verified by reproduction against `origin/main`'s own `analyze_proxy`/`auto_recipe`, on the scene
+`tests/test_auto_noise_measure.py` already ships. Severity: **wrong picture on the on-by-default, one-click,
+PRIORITY-1 path**. Confidence: measured end to end, and now pinned by six tests that fail before.)*
+
+**The bug.** v0.225.0 fixed the owner's "multicolour grid" by making the sky **noise** structure-blind: it
+stopped being the MAD of the sky's *levels* — which counts a gradient and a mosaic's panel offsets as if they
+were grain — and became the MAD of adjacent-pixel differences. That fix was never carried to the number sitting
+next to it. `presets.analyze_proxy`'s **sky level** stayed the median of the *whole-image-normalized*
+luminance, which a residual light-pollution gradient moves bodily — and that level is the only input to Auto's
+stretch target (`target_bg = 0.24 - sky*0.4`, "darker sky → lift a little more, brighter → less").
+
+**Why it is a bug and not a trade-off: the gradient is gone before the stretch ever sees a pixel.**
+`background.final_gradient` is the **first** op `auto_recipe` emits, on every stack, mosaic or not. Rendering
+the recipe up to (not including) `tone.stretch` and re-measuring shows the stretch's actual input is the *same
+picture* whatever gradient the proxy carried — sky **0.1749 / 0.1751 / 0.1751** at gradients 0 / 0.03 / 0.08 —
+while Auto's own measurement of that stack read **0.047 / 0.195 / 0.357**, a 7.6× spread. Auto was choosing the
+goal for one image by measuring another.
+
+**Measured, on the fixture the noise half of this file already uses** (`_scene(0.004, seed=13)`, gradient added
+in the same units as the sky):
+
+| gradient | sky (before) | sky (after) | `target_bg` before → after | finished picture, sky p30 |
+|---|---|---|---|---|
+| none  | 0.0240 | 0.0240 | 0.2304 → 0.2304 | 0.1899 → 0.1899 |
+| 0.02  | 0.0543 | 0.0240 | 0.2183 → 0.2304 | — |
+| 0.05  | 0.1064 | 0.0240 | 0.1974 → 0.2304 | — |
+| 0.08  | 0.1527 | 0.0240 | 0.1789 → 0.2304 | **0.1467 → 0.1898** |
+
+So the same stack, with a tilt the recipe takes straight back out, was handed back with a sky **23 % darker**.
+
+**The fix corrects a measurement; it moves no threshold.** New `presets._detrended_luminance` takes the smooth,
+frame-scale sky shape out of the luminance the *level* is read from, using the same
+`seestack.bg.sky_poly.fit_sky_poly` primitive both background passes detrend with — so "the smooth shape light
+pollution has" means one thing across the app, at degree 2 over ~600 tile medians (≈40 ms on a 700×1000 proxy,
+not the 2.5 s running the real gradient op would cost). It subtracts only the *shape*: the surface's own median
+is kept, so the plane gets flatter and never brighter, and the sky level being measured is still this stack's.
+`0.24 - sky*0.4`, `_NOISE_LO`/`_NOISE_HI`, the `> 0.02` "noisy" verdict and the `× 6.0` saturation term are all
+untouched.
+
+**The sky σ is deliberately still measured on the raw pixels.** Its estimator is already blind to this
+structure (pinned in the same file, within 25 % across gradients) and its thresholds are calibrated in
+raw-proxy units — re-measuring it on the detrended plane would move it 0.007 → 0.023 and swing the
+denoise/sharpen crossfade on every image, which is exactly the blind threshold flip AGENTS.md §1 forbids.
+Only the level moved, because only the level was wrong.
+
+**Upgrade-safe, and inert where there is nothing to fix.** A stack with no gradient has no shape to remove:
+sky **0.0240 → 0.0240** on the synthetic scene, **0.00298 → 0.00298** on the bundled sample's real proxy, and
+**0.00327 → 0.00339** on the bundled `--mosaic` sample's. The largest pixel the detrend changes on a
+gradient-free scene is **0.17 %** of that image's own robust range, against **13.6 %** on the tilted one. It
+declines — returns the plane unchanged — wherever `fit_sky_poly` declines (too little sky, a non-finite
+surface), so an image it cannot measure keeps today's number rather than a fabricated one. Engine-only and
+additive: no config, schema, on-disk, endpoint, response-shape or default change, and no saved recipe is
+touched (Auto is recomputed on request, never replayed from a stored number).
+
+**Not over-claimed: a mosaic's panel *steps* are only partly answered.** They are not a smooth degree-2 shape,
+so the level still reads 0.075 for a mosaic against 0.024 for the identical single field (it was 0.082). That
+half belongs to `background.level_coverage`, which runs ahead of the stretch on exactly those stacks and which
+`analyze_proxy` cannot see because it is handed no coverage map — filed as the residual under "Bugs" rather
+than guessed at here.
+
+**Tests (+8 collected, 6 failing before).** In `tests/test_auto_noise_measure.py`, whose thesis this extends:
+the level is unmoved by a gradient (parametrized ×3, all three fail before); the stretch target is unmoved; the
+**finished picture's** sky is unmoved (the user-visible one); the detrend leaves a gradient-free scene where it
+was *and* really does flatten a tilted one; it declines rather than inventing a surface (a too-small plane and
+an all-NaN one); and — the guard against swinging the other way — a genuinely bright-sky stack still reads
+bright and still gets the low stretch target that goes with it.
+
+---
+
 ## v0.408.2 — 2026-09-10 — 🐛 the Sun came back green: the video path debayered in the deep-sky path's CFA phase
 
 *(Builder-fixed the same run the Scout filed it. Severity: **wrong picture on a shipped feature the owner was

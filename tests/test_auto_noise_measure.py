@@ -12,6 +12,12 @@ counts a mosaic's per-panel level/colour offsets (and any residual light-polluti
 gradient) as if they were noise — so a genuinely clean mosaic read as one of the
 noisiest images the app had seen and got the wide-kernel chroma smoothing at full
 strength, smearing colour across the seams.
+
+The same property is owed to the **sky level** ``analyze_proxy`` reports beside
+it — the number ``auto_recipe`` turns into the stretch's target grey — and it did
+not have it until v0.409.0: a light-pollution gradient that Auto's own first op
+removes used to drag the level up and the finished picture down. Those tests live
+at the bottom of this file, on the same scene, because it is the same claim.
 """
 
 from __future__ import annotations
@@ -19,12 +25,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from seestack.edit.pipeline import apply_recipe
 from seestack.edit.presets import (
     _AUTO_CHROMA_MAX,
+    _detrended_luminance,
     _noise_fraction,
     analyze_proxy,
     auto_recipe,
 )
+from seestack.edit.registry import EditContext
 
 H, W = 300, 600
 _PANEL_OFFSETS = (0.0, 0.012, -0.008, 0.016)
@@ -226,3 +235,96 @@ def test_an_unmeasurable_image_still_reads_as_clean():
     all_nan = analyze_proxy(np.full((40, 40, 3), np.nan, np.float32))
     assert all_nan["sky_sigma"] == 0.0
     assert all_nan["noisy"] is False
+
+
+# --------------------------------------------------------------------------
+# The same claim, for the sky *level* (v0.409.0)
+#
+# ``analyze_proxy``'s ``sky`` is the *only* input to Auto's stretch target
+# (``target_bg = 0.24 - sky*0.4``), and it read the whole-image normalized
+# median — which a residual light-pollution gradient moves bodily, exactly the
+# way the old level-MAD moved the σ above. The gradient is gone before the
+# stretch sees a pixel (``background.final_gradient`` is the recipe's first op),
+# so the same picture with and without one must be measured, and finished, the
+# same.
+# --------------------------------------------------------------------------
+
+
+def _target_bg(img: np.ndarray) -> float:
+    """The grey Auto aims this stack's sky at, off its own recipe."""
+    stretch = next(op for op in auto_recipe(img, median_fwhm=2.5).ops
+                   if op.id == "tone.stretch")
+    return float(stretch.params["target_bg"])
+
+
+def _finished_sky(img: np.ndarray) -> float:
+    """A low percentile of the finished one-click picture's luminance — i.e. how
+    dark the sky the owner is handed actually came out."""
+    out = apply_recipe(img, auto_recipe(img, median_fwhm=2.5), EditContext())
+    return float(np.percentile(out[..., :3].mean(axis=2), 30.0))
+
+
+@pytest.mark.parametrize("gradient", [0.02, 0.05, 0.08])
+def test_a_light_pollution_gradient_does_not_move_the_measured_sky_level(gradient):
+    """The level owes the same "structure is not a sky" property the σ has.
+
+    Before v0.409.0 the same scene read 0.024 flat and 0.153 at gradient 0.08 —
+    a six-fold move caused entirely by a tilt Auto removes itself.
+    """
+    flat = analyze_proxy(_scene(0.004, seed=13))["sky"]
+    tilted = analyze_proxy(_scene(0.004, seed=13, gradient=gradient))["sky"]
+    assert tilted == pytest.approx(flat, rel=0.10), f"{gradient=} {tilted=} {flat=}"
+
+
+def test_a_gradient_does_not_pull_down_the_one_click_stretch_target():
+    """One step downstream, in the number the recipe actually carries: the
+    stretch target went 0.230 → 0.179 for the same picture."""
+    flat = _target_bg(_scene(0.004, seed=13))
+    tilted = _target_bg(_scene(0.004, seed=13, gradient=0.08))
+    assert tilted == pytest.approx(flat, rel=0.02), f"{tilted=} {flat=}"
+
+
+def test_a_gradient_does_not_darken_the_finished_one_click_picture():
+    """And the consequence the owner would actually see: the finished picture's
+    sky came out 23 % darker (p30 0.190 → 0.147) purely because the stack had a
+    gradient in it — one the recipe's own first op takes straight back out."""
+    flat = _finished_sky(_scene(0.004, seed=13))
+    tilted = _finished_sky(_scene(0.004, seed=13, gradient=0.08))
+    assert tilted == pytest.approx(flat, rel=0.05), f"{tilted=} {flat=}"
+
+
+def test_detrending_leaves_a_stack_with_no_gradient_where_it_already_was():
+    """The upgrade-safety half, stated as a property rather than a promise: the
+    detrend removes a *shape*, so a stack that has no shape to remove is
+    measured exactly as it was before this existed — while a tilted one really
+    is flattened. (Measured: 0.17 % of the image's own robust range against
+    13.6 %.)"""
+    def lum_of(img):
+        return np.asarray(img, np.float32)[..., :3].mean(axis=2)
+
+    flat = lum_of(_scene(0.004, seed=13))
+    span = float(np.percentile(flat, 99.5) - np.percentile(flat, 0.5))
+    assert float(np.max(np.abs(_detrended_luminance(flat) - flat))) < 0.01 * span
+
+    tilted = lum_of(_scene(0.004, seed=13, gradient=0.08))
+    assert float(np.max(np.abs(_detrended_luminance(tilted) - tilted))) > 0.05 * span
+
+
+def test_the_detrend_declines_rather_than_inventing_a_surface():
+    """It stands aside wherever the shared sky fit does, so an image it cannot
+    measure keeps today's number instead of a fabricated one."""
+    tiny = np.linspace(0.0, 1.0, 64, dtype=np.float32).reshape(8, 8)
+    assert np.array_equal(_detrended_luminance(tiny), tiny)
+
+    all_nan = np.full((40, 40), np.nan, np.float32)
+    out = _detrended_luminance(all_nan)
+    assert out.shape == all_nan.shape and not np.isfinite(out).any()
+
+
+def test_a_genuinely_bright_sky_is_still_reported_as_bright():
+    """The fix must not swing the other way and flatten every stack to "dark
+    sky": a thin, bright-sky stack still reads bright and still gets the low
+    stretch target that goes with it."""
+    bright = analyze_proxy(_scene(0.05, seed=11, mosaic=True))["sky"]
+    assert bright > 0.2
+    assert _target_bg(_scene(0.05, seed=11, mosaic=True)) < 0.16
