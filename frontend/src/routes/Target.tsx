@@ -1584,6 +1584,12 @@ export function TargetView() {
                               picture above for anyone west of Greenwich. */}
                           <span>{formatFrameStamp(f.night_date, f.timestamp_utc)}</span>
                           {!f.accept && f.reject_reason ? (
+                            // hint-anchor-exempt: the tooltip repeats the badge's
+                            // own text (it adds only the word "Rejected"), so there
+                            // is nothing a phone is missing — category (b) of the
+                            // phone-invisible-Tooltip entry. Making it a HintAnchor
+                            // would put a tab stop on every rejected row for a
+                            // sentence that says nothing new.
                             <Tooltip label={`Rejected — ${rejectReasonLabel(f.reject_reason)}`}>
                               <Badge size="xs" color="gray" variant="light" style={{ flexShrink: 0 }}>
                                 {rejectReasonLabel(f.reject_reason)}
