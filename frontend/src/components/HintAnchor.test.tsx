@@ -71,6 +71,39 @@ describe("HintAnchor", () => {
     expect(await screen.findByText(HINT)).toBeInTheDocument();
   });
 
+  it("only swallows the container's click when asked to", async () => {
+    // Inside a menu item or a selectable row the tap is not free: asking the
+    // question would otherwise also run the container — which is the v0.402.1
+    // defect one level out. Off by default, because swallowing a click a page
+    // expects is the worse failure of the two.
+    const container = vi.fn();
+    const { unmount } = render(
+      <MantineProvider>
+        <div onClick={container}>
+          <HintAnchor label={HINT}><Badge>slower preview</Badge></HintAnchor>
+        </div>
+      </MantineProvider>,
+    );
+    fireEvent.click(screen.getByText("slower preview"));
+    expect(await screen.findByText(HINT)).toBeInTheDocument();
+    expect(container).toHaveBeenCalledTimes(1);
+    unmount();
+
+    const guarded = vi.fn();
+    render(
+      <MantineProvider>
+        <div onClick={guarded}>
+          <HintAnchor label={HINT} stopPropagation>
+            <Badge>slower preview</Badge>
+          </HintAnchor>
+        </div>
+      </MantineProvider>,
+    );
+    fireEvent.click(screen.getByText("slower preview"));
+    expect(await screen.findByText(HINT)).toBeInTheDocument();
+    expect(guarded).not.toHaveBeenCalled();
+  });
+
   it("renders the anchor itself, not a wrapper box — no row can move", () => {
     const { container } = renderChip();
     // The chip sits directly in the render root: nothing was inserted around
