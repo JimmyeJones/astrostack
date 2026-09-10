@@ -76,7 +76,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **Builder, branch `claude/sweet-babbage-bhkhl1`** — the "a Tooltip is invisible on the device
+  the owner actually reads this app on" entry (Ideas → Autonomy — "just works"), **fifth slice:
+  the badge vocabulary**. A `Badge` is not interactive, so on a phone there is no gesture at all —
+  the sentence simply does not exist. Measuring the three routes the entry names (History, Stack,
+  Dashboard) turned up the bigger population: 27 `<Tooltip>`s wrap a non-interactive `Badge`.
 
 ---
 
