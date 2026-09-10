@@ -14,6 +14,158 @@ Newest first.
 
 ---
 
+## v0.414.2 — 2026-09-10 — the app refused to boot over a missing *frontend*
+
+*(Builder, branch `claude/sweet-babbage-bhkhl1`. A bug this run reproduced 14 times by accident, filed and
+fixed in the same run. Pillar: upgrade-safety — AGENTS.md §9, "the container still builds and boots".)*
+
+**The bug.** `webapp/main._mount_spa` decided "is the frontend built?" from `STATIC_DIR.exists()` — the
+*directory* — and then did `app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"))`
+unconditionally. `StaticFiles` raises `RuntimeError: Directory '…' does not exist` in its constructor when
+`check_dir` is on, which it is by default. So a `webapp/static/` that exists but is **empty** takes the
+"built" branch and raises out of `create_app()`: no API, no Settings page, no job queue, no way for the
+owner to see why — over a missing *frontend*, which the function's own placeholder branch one line above
+already knows how to survive.
+
+**How it is reachable, which is the part that makes it worth fixing.** `frontend/vite.config.ts` sets
+`emptyOutDir: true` on an `outDir` of `../webapp/static`, so **every build deletes that tree before it
+writes it**, and the directory is recreated before its contents are. Anything that starts the app inside
+that window meets the empty directory, not a missing one: an interrupted build, a half-copied image layer,
+a rebuild on a running dev box. This run met it 14 times — a `pytest` session overlapping the `vite build`
+inside `scripts/agent-dogfood.sh` failed every `tests/webapp` test that constructs the app, with a
+`RuntimeError` that reads exactly like a red baseline. (See the collision note in `PROCESS-NOTES.md`; the
+run's own first reading of it was "main is red".)
+
+**The fix, three lines.** `index.html` is the honest test for "is the frontend built?", not the directory —
+so the placeholder branch is taken whenever it is absent, which now also covers an `assets/` with no shell
+(where the SPA fallback would have `FileResponse`d a file that does not exist on every client route). And
+the `/assets` mount is made conditional. **Nothing is lost when it is skipped:** the SPA catch-all below it
+already serves any *file* under the static root, with the same resolved-path confinement the traversal fix
+added — so a build that emitted its chunks elsewhere still works.
+
+**A complete build is served byte-for-byte as before**, which is the test that matters most here and is the
+one test in the new file that passes before the change.
+
+**Upgrade-safe (§9):** this *is* a §9 fix. No config, schema, on-disk layout, response shape, endpoint or
+default changed; the only behaviour that moves is in states where the app previously did not start.
+
+**Tests (+6 in new `tests/webapp/test_static_boot.py`; five fail before):** an emptied `static/` boots and
+says the frontend is not built; `assets/` with no `index.html` takes the same branch; an `index.html` with
+no `assets/` still serves the shell *and* a sibling file, proving the catch-all covers the skipped mount; a
+complete build is unchanged; and both half-built states answer with no 5xx. The existing
+`test_spa_static.py` traversal contract and `test_spa_serving_e2e.py` pass untouched.
+
+---
+
+## v0.414.1 — 2026-09-10 — asking what "Save as defaults" does no longer saves your defaults
+
+*(Builder, branch `claude/sweet-babbage-bhkhl1`. The **ninth slice** of the "a Tooltip is invisible on the
+device the owner actually reads this app on" entry — the one *interactive* site the run's own measurement
+said was worth doing. Pillar: friendliness — PRIORITY 3. Frontend-only.)*
+
+The eighth slice and the three before it swept the **non-interactive** anchors and left the interactive ones
+to be judged site by site, as the entry asks. Of every `Button`/`ActionIcon` under a `<Tooltip>` in the app,
+exactly one failed that judgement: the Stack form's **"Save as defaults"**.
+
+**Why this one and not the others.** Most interactive tooltips are category (b) — they repeat the control's
+own label, or the page already says it (the editor's preview-tool row has `PreviewToolGuide` since v0.402.0;
+`IncomingCalibrationCard`'s tip only names the file its card already describes; History's "Reuse settings"
+and "Compare" navigate, which is reversible, and would need one icon **per run card** — the "one more
+always-on element" the standing IA priority exists to prevent; Stack's disabled "Start stacking" tip repeats,
+word for word, the yellow "No plate-solved frames yet" alert at the top of the same page, and a disabled
+`<button>` receives no pointer events, so it was never reachable on a mouse either). This one is neither.
+Its sentence —
+
+> "Remember what you changed (and your calibration picks) for this target — it pre-fills this form and is
+> used when auto-stacking is on. Anything left at your global setting keeps following it."
+
+— is the **only** statement anywhere in the app that this button also decides what the *unattended*
+walk-away stack does for that target. And the button's effect is persistent: the saved blob wins over
+`default_stack_options` in both readers (see v0.372.0). So the one gesture a phone has for "what does this
+do?" was the gesture that did it, on a control whose consequence outlives the page. That is exactly the
+defect v0.402.1 fixed on five `Switch`/`SegmentedControl` sites, on a button rather than a switch. The
+explanation *does* exist — in the success notification, i.e. after the save.
+
+**The fix is v0.402.1's own shape.** A `HintIcon` beside the button inside a `Group gap={6}`, so the
+button's label, action and accessible name are all untouched — the four existing assertions that find it by
+`getByRole("button", { name: "Save as defaults" })` pass unchanged — and hover keeps the words for anyone
+with a mouse.
+
+**Upgrade-safe (§9):** frontend-only, one row's layout. No API, response shape, schema, config, on-disk
+layout or default changed.
+
+**Tests (+1, fails before):** `Stack.test.tsx` — tapping the hint shows *"used when auto-stacking is on"*
+**and** `putStackDefaults` is never called. Before the change the same tap saved the defaults, which is the
+bug stated as a test rather than described.
+
+---
+
+## v0.414.0 — 2026-09-10 — the last chips a phone could not ask about, and the guard that stops a ninth sweep
+
+*(Builder, branch `claude/sweet-babbage-bhkhl1`. The **eighth slice** of the "a Tooltip is invisible on the
+device the owner actually reads this app on" entry. Pillar: friendliness — PRIORITY 3. Frontend-only.)*
+
+**Read the collision note first** (`PROCESS-NOTES.md`, 2026-09-10, collision #14). Two Builders swept this
+entry in the same hour from opposite ends of the same measurement: branch `claude/sweet-babbage-w1qz43`
+built `components/HintAnchor.tsx` and 28 anchors, this branch built an equivalent component and 33, and 24
+of the sites were the same file and the same line. **Theirs landed on `main` first and is the record; mine
+was dropped rather than re-applied** (§11, and the precedent of collision #12) — the overlapping files were
+resolved to theirs, my component and its test deleted, and `HintIcon.tsx` restored to main's version. On the
+one point where the two designs differed theirs is better and is what ships: an opt-in `stopPropagation`
+for an anchor sitting inside something clickable, which mine did not have.
+
+**What this slice is, then: the "still open" list their own entry ends with.** Four surfaces, one line each,
+all converted to `HintAnchor`:
+
+- **`NightsCard` ×3** — a night's *"ended early"*, *"bright Moon"* and its verdict badge. This is the
+  Target page's own per-night table, i.e. the busiest page in the app, where the tooltip exists precisely
+  *because* another column was refused.
+- **`Calibration` ×2** — the broken-pixel repair state and each master's defect note: the two sentences on
+  that page that are not restatements of a control beside them.
+- **`BestPictures` ×2 and `Gallery` ×1** — the "why is this picture here" and "what is this count" chips.
+
+`NightsCard`'s verdict badge **skips the anchor entirely when it has no sentence**, rather than passing
+`disabled`: a `HintAnchor` makes its child a tab stop with `role="button"`, and a verdict with nothing to
+say must not advertise itself as answerable.
+
+**The durable half is the guard.** `frontend/src/components/hintAnchorDrift.test.ts` reads every non-test
+`.tsx` in the app — through Vite's own `import.meta.glob`, so it sees exactly the files the bundler compiles
+and needs no `@types/node` — and fails if any `<Tooltip>`'s first child element is a `<Badge>`. Eight sweeps
+of this entry have each fixed the sites that existed on the day, and nothing stopped the next one being
+written the old way; that is precisely how the badges survived the first four, since the entry lists its
+open work by *route* and they live in shared components no route owns. It is proven **armed** two ways
+rather than trusted: against a synthetic bad site, whose `file:line` it reports, and by asserting the sweep
+really walked the tree (>80 files, two named ones present) — an empty result is what a clean tree and a
+broken scanner both look like. It deliberately says nothing about a `Tooltip` on a *control*: that half is a
+judgement per site (a button that only previews something is a safe way to find out), which is not a
+guard's business.
+
+**And the rule it enforces was narrowed honestly rather than quietly, because it caught a non-defect on its
+first real run.** It flagged the one site the other Builder had deliberately left — the frames table's
+`Rejected — …` badge, whose tooltip repeats the badge's own text (it adds only the word "Rejected"). They
+were right to leave it: making that a `HintAnchor` would put a tab stop on every rejected row for a
+sentence that says nothing new, and deleting the tooltip would remove a feature. So the rule is *a
+`<Tooltip>` around a `Badge` is a defect **when the tooltip says something the badge does not***, and a
+site that is the other case opts out with a `hint-anchor-exempt:` marker carrying its reason, on the tag's
+own line or in the comment block above it. The marker makes the next author write the reason down, and a
+second test pins the exempt list **by file** — so a second exemption cannot be added silently, while an
+edit above the first does not redden the suite.
+
+**Upgrade-safe (§9):** frontend-only. No API, response shape, schema, config, on-disk layout or default
+changed. `frontend/tsconfig.json` gains `"vite/client"` to its `types` array so the guard's
+`import.meta.glob` is typed; `vite` was already a devDependency and nothing new is installed.
+
+**No page gets taller** — `HintAnchor` clones its child rather than wrapping it, so nothing is added to the
+DOM. Measured anyway: `scripts/agent-dogfood.sh --mosaic --editor` returns the mosaic page-height table
+byte-identical, 3,407 / 3,166 / 3,094 / 2,432 px on a phone and 2,116 / 2,104 / 1,699 / 1,637 px on the
+desktop, nothing overflowing, no console errors, Auto's trim still 7.9 %.
+
+**Tests (+3):** the drift guard's three cases. The converted sites are covered by their components' existing
+tests, which pass unchanged — which is the point of the accessible name staying the badge's own words.
+
+---
+
+
 ## v0.412.0 — 2026-09-10 — the faint-field rescue anchors on a sub that already solved
 
 *(Builder, the 2026-07-25 backlog item "let the bootstrap anchor on an already-solved sub when a few (but

@@ -14,6 +14,7 @@ import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
 import { bestPictureReason, pinnedNote } from "../components/bestPictures";
 import { hasAnythingToShow, runSlideKey, showFromHref } from "../showAndTell";
+import { HintAnchor } from "../components/HintAnchor";
 
 function BestCard({ pic, rank, onView }: {
   pic: BestPicture;
@@ -38,7 +39,7 @@ function BestCard({ pic, rank, onView }: {
         {/* The user's own pick. The score line can't explain why a favourite is
             sitting above a deeper stack, so say it on the picture itself. */}
         {pinned ? (
-          <Tooltip label={pinned} multiline w={280}>
+          <HintAnchor label={pinned} multiline w={280}>
             <Badge
               variant="filled" color="yellow" size="sm"
               leftSection={<IconStarFilled size={11} />}
@@ -46,7 +47,7 @@ function BestCard({ pic, rank, onView }: {
             >
               Pinned
             </Badge>
-          </Tooltip>
+          </HintAnchor>
         ) : null}
         <Tooltip label="Click to view fullscreen" openDelay={400}>
           <Image
@@ -94,9 +95,9 @@ export function BestPicturesView() {
         <IconSparkles size={24} />
         <Title order={2}>My best pictures</Title>
         {items.length > 0 ? (
-          <Tooltip label="Your finest finished stacks across every target, picked automatically by total integration time, cleanliness, and frame count.">
+          <HintAnchor label="Your finest finished stacks across every target, picked automatically by total integration time, cleanliness, and frame count.">
             <Badge variant="light">{items.length}</Badge>
-          </Tooltip>
+          </HintAnchor>
         ) : null}
         {/* The entry point to the slideshow. It lives here rather than as a
             sixteenth sidebar link: this is the page you're already on when you
