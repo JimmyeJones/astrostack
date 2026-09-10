@@ -14,6 +14,64 @@ Newest first.
 
 ---
 
+## v0.408.1 — 2026-09-10 — 🐛 a mosaic panel too thin to be its own population was condemned by its richer neighbours
+
+*(Builder-verified by reproduction against `origin/main`'s own `grade_frames`. Filed and fixed in the same run.
+Severity: HIGH on a mosaic — a whole panel's subs auto-rejected as "likely cloud" on the by-default auto-grade
+path. The same "a threshold taken from a whole-target number that is really per-panel" class as v0.408.0, A6,
+v0.270.2 and v0.406.x.)*
+
+**The bug.** v0.270.2 made the flux-like metrics per-panel, because a mosaic's panels are different patches of
+sky: a panel framing sparser sky really does detect fewer stars, and grading it against the whole target reads
+that as cloud. It fixed panels big enough to be a population. What it left — measured here for the first time —
+is that a panel below `MIN_FRAMES_FOR_GRADING` (10) is *not* a population, so `pointing_groups` labels its
+frames `-1` and they fell back to **the whole target's** yardstick: the very reading the split exists to refuse.
+And because a thin panel's subs are alike, the fallback does not flag one of them, it flags **all** of them.
+
+Measured on three healthy 12-sub panels plus a fourth 6-sub panel at a star-poor pointing, with a perfectly
+normal sky level and normal star flux:
+
+| thin panel | pre-fix | metric |
+|---|---|---|
+| star-poor pointing, sky and transparency normal | **6 of 6 rejected** | `star_count` alone |
+| star-poor pointing, fainter stars too | **6 of 6 rejected** | `star_count` |
+| genuinely clouded (sky 9000 vs 1200) | 6 of 6 rejected | `sky_adu_median`, `star_count`, `transparency_score` |
+
+The reason string on the first row is *"far fewer stars than typical (120 vs 404) — likely cloud"* — verbatim
+the sentence AGENTS.md §1 quotes as the v0.270.2 bug. This is the owner's shape: the bundled mosaic sample runs
+6/6/6/**3** subs, and a panel cut short by cloud, or a new mosaic's first night, is thin by definition.
+
+**Why the fix is narrow rather than "never grade a thin panel".** `tests/test_qc_grading.py::
+test_a_panel_too_thin_to_grade_falls_back_to_the_whole_target` deliberately pins that a genuinely *clouded*
+thin panel is still caught, and it is right to. The table above is what separates the two causes, and it is
+physical rather than statistical: **cloud raises the sky level; a different pointing does not.** Over one
+mosaic's few degrees `sky_adu_median` is a property of the *night* — moon, cloud, twilight — while star count
+and median star flux are properties of *what you framed*. So a new `_MetricSpec.pointing_scale` flag marks
+`star_count` and `transparency_score` only, and those two may never borrow another panel's population: a frame
+with no yardstick of its own is left **ungraded on them** instead of judged by a neighbour. `sky_adu_median`
+keeps today's target-wide fallback untouched, which is what the existing test's clouded panel actually trips —
+so **no test was weakened**; that test now also asserts the reason set is exactly `{"sky_adu_median"}`, pinning
+the two rules apart.
+
+Post-fix, same fixtures: the star-poor thin panel is **0 of 6** flagged (and nothing else is disturbed), the
+merely-fainter one is 0 of 6, and the clouded one is still **6 of 6** — on the sky level alone.
+
+**Nothing else moves.** A panel *with* a population of its own still grades its members against it on every
+metric, a single-pointing target is untouched (no split, so no per-panel yardsticks, so no `pointing_scale`
+branch), and `bulk_select` — the other reader of `PER_POINTING_METRICS` — already gave the unclustered frames a
+bucket of their own rather than merging them into a panel, which is the pattern this brings grading in line
+with. Grading only ever *recommends* rejections, so withholding a verdict is the safe degradation.
+
+Engine-only and additive: no config, DB-schema, on-disk, API-shape or default change, and nothing about *what*
+QC measures moved.
+
+**Tests (+5, three failing before):** a thin star-poor panel not condemned by its richer neighbours; the same
+for merely-fainter stars; a genuinely clouded thin panel still caught **and only on `sky_adu_median`**; a
+single-pointing target still graded on star count; a bad sub inside a healthy panel still graded on star count.
+Plus the strengthened assertion on the existing fallback test.
+
+---
+
 ## v0.408.0 — 2026-09-10 — 🐛 the streak guard anchored on one median, so a mosaic rescued nothing
 
 *(Builder-verified by reproduction against `origin/main`'s own `stationary_streak_frames`, run verbatim on the
