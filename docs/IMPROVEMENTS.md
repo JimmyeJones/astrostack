@@ -82,6 +82,57 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🔴🔴 THE SOLAR MESH IS STILL THERE, AND NOW THE SUN IS GREEN — `CFA_PATTERN = "RGGB"` IS WRONG FOR VIDEO.
+  IT IS `GBRG`. Measured on the owner's real capture; he is looking at this right now.** *(Severity: **wrong
+  picture on a shipped feature the owner is actively using**. Confidence: **MEASURED on his own file, then
+  reproduced exactly from those numbers.** The v0.347.0 demosaic fix was right that the mosaic needed
+  debayering, and wrong about which pattern.)*
+
+  **What he sees:** the stacked Sun came back **green** (it was grey before v0.347.0) and **still covered in the
+  fine mesh**. Both symptoms have one cause.
+
+  **The measurement.** Decoding one frame of
+  `incoming/Solar_video/2026-06-19-175558-Solar-RAW.avi` and taking the mean of each 2×2 sub-lattice **inside
+  the disk** (geometric box, no brightness threshold):
+  | site | mean |
+  |---|---|
+  | `(0,0)` | **40.7** |
+  | `(0,1)` | 10.2 |
+  | `(1,0)` | 131.7 |
+  | `(1,1)` | **40.7** |
+  The two **equal** values are the two green photosites — and they sit on the **main diagonal**. `RGGB` places
+  green on the *anti*-diagonal, i.e. on the 10.2 and 131.7 sites, which are **13:1 apart**.
+
+  **Reproduced from exactly those four numbers** (`bilinear_debayer` on a synthetic mosaic built from them):
+  | pattern | R:G:B | cast | residual pattern |
+  |---|---|---|---|
+  | `RGGB` (**shipped**) | 40.7 : **70.9** : 40.7 | **GREEN** | **40.50** |
+  | `GBRG` (**correct**) | **131.7** : 40.7 : 10.2 | red/orange | **0.00** |
+  `RGGB` averages the darkest and brightest sites together to make "green" — which is *both* the green cast
+  **and** a huge alternating residual, i.e. the mesh. `GBRG` gives a red/orange Sun (physically right for a
+  white-light solar filter) and **zero** residual.
+
+  **Two traps for whoever fixes this — read both.**
+  1. **Do not just swap one hard-coded guess for another.** `RGGB` came from `fits_loader.py`'s
+     *"The Seestar uses 'RGGB'"* — but that path **reads `BAYERPAT` from the FITS header** and only falls back
+     to RGGB. Video has no header, so the constant is an assumption. **Detect the green diagonal instead**: the
+     matched sub-lattice pair identifies it objectively (the method above), and it is cheap — one frame, four
+     means. Fall back to `GBRG` when the frame is too flat to call. R-vs-B cannot be read from the mosaic alone,
+     so keep that as the device fact this measurement establishes.
+  2. **`RGGB` → `GBRG` is exactly a vertical row-flip of the pattern**, which is almost certainly *why* they
+     differ: AVI is conventionally stored bottom-up, so the rows reach the demosaic in the opposite order from
+     the FITS path. **This makes orientation and CFA phase a coupled invariant** — if a future run flips the
+     video frame to fix image orientation, the pattern flips with it and this bug comes straight back. Say so
+     in the code, and pin it with a test that would fail if one is changed without the other.
+
+  **Regression test:** build a mosaic from the four measured values above, assert `GBRG` yields a red-dominant
+  result with ~zero anti-diagonal residual and `RGGB` does not. That test fails today.
+
+  **Also worth knowing (not the bug):** his capture peaks at **157/255** with **0 %** clipped — somewhat
+  under-exposed, so there is headroom if he ever wants a brighter solar capture. And the **green cast alone**
+  would be expected from any un-white-balanced OSC demosaic; it is only *this* extreme because the wrong
+  pattern put the two most mismatched sites into the green channel.
+
 > **Open bugs and nothing else** (the three-file rule, AGENTS.md §2). The 227 resolved
 > entries and 24 QA sweep records this section used to carry were cut to
 > [`SHIPPED.md`](SHIPPED.md) and [`PROCESS-NOTES.md`](PROCESS-NOTES.md) on 2026-09-05,
