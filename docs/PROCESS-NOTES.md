@@ -96,12 +96,32 @@ passed unchanged — and it now also asserts its reason set is exactly
 test that pins the opposite of your fix is usually telling you the fix is the
 wrong width, not that the test is wrong.**
 
-### Checked and deliberately left alone
+### The rest of the class is swept — all eleven `pointing_groups` callers, checked
 
-`stack/weighting._positional_medians` carries the *same* thin-panel fallback, and
-it is fine: its `_MIN_PANEL_FRAMES` is **3**, not 10, so only a one- or two-frame
-"panel" falls back — which is a stray solve rather than a panel, and the
-target-wide median is the right answer for it. Recorded so nobody re-walks it.
+Recorded so nobody re-walks them. `grep -rn "pointing_groups(" seestack/ webapp/`
+gives eleven call sites; the two fixed above were the only ones that handed a
+leftover frame another panel's yardstick.
+
+- `stack/photometric.py::_panel_transparency_refs` — **right already**, and says
+  so in its own docstring: a frame in no substantial group "gets no reference and
+  stays neutral rather than being scaled against a yardstick from another patch
+  of sky".
+- `session_recap.py::_panel_rescale_factors` — **right**: a sub in no substantial
+  panel is left at 1.0, and it declines entirely below two measurable panels
+  because rescaling one against un-rescaled neighbours is worse than nothing.
+- `qc/bulk_select.py::_buckets` — **right**, and it is the pattern the grading fix
+  copied: `-1` is "a bucket of its own, never merged into a panel and never
+  counted as one".
+- `stack/stacker.py::_panel_transparency_ratios` — **right**: `-1` frames are
+  skipped, and below two measurable panels it returns `[]` so the whole target
+  falls back together rather than mixing the two rules.
+- `stack/weighting.py::_positional_medians` — carries the *same* thin-panel
+  fallback in words, and is fine in practice: its `_MIN_PANEL_FRAMES` is **3**,
+  not 10, so only a one- or two-frame "panel" falls back — a stray solve rather
+  than a panel, for which the target-wide median is the right answer.
+- `mosaicmap.py` and the two `stacker.py` canvas/auto-reject sites are about
+  *geometry* (which panels exist, how deep each is), not about judging a frame
+  against a population, so the question doesn't arise.
 
 ### Green gates
 
