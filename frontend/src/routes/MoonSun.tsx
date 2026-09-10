@@ -242,10 +242,16 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
             <Text key={w} size="xs" c="dimmed">{w}</Text>
           ))}
           {/* This picture is genuinely wrong — it was stacked before AstroStack
-              could read the camera's colour filter, so it is grey and covered in
-              a fine mesh. Nothing on disk fixes itself and there is no automatic
-              stack for video, so the only way the owner ever gets the good
-              version is if the page says so and offers the button. */}
+              could read the camera's colour filter *correctly*, so its colours
+              are off and a fine mesh runs over it. Two generations land here:
+              the pre-v0.347.0 stills, which are grey and meshed, and the
+              v0.347.0 ones, which are green and meshed because that build
+              demosaiced in the deep-sky path's phase rather than video's. The
+              copy names the symptom both share rather than picking one, since
+              the owner can see which he has. Nothing on disk fixes itself and
+              there is no automatic stack for video, so the only way he ever
+              gets the good version is if the page says so and offers the
+              button. */}
           {result.colour_stale ? (
             <Alert
               color="violet"
@@ -256,8 +262,9 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
             >
               <Text size="xs">
                 This picture was made before AstroStack could read your camera's
-                colour filter, so it came out grey with a fine mesh over it.
-                Stacking it again gives you real colour and a clean picture.
+                colour filter properly, so its colours came out wrong and it has
+                a fine mesh over it. Stacking it again gives you true colour and
+                a clean picture.
               </Text>
               <Button
                 size="compact-xs"

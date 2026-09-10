@@ -95,15 +95,32 @@ def write_video(path: Path, frames: Iterable[np.ndarray], *, fps: int = 10) -> P
 _CFA_TRANSMISSION = {"R": 1.00, "G": 0.80, "B": 0.55}
 
 
+#: The 2×2 site layout each pattern name spells out, top-left → bottom-right.
+#: Mirrors ``bilinear_debayer``'s own table so a fixture can be *built* in the
+#: phase a test wants to *read* back.
+_CFA_LAYOUTS = {
+    "RGGB": ("R", "G", "G", "B"),
+    "BGGR": ("B", "G", "G", "R"),
+    "GRBG": ("G", "R", "B", "G"),
+    "GBRG": ("G", "B", "R", "G"),
+}
+
+
 def solar_mosaic_frame(
     w: int, h: int, *, cx: float, cy: float, radius: float,
     sharpness: float = 1.0, seed: int = 0, noise: float = 2.0,
+    pattern: str = "RGGB",
 ) -> np.ndarray:
     """One synthetic **raw sensor mosaic** frame as (h, w) uint8.
 
-    A near-uniform solar disk sampled through an RGGB colour filter array: the
-    scene itself is smooth, so *every* 2-px structure in the result comes from
-    the filter. Single channel, exactly as a raw capture is recorded.
+    A near-uniform solar disk sampled through a colour filter array: the scene
+    itself is smooth, so *every* 2-px structure in the result comes from the
+    filter. Single channel, exactly as a raw capture is recorded.
+
+    ``pattern`` is the CFA phase to *lay down*. The owner's real solar AVI is
+    ``GBRG`` — the vertical row-flip of the deep-sky path's ``RGGB``, because
+    AVI is stored bottom-up — so a fixture that can only be built in one phase
+    cannot show the difference between reading the phase and assuming it.
     """
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
     r = np.hypot(xx - cx, yy - cy)
@@ -112,11 +129,12 @@ def solar_mosaic_frame(
     detail = (np.sin(dx * 0.35) * np.cos(dy * 0.31)).astype(np.float32)
     scene = 200.0 * disk + 25.0 * sharpness * detail * disk + 8.0
 
+    tl, tr, bl, br = _CFA_LAYOUTS[pattern.upper()]
     gain = np.empty((h, w), dtype=np.float32)
-    gain[0::2, 0::2] = _CFA_TRANSMISSION["R"]
-    gain[0::2, 1::2] = _CFA_TRANSMISSION["G"]
-    gain[1::2, 0::2] = _CFA_TRANSMISSION["G"]
-    gain[1::2, 1::2] = _CFA_TRANSMISSION["B"]
+    gain[0::2, 0::2] = _CFA_TRANSMISSION[tl]
+    gain[0::2, 1::2] = _CFA_TRANSMISSION[tr]
+    gain[1::2, 0::2] = _CFA_TRANSMISSION[bl]
+    gain[1::2, 1::2] = _CFA_TRANSMISSION[br]
 
     rng = np.random.default_rng(seed)
     img = scene * gain + rng.normal(0.0, noise, size=scene.shape).astype(np.float32)
@@ -164,19 +182,22 @@ def write_pal8_video(path: Path, planes: Iterable[np.ndarray], *, fps: int = 10)
 
 def solar_raw_video(
     path: Path, *, n_frames: int = 12, w: int = 96, h: int = 72,
-    sharp_indices: Iterable[int] = (), fps: int = 10,
+    sharp_indices: Iterable[int] = (), fps: int = 10, pattern: str = "RGGB",
 ) -> Path:
     """A short **undebayered** solar capture, in the owner's real file shape.
 
     The disk does not move — a solar/planetary capture is a static target, which
     is exactly why a sensor-fixed pattern accumulates through the stack instead
     of averaging away.
+
+    ``pattern`` is the CFA phase the fixture is recorded in; ``"GBRG"`` is the
+    one measured on the owner's own file.
     """
     sharp = set(sharp_indices)
     planes = [
         solar_mosaic_frame(
             w, h, cx=w / 2, cy=h / 2, radius=min(w, h) * 0.35,
-            sharpness=1.0 if i in sharp else 0.2, seed=i,
+            sharpness=1.0 if i in sharp else 0.2, seed=i, pattern=pattern,
         )
         for i in range(n_frames)
     ]

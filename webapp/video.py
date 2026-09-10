@@ -174,12 +174,20 @@ class VideoStackMeta:
     #: by an older version has none; the box is re-measured from the original in
     #: that case, which is deterministic on the same picture.
     crop_box: list[int] = field(default_factory=list)
-    #: True when this picture's colour is what the current build would produce —
-    #: either its source was demosaiced on the way in, or it was already a colour
-    #: capture and needed none. False on every ``meta.json`` written before the
-    #: video path could read a colour-filter mosaic, which is exactly the set of
-    #: stills that may be carrying the mesh. See :func:`colour_is_stale`.
+    #: True when this picture's colour was handled *at all* — either its source
+    #: was demosaiced on the way in, or it was already a colour capture and
+    #: needed none. False on every ``meta.json`` written before the video path
+    #: could read a colour-filter mosaic. See :func:`colour_is_stale`.
     colour_current: bool = False
+    #: *Which* colour handling, as a generation number. ``colour_current`` alone
+    #: turned out to be the wrong shape for this question: it says "a build that
+    #: knew about colour made this", and the first such build got the pattern
+    #: wrong (see :data:`_COLOUR_PIPELINE_BUILD`), so a still it stamped True is
+    #: still the wrong picture. ``0`` on every ``meta.json`` written before this
+    #: field existed, which is what puts those stills back in front of the
+    #: advisory. Additive: an older build ignores the key, a newer one reads a
+    #: missing key as 0.
+    colour_build: int = 0
 
 
 def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
@@ -695,6 +703,20 @@ def ensure_framing_measured(
     return updated
 
 
+#: Which generation of colour handling the current build has, stamped onto
+#: every still it makes. Bump this whenever a change alters the colour a raw
+#: capture stacks to, so the stills made by the previous generation are offered
+#: a re-stack instead of being trusted forever.
+#:
+#: * ``0`` — no colour handling at all: the mosaic reached the stack as a
+#:   luminance checkerboard (grey Sun, fine mesh). Pre-v0.347.0.
+#: * ``1`` — demosaiced, but as ``RGGB``, hard-coded from the deep-sky path.
+#:   That is the wrong phase for video (green Sun, mesh still there), so these
+#:   stills are wrong too even though they stamped ``colour_current``.
+#: * ``2`` — the phase is read off the frame (``detect_cfa_pattern``).
+_COLOUR_PIPELINE_BUILD = 2
+
+
 def colour_is_stale(
     settings: Settings, capture_id: str, meta: VideoStackMeta,
 ) -> tuple[bool, VideoStackMeta]:
@@ -713,12 +735,19 @@ def colour_is_stale(
     (:func:`~seestack.video.ffmpeg.source_is_cfa_mosaic`), and the metadata says
     whether the stack that made this picture handled it.
 
+    **"Handled it" is a generation, not a yes/no** — the correction this
+    function exists for was itself wrong once. v0.347.0 demosaiced as ``RGGB``,
+    which is the deep-sky path's phase and not video's, so the stills it made
+    are green and *still* meshed while claiming ``colour_current``. So the gate
+    is :data:`_COLOUR_PIPELINE_BUILD`, and a still from an older generation is
+    offered the re-stack however confidently it was stamped.
+
     Best-effort in every direction that could nag wrongly: a capture whose file
     has gone, an unreadable source, ffmpeg missing, or any probe failure all
     answer **not stale**, because being told to re-stack a picture that is fine
     is worse than being told nothing about one that isn't.
     """
-    if meta.colour_current:
+    if meta.colour_current and meta.colour_build >= _COLOUR_PIPELINE_BUILD:
         return False, meta
     try:
         _capture, source = _resolve_source(settings, capture_id, meta.source_name)
@@ -729,8 +758,10 @@ def colour_is_stale(
     if source_is_cfa_mosaic(info.pix_fmt):
         return True, meta
     # Nothing to remake: this capture was always colour, so the picture is as
-    # good as this build can make it. Record that so the probe happens once.
-    updated = replace(meta, colour_current=True)
+    # good as this build can make it — no CFA phase was ever applied to it, so
+    # no generation of the demosaic can have got it wrong. Record that so the
+    # probe happens once, ever, even across a future generation bump.
+    updated = replace(meta, colour_current=True, colour_build=_COLOUR_PIPELINE_BUILD)
     try:
         _write_meta(result_dir(settings, capture_id), updated)
     except OSError:
@@ -1202,8 +1233,11 @@ def _video_stack_body(
         # This build demosaics a raw source on the way in, so whatever the
         # capture was, this picture's colour is current. Recorded here (rather
         # than only for a raw source) so ``colour_is_stale`` never has to probe
-        # a capture this build already stacked.
+        # a capture this build already stacked — and stamped with *which*
+        # generation of colour handling made it, so a future correction can tell
+        # these stills apart from its own.
         colour_current=True,
+        colour_build=_COLOUR_PIPELINE_BUILD,
     )
     _write_meta(out_dir, meta)
     return {

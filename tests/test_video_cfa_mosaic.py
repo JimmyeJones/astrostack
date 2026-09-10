@@ -114,7 +114,7 @@ def test_decoding_a_raw_capture_removes_the_mesh(tmp_path):
 
 def test_a_raw_capture_comes_back_as_real_colour(tmp_path):
     """The other half of demosaicing: the three channels stop being copies of
-    each other, and the disk reads warm through an RGGB filter rather than grey."""
+    each other, and the disk reads warm through the colour filter, not grey."""
     path = solar_raw_video(tmp_path / "Solar_video.avi", n_frames=4, w=64, h=48)
     frame = next(iter(iter_frames(path)))
     assert frame.shape == (48, 64, 3) and frame.dtype == np.uint8
@@ -162,6 +162,166 @@ def test_a_palettised_source_that_is_really_colour_is_left_alone(tmp_path):
     assert source_is_cfa_mosaic(probe_video(path).pix_fmt) is True  # it claims raw
     frame = next(iter(iter_frames(path)))
     assert np.array_equal(frame, _raw_rgb24_frame(path, w, h))  # ...but is passed through
+
+
+# --- ...and in the phase the sensor actually used -------------------------
+#
+# The v0.347.0 fix above was right that the mosaic needed debayering and wrong
+# about which pattern: it took ``RGGB`` from the deep-sky path, where it is read
+# out of the FITS ``BAYERPAT`` header, and hard-coded it for video, which has no
+# header to read. The owner's Sun came back **green** and still meshed.
+
+
+#: The mean of each 2×2 sub-lattice inside the disk of the owner's own
+#: ``incoming/Solar_video/2026-06-19-175558-Solar-RAW.avi``, measured on the
+#: file. The two *matched* values are the two green photosites and they sit on
+#: the **main** diagonal, which is ``GBRG``; ``RGGB`` would put green on the two
+#: sites that are 13:1 apart.
+_OWNERS_MEASURED_SITES = {(0, 0): 40.7, (0, 1): 10.2, (1, 0): 131.7, (1, 1): 40.7}
+
+
+def _mosaic_from_sites(sites, size=64):
+    """A synthetic mosaic laid down from four measured sub-lattice means."""
+    m = np.zeros((size, size), dtype=np.float32)
+    for (i, j), v in sites.items():
+        m[i::2, j::2] = v
+    return m
+
+
+def test_the_owners_measured_sites_say_green_is_on_the_main_diagonal():
+    """**The bug, at the arithmetic that settles it.** Four numbers off the
+    owner's real file are enough to identify the green pair objectively — the
+    two green photosites see the same filter, so their means match — and they
+    are the main diagonal, i.e. ``GBRG`` and not the shipped ``RGGB``."""
+    from seestack.video.ffmpeg import detect_cfa_pattern
+
+    assert detect_cfa_pattern(_mosaic_from_sites(_OWNERS_MEASURED_SITES)) == "GBRG"
+
+
+def test_debayering_the_owners_frame_as_rggb_is_what_made_the_sun_green():
+    """Both symptoms from one cause, reproduced from those four numbers alone.
+
+    ``RGGB`` averages the darkest and brightest sites together to make "green",
+    which is the green cast *and* a huge alternating residual — the mesh that
+    survived v0.347.0. ``GBRG`` leaves none of either and a red/orange disk,
+    which is what a white-light solar filter physically gives you.
+
+    Fails before: ``CFA_PATTERN`` was ``"RGGB"``."""
+    from seestack.io.fits_loader import bilinear_debayer
+    from seestack.video.ffmpeg import CFA_PATTERN, detect_cfa_pattern
+
+    mosaic = _mosaic_from_sites(_OWNERS_MEASURED_SITES)
+    chosen = detect_cfa_pattern(mosaic)
+
+    def measure(pattern):
+        rgb = bilinear_debayer(mosaic, pattern=pattern)[8:-8, 8:-8]
+        luma = rgb.mean(axis=2)
+        phases = [luma[i::2, j::2].mean() for i in (0, 1) for j in (0, 1)]
+        return [float(rgb[..., c].mean()) for c in range(3)], float(
+            max(phases) - min(phases))
+
+    (r, g, b), residual = measure(chosen)
+    assert r > g > b, f"the Sun is not red/orange under {chosen}: {r}:{g}:{b}"
+    assert residual < 0.01, f"{chosen} left a mesh behind ({residual})"
+
+    # ...and the shipped answer really was the bad one, not a wash.
+    (r_bad, g_bad, b_bad), residual_bad = measure("RGGB")
+    assert g_bad > r_bad and g_bad > b_bad, "RGGB was supposed to read green"
+    assert residual_bad > 10.0, f"RGGB was supposed to mesh ({residual_bad})"
+
+    # The default for a frame with nothing to read is the measured phase too.
+    assert CFA_PATTERN == "GBRG"
+
+
+@pytest.mark.parametrize("pattern", ["GBRG", "RGGB"])
+def test_a_raw_capture_is_debayered_in_its_own_phase(tmp_path, pattern):
+    """**The regression, end to end through the decoder.** A capture recorded in
+    either phase comes back red-dominant and mesh-free, because the phase is
+    read off the frame instead of asserted.
+
+    Fails before on ``GBRG`` — the owner's real phase — with a green disk and
+    the mesh intact; the ``RGGB`` case is the pre-existing behaviour, pinned so
+    that reading the phase cannot regress the captures that already worked."""
+    path = solar_raw_video(
+        tmp_path / "Solar_video.avi", n_frames=4, w=64, h=48, pattern=pattern)
+    frame = next(iter(iter_frames(path)))
+
+    r, g, b = (float(frame[..., c].mean()) for c in range(3))
+    assert r > g > b, f"{pattern} decoded to the wrong colour: {r}:{g}:{b}"
+    assert _mesh_strength(frame[..., 1]) < 0.05
+
+
+def test_the_two_patterns_are_one_row_flip_apart():
+    """The coupled invariant the module comment warns about, pinned.
+
+    ``RGGB`` row-flipped **is** ``GBRG`` — which is almost certainly why the
+    video and FITS paths disagree at all (AVI is stored bottom-up). So if a
+    future change ever flips a video frame vertically to fix its orientation,
+    the pattern has to flip with it or the green Sun comes back. This test fails
+    if either constant is changed on its own."""
+    from seestack.io.fits_loader import bilinear_debayer
+    from seestack.video.ffmpeg import (
+        CFA_PATTERN_GREEN_ANTIDIAGONAL,
+        CFA_PATTERN_GREEN_DIAGONAL,
+        detect_cfa_pattern,
+    )
+
+    rng = np.random.default_rng(7)
+    mosaic = rng.uniform(10, 200, size=(32, 32)).astype(np.float32)
+
+    upright = bilinear_debayer(mosaic, pattern=CFA_PATTERN_GREEN_ANTIDIAGONAL)
+    flipped = bilinear_debayer(mosaic[::-1], pattern=CFA_PATTERN_GREEN_DIAGONAL)
+    assert np.allclose(upright, flipped[::-1])
+
+    # And the detector agrees about which name goes with which diagonal.
+    sites = _OWNERS_MEASURED_SITES
+    assert detect_cfa_pattern(_mosaic_from_sites(sites)) == CFA_PATTERN_GREEN_DIAGONAL
+    antidiagonal = {(0, 0): 10.2, (0, 1): 40.7, (1, 0): 40.7, (1, 1): 131.7}
+    assert (detect_cfa_pattern(_mosaic_from_sites(antidiagonal))
+            == CFA_PATTERN_GREEN_ANTIDIAGONAL)
+
+
+def test_a_frame_with_nothing_to_read_falls_back_instead_of_guessing():
+    """A dark, a blank sky or a blown disk has no colour information in it, and
+    a coin toss between two phases would change a capture's colours from one run
+    to the next. Those degrade to the measured default."""
+    from seestack.video.ffmpeg import CFA_PATTERN, detect_cfa_pattern
+
+    rng = np.random.default_rng(3)
+    flat = np.full((64, 64), 32.0, np.float32) + rng.normal(0, 2.0, (64, 64))
+    assert detect_cfa_pattern(flat.astype(np.float32)) == CFA_PATTERN
+    assert detect_cfa_pattern(np.zeros((64, 64), np.float32)) == CFA_PATTERN
+    # Both diagonals mismatched by the same amount is not a call either.
+    ambiguous = {(0, 0): 10.0, (0, 1): 20.0, (1, 0): 60.0, (1, 1): 60.0}
+    assert detect_cfa_pattern(_mosaic_from_sites(ambiguous)) == CFA_PATTERN
+    # A frame too small to hold a whole 2×2 has nothing to average.
+    assert detect_cfa_pattern(np.zeros((1, 8), np.float32)) == CFA_PATTERN
+    with pytest.raises(ValueError):
+        detect_cfa_pattern(np.zeros((8, 8, 3), np.float32))
+
+
+def test_the_phase_is_read_once_and_reused_for_the_whole_capture(tmp_path, monkeypatch):
+    """The sensor's phase cannot change mid-capture, so it is latched on the
+    first frame off the wire like the "is this really a mosaic" decision beside
+    it. Re-reading it per frame would let one frame too flat to call flip the
+    colours halfway through a stack."""
+    from seestack.video import ffmpeg as ffmpeg_mod
+
+    path = solar_raw_video(
+        tmp_path / "Solar_video.avi", n_frames=6, w=64, h=48, pattern="GBRG")
+    calls = 0
+    real = ffmpeg_mod.detect_cfa_pattern
+
+    def counted(plane):
+        nonlocal calls
+        calls += 1
+        return real(plane)
+
+    monkeypatch.setattr(ffmpeg_mod, "detect_cfa_pattern", counted)
+    frames = list(iter_frames(path))
+
+    assert len(frames) == 6
+    assert calls == 1, f"the phase was re-read {calls} times"
 
 
 def test_the_two_decode_passes_still_see_the_same_frames(tmp_path):
