@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { HazyNightBadge, isHazy } from "./HazyNightBadge";
 
@@ -28,6 +28,14 @@ describe("HazyNightBadge", () => {
     renderBadge(undefined);
     expect(screen.queryByText("Hazy night")).not.toBeInTheDocument();
   });
+
+  it("explains itself on a tap — the badge is two words and the sentence is all of it",
+    async () => {
+      renderBadge(0.44);
+      expect(screen.queryByText(/median transparency/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByText("Hazy night"));
+      expect(await screen.findByText(/median transparency/)).toBeInTheDocument();
+    });
 
   it("isHazy guards non-positive and missing values", () => {
     expect(isHazy(0.59)).toBe(true);

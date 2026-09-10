@@ -15,6 +15,7 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, use
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, type AutoAnalysis, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
+import { HintAnchor } from "../components/HintAnchor";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { ObjectInfoCard } from "../components/ObjectInfoCard";
 import {
@@ -109,11 +110,12 @@ function toOpInstances(
  * adding the op why its live preview updates after a beat rather than instantly. */
 function SlowPreviewChip() {
   return (
-    <Tooltip label="Slow to render — the live preview updates after a short pause" withArrow>
+    <HintAnchor label="Slow to render — the live preview updates after a short pause"
+      withArrow stopPropagation>
       <Badge size="xs" variant="light" color="grape" style={{ flexShrink: 0, cursor: "help" }}>
         slower preview
       </Badge>
-    </Tooltip>
+    </HintAnchor>
   );
 }
 
@@ -1526,10 +1528,10 @@ export function EditorView() {
           <div>
             <Title order={2}>Editor — {target.data?.name ?? safe}</Title>
             {measuredText ? (
-              <Tooltip multiline w={260} withArrow
+              <HintAnchor multiline w={260} withArrow
                 label="What the editor measured from this stack — the same values behind the 'From your data' suggestion buttons.">
                 <Text size="xs" c="dimmed">{measuredText}</Text>
-              </Tooltip>
+              </HintAnchor>
             ) : null}
           </div>
         </Group>

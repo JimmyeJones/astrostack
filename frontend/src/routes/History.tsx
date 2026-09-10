@@ -13,6 +13,7 @@ import {
   formatCaptureNights, formatIntegration, formatStampDateTime,
 } from "../format";
 import { postCaption } from "../components/postCaption";
+import { HintAnchor } from "../components/HintAnchor";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
@@ -1639,12 +1640,15 @@ export function HistoryView() {
             <div>
               <Group gap={6}>
                 <Text size="sm" fw={600}>Noise trend</Text>
-                <Tooltip
+                {/* "what's this?" is an *invitation*, so it is the one anchor on
+                    the page that must answer a tap — a hover-only reply to it
+                    reads as a dead link on a phone. */}
+                <HintAnchor
                   label="Background-noise σ of each measured stack, oldest → newest. Lower is cleaner; a downward line means your results are improving as you add nights."
                   multiline w={260} withArrow>
                   <Text span size="xs" c="dimmed" style={{ cursor: "help" }}
                     td="underline dotted">what's this?</Text>
-                </Tooltip>
+                </HintAnchor>
               </Group>
               <Text size="xs" c="dimmed">
                 {trend[trend.length - 1] < trend[0]

@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import {
   Alert, Anchor, Badge, Button, Card, Center, Group, Loader, Paper, Select,
-  SegmentedControl, SimpleGrid, Stack, Table, Text, TextInput, Title, Tooltip,
+  SegmentedControl, SimpleGrid, Stack, Table, Text, TextInput, Title,
 } from "@mantine/core";
 import { IconMoon, IconStars, IconTelescope } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type PlannedTarget } from "../api/client";
+import { HintAnchor } from "../components/HintAnchor";
 import { NearlyThereCard } from "../components/NearlyThereCard";
 import { WishlistStar } from "../components/WishlistStar";
 import { WishlistTonightCard } from "../components/WishlistTonightCard";
@@ -27,11 +28,11 @@ import {
 
 function ScoreBadge({ score }: { score: number }) {
   return (
-    <Tooltip label="Higher = better placed tonight (altitude, time up, Moon clear)">
+    <HintAnchor label="Higher = better placed tonight (altitude, time up, Moon clear)">
       <Badge color={scoreColor(score)} variant="light" size="lg">
         {Math.round(score)}
       </Badge>
-    </Tooltip>
+    </HintAnchor>
   );
 }
 
@@ -94,35 +95,35 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
             : ""}
         </Text>
         {readyHint ? (
-          <Tooltip label={readyHint.tooltip} multiline w={260} withArrow>
+          <HintAnchor label={readyHint.tooltip} multiline w={260} withArrow>
             <Badge mt={4} size="xs" variant="light" color={readyHint.color}>
               {readyHint.label}
             </Badge>
-          </Tooltip>
+          </HintAnchor>
         ) : null}
         {difficultyBadge ? (
-          <Tooltip label={difficultyBadge.tooltip} multiline w={240} withArrow>
+          <HintAnchor label={difficultyBadge.tooltip} multiline w={240} withArrow>
             <Badge mt={4} ml={readyHint ? 4 : 0} size="xs" variant="light"
               color={difficultyBadge.color}>
               {difficultyBadge.label}
             </Badge>
-          </Tooltip>
+          </HintAnchor>
         ) : null}
         {framingBadge ? (
-          <Tooltip label={framingBadge.tooltip} multiline w={240} withArrow>
+          <HintAnchor label={framingBadge.tooltip} multiline w={240} withArrow>
             <Badge mt={4} ml={(readyHint || difficultyBadge) ? 4 : 0} size="xs" variant="light"
               color={framingBadge.color}>
               {framingBadge.label}
             </Badge>
-          </Tooltip>
+          </HintAnchor>
         ) : null}
         {nudgeBadge ? (
-          <Tooltip label={nudgeBadge.tooltip} multiline w={260} withArrow>
+          <HintAnchor label={nudgeBadge.tooltip} multiline w={260} withArrow>
             <Badge mt={4} ml={(readyHint || difficultyBadge || framingBadge) ? 4 : 0}
               size="xs" variant="light" color={nudgeBadge.color}>
               {nudgeBadge.label}
             </Badge>
-          </Tooltip>
+          </HintAnchor>
         ) : null}
       </Table.Td>
       <Table.Td>{t.max_altitude_deg.toFixed(0)}°</Table.Td>

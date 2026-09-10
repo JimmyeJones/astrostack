@@ -1370,6 +1370,24 @@ describe("TargetView streaked badge", () => {
       expect(screen.getByText("2 streaked")).toBeInTheDocument());
   });
 
+  it("says what a streak is on a tap — the badge sits beside a bulk reject", async () => {
+    // "2 streaked" is a count with a "Reject all" button next to it, and what a
+    // streak *is* (and that Auto outlier removal keeps the frame) lives only in
+    // the badge's tooltip. On a phone that made the destructive button the more
+    // reachable of the two.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { streak_detected: true }),
+      mkFrame(2, { streak_detected: true }),
+    ]);
+    renderTarget();
+    const badge = await screen.findByText("2 streaked");
+    expect(screen.queryByText(/Stack with Auto outlier removal/)).not.toBeInTheDocument();
+    fireEvent.click(badge);
+    expect(await screen.findByText(/Stack with Auto outlier removal/)).toBeInTheDocument();
+  });
+
   it("rejects all streaked frames in one gesture from the badge action", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);

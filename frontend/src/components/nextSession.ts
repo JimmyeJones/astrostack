@@ -6,7 +6,7 @@
  * into one plain, dated next step. All phrasing lives here (no React, no I/O) so
  * it's unit-testable in isolation. Times are shown in the viewer's *local* clock —
  * matching the adjacent "Point here tonight" card and the local calendar an owner
- * actually plans around — with the UTC equivalent kept as a hover tooltip. (An
+ * actually plans around — with the UTC equivalent kept in a hint the line answers. (An
  * earlier version formatted everything in UTC, which named the wrong night for any
  * owner west of UTC: a `dark_start` of 06:17 UTC is the previous evening locally,
  * so the card said "Mon 27 Jul" for what is Sunday night in Seattle and disagreed
@@ -32,7 +32,7 @@ export function formatWindowDate(iso: string | null | undefined): string {
   return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
 }
 
-/** "Thu 15 Jan" in UTC, for the hover tooltip that keeps the honest UTC anchor. */
+/** "Thu 15 Jan" in UTC, for the hint that keeps the honest UTC anchor. */
 export function formatWindowDateUtc(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -101,7 +101,7 @@ export function moonPhrase(w: NextObservingWindow): string {
 
 /** One window as a dated, plain-language line in the viewer's *local* clock:
  * "Thu 15 Jan, 22:40 → 02:10 — climbs to 34°, thin Moon (12%)." (The UTC anchor
- * lives in {@link windowUtcTooltip}, shown on hover.) */
+ * lives in {@link windowUtcTooltip}, shown on a tap or a hover.) */
 export function describeWindow(w: NextObservingWindow): string {
   const date = formatWindowDate(w.dark_start_utc);
   const start = formatClockLocal(w.usable_start_utc ?? w.dark_start_utc);
@@ -112,7 +112,7 @@ export function describeWindow(w: NextObservingWindow): string {
   return `${date}, ${timeClause} — climbs to ${alt}°, ${moon}.`;
 }
 
-/** The same window's date + times in UTC, for the hover tooltip — so the local
+/** The same window's date + times in UTC, for the line's own hint — so the local
  * line stays honest about the underlying UTC anchor the .ics file also uses:
  * "In UTC: Thu 15 Jan, 22:40 → 02:10". */
 export function windowUtcTooltip(w: NextObservingWindow): string {
