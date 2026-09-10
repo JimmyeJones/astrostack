@@ -125,9 +125,19 @@ leftover frame another panel's yardstick.
 
 ### Green gates
 
-Baseline on `origin/main` before any change, and the full suite re-run on the
-merged branch — figures in the merge commit. Frontend untouched this run (no
-file under `frontend/` changed), so tsc/vitest/vite build were not re-run.
+Full suite headless, baseline on `origin/main` before any change: **5,487
+passed / 2 skipped** in 36 m 47 s — identical to the figure the 2026-09-09 run
+recorded, so `main` was green. Re-run on the branch (already up to date with
+`origin/main`, nothing new to merge): **5,500 passed / 2 skipped** in 36 m 03 s
+— exactly **+13**, which is the arithmetic the new tests predict (8 in
+`test_qc_streak_stationary.py`, 5 in `test_qc_grading.py`). Frontend untouched
+this run — no file under `frontend/` changed — so tsc/vitest/vite build were not
+re-run. `ruff check` on the four touched files reports one finding, pre-existing
+(`timezone.utc` on a fixture line that predates this run); nothing new added.
+
+The two suites were run **one after the other**, not in parallel, and
+`/tmp/pytest-of-root` (7.2 GB) was deleted between them — the disk lesson the
+2026-09-09 block records.
 
 ---
 
