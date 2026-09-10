@@ -108,7 +108,13 @@ worth doing) and **v0.414.2** (a verified §9 bug this run reproduced 14 times b
 accident: the app refusing to boot over a missing *frontend*). Baseline on
 `origin/main` (`a59ee928`): **5,553 collected, 5,539 passed / 2 skipped / 14
 errors**, and the 14 were self-inflicted — see below. 5,553 is exactly the number
-the two runs either side recorded for that head.
+the two runs either side recorded for that head. On the finished branch:
+**5,559 passed / 2 skipped** (38m15s) — exactly **+6**, the six `test_static_boot.py`
+cases v0.414.2 claims, with no test's status changed. Frontend: `tsc` clean,
+`vite build` clean, `vitest` **3,570 passed / 255 files** against main's 3,564 —
+exactly the +5 drift-guard cases and the +1 Stack regression. `ruff check` on both
+touched Python files is clean apart from the `I001` `webapp/main.py` already carries
+on `main` (verified against `origin/main`'s own copy).
 
 ### Collision #14, and it is the most complete one yet
 
