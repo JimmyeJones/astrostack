@@ -20,11 +20,14 @@ is a queue.
 
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-puusez`) — a test that passed for the wrong reason, and the class that found it
 
-**The run.** One task: **v0.415.1**, a bug I verified myself by reproduction —
+**The run.** Two tasks. **v0.415.1**, a bug I verified myself by reproduction —
 `overlapgain` scaled a mosaic panel that shared no measurable overlap with
-anything, contrary to the safety rule written at the top of its own module.
-Baseline on `origin/main` (`f6f7627e`): **5,579 passed / 2 skipped** (32m07s),
-which is exactly the number the previous run recorded for this same `main`.
+anything, contrary to the safety rule written at the top of its own module —
+merged as #823; then **v0.416.0**, the **editor half** of the ⭐ 🔴 entry the
+fourth external audit filed onto `main` *while this branch's suite was running*
+(see "the second task" below). Baseline on `origin/main` (`f6f7627e`):
+**5,579 passed / 2 skipped** (32m07s), which is exactly the number the previous
+run recorded for this same `main`.
 
 ### Where it came from: the lead the previous run handed forward, then a new class
 
@@ -118,6 +121,47 @@ wrote it down. The step-4c "what the app SAYS" block now reads as one paragraph
 behind, evens out*, and the seam note explicitly hands the grain question to
 the depth note rather than contradicting it. The three findings that came out
 of that block on 09-09 are closed.
+
+### The second task — v0.416.0, and the reason it exists at all
+
+The fourth external audit merged its findings onto `main` **while this branch's
+own suite was running**, and its top entry is a ⭐ 🔴 "owner hits this first":
+a mosaic Auto-edited before the D1 fixes keeps the old over-trim in its **saved
+recipe**, so the hero, the Library card, the editor and the share sheet all show
+a sliver of the picture. So the merge-time `git fetch` (§11) was not a
+formality this run — it was where the run's second task came from. Worth
+carrying forward: **fetch before merging even when you have no conflict to
+expect**, because `main` is also where new work arrives.
+
+Two things about the fix are worth keeping.
+
+**The whole fix was a comparison; the machinery was already built.** The one-click
+answer — a trim preview, then `applyTrimCrop` updating the crop op *in place* —
+has existed since the "Trim border" button, and `cropCoverageFraction` already
+knew how to say what a recipe's crops keep. What was missing was that nobody had
+ever put the two numbers side by side. That is the same shape as the entry's own
+observation that every Playwright sweep of those pages came back CLEAN: nothing
+is *broken*, the app is faithfully showing what the recipe says. **A sweep that
+looks for errors cannot find a wrong number that is being displayed correctly.**
+
+**Where a threshold comes from decides whether it accuses people.** The entry
+suggested "less than half of what the current trim rule would keep". Half is
+where a *person* cropping in on their object lives — the middle 40 % of a mosaic
+is an ordinary framing decision — while the bug's own measurement is 3.4 %
+against 92.4 %, a **27×** gap. `OVER_TRIM_KEEP_RATIO = 0.25` sits in that empty
+space, and the second half of getting it right is the denominator: it is
+measured against what *this canvas* offers, not against the whole frame, so on a
+genuinely ragged mosaic whose honest rule keeps 20 % a crop keeping 10 % is
+silent. Both halves have their own test, and the framing-decision test also
+asserts that 0.5 *would* have fired — the alternative is pinned, not just
+described.
+
+**Gates for this second task**, which is frontend-only apart from the version
+line: `npx tsc --noEmit` clean, `npx vitest run` **256 files / 3,589 tests**
+(+9), `npx vite build` ✓, all three run from `frontend/`; the two component
+tests verified fail-before by reverting `Editor.tsx`. The full Python suite was
+re-run anyway rather than argued about, since `webapp/__init__.py` is a Python
+file even when the change is a version string.
 
 ---
 

@@ -14,6 +14,73 @@ Newest first.
 
 ---
 
+## v0.416.0 — 2026-09-10 — the editor says when a picture's crop is an older version's over-trim
+
+*(Builder, the **editor half** of the fourth external audit's ⭐ 🔴 "owner hits this first" entry, filed the
+same day. Pillar: the editor — PRIORITY 1. Frontend-only; additive; the note is an offer, never an action.
+The entry stays open for its other two halves — see below.)*
+
+**The bug, as the audit reproduced it in the shipped image over a v0.277.0 data volume.** The D1 fixes
+re-derive the *trim* a mosaic should get (`_trim_rect_for_run`), but a run Auto-edited before them carries the
+old, far tighter crop in its **saved recipe**, and nothing compared the two. So the hero, the Library card, the
+editor and the share sheet all show a sliver of the picture: a stored
+`geometry.crop {x0 0.6228, y0 0.0341, x1 0.6896, y1 0.5463}` keeps **3.4 %** of a 5089×2045 canvas where
+`/editor/trim-suggestion` on the same run now says **92.4 %** is well covered — and the stored "what Auto did"
+note still explains the trim as if it were right. Every Playwright sweep of those pages came back "CLEAN",
+because nothing is broken: the app is showing exactly what the recipe says.
+
+**What shipped.** `mosaicTrim.overTrimmedVerdict(ops, suggested)` — pure — weighs the recipe's **live** enabled
+crops (through `cropCoverageFraction`, which already existed and already handles several crops multiplying)
+against the rectangle the editor's trim-suggestion query has already fetched. When the crop keeps under
+`OVER_TRIM_KEEP_RATIO` of what the canvas offers, the editor shows an Alert:
+
+> **This picture was trimmed by an older version** — This picture is cropped down to about 3% of the stack, but
+> about 92% of it is well covered. Older versions of AstroStack over-trimmed a mosaic's ragged edge, and that
+> crop is saved in this run's edit. "Re-trim border" measures it again and replaces just the Crop step — your
+> other adjustments stay. If you cropped it this way yourself, leave it.
+
+**Re-trim border** enters the *existing* trim preview (`enterCropPreview("trim")`), so the user sees the dashed
+rectangle over the coverage heatmap before anything changes, and the existing `applyTrimCrop` then updates the
+crop op in place rather than stacking a second one — which is the entry's "replaces only the crop op", already
+built. **No new endpoint and no new request:** both numbers were already on the page.
+
+**The two sentences are joined rather than left to argue.** When the stored auto-note is on screen the Alert
+adds one line saying its trim figure describes the crop being replaced, not this picture. That is the entry's
+"fix the auto-note's percentage from the recipe on display" done without parsing a stored string — the honest
+move, since the note is free text written by a version that no longer exists.
+
+**A quarter, not the half the entry suggested.** The number that has to be told apart from the bug is a person
+cropping in on their object. At 0.5 someone deliberately framing on the middle 40 % of their mosaic is accused;
+the measured case is 3.4 % against 92.4 %, a **27×** gap. `OVER_TRIM_KEEP_RATIO = 0.25` separates the two with
+room on both sides, and the constant carries that reasoning. It is also measured against **what the canvas
+offers**, never against the whole frame: on a genuinely ragged mosaic whose honest rule keeps only 20 %, a crop
+keeping 10 % is half of what is available and stays silent — pinned by its own test.
+
+**Read off the live `ops`, not the saved recipe**, so widening or removing the crop makes the notice go away;
+and gated on `trim.data.crop`, which is `null` on a single field — where this over-trim never happened — so a
+single-field stack can never reach it however tight its crop.
+
+**Upgrade-safe (§9):** frontend-only. No engine, config, DB schema, on-disk, endpoint, response-shape or
+default change, and nothing under `docker/`, `pyproject.toml` or `tsconfig*`, so the new image rule in
+AGENTS.md §8 does not apply.
+
+**Tests (+9).** `mosaicTrim.test.ts` (+7): the audit's own numbers named honestly ("about 3%" / "about 92%"), a
+sliver reported as "under 1%" rather than rounded up to a percent it does not have, silence on a single field
+(both `null` and `undefined`), silence on a 40 % framing decision *with* the assertion that 0.5 would have
+fired, silence with no enabled crop (and with a disabled one), the ragged-canvas case above, and a degenerate
+zero-area suggestion refused rather than divided by. `Editor.test.tsx` (+2): the Alert with both shares and the
+**Re-trim border** button entering the trim preview, and — the other half of the claim — the same run with a
+40 % crop showing the ordinary "Trim border" button and **no** accusation. Both component tests fail before
+(verified by reverting `Editor.tsx` and re-running).
+
+**Still open on the entry, deliberately:** (a) the same note on the **Target page**, where the owner lands
+first and where the hero *is* the sliver; (b) the library-wide count on the Dashboard, `NewSubsWaitingNote`-
+style, which is also the right home for the sibling banner the entry names (every pre-v0.313 run's "can't say
+which night it's from" offer, twelve at once on his library) — one "pictures from an older version" note
+instead of one per target.
+
+---
+
 ## v0.415.1 — 2026-09-10 — a mosaic panel nobody could measure was dimmed anyway
 
 *(Builder, a bug verified in this run by reproduction — fails before / passes after. Pillar: image quality —

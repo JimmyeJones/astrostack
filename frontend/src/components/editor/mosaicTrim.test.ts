@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { EditOp, OpInstance } from "../../api/client";
 import { applyTrimCrop, trimRectStyle, trimKeptLabel, hasEnabledGeometryOp,
   geometryOpsKey, previewBoxStyle, cropCoveragePct, cropCoverageFraction,
-  removeCropOps } from "./mosaicTrim";
+  removeCropOps, overTrimmedVerdict, overTrimmedSentence,
+  OVER_TRIM_KEEP_RATIO } from "./mosaicTrim";
 
 const specs: Record<string, EditOp> = {
   "tone.stretch": { id: "tone.stretch", label: "Stretch", group: "tone",
@@ -219,5 +220,66 @@ describe("geometryOpsKey", () => {
     expect(geometryOpsKey([op("geometry.crop", false, { x0: 0.1 })])).toBe("[]");
     expect(geometryOpsKey([op("tone.stretch", true)])).toBe("[]");
     expect(geometryOpsKey([])).toBe("[]");
+  });
+});
+
+describe("overTrimmedVerdict", () => {
+  const op = (params: Record<string, unknown>, enabled = true): OpInstance =>
+    ({ uid: "c", id: "geometry.crop", enabled, params });
+  // The fourth external audit's reproduction, to the numbers it recorded: a
+  // v0.277.0 recipe keeping 3.4% of the canvas while today's border rule keeps
+  // 92.4% of it.
+  const savedSliver = op({ x0: 0.6228, y0: 0.0341, x1: 0.6896, y1: 0.5463 });
+  const honestTrim = { x0: 0.02, y0: 0.02, x1: 0.98, y1: 0.98 };
+
+  it("names the old over-trim with both shares, honestly rounded", () => {
+    const v = overTrimmedVerdict([savedSliver], honestTrim);
+    expect(v).not.toBeNull();
+    expect(v!.keptLabel).toBe("about 3%");   // the audit's 3.4%
+    expect(v!.availableLabel).toBe("about 92%");
+    expect(overTrimmedSentence(v!)).toContain("about 3% of the stack");
+    expect(overTrimmedSentence(v!)).toContain("about 92% of it is well covered");
+    expect(overTrimmedSentence(v!)).toContain("Re-trim border");
+  });
+
+  it("does not round a sliver up to a percent it does not have", () => {
+    const hair = op({ x0: 0.5, y0: 0.5, x1: 0.55, y1: 0.55 });   // 0.25%
+    expect(overTrimmedVerdict([hair], honestTrim)!.keptLabel).toBe("under 1%");
+  });
+
+  it("says nothing on a single field, where the over-trim never happened", () => {
+    // `/editor/trim-suggestion` returns a null crop for a single-field stack, so
+    // the tightest crop in the world cannot reach this on one.
+    expect(overTrimmedVerdict([savedSliver], null)).toBeNull();
+    expect(overTrimmedVerdict([savedSliver], undefined)).toBeNull();
+  });
+
+  it("says nothing about a crop that is a framing decision", () => {
+    // Cropping in on the middle 40% of a mosaic is a choice, and is exactly why
+    // the bar is a quarter rather than a half: at 0.5 this would be accused.
+    const framed = op({ x0: 0.2, y0: 0.2, x1: 0.83, y1: 0.83 });   // ~40%
+    expect(overTrimmedVerdict([framed], honestTrim)).toBeNull();
+    expect(0.4).toBeGreaterThan(OVER_TRIM_KEEP_RATIO * 0.92);
+  });
+
+  it("says nothing when there is no enabled crop to be wrong", () => {
+    expect(overTrimmedVerdict([], honestTrim)).toBeNull();
+    expect(overTrimmedVerdict([op({ x0: 0.62, y0: 0.03, x1: 0.69, y1: 0.55 },
+                                  false)], honestTrim)).toBeNull();
+  });
+
+  it("is measured against what the canvas offers, not against the whole frame", () => {
+    // A genuinely ragged mosaic whose honest rule keeps only 20%: a crop keeping
+    // 10% of the frame is then half of what is available, not a sliver of it, so
+    // the same crop that fires against a 92% canvas is silent here.
+    const ragged = { x0: 0.3, y0: 0.3, x1: 0.75, y1: 0.75 };       // ~20%
+    const tenth = op({ x0: 0.35, y0: 0.35, x1: 0.67, y1: 0.67 });  // ~10%
+    expect(overTrimmedVerdict([tenth], ragged)).toBeNull();
+    expect(overTrimmedVerdict([tenth], honestTrim)).not.toBeNull();
+  });
+
+  it("refuses a degenerate suggestion rather than dividing by nothing", () => {
+    expect(overTrimmedVerdict([savedSliver],
+                              { x0: 0.5, y0: 0.5, x1: 0.5, y1: 0.5 })).toBeNull();
   });
 });
