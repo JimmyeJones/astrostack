@@ -442,3 +442,41 @@ def test_a_lone_panel_is_left_at_one_rather_than_dragged_along():
     scales = np.exp(solution)
     assert scales[2] == pytest.approx(1.0, abs=1e-9)
     assert scales[0] / scales[1] == pytest.approx(1 / 1.6, rel=1e-6)
+
+
+def test_an_unpaired_panel_is_not_moved_by_a_lopsided_pair_graph():
+    """The test directly above passes for the wrong reason, and this is the
+    fixture that tells them apart.
+
+    Its one pair is symmetric, so the median of the whole solution is 0 and the
+    lone panel lands on 1.0 whether or not anything holds it there. Make the
+    graph lopsided — three panels each measuring 1.2× against a fourth, plus a
+    fifth that shares no overlap with anybody — and the median moves off zero
+    and takes the unpaired panel with it: **0.955**, a 4.5% dimming of a whole
+    tile of a mosaic, from an overlap that was never measured.
+
+    The panels that *were* measured keep their gains exactly, and their median
+    is still 1.0, so the picture's overall brightness does not move either.
+    """
+    pairs = {(0, 1): 1.2, (0, 2): 1.2, (0, 3): 1.2}
+    solution = overlapgain._solve_log_scales([0, 1, 2, 3, 4], pairs)
+    assert solution is not None
+    scales = np.exp(solution)
+    assert scales[4] == pytest.approx(1.0, abs=1e-9)
+    for other in (1, 2, 3):
+        assert scales[0] / scales[other] == pytest.approx(1 / 1.2, rel=1e-6)
+    assert float(np.median(scales[:4])) == pytest.approx(1.0, rel=1e-9)
+
+
+def test_a_fully_measured_mosaic_is_normalised_exactly_as_it_always_was():
+    """The other half of the claim: pinning the unmeasured panels must not move
+    the ordinary mosaic, where every panel carries a pair. The old rule was
+    "subtract the median of the whole solution", so asserting the new code
+    still lands there is what bounds the fix to the case it is for."""
+    pairs = {(0, 1): 1.2, (0, 2): 1.2, (0, 3): 1.2, (1, 2): 1.0}
+    labels = [0, 1, 2, 3]
+    remaining = dict(pairs)
+    raw, _residual, _keys = overlapgain._solve_once(labels, remaining)
+    solution = overlapgain._solve_log_scales(labels, pairs)
+    assert solution is not None
+    assert np.allclose(solution, raw - float(np.median(raw)), atol=0, rtol=0)

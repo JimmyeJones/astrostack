@@ -14,6 +14,56 @@ Newest first.
 
 ---
 
+## v0.415.1 — 2026-09-10 — a mosaic panel nobody could measure was dimmed anyway
+
+*(Builder, a bug verified in this run by reproduction — fails before / passes after. Pillar: image quality —
+PRIORITY 4, on the mosaic path that is on by default. Engine-only; a mosaic whose panels all carry an overlap
+pair is byte-for-byte unchanged.)*
+
+**The symptom.** `overlapgain` — the v0.387.0 pre-pass that lifts a mosaic panel shot through haze to match
+its neighbours — states its own safety rule at the top of the module: *"a panel that loses every pair keeps
+1.0"*. It did not. On a lopsided pair graph a panel that shares **no measurable overlap with anything** came
+out scaled, and the scale it got was computed entirely from other panels' measurements. Reproduced against
+the real solver: three panels each reading 1.2× against a fourth, plus a fifth sharing nothing, put the fifth
+at **0.9554** — a 4.5 % dimming of a whole tile of the owner's picture, from an overlap that does not exist.
+
+**The mechanism, and why the existing test could not see it.** `_solve_log_scales` ended with
+`solution - np.median(solution)`. `lstsq`'s minimum-norm solution really does hand an unpaired panel a log
+scale of 0, which is what the docstring's claim rests on — but 0 only *means* "scale 1.0" while the median it
+is then shifted by is itself 0. Minimum-norm makes each connected component sum to zero, not have zero
+median, so any asymmetric component (a star-shaped pair graph: one panel measured against three) puts the
+median off zero, and the shift lands on the unpaired panel along with everyone else. The test that claimed
+this behaviour, `test_a_lone_panel_is_left_at_one_rather_than_dragged_along`, uses a **single symmetric
+pair**, where the whole-solution median is 0 by coincidence — so it passed, and goes on passing, for a reason
+that has nothing to do with the property it names.
+
+**Reachability.** A panel loses every pair when each of its overlaps fails one of the pass's own guards —
+fewer than `MIN_SIGNAL_CELLS` (12) coarse cells carrying signal on both sides, or a strip correlating under
+`MIN_OVERLAP_CORRELATION`. A star-poor overlap strip does exactly that, which is the faint-field case this
+owner already has trouble with, so the population is real rather than theoretical.
+
+**The fix.** The normalisation moved into `overlapgain._normalise(labels, pairs, solution)`, which centres
+**only the panels carrying a surviving pair** on 1.0 and pins every other panel to exactly 0 (scale 1.0).
+Both halves of the module's promise are now true at once: the picture's overall brightness does not move (the
+median *measured* panel is still 1.0) and an unmeasured panel is not moved at all. `pairs` is read at the
+point the fit is accepted, not at entry, because the drop-and-refit loop above can strand a panel that
+started out paired.
+
+**Bounded to the bug.** When every panel is measured — the ordinary mosaic, and every case the pass shipped
+against — the two medians are the same number over the same values and the output is byte-for-byte what it
+was. `test_a_fully_measured_mosaic_is_normalised_exactly_as_it_always_was` pins that against a hand-rolled
+`_solve_once` + old-rule normalisation at `atol=0, rtol=0`, so the fix cannot quietly widen.
+
+**Upgrade-safe (§9):** engine-only, no config, schema, on-disk, endpoint, response-shape or default change.
+
+**Tests (+2):** `test_an_unpaired_panel_is_not_moved_by_a_lopsided_pair_graph` (fails before at 0.9554 vs
+1.0; also asserts the measured panels keep their 1.2× exactly and their median stays 1.0) and the
+byte-identity test above (passes before *and* after, deliberately — it is the bound, not the claim). Nothing
+weakened; the misleading older test is kept, since it is still true, with the new one beside it saying what
+it cannot.
+
+---
+
 ## v0.415.0 — 2026-09-10 — the walk-away minimum-frames floor counts a mosaic's subs, not its depth
 
 *(Builder, a bug verified in this run — repro'd end-to-end against the real pipeline, fails before / passes

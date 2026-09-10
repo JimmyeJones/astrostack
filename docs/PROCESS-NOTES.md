@@ -18,6 +18,111 @@ is a queue.
 
 ---
 
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-puusez`) — a test that passed for the wrong reason, and the class that found it
+
+**The run.** One task: **v0.415.1**, a bug I verified myself by reproduction —
+`overlapgain` scaled a mosaic panel that shared no measurable overlap with
+anything, contrary to the safety rule written at the top of its own module.
+Baseline on `origin/main` (`f6f7627e`): **5,579 passed / 2 skipped** (32m07s),
+which is exactly the number the previous run recorded for this same `main`.
+
+### Where it came from: the lead the previous run handed forward, then a new class
+
+Two briefs were pointed at the code this run. The first was the one
+`sweet-babbage-mudy09` left behind — *"a `log.info` inside a `try` whose
+`except` logs a failure"* — and it is now **swept and clean**; see below.
+The second is new and is what actually found something:
+
+> **A promise a module makes about itself in its own docstring, held up against
+> the code — and then against the test that claims to pin it.**
+
+`overlapgain`'s module docstring lists what it does when the evidence is thin,
+ending *"a panel that loses every pair keeps 1.0"*. That is the sentence that
+makes the whole pass safe to leave on by default for every mosaic. It was not
+true. `_solve_log_scales` ended with `solution - np.median(solution)`;
+`lstsq`'s minimum-norm solution does hand an unpaired panel a log scale of 0,
+but 0 only *means* 1.0 while the median it is then shifted by is itself 0 — and
+minimum-norm zeroes each connected component's **sum**, not its median. Three
+panels each reading 1.2× against a fourth, plus a fifth sharing nothing, put
+the fifth at **0.9554**: a 4.5 % dimming of a whole tile, from overlaps that
+panel never had.
+
+### The half worth carrying forward: the test was already there, and passed
+
+`test_a_lone_panel_is_left_at_one_rather_than_dragged_along` names this exact
+property and has passed since v0.387.0. Its fixture is **one symmetric pair**,
+which makes the whole-solution median 0 by coincidence — so it was testing
+arithmetic that happened to agree, not the property in its own name. Nothing
+about reading it suggests that; the tell only appears when you ask *"what would
+this fixture have to look like for the claim to be load-bearing?"* and notice
+the answer is "asymmetric", which it is not.
+
+So the class generalises past docstrings: **for a test that pins a safety
+property, ask what its fixture makes true by accident.** A property test whose
+fixture is symmetric, balanced, or minimal is the cheapest place in a codebase
+for a wrong claim to hide, because it is *green* and it *names the right
+thing*. The fix keeps that test (it is still true) and puts the asymmetric one
+beside it.
+
+*(Converged, independently and in the same hour: the fourth external audit's
+block below reaches the same rule from the other side — "a 'regression test'
+whose fixture cannot show the bug … revert the fix in a scratch script and watch
+the test fail", now in AGENTS.md §8 — and files two more instances of it in
+`test_edit_curve.py` and `test_coverage_trim.py`. This run did revert-and-watch:
+`git checkout seestack/stack/overlapgain.py`, re-run the three tests, 0.9554 vs
+1.0.)*
+
+The bug fix is bounded by a second test rather than by an argument:
+`test_a_fully_measured_mosaic_is_normalised_exactly_as_it_always_was` asserts
+the new code lands on the old rule at `atol=0, rtol=0` whenever every panel
+carries a pair. It passes before *and* after, deliberately — it is not the
+claim, it is the fence around it.
+
+### Two sweeps that came back clean — do not re-walk them today
+
+- **`log.info` inside a broad `except` that reports the block's success**
+  (`sweet-babbage-mudy09`'s hand-off). Enumerated with an AST walk over every
+  `.py` in `webapp/` and `seestack/`: eight sites in five files
+  (`watcher.py` ×2, `pipeline.py` ×2, `stacker.py` ×3, `scanner.py` ×1). Every
+  one is safe — the arguments are locals or literals already computed, and the
+  `scanner.py` site is the very one v0.411.1 fixed. The class is real; the
+  population is currently empty.
+- **ASTAP / ffmpeg filesystem side effects against `incoming/` (AGENTS.md §10).**
+  `ASTAPSolver._solve_once` copies each sub into a `TemporaryDirectory` before
+  invoking the solver precisely because ASTAP writes its `.wcs`/`.ini` sidecars
+  beside whatever `-f` names, and `copy_to_cache` is off; `-update` is
+  deliberately not passed. `solve/bootstrap.py` uses its own temp dir, and the
+  video path reads captures out of `incoming/` while writing everything to
+  `<data_root>/video/<capture_id>`. Nothing writes, renames or deletes under
+  `incoming/`.
+- **"A whole-target number used where a per-panel one is meant", pointed at the
+  surfaces that *report* depth** rather than decide from it, which is where the
+  previous run said to point it next. Also clean, and worth recording *why*:
+  `stackhealth.noise_yardstick_frames` already refuses to judge a mosaic on
+  anything but its crop depth, `noise_low_lead` / `noiseVsExpectedNote` already
+  have a mosaic voice, `integrationReadiness` already scales its goal by
+  `field_fulls` at all three of its call sites, and `noiseReductionHint` and
+  `grainProjection` are scale-free by construction (both T and ΔT divide by the
+  panel count, so the ratio is the single-field one). This brief is not
+  exhausted, but the reporting surfaces are done.
+
+### Dogfood — `--build --mosaic --editor`, CLEAN
+
+Mosaic trim **7.9 %** (the eighth consecutive pass at that number), all 21 ops
+re-render on **both** the field and the mosaic run with undo/redo clean, no
+console errors, nothing overflowing. Phone page heights on the standing
+baselines to the pixel: `/life-list` 3,094 px, `/targets/<field>` 3,078 px; the
+mosaic target page measures 3,407 px, recorded here because no earlier pass
+wrote it down. The step-4c "what the app SAYS" block now reads as one paragraph
+— the panel map, the grain-uneven note and the seam verdict all say *30 s
+behind, evens out*, and the seam note explicitly hands the grain question to
+the depth note rather than contradicting it. The three findings that came out
+of that block on 09-09 are closed.
+
+---
+
+---
+
 ## 2026-09-10 (fourth external audit, branch `claude/astrostack-verification-audit-gl564j`) — the shipped image was built and run for the first time, and "green" was measured against it
 
 **Subject.** Not the app: the apparatus that certifies it. Thesis under test: a green
@@ -128,6 +233,9 @@ does; `shm_size` is inert (no shared memory used); TZ-independence (all UTC);
 sidecar near `incoming/`); the skipped-folder report is silent on the bare device
 folder *by design* (its files are device-named); S30 FOV derived from `FOCALLEN`
 (2.13° search window in ASTAP's own log). — the fourth finding in the gap between two sentences, a "new" feature that was 90 % already built, and a two-pytest disk lesson
+
+---
+
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-dg6420`) — one task: a floor that counted the wrong thing, and where the bug was actually found
 
 **The run.** One task, deliberately: **v0.415.0**, a bug I verified myself —
