@@ -91,21 +91,24 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > here.
 
 - **🟠 FIXTURES THAT CANNOT EXHIBIT THEIR BUG (fourth external audit, 2026-09-10 — both reproduced by reverting
-  the fix in a scratch script; see PROCESS-NOTES).** (1) `tests/test_edit_curve.py::
-  test_the_sky_stays_put_at_every_stack_depth[very-deep]` — at `noise=0.0006` the zero-clip spike is no longer
-  the tallest bin of `_sky_mode`'s `[p0.5, median]` histogram, so the **pre-A1** `_sky_mode` reads the sky
-  correctly (rel. error 0.048; 0.996 at the other three depths) and the test passes on the bug. The guard
-  `clipped_fraction(st) > 0.005` (and `displayspace.MIN_CLIPPED_FRACTION`) asserts the clip is *present*, not
-  *dominant*. **Fix:** make `assert_shadow_clip` histogram the finite values over `[p0.5, median]` (128 bins) and
-  assert `argmax == 0`, or drop the deepest noise to ~0.001 where the spike still wins. (2)
-  `tests/test_coverage_trim.py::test_a_ragged_mosaic_still_gets_its_fringe_trimmed` — with `panel_coverage_level`
-  reverted to the **peak**, the `TRIM_KEEP_RATIO` ladder yields kept **0.902**, inside the asserted `0.90 < kept
-  < 0.99` (fixed code: 0.975), so the "before the fix the same map was cropped to the overlap band" docstring is
-  no longer what the assertion pins. **Fix:** assert the rect equals the border rule's answer
-  `(5/400, 5/400, 395/400, 395/400)`, or raise the floor to 0.95. (3, note only) the v20/v21 fixtures in
+  the fix in a scratch script; see PROCESS-NOTES).**
+  ~~(1) `test_the_sky_stays_put_at_every_stack_depth[very-deep]`~~ and
+  ~~(2) `test_a_ragged_mosaic_still_gets_its_fringe_trimmed`~~ — **BOTH FIXED v0.417.0** (Builder 2026-09-10),
+  each verified by reverting the production fix in a scratch script and watching the test go red, which it now
+  does and did not before. (1) `displayspace.assert_shadow_clip` now replays the **pre-fix** `_sky_mode`
+  histogram — all finite values over `[p0.5, median]`, 128 bins — and requires bin 0 to *win* it, so the guard
+  checks the clip **dominates** rather than merely exists; and the depth ladder gained an explicit
+  `exhibits_a1` flag, because the measured boundary is between 0.001 (pre-fix rel. error 0.996) and 0.0008
+  (0.114): the three rungs at and above 0.001 now assert the strong guard, and `very-deep` is kept but labelled
+  as coverage of the *fix*, never of the bug. The test had also been leading with a hand-rolled
+  `clipped_fraction(st) > 0.005` instead of the shared guard, which is how it drifted. (2) now asserts the rect
+  **equals** `(5/400, 5/400, 395/400, 395/400)` — the border rule's own answer, measured — with the ~95 % kept
+  fraction a consequence rather than the check; on the reverted rule it was 0.902, inside the old
+  `0.90 < kept < 0.99` window.
+  **Still open: (3, note only)** the v20/v21 fixtures in
   `tests/test_project_schema_drift.py` are today's `SCHEMA_SQL` minus one or two columns, which
   `_reconcile_table_columns` restores even with the migration steps deleted — the v9–v14 tests in
-  `tests/test_project.py` hand-write the old tables and are the pattern to copy. (S each; Confidence: HIGH.)
+  `tests/test_project.py` hand-write the old tables and are the pattern to copy. (S; Confidence: HIGH.)
 
 - **🟠 CI CERTIFIES THE CHECKOUT, NEVER THE IMAGE (fourth external audit, 2026-09-10) — `READY`, infra, S.**
   `.github/workflows/ci.yml` has two jobs, both against the source tree; the artifact the owner installs has
@@ -2994,6 +2997,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.417.1** — 🟠 two fixtures from the fourth external audit that **passed on the bug they name**, each now verified red against a scratch revert of the production fix. `displayspace.assert_shadow_clip` replays the pre-A1 `_sky_mode` histogram and requires the clipped-zero bin to *win* it (the old guard only said the clip was *present*), and `test_the_sky_stays_put_at_every_stack_depth` — which had drifted onto a hand-rolled `clipped_fraction > 0.005` instead of the shared guard — carries an explicit `exhibits_a1` flag, the measured boundary being between 0.001 and 0.0008. `test_a_ragged_mosaic_still_gets_its_fringe_trimmed` now asserts the exact rect `(5/400, 5/400, 395/400, 395/400)` rather than a `0.90 < kept < 0.99` window the reverted rule's 0.902 sat inside. Tests-only: no engine, webapp, frontend, config, schema or on-disk change.
 - **v0.417.0** — ⭐ 🔴 PRIORITY 1, the **remaining two halves** of the fourth external audit's "owner hits this first" entry, closing it: the same over-trim note on the **Target page** (`OverTrimmedTargetNote`) and the **library-wide count on the Dashboard** (`OverTrimmedNote` over a new `GET /api/over-trimmed-pictures`), so the question "*which* of my pictures is this?" has an answer without opening every target. Both read one server-side verdict — new `webapp/stale_crop.py` + `…/editor/crop-health`, factored through `editor.crop_health_for_run` so the scan and the per-run answer cannot name different pictures — and that verdict adopts the editor's shipped rule verbatim (`STALE_CROP_KEEP_RATIO` 0.25, silent when the border rule proposes no trim), with a drift test grepping `mosaicTrim.OVER_TRIM_KEEP_RATIO` so the two copies can't diverge. `sharePctLabel` is now shared, so all three surfaces round one measurement the same way. Read-only throughout: a saved recipe is never rewritten. Tests +27. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.416.0** — ⭐ 🔴 PRIORITY 1 (the editor), the **editor half** of the fourth external audit's "owner hits this first" entry, filed the same day and reproduced in the shipped image: **a mosaic Auto-edited before the D1 fixes keeps the old over-trim in its *saved recipe*, and every surface shows the sliver.** The fixes re-derive the trim; nothing compared a stored crop against it. New `mosaicTrim.overTrimmedVerdict` weighs the recipe's live enabled crops (`cropCoverageFraction`) against the rectangle `/editor/trim-suggestion` already fetches, and under `OVER_TRIM_KEEP_RATIO` (0.25) of what the canvas offers says so — *"cropped down to about 3% of the stack, but about 92% of it is well covered"* — with **Re-trim border**, which is the existing trim *preview*, so the user sees the rectangle before `applyTrimCrop` replaces only the Crop op. Where the stored "what Auto did" note is on screen the Alert also says its trim figure describes the crop being replaced, closing the gap between two sentences a beginner reads together. A quarter rather than the entry's suggested half, because at 0.5 a deliberate crop to the middle 40 % of a mosaic gets accused while the measured case is 3.4 % against 92.4 %. Frontend-only, no new endpoint and no new request; the Target-page note and the Dashboard library-wide count stay open on the entry. Tests +9, two fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.415.1** — PRIORITY 4 (image quality, on the mosaic path that is on by default), a bug verified by reproduction and fixed in one run: **a mosaic panel that nothing could measure was dimmed anyway.** `overlapgain`'s own module docstring promises *"a panel that loses every pair keeps 1.0"*; `_solve_log_scales` ended with `solution - np.median(solution)`, and `lstsq`'s minimum-norm 0 for an unpaired panel only *means* 1.0 while that median is itself 0. Minimum-norm zeroes each connected component's **sum**, not its median, so a lopsided graph (three panels each reading 1.2× against a fourth, plus one sharing nothing) put the unpaired panel at **0.9554** — a 4.5 % dimming of a whole tile from an overlap that does not exist. Reachable on a star-poor overlap strip, i.e. the faint-field case. New `overlapgain._normalise` centres only the panels carrying a *surviving* pair (read at the point the fit is accepted, since the drop-and-refit loop can strand a panel that started out paired) and pins the rest to exactly 1.0. A fully-measured mosaic is byte-for-byte unchanged, pinned at `atol=0, rtol=0`. The existing `test_a_lone_panel_is_left_at_one_rather_than_dragged_along` passed throughout — its single symmetric pair makes the whole-solution median 0 by coincidence — and is kept, with the new test beside it saying what it cannot. Tests +2, one fails before. Full entry in [`SHIPPED.md`](SHIPPED.md).

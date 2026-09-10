@@ -328,17 +328,42 @@ def test_auto_contrast_leaves_the_sky_alone_at_every_stretch_target(target_bg):
 # subs to a few thousand. It falls far more slowly than 1/√N would suggest — sky
 # *shot* noise doesn't average away with read noise — so this is the measured
 # range, not a textbook one.
-@pytest.mark.parametrize("noise", [0.004, 0.002, 0.001, 0.0006],
-                         ids=["shallow", "typical", "deep", "very-deep"])
-def test_the_sky_stays_put_at_every_stack_depth(noise):
+@pytest.mark.parametrize(("noise", "exhibits_a1"), [
+    (0.004, True), (0.002, True), (0.001, True), (0.0006, False),
+], ids=["shallow", "typical", "deep", "very-deep"])
+def test_the_sky_stays_put_at_every_stack_depth(noise, exhibits_a1):
     """Depth was never the variable: the audit measured the same wrong control
     point on 4 subs and on 1,000, because the shadow clip takes a fixed *fraction*
     of the frame however clean the sky underneath it is (1.4 % here at the
-    shallowest, still 0.5 % at the deepest). Check the fix is equally depth-blind."""
+    shallowest, still 0.5 % at the deepest). Check the fix is equally depth-blind.
+
+    **``exhibits_a1`` is not decoration** *(added 2026-09-10, fourth external
+    audit)*. This test used to lead with a hand-rolled
+    ``clipped_fraction(st) > 0.005`` instead of the shared
+    :func:`assert_shadow_clip` — and that number only says the zero spike is
+    *present*, while A1 needs it to be the **tallest bin** of ``_sky_mode``'s
+    histogram. Measured across this ladder, the spike wins at 0.001 and above
+    (pre-fix relative error 0.996 at every rung) and **loses** below it: at
+    0.0008 the pre-fix error is 0.114 and at 0.0006 it is 0.048, so on the
+    deepest rung the *unfixed* code reads the sky correctly and the rung passed
+    on the very bug it was written to catch.
+
+    The rung is kept rather than deleted — it is still a real check that the fix
+    doesn't disturb a very deep stack — but it is now labelled for what it is,
+    and only the rungs that can actually catch a regression assert the guard. A
+    rung that cannot exhibit the bug is coverage of the fix, never of the bug."""
     from seestack.edit.ops.tone import _curves
 
     st = _real_stretched_stack(noise=noise)
-    assert clipped_fraction(st) > 0.005, "the clip spike survives at this depth"
+    if exhibits_a1:
+        # The strong guard: the clipped-zero bin must *win* _sky_mode's histogram,
+        # or a regression here would sail through.
+        assert_shadow_clip(st)
+    else:
+        # Deep enough that the sky's own noise spread outvotes the spike. Still
+        # assert the clip exists, so this rung stays a display-space case rather
+        # than quietly becoming an unstretched one.
+        assert clipped_fraction(st) > 0.005, "the clip spike survives at this depth"
     out = _curves(st.copy(), {"points": [[0.0, 0.0], [1.0, 1.0]], "auto": True}, EditContext())
     sky_in = sky_truth(st)
     sky_out = float(np.median(out[:SKY_PATCH_PX, :SKY_PATCH_PX]))
