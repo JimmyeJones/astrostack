@@ -89,6 +89,26 @@ enough apart that 3.0 is a separation rather than a tuning. The generalisable
 rule: **whenever a guard has to ask "is this structure?", it must not be
 calibrated on a statistic that the structure itself sets.**
 
+### Dogfood record — `--mosaic --editor`, on this branch's code, CLEAN
+
+Run after both fixes were committed, because both are Auto/editor claims and §1
+judges those on a mosaic canvas. **Auto's trim on the mosaic sample: 7.9 %** —
+unchanged by either fix and well under the ~15 % D1 bar. Nothing overflowing and
+no console errors on either target; the editor drive added all 21 ops on the
+**mosaic** run as well as the field one, each re-rendering the live preview, and
+undo/redo applied. Tallest page [phone] `/targets/Sample_M42_mosaic_2_2` at
+3,407 px.
+
+Read as one paragraph, per §7, the app's three claims about that mosaic now
+**cohere** — the panel map's "a little behind at the top-right… about 30 s
+there against 1 min", `grain_uneven`'s "about 23 % of the picture has 3 subs
+where most of it has 6, so that part looks about 1.4× grainier… only about 30 s
+behind", and `seams_flat`'s "where the picture looks grainier that is a
+difference in depth, not a step in the sky". A beginner can hold all three at
+once: one panel is thinner, that is why a quarter of the picture is grainier, it
+is not a seam, and it closes itself. That is what v0.406.x/v0.407.1 were for, and
+this is the first pass to say so after all of them landed.
+
 ### Two smaller things this run learned
 
 - **A no-op simulation is a fair fail-before when the test imports the new
