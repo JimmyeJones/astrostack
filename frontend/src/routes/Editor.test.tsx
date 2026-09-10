@@ -2819,6 +2819,76 @@ describe("EditorView", () => {
       expect(screen.getByRole("button", { name: "Coverage" })).toBeInTheDocument());
   });
 
+  it("says a mosaic's saved crop is an older version's over-trim, and offers to re-do it", async () => {
+    // The fourth external audit's case, reproduced in the shipped image over a
+    // v0.277.0 data volume: a mosaic Auto-edited before the D1 fixes carries the
+    // old, far tighter crop in its *saved recipe*, so the hero, the Library card,
+    // the editor and the share sheet all show a sliver of the stack — while the
+    // stored "what Auto did" note still explains the trim as if it were right.
+    // Nothing compared the saved crop against the border rule the fixes re-derive.
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{
+        uid: "c1", id: "geometry.crop", enabled: true,
+        params: { x0: 0.6228, y0: 0.0341, x1: 0.6896, y1: 0.5463 },
+      }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: true });
+    vi.spyOn(client.api, "trimSuggestion").mockResolvedValue({
+      is_mosaic: true, crop: { x0: 0.02, y0: 0.02, x1: 0.98, y1: 0.98 },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    expect(await screen.findByText(/trimmed by an older version/i)).toBeInTheDocument();
+    expect(screen.getByText(/cropped down to about 3% of the stack/)).toBeInTheDocument();
+    expect(screen.getByText(/about 92% of it is well covered/)).toBeInTheDocument();
+
+    // The offer is the existing trim preview, so the user sees the rectangle
+    // before anything changes -- it is a question, never an action.
+    fireEvent.click(screen.getByRole("button", { name: /Re-trim border/ }));
+    expect(await screen.findByRole("button", { name: /Apply crop/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+  });
+
+  it("says nothing about a saved crop that is a framing decision", async () => {
+    // The other half of the claim: a crop keeping the middle 40% of the same
+    // mosaic is a choice the owner made, and accusing it would be worse than
+    // silence. Same run, same suggestion, only the crop differs.
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [{
+        uid: "c1", id: "geometry.crop", enabled: true,
+        params: { x0: 0.2, y0: 0.2, x1: 0.83, y1: 0.83 },
+      }],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: true });
+    vi.spyOn(client.api, "trimSuggestion").mockResolvedValue({
+      is_mosaic: true, crop: { x0: 0.02, y0: 0.02, x1: 0.98, y1: 0.98 },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    // Wait for the run to be fully loaded before asserting an absence.
+    await waitFor(() => expect(client.api.trimSuggestion).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: /Trim border/ })).toBeInTheDocument();
+    expect(screen.queryByText(/trimmed by an older version/i)).not.toBeInTheDocument();
+  });
+
   it("disables the overlay/compare toggles while previewing a trim crop", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({
