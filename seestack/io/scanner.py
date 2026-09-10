@@ -1070,6 +1070,7 @@ def run_qc_and_solve(
     serial: bool = False,
     only_new_qc: bool = False,
     use_solve_hints: bool = True,
+    retry_unsolved_with_sibling_hint: bool = True,
     auto_reject_streaks: bool = True,
     bootstrap_solve: bool = False,
     progress: ProgressFn | None = None,
@@ -1089,7 +1090,16 @@ def run_qc_and_solve(
     Returns a small summary dict: ``{'qc_done', 'qc_total', 'solve_done',
     'solve_total', 'solve_ok'}``. The ``*_done`` figures are progress counters
     (frames *attempted*); ``solve_ok`` is how many of them actually came back
-    with a usable plate solution.
+    with a usable plate solution. When the sibling-hint second pass rescues any
+    frame, ``solve_retry_total``/``solve_retry_ok`` are added beside them.
+
+    ``retry_unsolved_with_sibling_hint`` runs that second pass: the frames this
+    round failed to locate are re-offered once around the solved subs' own centre
+    at the tight :data:`~seestack.solve.runner.SIBLING_HINT_RADIUS_DEG`, which is
+    the only way a Seestar's header-hinted subs ever get the sibling centre (see
+    :func:`~seestack.solve.runner.build_sibling_retry_arglist`). It can only add
+    solves — ASTAP still verifies the star pattern — and is skipped entirely for
+    setup failures, timeouts, and frames that already searched exactly there.
     """
     from seestack.qc.runner import (
         apply_qc_result_to_db,
@@ -1099,6 +1109,7 @@ def run_qc_and_solve(
     )
     from seestack.solve.runner import (
         apply_solve_result_to_db,
+        build_sibling_retry_arglist,
         build_solve_arglist,
         solve_one,
     )
@@ -1162,6 +1173,10 @@ def run_qc_and_solve(
         # The bar is the same one ``apply_solve_result_to_db`` writes a WCS for:
         # ASTAP said yes *and* a usable WCS came out of the sidecar.
         solve_ok = 0
+        # Frames this round failed to locate, as ``(frame_id, error_text)`` — the
+        # only thing the sibling-hint second pass below needs, and far smaller than
+        # holding a thousand subs' ``SolveResult`` (each carrying a WCS blob).
+        failures: list[tuple[int, str | None]] = []
         for done, result in _map_jobs(
             solve_one, solve_args,
             serial=serial, max_workers=max_workers,
@@ -1170,12 +1185,54 @@ def run_qc_and_solve(
             if result is not None:
                 if result.solved and wcs_text_is_usable(result.wcs_text):
                     solve_ok += 1
+                else:
+                    failures.append((result.frame_id, result.error))
                 try:
                     apply_solve_result_to_db(project, result)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("solve DB write failed: %s", exc)
             summary["solve_done"] = done
         summary["solve_ok"] = solve_ok
+
+        # Second pass: re-offer the frames that didn't locate around the centre the
+        # subs that *did* solve agree on, at the tight sibling radius. A Seestar
+        # writes RA/Dec headers, so its subs carry a loose 30° hint and
+        # ``build_solve_arglist`` never hands them the sibling centre — this is the
+        # rung that reaches them, searching a smaller *correct* region than the one
+        # that just failed. Bounded to one extra attempt per frame, skipping the
+        # setup/timeout/identical cases (see ``build_sibling_retry_arglist``), so a
+        # genuinely unsolvable night pays almost nothing and a night where nothing
+        # solved at all pays nothing.
+        if retry_unsolved_with_sibling_hint and failures and not _stopped(should_stop):
+            retry_args = build_sibling_retry_arglist(project, solve_args, failures)
+            if retry_args:
+                summary["solve_retry_total"] = len(retry_args)
+                retry_ok = 0
+                for _done, result in _map_jobs(
+                    solve_one, retry_args,
+                    serial=serial, max_workers=max_workers,
+                    phase="Solving (second try)", progress=progress,
+                    should_stop=should_stop,
+                ):
+                    if result is not None:
+                        if result.solved and wcs_text_is_usable(result.wcs_text):
+                            retry_ok += 1
+                        try:
+                            apply_solve_result_to_db(project, result)
+                        except Exception as exc:  # noqa: BLE001
+                            log.warning("solve DB write failed: %s", exc)
+                summary["solve_retry_ok"] = retry_ok
+                # ``solve_ok`` is "how many of this target's subs did we locate?",
+                # so a sub rescued by the second pass counts there too. The retry is
+                # a subset of the frames already attempted, so ``solve_done`` /
+                # ``solve_total`` (the progress counters) stay exactly as they were.
+                solve_ok += retry_ok
+                summary["solve_ok"] = solve_ok
+                if retry_ok:
+                    log.info(
+                        "sibling-hint retry located %d more sub(s) for %s",
+                        retry_ok, project.get_meta("name"),
+                    )
 
         # Stack-then-solve bootstrap: if the per-sub pass left most subs unsolved
         # (a faint / sparse-star field), integrate the accepted-but-unsolved subs

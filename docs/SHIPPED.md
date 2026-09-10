@@ -14,6 +14,72 @@ Newest first.
 
 ---
 
+## v0.411.0 — 2026-09-10 — a second solve pass reaches the subs a Seestar's own header hint kept blind
+
+*(Builder, backlog slice (c) of the v0.180.0 sibling-hint fill-in, filed 2026-07-23 and open since. Pillar:
+autonomy + image quality — PRIORITY 2/4. Additive; can only ever add solves.)*
+
+**The gap.** `run_stack` combines only frames that are accepted **and** solved, so every sub ASTAP fails to
+locate is silently left out of the picture — the mechanism behind the owner's thin/gibberish stacks on faint
+fields. v0.180.0 already borrows the centre the target's *solved* subs agree on and searches a tight
+`SIBLING_HINT_RADIUS_DEG` (5°) around it — but only for a frame that has **no** usable header hint. A Seestar
+writes `RA`/`DEC` into every sub, so on the owner's own data that rescue **never fires**: each unsolved sub
+carries its own loose hint and is searched blind-wide at the configured 30°, even after a dozen of its
+siblings have pinned the pointing to within a degree.
+
+**The fix — one extra pass, over the failures only.** After the round finishes, `run_qc_and_solve` re-offers
+each frame it failed to locate with the now-known sibling centre at the tight radius: a *smaller, correct*
+search region than the one that just failed, which is exactly what the 2026-07-24 ASTAP measurement said
+moves the needle (a failed search costs ~4 s at 30° and ~0.2 s at 5°; a wider radius and a longer timeout are
+non-levers). ASTAP still verifies the star pattern, so a second pass cannot invent a wrong solution — it can
+only add solves.
+
+**What it deliberately does not retry**, so a hopeless night pays almost nothing:
+* a **setup** failure (ASTAP or its star database missing) — the same error on every frame, and no search
+  region fixes it (so a library with no star database costs exactly zero extra attempts);
+* a **timeout** — that frame already burned up to 3× `astap_timeout_s` on the ladder, the one cost the
+  Settings hint warns about, and it is the single shape where a second full attempt genuinely doubles the
+  wait. It keeps its "Ran out of time being located" bucket (v0.276.4) untouched;
+* a job that **raised** rather than returning a result (no error text to judge, and a crashed worker is not a
+  search-region problem);
+* a frame whose first attempt was **already** this same search — same centre, radius already at or inside the
+  sibling radius — which would re-run an identical solve. This is what keeps the pass off the frames
+  v0.180.0 already rescues.
+
+And it stands down entirely when **nothing** has solved yet: with no sibling centre there is nothing to offer,
+so a night where every sub failed is attempted once, exactly as today.
+
+**Shape.** The decision is a pure, testable
+`solve/runner.build_sibling_retry_arglist(project, solve_args, failures)`, which reuses the round's own arg
+tuples (so a caller that overrode ASTAP path/FOV/timeout gets those same values back) and takes the failures
+as `(frame_id, error_text)` rather than whole `SolveResult`s — a thousand-sub target's results carry a WCS
+blob each, and this pass must not hold the round in memory to schedule its retry. It honours
+`build_solve_arglist`'s own rule that a user who tightened `astap_hint_radius_deg` below 5° is never widened.
+`scanner.run_qc_and_solve` gains `retry_unsolved_with_sibling_hint=True` beside the existing
+`use_solve_hints` / `auto_reject_streaks` defaults; the pass runs **before** the opt-in stack-then-solve
+bootstrap, so a real per-sub solve is preferred over a propagated one and the bootstrap engages on fewer
+targets.
+
+**What the user sees, without a new surface.** `solve_ok` is the app's honest "how many did we locate?" figure
+and a rescued sub counts there, so the Jobs page's existing *"Located 38 of 40 in the sky"* sentence and its
+mostly-failed nudge both get better with no frontend change; `solve_done`/`solve_total` stay the progress
+counters they were (the retry is a subset of the frames already attempted). `solve_retry_total` /
+`solve_retry_ok` are added to the summary only when the pass actually ran.
+
+**Upgrade-safe (§9):** engine-only, additive. No config, DB-schema, on-disk, endpoint, response-shape or
+existing-default change; the new summary keys are additive and every existing consumer reads the same keys it
+did. No new setting to migrate, and nothing to turn on.
+
+**Tests (+7, three fail before on behaviour):** `tests/test_solve_hints.py` (+4 — a header-hinted failure is
+retried at the tight radius around the sibling centre; setup failures, timeouts and an identical search are
+each skipped in one case; nothing is retried until something has solved; a tightened radius is never widened)
+and `tests/test_scanner.py` (+3 — end-to-end through `run_qc_and_solve` with a solver that only finds the
+field when searched tight: three subs rescued, `solve_ok` counts them, exactly one extra attempt per frame
+and never a loop; the same target left unsolved with the pass switched off, which is the fail-before; and a
+night where nothing solved at all paying no extra attempts).
+
+---
+
 ## v0.410.1 — 2026-09-10 — 🐛 the same panel steps decided what your target *was*
 
 *(Builder-verified by reproduction, found by taking v0.410.0's bug class to the other cue `auto_recipe`
