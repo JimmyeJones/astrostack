@@ -23,9 +23,28 @@
 
 import { describe, expect, it } from "vitest";
 
-/** `<Tooltip …>` whose first child element is a `<Badge`, as "file:line". */
+/** How a site opts out: the marker, and the reason, on or just above the tag.
+ *
+ * A `<Tooltip>` around a `Badge` is a defect *when the tooltip says something the
+ * badge does not*. One live site is the other case — the frames table's
+ * `Rejected — …` badge, whose tooltip repeats the badge's own text — and the
+ * honest answer there is to leave it, not to put a tab stop on every rejected
+ * row for a sentence that says nothing new. So the guard takes an explicit,
+ * reviewable exemption rather than either flagging a non-defect or quietly
+ * narrowing its own rule; the marker forces the next author to write the reason
+ * down, and the pinned list below means a second one cannot be added silently.
+ */
+const EXEMPT = "hint-anchor-exempt:";
+
+/**
+ * `<Tooltip …>` whose first child element is a `<Badge`, as "file:line".
+ *
+ * `exempt: true` returns the opted-out sites instead of the offending ones, so
+ * the same scanner answers both questions and they cannot disagree.
+ */
 export function tooltipsWrappingABadge(
   sources: { name: string; text: string }[],
+  { exempt = false }: { exempt?: boolean } = {},
 ): string[] {
   const hits: string[] = [];
   for (const { name, text } of sources) {
@@ -33,6 +52,11 @@ export function tooltipsWrappingABadge(
     lines.forEach((line, i) => {
       const at = line.indexOf("<Tooltip");
       if (at < 0) return;
+      // The marker may sit on the tag's own line or in the comment block above
+      // it (where a real reason has room to be written).
+      const excused = line.includes(EXEMPT)
+        || lines.slice(Math.max(0, i - 8), i).some((l) => l.includes(EXEMPT));
+      if (excused !== exempt) return;
       // Only the *first* element under the opening tag decides: that is the
       // anchor Mantine clones, and the one a tap would land on.
       for (let j = i; j < Math.min(i + 14, lines.length); j++) {
@@ -68,6 +92,14 @@ describe("no plain Tooltip may be wrapped around a Badge", () => {
     expect(tooltipsWrappingABadge(sources)).toEqual([]);
   });
 
+  it("and the one exemption is the one that is written down", () => {
+    // Pinned by file, not by line, so an edit above it doesn't redden the suite —
+    // but a *second* exemption shows up in a diff and has to justify itself.
+    const files = tooltipsWrappingABadge(frontendSources(), { exempt: true })
+      .map((hit) => hit.split(":")[0]);
+    expect(files).toEqual(["routes/Target.tsx"]);
+  });
+
   it("and the guard is armed — it flags one written the old way, with its line", () => {
     expect(tooltipsWrappingABadge([{
       name: "routes/Made Up.tsx",
@@ -81,6 +113,26 @@ describe("no plain Tooltip may be wrapped around a Badge", () => {
         "}",
       ].join("\n"),
     }])).toEqual(["routes/Made Up.tsx:3"]);
+  });
+
+  it("the marker excuses a site, and only that site", () => {
+    const bad = [
+      "    <Tooltip label={why}>",
+      '      <Badge size="xs">seams flat</Badge>',
+      "    </Tooltip>",
+    ];
+    const excused = [
+      "    // hint-anchor-exempt: it repeats the badge's own text",
+      "    <Tooltip label={why}>",
+      '      <Badge size="xs">seams flat</Badge>',
+      "    </Tooltip>",
+    ];
+    expect(tooltipsWrappingABadge([{ name: "a.tsx", text: bad.join("\n") }]))
+      .toEqual(["a.tsx:1"]);
+    expect(tooltipsWrappingABadge([{ name: "b.tsx", text: excused.join("\n") }]))
+      .toEqual([]);
+    expect(tooltipsWrappingABadge([{ name: "b.tsx", text: excused.join("\n") }],
+      { exempt: true })).toEqual(["b.tsx:2"]);
   });
 
   it("does not flag a Tooltip around something a tap can already reach", () => {
