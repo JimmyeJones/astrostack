@@ -114,6 +114,87 @@ export function removeCropOps(ops: OpInstance[]): OpInstance[] {
   return ops.filter((o) => !(o.enabled && o.id === "geometry.crop"));
 }
 
+/** How little of the honestly-covered area a *saved* crop has to keep before it
+ * reads as an old version's over-trim rather than a framing decision.
+ *
+ * The number that has to be told apart from a bug is a person cropping in on
+ * their object, and a quarter is where those two populations separate. The
+ * over-trim this exists for collapsed a mosaic onto its panel *overlap band*:
+ * measured on the owner's own library (fourth external audit, 2026-09-10) a
+ * v0.277.0 recipe kept **3.4 %** of a 5089×2045 canvas where today's rule keeps
+ * **92.4 %** — a 27× gap. A half would also catch someone deliberately framing
+ * on the middle 40 % of their mosaic, which is a decision, not a defect.
+ */
+export const OVER_TRIM_KEEP_RATIO = 0.25;
+
+/** What a saved crop keeps against what the canvas actually offers. */
+export interface OverTrimVerdict {
+  /** Fraction of the frame the recipe's enabled crops leave. */
+  keptFraction: number;
+  /** Fraction today's border rule would leave. */
+  availableFraction: number;
+  /** "under 1%" / "about 3%" — the recipe's share, ready to print. */
+  keptLabel: string;
+  /** The same for what is available. */
+  availableLabel: string;
+}
+
+/** "about 3%" / "under 1%" — an honest share, never rounded up to a number that
+ * overstates a sliver. Pure. */
+function sharePctLabel(frac: number): string {
+  const pct = frac * 100;
+  if (pct < 1) return "under 1%";
+  return `about ${Math.round(pct)}%`;
+}
+
+/** Is this recipe's saved crop an older version's over-trim rather than a
+ * framing choice? `null` — say nothing — unless it clearly is.
+ *
+ * **Why this is needed at all.** The D1 fixes re-derive the *trim* a mosaic
+ * should get, but a run edited before them carries the old, far tighter crop in
+ * its **saved recipe**, and nothing compared the two — so the hero, the Library
+ * card, the editor and the share sheet all show a sliver of the picture, under
+ * an auto-note that still explains the trim as if it were right.
+ *
+ * `suggested` is the rectangle the current border rule proposes for this run
+ * (`/editor/trim-suggestion`), which is `null` on a single field — so a
+ * single-field stack can never reach this, which is right: the over-trim only
+ * ever happened on a mosaic canvas.
+ *
+ * Deliberately a *question*, never an action: a tight crop can be the user's
+ * own, so this only ever earns a sentence and a button. Pure.
+ */
+export function overTrimmedVerdict(
+  ops: OpInstance[],
+  suggested: TrimCrop | null | undefined,
+): OverTrimVerdict | null {
+  if (!suggested) return null;
+  const keptFraction = cropCoverageFraction(ops);
+  if (keptFraction == null || !Number.isFinite(keptFraction) || keptFraction <= 0) {
+    return null;
+  }
+  const availableFraction =
+    (suggested.x1 - suggested.x0) * (suggested.y1 - suggested.y0);
+  if (!Number.isFinite(availableFraction) || availableFraction <= 0) return null;
+  if (keptFraction >= OVER_TRIM_KEEP_RATIO * availableFraction) return null;
+  return {
+    keptFraction,
+    availableFraction,
+    keptLabel: sharePctLabel(keptFraction),
+    availableLabel: sharePctLabel(availableFraction),
+  };
+}
+
+/** The whole sentence for :func:`overTrimmedVerdict`, so the one place that owns
+ * the wording is beside the rule that decides it. Pure. */
+export function overTrimmedSentence(v: OverTrimVerdict): string {
+  return `This picture is cropped down to ${v.keptLabel} of the stack, but `
+    + `${v.availableLabel} of it is well covered. Older versions of AstroStack `
+    + `over-trimmed a mosaic's ragged edge, and that crop is saved in this run's `
+    + `edit. "Re-trim border" measures it again and replaces just the Crop step — `
+    + `your other adjustments stay. If you cropped it this way yourself, leave it.`;
+}
+
 /** Plain-language "keeps the central W% × H%" summary of a proposed crop. Pure. */
 export function trimKeptLabel(crop: TrimCrop): string {
   const pctW = Math.round((crop.x1 - crop.x0) * 100);
