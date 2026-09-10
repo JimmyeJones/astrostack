@@ -23,6 +23,29 @@
  * σ ∝ 1/√t, so reaching a target σ takes `(σ_now/σ_target)²` times the light.
  * Doubling total time cuts grain ~29 %; quadrupling it halves the grain.
  *
+ * ## …but only until the target's own stacks say otherwise
+ * That ideal is the right assumption from *one* measured point, and the wrong
+ * one the moment there are two. A real sky goes background-limited: the same
+ * `integrationTrend` the History "Noise trend" card reads fits the target's
+ * **measured** falloff exponent `p` (σ ∝ t^-p; ideal 0.5), and on a target that
+ * has already slowed to, say, p = 0.17, reaching a target σ takes
+ * `(σ_now/σ_target)^(1/p)` times the light — 250× where the ideal says 6.3×.
+ * Projecting along the ideal there quotes "roughly 16 h more" at a beginner
+ * whose own two stacks imply ~750 h, which is not a rounding error but a plan
+ * they would spend clear nights on. So when a measured exponent exists this
+ * projects along **it**, and the clamp is one-sided — a measured `p` above the
+ * ideal is jitter, never a promise to beat the physics. With no trend to read
+ * (one stack, the common beginner case this module was built for) nothing
+ * changes: `p` is the ideal 0.5 and every figure is what it always was.
+ *
+ * A fit off two stacks is not a precise `p` — at `integrationTrend`'s minimum
+ * 1.5× spread, a 5 % error on the deeper σ moves a true 0.5 to ≈ 0.38, and the
+ * quoted hours with it. That is accepted deliberately rather than smoothed: it
+ * errs *pessimistic* where the old assumption erred optimistic, and it is the
+ * same single fit that already decides this target's trend verdict and this
+ * card's plateau stand-down. One noisy measurement used consistently beats a
+ * clean number that is about a different target.
+ *
  * ## Reconciling with the goal verdict rather than contradicting it
  * Low grain is *not* the same claim as "you have enough integration": more time
  * also pulls out fainter detail, which is what the per-type goal is really
@@ -69,6 +92,9 @@ export const GRAINY_SIGMA = 0.05;
  * rather than the light multiple on purpose — 25× the light on a 20-minute
  * first attempt is a perfectly reachable evening, and should be quoted. */
 export const MAX_HONEST_EXTRA_HOURS = 60;
+/** Shot-noise-limited stacking: σ ∝ t^-0.5. The exponent this projects along
+ * when the target has no measured trend of its own to read. */
+export const IDEAL_EXPONENT = 0.5;
 
 export type GrainLevel = "clean" | "some" | "grainy";
 
@@ -78,6 +104,13 @@ export interface GrainProjection {
   /** Integration behind that stack, in hours. */
   hours: number;
   level: GrainLevel;
+  /** The falloff exponent every figure below is projected along: this target's
+   * own measured one when `integrationTrend` can read it (capped at
+   * `IDEAL_EXPONENT`, never above), else `IDEAL_EXPONENT`. */
+  exponent: number;
+  /** True when `exponent` came from this target's own stacks rather than from
+   * the ideal — i.e. the copy is quoting a measured rate, not an assumed one. */
+  measuredFalloff: boolean;
   /** Total light needed to reach `CLEAN_SIGMA`, as a multiple of what's already
    * there (e.g. 4 = "four times the light"). `null` once already clean, or when
    * the extra hours run past `MAX_HONEST_EXTRA_HOURS`. */
@@ -88,9 +121,11 @@ export interface GrainProjection {
   /** True when reaching clean would take more than `MAX_HONEST_EXTRA_HOURS` of
    * extra light — the projection is real, but too far away to quote as a plan. */
   beyondReach: boolean;
-  /** Extra hours that would *halve* the grain: 4× the light, so 3× what's
-   * already there. Always finite and always worth stating. */
-  hoursToHalve: number;
+  /** Extra hours that would *halve* the grain — 4× the light (3× what's already
+   * there) at the ideal exponent, more once a measured falloff says the target
+   * is slower than that. `null` when the measured falloff has flattened to the
+   * point where no amount of time halves the grain. */
+  hoursToHalve: number | null;
   /** Plain-language one-liner for the card. */
   sentence: string;
 }
@@ -150,19 +185,50 @@ export function grainProjection(
   const level: GrainLevel =
     sigma <= CLEAN_SIGMA ? "clean" : sigma >= GRAINY_SIGMA ? "grainy" : "some";
 
-  // σ ∝ 1/√t, so the light needed to fall from σ to CLEAN_SIGMA is (σ/target)².
-  // One decimal is as much precision as a projection from one point deserves.
-  const factor = Math.round(Math.pow(sigma / CLEAN_SIGMA, 2) * 10) / 10;
+  // The rate to project along. `integrationTrend` is the *same* fit the History
+  // "Noise trend" card prints its "N% cleaner if you double" from, so reading it
+  // here is what stops the two surfaces quoting two different futures for one
+  // target. Capped at the ideal and never floored: a measured exponent above 0.5
+  // is jitter (we don't promise better than shot noise), while one at or below 0
+  // is a target whose noise has stopped responding — which must fall through to
+  // the "not from here" copy, not be nudged up into a quotable number.
+  const trend = integrationTrend(runs);
+  const exponent = trend ? Math.min(IDEAL_EXPONENT, trend.exponent) : IDEAL_EXPONENT;
+  const measuredFalloff = trend != null && exponent < IDEAL_EXPONENT;
+
+  // σ ∝ t^-p, so the light needed to fall from σ to CLEAN_SIGMA is
+  // (σ/target)^(1/p) — (σ/target)² at the ideal p = 0.5. A non-positive exponent
+  // means more time buys nothing, i.e. an infinite multiple.
+  // One decimal is as much precision as a projection from so few points deserves.
+  const rawFactor = exponent > 0
+    ? Math.pow(sigma / CLEAN_SIGMA, 1 / exponent)
+    : Number.POSITIVE_INFINITY;
+  const factor = Number.isFinite(rawFactor) ? Math.round(rawFactor * 10) / 10 : rawFactor;
   const extra = hours * (factor - 1);
-  const beyondReach = level !== "clean" && extra > MAX_HONEST_EXTRA_HOURS;
+  const beyondReach =
+    level !== "clean" && !(Number.isFinite(extra) && extra <= MAX_HONEST_EXTRA_HOURS);
   const quotable = level !== "clean" && !beyondReach;
   const moreLightFactor = quotable ? factor : null;
   const extraHours = quotable ? extra : null;
-  // Halving the grain is always exactly 4× the light — 3× more than is there.
-  const hoursToHalve = hours * 3;
+  // Halving the grain is 2^(1/p) times the light — exactly 4× (3× more than is
+  // there) at the ideal, and out of reach entirely once the falloff hits zero.
+  const hoursToHalve = exponent > 0 ? hours * (Math.pow(2, 1 / exponent) - 1) : null;
+  // What doubling the time buys, in the *same* number the History noise-trend
+  // card prints for this target — taken from that card's own field rather than
+  // recomputed, so the two can never round to different percentages.
+  const percentIfDoubled = trend
+    ? trend.percentCutIfDoubled
+    : Math.round((1 - Math.pow(2, -IDEAL_EXPONENT)) * 100);
 
   const now = fmtHours(hours);
   const grain = sigma.toFixed(3);
+  // One clause, added only when the rate came off this target's own stacks, so
+  // the bigger number arrives with the reason it is bigger instead of looking
+  // like a different app's arithmetic. Empty (and every sentence byte-for-byte
+  // as it always was) for the single-stack case.
+  const atThisRate = measuredFalloff
+    ? "At the rate this target's own stacks have been improving, about "
+    : "About ";
   let sentence: string;
   if (level === "clean") {
     // Deliberately not "you're done": see "Reconciling with the goal verdict".
@@ -170,32 +236,47 @@ export function grainProjection(
       `Measured on your own picture: the background already looks clean at ` +
       `${now} (grain ${grain}). More time from here mostly buys fainter ` +
       `detail rather than a visibly cleaner picture — doubling your ${now} ` +
-      `would take the grain down about 29 % more.`;
+      `would take the grain down about ${percentIfDoubled} % more.`;
   } else if (beyondReach) {
+    // The measured case must not credit this target with the ideal falloff it
+    // has just been measured *not* to have.
+    const why = measuredFalloff
+      ? `and its noise has been falling more slowly than the square root of ` +
+        `time`
+      : `and grain only falls with the square root of time`;
+    // A measured falloff puts middling stacks out of reach far more often than
+    // the ideal did, so this branch can no longer assume it is talking about a
+    // grainy one.
+    const lead = level === "some"
+      ? `there's a little grain left at ${now} (grain ${grain})`
+      : `it's still grainy at ${now} (grain ${grain})`;
     sentence =
-      `Measured on your own picture: it's still grainy at ${now} (grain ` +
-      `${grain}), and grain only falls with the square root of time — getting ` +
+      `Measured on your own picture: ${lead}, ${why} — getting ` +
       `it clean from here would take dozens more clear nights. Longer subs, a ` +
       `darker sky, or a brighter target will get you there far sooner than ` +
       `more hours on this one.`;
   } else if (level === "some") {
     sentence =
       `Measured on your own picture: there's a little grain left at ${now} ` +
-      `(grain ${grain}). About ${fmtFactor(factor)} the light in total — ` +
+      `(grain ${grain}). ${atThisRate}${fmtFactor(factor)} the light in total — ` +
       `roughly ${fmtHours(extra)} more — would bring it down to a ` +
       `clean-looking result.`;
   } else {
+    const law = measuredFalloff
+      ? `Its noise is falling more slowly than the square root of time, so ` +
+        `each extra hour helps a little less than the last.`
+      : `Grain falls with the square root of time, so each extra hour ` +
+        `helps a little less than the last.`;
     sentence =
       `Measured on your own picture: it's still grainy at ${now} (grain ` +
-      `${grain}). About ${fmtFactor(factor)} the light in total — roughly ` +
+      `${grain}). ${atThisRate}${fmtFactor(factor)} the light in total — roughly ` +
       `${fmtHours(extra)} more — would bring it down to a clean-looking ` +
-      `result. Grain falls with the square root of time, so each extra hour ` +
-      `helps a little less than the last.`;
+      `result. ${law}`;
   }
 
   return {
-    sigma, hours, level, moreLightFactor, extraHours, beyondReach,
-    hoursToHalve, sentence,
+    sigma, hours, level, exponent, measuredFalloff, moreLightFactor, extraHours,
+    beyondReach, hoursToHalve, sentence,
   };
 }
 
@@ -204,16 +285,15 @@ export function grainProjection(
  *
  * Identical to `grainProjection`, except it stays **silent** when the target's
  * own *measured* noise trend already says the stack has plateaued (gone
- * sky-limited). This projection assumes the ideal σ ∝ 1/√t curve — a fair
- * assumption from one point, but a fitted falloff read off two or more real
- * stacks beats an assumed one every time, and a plateaued target is precisely
- * where the assumption is wrong. Left to speak, it would promise "about 4× the
- * light would clean this up" a few centimetres from the `IntegrationTrendBadge`
- * saying more subs won't help — the exact contradiction the badge itself was
- * careful to avoid with the add-time coaching.
+ * sky-limited). A plateau is the one verdict the `IntegrationTrendBadge` puts on
+ * this same page, and the honest projection there is "not from here" — which the
+ * badge is already saying, better and louder. Two cards agreeing at length is
+ * still clutter, so the badge keeps that case to itself.
  *
- * Every other trend verdict ("improving"/"slowing") agrees with the projection,
- * so it speaks there as normal.
+ * `grainProjection` now projects along the target's *measured* falloff wherever
+ * there is one, so the "improving"/"slowing" verdicts — which live on the
+ * History noise-trend card — no longer merely "agree broadly" with what this
+ * says: both are read off the same fit. It speaks there as normal.
  */
 export function cardGrainProjection(
   runs: RunLike[] | null | undefined,

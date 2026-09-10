@@ -687,6 +687,40 @@ describe("TargetView readiness card", () => {
     expect(screen.getByText(/plenty for a clean image/)).toBeInTheDocument();
   });
 
+  it("stops quoting the ideal-√t hours once this target's own stacks measure slower", async () => {
+    // Same deepest stack as the test above (3 h, σ 0.05) — but this target has a
+    // *second*, shallower measured stack, and the two together fit a falloff of
+    // p ≈ 0.17: its noise is measurably not falling with √t. The ideal answer
+    // ("6.3× the light, 16 h more") is a plan a beginner would go and shoot; at
+    // the rate this target has actually been improving it is ~250× the light,
+    // about 750 h. So the card must stop quoting a figure it can't stand behind.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 3 * 3600 }),
+    );
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M13", name: "Great Globular Cluster", type: "globular cluster",
+      constellation: "Hercules", constellation_abbr: "Her",
+      ra_deg: 250, dec_deg: 36, matched_by: "name",
+    });
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 2, total_exposure_s: 3600, noise_sigma: 0.06, reusable: true }),
+      mkRun({ total_exposure_s: 3 * 3600, noise_sigma: 0.05, reusable: true }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("grain-projection")).toBeInTheDocument());
+    const text = screen.getByTestId("grain-projection").textContent ?? "";
+    expect(text).toMatch(/still grainy at 3\.0 h \(grain 0\.050\)/);
+    expect(text).toMatch(/dozens more clear nights/);
+    expect(text).toMatch(/falling more slowly than the square root of time/);
+    // The numbers the ideal projection would have promised are gone.
+    expect(text).not.toMatch(/6\.3×/);
+    expect(text).not.toMatch(/16 h more/);
+  });
+
   it("uses a user-set goal over the default and labels it 'your goal'", async () => {
     // 5 h on a galaxy would be "close" at the 6 h default, but the user set a
     // 10 h goal, so it scores against 10 h (still "solid") and reads "your goal".

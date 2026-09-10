@@ -6,7 +6,9 @@ import {
   CLEAN_SIGMA,
   GRAINY_SIGMA,
   MAX_HONEST_EXTRA_HOURS,
+  IDEAL_EXPONENT,
 } from "./grainProjection";
+import { integrationTrend } from "./integrationTrend";
 
 // Minimal run shape: the helper only reads integration, measured σ, and the
 // genuine-run flag.
@@ -133,6 +135,87 @@ describe("grainProjection", () => {
   it("always offers the halve-the-grain figure: 4× the light, so 3× what's there", () => {
     expect(grainProjection([run(2 * HOUR, 0.016)])?.hoursToHalve).toBeCloseTo(6, 6);
     expect(grainProjection([run(2 * HOUR, 0.09)])?.hoursToHalve).toBeCloseTo(6, 6);
+  });
+
+  it("projects along the ideal exponent when there is only one stack to read", () => {
+    const p = grainProjection([run(HOUR, 0.04)]);
+    expect(p?.exponent).toBeCloseTo(IDEAL_EXPONENT, 12);
+    expect(p?.measuredFalloff).toBe(false);
+    // No "at the rate…" clause, and the ideal doubling figure, unchanged.
+    expect(p?.sentence).toContain("About 4× the light");
+    expect(grainProjection([run(3 * HOUR, 0.016)])?.sentence)
+      .toContain("about 29 % more");
+  });
+
+  it("quotes the target's OWN measured falloff, not the ideal, once two stacks fit one", () => {
+    // 1 h @ 0.06 → 3 h @ 0.05 fits p = ln(1.2)/ln(3) ≈ 0.166: this target's noise
+    // is measurably falling far slower than √t. The ideal projection says
+    // (0.05/0.02)² = 6.3× the light — "roughly 16 h more". At the measured rate
+    // it is 2.5^(1/0.166) ≈ 250× — about 747 h, i.e. dozens of clear nights.
+    // Quoting the 16 h is a plan a beginner would actually go and shoot.
+    const runs = [run(HOUR, 0.06), run(3 * HOUR, 0.05)];
+    const p = grainProjection(runs);
+    expect(p?.hours).toBeCloseTo(3, 6);
+    expect(p?.measuredFalloff).toBe(true);
+    expect(p?.exponent).toBeCloseTo(0.166, 2);
+    // Fails before the fix, which quoted 6.3× / 15.6 h here.
+    expect(p?.beyondReach).toBe(true);
+    expect(p?.moreLightFactor).toBeNull();
+    expect(p?.extraHours).toBeNull();
+    expect(p?.sentence).toContain("dozens more clear nights");
+    expect(p?.sentence).not.toContain("6.3×");
+    expect(p?.sentence).not.toContain("16 h more");
+    // …and it must not credit the target with the √t law it just failed.
+    expect(p?.sentence).toContain("falling more slowly than the square root of time");
+  });
+
+  it("still quotes a figure on a measured-but-reachable target, at the measured rate", () => {
+    // 20 min @ 0.05 → 40 min @ 0.043 fits p ≈ 0.218. Reaching clean needs
+    // 2.5^(1/0.218) ≈ 64× the light off a 0.67 h base ≈ 42 h more — big, but
+    // inside MAX_HONEST_EXTRA_HOURS, so it is still a quotable plan.
+    const runs = [run(HOUR / 3, 0.05), run((2 * HOUR) / 3, 0.043)];
+    const p = grainProjection(runs);
+    expect(p?.measuredFalloff).toBe(true);
+    expect(p?.beyondReach).toBe(false);
+    // The ideal would have said 6.3× / 3.5 h more; the measured rate is far more.
+    expect(p?.moreLightFactor as number).toBeGreaterThan(30);
+    expect(p?.extraHours as number).toBeGreaterThan(20);
+    expect(p?.extraHours as number).toBeLessThanOrEqual(MAX_HONEST_EXTRA_HOURS);
+    expect(p?.sentence).toContain("At the rate this target's own stacks have been improving");
+  });
+
+  it("never promises better than shot noise when the measured exponent overshoots", () => {
+    // A σ that fell faster than √t (measurement luck, or a night that was simply
+    // better) fits p > 0.5. Projecting along that would quote *less* light than
+    // the physics allows, which is the one direction this must never move.
+    const lucky = [run(HOUR, 0.08), run(2 * HOUR, 0.04)];  // p = 1.0
+    const p = grainProjection(lucky);
+    expect(p?.exponent).toBeCloseTo(IDEAL_EXPONENT, 12);
+    expect(p?.measuredFalloff).toBe(false);
+    // Identical to the same deepest stack read on its own.
+    const alone = grainProjection([run(2 * HOUR, 0.04)]);
+    expect(p?.moreLightFactor).toBeCloseTo(alone?.moreLightFactor as number, 12);
+    expect(p?.extraHours).toBeCloseTo(alone?.extraHours as number, 12);
+  });
+
+  it("says the same thing about doubling as the History noise-trend card", () => {
+    // The one number both surfaces print for one target. Read off the trend
+    // itself, so they cannot round to two different percentages.
+    const runs = [run(HOUR, 0.019), run(3 * HOUR, 0.016)];
+    const t = integrationTrend(runs);
+    const p = grainProjection(runs);
+    expect(p?.level).toBe("clean");
+    expect(t).not.toBeNull();
+    expect(p?.sentence).toContain(`about ${t?.percentCutIfDoubled} % more`);
+  });
+
+  it("declines the halve-the-grain figure when the noise has stopped falling", () => {
+    // p ≤ 0: no multiple of the light halves this grain, so there is no number.
+    const p = grainProjection([run(HOUR, 0.04), run(3 * HOUR, 0.042)]);
+    expect(p?.exponent).toBeLessThanOrEqual(0);
+    expect(p?.hoursToHalve).toBeNull();
+    expect(p?.beyondReach).toBe(true);
+    expect(p?.moreLightFactor).toBeNull();
   });
 });
 

@@ -14,6 +14,76 @@ Newest first.
 
 ---
 
+## v0.407.2 — 2026-09-10 — 🐛 the readiness card quoted the ideal √t curve at a target its own stacks had already measured off it
+
+*(Builder-verified by computation against the two helpers as they stood, both of which render for the same
+target. Filed and fixed in the same run, so it never sat in "Bugs (fix these first)".)*
+
+**What was wrong.** `frontend/src/components/target/grainProjection.ts` answers the beginner's commonest
+question — *"is more time worth it?"* — from the target's own deepest stack, and prints it on the Target page's
+"Is it enough yet?" card (`data-testid="grain-projection"`). It projected **only** along the ideal
+shot-noise law σ ∝ 1/√t, so reaching `CLEAN_SIGMA` always cost `(σ_now/0.02)²` times the light. That is the
+right assumption from **one** measured point, and it is the wrong one the moment there are two — because the
+same page's own `integrationTrend` already fits the target's **measured** falloff exponent `p` from its stack
+history, and prints it on the History "Noise trend" card.
+
+**Measured, on three ordinary two-stack histories** (`p` from `integrationTrend`, hours from the deepest run):
+
+| the target's own stacks | measured `p` | card said | at the measured rate |
+|---|---|---|---|
+| 1 h σ 0.060 → 3 h σ 0.050 | 0.166 | 6.3× the light, **16 h more** | 250×, **747 h** |
+| 1 h σ 0.075 → 4 h σ 0.050 | 0.292 | 6.3× the light, **21 h more** | 22.9×, **88 h** |
+| 2 h σ 0.090 → 6 h σ 0.060 | 0.369 | 9.0× the light, **48 h more** | 19.6×, **112 h** |
+
+Sixteen hours is a plan a beginner would go and shoot — four or five clear nights on one object — and it was
+being quoted at a target whose own two stacks say it will not get there. The under-quote is worst exactly where
+the app has the most evidence, and it survives the existing stand-down: `cardGrainProjection` goes quiet only on
+a **plateaued** verdict (`p ≤ 0.15`), so every "slowing" target, and every "improving" one whose `p` is short of
+the ideal, kept getting the ideal answer. The module's own docstring had already written down the reason this
+was wrong — *"a fitted falloff read off two or more real stacks beats an assumed one every time"* — and then
+acted on it in one case out of three.
+
+**The fix is the shape this project keeps converging on: read the other surface's number, don't invent a second
+one.** `grainProjection` now calls `integrationTrend(runs)` and projects along `min(IDEAL_EXPONENT, p)`:
+
+- **the clamp is one-sided on purpose.** A measured `p` above 0.5 is jitter or a better night, never licence to
+  promise less light than shot noise needs, so it falls back to the ideal and the projection is byte-identical
+  to reading that deepest stack alone (pinned by a test that compares the two).
+- **a `p` at or below 0 is not floored up into a quotable number.** It makes the light multiple infinite, which
+  lands in the existing `beyondReach` copy — *"getting it clean from here would take dozens more clear
+  nights. Longer subs, a darker sky, or a brighter target will get you there far sooner"* — which is the honest
+  answer and was already written.
+- **`percentIfDoubled` is taken off `trend.percentCutIfDoubled` rather than recomputed**, so the "doubling your
+  3.0 h would take the grain down about N % more" on the Target page and the "about N % cleaner if you double
+  your time" on History cannot round to two different percentages for one target.
+- **`hoursToHalve`** is now `hours × (2^(1/p) − 1)` — exactly the old `hours × 3` at the ideal — and `null`
+  rather than infinite once the falloff has flattened. Nothing renders it; the type change is contained.
+
+**Copy: one clause, only where the rate is measured.** *"At the rate this target's own stacks have been
+improving, about 23× the light in total — roughly 88 h more — …"*, so a larger number arrives with the reason it
+is larger. The trailing law adapts too (*"Its noise is falling more slowly than the square root of time"*), and
+the `beyondReach` branch stops crediting a target with the √t law it was just measured not to have. Because a
+measured falloff puts middling stacks out of reach far more often than the ideal did, that branch also stopped
+assuming it is talking about a *grainy* stack and now leads with the level it actually has.
+
+**Nothing changes for the case this module was built for.** With one stack — the beginner who has stacked once,
+and the common case — `integrationTrend` returns `null`, `p` is the ideal, no clause is added and every figure
+and sentence is character-for-character what it was. All fifteen pre-existing `grainProjection` cases and both
+existing Target-page renderings pass untouched.
+
+**Upgrade-safe (§9):** frontend-only, pure functions. No config, DB schema, on-disk layout, endpoint,
+response shape or default touched.
+
+**Tests +7 (6 unit, 1 rendered; all 7 fail before).** `grainProjection.test.ts`: the ideal path when there is
+one stack; the measured 0.166 history above going `beyondReach` instead of quoting 6.3× / 16 h *and* not
+crediting the √t law; a measured-but-reachable history still quoting, at the measured rate; the overshoot clamp
+proving identity with the deepest stack read alone; the doubling percentage read off `integrationTrend` itself;
+and `hoursToHalve` declining when `p ≤ 0`. `Target.test.tsx`: the same deepest stack as the existing
+"still grainy … 6.3× the light … 16 h more" case, given a second shallower stack, now renders the
+dozens-of-nights answer with neither number on the page.
+
+---
+
 ## v0.407.1 — 2026-09-09 — 🐛 the panel map and the health panel gave opposite instructions about the same panel
 
 *(Builder-verified by reproduction on the running app: `scripts/agent-dogfood.sh --build --mosaic --editor`,
