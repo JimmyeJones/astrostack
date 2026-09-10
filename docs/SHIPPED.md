@@ -93,7 +93,7 @@ config, DB schema, on-disk layout, endpoint or response-shape change; nothing un
 The one deliberate behaviour change is the point of the fix: a raw capture now debayers in its own phase, and a
 still made by generation 0 or 1 is offered a re-stack it was not offered before.
 
-**Tests +9 (7 Python engine/webapp, 1 parametrized ×2, plus assertions), five failing before**, including the
+**Tests +11 collected — 7 in `test_video_cfa_mosaic.py` (one of them parametrized ×2) and 4 in `tests/webapp/test_video_api.py` — five of which fail before *on behaviour*** (the others reference symbols this change introduces). Suite 5,500 → 5,511 passed / 2 skipped, exactly +11., including the
 owner's four measured numbers as a fixture, an end-to-end decode of a `GBRG`-recorded capture (red-dominant,
 mesh-free — green and meshed before), the `RGGB` case pinned so reading the phase cannot regress the captures
 that already worked, the latch, the flat-frame fallback, the row-flip invariant, the v0.347.0-shaped `meta.json`
