@@ -24,7 +24,8 @@ is a queue.
 (`edit/presets.analyze_proxy`'s sky level under a mosaic's panel steps — the
 residual the previous run filed rather than guessed at) and **v0.410.1**
 (`classify_target`'s geometry cues, the same steps). Baseline on `origin/main`:
-**5,522 passed / 2 skipped** (26m25s).
+**5,522 passed / 2 skipped** (26m25s); on the finished branch, **5,539 / 2** (26m27s) — exactly **+17**, the +14 and +3 the two entries claim. The frontend is untouched, so its
+gates were not re-run; `vite build` ran anyway inside the dogfood pass below and succeeded.
 
 ### The class is now four cues deep, and it is worth naming precisely
 
