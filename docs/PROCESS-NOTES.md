@@ -762,6 +762,35 @@ once: one panel is thinner, that is why a quarter of the picture is grainier, it
 is not a seam, and it closes itself. That is what v0.406.x/v0.407.1 were for, and
 this is the first pass to say so after all of them landed.
 
+### Correction — CI was **not** slow; the Actions API view was stale by two hours
+
+Recorded because this run spent **over an hour** polling on a wrong reading, and
+the next run will hit the same thing. After merging #816 I watched
+`actions_list(list_workflow_jobs)` on the merge commit. The `Python tests` job
+sat at `status: in_progress`, step `Test` `started_at 11:02:31`, through poll
+after poll — long past the ~29 min these runs take. I concluded the runner was
+degraded and said so in the run summary.
+
+**It was not.** The job's own record, read later, is
+`Test` **11:02:31 → 11:30:22** and `completed_at` **11:30:26**, conclusion
+**success** — 27m51s, entirely normal, and green about two hours before the API
+stopped telling me so. The `Frontend build + tests` job on the *same run* updated
+promptly (completed 11:09:18 and reported as such), which is what made the stale
+half look like a real stall rather than a cache: **the lag was per-job, so the
+two jobs disagreeing was evidence of nothing.**
+
+**What to do instead.** Do not read `status: in_progress` as "still running" when
+the elapsed wall clock is far past the step's normal duration — that combination
+is the *signature of a stale view*, not of a slow runner. Prefer the run's
+`updated_at` (it was frozen at `11:01:12` the whole time, i.e. the record itself
+had not been refreshed since the run started, which is the tell), and remember
+that a job whose steps are all `success` with one `in_progress` tail cannot be
+distinguished from a finished one through this API. **Better still: don't block
+on CI at all.** AGENTS.md §8 makes the local suite the gate and CI the backstop;
+the local run here was green on the identical tree, so the right move after the
+merge was to note the run URL and stop, which is what the summary should have
+said in one line instead of an hour of polling.
+
 ### Two smaller things this run learned
 
 - **A no-op simulation is a fair fail-before when the test imports the new
