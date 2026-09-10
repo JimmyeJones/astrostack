@@ -201,3 +201,121 @@ def test_solve_one_passes_hint_to_solver(tmp_path, monkeypatch):
     runner.solve_one(1, str(tmp_path / "x.fit"),
                      ra_hint_deg=83.6, dec_hint_deg=-5.4, search_radius_deg=12.0)
     assert seen == {"ra": 83.6, "dec": -5.4, "radius": 12.0}
+
+
+def _retry_project(tmp_path):
+    """A target where one sub has solved and three failed, Seestar-shaped.
+
+    The failures all carry their own (loose, 30°) header hint, which is what a
+    real Seestar sub looks like — so ``build_solve_arglist`` never offered them
+    the sibling centre on the first pass.
+    """
+    from seestack.io.project import FrameRow, Project
+
+    proj = Project.create(tmp_path / "p", name="t")
+    paths = {}
+    for name in ("solved.fit", "b.fit", "c.fit", "d.fit"):
+        p = tmp_path / name
+        p.write_bytes(b"x")
+        paths[name] = p
+    proj.add_frame(FrameRow(source_path=str(paths["solved.fit"]),
+                            cached_path=str(paths["solved.fit"]),
+                            wcs_json="{\"solved\": true}",
+                            ra_center_deg=200.0, dec_center_deg=12.0))
+    for name in ("b.fit", "c.fit", "d.fit"):
+        proj.add_frame(FrameRow(source_path=str(paths[name]),
+                                cached_path=str(paths[name]),
+                                ra_hint_deg=201.5, dec_hint_deg=11.2))
+    return proj
+
+
+def test_build_sibling_retry_arglist_retries_a_header_hinted_failure_at_the_tight_radius(tmp_path):
+    """The gap this pass exists for: a Seestar sub carries a header hint, so the
+    first pass searched 30° around it and never saw the solved sibling's centre."""
+    from seestack.solve.runner import (
+        SIBLING_HINT_RADIUS_DEG,
+        build_sibling_retry_arglist,
+        build_solve_arglist,
+    )
+
+    proj = _retry_project(tmp_path)
+    try:
+        args = build_solve_arglist(proj, use_hint=True)
+        by_name = {tp[1].split("/")[-1]: tp for tp in args}
+        # Precondition: the first pass really did search wide around the header hint.
+        assert by_name["b.fit"][5] == pytest.approx(201.5)
+        assert by_name["b.fit"][7] == pytest.approx(30.0)
+
+        failures = [(by_name[n][0], "no star match found") for n in ("b.fit", "c.fit", "d.fit")]
+        retry = build_sibling_retry_arglist(proj, args, failures)
+        assert len(retry) == 3
+        for tp in retry:
+            # Same frame, same file, same ASTAP/FOV/timeout — only the search moves.
+            assert tp[5] == pytest.approx(200.0)
+            assert tp[6] == pytest.approx(12.0)
+            assert tp[7] == pytest.approx(SIBLING_HINT_RADIUS_DEG)
+        assert {tp[0] for tp in retry} == {tp[0] for tp in failures}
+    finally:
+        proj.close()
+
+
+def test_build_sibling_retry_arglist_skips_setup_failures_timeouts_and_identical_searches(tmp_path):
+    """The three failures a second pass cannot help, and must not pay for."""
+    from seestack.io.project import FrameRow
+    from seestack.solve.astap import SOLVE_FAILED_TIMEOUT
+    from seestack.solve.runner import build_sibling_retry_arglist, build_solve_arglist
+
+    proj = _retry_project(tmp_path)
+    try:
+        # A fourth unsolved frame with NO header hint: the first pass already gave
+        # it the sibling centre at the tight radius, so a retry would be identical.
+        e = tmp_path / "e.fit"; e.write_bytes(b"x")
+        proj.add_frame(FrameRow(source_path=str(e), cached_path=str(e)))
+
+        args = build_solve_arglist(proj, use_hint=True)
+        by_name = {tp[1].split("/")[-1]: tp for tp in args}
+        failures = [
+            (by_name["b.fit"][0], "No star database installed"),
+            (by_name["c.fit"][0], f"{SOLVE_FAILED_TIMEOUT} after 60s on every attempt"),
+            (by_name["e.fit"][0], "no star match found"),
+            (by_name["d.fit"][0], "no star match found"),
+        ]
+        retry = build_sibling_retry_arglist(proj, args, failures)
+        # Only the ordinary "no match" frame that searched somewhere else is retried.
+        assert [tp[0] for tp in retry] == [by_name["d.fit"][0]]
+    finally:
+        proj.close()
+
+
+def test_build_sibling_retry_arglist_is_empty_until_something_has_solved(tmp_path):
+    """With no solved sub there is no centre to offer — the pass stands down."""
+    from seestack.io.project import FrameRow, Project
+    from seestack.solve.runner import build_sibling_retry_arglist, build_solve_arglist
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        b = tmp_path / "b.fit"; b.write_bytes(b"x")
+        proj.add_frame(FrameRow(source_path=str(b), cached_path=str(b),
+                                ra_hint_deg=201.5, dec_hint_deg=11.2))
+        args = build_solve_arglist(proj, use_hint=True)
+        assert build_sibling_retry_arglist(proj, args, [(args[0][0], "no match")]) == []
+    finally:
+        proj.close()
+
+
+def test_build_sibling_retry_arglist_never_widens_a_tightened_search(tmp_path):
+    """A user who configured a radius below 5° keeps it — the same rule
+    ``build_solve_arglist`` follows when it offers the sibling centre."""
+    from seestack.solve.runner import build_sibling_retry_arglist, build_solve_arglist
+
+    proj = _retry_project(tmp_path)
+    try:
+        proj.set_meta("astap_hint_radius_deg", "2.0")
+        args = build_solve_arglist(proj, use_hint=True)
+        by_name = {tp[1].split("/")[-1]: tp for tp in args}
+        retry = build_sibling_retry_arglist(
+            proj, args, [(by_name["b.fit"][0], "no star match found")])
+        assert len(retry) == 1
+        assert retry[0][7] == pytest.approx(2.0)
+    finally:
+        proj.close()

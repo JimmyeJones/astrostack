@@ -1703,3 +1703,137 @@ def test_a_scoped_scan_of_a_whole_device_container_is_not_taken_literally(tmp_pa
         assert "MyWorks" not in {t.name for t in lib.list_targets()}
     finally:
         lib.close()
+
+
+def _sibling_retry_project(tmp_path, n_unsolved: int = 3):
+    """One solved sub at (200, 12) plus Seestar-shaped unsolved subs.
+
+    Every unsolved sub carries its own loose header hint 1.5° away — exactly what
+    a Seestar writes — so the first solve pass searches wide around *that* and
+    never borrows the solved sibling's centre.
+    """
+    proj = Project.create(tmp_path / "p", name="t")
+    from tests.synth import make_synth_wcs_text
+
+    solved = tmp_path / "solved.fit"
+    solved.write_bytes(b"x")
+    proj.add_frame(FrameRow(source_path=str(solved), cached_path=str(solved),
+                            wcs_json=make_synth_wcs_text(),
+                            ra_center_deg=200.0, dec_center_deg=12.0))
+    for i in range(n_unsolved):
+        p = tmp_path / f"u{i}.fit"
+        p.write_bytes(b"x")
+        proj.add_frame(FrameRow(source_path=str(p), cached_path=str(p),
+                                ra_hint_deg=201.5, dec_hint_deg=11.2))
+    return proj
+
+
+def _fake_tight_only_solver(calls: list):
+    """A solver that only finds the field when searched tight around (200, 12).
+
+    That is the measured shape of the case this pass exists for: the blind 30°
+    sweep around a loose header hint fails on a star-poor sub, while a small,
+    correct search region around the pointing the target's other subs already
+    proved lands the solve.
+    """
+    from seestack.solve.runner import SolveResult
+    from tests.synth import make_synth_wcs_text
+
+    def fake_solve_one(frame_id, fits_path, astap_path=None, fov_deg=1.3,
+                       timeout_s=60.0, ra_hint_deg=None, dec_hint_deg=None,
+                       search_radius_deg=30.0):
+        calls.append((frame_id, ra_hint_deg, dec_hint_deg, search_radius_deg))
+        tight = (search_radius_deg <= 5.0
+                 and ra_hint_deg is not None
+                 and abs(ra_hint_deg - 200.0) < 1.0
+                 and abs((dec_hint_deg or 0.0) - 12.0) < 1.0)
+        if not tight:
+            return SolveResult(frame_id=frame_id, fits_path=fits_path, solved=False,
+                               wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+                               pixscale_arcsec=None, rotation_deg=None,
+                               error="no star match found")
+        return SolveResult(frame_id=frame_id, fits_path=fits_path, solved=True,
+                           wcs_text=make_synth_wcs_text(), ra_center_deg=200.0,
+                           dec_center_deg=12.0, pixscale_arcsec=5.0, rotation_deg=0.0,
+                           error=None)
+
+    return fake_solve_one
+
+
+def test_run_qc_and_solve_retries_unsolved_subs_around_the_sibling_centre(tmp_path, monkeypatch):
+    """The second pass rescues header-hinted subs the wide first pass missed."""
+    from seestack.solve import runner as solve_runner
+
+    proj = _sibling_retry_project(tmp_path)
+    try:
+        calls: list = []
+        monkeypatch.setattr(solve_runner, "solve_one", _fake_tight_only_solver(calls))
+        summary = run_qc_and_solve(proj, run_qc=False, run_solve=True, serial=True)
+
+        # Every unsolved sub was attempted wide first, then re-offered tight.
+        assert summary["solve_total"] == 3
+        assert summary["solve_retry_total"] == 3
+        assert summary["solve_retry_ok"] == 3
+        # ``solve_ok`` is "how many did we locate?", so the rescues count there…
+        assert summary["solve_ok"] == 3
+        # …while the progress counters stay a count of the frames offered once.
+        assert summary["solve_done"] == 3
+        assert [f.wcs_json is not None for f in proj.iter_frames()] == [True] * 4
+        # No frame is left carrying the first pass's failure once it solves.
+        assert all(not (f.reject_reason or "").startswith("solve_failed:")
+                   for f in proj.iter_frames())
+        # Exactly one extra attempt per frame — never a loop.
+        assert len(calls) == 6
+        assert sorted(c[3] for c in calls) == [5.0, 5.0, 5.0, 30.0, 30.0, 30.0]
+    finally:
+        proj.close()
+
+
+def test_run_qc_and_solve_leaves_the_subs_unsolved_when_the_retry_is_off(tmp_path, monkeypatch):
+    """The fail-before half: without the second pass those subs never locate."""
+    from seestack.solve import runner as solve_runner
+
+    proj = _sibling_retry_project(tmp_path)
+    try:
+        calls: list = []
+        monkeypatch.setattr(solve_runner, "solve_one", _fake_tight_only_solver(calls))
+        summary = run_qc_and_solve(proj, run_qc=False, run_solve=True, serial=True,
+                                   retry_unsolved_with_sibling_hint=False)
+
+        assert summary["solve_ok"] == 0
+        assert "solve_retry_total" not in summary
+        assert len(calls) == 3
+        assert sum(1 for f in proj.iter_frames() if f.wcs_json) == 1
+    finally:
+        proj.close()
+
+
+def test_the_sibling_retry_pass_stands_down_when_nothing_solved_at_all(tmp_path, monkeypatch):
+    """A night where no sub located has no centre to retry around, so it pays
+    nothing — the second pass must not double a hopeless night's solve time."""
+    from seestack.solve import runner as solve_runner
+    from seestack.solve.runner import SolveResult
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        for i in range(3):
+            p = tmp_path / f"u{i}.fit"
+            p.write_bytes(b"x")
+            proj.add_frame(FrameRow(source_path=str(p), cached_path=str(p),
+                                    ra_hint_deg=201.5, dec_hint_deg=11.2))
+        calls: list = []
+
+        def never_solves(frame_id, fits_path, *a, **kw):
+            calls.append(frame_id)
+            return SolveResult(frame_id=frame_id, fits_path=fits_path, solved=False,
+                               wcs_text=None, ra_center_deg=None, dec_center_deg=None,
+                               pixscale_arcsec=None, rotation_deg=None,
+                               error="no star match found")
+
+        monkeypatch.setattr(solve_runner, "solve_one", never_solves)
+        summary = run_qc_and_solve(proj, run_qc=False, run_solve=True, serial=True)
+        assert summary["solve_ok"] == 0
+        assert "solve_retry_total" not in summary
+        assert len(calls) == 3
+    finally:
+        proj.close()
