@@ -159,6 +159,15 @@ export function describeNeedsLook(h: NeedsLook): string {
       + "existing picture was kept rather than replaced with a thinner one. "
       + "Worth checking the drive with your subs on it is connected.";
   }
+  if (h.panel_depth && h.panel_depth > 0) {
+    // A mosaic held on depth has every sub located and a count well past the
+    // floor, so the sentence below would argue with its own numbers.
+    const panels = h.panels && h.panels > 1 ? `${h.panels} panels` : "its panels";
+    return `${h.name} is waiting — its ${h.n_frames} subs are spread over `
+      + `${panels}, so a typical part of the picture has only ${h.panel_depth} `
+      + `sub${h.panel_depth === 1 ? "" : "s"} on it, and it needs ${h.n_other}. `
+      + "It will stack itself once you've shot the mosaic a few more times.";
+  }
   return `${h.name} is waiting — only ${h.n_frames} of its subs are located so `
     + `far, and it needs ${h.n_other} to make a picture worth showing. It will `
     + "stack itself once more subs come in.";

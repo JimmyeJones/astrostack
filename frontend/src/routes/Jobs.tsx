@@ -644,7 +644,34 @@ export function jobHeaderNote(
 /** One target the walk-away auto-stack is holding back because too few of its
  * subs have been located (plate-solved) to make anything but single-frame
  * speckle — the `auto_stack_held_thin` entries the pipeline job records. */
-export interface HeldForSubs { target: string; frames: number; min: number; }
+export interface HeldForSubs {
+  target: string; frames: number; min: number;
+  /** On a **mosaic**, how many subs a typical part of the picture actually has.
+   * The floor above is a statement about one pixel, and a mosaic's subs are
+   * spread across its panels — so a target can clear `min` on count while every
+   * pixel of it is one sub deep. Absent (0) on a single field, and on a scan
+   * recorded by a build before the depth was measured. */
+  panelDepth?: number;
+  /** How many panels those subs are spread over (0 when not a mosaic). */
+  panels?: number;
+}
+
+/** The per-target sentence under "not ready to auto-stack yet".
+ *
+ * Two different holds land in one list and they need different words: a single
+ * field is waiting to be **located** (plate-solved), which is why the copy has
+ * always pointed at Plate Solve — but a mosaic held on depth has every sub
+ * located already and is waiting for more *time on each panel*. Telling a
+ * mosaic owner to run Plate Solve would send them at a job with nothing to do. */
+export function heldForSubsLine(h: HeldForSubs): string {
+  if (h.panelDepth && h.panelDepth > 0) {
+    const panels = h.panels && h.panels > 1 ? `${h.panels} panels` : "panels";
+    return `: your ${h.frames} subs are spread over ${panels}, so a typical part `
+      + `of the picture has only ${h.panelDepth} sub`
+      + `${h.panelDepth === 1 ? "" : "s"} on it — needs ${h.min}.`;
+  }
+  return `: ${h.frames} of your subs located so far — needs ${h.min}.`;
+}
 
 /** One target the walk-away auto-stack is holding back because some of its subs
  * have **no file on disk right now** — a share that unmounted, a drive that
@@ -694,6 +721,8 @@ export function pipelineSummary(r: Record<string, unknown>): {
           target: typeof o.target === "string" ? o.target : "",
           frames: Number(o.frames ?? 0) || 0,
           min: Number(o.min ?? 0) || 0,
+          panelDepth: Number(o.panel_depth ?? 0) || 0,
+          panels: Number(o.panels ?? 0) || 0,
         }))
     : [];
   const heldFiles: HeldForFiles[] = Array.isArray(r.auto_stack_held_unreadable)
@@ -927,15 +956,19 @@ function JobResultActions({ job }: { job: Job }) {
         ) : null}
         {held.length ? (
           <Alert color="blue" variant="light" p="xs"
-            title="Waiting for more of your subs to be located">
+            title={held.some((h) => (h.panelDepth ?? 0) > 0)
+              ? "Not ready to auto-stack yet"
+              : "Waiting for more of your subs to be located"}>
             <Text size="xs">
               {held.length === 1
                 ? "One target isn't ready to auto-stack yet"
                 : `${held.length} targets aren't ready to auto-stack yet`}
               {" — the hands-off auto-stack is holding off rather than making a "}
               {"picture out of one or two frames (that would just be noise). "}
-              {"Run Plate Solve to locate more subs, or open the target and use "}
-              {'"Stack" to make one now anyway:'}
+              {held.every((h) => (h.panelDepth ?? 0) > 0)
+                ? "Keep shooting and the next scan will stack it, or open the "
+                : "Run Plate Solve to locate more subs, or open the "}
+              {'target and use "Stack" to make one now anyway:'}
             </Text>
             <Stack gap={0} mt={4}>
               {held.map((h) => (
@@ -943,7 +976,7 @@ function JobResultActions({ job }: { job: Job }) {
                   {h.target ? (
                     <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
                   ) : "This target"}
-                  {`: ${h.frames} of your subs located so far — needs ${h.min}.`}
+                  {heldForSubsLine(h)}
                 </Text>
               ))}
             </Stack>

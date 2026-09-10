@@ -282,6 +282,30 @@ class AutoStackHoldOut(BaseModel):
     when_utc: str | None = None
 
 
+class AutoStackThinHoldOut(BaseModel):
+    """Why the last hands-off scan judged *this* target too thin to publish.
+
+    The sibling of :class:`AutoStackHoldOut`, for the other hold the walk-away
+    scan applies: the minimum-frames floor (v0.183.0). The Target page has
+    always guessed at this state from the frame counts it happens to hold, which
+    can only see the "not enough subs are located yet" half — so a target held
+    because its **mosaic panels** are one sub deep, or one held with nothing left
+    to locate, looked simply idle. This reports what the scan actually decided.
+
+    ``panel_depth``/``panels`` are the mosaic case (0 on a single field, and on a
+    scan recorded by a build before the depth was measured): the subs *are*
+    located, there just aren't enough of them on any one patch of sky yet.
+    Read-only, newest finished scan only, so it clears itself the moment a scan
+    stacks the target.
+    """
+
+    frames: int
+    min_frames: int
+    panel_depth: int = 0
+    panels: int = 0
+    when_utc: str | None = None
+
+
 class CleanestShotOut(BaseModel):
     """The newest stack is materially cleaner than the target's pinned cover.
 
