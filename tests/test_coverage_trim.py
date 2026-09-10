@@ -223,10 +223,22 @@ def test_a_tiled_mosaic_is_no_longer_cropped_to_its_panel_overlaps():
 
 def test_a_ragged_mosaic_still_gets_its_fringe_trimmed():
     """The fix must not turn the trim off for mosaics — only stop it eating the
-    panels. A 2x2 with a 10 px partial-coverage border keeps ~95 % (the border
-    goes); before the fix the same map was cropped to the overlap band."""
+    panels. A 2x2 with a 10 px partial-coverage border must lose the border and
+    keep every panel interior.
+
+    **Pinned to the exact rectangle** *(tightened 2026-09-10, fourth external
+    audit)*. This asserted ``0.90 < kept < 0.99``, and with
+    ``panel_coverage_level`` reverted to the pre-fix **peak** the ladder yields
+    kept **0.902** — inside the window. So the docstring's claim that "before the
+    fix the same map was cropped to the overlap band" was not what the assertion
+    checked, and this case passed on the bug it names while nine of its
+    neighbours caught it. The border rule's own answer here is unambiguous: a
+    400x400 canvas with a 10 px ramped border, of which the outer 5 px fall below
+    the keep threshold. Assert *that*, so a rule that drifts by a pixel is a
+    failure rather than a still-green window."""
     cov = _tiled_mosaic(2, 2, overlap=0.15)
     h, w = cov.shape
+    assert (h, w) == (400, 400), "the pixel bounds below are written for this size"
     for k in range(10):
         v = 30 * (k + 1) / 11
         cov[k, :] = np.minimum(cov[k, :], v)
@@ -234,11 +246,10 @@ def test_a_ragged_mosaic_still_gets_its_fringe_trimmed():
         cov[:, k] = np.minimum(cov[:, k], v)
         cov[:, -1 - k] = np.minimum(cov[:, -1 - k], v)
     rect = largest_covered_rect(cov)
-    assert rect is not None
-    assert 0.90 < _kept_fraction(rect) < 0.99
-    # The panel interiors survive: the kept rectangle covers the canvas centre.
-    x0, y0, x1, y1 = rect
-    assert x0 < 0.05 and y0 < 0.05 and x1 > 0.95 and y1 > 0.95
+    assert rect == (5 / 400, 5 / 400, 395 / 400, 395 / 400)
+    # …which is the ~95 % the old window was reaching for, now a consequence
+    # rather than the check.
+    assert _kept_fraction(rect) == pytest.approx(0.9506, abs=1e-4)
 
 
 def test_the_single_field_path_is_unchanged():

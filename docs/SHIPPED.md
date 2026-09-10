@@ -1,5 +1,90 @@
 # Shipped — the record
 
+## v0.417.0 — 2026-09-10 — the Target-page note and the Dashboard's library-wide count (entry CLOSED)
+
+The two halves v0.416.0 left open, and with them the whole "owner hits this first" entry.
+The editor said it on the one screen that can fix it; these are the two screens he reaches
+*first* — the Target page, where the hero is the sliver, and the Dashboard, which is the only
+place that can answer "which of my pictures are like this?" without opening every target.
+
+**One verdict, three surfaces.** The editor's rule was pure frontend (`mosaicTrim.overTrimmedVerdict`),
+which cannot scan a library. So the judgement now also exists server-side — `webapp/stale_crop.py`,
+a pure function of two keep-fractions — behind `GET …/editor/crop-health` (per run) and
+`GET /api/over-trimmed-pictures` (per library). Both go through one
+`editor.crop_health_for_run`, so the Dashboard and the Target page cannot name different
+pictures; a test pins that. The server rule **adopts the editor's shipped thresholds verbatim**
+rather than the backlog entry's suggested ones: `STALE_CROP_KEEP_RATIO` = 0.25, and silence when
+the border rule proposes no trim. A cross-language drift test greps
+`mosaicTrim.OVER_TRIM_KEEP_RATIO` and fails if the two copies diverge — because a Dashboard
+naming pictures the editor is then silent about is exactly the failure "one definition, two
+surfaces" exists to prevent, and it would be invisible until he clicked through.
+
+**The deliberate gap.** A sliver saved on a run the border rule would *not* trim goes
+unreported, in all three surfaces. The share a crop is weighed against is what the canvas
+*offers*, and with no measured proposal the only yardstick left is the whole frame — which a
+legitimately tight hand-crop is also a small share of. The case this exists for carries a
+proposal (92.4 % on the audit's own run). Pinned by
+`test_a_run_the_rule_would_not_trim_is_left_alone`, as a decision rather than an oversight.
+
+**Read-only, throughout.** A small crop may be his own framing, so nothing rewrites a saved
+recipe anywhere: the Dashboard links into the editor, the Target page links into the editor, and
+the editor's own one-click re-seed (v0.416.0) replaces the Crop op alone. `sharePctLabel` is now
+exported and shared, so the three surfaces round one measurement identically — "about 3%" in all
+three, never "3%" beside "under 1%".
+
+Cheap on a healthy library: per target one saved-recipe read, and a run with no enabled
+`geometry.crop` returns before any coverage FITS is opened. Additive — new endpoints, new
+optional response fields, no config/DB/on-disk/default change. Tests +27 (13 in
+`tests/test_stale_crop.py`, 6 in `tests/webapp/test_editor.py`, 10 in
+`tests/webapp/test_over_trimmed.py`, 11 in the two new frontend note tests), and the verdict was
+neutered three ways in a scratch script to confirm the fixtures can show the bug.
+
+The original entry, verbatim:
+
+- **⭐ 🔴 OWNER HITS THIS FIRST (fourth external audit, 2026-09-10 — reproduced in the shipped image over a
+  v0.277.0 data volume) — a mosaic Auto-edited on the old build keeps D1's crop in its saved recipe, and the new
+  build shows it as-is: a sliver for the hero, the Library card, the editor and the share sheet, under an auto-note
+  that still says "97% of ragged mosaic edge to trim".** *(Severity: high — every mosaic he processed before D1's
+  fix; the picture is wrong and the sentence beside it calls it right. Confidence: HIGH — v0.277.0 wrote the
+  recipe `geometry.crop {x0 0.6228, y0 0.0341, x1 0.6896, y1 0.5463}` = 3.4 % of a 5089×2045 canvas; after
+  `up -d --build` on v0.407.1 the same run's `editor/trim-suggestion` says 7.6 % but `editor/preview` and
+  `/thumbnail` are 85×263 px and `editor/auto-note` repeats the 97 %; a Playwright sweep of those pages was
+  "CLEAN". Size: S–M.)* The D1 fixes re-derive the *trim* (`_trim_rect_for_run`) but nothing compares a **stored**
+  recipe's crop against it. **Fix direction:** when a run's saved recipe carries a `geometry.crop` that keeps less
+  than, say, half of what the current trim rule would keep (or under ~15 % of a mosaic canvas), (a) surface one
+  health note on the Target page and the editor — *"An older version trimmed this picture too far — re-run Auto"* —
+  with a one-click re-seed that replaces only the crop op, and (b) count them library-wide on the Dashboard once,
+  the way `NewSubsWaitingNote` does. Never silently rewrite a saved recipe (it may be his own crop); fix the
+  auto-note's percentage from the recipe on display rather than from the stale stored sentence. Regression test:
+  a run whose stored recipe crop disagrees with `largest_covered_rect` by more than the threshold **must** produce
+  the note; a run whose crop matches must not. *(Sibling he meets on the same screen: every pre-v0.313 run
+  shows "This picture can't say which night it's from → Stack it again" — twelve multi-hour offers at once on his
+  library. Not a bug, but the two banners together are the first thing he sees; consider one library-wide
+  "pictures from an older version" note instead of one per target.)*
+
+  **▶ THE EDITOR HALF IS SHIPPED — v0.416.0 (Builder 2026-09-10, branch `claude/sweet-babbage-puusez`); what is
+  left is listed below, so re-pick *that*, not the whole entry.** The editor now says it, on the one screen that
+  can put it right: `mosaicTrim.overTrimmedVerdict` compares the recipe's *live* enabled crops
+  (`cropCoverageFraction`, already there) against the rectangle `/editor/trim-suggestion` already fetches, and
+  when the saved crop keeps under `OVER_TRIM_KEEP_RATIO` (0.25) of what the canvas offers, an Alert says
+  *"cropped down to about 3% of the stack, but about 92% of it is well covered"* and offers **Re-trim border**,
+  which is the existing trim *preview* — so the user sees the rectangle before anything changes, and
+  `applyTrimCrop` then replaces only the Crop op. **The two sentences are joined:** when the stored "what Auto
+  did" note is on screen the Alert says outright that its trim figure describes the crop being replaced, which
+  is the entry's "fix the auto-note's percentage" done without parsing a stored string. No new endpoint and no
+  new request — both numbers were already on the page — and **frontend-only**, so no engine, schema, config or
+  API change. **The quarter, not the half the entry suggests:** at 0.5 a person deliberately framing on the
+  middle 40 % of their mosaic gets accused; the measured case is 3.4 % against 92.4 %, a 27× gap, so a quarter
+  separates the two populations with room either side. Tests +9 (7 in `mosaicTrim.test.ts` including the
+  framing-decision case and a ragged mosaic where the *same* crop is silent because its canvas offers less, 2 in
+  `Editor.test.tsx`, both fail before). **Still open, and the reason this entry stays:** (a) the same note on the
+  **Target page**, where he lands first and where the hero is the sliver; (b) the library-wide count on the
+  Dashboard, `NewSubsWaitingNote`-style, which is also the right home for the sibling banner the entry names
+  (the pre-v0.313 "can't say which night" offer, twelve at once) — one "pictures from an older version" note
+  instead of one per target.
+
+---
+
 The archive [`IMPROVEMENTS.md`](IMPROVEMENTS.md) cuts to, so the backlog stays a
 **working list**. When an item ships or is closed, cut the whole entry from
 `IMPROVEMENTS.md` and append it here as one block, headed by its version and

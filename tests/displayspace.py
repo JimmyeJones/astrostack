@@ -99,9 +99,36 @@ def assert_shadow_clip(display: np.ndarray) -> None:
     ``autostretch`` — or a fixture tweaked until it stopped clipping — would turn
     every assertion below it into a no-op silently, which is exactly how the
     v0.210.6 regression test came to pass on a live bug for four months.
+
+    **The clip has to *dominate*, not merely exist** *(strengthened 2026-09-10,
+    fourth external audit)*. The two assertions below used to be the whole guard,
+    and they only say the zero spike is *present* — while A1 was `_sky_mode`
+    mistaking the spike for the sky, which needs it to be the **tallest bin** of
+    that function's own histogram. On a deep, low-noise stack it is not: at
+    ``noise=0.0006`` the pre-fix `_sky_mode` reads the sky to within 5 %, so
+    ``test_the_sky_stays_put_at_every_stack_depth[very-deep]`` passed on the bug
+    it was written to catch. So the real precondition is checked directly, by
+    replaying the *pre-fix* measurement — the histogram over **all** finite values
+    (the fix's contribution is dropping the non-positive ones) across
+    ``[p0.5, median]``, 128 bins, exactly as :func:`seestack.edit.curve._sky_mode`
+    builds it — and requiring bin 0, the one holding the clipped zeros, to win it.
     """
     frac = clipped_fraction(display)
     assert frac > MIN_CLIPPED_FRACTION, (
         f"only {frac:.4%} of samples are clipped to zero — no shadow clip means "
         "the tests below this cannot exhibit the bug they guard")
     assert float(np.percentile(display, 0.5)) == 0.0
+
+    finite = display[np.isfinite(display)]
+    lo = float(np.percentile(finite, 0.5))
+    hi = float(np.median(finite))
+    assert hi > lo, (
+        "the fixture's lower half is degenerate — the pre-fix _sky_mode would "
+        "short-circuit before its histogram, so nothing below can exhibit A1")
+    counts, _edges = np.histogram(finite, bins=128, range=(lo, hi))
+    winner = int(np.argmax(counts))
+    assert winner == 0, (
+        f"the clipped-zero bin is not the tallest of the pre-fix _sky_mode "
+        f"histogram (bin {winner} wins with {counts[winner]} vs {counts[0]}) — "
+        "so the unfixed code would read this fixture's sky correctly and the "
+        "tests below it cannot exhibit A1")

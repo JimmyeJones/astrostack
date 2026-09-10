@@ -20,6 +20,7 @@ import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { FirstLookStrip } from "../components/dashboard/FirstLookStrip";
 import { MissingFilesNote } from "../components/dashboard/MissingFilesNote";
 import { NewSubsWaitingNote } from "../components/dashboard/NewSubsWaitingNote";
+import { OverTrimmedNote } from "../components/dashboard/OverTrimmedNote";
 import { StackFailuresNote } from "../components/dashboard/StackFailuresNote";
 import { PointHereTonightCard } from "../components/dashboard/PointHereTonightCard";
 import { AutoStackOffNote } from "../components/dashboard/AutoStackOffNote";
@@ -262,6 +263,13 @@ export function Dashboard() {
           // zero, so a fully-stacked library costs nothing and folds nothing.
           { key: "new-subs-waiting", priority: NOTICE_PRIORITY.advisory,
             node: <NewSubsWaitingNote /> },
+          // Not an offer but a *fault*, so it outranks the two above: an older
+          // build's border trim is still cropping finished pictures to a sliver,
+          // because the crop it chose lives in each run's saved recipe and
+          // nothing re-derives that. The per-picture note is in the editor; this
+          // is the "which ones?" the owner had no surface for after upgrading.
+          { key: "over-trimmed", priority: NOTICE_PRIORITY.warning,
+            node: <OverTrimmedNote /> },
         ]}
       />
 
