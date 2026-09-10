@@ -1,5 +1,7 @@
-import { Badge, Text, Tooltip } from "@mantine/core";
+import { Badge, Text } from "@mantine/core";
+
 import type { StackRun, GalleryItem } from "../api/client";
+import { HintAnchor } from "./HintAnchor";
 
 // The per-run background-noise σ is normalized to the image's own signal range
 // (see seestack/edit/noise.estimate_noise_sigma), so it's comparable across
@@ -16,7 +18,7 @@ export function hasNoise(sigma?: number | null): boolean {
 export function NoiseReadout({ sigma }: { sigma?: number | null }) {
   if (!hasNoise(sigma)) return null;
   return (
-    <Tooltip
+    <HintAnchor
       label="Background-noise level of this stack, normalized so it's comparable across gain/exposure. Lower = cleaner. Compare several stacks of the same target to find the least noisy."
       multiline
       w={260}
@@ -24,7 +26,7 @@ export function NoiseReadout({ sigma }: { sigma?: number | null }) {
       <Text span size="xs" c="dimmed" style={{ cursor: "help" }}>
         Noise {(sigma as number).toFixed(3)}
       </Text>
-    </Tooltip>
+    </HintAnchor>
   );
 }
 
@@ -45,7 +47,7 @@ export function NoiseDelta({ delta }: { delta?: number }) {
     ? "≈ same noise as your last stack"
     : `${sign}${pct}% noise vs your last stack`;
   return (
-    <Tooltip
+    <HintAnchor
       label="Change in background-noise level compared with this target's previous stack. Negative means this stack is cleaner — a quick way to tell whether adding subs or changing settings actually helped."
       multiline
       w={260}
@@ -53,7 +55,7 @@ export function NoiseDelta({ delta }: { delta?: number }) {
       <Text span size="xs" c={color} style={{ cursor: "help" }}>
         {text}
       </Text>
-    </Tooltip>
+    </HintAnchor>
   );
 }
 
@@ -63,11 +65,11 @@ export function NoiseDelta({ delta }: { delta?: number }) {
 export function CleanestBadge({ isCleanest, size = "xs" }: { isCleanest: boolean; size?: string }) {
   if (!isCleanest) return null;
   return (
-    <Tooltip label="Lowest measured background noise of this target's stacks — the cleanest result." multiline w={220}>
+    <HintAnchor label="Lowest measured background noise of this target's stacks — the cleanest result." multiline w={220}>
       <Badge color="teal" variant="light" size={size}>
         Cleanest
       </Badge>
-    </Tooltip>
+    </HintAnchor>
   );
 }
 
