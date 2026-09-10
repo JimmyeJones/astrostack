@@ -75,6 +75,14 @@ class NeedsLook:
     #: The other side of the comparison: how many subs were missing
     #: (``missing_files``), or the minimum the setting asks for (``too_thin``).
     n_other: int
+    #: The **mosaic** shape of a ``too_thin`` hold: how many subs a typical part
+    #: of the picture has, and how many panels they are spread over. Both ``0``
+    #: on a single field (and on a scan recorded before the depth was measured),
+    #: which is what a reader keys off — "only 9 of its subs are located, and it
+    #: needs 3" is a sentence that argues with itself on a mosaic, where every
+    #: sub *is* located and the count is well past the floor.
+    panel_depth: int = 0
+    panels: int = 0
 
 
 def new_pictures_since(
@@ -193,6 +201,8 @@ def needs_a_look(
             safe=safe, name=named(safe) or safe, kind="too_thin",
             n_frames=_count(entry.get("frames")),
             n_other=_count(entry.get("min")),
+            panel_depth=_count(entry.get("panel_depth")),
+            panels=_count(entry.get("panels")),
         ))
     return out
 

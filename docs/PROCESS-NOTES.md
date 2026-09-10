@@ -18,6 +18,70 @@ is a queue.
 
 ---
 
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-dg6420`) — one task: a floor that counted the wrong thing, and where the bug was actually found
+
+**The run.** One task, deliberately: **v0.414.0**, a bug I verified myself —
+`auto_stack_min_frames` asked its "would this be speckle?" question of the
+target's *frame count*, so a mosaic one pass in (nine subs, one sub deep
+everywhere) cleared a floor of three and was published. Repro'd end-to-end
+against the real pipeline: `test_auto_stack_holds_back_a_mosaic_that_is_one_sub_deep_everywhere`
+fails before with `assert ['?', '?'] == []` — i.e. `run_stack` was called twice
+on data that is single-frame noise at every pixel.
+
+**Where it came from, since that is the reusable part.** Not from the backlog —
+the "Bugs (fix these first)" section is currently five entries, every one of them
+gated on data no agent has, deliberately stood down with numbers, or measured and
+closed. It came from taking the Scout rotation's item (2) as a *reading* brief
+rather than a sweep: **"any threshold taken from a whole-target or peak number
+that is really per-panel"**. Grep the walk-away path for the numbers it makes
+decisions from, then ask of each one "what does this describe on a mosaic?".
+`_afford_drizzle_reject` (already filed, memory-only consequence) and this floor
+were the two that answered "nothing". A2/A6/D1 and now this are the same class
+four times over; the brief is not exhausted, and the next place to point it is
+the surfaces that *report* depth rather than decide from it.
+
+**The design call worth carrying forward: the thinnest panel is not always the
+honest panel.** `auto_reject_depth` (A6, v0.326.7) answers "can the rejection
+method bite anywhere?" and is right to take the **minimum**. Reusing it here
+would have been the obvious move and would have been wrong twice over: it
+returns `None` unless *two* panels clear `AUTO_REJECT_PANEL_MIN_FRAMES`, so the
+all-one-deep mosaic — the exact case — is invisible to it; and its minimum would
+strand a mosaic with eight deep panels for one corner lost to cloud. The
+question here is "is the *picture* speckle?", whose honest statistic is the
+**frame-weighted median**: the depth of the panel a randomly chosen sub belongs
+to. It also disposes of the population that kills an unweighted median — one
+stray mis-solved sub is a one-frame "panel", `[200, 1] → 1` unweighted and
+`→ 200` weighted, i.e. the difference between holding a good deep target back
+for ever and doing nothing.
+
+**Then the three sentences.** Fixing the hold created a silence: a mosaic held on
+depth has every sub located and a count past the floor, so the Target page's
+"waiting for more of your subs to be located" note — computed frontend-side from
+`unsolvedCount` — cannot fire, and the page would have looked idle on a target
+the scan had deliberately held. That is the AGENTS.md §7 dogfood question ("could
+a beginner hold all of these at once?") arriving *before* the browser rather than
+after it, and it is most of the diff: `GET /api/targets/{safe}/autostack-thin-hold`
++ `MosaicThinHoldNote`, and the mosaic wording in `heldForSubsLine` (Jobs) and
+`describeNeedsLook` (the Dashboard's overnight digest), both of which would
+otherwise have printed "only 9 of its subs are located — needs 3".
+
+**A process slip to not repeat.** I started editing while the baseline suite was
+still running, which makes that run worthless as a baseline (already-imported
+modules are the old code, lazily-imported ones are the new). The gate that
+actually held was the full suite re-run on the finished branch, plus the
+fail-before check done by stashing the two source files and re-running the new
+tests — which is the check that matters anyway. But the baseline is cheap
+insurance against inheriting someone else's red `main`, and it only works if the
+run is *finished* before the first edit. On this container the suite takes ~80
+minutes, not the ~25 earlier notes record, so "read the backlog while it runs"
+is the wrong plan: pick the task first, then start the baseline, then read.
+
+**Dogfood.** `--empty` (the first-run app): CLEAN — nothing overflowing, no
+console errors, tallest page `/life-list` at 2,779 px on a phone. Not a mosaic
+pass, and no Auto/editor claim is made in this run.
+
+---
+
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-w1qz43`) — half the app's explanations were never written on the device it is read on
 
 **The run.** Three tasks, all shipped, all one class: **v0.413.0**

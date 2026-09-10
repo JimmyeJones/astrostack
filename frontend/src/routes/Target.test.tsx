@@ -2003,6 +2003,26 @@ describe("TargetView reject breakdown + undo", () => {
     )).toBeInTheDocument();
   });
 
+  it("says on the Target page when a mosaic is held back for being one sub deep",
+    async () => {
+    // The count sentence cannot speak for this one: all nine subs ARE located,
+    // and nine clears the floor of three. Without this note the scan's decision
+    // is invisible and the app reads as idle on a target it deliberately held.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: 9, n_frames_accepted: 9 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "autoStackThinHold").mockResolvedValue({
+      frames: 9, min_frames: 3, panel_depth: 1, panels: 9,
+      when_utc: "2026-09-10T02:00:00Z",
+    });
+    renderTarget();
+    await waitFor(() =>
+      expect(screen.getByTestId("mosaic-thin-hold-note")).toBeInTheDocument());
+    expect(screen.getByText(/spread over 9 panels/)).toBeInTheDocument();
+  });
+
   it("does not show the auto-stack waiting note when Auto-stack is off", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(
       mkTarget({ n_frames: 202, n_frames_accepted: 202 }),

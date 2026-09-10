@@ -188,6 +188,114 @@ def test_auto_stack_skips_a_legacy_mixed_drop_target(solved_library, monkeypatch
         lib.close()
 
 
+def _spread_across_panels(lib, n_side: int, step_deg: float = 0.5) -> None:
+    """Re-point every target's subs over an ``n_side × n_side`` mosaic grid.
+
+    The fixture's subs all sit on one pointing (a single field). A Seestar
+    mosaic walks its panels, so its subs are spread across them — which is the
+    whole point: the target's *count* stays what it was while the depth at any
+    one pixel drops by the number of panels.
+    """
+    for entry in lib.list_targets():
+        proj = lib.open_target(entry.safe_name)
+        try:
+            frames = list(proj.iter_frames())
+            for k, f in enumerate(frames):
+                i, j = k % n_side, (k // n_side) % n_side
+                proj.update_frame(f.id, ra_center_deg=83.6 + i * step_deg,
+                                  dec_center_deg=-5.4 + j * step_deg)
+        finally:
+            proj.close()
+        lib.refresh_target_stats(entry.safe_name)
+
+
+def test_auto_stack_holds_back_a_mosaic_that_is_one_sub_deep_everywhere(
+    solved_library, monkeypatch,
+):
+    """The minimum-frames floor must judge a *pixel*, not a frame count.
+
+    The owner is a heavy mosaic user (AGENTS.md §1). A mosaic one pass in has
+    one sub per panel, so its picture is single-frame colour speckle at every
+    pixel — but its *count* clears the floor, so the walk-away scan published it
+    (and the auto-edit adopted it) as the target's newest picture: exactly the
+    gibberish the floor was added to prevent, through the door it left open.
+
+    Fail-before: the mosaic was auto-stacked at depth 1. After: held back, with
+    no attempt marker, so the next scan stacks it the moment the panels deepen.
+    """
+    calls = _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        _spread_across_panels(lib, n_side=2)   # 3 subs -> 3 panels, 1 deep each
+        summary = pipeline._pipeline_body(
+            _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+        assert calls == [], "a one-sub-deep mosaic must not be published"
+        assert summary["auto_stacked"] == []
+        held = summary.get("auto_stack_held_thin")
+        assert held, "expected the mosaic to be reported as held back"
+        for h in held:
+            # The count that used to wave it through is still reported honestly
+            # beside the depth that actually describes the picture.
+            assert h["frames"] >= h["min"]
+            assert h["panel_depth"] == 1
+            assert h["panels"] >= 2
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                assert proj.get_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY) is None
+            finally:
+                proj.close()
+    finally:
+        lib.close()
+
+
+def test_auto_stack_still_fires_for_a_single_field_at_the_floor(
+    solved_library, monkeypatch,
+):
+    """The no-regression half: a single field is judged exactly as before — the
+    depth check contributes nothing because there are no panels to divide by."""
+    calls = _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        summary = pipeline._pipeline_body(
+            _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+        assert calls, "a single-field target at the floor still stacks"
+        assert summary["auto_stacked"]
+        assert not summary.get("auto_stack_held_thin")
+    finally:
+        lib.close()
+
+
+def test_a_mosaic_stacks_once_its_panels_reach_the_floor(
+    solved_library, monkeypatch,
+):
+    """Self-clearing, like every other hold: deepen the panels and it goes."""
+    calls = _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        # Two panels, and every sub on one of them — 3 subs -> panels of 2 and 1,
+        # so a typical sub sits 2 deep. Below the floor of 3: held.
+        _spread_across_panels(lib, n_side=2)
+        settings = _settings(solved_library).model_copy(
+            update={"auto_stack_min_frames": 2})
+        # Depth 1 < floor 2 → still held even with the floor lowered to 2.
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert calls == []
+        assert summary.get("auto_stack_held_thin")
+        # Floor of 1 is the documented opt-out — it restores stacking from the
+        # first frame, and must not be re-armed by the depth check.
+        opt_out = _settings(solved_library).model_copy(
+            update={"auto_stack_min_frames": 1})
+        summary2 = pipeline._pipeline_body(
+            opt_out, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert calls, "floor=1 must still stack a one-sub-deep mosaic"
+        assert summary2["auto_stacked"]
+        assert not summary2.get("auto_stack_held_thin")
+    finally:
+        lib.close()
+
+
 def test_auto_stack_min_frames_one_restores_stacking_from_first_frame(
     solved_library, monkeypatch,
 ):
