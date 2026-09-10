@@ -14,6 +14,45 @@ Newest first.
 
 ---
 
+## v0.413.1 — 2026-09-10 — asking what "Save as defaults" does no longer saves your defaults
+
+*(Builder, branch `claude/sweet-babbage-bhkhl1`, immediately after v0.413.0 and from its own measurement.
+The **sixth slice** of the "a Tooltip is invisible on the device the owner actually reads this app on"
+entry. Pillar: friendliness — PRIORITY 3. Frontend-only.)*
+
+v0.413.0 swept the **non-interactive** triggers and left the interactive ones to be judged site by site, as
+the entry asks. Of every `Button`/`ActionIcon` under a `<Tooltip>` in the app, exactly one failed that
+judgement: the Stack form's **"Save as defaults"**.
+
+**Why this one and not the others.** Most interactive tooltips are category (b) — they repeat the control's
+own label, or the page already says it (the editor's preview-tool row has `PreviewToolGuide` since v0.402.0;
+`IncomingCalibrationCard`'s tip only names the file its card already describes; History's "Reuse settings"
+and "Compare" navigate, which is reversible). This one is neither. Its sentence —
+
+> "Remember what you changed (and your calibration picks) for this target — it pre-fills this form and is
+> used when auto-stacking is on. Anything left at your global setting keeps following it."
+
+— is the **only** statement anywhere in the app that this button also decides what the *unattended*
+walk-away stack does for that target. And the button's effect is persistent: the saved blob wins over
+`default_stack_options` in both readers (see v0.372.0). So the one gesture a phone has for "what does this
+do?" was the gesture that did it, on a control whose consequence outlives the page. That is exactly the
+defect v0.402.1 fixed on five `Switch`/`SegmentedControl` sites, on a button rather than a switch. The
+explanation *does* exist — in the success notification, i.e. after the save.
+
+**The fix is v0.402.1's own shape.** A `HintIcon` beside the button inside a `Group gap={6}`, so the
+button's label, action and accessible name are all untouched (nothing that finds it by
+`getByRole("button", { name: "Save as defaults" })` has to change — the existing four assertions that do
+pass unchanged), and hover keeps the words for anyone with a mouse.
+
+**Upgrade-safe (§9):** frontend-only, one row's layout. No API, response shape, schema, config, on-disk
+layout or default changed.
+
+**Tests (+1, fails before):** `Stack.test.tsx` — tapping the hint shows *"used when auto-stacking is on"*
+**and** `putStackDefaults` is never called. Before the change the same tap saved the defaults, which is the
+bug stated as a test rather than described.
+
+---
+
 ## v0.413.0 — 2026-09-10 — a badge's only explanation stops being unreachable on a phone
 
 *(Builder, branch `claude/sweet-babbage-bhkhl1`. The **fifth slice** of the "a Tooltip is invisible on the
