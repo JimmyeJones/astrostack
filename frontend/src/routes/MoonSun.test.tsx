@@ -374,6 +374,10 @@ describe("cropping the empty sky", () => {
       // The leftover of the mesh bug: v0.347.0 fixed the stacking, but the Sun
       // already on disk keeps the mesh and nothing re-derives itself. Fails
       // before: the page said nothing and the owner kept the wrong picture.
+      //
+      // The copy no longer says "grey": v0.347.0 demosaiced in the wrong phase,
+      // so its stills are *green* and meshed while the older ones are grey and
+      // meshed. Both land on this alert, so it names the symptom they share.
       vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
         captures: [capture({ result: result({ colour_stale: true }) })],
       }));
@@ -381,7 +385,7 @@ describe("cropping the empty sky", () => {
         .mockResolvedValue({ job_id: "j9" });
       renderView();
       await waitFor(() => expect(
-        screen.getByText(/came out grey with a fine mesh over it/),
+        screen.getByText(/its colours came out wrong and it has a fine mesh/),
       ).toBeInTheDocument());
       fireEvent.click(screen.getByRole("button", { name: /^Stack it again$/i }));
       await waitFor(() => expect(stack).toHaveBeenCalled());

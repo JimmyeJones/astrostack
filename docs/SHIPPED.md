@@ -14,6 +14,96 @@ Newest first.
 
 ---
 
+## v0.408.2 — 2026-09-10 — 🐛 the Sun came back green: the video path debayered in the deep-sky path's CFA phase
+
+*(Builder-fixed the same run the Scout filed it. Severity: **wrong picture on a shipped feature the owner was
+actively looking at**. Confidence: MEASURED on his own file, reproduced exactly from those numbers, and now
+pinned by tests that fail before.)*
+
+**The bug.** v0.347.0 was right that a raw solar/planetary capture reaches the stack as an undebayered sensor
+mosaic and has to be demosaiced. It was wrong about *which pattern*. It took `RGGB` from
+`seestack/io/fits_loader.py` — where that name is the **fallback** for a `BAYERPAT` header the deep-sky path
+actually reads — and hard-coded it as `video/ffmpeg.CFA_PATTERN`. Video carries no header, so the constant was
+an assumption dressed as a device fact. The owner's Sun came back **green** (it had been grey) and **still
+covered in the fine mesh** the fix existed to remove. Both symptoms, one cause.
+
+**The measurement.** Decoding one frame of `incoming/Solar_video/2026-06-19-175558-Solar-RAW.avi` and taking
+the mean of each 2×2 sub-lattice inside the disk:
+
+| site | mean |
+|---|---|
+| `(0,0)` | **40.7** |
+| `(0,1)` | 10.2 |
+| `(1,0)` | 131.7 |
+| `(1,1)` | **40.7** |
+
+The two **matched** values are the two green photosites — they see the same filter — and they sit on the
+**main** diagonal. `RGGB` puts green on the *anti*-diagonal, i.e. on the 10.2 and 131.7 sites, which are 13:1
+apart. Reproduced through the real `bilinear_debayer` from exactly those four numbers:
+
+| pattern | R:G:B | cast | residual (mesh) |
+|---|---|---|---|
+| `RGGB` (**was shipped**) | 40.7 : **71.0** : 40.7 | **GREEN** | **40.50** |
+| `GBRG` (**correct**) | **131.7** : 40.7 : 10.2 | red/orange | **0.00** |
+
+`RGGB` averages the darkest and brightest sites together to make "green" — which is *both* the cast and a huge
+alternating residual. `GBRG` gives a red/orange Sun (physically right for a white-light solar filter) and zero
+residual.
+
+**The fix, in two halves.**
+
+**(a) Read the phase, don't assert it** (`seestack/video/ffmpeg.py`). The backlog's first trap was "do not just
+swap one hard-coded guess for another", and this doesn't: new `detect_cfa_pattern` takes the four sub-lattice
+means off the stream's **first frame** and identifies the green **diagonal** objectively — the matched pair is
+green by construction. Green on the anti-diagonal is `RGGB`; green on the main diagonal is `GBRG`. Red-vs-blue
+*within* the winning pair cannot be read from a mosaic at all (`GBRG` and `GRBG` differ only by swapping them
+and both leave zero residual), so that stays the device fact the owner's measurement establishes. Two guards
+stop it inventing an answer: the unmatched diagonal must be separated by at least `_CFA_DETECT_MIN_SPREAD_DN`
+(1.0 DN — each mean averages a quarter of the frame, so its noise is well under a tenth of that), and the
+matched pair must be at least `_CFA_DETECT_MATCH_RATIO` (0.5) better matched than the other; a frame that fails
+either — a dark, a blank sky, a blown disk — falls back to `CFA_PATTERN`, which is now the **measured** `GBRG`
+rather than the deep-sky path's name. The phase is **latched on the first frame off the wire** beside the
+existing "is this really a mosaic" decision, and for a stronger reason: re-reading it per frame would let one
+flat frame flip a capture's colours halfway through a stack.
+
+**(b) Tell the owner his existing Sun is wrong** (`webapp/video.py`). `colour_is_stale` short-circuited on
+`meta.colour_current`, a boolean meaning *"a build that knew about colour made this"* — and v0.347.0 stamped it
+True on every still it made. So after (a) alone the owner's green Sun would have stayed on disk, unmentioned,
+forever: there is no auto-stack path for video and nothing re-derives itself. `colour_current` is now joined by
+`colour_build`, a **generation number** gated on `_COLOUR_PIPELINE_BUILD` (0 = no colour handling at all,
+pre-v0.347.0; 1 = demosaiced in the wrong phase; 2 = the phase is read). A still from an older generation is
+offered the re-stack however confidently it was stamped. An ordinary colour capture carries no CFA phase, so no
+generation of the demosaic can have got it wrong — it is re-probed once to pick up the new stamp and then left
+alone for good, which keeps the "never nag someone whose picture is fine" rule intact.
+
+The alert's copy followed: it said *"came out grey with a fine mesh over it"*, true of the pre-v0.347.0 stills
+and false of the v0.347.0 ones, which are green. It now names the symptom both share — *"its colours came out
+wrong and it has a fine mesh over it"* — since the owner can see which he has.
+
+**⚠️ CFA phase and frame orientation are one coupled invariant, and the code now says so.** `RGGB` row-flipped
+is *exactly* `GBRG`, which is almost certainly why the two paths disagree at all: AVI is conventionally stored
+bottom-up, so the rows reach this demosaic in the opposite order from the FITS path. If a future change ever
+flips a video frame vertically to fix its orientation, **the pattern flips with it** and the green Sun comes
+straight back. Detection makes that self-correcting, and
+`test_the_two_patterns_are_one_row_flip_apart` pins the relationship so neither constant can be changed alone.
+
+**Upgrade-safe (§9).** `colour_build` is additive on a result `meta.json` — `read_meta` already filters to known
+fields, so an old file reads as generation 0 (pinned by a test) and an older build ignores the new key. No
+config, DB schema, on-disk layout, endpoint or response-shape change; nothing under `incoming/` is touched.
+The one deliberate behaviour change is the point of the fix: a raw capture now debayers in its own phase, and a
+still made by generation 0 or 1 is offered a re-stack it was not offered before.
+
+**Tests +9 (7 Python engine/webapp, 1 parametrized ×2, plus assertions), five failing before**, including the
+owner's four measured numbers as a fixture, an end-to-end decode of a `GBRG`-recorded capture (red-dominant,
+mesh-free — green and meshed before), the `RGGB` case pinned so reading the phase cannot regress the captures
+that already worked, the latch, the flat-frame fallback, the row-flip invariant, the v0.347.0-shaped `meta.json`
+that must now be called stale, and the old `meta.json` that must still load. `tests/videosynth.py`'s
+`solar_mosaic_frame` / `solar_raw_video` gained a `pattern` argument, defaulting to `RGGB` so every existing
+fixture is byte-identical — a fixture that can only be built in one phase cannot show the difference between
+reading the phase and assuming it.
+
+---
+
 ## v0.408.1 — 2026-09-10 — 🐛 a mosaic panel too thin to be its own population was condemned by its richer neighbours
 
 *(Builder-verified by reproduction against `origin/main`'s own `grade_frames`. Filed and fixed in the same run.

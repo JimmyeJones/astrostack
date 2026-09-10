@@ -879,6 +879,110 @@ def test_an_old_still_from_a_colour_capture_is_left_alone(client, data_root):
     assert meta.colour_current is True  # written back, so it is asked once
 
 
+def _v0_347_meta(data_root: Path, capture_id: str) -> None:
+    """Rewrite a finished still's metadata the way **v0.347.0** wrote it: it
+    demosaiced, so it stamped ``colour_current``, but it demosaiced as ``RGGB``
+    — the deep-sky path's phase, not video's — so the picture is green and still
+    meshed. No ``colour_build``, because that generation number did not exist."""
+    import json
+
+    from webapp.config import Settings
+    from webapp.video import META_NAME, result_dir
+
+    path = result_dir(Settings(data_root=str(data_root)), capture_id) / META_NAME
+    raw = json.loads(path.read_text())
+    raw["colour_current"] = True
+    raw.pop("colour_build", None)
+    path.write_text(json.dumps(raw))
+
+
+def test_a_still_demosaiced_in_the_wrong_phase_offers_a_re_stack(client, data_root):
+    """**The owner's actual Sun, right now.** v0.347.0 demosaiced his solar
+    capture as ``RGGB`` and stamped the picture ``colour_current``, so the
+    advisory believed it and said nothing — while he looked at a green, meshed
+    Sun. "Colour was handled" was the wrong question; *which* handling is the
+    right one, so the stamp is a generation number now.
+
+    Fails before: ``colour_current`` alone short-circuited this to False."""
+    _drop_raw_capture(data_root)
+    job_id = client.post("/api/videos/Solar_video/stack",
+                         json={"keep_percent": 30}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    _v0_347_meta(data_root, "Solar_video")
+
+    listed = client.get("/api/videos").json()["captures"][0]
+    assert listed["result"]["colour_stale"] is True
+
+
+def test_a_colour_capture_stamped_by_the_older_build_is_still_never_nagged(
+        client, data_root):
+    """The other side of that: an ordinary colour Moon carries no CFA phase, so
+    no generation of the demosaic can have got it wrong. It is re-probed once to
+    pick up the new stamp and then left alone for good."""
+    _drop_capture(data_root)
+    job_id = client.post("/api/videos/Lunar_video/stack",
+                         json={"keep_percent": 30}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+    _v0_347_meta(data_root, "Lunar_video")
+
+    listed = client.get("/api/videos").json()["captures"][0]
+    assert listed["result"]["colour_stale"] is False
+
+    from webapp.config import Settings
+    from webapp.video import _COLOUR_PIPELINE_BUILD, read_meta
+
+    meta = read_meta(Settings(data_root=str(data_root)), "Lunar_video")
+    assert meta is not None
+    assert meta.colour_build == _COLOUR_PIPELINE_BUILD  # asked once, ever
+
+
+def test_a_still_this_build_makes_carries_the_generation_stamp(client, data_root):
+    """So the *next* correction to the colour path can tell these stills from
+    its own — which is the whole reason this bug went unannounced."""
+    _drop_raw_capture(data_root)
+    job_id = client.post("/api/videos/Solar_video/stack",
+                         json={"keep_percent": 30}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["state"] == "done"
+
+    from webapp.config import Settings
+    from webapp.video import _COLOUR_PIPELINE_BUILD, read_meta
+
+    meta = read_meta(Settings(data_root=str(data_root)), "Solar_video")
+    assert meta is not None
+    assert meta.colour_current is True
+    assert meta.colour_build == _COLOUR_PIPELINE_BUILD
+
+
+def test_an_old_meta_json_without_the_generation_field_still_loads(data_root):
+    """Upgrade safety (AGENTS.md §9): ``meta.json`` files already on the owner's
+    box have no ``colour_build`` key. They must read back as a still from
+    generation 0, not fail to load and take the whole result with them."""
+    import json
+
+    from webapp.config import Settings
+    from webapp.video import META_NAME, VideoStackMeta, read_meta, result_dir
+
+    settings = Settings(data_root=str(data_root))
+    out = result_dir(settings, "Solar_video")
+    out.mkdir(parents=True, exist_ok=True)
+    meta = VideoStackMeta(
+        capture_id="Solar_video", label="Sun", kind="solar",
+        source_name="clip.avi", created_utc="2026-06-19T17:55:58Z",
+        width=64, height=48, keep_percent=30, n_graded=10, n_kept=3,
+        n_stacked=3, n_align_failed=0, stride=1, aligned=True,
+        sharpness_best=1.0, sharpness_kept_median=0.9,
+        sharpness_all_median=0.5, warnings=[],
+    )
+    raw = {k: getattr(meta, k) for k in VideoStackMeta.__dataclass_fields__}
+    raw.pop("colour_build")
+    (out / META_NAME).write_text(json.dumps(raw))
+
+    loaded = read_meta(settings, "Solar_video")
+    assert loaded is not None
+    assert loaded.colour_build == 0
+    assert loaded.n_kept == 3
+
+
 def test_a_still_whose_video_is_gone_is_never_called_stale(client, data_root):
     """No source to check means no verdict: telling someone to re-stack a
     capture they no longer have is worse than saying nothing."""
