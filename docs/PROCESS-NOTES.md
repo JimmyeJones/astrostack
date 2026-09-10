@@ -20,7 +20,7 @@ is a queue.
 
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-dg6420`) — one task: a floor that counted the wrong thing, and where the bug was actually found
 
-**The run.** One task, deliberately: **v0.414.0**, a bug I verified myself —
+**The run.** One task, deliberately: **v0.415.0**, a bug I verified myself —
 `auto_stack_min_frames` asked its "would this be speckle?" question of the
 target's *frame count*, so a mosaic one pass in (nine subs, one sub deep
 everywhere) cleared a floor of three and was published. Repro'd end-to-end
@@ -163,8 +163,133 @@ unchanged by this run's work by construction, since `HintAnchor` adds no element
 and no padding. The mosaic's own three sentences (panel map, `grain_uneven`,
 `seams_flat`) still cohere: all three now say the thin panel is ~30 s behind and
 evens out on its own.
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-bhkhl1`) — collision #14: two Builders swept the same entry in the same hour, and a green baseline that read as red
+
+**The run.** Three tasks shipped: **v0.414.0** (the "still open" remainder of the
+`HintAnchor` sweep, plus the drift guard that stops a ninth), **v0.414.1**
+(Stack's *"Save as defaults"* — the one interactive site the measurement said was
+worth doing) and **v0.414.2** (a verified §9 bug this run reproduced 14 times by
+accident: the app refusing to boot over a missing *frontend*). Baseline on
+`origin/main` (`a59ee928`): **5,553 collected, 5,539 passed / 2 skipped / 14
+errors**, and the 14 were self-inflicted — see below. 5,553 is exactly the number
+the two runs either side recorded for that head. On the finished branch:
+**5,559 passed / 2 skipped** (38m15s) — exactly **+6**, the six `test_static_boot.py`
+cases v0.414.2 claims, with no test's status changed. Frontend: `tsc` clean,
+`vite build` clean, `vitest` **3,570 passed / 255 files** against main's 3,564 —
+exactly the +5 drift-guard cases and the +1 Stack regression. `ruff check` on both
+touched Python files is clean apart from the `I001` `webapp/main.py` already carries
+on `main` (verified against `origin/main`'s own copy).
+
+### Collision #14, and it is the most complete one yet
+
+Branch `claude/sweet-babbage-w1qz43` and this one picked the **same backlog
+entry**, in the same hour, from opposite ends of the same measurement. They built
+`components/HintAnchor.tsx`; I built `components/HintTooltip.tsx`. Same
+controlled-tooltip state machine, same `cloneElement`-not-wrap decision, same
+"a `Badge` is the half of the class with no gesture at all" reading, and
+overlapping anchor sets — of my 33 sites and their 28, **24 were the same file
+and the same line**. Their PR (#818) merged first.
+
+**Theirs ships; mine was dropped rather than re-applied**, per §11 and the
+precedent of collision #12. Nothing of mine was layered on top of a file they had
+already converted: I merged `origin/main`, resolved every overlapping frontend
+file to *theirs*, deleted my component and its test, and restored `HintIcon.tsx`
+to main's version (my refactor had pointed it at my component). What remains on
+this branch is only what theirs did not reach.
+
+**On the one point where the two designs differed, theirs is better and that is
+worth carrying forward.** `HintAnchor` has an opt-in `stopPropagation` for an
+anchor sitting *inside* something clickable; mine did not, and I had explicitly
+noted the risk (a badge inside a card-link would open the hint *and* navigate)
+and then deferred it as "don't change existing behaviour". They found it as a
+live bug instead — the editor's `SlowPreviewChip` sits inside a `Menu.Item`, so
+asking what "slower preview" meant **added the very op it warns about**. The
+generalisable lesson is not about tooltips: **when you defer a risk because
+acting on it would change behaviour, check whether the current behaviour is
+already wrong somewhere.**
+
+**What made this collision cost a whole task rather than a minute** is the same
+thing §11 already says and this run did anyway: I fetched at the start of the
+run, spent the session building, and fetched again only at merge time. The entry
+was sized S/M per site and did not feel like an "L" that §11 tells you to
+re-fetch after the design read — but the *sweep* was long even though each site
+was short. **Re-fetch by elapsed time, not by the item's size label.**
+
+### The trap: a green baseline that reads as red
+
+The baseline run reported `5539 passed, 2 skipped, 14 errors`, the errors being
+fourteen `tests/webapp` tests raising
+`RuntimeError: Directory '…/webapp/static/assets' does not exist` at fixture
+setup. Read cold, that is "main is red, and fixing it is task #1" (AGENTS.md §2).
+
+It was self-inflicted. **`scripts/agent-dogfood.sh` runs `npx vite build`, and
+`frontend/vite.config.ts` sets `emptyOutDir: true` on an `outDir` of
+`../webapp/static`** — so a dogfood pass *deletes* `webapp/static/` and rebuilds
+it, and any `tests/webapp` test that calls `create_app()` inside that window
+fails. Both had been started in the background to save wall-clock.
+
+**Do not run `agent-dogfood.sh` concurrently with `pytest`** unless the dogfood
+will not build (it builds only on `--build`, or when
+`webapp/static/index.html` is missing — so the *second* pass of a run is usually
+safe and the first is not). Serialise them: dogfood first, pytest after.
+
+**And the trap was a real bug**, which is why it is not only a process note.
+`_mount_spa` guarded on the *directory* and then mounted `static/assets`
+unconditionally, so the empty-directory state every build passes through did not
+degrade to the "Frontend not built" placeholder the same function already
+implements — it raised out of `create_app()` and the whole app failed to start,
+API and Settings page included. On a box upgraded in place that is a §9
+violation. Shipped as **v0.414.2**. The generalisable shape: **a guard that asks
+whether the *container* exists, when the question is whether the *contents* do.**
+
+### Two sweeps that came back clean — do not re-walk them
+
+- **Every editor op parameter measured in pixels is already proxy-scaled.**
+  Enumerated from the registry rather than by reading: `background.subtract`
+  (`box_size`), `background.final_gradient` (`box_size`, `dilate_px`),
+  `detail.chroma_denoise`, `detail.sharpen`, `detail.deconvolve`,
+  `stars.reduce` and `stars.boost_nebula` all scale — the last two inside
+  `starmask.star_mask` rather than in the op, which is why grepping `stars.py`
+  for `scaled_px` under-reports. `detail.hot_pixels`'s `sigma` is a statistical
+  threshold, not a length.
+- **The "a `log.info` inside a `try` whose `except` logs a failure" sweep the
+  previous run asked for is clean.** Six candidate blocks across `seestack/` and
+  `webapp/` (AST-scanned, not grepped); every one logs plain locals. The one that
+  did bite — `scanner.run_qc_and_solve`'s `project.name` — is already fixed as
+  v0.411.1. The closest remaining shape is
+  `pipeline._auto_grade_target`'s success line, which reads `r.name` /
+  `r.primary_metric` off `FrameGrade` **after** the DB writes have committed, so
+  a raise there would report `AutoGradeCounts(0, 0)` for work that happened —
+  both attributes were checked against the dataclass and exist.
+
+### Dogfood record — `--mosaic --editor`, three times, byte-identical
+
+Run on `origin/main` (`a59ee928`), on the branch's own build of the work that was
+later dropped, and again on the **final merged tree** that ships. **Auto's
+trim on the mosaic sample: 7.9 %**, unchanged and well under the ~15 % D1 bar.
+The mosaic page-height table is **identical to the pixel** across the change —
+`[phone]` 3,407 / 3,166 / 3,094 / 2,432 px, `[desktop]` 2,116 / 2,104 / 1,699 /
+1,637 px — nothing overflowing, no console errors, and the editor drive added all
+21 ops on the mosaic run with the live preview re-rendering each time, undo and
+redo applied. That is the measurement the entry demands ("don't make the pages
+taller"), and an exact match rather than "within noise", because the change adds
+no DOM node and no style. The third pass also exercises **v0.414.2** end to end:
+the app boots and serves its SPA through the rewritten `_mount_spa`, with a real
+build present, exactly as before. The app's three claims about that mosaic still
+cohere, unchanged from the previous run's record.
+
+### One implementation detail worth keeping
+
+**Mantine's `Badge` puts its words in an inner element.** `getByText("Hazy
+night")` returns the label `<span>`; a cloned anchor's `role`/`tabIndex` land on
+the Badge's *root*. A click on the words still reaches the root by bubbling —
+which is why nine of ten component assertions passed while the `tabindex` one did
+not. Assert attributes on `getByRole("button", { name: … })` and fire gestures on
+`getByText`. A test that only fired events would have looked entirely green while
+the keyboard path did not exist.
 
 ---
+
 
 ## 2026-09-10 (Builder, branch `claude/sweet-babbage-mudy09`) — the plate-solve rescue chain, and the reason the owner's own subs never got the sibling hint
 

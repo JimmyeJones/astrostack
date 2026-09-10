@@ -1547,12 +1547,6 @@ problems. Dogfood it every big-picture run and fix root causes.
   not move: `Editor.test.tsx` (the switch stays checked and `autoProcess` still gets `undefined`),
   `Jobs.test.tsx` (`requestPermission` not called), `Gallery.test.tsx` (still sorted by Newest).
 
-  **Still open:** the *route-specific* tooltips on History, Stack and the Dashboard, and the editor's **header**
-  row buttons — `Trim border`, `Re-centre`, `Crop`. Those three are the weaker half of the class and should be
-  judged before being swept: pressing them only *previews* a crop behind an Apply/Cancel, so the tap is a safe
-  way to find out, unlike the five above. Each remaining route still needs its own measurement; these slices
-  deliberately don't guess at them.
-
   **▶ FIFTH SLICE SHIPPED — v0.413.0, the *other* half of the class: an anchor with no behaviour at all**
   (Builder 2026-09-10, branch `claude/sweet-babbage-w1qz43`). The four slices above are all about a tooltip on a
   **control** — where the tap does the wrong thing. **Enumerated rather than guessed at:** of the app's 105
@@ -1605,6 +1599,59 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Still open after all three:** the ~22 remaining non-control anchors — `NightsCard` ×3, `BestMonthsStrip`,
   `MosaicMapCard`, `BestPictures`/`Gallery`/`Calibration`/`LifeList`, and `ImageLightbox`'s bare-icon anchors.
   `HintAnchor` makes each a one-line swap; take them a coherent surface at a time, not as a sweep.
+
+  **▶ EIGHTH SLICE SHIPPED — v0.414.0: the "still open" list above, and the guard that stops a ninth**
+  (Builder 2026-09-10, branch `claude/sweet-babbage-bhkhl1`). **Read the collision note first
+  ([`PROCESS-NOTES.md`](PROCESS-NOTES.md), 2026-09-10, collision #14):** two Builders swept this entry in the
+  same hour, from opposite ends of the same measurement. `HintAnchor` and its 28 anchors landed on `main`
+  first and are the record; my own component and its 33 anchors were **dropped rather than re-applied**, and
+  what is here is only what theirs did not reach. On the one point where the two differed, theirs is better
+  and is what ships: `stopPropagation` for an anchor inside something clickable, which mine did not have.
+  **What this slice adds is the remainder of that list**, converted to `HintAnchor` one line each:
+  `NightsCard` ×3 (a night's *"ended early"*, *"bright Moon"* and its verdict badge — the Target page's own
+  per-night table), `Calibration` ×2 (the broken-pixel repair state and each master's defect note, the two
+  sentences on that page that are not restatements of a control), `BestPictures` ×2 and `Gallery` ×1 (the
+  *"why is this picture here"* and *"what is this count"* chips). `NightsCard`'s verdict badge **skips the
+  anchor entirely when it has no sentence** rather than passing `disabled`: `HintAnchor` makes its child a
+  tab stop with `role="button"`, and a verdict with nothing to say must not advertise itself as answerable.
+  **And the guard, which is the durable half.** `components/hintAnchorDrift.test.ts` reads every non-test
+  `.tsx` in the app through Vite's own `import.meta.glob` and fails if any `<Tooltip>`'s first child element
+  is a `<Badge>`. Eight sweeps have each fixed the sites that existed on the day and nothing stopped the next
+  one being written the old way — which is precisely how the badges survived the first four, since this
+  entry lists its open work by *route* and they live in shared components no route owns. It is proven armed
+  two ways rather than trusted: against a synthetic bad site, whose `file:line` it reports, and by asserting
+  the sweep really walked the tree (>80 files, two named ones present) — an empty result is what a clean
+  tree and a broken scanner both look like. It deliberately says nothing about a `Tooltip` on a *control*:
+  that half is a judgement per site (a button that only previews something is a safe way to find out), which
+  is not a guard's business. **It caught a non-defect on its first real run and the rule was narrowed
+  honestly rather than quietly:** it flagged the frames table's `Rejected — …` badge, whose tooltip repeats
+  the badge's own text — the site the seventh slice had already, correctly, left. So the rule is *a
+  `<Tooltip>` around a `Badge` is a defect **when the tooltip says something the badge does not***, and the
+  other case opts out with a `hint-anchor-exempt:` marker carrying its reason; a second test pins the
+  exempt list **by file**, so a second exemption cannot be added silently.
+  `frontend/tsconfig.json` gains `"vite/client"` to its `types` so
+  `import.meta.glob` is typed; `vite` was already a devDependency and nothing new is installed.
+  **▶ NINTH SLICE SHIPPED — v0.414.1, the one *interactive* site the same measurement said was worth
+  doing** (same run, same branch). Stack's **"Save as defaults"** carried its sentence on a `<Tooltip>`
+  wrapped around the button, and that sentence is the only statement anywhere that the button also decides
+  what the *unattended* walk-away stack does for that target — a persistent effect, since the saved blob
+  wins over `default_stack_options` in both readers (v0.372.0). So on a phone the one gesture available for
+  "what does this do?" was the gesture that did it: the v0.402.1 defect on a button whose consequence
+  outlives the page. (The explanation *does* exist — in the success notification, i.e. after the save.) Now
+  a `HintIcon` **beside** the button inside a `Group gap={6}`, so its label, action and accessible name are
+  untouched and the four existing assertions that find it by role and name pass unchanged. **The rest of the
+  interactive half stays category (b), checked rather than assumed:** the editor's preview-tool row has had
+  `PreviewToolGuide` since v0.402.0; `IncomingCalibrationCard`'s tip only names the file its own card
+  describes; History's *"Reuse settings"* / *"Compare"* navigate, which is reversible, and would need one
+  icon **per run card** — the "one more always-on element" the standing IA priority exists to prevent; and
+  Stack's disabled *"Start stacking"* tip repeats, word for word, the yellow *"No plate-solved frames yet"*
+  alert at the top of the same page (a disabled `<button>` receives no pointer events, so it was never
+  reachable on a mouse either). Regression in `Stack.test.tsx`, failing before **by saving**.
+
+  **Still open, unchanged from the list above:** `BestMonthsStrip`, `MosaicMapCard`, `LifeList` and
+  `ImageLightbox`'s bare-icon anchors — each is a *chart cell or an icon button*, not a chip, so each wants
+  its own judgement rather than the one-line swap; and the interactive half of the class generally.
+
 
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — surface calibration-master mismatches (and a *never-applied* wrong-shaped
   bias) at *bind time* in the calibration UI, not only buried in the stack log.** *(Friendliness + trust; size S–M;
@@ -2904,7 +2951,10 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
-- **v0.414.0** — PRIORITY 2/4 (autonomy + image quality), a bug verified and fixed in one run: **the walk-away minimum-frames floor counted a mosaic's subs, not its depth.** `auto_stack_min_frames` exists to stop the hands-off scan publishing single-frame colour speckle, and asked the question of the target's *frame count* — right on a single field, wrong on a mosaic, where a 3×3 one pass in has nine subs and a picture one sub deep everywhere, so `9 >= 3` waved it through on exactly the canvases the owner shoots. New `stacker.panel_frame_counts` + `typical_panel_depth` (the **frame-weighted** median panel depth — stray-proof, and it does not strand a mosaic for one thin corner the way the thinnest panel would); the hold reuses the existing `auto_stack_held_thin` discipline (no attempt marker, self-clearing) and `auto_stack_min_frames = 1` stays the opt-out. Plus the three sentences that would then have argued with their own numbers — Jobs, the Dashboard's overnight digest, and the Target page, which could not see this hold at all until the new read-only `GET /api/targets/{safe}/autostack-thin-hold`. Single field byte-for-byte unchanged. Full entry in [`SHIPPED.md`](SHIPPED.md). Tests +22, three fail before.
+- **v0.415.0** — PRIORITY 2/4 (autonomy + image quality), a bug verified and fixed in one run: **the walk-away minimum-frames floor counted a mosaic's subs, not its depth.** `auto_stack_min_frames` exists to stop the hands-off scan publishing single-frame colour speckle, and asked the question of the target's *frame count* — right on a single field, wrong on a mosaic, where a 3×3 one pass in has nine subs and a picture one sub deep everywhere, so `9 >= 3` waved it through on exactly the canvases the owner shoots. New `stacker.panel_frame_counts` + `typical_panel_depth` (the **frame-weighted** median panel depth — stray-proof, and it does not strand a mosaic for one thin corner the way the thinnest panel would); the hold reuses the existing `auto_stack_held_thin` discipline (no attempt marker, self-clearing) and `auto_stack_min_frames = 1` stays the opt-out. Plus the three sentences that would then have argued with their own numbers — Jobs, the Dashboard's overnight digest, and the Target page, which could not see this hold at all until the new read-only `GET /api/targets/{safe}/autostack-thin-hold`. Single field byte-for-byte unchanged. Full entry in [`SHIPPED.md`](SHIPPED.md). Tests +22, three fail before.
+- **v0.414.2** — 🐛 VERIFIED BUG (upgrade-safety, AGENTS.md §9 "the container still builds and boots"; Builder-reproduced 14 times by accident this run): **the app refused to boot over a missing *frontend*.** `main._mount_spa` read "is the frontend built?" off `STATIC_DIR.exists()` — the *directory* — then mounted `static/assets` unconditionally, and `StaticFiles` raises in its constructor when the directory is absent. So an **empty** `webapp/static/` took the "built" branch and raised out of `create_app()`: no API, no Settings page, no job queue, over a missing frontend the placeholder branch one line above already knows how to survive. Reachable because `vite build` sets `emptyOutDir` on `../webapp/static`, so **every build deletes that tree before writing it** — an interrupted build, a half-copied image layer, or (here) a pytest session overlapping one. Fixed by testing `index.html` rather than the directory, and mounting `/assets` only when it is there — nothing is lost, since the SPA catch-all already serves any file under the static root with the same resolved-path confinement. A complete build is served byte-for-byte as before. No config, schema, on-disk, endpoint, response-shape or default change. Tests +6, five fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.414.1** — FRIENDLINESS (PRIORITY 3, the ninth slice of the phone-invisible-Tooltip entry — the one *interactive* site the measurement said was worth doing): **asking what "Save as defaults" does no longer saves your defaults.** Its `<Tooltip>` wrapped the button, and its sentence is the only place the app says the button also drives *auto-stacking for this target* — so on a phone the one gesture available for "what does this do?" performed the persistent save. Now a `HintIcon` beside the button; label, action and accessible name untouched, hover unchanged. Frontend-only. Tests +1, fails before by saving. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.414.0** — FRIENDLINESS (PRIORITY 3, the eighth slice — the "still open" remainder of v0.413.0–2's own list, **shipped after a collision in which the other Builder's `HintAnchor` landed first and mine was dropped**; see `PROCESS-NOTES.md`, collision #14): **the last chips whose meaning a phone could not ask for** — `NightsCard` ×3, `Calibration` ×2, `BestPictures` ×2, `Gallery` ×1, converted to `HintAnchor` one line each, with `NightsCard`'s verdict badge skipping the anchor entirely when it has no sentence rather than passing `disabled` (an anchor makes its child a tab stop with `role="button"`). **Plus the durable half: a drift guard.** `hintAnchorDrift.test.ts` reads every non-test `.tsx` through `import.meta.glob` and fails if any `<Tooltip>`'s first child is a `<Badge>` — eight sweeps have each fixed the sites of the day and nothing stopped the next being written the old way, which is exactly how the badges survived four of them. Proven armed against a synthetic bad site *and* proven to have walked the tree. Frontend-only; `tsconfig.json` gains `"vite/client"` so the guard is typed. Tests +3. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.413.2** — PRIORITY 1/3 (the editor and the Target page), the seventh slice of the same entry and the one that carries a **bug**: **asking what "slower preview" means no longer adds the slow op.** `SlowPreviewChip` renders *inside* the Add menu's `Menu.Item`, so on a phone the only gesture for "what does this mean?" added the very op being warned about — the v0.402.1 defect one level out, and the same shape in `OpList`'s three row chips, where the tap selected the op. New opt-in `stopPropagation` on `HintAnchor` (off by default: swallowing a click a page expects is the worse failure). Also the Target page's `N integration` / **`N streaked`** / **`N trailed`** badges, each of which sits beside a bulk-reject button while what a streak *is* — and that Auto outlier removal keeps the frame — was hover-only. Eight sites. The frames table's column headings and the per-frame `Rejected — …` badge are deliberately left (the heading's tap *sorts*, and `FrameColumnGuide` already gives those sentences a reachable home; the reject badge's tooltip repeats its own text). Frontend-only; no config, schema, on-disk, endpoint, response-shape or default change. Tests +3, two fail before.
 - **v0.413.1** — PRIORITY 3 (friendliness), the sixth slice of the same entry and the one that reaches the **most phone-critical page in the app**: **the Tonight page's planning verdicts now answer a tap.** You read Tonight standing next to the scope, in the dark, on a phone — and its score badge and four per-target chips (`readyHint`, `difficultyRowBadge`, `framingRowBadge`, `recentreNudgeRowBadge`) each printed a two-word verdict whose *reason* opened on `mouseenter` and on nothing else. Nine sites through `HintAnchor`: `routes/Tonight.tsx` ×5, `SuggestTargetsCard` ×2 (the Dashboard's copy of the same chips), `ContinueTonightCard`'s re-centre nudge, and `NextSessionCard`'s window line — whose hint is the honest **UTC** anchor behind the local wall-clock it prints, the same one its `.ics` carries. Four now-wrong "shown on hover" comments in `components/nextSession.ts` refreshed with it. Frontend-only; no config, schema, on-disk, endpoint, response-shape or default change. Tests +2, both fail before.
 - **v0.413.0** — PRIORITY 3 (friendliness on the device the owner reads this app on), the fifth slice of the "a Tooltip is invisible on a phone" entry and the first to take its *other* half: **a stack card's verdict chips now explain themselves on a tap, not only on a hover.** Mantine's `Tooltip` ships `events={{ hover: true, focus: false, touch: false }}`, so of the app's 105 tooltips the **53 hanging off a non-control anchor** — a `Badge`, a `Text` — open on `mouseenter` and on nothing else: on a phone the sentence is not written at all. Enabling Mantine's `touch` is not the fix (floating-ui opens on `pointerenter` and closes on the `pointerleave` a lifted finger fires). New `components/HintAnchor.tsx` is the app's own controlled-tooltip affordance (`HintIcon`, v0.402.1) applied to an anchor with no behaviour to collide with; it **clones the child** rather than wrapping it, so no row moves and no page gets taller, and it keeps the site's own handlers and role. Applied to the eleven verdict chips of a stack card — `NoiseReadout`, `NoiseDelta`, `CleanestBadge`, `FocusChip` ×2, `CalibrationBadge`, `HazyNightBadge`, `PanelSeamsBadge`, `RejectionBadge`, `FrameCountBadge`'s thin-stack warning, and History's own *"what's this?"*, which is the sharpest case (two words that *invite* a question, answering only a hover). Hover is byte-for-byte what it was; keyboard users gain the hints for the first time. Frontend-only: no config, schema, on-disk, endpoint, response-shape or default change. Tests +9, three fail before.

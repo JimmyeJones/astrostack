@@ -14,6 +14,7 @@ import { api, type StackOptionField } from "../api/client";
 import { dependencyMet } from "../api/depends";
 import { autoRejectMethodNote as autoRejectMethodNoteText } from "../autoRejectNote";
 import { backgroundModeLabel, backgroundModeNudge } from "../backgroundModeNudge";
+import { HintIcon } from "../components/HintIcon";
 import { SampleTourNote } from "../components/SampleTourNote";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import {
@@ -1535,11 +1536,20 @@ export function StackView() {
           ) : null}
 
           <Group justify="flex-end" mt="sm">
-            <Tooltip label="Remember what you changed (and your calibration picks) for this target — it pre-fills this form and is used when auto-stacking is on. Anything left at your global setting keeps following it.">
+            {/* The hint is an icon *beside* the button, not a Tooltip around
+                it (v0.413.1). This sentence is the only place the app says the
+                button also drives auto-stacking for this target — and wrapping
+                the button meant the one gesture a phone has for "what does this
+                do?" was the gesture that performed the save. The same defect
+                v0.402.1 fixed on five Switch/SegmentedControl sites, on a button
+                whose consequence is persistent. Hover keeps the words for anyone
+                with a mouse; the button's own label and action are untouched. */}
+            <Group gap={6} wrap="nowrap">
               <Button variant="default" onClick={() => saveDefaults.mutate()} loading={saveDefaults.isPending}>
                 Save as defaults
               </Button>
-            </Tooltip>
+              <HintIcon hint="Remember what you changed (and your calibration picks) for this target — it pre-fills this form and is used when auto-stacking is on. Anything left at your global setting keeps following it." />
+            </Group>
             <Tooltip
               label="Plate-solve at least one accepted frame first"
               disabled={!noSolved}

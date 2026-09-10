@@ -192,7 +192,18 @@ def _install_auth_gate(app: FastAPI) -> None:
 
 def _mount_spa(app: FastAPI) -> None:
     """Serve the built frontend, with an SPA fallback for client routes."""
-    if not STATIC_DIR.exists():
+    index = STATIC_DIR / "index.html"
+    # "Is the frontend built?" is `index.html`, not the *directory*. The dir can
+    # exist and be empty — `vite build` sets `emptyOutDir`, so it deletes this
+    # tree before it writes it, and an interrupted build (or a half-copied image
+    # layer) leaves exactly that. The old guard checked only the directory and
+    # then mounted `static/assets` unconditionally, so that state raised
+    # `RuntimeError: Directory '…/static/assets' does not exist` out of
+    # `create_app()` and **the whole app refused to boot** — API, Settings and
+    # all — over a missing *frontend*. AGENTS.md §9 asks the opposite: the
+    # container must still boot. Reproduced 14 times in one run, by a pytest
+    # session that happened to overlap a `vite build`.
+    if not index.is_file():
         @app.get("/")
         def _placeholder() -> JSONResponse:
             return JSONResponse(
@@ -201,8 +212,12 @@ def _mount_spa(app: FastAPI) -> None:
             )
         return
 
-    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
-    index = STATIC_DIR / "index.html"
+    # Mounted only when it is really there. Nothing is lost if it is not: the SPA
+    # catch-all below already serves any *file* under the static root, so a build
+    # that emitted its chunks elsewhere still works — just without the mount's
+    # own caching path.
+    if (STATIC_DIR / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
     static_root = STATIC_DIR.resolve()
 
     @app.get("/{full_path:path}")
