@@ -84,7 +84,7 @@ parametrized test.
 ### Green gates
 
 Baseline on `origin/main` before any change: **5,500 passed / 2 skipped**
-(26m16s). After: the same suite plus this task's **+9**. Frontend, because
+(26m16s). After: **5,511 passed / 2 skipped** (26m31s), exactly **+11**. Frontend, because
 `MoonSun.tsx` changed: `npx tsc --noEmit` clean, **3,550 tests** in 253 files,
 `npx vite build` succeeds. `ruff check` clean on every file touched.
 
