@@ -202,10 +202,92 @@ def source_is_cfa_mosaic(pix_fmt: str | None) -> bool:
     return fmt in _MOSAIC_PIX_FMTS or fmt.startswith(_MOSAIC_PIX_FMT_PREFIXES)
 
 
-#: The Seestar's colour-filter layout. Stated once here rather than guessed:
-#: ``seestack/io/fits_loader.py`` already documents it for the deep-sky path
-#: ("The Seestar uses 'RGGB'") and :func:`bilinear_debayer` defaults to it.
-CFA_PATTERN = "RGGB"
+#: The two colour-filter phases one Seestar sensor can reach a demosaic in, and
+#: why a single constant was the wrong shape for this. The deep-sky path reads
+#: ``BAYERPAT`` out of the FITS header and only *falls back* to ``RGGB``
+#: (``seestack/io/fits_loader.py``); video carries no header, so taking the same
+#: name as a constant here was an assumption, not a device fact.
+#:
+#: **Measured on the owner's own** ``2026-06-19-175558-Solar-RAW.avi``, as the
+#: mean of each 2×2 sub-lattice inside the disk: ``(0,0)`` 40.7, ``(0,1)`` 10.2,
+#: ``(1,0)`` 131.7, ``(1,1)`` 40.7. The two *matched* values are the two green
+#: photosites, and they sit on the **main** diagonal — where ``RGGB`` puts red
+#: and blue, which here are 13:1 apart. Debayering it as ``RGGB`` therefore
+#: averaged the darkest and brightest sites together to make "green": that is
+#: both the **green Sun** the owner reported after v0.347.0 and the alternating
+#: residual (mesh, 40.50) that the same fix was supposed to remove. ``GBRG``
+#: leaves 0.00 residual and a red/orange disk — physically right for a
+#: white-light solar filter.
+#:
+#: ⚠️ **CFA phase and frame orientation are one coupled invariant.** ``RGGB``
+#: row-flipped is *exactly* ``GBRG``, which is almost certainly why the two
+#: paths disagree: AVI is conventionally stored bottom-up, so the rows reach
+#: this demosaic in the opposite order from the FITS path. If a future change
+#: ever flips a video frame vertically to fix its orientation, **the pattern
+#: flips with it** and the green Sun comes straight back. Detection below makes
+#: that self-correcting, and
+#: ``test_video_cfa_mosaic.py::test_the_two_patterns_are_one_row_flip_apart``
+#: pins the relationship so neither can be changed alone.
+CFA_PATTERN_GREEN_ANTIDIAGONAL = "RGGB"
+CFA_PATTERN_GREEN_DIAGONAL = "GBRG"
+
+#: What to debayer as when a frame carries no colour information to read — the
+#: measured phase of the owner's real capture, not the deep-sky path's name.
+CFA_PATTERN = CFA_PATTERN_GREEN_DIAGONAL
+
+#: The green pair must be at least this many times better matched than the other
+#: diagonal before :func:`detect_cfa_pattern` believes itself. On the owner's
+#: file the two diagonals are 0.0 and 121.5 DN apart, so the real margin is
+#: enormous; this only has to exclude the ambiguous middle.
+_CFA_DETECT_MATCH_RATIO = 0.5
+
+#: …and the *un*matched diagonal must be separated by at least this many DN at
+#: all, so shot noise on a genuinely flat frame (a dark, a blank sky, a blown
+#: disk) cannot elect a diagonal out of nothing. Each sub-lattice mean averages
+#: a quarter of the frame, so its noise is well under a tenth of a DN.
+_CFA_DETECT_MIN_SPREAD_DN = 1.0
+
+
+def detect_cfa_pattern(mosaic: np.ndarray) -> str:
+    """Which colour-filter phase this raw sensor plane is in.
+
+    Reads the answer off the frame instead of asserting it, because the one
+    thing video has no way to state is its own ``BAYERPAT``. The two green
+    photosites of a Bayer 2×2 see the *same* filter, so their sub-lattice means
+    match to within noise while red's and blue's do not — which identifies the
+    green **diagonal** objectively, from four means over one frame.
+
+    Green on the anti-diagonal is ``RGGB``; green on the main diagonal is
+    ``GBRG``. Red-vs-blue *within* the winning pair cannot be read from a mosaic
+    at all (``GBRG`` and ``GRBG`` differ only by swapping them, and both leave
+    zero residual), so that stays the device fact the owner's measurement
+    establishes: on this sensor the brighter site through a white-light solar
+    filter is red.
+
+    Returns :data:`CFA_PATTERN` when the frame is too flat to call, so a dark or
+    an unexposed capture degrades to the measured default rather than to a coin
+    toss.
+    """
+    a = np.asarray(mosaic)
+    if a.ndim != 2:
+        raise ValueError("mosaic must be 2D")
+    # Crop to even dimensions: an odd trailing row/column would put a different
+    # count of pixels behind each phase and bias the means it decides on.
+    h, w = a.shape[0] - a.shape[0] % 2, a.shape[1] - a.shape[1] % 2
+    if h < 2 or w < 2:
+        return CFA_PATTERN
+    a = a[:h, :w].astype(np.float64)
+    means = {(i, j): float(a[i::2, j::2].mean()) for i in (0, 1) for j in (0, 1)}
+    diagonal = abs(means[(0, 0)] - means[(1, 1)])
+    antidiagonal = abs(means[(0, 1)] - means[(1, 0)])
+    matched, unmatched = sorted((diagonal, antidiagonal))
+    if unmatched < _CFA_DETECT_MIN_SPREAD_DN:
+        return CFA_PATTERN  # nothing to read — a flat or unexposed frame
+    if matched > unmatched * _CFA_DETECT_MATCH_RATIO:
+        return CFA_PATTERN  # both diagonals equally mismatched: not a call
+    if diagonal < antidiagonal:
+        return CFA_PATTERN_GREEN_DIAGONAL
+    return CFA_PATTERN_GREEN_ANTIDIAGONAL
 
 
 def iter_frames(
@@ -281,6 +363,7 @@ def iter_frames(
             pix_fmt = info.pix_fmt
     mosaic_source = source_is_cfa_mosaic(pix_fmt)
     demosaic: bool | None = None  # decided on the first frame, then latched
+    pattern = CFA_PATTERN  # ditto — the sensor's phase cannot change mid-stream
 
     stride = max(1, int(stride))
     cmd = [exe, "-v", "error", "-nostdin", "-i", str(path)]
@@ -320,14 +403,24 @@ def iter_frames(
                 # itself is worth skipping.
                 if demosaic is None:
                     demosaic = _channels_agree(frame)
-                    if not demosaic:
+                    if demosaic:
+                        # Latched here for the same reason, and it matters more:
+                        # the phase is a property of the sensor, so re-reading it
+                        # per frame could only ever make the *colours change
+                        # mid-capture* if one frame were too flat to call.
+                        pattern = detect_cfa_pattern(frame[..., 0])
+                        log.info(
+                            "%s is a raw sensor mosaic — debayering it as %s",
+                            Path(path).name, pattern,
+                        )
+                    else:
                         log.info(
                             "%s reports %s but decodes to real colour — leaving it "
                             "alone rather than demosaicing a picture",
                             Path(path).name, pix_fmt,
                         )
                 if demosaic and keep:
-                    frame = _demosaic_frame(frame)
+                    frame = _demosaic_frame(frame, pattern=pattern)
             yield frame if keep else None
     finally:
         if proc.poll() is None:
@@ -349,7 +442,7 @@ def _channels_agree(frame: np.ndarray) -> bool:
     )
 
 
-def _demosaic_frame(frame: np.ndarray) -> np.ndarray:
+def _demosaic_frame(frame: np.ndarray, *, pattern: str = CFA_PATTERN) -> np.ndarray:
     """Turn a replicated-mosaic ``rgb24`` frame into a real colour frame.
 
     Reuses the engine's own :func:`~seestack.io.fits_loader.bilinear_debayer` —
@@ -357,8 +450,12 @@ def _demosaic_frame(frame: np.ndarray) -> np.ndarray:
     second demosaic here. It preserves dtype, so the ``uint8`` contract this
     generator promises is unchanged, and the frame is **not** transposed or
     flipped on the way in: CFA phase depends on true row/column parity, so a
-    flip would silently swap colours while looking "fixed".
+    flip would silently swap colours while looking "fixed" — see
+    :data:`CFA_PATTERN_GREEN_DIAGONAL` for what that cost the owner once.
+
+    ``pattern`` comes from :func:`detect_cfa_pattern` on the stream's first
+    frame; the default is only for a caller demosaicing one frame on its own.
     """
     from seestack.io.fits_loader import bilinear_debayer
 
-    return bilinear_debayer(frame[..., 0], pattern=CFA_PATTERN)
+    return bilinear_debayer(frame[..., 0], pattern=pattern)
