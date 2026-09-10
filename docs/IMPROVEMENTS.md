@@ -90,6 +90,70 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > the target of any "see above" / "see below" in the entries below that no longer resolves
 > here.
 
+- **⭐ 🔴 OWNER HITS THIS FIRST (fourth external audit, 2026-09-10 — reproduced in the shipped image over a
+  v0.277.0 data volume) — a mosaic Auto-edited on the old build keeps D1's crop in its saved recipe, and the new
+  build shows it as-is: a sliver for the hero, the Library card, the editor and the share sheet, under an auto-note
+  that still says "97% of ragged mosaic edge to trim".** *(Severity: high — every mosaic he processed before D1's
+  fix; the picture is wrong and the sentence beside it calls it right. Confidence: HIGH — v0.277.0 wrote the
+  recipe `geometry.crop {x0 0.6228, y0 0.0341, x1 0.6896, y1 0.5463}` = 3.4 % of a 5089×2045 canvas; after
+  `up -d --build` on v0.407.1 the same run's `editor/trim-suggestion` says 7.6 % but `editor/preview` and
+  `/thumbnail` are 85×263 px and `editor/auto-note` repeats the 97 %; a Playwright sweep of those pages was
+  "CLEAN". Size: S–M.)* The D1 fixes re-derive the *trim* (`_trim_rect_for_run`) but nothing compares a **stored**
+  recipe's crop against it. **Fix direction:** when a run's saved recipe carries a `geometry.crop` that keeps less
+  than, say, half of what the current trim rule would keep (or under ~15 % of a mosaic canvas), (a) surface one
+  health note on the Target page and the editor — *"An older version trimmed this picture too far — re-run Auto"* —
+  with a one-click re-seed that replaces only the crop op, and (b) count them library-wide on the Dashboard once,
+  the way `NewSubsWaitingNote` does. Never silently rewrite a saved recipe (it may be his own crop); fix the
+  auto-note's percentage from the recipe on display rather than from the stale stored sentence. Regression test:
+  a run whose stored recipe crop disagrees with `largest_covered_rect` by more than the threshold **must** produce
+  the note; a run whose crop matches must not. *(Sibling he meets on the same screen: every pre-v0.313 run
+  shows "This picture can't say which night it's from → Stack it again" — twelve multi-hour offers at once on his
+  library. Not a bug, but the two banners together are the first thing he sees; consider one library-wide
+  "pictures from an older version" note instead of one per target.)*
+
+- **🟠 FIXTURES THAT CANNOT EXHIBIT THEIR BUG (fourth external audit, 2026-09-10 — both reproduced by reverting
+  the fix in a scratch script; see PROCESS-NOTES).** (1) `tests/test_edit_curve.py::
+  test_the_sky_stays_put_at_every_stack_depth[very-deep]` — at `noise=0.0006` the zero-clip spike is no longer
+  the tallest bin of `_sky_mode`'s `[p0.5, median]` histogram, so the **pre-A1** `_sky_mode` reads the sky
+  correctly (rel. error 0.048; 0.996 at the other three depths) and the test passes on the bug. The guard
+  `clipped_fraction(st) > 0.005` (and `displayspace.MIN_CLIPPED_FRACTION`) asserts the clip is *present*, not
+  *dominant*. **Fix:** make `assert_shadow_clip` histogram the finite values over `[p0.5, median]` (128 bins) and
+  assert `argmax == 0`, or drop the deepest noise to ~0.001 where the spike still wins. (2)
+  `tests/test_coverage_trim.py::test_a_ragged_mosaic_still_gets_its_fringe_trimmed` — with `panel_coverage_level`
+  reverted to the **peak**, the `TRIM_KEEP_RATIO` ladder yields kept **0.902**, inside the asserted `0.90 < kept
+  < 0.99` (fixed code: 0.975), so the "before the fix the same map was cropped to the overlap band" docstring is
+  no longer what the assertion pins. **Fix:** assert the rect equals the border rule's answer
+  `(5/400, 5/400, 395/400, 395/400)`, or raise the floor to 0.95. (3, note only) the v20/v21 fixtures in
+  `tests/test_project_schema_drift.py` are today's `SCHEMA_SQL` minus one or two columns, which
+  `_reconcile_table_columns` restores even with the migration steps deleted — the v9–v14 tests in
+  `tests/test_project.py` hand-write the old tables and are the pattern to copy. (S each; Confidence: HIGH.)
+
+- **🟠 CI CERTIFIES THE CHECKOUT, NEVER THE IMAGE (fourth external audit, 2026-09-10) — `READY`, infra, S.**
+  `.github/workflows/ci.yml` has two jobs, both against the source tree; the artifact the owner installs has
+  never been built or run by anything but his terminal (incident 2026-09-09). Add a third job that builds **from
+  the Dockerfile's own file set**: `docker build --target frontend -f docker/Dockerfile .` (fast; no ASTAP
+  download in that stage; fails on any import that reaches outside `frontend/`), then a Python smoke that copies
+  only what the Dockerfile copies (`pyproject.toml README.md seestack/ webapp/`) to a scratch dir, `pip install
+  "<dir>[web]"` **non-editable**, and from `cd /` runs `python -c "import webapp.main, webapp.sample_data;
+  from seestack import nightplan"` (exercises package-data and CWD-independence, which `pip install -e` at the
+  repo root never can). Verified in this audit's build that both would pass today. Batch with the same commit
+  (each traced in PROCESS-NOTES 2026-09-10): `RUN npm install` → `npm ci` with `package-lock.json` copied
+  unconditionally (CI uses `npm ci`; no drift today); **PySide6 is in the base `dependencies`, so `pip install
+  .[web]` installs 650 MB of Qt into a 1.89 GB image that never imports it** — move it to a `gui` extra and update
+  AGENTS.md §7 / `agent-setup.sh` / `ci.yml` to `.[dev,web,gui]`; `ENV ASTROSTACK_PORT` in the Dockerfile is dead
+  (`CMD` hardcodes 8000 — drop the ENV or use it); in `docker-compose.yml` use the long volume syntax with
+  `create_host_path: false` so a mistyped `ASTRO_DATA` fails loudly instead of booting on a fresh empty directory
+  (reproduced: Docker creates the missing host path and the app comes up with an empty library).
+
+- **🟡 THE EDITOR OFFERS A MODE THE IMAGE CANNOT RUN AND THE OWNER HAS DECLINED (fourth external audit,
+  2026-09-10).** `color_calibration_mode` = `"gaia"` (`webapp/schemas.py` ~1127, `seestack/edit/ops/tone.py`)
+  imports `astroquery.gaia` (`seestack/post/color_cal.py` ~387); `astroquery` is in no dependency list and is
+  absent from the image (`ModuleNotFoundError`), and it is a SIMBAD/CDS network call — declined by the LOCAL
+  rule (AGENTS.md §1). The broad `except Exception` at `color_cal.py` ~156 swallows it and falls back to
+  gray-star with only a log line, so picking it does nothing and says nothing. **Fix:** remove the option from the
+  schema and the op (keep the engine branch inert), and let a stored recipe that names it load as `gray_star`
+  with the auto-note saying so. (S, friendliness; confidence HIGH — checked in the running image.)
+
 - **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** ~~No validator
   stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
   resolves inside the raw tree — *not* the owner's current state, but one settings edit away)~~ *(shipped
