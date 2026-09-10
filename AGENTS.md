@@ -758,6 +758,25 @@ and if `main`'s CI is red at the start of a run, **fixing it is your first task*
 (it means the last merge broke something). Keep CI green — never merge changes
 you expect to fail it.
 
+**Green means the checkout passed, not that the owner's install works** *(added
+2026-09-10 by the fourth external audit, the first to build and run the image)*.
+CI checks out the whole repo; the image is built from `docker/Dockerfile`'s own
+file set (`frontend/`, `seestack/`, `webapp/`, `pyproject.toml`, `README.md` —
+`tests/` and `docs/` are not there) and runs from `/app` with a non-editable
+install. The 2026-09-09 deploy failure was exactly that gap. So: **any change to
+`docker/`, `.dockerignore`, `frontend/package.json` scripts or `tsconfig*`,
+`pyproject.toml` dependencies or package-data, or any new import that reaches
+outside those directories must be checked against the image, not the tree** —
+`docker build --target frontend -f docker/Dockerfile .` for the frontend (fast, no
+ASTAP download), and for Python a non-editable `pip install` of a copy holding only
+what the Dockerfile copies, imported from `cd /`. Until the `READY` CI job in the
+backlog lands, that is a manual step, and a run that skips it has not verified the
+artifact. The same rule in test form: a "regression test" whose fixture cannot show
+the bug — the stack-depth A1 case, the ragged-mosaic D1 band — is green for the same
+reason a Dockerfile-context break is green: it is looking at something other than
+what the owner has. Before claiming a fix is pinned, revert the fix in a scratch
+script and watch the test fail.
+
 **Absolute rules for merging:**
 - Only ever merge a **fully green** branch. Green tests are the safety gate that
   replaces a human reviewer — treat §5 as mandatory before every merge.
