@@ -76,6 +76,11 @@ run is *finished* before the first edit. On this container the suite takes ~80
 minutes, not the ~25 earlier notes record, so "read the backlog while it runs"
 is the wrong plan: pick the task first, then start the baseline, then read.
 
+**Green gates on the merged tree** (this branch, after taking `origin/main`'s
+own v0.414.0–.2): Python **5,579 passed / 2 skipped** (28m20s), `npx tsc
+--noEmit` clean, vitest **256 files / 3,580 tests**, `npx vite build` ✓ — run
+*after* pytest finished, per the §7 rule main added this hour.
+
 **Dogfood.** `--empty` (the first-run app): CLEAN — nothing overflowing, no
 console errors, tallest page `/life-list` at 2,779 px on a phone. Not a mosaic
 pass, and no Auto/editor claim is made in this run.

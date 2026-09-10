@@ -65,7 +65,7 @@ read, same self-clearing, no state of its own).
 "not a mosaic", which is right for every hold recorded before this existed). No config, DB-schema, on-disk
 or API-shape change, and no stored default flipped.
 
-**Tests (+22, three failing before):** `tests/test_autostack_mosaic_depth.py` (13 — the counts, the dither
+**Tests (+30, three failing before):** `tests/test_autostack_mosaic_depth.py` (11 — the counts, the dither
 that stays one panel, unsolved/non-finite pointings skipped, the nine-subs-one-deep case, the thin corner
 that must *not* speak for the mosaic, the stray that must not hold back a single field, and the ordering
 invariant), `tests/webapp/test_auto_stack_pipeline.py` (+3 — the mosaic held with no attempt marker
