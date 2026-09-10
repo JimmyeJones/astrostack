@@ -269,7 +269,8 @@ def test_build_sibling_retry_arglist_skips_setup_failures_timeouts_and_identical
     try:
         # A fourth unsolved frame with NO header hint: the first pass already gave
         # it the sibling centre at the tight radius, so a retry would be identical.
-        e = tmp_path / "e.fit"; e.write_bytes(b"x")
+        e = tmp_path / "e.fit"
+        e.write_bytes(b"x")
         proj.add_frame(FrameRow(source_path=str(e), cached_path=str(e)))
 
         args = build_solve_arglist(proj, use_hint=True)
@@ -294,7 +295,8 @@ def test_build_sibling_retry_arglist_is_empty_until_something_has_solved(tmp_pat
 
     proj = Project.create(tmp_path / "p", name="t")
     try:
-        b = tmp_path / "b.fit"; b.write_bytes(b"x")
+        b = tmp_path / "b.fit"
+        b.write_bytes(b"x")
         proj.add_frame(FrameRow(source_path=str(b), cached_path=str(b),
                                 ra_hint_deg=201.5, dec_hint_deg=11.2))
         args = build_solve_arglist(proj, use_hint=True)
