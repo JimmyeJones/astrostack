@@ -1837,3 +1837,37 @@ def test_the_sibling_retry_pass_stands_down_when_nothing_solved_at_all(tmp_path,
         assert len(calls) == 3
     finally:
         proj.close()
+
+
+def test_a_successful_bootstrap_rescue_is_not_logged_as_a_failure(tmp_path, monkeypatch, caplog):
+    """The rescue's own log line must not be the thing that reports a failure.
+
+    ``Project`` keeps the target's name in its meta table and has no ``.name``
+    attribute, so reading it raised *inside* the bootstrap's ``try`` — turning the
+    one line that credits a **successful** rescue into the "bootstrap failed"
+    warning below it, on the opt-in path a beginner turns on precisely because
+    their faint targets aren't stacking.
+    """
+    import logging
+
+    from seestack.solve import bootstrap as bootstrap_mod
+    from seestack.solve.bootstrap import BootstrapResult
+
+    proj = Project.create(tmp_path / "p", name="NGC 6888")
+    try:
+        monkeypatch.setattr(
+            bootstrap_mod, "bootstrap_solve",
+            lambda project, **kw: BootstrapResult(
+                engaged=True, deep_solved=True, n_propagated=3),
+        )
+        with caplog.at_level(logging.INFO, logger="seestack.io.scanner"):
+            summary = run_qc_and_solve(proj, run_qc=False, run_solve=True,
+                                       serial=True, bootstrap_solve=True)
+
+        assert summary["bootstrap_propagated"] == 3
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING], \
+            "a successful rescue reported itself as a failure"
+        assert any("rescued 3 sub(s) for NGC 6888" in r.getMessage()
+                   for r in caplog.records)
+    finally:
+        proj.close()
