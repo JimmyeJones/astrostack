@@ -311,6 +311,38 @@ def _solve_once(labels: list[int], pairs: dict[tuple[int, int], float],
     return solution, design @ solution - rhs, keys
 
 
+def _normalise(labels: list[int], pairs: dict[tuple[int, int], float],
+               solution: np.ndarray) -> np.ndarray:
+    """Centre the *measured* panels on 1.0, and leave every other panel there.
+
+    Two jobs at once, and doing only the first is the bug this function was
+    extracted for. **Centre:** the pass moves panels relative to each other, so
+    the finished picture's overall brightness must not move with them — the
+    median *measured* panel therefore stays at 1.0. **Leave alone:** a panel
+    that ends the fit sharing no surviving pair has no evidence behind it at
+    all, and this module's rule is that no evidence means no change.
+
+    Subtracting a median taken over **every** panel did the first and quietly
+    undid the second. ``lstsq``'s minimum-norm solution does give an unpaired
+    panel 0, but 0 only means "scale 1.0" while the median it is then shifted
+    by is itself 0 — which a lopsided pair graph makes false. Measured on three
+    panels each reading 1.2× against a fourth, plus one panel sharing nothing:
+    that last panel came out at **0.955**, a 4.5 % dimming of a whole tile on
+    an overlap it never had.
+
+    A mosaic whose panels are all measured — the ordinary case, and every one
+    the pass was shipped against — is byte-for-byte unchanged: the two medians
+    are then the same number over the same values, and nothing is pinned.
+    """
+    measured = {panel for key in pairs for panel in key}
+    keep = np.array([label in measured for label in labels], dtype=bool)
+    out = np.zeros_like(solution)
+    if not keep.any():  # pragma: no cover — ``pairs`` is non-empty here
+        return out
+    out[keep] = solution[keep] - float(np.median(solution[keep]))
+    return out
+
+
 def _solve_log_scales(labels: list[int],
                       pairs: dict[tuple[int, int], float]) -> np.ndarray | None:
     """Per-panel log scale consistent with the pairs, or ``None`` to stand down.
@@ -329,6 +361,10 @@ def _solve_log_scales(labels: list[int],
     evidence of anything. A drop is therefore only taken while it would leave a
     loop behind, and a fit that still disagrees at that limit stands the pass
     down instead.
+
+    The accepted fit is handed to :func:`_normalise`, which centres it on the
+    panels that actually carry a *surviving* pair — the drop loop above is why
+    that set has to be read at the end rather than at the start.
     """
     remaining = dict(pairs)
     tol = float(np.log(MAX_FIT_RESIDUAL_RATIO))
@@ -336,11 +372,7 @@ def _solve_log_scales(labels: list[int],
         solution, residual, keys = _solve_once(labels, remaining)
         worst = float(np.max(np.abs(residual))) if residual.size else 0.0
         if worst <= tol:
-            # Normalise to the median panel, so the finished picture's overall
-            # brightness is exactly where it was — this pass moves panels
-            # *relative to each other*, it does not decide how bright the mosaic
-            # should be.
-            return solution - float(np.median(solution))
+            return _normalise(labels, remaining, solution)
         # A connected graph of ``n`` panels needs ``n - 1`` pairs to be a tree,
         # and a tree fits any ratios at all with zero residual. Only drop while
         # at least one loop would survive the drop.
