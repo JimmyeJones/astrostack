@@ -140,6 +140,17 @@ broken scanner both look like. It deliberately says nothing about a `Tooltip` on
 judgement per site (a button that only previews something is a safe way to find out), which is not a
 guard's business.
 
+**And the rule it enforces was narrowed honestly rather than quietly, because it caught a non-defect on its
+first real run.** It flagged the one site the other Builder had deliberately left — the frames table's
+`Rejected — …` badge, whose tooltip repeats the badge's own text (it adds only the word "Rejected"). They
+were right to leave it: making that a `HintAnchor` would put a tab stop on every rejected row for a
+sentence that says nothing new, and deleting the tooltip would remove a feature. So the rule is *a
+`<Tooltip>` around a `Badge` is a defect **when the tooltip says something the badge does not***, and a
+site that is the other case opts out with a `hint-anchor-exempt:` marker carrying its reason, on the tag's
+own line or in the comment block above it. The marker makes the next author write the reason down, and a
+second test pins the exempt list **by file** — so a second exemption cannot be added silently, while an
+edit above the first does not redden the suite.
+
 **Upgrade-safe (§9):** frontend-only. No API, response shape, schema, config, on-disk layout or default
 changed. `frontend/tsconfig.json` gains `"vite/client"` to its `types` array so the guard's
 `import.meta.glob` is typed; `vite` was already a devDependency and nothing new is installed.

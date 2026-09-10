@@ -1623,7 +1623,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   the sweep really walked the tree (>80 files, two named ones present) — an empty result is what a clean
   tree and a broken scanner both look like. It deliberately says nothing about a `Tooltip` on a *control*:
   that half is a judgement per site (a button that only previews something is a safe way to find out), which
-  is not a guard's business. `frontend/tsconfig.json` gains `"vite/client"` to its `types` so
+  is not a guard's business. **It caught a non-defect on its first real run and the rule was narrowed
+  honestly rather than quietly:** it flagged the frames table's `Rejected — …` badge, whose tooltip repeats
+  the badge's own text — the site the seventh slice had already, correctly, left. So the rule is *a
+  `<Tooltip>` around a `Badge` is a defect **when the tooltip says something the badge does not***, and the
+  other case opts out with a `hint-anchor-exempt:` marker carrying its reason; a second test pins the
+  exempt list **by file**, so a second exemption cannot be added silently.
+  `frontend/tsconfig.json` gains `"vite/client"` to its `types` so
   `import.meta.glob` is typed; `vite` was already a devDependency and nothing new is installed.
   **▶ NINTH SLICE SHIPPED — v0.414.1, the one *interactive* site the same measurement said was worth
   doing** (same run, same branch). Stack's **"Save as defaults"** carried its sentence on a `<Tooltip>`
