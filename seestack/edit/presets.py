@@ -104,11 +104,59 @@ def preset_recipe(preset_id: str) -> Recipe | None:
 _SKY_HALF_MAD_SCALE = 0.593
 
 
+def _detrended_luminance(lum: np.ndarray) -> np.ndarray:
+    """``lum`` with its smooth, frame-scale sky shape removed and its overall
+    level left where it was — the plane the *sky level* is measured on.
+
+    **Why the level needs this too.** v0.225.0 made the sky *noise*
+    structure-blind (adjacent-pixel differences, not the MAD of the sky's levels)
+    because a residual light-pollution gradient is structure, not grain. The sky
+    *level* was left reading the whole-image normalized median, which a gradient
+    moves bodily — and that number is what sets Auto's stretch target
+    (``0.24 - sky*0.4`` in :func:`auto_recipe`). Measured on
+    ``tests/test_auto_noise_measure.py``'s scene, adding a gradient took the
+    reported sky from **0.024 to 0.153** and the stretch target from **0.230 to
+    0.179**, finishing a picture whose sky was **23 % darker** — for a gradient
+    ``background.final_gradient``, Auto's own *first* op, removes before
+    ``tone.stretch`` ever sees the pixels. Detrending first makes it stable
+    (0.024 at every gradient tested).
+
+    **It corrects a measurement; it moves no threshold.** On a stack that has no
+    gradient there is no shape to remove, so the number does not move: 0.0240 →
+    0.0240 on that scene, and 0.00298 → 0.00298 on the bundled sample's real
+    proxy. The largest pixel it changes there is 0.17 % of the image's own robust
+    range, against 13.6 % on the tilted one.
+
+    Uses the same :func:`~seestack.bg.sky_poly.fit_sky_poly` primitive the two
+    background passes detrend with, so "the smooth shape light pollution has"
+    means one thing across the app. Declines — returns ``lum`` unchanged —
+    wherever that fit does (too little sky to fit, a non-finite surface), so an
+    image it cannot measure is measured exactly as it is today.
+    """
+    from seestack.bg.sky_poly import fit_sky_poly
+
+    finite = np.isfinite(lum)
+    if not finite.any():
+        return lum
+    surface = fit_sky_poly(lum, finite)
+    if surface is None or not np.all(np.isfinite(surface)):
+        return lum
+    # Subtract only the *shape*: keeping the surface's own median in place means
+    # this changes how flat the plane is, never how bright it is — so the sky
+    # level being measured is still this stack's sky level.
+    return lum - (surface - np.float32(np.median(surface)))
+
+
 def analyze_proxy(rgb: np.ndarray) -> dict[str, Any]:
     """Cheap content analysis of a proxy used to tailor the auto recipe:
     sky level, sky-noise fraction, and a coarse 'noisy' verdict.
 
-    The sky *level* is the robust median of the whole-image-normalized luminance.
+    The sky *level* is the robust median of the whole-image-normalized luminance,
+    measured after :func:`_detrended_luminance` takes the frame-scale sky shape
+    out — see there for why, and for the measurement. A mosaic's per-panel
+    *steps* are not a smooth shape, so that half is only partly answered here;
+    ``background.level_coverage`` is what actually removes them, and it runs
+    ahead of the stretch on exactly those stacks.
 
     The sky *noise* is measured **locally**, from the MAD of adjacent-pixel
     differences (``seestack.edit.noise.estimate_noise_sigma``), not from the
@@ -133,7 +181,14 @@ def analyze_proxy(rgb: np.ndarray) -> dict[str, Any]:
 
     arr = np.asarray(rgb, dtype=np.float32)
     lum = arr[..., :3].mean(axis=2) if arr.ndim == 3 else arr
-    finite = lum[np.isfinite(lum)]
+    if int(np.isfinite(lum).sum()) < 16:
+        return {"sky": 0.1, "sky_sigma": 0.0, "noisy": False}
+    # The *level* is read off the detrended plane (a gradient is structure, not a
+    # sky level); the *noise* below is still measured on the raw pixels, where its
+    # own estimator is already blind to that structure and its thresholds are
+    # calibrated.
+    flat = _detrended_luminance(lum)
+    finite = flat[np.isfinite(flat)]
     if finite.size < 16:
         return {"sky": 0.1, "sky_sigma": 0.0, "noisy": False}
     lo, hi = float(np.nanpercentile(finite, 0.5)), float(np.nanpercentile(finite, 99.5))
@@ -292,7 +347,9 @@ def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
     of them are measured on a **locally averaged** copy of the luminance
     (``_GEOM_SMOOTH_PX``) so that one unchanging sky gives one answer however
     many subs went into it — see that constant for the two mechanisms that made
-    them depth-dependent before:
+    them depth-dependent before — and on a **detrended** one
+    (:func:`_detrended_luminance`) so that one unchanging sky gives one answer
+    however much light pollution was sitting on top of it:
 
     * ``star_share`` — how much of the above-sky *signal* is compact point sources
       (from the same white-top-hat ``star_mask`` the editor uses). A field that is
@@ -320,6 +377,20 @@ def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
     n_cov = int(cover.sum())
     if n_cov < 1024:
         return none  # too little covered area to classify meaningfully
+
+    # Geometry is read off the plane with its frame-scale sky shape taken out, for
+    # the same reason v0.225.0 stopped measuring grain from the sky's levels: the
+    # signal threshold below is ``sky + max(0.06, 6·sky_sigma)`` where ``sky`` is a
+    # **global** median and ``sky_sigma`` the MAD of the levels beneath it, so a
+    # light-pollution gradient inflates the σ and the threshold rises until the
+    # faint diffuse structure disappears under it. Measured on a star-rich field
+    # with faint nebulosity, adding a tilt of 0.05 (on a 0.10 sky) took
+    # ``ext_frac`` 0.059 → 0.001 and ``star_share`` 0.67 → 0.99, turning a verdict
+    # of "nothing clear" into **globular cluster at confidence 1.0** — and it cuts
+    # the other way too: a real coloured nebula under a strong tilt was lost
+    # entirely. The colour cue below still reads the untouched ``arr`` (it is
+    # scale-invariant by construction), so only the geometry moves.
+    lum = _detrended_luminance(lum)
 
     lum_c = lum[cover]
     lo, hi = float(np.percentile(lum_c, 0.5)), float(np.percentile(lum_c, 99.5))

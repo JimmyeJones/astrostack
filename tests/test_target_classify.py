@@ -305,3 +305,80 @@ def test_smoothing_the_geometry_did_not_blur_stars_into_nebulosity():
         out = classify_target(rgb)
         assert out["cls"] == "cluster", f"lost the cluster at {n} subs: {out['cues']}"
         assert out["cues"]["ext_frac"] <= 0.012
+
+
+# ---------------------------------------------------------------------------
+# …and the same for a light-pollution GRADIENT (v0.409.1)
+#
+# The cues are thresholded at ``sky + max(0.06, 6·sky_sigma)``, built from a
+# *global* level median and the MAD of the levels beneath it — the estimator
+# v0.225.0 replaced in ``analyze_proxy`` for exactly this reason. A tilt inflates
+# that σ, the threshold rises, and the faint diffuse half of the picture vanishes
+# under it. The verdict then moves in **both** directions: a field with nothing
+# clear to say became a confident globular cluster, and a real coloured nebula
+# was lost. The tilt is one ``background.final_gradient`` removes before any of
+# this reaches a picture, so it must not decide the archetype.
+# ---------------------------------------------------------------------------
+
+
+def _tilted(rgb: np.ndarray, amount: float) -> np.ndarray:
+    """``rgb`` under a smooth left-to-right light-pollution ramp of ``amount``
+    across the frame."""
+    h, w = rgb.shape[:2]
+    ramp = np.mgrid[0:h, 0:w][1].astype(np.float32) / float(w) * float(amount)
+    return (np.asarray(rgb, np.float32) + ramp[..., None]).astype(np.float32)
+
+
+def _star_field_with_faint_nebulosity(seed: int = 6) -> np.ndarray:
+    """Many stars over a broad, faint diffuse glow — the shape a real Seestar
+    frame has, and the one whose verdict the tilt flips. Neither cue dominates,
+    so the classifier honestly declines on it."""
+    rng = np.random.default_rng(seed)
+    h = w = 220
+    lum = (np.full((h, w), 0.10, np.float32)
+           + 0.05 * _blob((h, w), 110, 110, 45)
+           + _stars((h, w), 150, rng, sigma=1.6))
+    rgb = np.repeat(lum[..., None], 3, axis=2).astype("float32")
+    return rgb + rng.normal(0, 0.004, rgb.shape).astype("float32")
+
+
+def test_a_gradient_does_not_invent_a_confident_verdict():
+    """The false positive: the tilt erases the diffuse half of the picture, so
+    what is left looks like a field of nothing but stars.
+
+    Before the fix, the same field went ``None`` → ``cluster`` at confidence
+    0.99 between tilt 0.02 and 0.05, with ``ext_frac`` collapsing 0.059 → 0.001
+    and ``star_share`` climbing 0.67 → 0.99.
+    """
+    field = _star_field_with_faint_nebulosity()
+    assert classify_target(field)["cls"] is None, "fixture must decline untilted"
+    for amount in (0.02, 0.05, 0.08):
+        out = classify_target(_tilted(field, amount))
+        assert out["cls"] is None, f"tilt {amount} invented {out['cls']}: {out['cues']}"
+        assert out["preset_id"] is None
+
+
+def test_a_gradient_does_not_lose_a_real_nebula():
+    """The false negative, on the same mechanism: a large coloured diffuse field
+    is a nebula whatever light pollution is sitting on it. At tilt 0.15 the
+    verdict used to disappear altogether."""
+    nebula = _coloured_nebula_field(0.01)
+    for amount in (0.0, 0.05, 0.15):
+        out = classify_target(_tilted(nebula, amount))
+        assert out["cls"] == "nebula", f"tilt {amount} lost the nebula: {out['cues']}"
+
+
+def test_a_gradient_does_not_move_a_galaxy_or_a_cluster_either():
+    """The guard against over-correcting: the two archetypes that were *already*
+    stable under a tilt must stay stable, and keep their presets."""
+    galaxy = _galaxy_field(0.01)
+    for amount in (0.0, 0.05, 0.15):
+        out = classify_target(_tilted(galaxy, amount))
+        assert out["cls"] == "galaxy" and out["preset_id"] == "galaxy_broadband"
+
+    rng = np.random.default_rng(4)
+    h = w = 220
+    lum = np.full((h, w), 0.02, np.float32) + _stars((h, w), 180, rng, sigma=1.0)
+    cluster = np.repeat(lum[..., None], 3, axis=2).astype("float32")
+    for amount in (0.0, 0.05, 0.15):
+        assert classify_target(_tilted(cluster, amount))["cls"] == "cluster"
