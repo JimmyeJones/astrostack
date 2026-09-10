@@ -310,6 +310,26 @@ def _trim_rect_for_run(run, min_frac: float = 0.5
     return (round(rect[0], 4), round(rect[1], 4), round(rect[2], 4), round(rect[3], 4))
 
 
+def _auto_measure_coverage(run, scale: float):
+    """The coverage map Auto should *measure* a run's sky level on: the proxy-grid
+    frame count where the run wrote one, else the weighted map, else ``None``.
+
+    Same precedence, and the same reason, as the sky-leveling op and the border
+    trim: a coverage value is a sum of per-frame *weights* once quality weighting
+    is on, which splits one real panel across a band of values, while the frame
+    count is flat inside a panel by construction.
+
+    Asked only for a **mosaic** run, because a mosaic run is exactly where Auto
+    prepends the pass that removes those steps — measuring out a step the recipe
+    is going to leave in would be the same mistake in the other direction. A
+    single-field run is never asked, never reads a sibling, and is measured
+    exactly as it is today."""
+    cov = _proxy_frame_coverage(run.fits_path, scale)
+    if cov is None:
+        cov = _proxy_coverage(run.fits_path, scale)
+    return cov
+
+
 def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
                               prefs: dict | None = None,
                               auto_crop: bool = True) -> Recipe:
@@ -319,6 +339,10 @@ def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
     without re-implementing it. A mosaic stack gets a coverage-leveling pass (and,
     when meaningful, a border trim) prepended; a single-field stack is unchanged.
 
+    The run's proxy-grid coverage map goes with the proxy, so Auto reads the sky
+    level off a plane with the panel steps that pass removes already taken out
+    (see :func:`_auto_measure_coverage` and ``presets._delevelled_luminance``).
+
     ``prefs`` is the library's Adaptive-Auto taste profile (see
     ``AUTO_PREFERENCES_META_KEY``): when supplied it shifts Auto's data-driven
     values toward the owner's taste, each clamped to a safe range. ``None``/empty ⇒
@@ -327,12 +351,13 @@ def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
     ``auto_crop`` is the owner's "let Auto trim the ragged border" preference
     (``auto_crop_border``, default on = today's behaviour); off keeps the full
     frame."""
-    rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
+    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     is_mosaic = _run_is_mosaic(run, load=True)
     trim = _trim_rect_for_run(run) if is_mosaic else None
     return presets_mod.auto_recipe(
         rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim,
-        prefs=prefs, auto_crop=auto_crop)
+        prefs=prefs, auto_crop=auto_crop,
+        coverage=_auto_measure_coverage(run, scale) if is_mosaic else None)
 
 
 def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | None,
@@ -343,12 +368,13 @@ def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | Non
     same trim rect) so the reported numbers match the recipe it would build, but
     returns only the analysis so the ``…/editor/auto`` Recipe response shape stays
     unchanged (a separate, additive sibling endpoint serves this)."""
-    rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
+    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     is_mosaic = _run_is_mosaic(run, load=True)
     trim = _trim_rect_for_run(run) if is_mosaic else None
     return presets_mod.analyze_auto_inputs(
         rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim,
-        auto_crop=auto_crop)
+        auto_crop=auto_crop,
+        coverage=_auto_measure_coverage(run, scale) if is_mosaic else None)
 
 
 def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:

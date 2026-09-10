@@ -147,16 +147,192 @@ def _detrended_luminance(lum: np.ndarray) -> np.ndarray:
     return lum - (surface - np.float32(np.median(surface)))
 
 
-def analyze_proxy(rgb: np.ndarray) -> dict[str, Any]:
+#: A coverage value has to cover at least this share of the covered canvas before
+#: :func:`_delevelled_luminance` will treat it as a **panel** whose step is worth
+#: removing. A mosaic panel, and the overlap band between two of them, is a large
+#: fraction of the canvas; the one-frame-deep slivers dithering leaves around a
+#: canvas's own rim are far smaller, and their medians are read off a handful of
+#: noisy pixels. Measured on the four-panel scene this is tested against, the
+#: reported level is unmoved (0.0240) for every share from 0.002 to 0.05 — the
+#: constant separates two populations that are far apart, it does not sit on a
+#: cliff. It is a *share*, not a pixel count, so it means the same thing at every
+#: proxy stride (the op next door has to scale its own floor by 1/step² for
+#: exactly that reason).
+_LEVEL_MIN_SHARE = 0.01
+
+#: ...and never fewer pixels than this outright, whatever the canvas size, so a
+#: level's "median" is a median rather than a coin toss. Matches the spirit of
+#: ``coverage_leveling._MIN_STRIDED_PIXELS``, with more headroom because nothing
+#: downstream rescues a level this pass measures badly.
+_LEVEL_MIN_PIXELS = 64
+
+#: How far above its own level's rough sky a pixel has to sit before it is treated
+#: as *object* rather than sky when a level's own sky level is measured. Matches
+#: ``level_by_coverage``'s ``object_sigma`` default, and exists for the same
+#: reason: a panel that a nebula happens to fill has a median that is the
+#: nebula's, and shifting the panel by it would subtract the object into the sky.
+_LEVEL_OBJECT_SIGMA = 2.0
+
+#: How many times the image's own **grain** a level's *retained* sample may be
+#: spread over before that level is refused outright. Mirrors
+#: ``coverage_leveling._RESCUE_MAX_SIGMA_RATIO``, and is the guard that keeps a
+#: panel a nebula genuinely fills from having the nebula's own level subtracted
+#: out of it: sky is flat, a region full of nebulosity is not. Measured over six
+#: scenes it reads **0.24–0.36** where the canvas is sky carrying an object and
+#: **5.1–12.5** where the canvas *is* the object, so this separates two
+#: populations rather than tuning a margin.
+_LEVEL_MAX_SIGMA_RATIO = 3.0
+
+
+def _delevelled_luminance(lum: np.ndarray,
+                          coverage: np.ndarray | None) -> np.ndarray:
+    """``lum`` with each *coverage level's* own step removed and the overall level
+    left where it was — the mosaic half of the plane the sky level is measured on.
+
+    **Why the level needs this too.** :func:`_detrended_luminance` takes out the
+    smooth, frame-scale shape a light-pollution gradient has. A mosaic's per-panel
+    offsets are not that shape — they are *steps* — so a degree-2 surface can only
+    partly absorb them, and the level Auto sets its stretch target from still read
+    **0.075** for a mosaic against **0.024** for the identical stack laid out as a
+    single field (v0.409.0's own "not over-claimed" note). Same bug as the
+    gradient, same reason it is a bug and not a trade-off: ``auto_recipe`` prepends
+    ``background.level_coverage`` on every mosaic, so those steps are gone before
+    ``tone.stretch`` sees a pixel — Auto was choosing the goal for one image by
+    measuring another.
+
+    So the steps are removed **the way the recipe removes them**: bin by the
+    integer coverage value and shift each bin by its own robust sky median, which
+    is what ``bg.coverage_leveling`` does (its ``rough_sky``), measured with that
+    module's own :func:`~seestack.bg.coverage_leveling._robust_stats` so "a
+    coverage level's own sky" means one thing across the app. It follows that this
+    can only answer what the op itself answers: two panels that happen to share a
+    frame count are one bin here exactly as they are one bin there.
+
+    Only the *shape* is subtracted — the canvas's own robust median is put back —
+    so, like the detrend beside it, this changes how flat the plane is and never
+    how bright it is.
+
+    Declines, returning ``lum`` unchanged, whenever there is nothing it can
+    honestly do: no coverage map, a map that doesn't match the luminance, or fewer
+    than two levels big enough to measure. Its callers pass a map **only for a
+    mosaic** — the runs whose recipe carries the leveling pass — so a single-field
+    stack's Auto never reaches here at all.
+    """
+    if coverage is None:
+        return lum
+    cov = np.asarray(coverage)
+    if cov.ndim == 3:
+        # A per-channel coverage map (WeightedSumAccumulator) is identical across
+        # channels for our pipeline — collapse it, exactly as the op does.
+        cov = cov[..., 0]
+    if cov.shape != lum.shape:
+        return lum
+    finite = np.isfinite(lum)
+    if not finite.any():
+        return lum
+    # The integer-rounded bin is what carries the visible panel structure (the op
+    # bins the same way, for the same reason).
+    with np.errstate(invalid="ignore"):
+        cov_int = np.rint(np.nan_to_num(cov.astype(np.float64, copy=False),
+                                        nan=0.0)).astype(np.int64)
+    valid = (cov_int > 0) & finite
+    n_valid = int(valid.sum())
+    if n_valid < 2 * _LEVEL_MIN_PIXELS:
+        return lum
+    floor = max(_LEVEL_MIN_PIXELS, int(round(_LEVEL_MIN_SHARE * n_valid)))
+    levels, counts = np.unique(cov_int[valid], return_counts=True)
+    big = [int(lv) for lv, n in zip(levels, counts, strict=True) if n >= floor]
+    if len(big) < 2:
+        return lum
+
+    from seestack.bg.coverage_leveling import _robust_stats
+
+    regions = {level: (cov_int == level) & valid for level in big}
+
+    # Pass 1 — a *rough* per-level sky, used only to put every level on the same
+    # footing so the object threshold below measures grain rather than the
+    # panel-to-panel offsets. Verbatim the shape ``_level_context`` uses, and for
+    # the same reason it gives.
+    rough = np.zeros(lum.shape, dtype=np.float32)
+    for level, region in regions.items():
+        med, _sigma = _robust_stats(lum[region])
+        if np.isfinite(med):
+            rough[region] = np.float32(med)
+    detrended = lum - rough
+    _med, spread = _robust_stats(detrended[valid])
+    if not np.isfinite(spread) or spread <= 0:
+        return lum
+
+    # The yardstick every "does this look like sky?" question below is asked
+    # against is the image's own **grain**, measured structure-blind (the MAD of
+    # adjacent-pixel differences, the estimator ``analyze_proxy`` reports σ with).
+    # It must not be the canvas's sigma-clipped spread: on the image this guard
+    # exists for — one the target genuinely fills — that spread *is* the object,
+    # so it floats above everything and the guard never fires. Measured across six
+    # scenes, the ratio below reads 0.24–0.36 on canvases that are sky with an
+    # object on them and 5.1–12.5 on canvases that are object, which is what makes
+    # 3.0 a separation rather than a tuning. Reported in units of the image's own
+    # robust range, so it is put back into the pixels' units here.
+    from seestack.edit.noise import estimate_noise_sigma
+
+    lum_c = lum[valid]
+    span = float(np.percentile(lum_c, 99.5) - np.percentile(lum_c, 0.5))
+    unit = estimate_noise_sigma(lum)
+    if unit is None or not np.isfinite(span) or span <= 0:
+        return lum  # no measurable grain to judge "flat" against
+    grain = float(unit) * span
+
+    # Pass 2 — the level's sky, with the object out of it. A panel a nebula fills
+    # has a median that is the *nebula's*, and subtracting that would flatten the
+    # object into the sky (measured: a large coloured nebula stopped being read as
+    # one at all). The op next door masks for the same reason.
+    sky = valid & (detrended <= (_med + _LEVEL_OBJECT_SIGMA * spread))
+    per_level: dict[int, float] = {}
+    for level, region in regions.items():
+        region_sky = region & sky
+        pixels = lum[region_sky]
+        if pixels.size < _LEVEL_MIN_PIXELS:
+            # Too little sky left in this level to say where its sky is: leave the
+            # level exactly as it came in, which is what this whole function does
+            # when it cannot measure.
+            continue
+        _, level_sigma = _robust_stats(detrended[region_sky])
+        if not np.isfinite(level_sigma) or level_sigma > _LEVEL_MAX_SIGMA_RATIO * grain:
+            # What is left of this level does not look like sky — it is a level a
+            # nebula or a galaxy fills, and reading the object's level as a sky
+            # offset would subtract real flux. The op refuses one for the same
+            # reason, by a test of the same shape.
+            continue
+        med, _sigma = _robust_stats(pixels)
+        if np.isfinite(med):
+            per_level[level] = float(med)
+    if len(per_level) < 2:
+        return lum
+    reference, _ = _robust_stats(lum[valid & sky])
+    if not np.isfinite(reference):
+        return lum
+    out = np.array(lum, dtype=np.float32, copy=True)
+    for level, med in per_level.items():
+        out[regions[level]] -= np.float32(med - reference)
+    return out
+
+
+def analyze_proxy(rgb: np.ndarray,
+                  coverage: np.ndarray | None = None) -> dict[str, Any]:
     """Cheap content analysis of a proxy used to tailor the auto recipe:
     sky level, sky-noise fraction, and a coarse 'noisy' verdict.
 
     The sky *level* is the robust median of the whole-image-normalized luminance,
-    measured after :func:`_detrended_luminance` takes the frame-scale sky shape
-    out — see there for why, and for the measurement. A mosaic's per-panel
-    *steps* are not a smooth shape, so that half is only partly answered here;
-    ``background.level_coverage`` is what actually removes them, and it runs
-    ahead of the stretch on exactly those stacks.
+    measured after the two passes that take *structure* out of the plane it is
+    read from: :func:`_delevelled_luminance` removes a mosaic's per-panel steps
+    (needs ``coverage``, the run's per-pixel map on this proxy's grid, which
+    ``auto_recipe`` passes only for the mosaic runs whose recipe carries the
+    leveling pass — ``None`` everywhere else, and then a no-op), then
+    :func:`_detrended_luminance` removes the smooth, frame-scale sky shape. In
+    that order, because that is the order the recipe removes them in
+    (``background.level_coverage`` is prepended ahead of
+    ``background.final_gradient``) and because a poly fitted through unremoved
+    steps is not the gradient.
 
     The sky *noise* is measured **locally**, from the MAD of adjacent-pixel
     differences (``seestack.edit.noise.estimate_noise_sigma``), not from the
@@ -183,11 +359,11 @@ def analyze_proxy(rgb: np.ndarray) -> dict[str, Any]:
     lum = arr[..., :3].mean(axis=2) if arr.ndim == 3 else arr
     if int(np.isfinite(lum).sum()) < 16:
         return {"sky": 0.1, "sky_sigma": 0.0, "noisy": False}
-    # The *level* is read off the detrended plane (a gradient is structure, not a
-    # sky level); the *noise* below is still measured on the raw pixels, where its
-    # own estimator is already blind to that structure and its thresholds are
-    # calibrated.
-    flat = _detrended_luminance(lum)
+    # The *level* is read off the de-stepped, detrended plane (a panel step and a
+    # gradient are both structure, not a sky level); the *noise* below is still
+    # measured on the raw pixels, where its own estimator is already blind to that
+    # structure and its thresholds are calibrated.
+    flat = _detrended_luminance(_delevelled_luminance(lum, coverage))
     finite = flat[np.isfinite(flat)]
     if finite.size < 16:
         return {"sky": 0.1, "sky_sigma": 0.0, "noisy": False}
@@ -481,7 +657,8 @@ def auto_recipe(rgb: np.ndarray | None = None,
                 is_mosaic: bool = False,
                 trim_crop: tuple[float, float, float, float] | None = None,
                 prefs: dict[str, Any] | None = None,
-                auto_crop: bool = True) -> Recipe:
+                auto_crop: bool = True,
+                coverage: np.ndarray | None = None) -> Recipe:
     """One-click auto-process built from the image, not hardcoded.
 
     Always: background/gradient removal → photometric colour balance → a proper
@@ -525,6 +702,14 @@ def auto_recipe(rgb: np.ndarray | None = None,
     all tone/detail ops), which is safe and keeps the coverage-leveling op — which
     needs the native-geometry coverage map — operating on the uncropped frame.
 
+    ``coverage`` is the run's per-pixel coverage map on the *proxy's* grid, when
+    the caller has one. It is only ever a **measurement** input: it lets
+    :func:`analyze_proxy` read the sky level off a plane with the mosaic's panel
+    steps taken out — the same steps the prepended ``background.level_coverage``
+    removes before the stretch runs — instead of letting them pull the stretch
+    target down. It emits no op and changes nothing on a single-field stack
+    (``None``, or one coverage level, ⇒ byte-for-byte today's recipe).
+
     ``auto_crop`` (default ``True`` — today's behaviour) is the owner's preference
     for that last step: some would rather keep the *whole* frame, ragged edges and
     all, than have Auto quietly reframe their picture. With it off the
@@ -540,8 +725,12 @@ def auto_recipe(rgb: np.ndarray | None = None,
     denoise_strength = 0.0
     chroma_strength = 0.0
     sharpen_amount = 0.5
+    # The steps are only measured *out* where the recipe actually takes them
+    # out — ``background.level_coverage`` is emitted on a mosaic and nowhere
+    # else — so ``is_mosaic`` decides both, in one place. A single-field stack's
+    # Auto is byte-for-byte what it was, whatever map the caller supplies.
     if rgb is not None:
-        a = analyze_proxy(rgb)
+        a = analyze_proxy(rgb, coverage if is_mosaic else None)
         sky_sigma = float(a["sky_sigma"])
         noise_frac = _noise_fraction(sky_sigma)
         # Darker sky → lift a little more (higher target grey), brighter → less.
@@ -676,12 +865,16 @@ def analyze_auto_inputs(
     is_mosaic: bool = False,
     trim_crop: tuple[float, float, float, float] | None = None,
     auto_crop: bool = True,
+    coverage: np.ndarray | None = None,
 ) -> dict[str, Any]:
     """The *measured cues* that drove the Auto recipe — the causal inputs behind
     each op, surfaced so the user sees Auto tuned itself to *their* data (not a
     fixed op list). Pure; reuses the exact same analysis ``auto_recipe`` consumes
     (``analyze_proxy`` + ``_noise_fraction`` + the FWHM→radius map + the trim
-    rect), so the numbers reported here match the recipe it actually built.
+    rect), so the numbers reported here match the recipe it actually built —
+    including ``coverage``, which must be passed here whenever it is passed to
+    :func:`auto_recipe` or the reported sky level describes a different plane from
+    the one the recipe's stretch target was chosen on.
 
     Every field is optional/nullable so it degrades gracefully: ``sky``/noise are
     ``None`` when the proxy can't be measured, ``median_fwhm`` is ``None`` when no
@@ -707,8 +900,12 @@ def analyze_auto_inputs(
         "trim_fraction_available": None,
         "auto_crop": bool(auto_crop),
     }
+    # The steps are only measured *out* where the recipe actually takes them
+    # out — ``background.level_coverage`` is emitted on a mosaic and nowhere
+    # else — so ``is_mosaic`` decides both, in one place. A single-field stack's
+    # Auto is byte-for-byte what it was, whatever map the caller supplies.
     if rgb is not None:
-        a = analyze_proxy(rgb)
+        a = analyze_proxy(rgb, coverage if is_mosaic else None)
         sky_sigma = float(a["sky_sigma"])
         out["sky"] = round(float(a["sky"]), 3)
         out["sky_sigma"] = round(sky_sigma, 4)
