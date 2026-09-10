@@ -14,6 +14,49 @@ Newest first.
 
 ---
 
+## v0.413.2 — 2026-09-10 — the app refused to boot over a missing *frontend*
+
+*(Builder, branch `claude/sweet-babbage-bhkhl1`. A bug this run reproduced 14 times by accident, filed and
+fixed in the same run. Pillar: upgrade-safety — AGENTS.md §9, "the container still builds and boots".)*
+
+**The bug.** `webapp/main._mount_spa` decided "is the frontend built?" from `STATIC_DIR.exists()` — the
+*directory* — and then did `app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"))`
+unconditionally. `StaticFiles` raises `RuntimeError: Directory '…' does not exist` in its constructor when
+`check_dir` is on, which it is by default. So a `webapp/static/` that exists but is **empty** takes the
+"built" branch and raises out of `create_app()`: no API, no Settings page, no job queue, no way for the
+owner to see why — over a missing *frontend*, which the function's own placeholder branch one line above
+already knows how to survive.
+
+**How it is reachable, which is the part that makes it worth fixing.** `frontend/vite.config.ts` sets
+`emptyOutDir: true` on an `outDir` of `../webapp/static`, so **every build deletes that tree before it
+writes it**, and the directory is recreated before its contents are. Anything that starts the app inside
+that window — an interrupted build, a half-copied image layer, a rebuild on a running dev box — meets the
+empty directory, not a missing one. This run met it 14 times: a `pytest` session overlapping the
+`vite build` inside `scripts/agent-dogfood.sh` failed every `tests/webapp` test that constructs the app,
+with a `RuntimeError` that reads exactly like a red baseline. (See the collision note in
+`PROCESS-NOTES.md` — the run's own first reading of it was "main is red".)
+
+**The fix, three lines.** `index.html` is the honest test for "is the frontend built?", not the directory —
+so the placeholder branch is taken whenever it is absent, which now also covers an `assets/` with no shell
+(where the SPA fallback would have `FileResponse`d a file that does not exist on every client route). And
+the `/assets` mount is made conditional. **Nothing is lost when it is skipped:** the SPA catch-all below it
+already serves any *file* under the static root, with the same resolved-path confinement the v0.291.x
+traversal fix added — so a build that emitted its chunks elsewhere still works.
+
+**A complete build is served byte-for-byte as before**, which is the test that matters most here and is the
+one test in the new file that passes before the change.
+
+**Upgrade-safe (§9):** this *is* a §9 fix. No config, schema, on-disk layout, response shape, endpoint or
+default changed; the only behaviour that moves is in states where the app previously did not start.
+
+**Tests (+6 in new `tests/webapp/test_static_boot.py`; five fail before):** an emptied `static/` boots and
+says the frontend is not built; `assets/` with no `index.html` takes the same branch; an `index.html` with
+no `assets/` still serves the shell *and* a sibling file, proving the catch-all covers the skipped mount; a
+complete build is unchanged; and both half-built states answer with no 5xx. The existing
+`test_spa_static.py` traversal contract and `test_spa_serving_e2e.py` pass untouched.
+
+---
+
 ## v0.413.1 — 2026-09-10 — asking what "Save as defaults" does no longer saves your defaults
 
 *(Builder, branch `claude/sweet-babbage-bhkhl1`, immediately after v0.413.0 and from its own measurement.
@@ -94,8 +137,12 @@ gestures that reach the words and nothing else. `label: null` and `disabled` lea
 the element it was — no `role`, no tab stop, nothing to tap — so a badge with nothing to say does not
 advertise itself as answerable (`NightsCard`'s verdict badge, whose tip is conditional, is the live case).
 
-**No page can get taller, and that is structural rather than measured.** Nothing is added to the DOM and no
+**No page can get taller, and that is structural — then measured anyway.** Nothing is added to the DOM and no
 style changes; the trigger *is* the badge that was already there, gaining `role="button"` and `tabIndex={0}`.
+`scripts/agent-dogfood.sh --mosaic --editor` before and after returns the mosaic page-height table
+**byte-identical** — 3,407 / 3,166 / 3,094 / 2,432 px on a phone and 2,116 / 2,104 / 1,699 / 1,637 px on the
+desktop, nothing overflowing, **no console errors**, Auto's trim still 7.9 % — and the editor drive added all
+21 ops on the mosaic run with the live preview re-rendering on each, undo and redo applied.
 The badge's own words stay its accessible name — unlike `HintIcon`, which has to invent one — so nothing
 that looks a badge up by its text has to know the hint exists. That claim is not a hope: **all 3,550
 existing frontend tests passed unchanged**, including the route tests that find these badges by their words.
