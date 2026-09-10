@@ -1252,6 +1252,11 @@ def run_qc_and_solve(
                 if bres.engaged:
                     summary["bootstrap_engaged"] = True
                     summary["bootstrap_solved"] = bres.deep_solved
+                    # Which of the two references the burst was given: a deep
+                    # image this run solved, or an already-solved sub's own
+                    # verified WCS. Additive and read by nobody yet — it is what
+                    # makes a job summary say *how* the rescue happened.
+                    summary["bootstrap_anchored"] = bres.anchored_on_solved_sub
                     summary["bootstrap_propagated"] = bres.n_propagated
                     if bres.n_propagated:
                         # ``Project`` has no ``.name`` attribute — the target's name

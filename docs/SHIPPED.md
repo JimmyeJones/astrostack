@@ -14,6 +14,56 @@ Newest first.
 
 ---
 
+## v0.412.0 — 2026-09-10 — the faint-field rescue anchors on a sub that already solved
+
+*(Builder, the 2026-07-25 backlog item "let the bootstrap anchor on an already-solved sub when a few (but
+< min_frames) subs did solve, instead of always re-solving the deep image". Pillar: autonomy + image quality
+— PRIORITY 2. Additive, on the opt-in `astap_bootstrap_solve` path only.)*
+
+**The gap.** The stack-then-solve bootstrap engages when the per-sub pass left **fewer than `min_frames`**
+subs solved — a band that includes "a handful did solve". In that band it nonetheless always built a deep
+image and asked ASTAP to solve *that*: a synthetic frame with no optics headers, on the very field that had
+just defeated the solver sub by sub. Meanwhile 1–7 real, ASTAP-verified plate solutions of that same pointing
+were sitting in the project DB, unused.
+
+**The change.** When such a sub can serve as the registration reference, the burst is registered against
+**it** and takes **its** WCS. Everything downstream is identical — the same phase-correlation shifts, the
+same `propagate_wcs` CRPIX offsets (the reference's pixel grid is what both paths propagate from) — but the
+integration, the temp FITS, the extra ASTAP call and that call's own failure risk all disappear. The
+deep-image path is untouched for the zero-solved case, which is what it was measured for.
+
+**`pick_solved_anchor(frames, shape)` is deliberately picky**, because a bad anchor would mis-place a whole
+burst:
+* the candidate's WCS must be **usable** — `wcs_text_is_usable`, the same bar the solve path applies, since a
+  truncated sidecar reads back truthy and locates nothing;
+* its pixels must be the members' own **shape** — a reference of another size correlates against nothing;
+* candidates are tried in `_order_members` order (star-richest, sharpest first — the best correlation
+  target), and only the first `ANCHOR_LOAD_ATTEMPTS` (3) are actually loaded, since a load is a debayer.
+Failing all that, it returns `None` and the deep-image path runs exactly as before.
+
+**The gates still mean what they meant.** The anchor is prepended as member 0 and every count below it —
+readability, registration, `n_members`, `n_registered` — counts only the **unsolved** members, so a target
+too thin to bootstrap cannot be made to look thick enough by the presence of an anchor (pinned by a test).
+The anchor is skipped in the propagation loop: it is already solved, and the module's contract is that an
+already-solved sub is never touched.
+
+**Honest about which path ran:** a new `BootstrapResult.anchored_on_solved_sub` (and `bootstrap_anchored` on
+the scan summary) says so, `deep_solved` stays False where no deep image was ever built, and `reason` reads
+*"rescued N sub(s) by registering to an already-solved sub"*.
+
+**Upgrade-safe (§9):** engine-only, additive, and on a path that is **off by default**. No config, DB-schema,
+on-disk, endpoint or existing-response-shape change; the two new keys are additive and nothing reads
+`bootstrap_solved` today.
+
+**Tests (+5, four fail before):** `tests/test_bootstrap_solve.py` — the anchored rescue lands every member on
+its **ground-truth** CRPIX with a `deep_solver` that raises if called at all (so "no deep solve happened" is
+proved, not asserted); the anchor is not among the rescued ids; an anchor cannot inflate the engagement gate;
+a differently-shaped solved sub and an unusable-WCS solved sub each fall back to the deep-image path; and
+`pick_solved_anchor` returns `None` when nothing has solved. The fifteen existing bootstrap cases pass
+untouched.
+
+---
+
 ## v0.411.1 — 2026-09-10 — 🐛 a successful bootstrap rescue reported itself as a failure
 
 *(Builder, tripped over while writing the v0.411.0 second solve pass in the same block; reproduced by test.
