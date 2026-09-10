@@ -14,6 +14,56 @@ Newest first.
 
 ---
 
+## v0.410.1 — 2026-09-10 — 🐛 the same panel steps decided what your target *was*
+
+*(Builder-verified by reproduction, found by taking v0.410.0's bug class to the other cue `auto_recipe`
+consumes — exactly as v0.409.1 was found from v0.409.0's. Severity: a wrong preset chip and a mis-routed
+Adaptive-Auto taste bias on the shape the owner shoots. Confidence: measured in both directions and pinned by
+a test that fails before.)*
+
+**The bug.** `classify_target` thresholds its geometry cues at `sky + max(0.06, 6·sky_sigma)`, built from a
+**global** level median and the MAD of the levels beneath it. v0.409.1 fixed the light-pollution half of that
+by reading the cues off `_detrended_luminance`. A mosaic's panel offsets break the same threshold the same way
+and worse — they are **steps**, so a degree-2 surface barely touches them.
+
+**Measured, on `tests/test_auto_noise_measure.py`'s four-panel scene** — the identical stack, only the layout
+differing: `ext_frac` **0.0215 → 0.0030**, `star_share` **0.597 → 0.889**, and the verdict **`None` → star
+cluster at confidence 0.89** (0.86–0.92 across seeds 5/7/13/21). On this file's own
+`_star_field_with_faint_nebulosity` with residual panel steps of 0.024/−0.016/0.032 on a 0.10 sky, the same
+flip reads **cluster at 0.98**, `ext_frac` 0.013 → 0.002. It is read by the editor's one-click "try this
+preset?" chip and by `auto_recipe`'s `object_type`, so a taste bias learned on one archetype could be spent on
+a stack the *layout* had renamed.
+
+**The fix is the same line, in the same place.** `classify_target` takes an optional `coverage` and reads its
+geometry off `_detrended_luminance(_delevelled_luminance(lum, coverage))` — v0.410.0's de-stepper, so "a
+coverage level's own sky" still means one thing across the app. The **colour** cue still reads the untouched
+`arr` (`_extended_chroma` is scale-invariant by construction), so only the geometry moves and no threshold or
+floor changes. After: `None` on all four seeds, matching the single field exactly.
+
+**Every archetype that was already stable stays stable**, which is the guard against over-correcting: a
+coloured nebula, a galaxy (with its preset) and a star cluster all keep their verdicts under the same panel
+steps plus the same map. The nebula case is the one that matters — it is a canvas the object *fills*, and it
+survives because of v0.410.0's grain-based stand-down, not by luck.
+
+**Wired at all three call sites, and only for a mosaic.** `webapp/routers/editor._auto_measure_coverage` gains
+the `is_mosaic` gate it was already being given by hand, so `build_preset_suggestion_for_run` (the chip) and
+`_classify_run` (which archetype a piece of feedback is filed under) get the map on the same terms
+`build_auto_recipe_for_run` does, and `auto_recipe` passes its own through for `object_type`. A single-field
+run reads no sibling and is classified exactly as it is today.
+
+**Upgrade-safe (§9) and additive.** One new optional engine parameter defaulting to `None`; no config, schema,
+on-disk, endpoint, response-shape or default change, and nothing is persisted by any of this.
+
+**Tests (+3, one failing before).** In `tests/test_target_classify.py`, extending the gradient section
+directly above with the same three claims for panel steps: the layout does not invent a confident verdict
+(fails before — `cluster`); it does not move a nebula, a galaxy or a cluster; and a single-level map leaves
+every cue byte-identical. Three existing `monkeypatch` stubs of `classify_target` in
+`tests/webapp/test_editor.py` gained the new keyword — their assertions are untouched; without it the stub
+raised `TypeError` into `_classify_run`'s deliberately broad `except`, which is a fair reminder that that
+`except` hides signature drift.
+
+---
+
 ## v0.410.0 — 2026-09-10 — 🐛 a mosaic's panel steps darkened the one-click picture — by steps Auto removes itself
 
 *(Builder-verified by reproduction against `origin/main`'s own `analyze_proxy`/`auto_recipe`, on the scene

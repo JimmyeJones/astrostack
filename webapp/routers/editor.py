@@ -310,8 +310,8 @@ def _trim_rect_for_run(run, min_frac: float = 0.5
     return (round(rect[0], 4), round(rect[1], 4), round(rect[2], 4), round(rect[3], 4))
 
 
-def _auto_measure_coverage(run, scale: float):
-    """The coverage map Auto should *measure* a run's sky level on: the proxy-grid
+def _auto_measure_coverage(run, scale: float, is_mosaic: bool | None = None):
+    """The coverage map Auto should *measure* a run's proxy against: the proxy-grid
     frame count where the run wrote one, else the weighted map, else ``None``.
 
     Same precedence, and the same reason, as the sky-leveling op and the border
@@ -319,11 +319,16 @@ def _auto_measure_coverage(run, scale: float):
     is on, which splits one real panel across a band of values, while the frame
     count is flat inside a panel by construction.
 
-    Asked only for a **mosaic** run, because a mosaic run is exactly where Auto
-    prepends the pass that removes those steps — measuring out a step the recipe
-    is going to leave in would be the same mistake in the other direction. A
-    single-field run is never asked, never reads a sibling, and is measured
-    exactly as it is today."""
+    ``None`` unless the run is a **mosaic**, because a mosaic run is exactly where
+    Auto prepends the pass that removes those panel steps — measuring out a step
+    the recipe is going to leave in would be the same mistake in the other
+    direction. A single-field run reads no sibling at all and is measured exactly
+    as it is today. Pass ``is_mosaic`` when the caller has already resolved it;
+    otherwise it is resolved here."""
+    if is_mosaic is None:
+        is_mosaic = _run_is_mosaic(run, load=True)
+    if not is_mosaic:
+        return None
     cov = _proxy_frame_coverage(run.fits_path, scale)
     if cov is None:
         cov = _proxy_coverage(run.fits_path, scale)
@@ -357,7 +362,7 @@ def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
     return presets_mod.auto_recipe(
         rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim,
         prefs=prefs, auto_crop=auto_crop,
-        coverage=_auto_measure_coverage(run, scale) if is_mosaic else None)
+        coverage=_auto_measure_coverage(run, scale, is_mosaic))
 
 
 def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | None,
@@ -374,7 +379,7 @@ def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | Non
     return presets_mod.analyze_auto_inputs(
         rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim,
         auto_crop=auto_crop,
-        coverage=_auto_measure_coverage(run, scale) if is_mosaic else None)
+        coverage=_auto_measure_coverage(run, scale, is_mosaic))
 
 
 def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:
@@ -383,8 +388,8 @@ def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:
     shows as a one-click "try this preset?" chip. Read-only: it never changes the Auto
     recipe or persists anything, so a mis-suggestion costs a click, not an image.
     Declines (``preset_id=None``) on an ambiguous or blank field."""
-    rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
-    out = presets_mod.classify_target(rgb)
+    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+    out = presets_mod.classify_target(rgb, _auto_measure_coverage(run, scale))
     # Only the user-facing fields; the raw cues stay server-side (debug/tests only).
     return {"preset_id": out["preset_id"], "label": out["label"],
             "reason": out["reason"], "confidence": out["confidence"]}
@@ -756,8 +761,9 @@ def _classify_run(request: Request, safe: str, run_id: int) -> str | None:
     back to the global taste — on any failure (missing run, unreadable proxy)."""
     try:
         project_dir, run = _run_info(request, safe, run_id)
-        rgb, _scale = get_proxy(project_dir, run.id, run.fits_path)
-        return presets_mod.classify_target(rgb).get("cls")
+        rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+        return presets_mod.classify_target(
+            rgb, _auto_measure_coverage(run, scale)).get("cls")
     except Exception:  # noqa: BLE001 — classification is advisory; never sink feedback
         return None
 
