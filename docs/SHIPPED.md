@@ -14,6 +14,98 @@ Newest first.
 
 ---
 
+## v0.413.0 — 2026-09-10 — a badge's only explanation stops being unreachable on a phone
+
+*(Builder, branch `claude/sweet-babbage-bhkhl1`. The **fifth slice** of the "a Tooltip is invisible on the
+device the owner actually reads this app on" entry — the entry stays open in `IMPROVEMENTS.md` with its
+remaining, deliberately-judged half. Pillar: friendliness — PRIORITY 3. Frontend-only.)*
+
+**The entry named three routes; the measurement named a different population.** History, Stack and the
+Dashboard between them carry **nine** hand-written tooltips, and by the entry's own (a)/(b) split most are
+category (b) — they repeat what the control already says. What the measurement found instead, by walking
+every `.tsx` in the app rather than the three routes, is that **27 `<Tooltip>`s wrap a `Badge`**, and they
+live in *shared components* that render on Target, History, Gallery, Tonight, the Dashboard and the editor
+at once. That is why four slices of this entry missed them: no route owns them.
+
+**A `Badge` is the worse half of the v0.402.1 class, not a lesser one.** v0.402.1 fixed five sites where a
+`Tooltip` wrapped a `Switch` or a `SegmentedControl`: there the tap does not merely leak to the control, it
+*is* the control, so asking the question performed the action. A badge has **no action at all** — so on a
+touch device there is no gesture that reveals its meaning and none that could be invented by trying. The
+words on screen are: `Hazy night`, `seams flat`, `min-max`, `σ-clip κ3`, `Needs mosaic`, `ended early`,
+`bright Moon`, `softer than usual`, `✨ sharpest yet`, `slower preview`, `Cleanest`, `24 streaked`,
+`12 trailed`, `Calibrated with a master dark`. Several of them set `cursor: "help"`, an affordance a phone
+cannot render — the code's own record that it was written for a mouse.
+
+**The fix is the app's own affordance moved one step further, not a new one.** New
+`frontend/src/components/HintTooltip.tsx` holds the same tap / hover / focus state machine `HintIcon` has
+had since v0.402.1, attached to the caller's own trigger instead of to a 14 px icon — and **shared with
+`HintIcon` through the new `useHintDisclosure` hook**, so the two cannot drift into two different gestures.
+The one difference between them is a flag: `HintIcon` calls `preventDefault()` because it renders inside a
+control's `<label>`, where the tap would otherwise be forwarded to the control it labels; `HintTooltip`
+does not, so a trigger that *does* have a handler of its own keeps working (composed, its handler first).
+
+- **tap** opens it; a second tap, or a touch anywhere else (which takes focus away), dismisses it;
+- **hover** is byte-for-byte what it was — nothing changes for a mouse;
+- **focus / Enter / Space** open it, so a keyboard reaches these sentences for the first time. Space is
+  swallowed so the page cannot scroll out from under the bubble.
+
+**The presentation props pass through with no defaults of their own** (`w`, `multiline`, `withArrow`,
+`position`, `openDelay`), so every call site keeps the bubble it already had: this change is about the
+gestures that reach the words and nothing else. `label: null` and `disabled` leave the trigger *exactly*
+the element it was — no `role`, no tab stop, nothing to tap — so a badge with nothing to say does not
+advertise itself as answerable (`NightsCard`'s verdict badge, whose tip is conditional, is the live case).
+
+**No page can get taller, and that is structural rather than measured.** Nothing is added to the DOM and no
+style changes; the trigger *is* the badge that was already there, gaining `role="button"` and `tabIndex={0}`.
+The badge's own words stay its accessible name — unlike `HintIcon`, which has to invent one — so nothing
+that looks a badge up by its text has to know the hint exists. That claim is not a hope: **all 3,550
+existing frontend tests passed unchanged**, including the route tests that find these badges by their words.
+
+**Applied to 33 triggers across 20 files.** Every `Badge` under a `Tooltip`, plus the non-interactive
+`Text`/`span` triggers written in the same idiom, which have exactly the same problem:
+`NoiseBadge`'s two dimmed readouts, the editor op-list's "edited" dot / "slower preview" / stage-conflict
+markers, the editor's *"what the editor measured from this stack"* line, `Calibration`'s repair and
+defect notes, `NextSessionCard`'s window line, and **History's noise-trend `"what's this?"`** — a control
+whose entire purpose is to reveal a tooltip, i.e. a question a phone could ask and never get answered.
+
+**Deliberately not touched, and why** (the entry's category (b), recorded so nobody re-walks them):
+- the **Dashboard**'s one tooltip labels a download icon that already carries an `aria-label` and opens a
+  menu naming its own formats;
+- **Stack**'s disabled *"Start stacking"* tooltip repeats, word for word, the yellow *"No plate-solved
+  frames yet"* alert at the top of the same page — and a disabled `<button>` receives no pointer events, so
+  it was never reachable on a mouse either;
+- **History**'s per-card *"Reuse settings"* / *"Compare"* buttons would need one hint icon **per run card**,
+  which is the "one more always-on element" the standing IA priority exists to prevent;
+- the frames table's **column headers** (`Target.tsx`) are inside a `Table.Th` that *sorts* on click, and
+  v0.270.0's `FrameColumnGuide` already spells those four sentences out as text;
+- every other `Button` / `ActionIcon` under a `Tooltip`: those are the interactive half, and they want
+  `HintIcon` *beside* the control, judged site by site. **Stack's "Save as defaults" is the one that is
+  genuinely worth doing** — its sentence is the only statement anywhere that the button also drives
+  auto-stacking for that target, and the tap that would ask the question performs the persistent save.
+
+**The drift guard is the point of the slice.** Four slices have each fixed the sites that existed and
+nothing stopped the next one being written the old way — which is how a `<Tooltip>` around a `Badge`
+survived three of them. `HintTooltip.test.tsx` now scans every non-test `.tsx` in the app (through Vite's
+own `import.meta.glob`, so it reads exactly what the bundler compiles and needs no `@types/node`) and fails
+if any `<Tooltip>`'s first child element is a `<Badge`. It is proven **armed** two ways rather than trusted:
+against a synthetic bad site, whose `file:line` it reports, and by asserting the sweep really walked the
+tree (>80 files, two named ones present) — because an empty result is what a clean tree and a broken
+scanner both look like.
+
+**Upgrade-safe (§9):** frontend-only. No API, response shape, schema, config, on-disk layout or default
+changed. `tsconfig.json` gains `"vite/client"` to its `types` array so the guard's `import.meta.glob` is
+typed; `vite` was already a devDependency, and nothing new is installed.
+
+**Tests (+14; three fail before):** `HintTooltip.test.tsx` (+12 — tap opens; second tap and blur dismiss;
+hover and focus still open it; Enter and Space, with Space's default prevented; it is a real tab stop; the
+badge's accessible name is unchanged; `label: null` and `disabled` each leave the trigger inert; a
+trigger's own `onClick` still runs *and* the hint opens; plus the three drift-guard cases), and one
+fail-before regression at each level — `HazyNightBadge.test.tsx` (the component) and `Tonight.test.tsx`
+(the real route, where *"Needs mosaic"* is two words a beginner has never met). Gates: `npx tsc --noEmit`
+clean, `npx vite build` clean, `npx vitest run` **3,564 passed**.
+
+---
+
 ## v0.412.0 — 2026-09-10 — the faint-field rescue anchors on a sub that already solved
 
 *(Builder, the 2026-07-25 backlog item "let the bootstrap anchor on an already-solved sub when a few (but

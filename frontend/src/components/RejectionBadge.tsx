@@ -1,4 +1,6 @@
-import { Badge, Tooltip } from "@mantine/core";
+import { Badge } from "@mantine/core";
+
+import { HintTooltip } from "./HintTooltip";
 
 // A stack can be combined one of four ways, recorded in the run's stored
 // options (and mirrored in the STACKER FITS card): a plain mean, κ-σ
@@ -97,10 +99,10 @@ export function RejectionBadge({
   const info = rejectionBadge(options);
   if (!info) return null;
   return (
-    <Tooltip label={info.title} multiline w={280}>
+    <HintTooltip label={info.title} multiline w={280}>
       <Badge color="violet" variant="light" size={size}>
         {info.label}
       </Badge>
-    </Tooltip>
+    </HintTooltip>
   );
 }

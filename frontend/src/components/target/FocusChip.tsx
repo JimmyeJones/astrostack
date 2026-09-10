@@ -1,4 +1,6 @@
-import { Badge, Tooltip } from "@mantine/core";
+import { Badge } from "@mantine/core";
+
+import { HintTooltip } from "../HintTooltip";
 import type { FocusVerdict } from "./focusChips";
 
 /**
@@ -12,26 +14,26 @@ import type { FocusVerdict } from "./focusChips";
 export function FocusChip({ verdict }: { verdict?: FocusVerdict }) {
   if (verdict === "sharpest") {
     return (
-      <Tooltip
+      <HintTooltip
         label="The tightest stars of any stack of this target up to this point — smaller FWHM is sharper."
         multiline w={240} withArrow
       >
         <Badge color="grape" variant="light" style={{ cursor: "help" }}>
           ✨ sharpest yet
         </Badge>
-      </Tooltip>
+      </HintTooltip>
     );
   }
   if (verdict === "soft") {
     return (
-      <Tooltip
+      <HintTooltip
         label="Stars in this stack are noticeably wider than this target's usual — often a focus wobble that night. Worth a focus check before the next session."
         multiline w={240} withArrow
       >
         <Badge color="orange" variant="light" style={{ cursor: "help" }}>
           softer than usual
         </Badge>
-      </Tooltip>
+      </HintTooltip>
     );
   }
   return null;

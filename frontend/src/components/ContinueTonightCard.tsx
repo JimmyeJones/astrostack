@@ -1,4 +1,5 @@
-import { Badge, Group, Paper, Progress, Stack, Text, ThemeIcon, Tooltip } from "@mantine/core";
+import { Badge, Group, Paper, Progress, Stack, Text, ThemeIcon } from "@mantine/core";
+
 import { IconTelescope } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -14,6 +15,7 @@ import { recentreNudgeRowBadge, usableWindowNote } from "../tonight";
 import {
   BEST_TONIGHT_QUERY_KEY, MAX_SHOWN, REFRESH_MS,
 } from "./dashboard/PointHereTonightCard";
+import { HintTooltip } from "./HintTooltip";
 
 /**
  * "Point here tonight" — one calm recommendation of which target *you've already
@@ -156,11 +158,11 @@ export function ContinueTonightCard() {
         </Group>
         {win ? <Text size="xs" c="dimmed" mb={4}>{win}</Text> : null}
         {nudge ? (
-          <Tooltip label={nudge.tooltip} multiline w={260} withArrow>
+          <HintTooltip label={nudge.tooltip} multiline w={260} withArrow>
             <Badge mb={6} size="xs" variant="light" color={nudge.color}>
               {nudge.label}
             </Badge>
-          </Tooltip>
+          </HintTooltip>
         ) : null}
         {pick.readiness ? (
           <>
