@@ -13,15 +13,21 @@ import pytest
 
 from webapp.stale_crop import (
     STALE_CROP_KEEP_RATIO,
+    combined_crop_keep_fraction,
     crop_is_stale,
     crop_keep_fraction,
-    enabled_crop_op,
+    enabled_crop_ops,
     stale_crop_verdict,
 )
 
 
 def _rect(x0, y0, x1, y1):
     return {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
+
+
+def _crop_ops(rect):
+    """A one-crop recipe, the shape ``stale_crop_verdict`` now takes."""
+    return [{"id": "geometry.crop", "enabled": True, "params": rect}]
 
 
 # ---- crop_keep_fraction ----------------------------------------------------
@@ -66,11 +72,11 @@ def test_it_finds_an_enabled_crop_and_ignores_a_disabled_one():
     params = _rect(0.1, 0.1, 0.2, 0.2)
     ops = [{"id": "tone.stretch", "enabled": True, "params": {}},
            {"id": "geometry.crop", "enabled": True, "params": params}]
-    assert enabled_crop_op(ops) == params
+    assert enabled_crop_ops(ops) == [params]
     off = [{"id": "geometry.crop", "enabled": False, "params": params}]
-    assert enabled_crop_op(off) is None, "a disabled crop is not what is on screen"
-    assert enabled_crop_op([]) is None
-    assert enabled_crop_op(None) is None
+    assert enabled_crop_ops(off) == [], "a disabled crop is not what is on screen"
+    assert enabled_crop_ops([]) == []
+    assert enabled_crop_ops(None) == []
 
 
 def test_it_reads_parsed_op_instances_too():
@@ -80,7 +86,19 @@ def test_it_reads_parsed_op_instances_too():
 
     params = _rect(0.0, 0.0, 0.5, 0.5)
     ops = [OpInstance(id="geometry.crop", params=params, enabled=True)]
-    assert enabled_crop_op(ops) == params
+    assert enabled_crop_ops(ops) == [params]
+
+
+def test_two_crops_multiply_the_way_the_editor_multiplies_them():
+    """Each crop cuts what the last one left, so their shares compose — the same
+    arithmetic ``mosaicTrim.cropCoverageFraction`` does. Reading only the first
+    would understate the cut on exactly the recipes this note is about."""
+    ops = [{"id": "geometry.crop", "enabled": True,
+            "params": _rect(0.0, 0.0, 0.5, 0.5)},          # keeps 0.25
+           {"id": "geometry.crop", "enabled": True,
+            "params": _rect(0.0, 0.0, 0.5, 1.0)}]          # keeps 0.5 of that
+    assert combined_crop_keep_fraction(ops) == pytest.approx(0.125)
+    assert combined_crop_keep_fraction([]) is None
 
 
 # ---- crop_is_stale ---------------------------------------------------------
@@ -140,28 +158,28 @@ def test_no_proposed_trim_means_no_opinion():
     proposal there is nothing to weigh the crop against but the whole frame, and
     a legitimately tight hand-crop is a small share of that too. Missing this
     case in all three surfaces beats catching it in one."""
-    v = stale_crop_verdict(_rect(0.6228, 0.0341, 0.6896, 0.5463), None)
+    v = stale_crop_verdict(_crop_ops(_rect(0.6228, 0.0341, 0.6896, 0.5463)), None)
     assert v["stale"] is False
     assert v["suggested_keep_fraction"] is None
 
 
 def test_an_unmeasurable_run_is_also_silent():
     """A run with no coverage sibling cannot have its trim re-derived at all."""
-    v = stale_crop_verdict(_rect(0.6228, 0.0341, 0.6896, 0.5463), None,
+    v = stale_crop_verdict(_crop_ops(_rect(0.6228, 0.0341, 0.6896, 0.5463)), None,
                            measurable=False)
     assert v["stale"] is False
     assert v["suggested_keep_fraction"] is None
 
 
 def test_a_picture_with_no_crop_at_all_is_silent():
-    v = stale_crop_verdict(None, _rect(0.02, 0.02, 0.98, 0.98))
+    v = stale_crop_verdict([], _rect(0.02, 0.02, 0.98, 0.98))
     assert v["stale"] is False
     assert v["stored_keep_fraction"] is None
 
 
 def test_the_verdict_carries_the_replacement_crop():
     suggested = _rect(0.02, 0.02, 0.98, 0.98)
-    v = stale_crop_verdict(_rect(0.62, 0.03, 0.69, 0.55), suggested)
+    v = stale_crop_verdict(_crop_ops(_rect(0.62, 0.03, 0.69, 0.55)), suggested)
     assert v["stale"] is True
     assert v["suggested_crop"] == suggested
     assert v["stored_keep_fraction"] == pytest.approx(0.0364, abs=1e-3)

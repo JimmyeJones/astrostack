@@ -1445,8 +1445,8 @@ def crop_health_for_run(proj, run) -> CropHealthOut:  # noqa: ANN001
     raw = proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}")
     if not raw:
         return CropHealthOut()
-    stored = stale_crop.enabled_crop_op(recipe_from_json(raw).ops)
-    if stored is None:
+    ops = recipe_from_json(raw).ops
+    if not stale_crop.enabled_crop_ops(ops):
         return CropHealthOut()
     # Only now is the coverage map worth reading. `_trim_rect_for_run` answers
     # `None` both for "the rule wants the full frame" and for "there is no map to
@@ -1459,7 +1459,7 @@ def crop_health_for_run(proj, run) -> CropHealthOut:  # noqa: ANN001
     rect = _trim_rect_for_run(run) if measurable else None
     suggested = (None if rect is None
                  else {"x0": rect[0], "y0": rect[1], "x1": rect[2], "y1": rect[3]})
-    v = stale_crop.stale_crop_verdict(stored, suggested, measurable=measurable)
+    v = stale_crop.stale_crop_verdict(ops, suggested, measurable=measurable)
     sc = v["suggested_crop"]
     return CropHealthOut(
         stale=v["stale"],

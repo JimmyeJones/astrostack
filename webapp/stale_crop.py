@@ -76,14 +76,21 @@ def crop_keep_fraction(crop: dict[str, Any] | None) -> float | None:
     return max(0.0, min(1.0, w * h))
 
 
-def enabled_crop_op(ops: list[Any]) -> dict[str, Any] | None:
-    """The first **enabled** ``geometry.crop`` op's params in a recipe's op list,
-    or ``None``. Accepts op dicts (the stored/JSON shape) and
+def enabled_crop_ops(ops: list[Any]) -> list[dict[str, Any]]:
+    """Every **enabled** ``geometry.crop`` op's params in a recipe's op list, in
+    recipe order. Accepts op dicts (the stored/JSON shape) and
     :class:`seestack.edit.recipe.OpInstance` alike, so the same helper serves the
     router (which holds dicts) and anything holding a parsed recipe.
 
     A *disabled* crop is not what the viewer is looking at, so it is not what this
-    note is about."""
+    note is about.
+
+    All of them, not the first: a recipe may legitimately carry more than one
+    crop, each cropping what the last left, and the editor's own
+    ``mosaicTrim.cropCoverageFraction`` multiplies their shares. Reading only the
+    first here would make the two disagree on exactly the recipes where the crop
+    is tightest — which is the population this note exists for."""
+    out: list[dict[str, Any]] = []
     for op in ops or []:
         if isinstance(op, dict):
             op_id, enabled, params = op.get("id"), op.get("enabled", True), op.get("params")
@@ -92,8 +99,26 @@ def enabled_crop_op(ops: list[Any]) -> dict[str, Any] | None:
             params = getattr(op, "params", None)
         if op_id != CROP_OP_ID or not enabled:
             continue
-        return params if isinstance(params, dict) else {}
-    return None
+        out.append(params if isinstance(params, dict) else {})
+    return out
+
+
+def combined_crop_keep_fraction(ops: list[Any]) -> float | None:
+    """The share of the canvas a recipe's enabled crops leave between them, or
+    ``None`` when it has none (or none of them is a usable rectangle).
+
+    The Python mirror of ``mosaicTrim.cropCoverageFraction``: each crop's share
+    multiplies, because each one crops what the one before it left."""
+    crops = enabled_crop_ops(ops)
+    if not crops:
+        return None
+    frac = 1.0
+    for c in crops:
+        share = crop_keep_fraction(c)
+        if share is None:
+            return None
+        frac *= share
+    return frac
 
 
 def crop_is_stale(stored_keep: float | None, suggested_keep: float | None) -> bool:
@@ -113,10 +138,14 @@ def crop_is_stale(stored_keep: float | None, suggested_keep: float | None) -> bo
     return stored_keep < STALE_CROP_KEEP_RATIO * suggested_keep
 
 
-def stale_crop_verdict(stored_crop: dict[str, Any] | None,
+def stale_crop_verdict(ops: list[Any],
                        suggested_crop: dict[str, Any] | None,
                        *, measurable: bool = True) -> dict[str, Any]:
     """The whole judgement for one run, as the shape every surface reports.
+
+    ``ops`` is the run's **saved** recipe op list; the crop it is judged on is
+    what its enabled crops leave between them
+    (:func:`combined_crop_keep_fraction`), matching the editor exactly.
 
     ``suggested_crop`` is what the current border rule would keep — the same rect
     the editor's "Trim border" suggestion offers.
@@ -138,7 +167,7 @@ def stale_crop_verdict(stored_crop: dict[str, Any] | None,
 
     Returns ``stale``, the two keep-fractions behind it, and the replacement crop
     a one-click re-seed would write."""
-    stored_keep = crop_keep_fraction(stored_crop)
+    stored_keep = combined_crop_keep_fraction(ops)
     suggested_keep = (crop_keep_fraction(suggested_crop)
                       if measurable and suggested_crop is not None else None)
     stale = crop_is_stale(stored_keep, suggested_keep)
