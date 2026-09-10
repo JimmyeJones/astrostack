@@ -67,7 +67,7 @@ describe("west-of-UTC night labelling (regression)", () => {
     expect(line).not.toContain("UTC");           // the local line no longer says UTC
   });
 
-  it("keeps the honest UTC anchor in the hover tooltip", () => {
+  it("keeps the honest UTC anchor in the line's hint", () => {
     const tip = windowUtcTooltip(seattleWin);
     expect(tip).toBe("In UTC: Mon 27 Jul, 06:40 → 10:10");
   });

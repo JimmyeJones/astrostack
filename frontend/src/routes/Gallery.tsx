@@ -43,7 +43,7 @@ import {
 } from "../components/videoFraming";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { runSlideKey, showFromHref, videoSlideKey } from "../showAndTell";
-import { HintTooltip } from "../components/HintTooltip";
+import { HintAnchor } from "../components/HintAnchor";
 
 export type GallerySort = "newest" | "cleanest";
 export type CalFilter = "all" | "calibrated" | "uncalibrated";
@@ -624,9 +624,9 @@ export function GalleryView() {
       <Group gap="xs">
         <IconPhoto size={24} />
         <Title order={2}>Gallery</Title>
-        <HintTooltip label="Every picture you've made — stacked images across all targets, plus your Moon & Sun stills">
+        <HintAnchor label="Every picture you've made — stacked images across all targets, plus your Moon & Sun stills">
           <Badge variant="light">{allItems.length + allStills.length}</Badge>
-        </HintTooltip>
+        </HintAnchor>
       </Group>
 
       {allItems.length + allStills.length > 0 ? (

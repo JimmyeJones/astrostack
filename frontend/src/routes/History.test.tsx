@@ -1328,6 +1328,20 @@ describe("HistoryView noise trend card", () => {
     expect(screen.getByText(/Cleaner than your first measured stack/)).toBeInTheDocument();
   });
 
+  it("answers its own \"what's this?\" on a tap, not only on a hover", async () => {
+    // The words are an invitation to ask; a phone has no hover, so if a tap does
+    // nothing the invitation is a dead link on the device this app is read on.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 2, output_basename: "run_b", noise_sigma: 0.03 }),
+      mkRun({ id: 1, output_basename: "run_a", noise_sigma: 0.05 }),
+    ]);
+    renderHistory();
+    const ask = await screen.findByText("what's this?");
+    expect(screen.queryByText(/oldest → newest/)).not.toBeInTheDocument();
+    fireEvent.click(ask);
+    expect(await screen.findByText(/oldest → newest/)).toBeInTheDocument();
+  });
+
   it("hides the trend card when only one run is measured", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ id: 2, output_basename: "solo_measured", noise_sigma: 0.03 }),

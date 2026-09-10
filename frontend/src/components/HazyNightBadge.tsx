@@ -1,6 +1,6 @@
 import { Badge } from "@mantine/core";
 
-import { HintTooltip } from "./HintTooltip";
+import { HintAnchor } from "./HintAnchor";
 
 // A run whose median transparency sits well below the target's clear-sky
 // baseline was shot through haze / thin cloud. Same threshold as the Stack
@@ -18,7 +18,7 @@ export function HazyNightBadge({ ratio, size = "xs" }: { ratio?: number | null; 
   if (!isHazy(ratio)) return null;
   const pctBelow = Math.round((1 - (ratio as number)) * 100);
   return (
-    <HintTooltip
+    <HintAnchor
       label={`Shot through haze — median transparency ~${pctBelow}% below this target's clearest nights. Quality weighting or rejecting the haziest subs can help.`}
       multiline
       w={260}
@@ -26,6 +26,6 @@ export function HazyNightBadge({ ratio, size = "xs" }: { ratio?: number | null; 
       <Badge color="orange" variant="light" size={size}>
         Hazy night
       </Badge>
-    </HintTooltip>
+    </HintAnchor>
   );
 }
