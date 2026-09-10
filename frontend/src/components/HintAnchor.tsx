@@ -30,8 +30,19 @@ import { cloneElement, useState, type ReactElement } from "react";
  * to ask about.
  */
 export function HintAnchor(
-  { children, ...tooltip }:
-    Omit<TooltipProps, "opened" | "children"> & { children: ReactElement },
+  { children, stopPropagation = false, ...tooltip }:
+    Omit<TooltipProps, "opened" | "children"> & {
+      children: ReactElement;
+      /**
+       * Set when the anchor sits **inside** something clickable — a menu item, a
+       * selectable row. There the tap is not free: without this it asks the
+       * question *and* runs the container, which is the v0.402.1 defect one
+       * level out (the "slower preview" chip's tap added the very op it warns
+       * about). Off by default, because swallowing a click a page expects to
+       * receive is the worse failure of the two.
+       */
+      stopPropagation?: boolean;
+    },
 ) {
   // Two reasons a hint can be showing, kept apart so a pointer leaving doesn't
   // dismiss one the user deliberately tapped open. Blur closes both: on touch,
@@ -57,6 +68,7 @@ export function HintAnchor(
     tabIndex: own.tabIndex ?? 0,
     onClick: (e: React.MouseEvent) => {
       e.preventDefault();
+      if (stopPropagation) e.stopPropagation();
       setTapped((open) => !open);
       own.onClick?.(e);
     },
@@ -64,6 +76,7 @@ export function HintAnchor(
       own.onKeyDown?.(e);
       if (e.key !== "Enter" && e.key !== " ") return;
       e.preventDefault();   // Space would scroll the page
+      if (stopPropagation) e.stopPropagation();
       setTapped((open) => !open);
     },
     onMouseEnter: (e: React.MouseEvent) => { setPointed(true); own.onMouseEnter?.(e); },
