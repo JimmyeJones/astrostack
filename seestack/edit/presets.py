@@ -347,7 +347,9 @@ def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
     of them are measured on a **locally averaged** copy of the luminance
     (``_GEOM_SMOOTH_PX``) so that one unchanging sky gives one answer however
     many subs went into it — see that constant for the two mechanisms that made
-    them depth-dependent before:
+    them depth-dependent before — and on a **detrended** one
+    (:func:`_detrended_luminance`) so that one unchanging sky gives one answer
+    however much light pollution was sitting on top of it:
 
     * ``star_share`` — how much of the above-sky *signal* is compact point sources
       (from the same white-top-hat ``star_mask`` the editor uses). A field that is
@@ -375,6 +377,20 @@ def classify_target(rgb: np.ndarray | None) -> dict[str, Any]:
     n_cov = int(cover.sum())
     if n_cov < 1024:
         return none  # too little covered area to classify meaningfully
+
+    # Geometry is read off the plane with its frame-scale sky shape taken out, for
+    # the same reason v0.225.0 stopped measuring grain from the sky's levels: the
+    # signal threshold below is ``sky + max(0.06, 6·sky_sigma)`` where ``sky`` is a
+    # **global** median and ``sky_sigma`` the MAD of the levels beneath it, so a
+    # light-pollution gradient inflates the σ and the threshold rises until the
+    # faint diffuse structure disappears under it. Measured on a star-rich field
+    # with faint nebulosity, adding a tilt of 0.05 (on a 0.10 sky) took
+    # ``ext_frac`` 0.059 → 0.001 and ``star_share`` 0.67 → 0.99, turning a verdict
+    # of "nothing clear" into **globular cluster at confidence 1.0** — and it cuts
+    # the other way too: a real coloured nebula under a strong tilt was lost
+    # entirely. The colour cue below still reads the untouched ``arr`` (it is
+    # scale-invariant by construction), so only the geometry moves.
+    lum = _detrended_luminance(lum)
 
     lum_c = lum[cover]
     lo, hi = float(np.percentile(lum_c, 0.5)), float(np.percentile(lum_c, 99.5))
