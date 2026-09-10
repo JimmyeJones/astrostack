@@ -93,7 +93,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 - **🟠 FIXTURES THAT CANNOT EXHIBIT THEIR BUG (fourth external audit, 2026-09-10 — both reproduced by reverting
   the fix in a scratch script; see PROCESS-NOTES).**
   ~~(1) `test_the_sky_stays_put_at_every_stack_depth[very-deep]`~~ and
-  ~~(2) `test_a_ragged_mosaic_still_gets_its_fringe_trimmed`~~ — **BOTH FIXED v0.417.0** (Builder 2026-09-10),
+  ~~(2) `test_a_ragged_mosaic_still_gets_its_fringe_trimmed`~~ — **BOTH FIXED v0.417.1** (Builder 2026-09-10),
   each verified by reverting the production fix in a scratch script and watching the test go red, which it now
   does and did not before. (1) `displayspace.assert_shadow_clip` now replays the **pre-fix** `_sky_mode`
   histogram — all finite values over `[p0.5, median]`, 128 bins — and requires bin 0 to *win* it, so the guard
