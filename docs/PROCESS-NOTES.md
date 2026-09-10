@@ -18,6 +18,129 @@ is a queue.
 
 ---
 
+## 2026-09-10 (Builder, branch `claude/sweet-babbage-blnqnh`) — two verified mosaic bugs from *auditing a bug class* rather than dogfooding, and a clean sixth mosaic pass
+
+**The run.** Two tasks, both verified bugs, both shipped: **v0.408.0**
+(`qc/runner.stationary_streak_frames`) and **v0.408.1**
+(`qc/grading.grade_frames`). One `scripts/agent-dogfood.sh --build --mosaic
+--editor` pass, which came back **clean and found nothing** — and that is the
+note worth keeping.
+
+### Where the bugs came from: the class, not the browser
+
+The last four findings all came out of the dogfood pass's step-4c block (two of
+the app's own sentences disagreeing). This run ran that pass and it was clean:
+mosaic trim **7.9 %** (unchanged across six passes), the three mosaic sentences
+now read as one paragraph after v0.406.2/v0.407.1, editor drive clean on all 21
+ops, page probes clean, nothing overflowing, no console errors. Tallest phone
+pages: `/life-list` 3,094 px, `/targets/<sample>` 3,078 px — in line with the
+standing baselines, so no IA slice is indicated.
+
+Both bugs instead came from grepping the **class** AGENTS.md §1 keeps naming —
+*a threshold taken from a whole-target number that is really per-panel* — which
+has now produced A6, v0.270.2, v0.271.0, v0.406.x, v0.407.1 and these two. The
+search was literally `grep -rn "min_frames\|MIN_FRAMES" seestack/ webapp/`, then
+reading each hit and asking "**whose** population is this, and what happens to a
+frame that isn't in one?"
+
+**The generalisable shape, for whoever reads this next.** Both bugs were in the
+*fallback*, not in the rule. Each module had already been fixed to judge a
+mosaic panel against itself; each then wrote "…and a frame with no population of
+its own falls back to the target-wide one, so nothing is left unjudged". That
+sentence sounds careful and is the bug: for a position-dependent measure the
+target-wide answer is not a *weaker* yardstick, it is the *wrong* one, and
+because a thin panel's frames are alike it condemns all of them at once. So the
+question to ask of the next one is **"what does this do with the leftovers?"** —
+`-1`, `None`, "too thin to cluster", "no cluster found". `bulk_select` is the
+counter-example that shows the right answer was available all along: it gives
+the unclustered frames a **bucket of their own** and never merges them into a
+panel.
+
+### v0.408.0 — a second stationary object made the detector worse than one
+
+`stationary_streak_frames` anchored on the median of the *whole* flagged set. On
+a mosaic the panels point at different sky, so one elongated object spanning the
+mosaic lands at a different place in each panel's frames, and that median falls
+**between** the clusters, within the radius of nothing. Reproduced by `exec`-ing
+`origin/main`'s own function verbatim on the new fixtures: one panel of 8 → 8
+rescued; **two panels of 8 → 0**; a 2×2 of 6 → 0; two panels of 60 → **0**.
+
+**The part that cost the most thought was the price of searching.** Replacing one
+anchor with "try every candidate centre" is obviously right and quietly changes
+the statistics: the radius's own "four trails agreeing is a one-in-a-million
+coincidence" is a statement about *one* centre. Measured, the first draft called
+**39 of 300** scattered-trail sets a tracked object at n = 20. A plain density
+floor (`k ≥ 5 × the chance occupancy`) does **not** fix it — it cannot separate
+"4 of 20" from "6 of 24", which are genuinely different under a Poisson tail and
+identical under a linear floor. Scoring each cluster against the null the trails
+actually obey, with the tail multiplied by the number of centres tried, gives
+**2 false verdicts in 1,800 sets** while a 60-per-panel mosaic cluster sails
+through. If you touch this again: the sweep is the test, not one seed.
+
+### v0.408.1 — and the test that was right to stop the first fix
+
+The first version of the grading fix said "a frame with no panel of its own is
+never graded on a per-pointing metric", and
+`test_a_panel_too_thin_to_grade_falls_back_to_the_whole_target` failed. That test
+is correct: a genuinely *clouded* thin panel must still be caught. §5 forbids
+weakening it, and the failure was the useful signal — the first fix was too
+broad.
+
+What separates the two causes turned out to be **physical, not statistical**:
+cloud raises the sky level, a different pointing does not. Over one mosaic's few
+degrees `sky_adu_median` is a property of the night; star count and median star
+flux are properties of what you framed. So only those two got the new
+`pointing_scale` flag, `sky_adu_median` kept its fallback, the existing test
+passed unchanged — and it now also asserts its reason set is exactly
+`{"sky_adu_median"}`, so the two rules can't merge back into one. **A failing
+test that pins the opposite of your fix is usually telling you the fix is the
+wrong width, not that the test is wrong.**
+
+### The rest of the class is swept — all eleven `pointing_groups` callers, checked
+
+Recorded so nobody re-walks them. `grep -rn "pointing_groups(" seestack/ webapp/`
+gives eleven call sites; the two fixed above were the only ones that handed a
+leftover frame another panel's yardstick.
+
+- `stack/photometric.py::_panel_transparency_refs` — **right already**, and says
+  so in its own docstring: a frame in no substantial group "gets no reference and
+  stays neutral rather than being scaled against a yardstick from another patch
+  of sky".
+- `session_recap.py::_panel_rescale_factors` — **right**: a sub in no substantial
+  panel is left at 1.0, and it declines entirely below two measurable panels
+  because rescaling one against un-rescaled neighbours is worse than nothing.
+- `qc/bulk_select.py::_buckets` — **right**, and it is the pattern the grading fix
+  copied: `-1` is "a bucket of its own, never merged into a panel and never
+  counted as one".
+- `stack/stacker.py::_panel_transparency_ratios` — **right**: `-1` frames are
+  skipped, and below two measurable panels it returns `[]` so the whole target
+  falls back together rather than mixing the two rules.
+- `stack/weighting.py::_positional_medians` — carries the *same* thin-panel
+  fallback in words, and is fine in practice: its `_MIN_PANEL_FRAMES` is **3**,
+  not 10, so only a one- or two-frame "panel" falls back — a stray solve rather
+  than a panel, for which the target-wide median is the right answer.
+- `mosaicmap.py` and the two `stacker.py` canvas/auto-reject sites are about
+  *geometry* (which panels exist, how deep each is), not about judging a frame
+  against a population, so the question doesn't arise.
+
+### Green gates
+
+Full suite headless, baseline on `origin/main` before any change: **5,487
+passed / 2 skipped** in 36 m 47 s — identical to the figure the 2026-09-09 run
+recorded, so `main` was green. Re-run on the branch (already up to date with
+`origin/main`, nothing new to merge): **5,500 passed / 2 skipped** in 36 m 03 s
+— exactly **+13**, which is the arithmetic the new tests predict (8 in
+`test_qc_streak_stationary.py`, 5 in `test_qc_grading.py`). Frontend untouched
+this run — no file under `frontend/` changed — so tsc/vitest/vite build were not
+re-run. `ruff check` on the four touched files reports one finding, pre-existing
+(`timezone.utc` on a fixture line that predates this run); nothing new added.
+
+The two suites were run **one after the other**, not in parallel, and
+`/tmp/pytest-of-root` (7.2 GB) was deleted between them — the disk lesson the
+2026-09-09 block records.
+
+---
+
 ## 2026-09-09 (Builder, branch `claude/sweet-babbage-p5vpyp`) — the fourth finding in the gap between two sentences, a "new" feature that was 90 % already built, and a two-pytest disk lesson
 
 **The run.** Two tasks, both shipped: **v0.407.0** (the Scout's shareable-labelled-picture
