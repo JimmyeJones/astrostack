@@ -14,6 +14,100 @@ Newest first.
 
 ---
 
+## v0.410.0 — 2026-09-10 — 🐛 a mosaic's panel steps darkened the one-click picture — by steps Auto removes itself
+
+*(Builder-verified by reproduction against `origin/main`'s own `analyze_proxy`/`auto_recipe`, on the scene
+`tests/test_auto_noise_measure.py` already ships. Severity: **wrong picture on the on-by-default, one-click,
+PRIORITY-1 path, on the shape the owner actually shoots**. Confidence: measured end to end, and now pinned by
+tests that fail before. Closes the residual v0.409.0 filed rather than guessed at.)*
+
+**The bug.** v0.409.0 took the smooth, frame-scale sky *shape* out of the plane `presets.analyze_proxy` reads
+the sky level from, and said explicitly what it had not answered: **a mosaic's per-panel offsets are steps, not
+a degree-2 surface**, so the identical stack still read **0.075** laid out as a mosaic against **0.024** as a
+single field. That level is the only input to Auto's stretch target (`target_bg = 0.24 - sky*0.4`), so the
+layout of the canvas — not anything about the data — was deciding how bright the owner's picture came out.
+
+**Why it is a bug and not a trade-off: the steps are gone before the stretch ever sees a pixel.** `auto_recipe`
+prepends `background.level_coverage` on **every** mosaic, ahead of the gradient pass, precisely to equalise
+those panel steps. So this is the same mistake v0.409.0 fixed, in the other structure Auto removes itself:
+choosing the goal for one image by measuring another.
+
+**Measured, on the fixture the gradient half already uses** (`_scene(0.004, seed=13)`, the four-panel layout the
+file has shipped since v0.225.0, with an uneven 12/9/15/6 frame count per panel):
+
+| | single field | as a mosaic (before) | as a mosaic (after) |
+|---|---|---|---|
+| reported sky | 0.0240 | **0.0749** | 0.0240 |
+| `target_bg` | 0.2304 | **0.2100** | 0.2304 |
+| finished picture, sky p30 | 0.1899 | **0.1687** (−11.2 %) | 0.1877 (−1.1 %) |
+
+Same at seeds 5 and 21 (0.0247 → 0.0795 → 0.0247; 0.0266 → 0.0831 → 0.0266).
+
+**The fix corrects a measurement; it moves no threshold.** New `presets._delevelled_luminance(lum, coverage)`
+removes the steps **the way the recipe removes them**: bin by the integer coverage value and shift each bin by
+its own robust sky median, which is exactly `bg.coverage_leveling`'s `rough_sky`, measured with that module's
+own `_robust_stats` so "a coverage level's own sky" means one thing across the app. Only the *shape* is
+subtracted — the canvas's own robust median is put back — so, like the detrend beside it, it changes how flat
+the plane is and never how bright it is. It runs **before** `_detrended_luminance`, matching the recipe's own
+order (`level_coverage` then `final_gradient`) and because a polynomial fitted through unremoved steps is not
+the gradient. `0.24 - sky*0.4`, `_NOISE_LO`/`_NOISE_HI`, the `> 0.02` verdict and the `× 6.0` saturation term
+are all untouched, and the σ stays measured on the raw pixels for the reason v0.409.0 recorded.
+
+**A canvas the object fills is left alone, and that guard is the hard part.** A panel a nebula genuinely
+*fills* has a median that is the **nebula's**, so shifting the panel by it subtracts real flux — measured on a
+first implementation, `_coloured_nebula_field`'s own radial profile flattened (per-panel means
+0.109/0.299/0.283/0.128 → 0.166/0.183/0.184/0.167) and `classify_target` stopped reading it as a nebula at all.
+So each level's retained sample is checked against `_LEVEL_MAX_SIGMA_RATIO` (3.0) times the image's own
+**grain**, and a level that does not look like sky is refused. The yardstick is deliberately **not** the one
+`coverage_leveling` uses: on exactly the image the guard exists for, a sigma-clipped canvas spread *is* the
+object, so it floats above everything and the guard could never fire. Measured structure-blind instead (the
+adjacent-pixel-difference estimator `analyze_proxy` already reports σ with), the ratio reads **0.24–0.36**
+across six scenes that are sky carrying an object and **5.1–12.5** across ones that are object — two
+populations, not a tuned margin. No measurable grain ⇒ no yardstick ⇒ stand down.
+
+**The map is asked for only where the recipe carries the pass, which is what makes it upgrade-safe.**
+`auto_recipe`/`analyze_auto_inputs` pass the coverage on to `analyze_proxy` only when `is_mosaic` — one place
+decides both — so a single-field stack's Auto is byte-for-byte what it was **whatever map is handed in**
+(pinned as a recipe-equality test, not as a promise). That is not merely conservative: a single-field run gets
+no `level_coverage` pass, so measuring its coverage steps *out* would be the same bug pointing the other way.
+Measured on the bundled samples, where the fix is correctly inert: the mosaic sample's sky 0.00309 → 0.00312,
+and the field sample's **unchanged to five decimals at 0.00285** even when handed its own map (its rim slivers
+never clear the panel floor).
+
+**New `webapp/routers/editor._auto_measure_coverage`** supplies it, with the same precedence and for the same
+reason as the border trim and the leveling op itself: the honest per-pixel **frame count** (`_framecov.fits`)
+where the run wrote one, falling back to the weighted map for every run recorded before that sibling existed. A
+coverage value is a sum of per-frame *weights* once quality weighting is on, which splits one real panel across
+a band of values; the frame count is flat inside a panel by construction.
+
+**Not over-claimed.** It removes the steps `level_coverage` removes, by binning the way that op bins — so two
+panels that happen to be equally deep are one bin here exactly as they are one bin there, and a step between
+them survives both. The honest claim is "Auto measures the picture its own recipe will hand the stretch", not
+"Auto sees every seam", and there is a test named for it.
+
+**Constants.** `_LEVEL_MIN_SHARE` (1 % of the covered canvas) and `_LEVEL_MIN_PIXELS` (64) are the floor a
+coverage value must clear to count as a *panel* rather than a dithered rim sliver. The share is not on a cliff:
+the reported level is 0.0240 at every share from 0.002 to 0.05. It is a *share*, not a pixel count, so it means
+the same thing at every proxy stride — the op next door has to scale its own floor by 1/step² for exactly that
+reason.
+
+**Upgrade-safe (§9) and additive.** Engine-only plus one webapp helper: no config, schema, on-disk, endpoint,
+response-shape or default change; the new engine parameter defaults to `None`, so every existing caller is
+unchanged, and no saved recipe is touched (Auto is recomputed on request, never replayed from a stored number).
+
+**Tests (+14 collected — 11 engine, 3 webapp — 7 failing before).** In `tests/test_auto_noise_measure.py`, whose thesis this extends:
+the level is unmoved by the layout (parametrized ×3, all fail before); the stretch target is unmoved; the
+**finished picture's** sky is unmoved, rendered with the coverage map in the `EditContext` so the leveling op
+really runs; the de-level leaves an already-level canvas where it was *and* really does flatten a stepped one;
+it declines rather than inventing a step (no map, wrong shape, one level, all-uncovered, all-NaN); a canvas the
+object fills is left alone rather than flattened; equally-deep panels are one bin (the limit, stated as a
+test); and a genuinely bright-sky mosaic still reads bright. In
+`tests/webapp/test_editor.py`: a mosaic run is measured on its frame-count map, falls back to the weighted map
+without the sibling, and a single-field run is never asked for one — each asserted for **both** Auto builders,
+so the recipe and the cues it reports can't drift apart.
+
+---
+
 ## v0.409.1 — 2026-09-10 — 🐛 the same gradient decided *what your target was*: `classify_target`'s cues read the tilt
 
 *(Builder-verified by reproduction, found by taking v0.409.0's bug class — "a number measured on an image the
