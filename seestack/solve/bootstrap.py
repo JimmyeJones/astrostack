@@ -31,6 +31,15 @@ The flow (all pure/testable except the one ASTAP call, which is injected):
      reference pixel (CRPIX) by the member's measured shift — giving each member a
      per-sub WCS so the whole burst can finally stack.
 
+**Steps 3–6 have a shortcut when a few subs did solve on their own** (the band
+``0 < n_solved < min_frames``, where this still engages): register against one of
+*them* and take its real, ASTAP-verified WCS as the reference, instead of
+integrating a deep image and solving that. Same registration, same CRPIX
+propagation — but no integration, no temp FITS, no second ASTAP call, and none of
+that call's risk of failing on the very field that already defeated it per-sub.
+The deep-image path stays exactly as it was for the zero-solved case (and for a
+target whose solved subs can't be read or don't share the members' shape).
+
 Safety: this is opt-in (off by default) and additive. A member that doesn't
 register confidently is left unsolved (honest — never silently mis-placed), and
 a deep image that doesn't solve leaves every sub exactly as it was.
@@ -61,6 +70,13 @@ DEFAULT_MAX_FRAMES = 16
 DEFAULT_MAX_SHIFT_PX = 200.0
 
 
+# How many already-solved subs to try loading as the registration anchor before
+# giving up and integrating a deep image instead. A load is a debayer, so this is
+# a work bound, not a quality one — the candidates are tried star-richest first
+# and the first one that reads is as good an anchor as the next.
+ANCHOR_LOAD_ATTEMPTS = 3
+
+
 @dataclass
 class BootstrapResult:
     """Outcome of a bootstrap attempt (all counts default to a no-op)."""
@@ -70,6 +86,11 @@ class BootstrapResult:
     n_members: int = 0
     n_registered: int = 0
     deep_solved: bool = False
+    #: True when the burst was registered to an **already-solved** sub and took
+    #: its real WCS, instead of integrating a deep image and solving that. The two
+    #: are alternatives, so ``deep_solved`` stays False on this path — the deep
+    #: image was never built, let alone solved.
+    anchored_on_solved_sub: bool = False
     n_propagated: int = 0
     propagated_frame_ids: list[int] = field(default_factory=list)
 
@@ -80,6 +101,7 @@ class BootstrapResult:
             "n_members": self.n_members,
             "n_registered": self.n_registered,
             "deep_solved": self.deep_solved,
+            "anchored_on_solved_sub": self.anchored_on_solved_sub,
             "n_propagated": self.n_propagated,
         }
 
@@ -264,6 +286,40 @@ def _order_members(frames: list) -> list:
     return sorted(frames, key=key)
 
 
+def pick_solved_anchor(frames: list, shape: tuple[int, int]):
+    """The best already-solved sub to register this burst against, or ``None``.
+
+    When a *few* subs solved on their own — fewer than ``min_frames``, so the
+    bootstrap still engages — one of them is a stronger anchor than a fresh solve
+    of the deep image: its WCS is a real ASTAP solution ASTAP has already
+    verified, and using it skips building the deep image, writing a temp FITS and
+    running the extra solve, along with that solve's own risk of failing on a
+    faint field. Everything downstream is unchanged — the same phase-correlation
+    shifts, the same CRPIX propagation.
+
+    Candidates are the solved, readable subs in :func:`_order_members` order
+    (star-richest, sharpest first — the best correlation target), and the first
+    ``ANCHOR_LOAD_ATTEMPTS`` are actually loaded. A candidate is accepted only if
+    it carries a **usable** WCS (a truncated sidecar reads back truthy but
+    locates nothing) and its pixels are ``shape`` — the members' own shape, since
+    a reference of a different size correlates against nothing.
+
+    Returns ``(frame, gray)`` or ``None``, in which case the caller integrates a
+    deep image and solves that, exactly as before.
+    """
+    from seestack.io.wcs_io import wcs_text_is_usable
+
+    candidates = [
+        f for f in frames
+        if wcs_text_is_usable(f.wcs_json) and readable_frame_path(f) is not None
+    ]
+    for frame in _order_members(candidates)[:ANCHOR_LOAD_ATTEMPTS]:
+        gray = _registration_gray(readable_frame_path(frame))
+        if gray is not None and gray.shape[:2] == tuple(shape):
+            return frame, gray
+    return None
+
+
 def _default_deep_solver(
     deep: np.ndarray,
     *,
@@ -324,8 +380,11 @@ def bootstrap_solve(
     already-solved or deliberately-rejected sub, and skips any member it can't
     register confidently. Returns a :class:`BootstrapResult`.
 
-    ``deep_solver`` is injectable for testing; production uses ASTAP on a temp
-    FITS of the deep image.
+    When one of those few solved subs can serve as the registration reference
+    (:func:`pick_solved_anchor`), its own verified WCS is used and **no deep image
+    is built or solved** — see the module docstring. ``deep_solver`` is injectable
+    for testing and is used only on the deep-image path; production runs ASTAP on
+    a temp FITS of the deep image.
     """
     from seestack.io.wcs_io import wcs_image_center_deg_from_text, wcs_text_is_usable
     from seestack.solve.astap import classify_solve_setup_error
@@ -360,61 +419,94 @@ def bootstrap_solve(
         result.n_members = len(members)
         return result
 
-    # Reference = the best (first-ordered) sub that actually loaded — it anchors
-    # the deep image's WCS, so it should be a star-rich one.
-    ref_index = valid[0]
+    # If a few subs *did* solve on their own, register against one of them and use
+    # its real WCS rather than solving a deep image: a verified ASTAP solution
+    # beats a fresh solve of a synthetic image, and it skips the integration, the
+    # temp FITS, the extra ASTAP call and that call's own failure risk. It is
+    # prepended as member 0 so the reference is always index 0 on this path;
+    # everything below counts only the *unsolved* members, so the engagement
+    # gates mean exactly what they meant before.
+    anchor = pick_solved_anchor(frames, grays[valid[0]].shape[:2])
+    anchored = anchor is not None
+    if anchor is not None:
+        anchor_frame, anchor_gray = anchor
+        members = [anchor_frame, *members]
+        paths = [readable_frame_path(anchor_frame), *paths]
+        grays = [anchor_gray, *grays]
+    first_unsolved = 1 if anchored else 0
+
+    # Reference = the solved anchor if there is one, else the best (first-ordered)
+    # sub that actually loaded — it anchors the deep image's WCS, so it should be
+    # a star-rich one.
+    ref_index = 0 if anchored else valid[0]
     shifts = register_members(grays, ref_index, max_shift_px=max_shift_px)
-    registered = [i for i, s in enumerate(shifts) if s is not None and grays[i] is not None]
-    result.n_members = len(members)
+    registered = [
+        i for i, s in enumerate(shifts)
+        if s is not None and grays[i] is not None and i >= first_unsolved
+    ]
+    result.n_members = len(members) - first_unsolved
     result.n_registered = len(registered)
     if len(registered) < min_frames:
         result.reason = "too few subs registered to a common frame"
         return result
 
-    deep = integrate_deep_image(grays, shifts, ref_index)
-
-    ref_frame = members[ref_index]
-    ref_fov = _fov_deg_for_frame(paths[ref_index], fov_deg)
-    ra_hint = ref_frame.ra_hint_deg
-    dec_hint = ref_frame.dec_hint_deg
-
-    solver = deep_solver if deep_solver is not None else _default_deep_solver
-    try:
-        solve_res = solver(
-            deep,
-            astap_path=astap_path,
-            fov_deg=ref_fov,
-            timeout_s=timeout_s,
-            ra_hint_deg=ra_hint,
-            dec_hint_deg=dec_hint,
-        )
-    except Exception as exc:  # noqa: BLE001 — a solve crash must not sink the scan
-        log.warning("bootstrap deep solve raised: %s", exc)
+    if anchored:
+        # No deep image is built at all on this path: the anchor's own solution is
+        # the reference WCS, and ``propagate_wcs`` offsets CRPIX from it exactly as
+        # it would from a solved deep image (both share the reference's pixel grid).
         result.engaged = True
-        result.reason = "deep-image solve error"
-        return result
+        result.anchored_on_solved_sub = True
+        wcs_text = anchor_frame.wcs_json
+        pixscale = anchor_frame.pixscale_arcsec
+        rotation = anchor_frame.rotation_deg
+    else:
+        deep = integrate_deep_image(grays, shifts, ref_index)
 
-    result.engaged = True
-    wcs_text = getattr(solve_res, "wcs_text", None)
-    # Truthiness is not enough: an empty/truncated ``.wcs`` sidecar reads back as a
-    # truthy ``"END"`` blob that parses to a non-``None``, celestial-less WCS (see
-    # ``wcs_text_is_usable``). Propagating that would stamp *every* rescued member
-    # with a WCS that locates nothing — worse than the honest "didn't solve" here,
-    # because a stamped member is never re-offered to the solver again.
-    if not getattr(solve_res, "solved", False) or not wcs_text_is_usable(wcs_text):
-        raw = getattr(solve_res, "error", None) or ""
-        setup = classify_solve_setup_error(raw)
-        result.reason = setup or "deep image did not solve"
-        return result
+        ref_frame = members[ref_index]
+        ref_fov = _fov_deg_for_frame(paths[ref_index], fov_deg)
+        ra_hint = ref_frame.ra_hint_deg
+        dec_hint = ref_frame.dec_hint_deg
 
-    result.deep_solved = True
-    pixscale = getattr(solve_res, "pixscale_arcsec", None)
-    rotation = getattr(solve_res, "rotation_deg", None)
+        solver = deep_solver if deep_solver is not None else _default_deep_solver
+        try:
+            solve_res = solver(
+                deep,
+                astap_path=astap_path,
+                fov_deg=ref_fov,
+                timeout_s=timeout_s,
+                ra_hint_deg=ra_hint,
+                dec_hint_deg=dec_hint,
+            )
+        except Exception as exc:  # noqa: BLE001 — a solve crash must not sink the scan
+            log.warning("bootstrap deep solve raised: %s", exc)
+            result.engaged = True
+            result.reason = "deep-image solve error"
+            return result
+
+        result.engaged = True
+        wcs_text = getattr(solve_res, "wcs_text", None)
+        # Truthiness is not enough: an empty/truncated ``.wcs`` sidecar reads back as
+        # a truthy ``"END"`` blob that parses to a non-``None``, celestial-less WCS
+        # (see ``wcs_text_is_usable``). Propagating that would stamp *every* rescued
+        # member with a WCS that locates nothing — worse than the honest "didn't
+        # solve" here, because a stamped member is never re-offered to the solver.
+        if not getattr(solve_res, "solved", False) or not wcs_text_is_usable(wcs_text):
+            raw = getattr(solve_res, "error", None) or ""
+            setup = classify_solve_setup_error(raw)
+            result.reason = setup or "deep image did not solve"
+            return result
+
+        result.deep_solved = True
+        pixscale = getattr(solve_res, "pixscale_arcsec", None)
+        rotation = getattr(solve_res, "rotation_deg", None)
+
     member_wcs = propagate_wcs(wcs_text, shifts, ref_index)
 
     for i, wtext in enumerate(member_wcs):
         if wtext is None or grays[i] is None:
             continue
+        if anchored and i == ref_index:
+            continue  # the anchor is already solved — never touch a solved sub
         frame = members[i]
         # This member's centre must come from *its own* WCS evaluated at its own
         # centre pixel — not from CRVAL. ``propagate_wcs`` builds each member's
@@ -441,5 +533,7 @@ def bootstrap_solve(
         result.n_propagated += 1
         result.propagated_frame_ids.append(frame.id)
 
-    result.reason = f"rescued {result.n_propagated} sub(s) via deep-image solve"
+    how = ("by registering to an already-solved sub" if anchored
+           else "via deep-image solve")
+    result.reason = f"rescued {result.n_propagated} sub(s) {how}"
     return result
