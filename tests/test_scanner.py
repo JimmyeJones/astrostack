@@ -1871,3 +1871,23 @@ def test_a_successful_bootstrap_rescue_is_not_logged_as_a_failure(tmp_path, monk
                    for r in caplog.records)
     finally:
         proj.close()
+
+
+def test_the_sibling_retry_follows_the_use_solve_hints_setting(tmp_path, monkeypatch):
+    """A user who turned hints off asked for a blind solve; the second pass is
+    nothing but a hint, so it must not reinstate hinting behind their back."""
+    from seestack.solve import runner as solve_runner
+
+    proj = _sibling_retry_project(tmp_path)
+    try:
+        calls: list = []
+        monkeypatch.setattr(solve_runner, "solve_one", _fake_tight_only_solver(calls))
+        summary = run_qc_and_solve(proj, run_qc=False, run_solve=True, serial=True,
+                                   use_solve_hints=False)
+
+        assert summary["solve_ok"] == 0
+        assert "solve_retry_total" not in summary
+        assert len(calls) == 3
+        assert all(c[1] is None for c in calls)  # blind, as asked
+    finally:
+        proj.close()

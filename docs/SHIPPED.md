@@ -123,8 +123,11 @@ only add solves.
   sibling radius — which would re-run an identical solve. This is what keeps the pass off the frames
   v0.180.0 already rescues.
 
-And it stands down entirely when **nothing** has solved yet: with no sibling centre there is nothing to offer,
-so a night where every sub failed is attempted once, exactly as today.
+And it stands down entirely when **nothing** has solved yet (with no sibling centre there is nothing to
+offer, so a night where every sub failed is attempted once, exactly as today), and when the caller passed
+`use_solve_hints=False` — a user who turned hints off asked for a blind solve, and this pass is nothing but a
+hint, so it follows that setting the way `build_solve_arglist`'s own sibling fallback does rather than
+reinstating hinting behind their back.
 
 **Shape.** The decision is a pure, testable
 `solve/runner.build_sibling_retry_arglist(project, solve_args, failures)`, which reuses the round's own arg
@@ -147,13 +150,14 @@ counters they were (the retry is a subset of the frames already attempted). `sol
 existing-default change; the new summary keys are additive and every existing consumer reads the same keys it
 did. No new setting to migrate, and nothing to turn on.
 
-**Tests (+7, three fail before on behaviour):** `tests/test_solve_hints.py` (+4 — a header-hinted failure is
+**Tests (+8, three fail before on behaviour):** `tests/test_solve_hints.py` (+4 — a header-hinted failure is
 retried at the tight radius around the sibling centre; setup failures, timeouts and an identical search are
 each skipped in one case; nothing is retried until something has solved; a tightened radius is never widened)
-and `tests/test_scanner.py` (+3 — end-to-end through `run_qc_and_solve` with a solver that only finds the
+and `tests/test_scanner.py` (+4 — end-to-end through `run_qc_and_solve` with a solver that only finds the
 field when searched tight: three subs rescued, `solve_ok` counts them, exactly one extra attempt per frame
-and never a loop; the same target left unsolved with the pass switched off, which is the fail-before; and a
-night where nothing solved at all paying no extra attempts).
+and never a loop; the same target left unsolved with the pass switched off, which is the fail-before; a night
+where nothing solved at all paying no extra attempts; and `use_solve_hints=False` leaving every attempt
+blind).
 
 ---
 

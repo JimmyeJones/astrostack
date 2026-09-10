@@ -1202,8 +1202,12 @@ def run_qc_and_solve(
         # that just failed. Bounded to one extra attempt per frame, skipping the
         # setup/timeout/identical cases (see ``build_sibling_retry_arglist``), so a
         # genuinely unsolvable night pays almost nothing and a night where nothing
-        # solved at all pays nothing.
-        if retry_unsolved_with_sibling_hint and failures and not _stopped(should_stop):
+        # solved at all pays nothing. A user who turned *hints* off asked for a
+        # blind solve, and this pass is nothing but a hint — so it follows
+        # ``use_solve_hints`` the way ``build_solve_arglist``'s own sibling
+        # fallback does, rather than reinstating hinting behind their back.
+        if (retry_unsolved_with_sibling_hint and use_solve_hints
+                and failures and not _stopped(should_stop)):
             retry_args = build_sibling_retry_arglist(project, solve_args, failures)
             if retry_args:
                 summary["solve_retry_total"] = len(retry_args)
