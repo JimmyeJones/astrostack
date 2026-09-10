@@ -15,6 +15,7 @@ importantly — pin that it stays quiet for real trails.
 
 from __future__ import annotations
 
+import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -25,8 +26,10 @@ pytest.importorskip("astropy")
 from seestack.io.project import FrameRow, Project
 from seestack.qc.runner import (
     STATIONARY_CLUSTER_RADIUS,
+    STATIONARY_MAX_CLUSTERS,
     STATIONARY_MIN_FRAMES,
     STATIONARY_MIN_SPAN_S,
+    _chance_cluster_p,
     build_qc_arglist,
     reconcile_streak_rejections,
     stationary_streak_frames,
@@ -295,5 +298,142 @@ def test_a_real_qc_pass_rescues_a_fixed_feature(tmp_path):
         restored = reconcile_streak_rejections(proj)
         assert set(restored) == set(streaked)
         assert sum(1 for f in proj.iter_frames() if f.accept) == 16
+    finally:
+        proj.close()
+
+
+# --- more than one stationary object: the mosaic case -----------------------
+#
+# A mosaic's panels point at different sky, so one extended object spanning the
+# mosaic forms its flagged component at a *different* place in each panel's
+# frames. The owner is a heavy mosaic user (AGENTS.md §1), so this is the shape
+# the rule meets in practice — and a single anchor cannot see it at all.
+
+def _panel_marks(spots, *, per_panel: int, minutes: float = 40.0):
+    """``per_panel`` flagged frames at each of ``spots``, spread over the night."""
+    marks, fid = [], 0
+    for cx, cy in spots:
+        for i in range(per_panel):
+            marks.append((fid, cx, cy, _stamp(minutes * i)))
+            fid += 1
+    return marks
+
+
+def test_two_mosaic_panels_each_with_their_own_object_are_both_rescued():
+    """**The bug.** Two panels, each carrying the object at its own place in the
+    frame. One anchor lands *between* the two clusters, so no frame is within the
+    radius of it and the whole flagged set keeps its rejection — adding a second
+    stationary object made the detector strictly worse than one.
+
+    Fails before: ``[]`` for all sixteen, while the same eight alone are rescued.
+    """
+    marks = _panel_marks([(0.20, 0.80), (0.80, 0.20)], per_panel=8)
+    assert stationary_streak_frames(marks) == list(range(16))
+    # The half that already worked still works, unchanged.
+    assert stationary_streak_frames(marks[:8]) == list(range(8))
+
+
+def test_a_four_panel_mosaic_rescues_every_panel():
+    """A 2×2 of an elongated nebula: four clusters, none of them a majority of
+    the flagged set, all four tracked objects."""
+    spots = [(0.25, 0.25), (0.25, 0.75), (0.75, 0.25), (0.75, 0.75)]
+    marks = _panel_marks(spots, per_panel=6)
+    assert stationary_streak_frames(marks) == list(range(24))
+
+
+def test_a_trail_among_several_clusters_still_keeps_its_rejection():
+    """The per-frame contract survives the multi-cluster search: the panels come
+    back, the satellite that landed between them does not."""
+    marks = _panel_marks([(0.20, 0.80), (0.80, 0.20)], per_panel=6)
+    marks.append((99, 0.50, 0.50, _stamp(70)))  # a real trail, on neither object
+    assert stationary_streak_frames(marks) == list(range(12))
+
+
+def test_the_cluster_count_is_capped_but_takes_the_biggest_first():
+    """The rounds are bounded (:data:`STATIONARY_MAX_CLUSTERS`) so the search can
+    never walk a huge flagged set cluster by cluster. Past the cap the *largest*
+    clusters are the ones kept, so the bound can only drop the least
+    significant."""
+    spots = [(0.06 + 0.06 * i, 0.5 if i % 2 else 0.1) for i in range(STATIONARY_MAX_CLUSTERS + 3)]
+    # Give the first clusters more frames, so "largest first" is observable.
+    marks, fid = [], 0
+    sizes = []
+    for n, (cx, cy) in enumerate(spots):
+        size = 30 - n
+        sizes.append(size)
+        for i in range(size):
+            marks.append((fid, cx, cy, _stamp(40 * i)))
+            fid += 1
+    got = set(stationary_streak_frames(marks))
+    # Exactly the first STATIONARY_MAX_CLUSTERS clusters (the biggest) come back.
+    kept = sum(sizes[:STATIONARY_MAX_CLUSTERS])
+    assert len(got) == kept
+    assert got == set(range(kept))
+
+
+# --- the price of searching: a coincidence is not an object -----------------
+
+def test_a_chance_cluster_among_scattered_trails_decides_nothing():
+    """Searching every candidate centre asks "is anything clustered here?" once
+    per flagged frame, and enough tries turn the radius's own coincidence budget
+    into an event. Twenty real trails, scattered over a night, must still decide
+    nothing however luckily four of them fall together.
+
+    This is a *statistical* claim, so it is asserted over many independent
+    scatters rather than one lucky seed.
+    """
+    rng = random.Random(20260910)
+    verdicts = 0
+    for _ in range(200):
+        marks = [(i, rng.random(), rng.random(), _stamp(7 * i)) for i in range(20)]
+        if stationary_streak_frames(marks):
+            verdicts += 1
+    assert verdicts == 0, f"{verdicts}/200 scatters were called tracked objects"
+
+
+def test_the_chance_score_pays_for_every_centre_the_search_tries():
+    """The rule the guard above rests on: a cluster of a given size gets *less*
+    surprising as the flagged set it was found in grows, because a bigger set
+    both crowds the frame and offers more places to look. Pinned so the
+    correction can't quietly be dropped."""
+    assert _chance_cluster_p(4, 6) < _chance_cluster_p(4, 20) < _chance_cluster_p(4, 60)
+    # A bigger cluster in the same set is rarer than a smaller one.
+    assert _chance_cluster_p(8, 40) < _chance_cluster_p(5, 40)
+    # Degenerate inputs are "no information", never a licence to re-accept.
+    assert _chance_cluster_p(1, 50) == 1.0
+    assert _chance_cluster_p(4, 1) == 1.0
+
+
+def test_a_real_mosaic_sized_object_is_not_blocked_by_the_chance_test(tmp_path):
+    """The other side of that guard: the owner's mosaics carry hundreds of subs
+    per panel, so a genuine panel-sized cluster must sail through it."""
+    marks = _panel_marks([(0.30, 0.30), (0.70, 0.70)], per_panel=60, minutes=3.0)
+    assert len(stationary_streak_frames(marks)) == 120
+
+
+def test_two_panel_mosaic_rescue_end_to_end(tmp_path):
+    """Through the database, on the population the fraction tiers cannot see:
+    two panels' worth of flagged subs (24 of 60 frames, 40 %) come back, and the
+    clean frames are untouched."""
+    proj = Project.create(tmp_path / "p", name="Veil (mosaic)")
+    try:
+        for i in range(36):
+            proj.add_frame(FrameRow(source_path=f"clean{i}.fit",
+                                    timestamp_utc=_stamp(5 * i), accept=True))
+        streaked = []
+        for panel, (cx, cy) in enumerate([(0.22, 0.78), (0.78, 0.22)]):
+            for i in range(12):
+                streaked.append(proj.add_frame(FrameRow(
+                    source_path=f"p{panel}_{i}.fit", timestamp_utc=_stamp(20 * i + panel),
+                    streak_detected=True, streak_count=1,
+                    streak_cx=cx + 0.004 * i, streak_cy=cy,
+                    accept=False, reject_reason="auto:streak")))
+        restored = reconcile_streak_rejections(proj)
+        assert set(restored) == set(streaked)
+        assert sum(1 for f in proj.iter_frames() if f.accept) == 60
+        for fid in streaked:
+            f = proj.get_frame(fid)
+            assert f.reject_reason is None
+            assert f.streak_detected is True  # still counted in the UI
     finally:
         proj.close()

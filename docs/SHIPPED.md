@@ -14,6 +14,78 @@ Newest first.
 
 ---
 
+## v0.408.0 — 2026-09-10 — 🐛 the streak guard anchored on one median, so a mosaic rescued nothing
+
+*(Builder-verified by reproduction against `origin/main`'s own `stationary_streak_frames`, run verbatim on the
+new fixtures. Filed and fixed in the same run, so it never sat in "Bugs (fix these first)". Severity: HIGH on a
+mosaic — every flagged sub of every affected panel silently stays out of the stack, on the by-default path.
+Found by auditing the "a threshold taken from a whole-target number that is really per-panel" class that
+produced A6, v0.270.2, v0.271.0 and v0.406.x — AGENTS.md §1 "test mosaic-shaped cases".)*
+
+**The bug.** `qc/runner.stationary_streak_frames` is the position half of the streak guardrail: streak detection
+is a shape-only Hough decision, so a bright *stationary* extended object — an edge-on galaxy, an elongated
+nebula — trips it on essentially every sub, and without a rescue those good subs are discarded to `auto:streak`.
+The fraction tiers above it can only ask "was a majority of the **target** flagged?", which a minority-flagged
+object slips under; this guard is what catches it, by asking whether the flagged component sits in *one place in
+the frame across hours*.
+
+It asked that of **one** place: the median of the whole flagged set. On a single field that is the object, and
+it works. On a **mosaic** the panels point at different sky, so one object spanning the mosaic forms its
+component at a *different* place in each panel's frames — and the median of two clusters lands **between** them,
+where no frame is within `STATIONARY_CLUSTER_RADIUS` of it. Measured on `origin/main`'s function, verbatim:
+
+| flagged set | pre-fix | post-fix |
+|---|---|---|
+| one panel, 8 subs at one spot | **8 rescued** | 8 |
+| **two** panels, 8 subs each | **0** | 16 |
+| four panels (2×2), 6 subs each | **0** | 24 |
+| two panels + one real trail between them | **0** | 12 (the trail stays rejected) |
+| two panels, 60 subs each (the owner's scale) | **0** | 120 |
+
+So adding a *second* stationary object made the detector **strictly worse than one** — the case it exists for,
+at the scale the owner actually shoots (§1: heavy mosaic user, thousands of subs).
+
+**The fix — find the clusters instead of assuming one.** Every remaining mark is a candidate centre; each
+candidate re-centres on the **median of its own neighbours** (so the accepted set is still the same
+median-centred one, and a trail sitting near the object still cannot drag the centre off it), the largest
+qualifying cluster is taken, its members are removed, and the round repeats up to `STATIONARY_MAX_CLUSTERS`
+(16 — comfortably above a 3×3 mosaic's 9 panels; a work bound, and largest-first, so it can only ever drop the
+least significant). A set holding exactly one cluster gives byte-for-byte the previous answer — all 21 existing
+tests pass unchanged.
+
+**The price of searching, paid explicitly.** Anchoring on one median asks "is anything at *this* place?" once;
+searching every centre asks it once per flagged frame, and enough tries turn the radius's own "four trails
+agreeing is a one-in-a-million coincidence" into an event: **measured, twenty scattered trails threw up a chance
+four in 39 of 300 sets (13 %)** on the first draft. So each cluster is now scored against the null that describes
+real trails — components landing independent and uniform over the frame, giving a Poisson count within the
+radius — and the tail is multiplied by the number of centres tried (`_chance_cluster_p`); a cluster that is not
+surprising under it decides nothing (`STATIONARY_CLUSTER_MAX_P = 0.05`). Re-measured over 1,800 scattered sets
+at n = 12/20/40/80/200/500: **2 false verdicts, all at n = 80** (0.1 %), against 39/300 for a plain density floor
+and 0 for the pre-fix anchor. It is inert on real objects, which is the point — a tracked feature is in
+*essentially every* sub of its pointing, not four of them — and the mosaic-sized case (60 per panel) sails
+through.
+
+**Bounded work.** The scan is vectorised (squared radius, no square root) and memoises re-centred groups on
+their centre, since every mark of one cluster re-centres on the same spot: **0.37 s for 3,000 flagged frames**
+(two 1,200-frame clusters plus 600 trails), down from 1.85 s for the unmemoised first draft. This runs once in
+the reconcile pass after QC, not per frame.
+
+**Contract unchanged.** Still un-reject-only, still per frame (a genuine trail among the object's frames keeps
+its rejection on its own evidence), still never a user override, still no verdict for an undated or
+positionless frame, still the same `STATIONARY_MIN_FRAMES` / `STATIONARY_CLUSTER_RADIUS` /
+`STATIONARY_MIN_SPAN_S` constants. Engine-only and additive: no config, DB-schema, on-disk, API-shape or
+default change, and nothing about *what* the detector flags moved — only which of the already-flagged frames
+can be given back.
+
+**Tests (+8, every multi-cluster one failing before):** `tests/test_qc_streak_stationary.py` — two mosaic
+panels each with their own object (and the single-panel half still working), a 2×2 rescuing every panel, a real
+trail between two clusters keeping its rejection, the cluster cap taking the biggest first, a 200-scatter
+statistical pin that a chance cluster decides nothing, the `_chance_cluster_p` correction pinned in both
+directions plus its degenerate inputs, a mosaic-sized cluster sailing through the chance test, and the whole
+thing end to end through the database (24 flagged of 60 frames, 40 % — the band the fraction tiers cannot see).
+
+---
+
 ## v0.407.1 — 2026-09-09 — 🐛 the panel map and the health panel gave opposite instructions about the same panel
 
 *(Builder-verified by reproduction on the running app: `scripts/agent-dogfood.sh --build --mosaic --editor`,
