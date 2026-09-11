@@ -1,6 +1,7 @@
 import { Alert, Group, Text } from "@mantine/core";
 
 import type { SkyBrightnessRead } from "../../api/client";
+import { formatNightDate } from "../../format";
 
 const TONE: Record<SkyBrightnessRead["level"], { color: string; icon: string }> = {
   darker: { color: "teal", icon: "🌌" },
@@ -23,6 +24,11 @@ const TONE: Record<SkyBrightnessRead["level"], { color: string; icon: string }> 
  * too few measured subs, no exposure recorded), so it's safe to drop in
  * unconditionally. A "typical" night is deliberately still shown — "nothing
  * unusual here" is the reassurance a beginner is looking for.
+ *
+ * The night goes through the shared `formatNightDate`, like every other night
+ * label in the app (the Nights card, the imaging calendar, "Shot …", the best
+ * night, the year page). It used to print the server's raw `2026-07-23`, which
+ * is the one date on the Target page that didn't read like a date.
  */
 export function SkyBrightnessNote({ read }: { read?: SkyBrightnessRead | null }) {
   if (!read) return null;
@@ -34,7 +40,9 @@ export function SkyBrightnessNote({ read }: { read?: SkyBrightnessRead | null })
       title={
         <Group gap={6} wrap="nowrap">
           <span aria-hidden>{tone.icon}</span>
-          <span>{`Your sky on the night of ${read.night}: ${read.label.toLowerCase()}`}</span>
+          <span>
+            {`Your sky on the night of ${formatNightDate(read.night)}: ${read.label.toLowerCase()}`}
+          </span>
         </Group>
       }
     >
