@@ -50,7 +50,7 @@ it, and every single-field target are bit-for-bit unchanged — asserted directl
 running each pre-existing case through `null`/`undefined`/`0`/`0.5`/`1` and `toEqual`-ing the
 un-scaled result.
 
-**Tests (+15).** `perPixel.test.ts` (new, 8) for the clamp, the identity, the division and the
+**Tests (+17).** `perPixel.test.ts` (new, 7) for the clamp, the identity, the division and the
 "never *about 1 field*" floor; `thinStack.test.ts` +5 (one sub deep everywhere, 2–4 deep, a genuinely
 deep mosaic, the **dogfood mosaic sample's own 21 subs over ~3.5 fields ≈ 6 deep** — which is what the
 app's health panel says about that picture — and the invariance sweep); `nextBestMove.test.ts` +5,
@@ -108,13 +108,13 @@ to 1.0, which is the pre-fix behaviour exactly. A value at or below 1.0 is clamp
 sides (the backend already did, for the same reason — a scale below one would inflate the apparent
 depth).
 
-**Tests (+11).** `integrationTrend.test.ts` +5: the growing mosaic says nothing; a mosaic that stopped
+**Tests (+15).** `integrationTrend.test.ts` +5: the growing mosaic says nothing; a mosaic that stopped
 improving **at a fixed size** is still called plateaued (the fix must not make the verdict unreachable
 on a mosaic) and still names its total in the sentence; a mosaic that genuinely deepened is still
 credited as improving; the shared-figure invariance sweep above; and "deepest" chosen by depth rather
 than by total. `tests/webapp/test_stack_run_field_fulls.py` (new, 5): the single-field 1.0, the 2×2
 4.0, **each run reporting its own canvas rather than the newest**, drizzle divided out, and the field
-present-but-null when no frame records a shape. `tests/test_field_fulls.py` +6 for
+present-but-null when no frame records a shape. `tests/test_field_fulls.py` +5 for
 `native_frame_shape`'s degraded shapes (no connection, no row, a raising DB, a zero/missing dimension)
 — every one must answer `None` rather than raise, because a broken project DB must not cost a page its
 picture list.

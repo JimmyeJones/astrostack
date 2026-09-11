@@ -82,10 +82,11 @@ sentences on a screen, and it is the cheapest place this class has been found ye
 
 ### Green gates
 
-Python **5,639 passed / 2 skipped** (baseline) and the full suite re-run on the finished branch before
-merge; `tests/webapp` **2,085 passed** after task 1. Frontend: `npx tsc --noEmit` clean (verified it
-was really compiling — `--listFiles` shows 823 `src/` files, per the §7 trap), vitest **259 files /
-3,622 tests**, `npx vite build` ✓. Every mosaic assertion in both tasks was watched go **red** first —
+Python **5,639 passed / 2 skipped** on the baseline (28m59s) and **5,649 passed / 2 skipped** (28m12s)
+on the finished branch — the +10 is this run's Python tests; `tests/webapp` **2,085 passed** after task
+1. Frontend: `npx tsc --noEmit` clean (verified it was really compiling — `--listFiles` shows 823
+`src/` files, per the §7 trap), vitest **259 files / 3,622 tests** (+22 across the two tasks), `npx
+vite build` ✓. Every mosaic assertion in both tasks was watched go **red** first —
 task 1 by stashing `integrationTrend.ts`, task 2 by neutering `canvasFieldFulls` to `return 1`.
 
 ---
