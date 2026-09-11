@@ -36,6 +36,10 @@ export function autoColorCalCaption(
   const clamped = typeof cc?.notes === "string" && cc.notes.includes(CLAMP_NOTE);
   const withClamp = (text: string): string =>
     clamped ? `${text} (capped an extreme channel)` : text;
+  // "gaia" is a retired mode (v0.418.0 — it needed a network call the app declines
+  // and an astroquery the image never shipped). The backend cannot report it any
+  // more, but a run record stamped by an older version still can, so keep reading
+  // it as the star-based solve it was stamped as. Don't "tidy" this away.
   if (mode === "gray_star" || mode === "gaia") {
     // A star-based solve. Guard the degenerate n=0 (shouldn't happen for these
     // modes, but never claim "0 stars ✓").

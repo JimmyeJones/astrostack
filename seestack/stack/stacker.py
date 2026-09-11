@@ -519,7 +519,10 @@ class StackOptions:
     save_progress: bool = False
     # Photometric color calibration (post-stack).
     color_calibration: bool = False
-    color_calibration_mode: str = "gray_star"  # 'gray_star' | 'gaia'
+    # 'gray_star' is the only offered mode; 'gaia' is retired (v0.418.0) and still
+    # accepted from an old run record — it solves gray-star and says so. See
+    # MODE_GAIA in seestack/post/color_cal.py.
+    color_calibration_mode: str = "gray_star"
     max_workers: int | None = None  # default: os.cpu_count()
     output_name: str = "master"
     use_gpu: bool | None = None  # None = auto-detect
