@@ -118,6 +118,11 @@ def test_bucket_reject_reason_direct():
     assert bucket_reject_reason("bulk:streaked") == "trailed"
     assert bucket_reject_reason("auto:grade:sky_adu_median") == "cloudy"
     assert bucket_reject_reason("auto:grade:transparency_score") == "cloudy"
+    # Auto-grade's own words for this one are "far fewer stars than typical —
+    # likely cloud", so it belongs with the sky and transparency rejections and
+    # not with the soft/elongated ones. It sat in the "soft" row until v0.428.0.
+    assert bucket_reject_reason("auto:grade:star_count") == "cloudy"
+    assert bucket_reject_reason("bulk:star_count") == "cloudy"
     assert bucket_reject_reason("auto:grade:fwhm_px") == "soft"
     assert bucket_reject_reason("auto:fwhm") == "soft"
     assert bucket_reject_reason("qc_error") == "unreadable"
@@ -632,6 +637,36 @@ def test_nights_breakdown_flags_a_cloudy_night_hazy(tmp_path):
         assert nights[0].verdict == "hazy"
         # A lone night has no baseline to be "best" against.
         assert nights[0].is_best is False
+    finally:
+        proj.close()
+
+
+def test_a_night_graded_out_on_star_count_is_hazy_not_soft(tmp_path):
+    """Solid cloud is the case auto-grade flags on **star count** — its own
+    reason reads "far fewer stars than typical — likely cloud" — so the night
+    must read as the sky's fault, not the owner's focus.
+
+    Before v0.428.0 ``auto:grade:star_count`` bucketed as *soft*: the night
+    scored a 0.0 cloud fraction, so it could never reach the "hazy" verdict, and
+    the Nights card showed a yellow **soft** badge (next to a one-click "Set
+    aside") over a night nothing could have been done about. The run's own "why
+    were frames left out?" panel called the identical rejections "Cloud, haze or
+    moonlight" at the same moment — the two surfaces described one night to the
+    same beginner in opposite terms.
+    """
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        base = datetime(2026, 7, 8, 22, 0, 0)
+        for i in range(5):  # the survivors, and they are sharp
+            proj.add_frame(_frame(base + timedelta(seconds=30 * i), fwhm_px=3.0))
+        for i in range(5):  # 50% of the night lost to cloud ≥ the 40% floor
+            proj.add_frame(_frame(base + timedelta(minutes=5, seconds=i),
+                                  accept=False,
+                                  reject_reason="auto:grade:star_count"))
+        nights = nights_breakdown(proj)
+        assert len(nights) == 1
+        assert nights[0].reject_buckets == {"cloudy": 5}
+        assert nights[0].verdict == "hazy"
     finally:
         proj.close()
 

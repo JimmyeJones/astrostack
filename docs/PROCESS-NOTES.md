@@ -18,6 +18,90 @@ is a queue.
 
 ---
 
+## 2026-09-11 (Builder, branch `claude/sweet-babbage-s75e9l`) — three bugs, none of them in the backlog, all three found by asking "does the app say this twice?"
+
+**The run.** Three tasks, three independently-green commits — **v0.428.0**
+(`grading.metric_cause`: a night lost to cloud stopped telling the owner to
+check his focus), **v0.428.1** (`sky_quality.sky_brightness`: the night being
+judged stopped being part of its own yardstick) and **v0.428.2** (the readiness
+chip's "3.63-field mosaic"). Full entries in [`SHIPPED.md`](SHIPPED.md).
+
+### The baseline came from CI, for the fourth consecutive run
+
+`actions_list(ci.yml, branch=main)` → run 1639 on `1d963413`, the exact tree
+this branch started from: **success**. A local full suite was started first out
+of habit and killed the moment CI answered, ~25 minutes earlier than it would
+have finished. Treat reading `main`'s CI conclusion as the default and the local
+full run as the *merge* gate, once, at the end.
+
+### The finding method, which is now three-for-three and worth naming
+
+"Bugs (fix these first)" is dry for the eighth consecutive run and no `READY`
+entry is left, so none of this run's tasks came from the backlog. All three came
+from one question — **does the app state this fact in two places, and do the two
+agree?** — asked of a subsystem at a time. It is the cheap sibling of the §7
+instruction to read the dogfood's sentence block as one paragraph, except that
+it works on *source* and needs no browser:
+
+1. **Two private copies of one mapping.** `webapp.rejection_summary` and
+   `seestack.session_recap` each kept their own list of which QC metric means
+   cloud and which means seeing, and the lists disagreed about `star_count` —
+   so one night's rejections read "Cloud, haze or moonlight, wait for a clearer
+   night" on one surface and "soft — check focus and dew" on two others, and
+   the **hazy** verdict (which counts only the `cloudy` bucket) could never
+   fire on the very case it exists for. The tell was that `grading._reason_text`
+   spells the cause out in words — *"likely cloud"* — so the repo already
+   contained the answer both copies were guessing at.
+2. **A rule stated in one module and not applied in its sibling.**
+   `session_recap._typical_other_fwhm` ("Leave-one-out, so a night is never
+   compared against itself") and `activity_calendar.off_night` ("so the latest
+   night is never its own yardstick") both say it out loud;
+   `qc.sky_quality.sky_brightness` — the third surface asking "was last night
+   unusual for you?" — took its baseline over every night including the one it
+   was reporting, under a card promising "compared with your **other** N
+   nights".
+3. **A formatter fixed on one number and not the one next to it.** `fmtGoal`
+   exists because "printing it raw is a real friendliness bug"; the *scale* in
+   the same chip was still `toFixed(2)`.
+
+**The generalisation:** where a module's docstring or comment states a rule in
+the imperative ("must", "never", "the single source of truth for"), grep for
+the other places that fact is decided. Twice this run the rule was already
+written down and simply had not reached its sibling. `PER_POINTING_METRICS`'s
+comment — "every caller that ranks or compares frames must split by pointing
+for these and only these" — is the model, and checking *it* is what led to the
+metric-cause mapping two lines below it. (That one came back clean: `weighting`,
+`photometric`, `bulk_select` and `transparency_trend` all split correctly.)
+
+### v0.428.2 was only findable by opening a PNG, which is the 09-11 lesson repeated
+
+`--mosaic` reported CLEAN — no console errors, nothing overflowing — and the
+sentence block it prints held together. The chip is in neither: it is a
+*parenthesis*, rendered correctly, saying something no person says. It took
+reading the full-size desktop shot of the mosaic Target page and noticing that
+the banner at the top and the chip 400 px below it were describing one number
+two ways. The previous run's habit ("after a CLEAN pass, look at two or three
+of the shots at full size") found a third bug on its first outing.
+
+### Dogfood record, for the file
+
+`scripts/agent-dogfood.sh --mosaic` then `--mosaic --editor --no-probe`, on a
+baseline of CI-green `main`:
+
+* **Page probe, field sample:** clean. Tallest `[phone] /life-list` **3,094 px**.
+* **Page probe, mosaic sample:** clean. Tallest
+  `[phone] /targets/Sample_M42_mosaic_2_2` **3,447 px**. Both identical to the
+  09-11 measurements, i.e. no drift.
+* **Mosaic trim:** **7.9 %** — well under the ~15 % §1 calls a bug.
+* **Editor drive, both samples:** all **21** ops added one at a time, every one
+  re-rendering the live preview with no console error and no failed request,
+  then Undo and Redo. Clean on the field sample *and* on the mosaic.
+* **The sentences:** hold together, including the `thin: null` / "23 % is
+  1.4× grainier" pair the 09-11 run already checked (30 s against a 300 s
+  floor, and the map's `behind` branch says so in the same words).
+
+---
+
 ## 2026-09-11 (Builder, branch `claude/sweet-babbage-vmy6e9`) — the baseline suite is now slower than the run that waits on it, and the backlog scan that says what is actually left
 
 **The run.** Three tasks, three independently-green commits — **v0.426.0** (the

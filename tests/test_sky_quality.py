@@ -46,10 +46,57 @@ def test_typical_night_reads_as_typical():
     read = sky_brightness(_three_typical_nights())
     assert read is not None
     assert read.level == "typical"
-    assert read.nights == MIN_NIGHTS
+    # The comparison is against the reported night's *other* nights, which is
+    # what "your other N nights" counts — three qualifying nights, two others.
+    assert read.nights == MIN_NIGHTS - 1
     assert read.night == "2026-07-22"
     assert 0.95 < read.ratio < 1.05
     assert "as bright as your other" in read.text
+
+
+def test_the_night_being_judged_is_never_part_of_its_own_yardstick():
+    """Leave-one-out, the same rule ``session_recap._typical_other_fwhm`` and
+    ``activity_calendar.off_night`` already follow — and the rule this card's own
+    wording ("compared with your other N nights") has always promised.
+
+    Including the night made the read quietly self-cancelling. With an odd
+    number of nights, a night that *is* the median is its own baseline: the
+    ratio is exactly 1.0 and the verdict is "typical" **by construction**, no
+    matter how the rest of the target's nights measured. Here the latest night
+    sits between a dark one and a bright one, so against its own two other
+    nights it is comfortably the darker — and it used to read "typical".
+    """
+    samples = (_night("2026-07-20", sky=600.0)
+               + _night("2026-07-21", sky=3000.0)
+               + _night("2026-07-22", sky=1000.0))   # the latest, and the median
+    read = sky_brightness(samples)
+    assert read is not None
+    assert read.night == "2026-07-22"
+    assert read.nights == 2
+    # Baseline = median(600, 3000) = 1800 → 1000/1800 ≈ 0.56, comfortably darker.
+    assert read.ratio < 0.8
+    assert read.level == "darker"
+
+
+def test_an_unusual_night_no_longer_drags_its_own_baseline_toward_itself():
+    """With an even night count the reported night is half of the old median, so
+    a genuinely brighter night quietly under-reported how bright it was.
+
+    Two dark nights, one already-bright one, and a latest night brighter still:
+    the baseline is the three *others* (1000 ADU), so the latest reads 31 %
+    brighter and is called out. It used to be judged against a median it was
+    itself half of (1150 ADU) and came back "typical".
+    """
+    samples = (_night("2026-07-20", sky=1000.0)
+               + _night("2026-07-21", sky=1000.0)
+               + _night("2026-07-22", sky=1300.0)
+               + _night("2026-07-23", sky=1310.0))   # the latest
+    read = sky_brightness(samples)
+    assert read is not None
+    assert read.night == "2026-07-23"
+    assert read.nights == 3
+    assert abs(read.ratio - 1.31) < 1e-9
+    assert read.level == "brighter"
 
 
 def test_a_much_brighter_night_is_called_out_with_advice():
