@@ -14,7 +14,12 @@ from dataclasses import dataclass
 
 from seestack.io.project import FrameRow, StackRunRow
 from webapp.jobs import Job
-from webapp.overnight import needs_a_look, new_pictures_since, newest_scan_summary
+from webapp.overnight import (
+    auto_stack_tallies,
+    needs_a_look,
+    new_pictures_since,
+    newest_scan_summary,
+)
 
 NIGHT = dt.datetime(2026, 7, 8, 21, 0, 0, tzinfo=dt.UTC)
 # The options a genuine integration records; an editor export / channel combine
@@ -186,6 +191,36 @@ def test_newest_scan_wins_and_a_resolved_hold_stops_being_news():
 
 
 # --------------------------------------------------------------------------
+# auto_stack_tallies — "it stacked N and finished M of them"
+# --------------------------------------------------------------------------
+
+def test_the_scan_reports_what_it_stacked_and_what_it_finished():
+    """The shapes are the ones ``_pipeline_body`` really writes: a *list* of safe
+    names for ``auto_stacked``, a *count* for ``auto_edited`` — which is exactly
+    why reading either with the other's accessor is the bug to guard against."""
+    assert auto_stack_tallies(
+        {"auto_stacked": ["M_42", "NGC_7000", "M_31"], "auto_edited": 1}) == (3, 1)
+    # `auto_edited` is written only when non-zero, so absent means none.
+    assert auto_stack_tallies({"auto_stacked": ["M_42"]}) == (1, 0)
+    assert auto_stack_tallies({"auto_stacked": []}) == (0, 0)
+
+
+def test_a_count_shaped_summary_answers_too():
+    """Other jobs record ``auto_edited`` (and could record a stacked count) as a
+    plain number, and a summary is *history* — a shape another build wrote has
+    to answer rather than read as zero for ever."""
+    assert auto_stack_tallies({"auto_stacked": 4, "auto_edited": 2}) == (4, 2)
+
+
+def test_a_missing_or_junk_summary_is_simply_quiet():
+    assert auto_stack_tallies(None) == (0, 0)
+    assert auto_stack_tallies({}) == (0, 0)
+    assert auto_stack_tallies("surprise") == (0, 0)  # type: ignore[arg-type]
+    assert auto_stack_tallies({"auto_stacked": "M_42", "auto_edited": None}) == (0, 0)
+    assert auto_stack_tallies({"auto_stacked": -2, "auto_edited": -9}) == (0, 0)
+
+
+# --------------------------------------------------------------------------
 # GET /api/last-night — the wire shape
 # --------------------------------------------------------------------------
 
@@ -252,6 +287,29 @@ def test_last_night_carries_the_overnight_digest(client, built_library):
     assert body["needs_look"][0]["name"] == "NGC_7000"
 
 
+def test_the_card_says_how_many_it_stacked_and_how_many_it_finished(
+        client, built_library):
+    """The two tallies the Dashboard's auto-editing offer is built on, off the
+    *same* scan as ``needs_look`` — so the three can never describe different
+    scans."""
+    from seestack.io.library import Library
+
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _add_night(lib, "M_42", NIGHT, n=6)
+    finally:
+        lib.close()
+    _finished_scan(client, {
+        "auto_stacked": ["M_42", "NGC_7000", "M_31"],
+        "auto_edited": 1,
+        "auto_stack_held_thin": [{"target": "IC_1396", "frames": 3, "min": 8}],
+    })
+
+    body = client.get("/api/last-night").json()
+    assert (body["auto_stacked"], body["auto_edited"]) == (3, 1)
+    assert [h["safe"] for h in body["needs_look"]] == ["IC_1396"]
+
+
 def test_a_night_the_app_did_nothing_with_reports_nothing(client, built_library):
     """Auto-stack off (the owner's live setting) — the card keeps its capture
     paragraph and simply carries two empty lists, so nothing new is drawn."""
@@ -266,6 +324,9 @@ def test_a_night_the_app_did_nothing_with_reports_nothing(client, built_library)
     body = client.get("/api/last-night").json()
     assert body["new_pictures"] == []
     assert body["needs_look"] == []
+    # And the tallies read as "nothing to say" rather than as a complaint about
+    # a scan that never ran.
+    assert (body["auto_stacked"], body["auto_edited"]) == (0, 0)
 
 
 def test_an_empty_library_is_still_a_null_card(client):

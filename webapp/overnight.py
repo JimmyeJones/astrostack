@@ -26,6 +26,10 @@ rather than adding a card to a Dashboard the owner has called busy (AGENTS.md §
   the target the moment the reason goes away — so this reports the newest scan
   only, exactly like ``/api/targets/{safe}/autostack-hold``, and needs no state
   of its own to go stale.
+* :func:`auto_stack_tallies` — how many targets that same scan stacked by itself
+  and how many of those it went on to **finish** into a picture. The gap between
+  the two numbers is the one fact that says "auto-editing is not reaching your
+  overnight pictures", which is the other switch the walk-away promise waits on.
 
 Everything here is pure: it takes rows that another layer has already read and
 returns dataclasses, so the aggregation is unit-testable without a library, a job
@@ -205,6 +209,43 @@ def needs_a_look(
             panels=_count(entry.get("panels")),
         ))
     return out
+
+
+def auto_stack_tallies(summary: dict | None) -> tuple[int, int]:
+    """``(auto_stacked, auto_edited)`` from the newest hands-off scan's summary.
+
+    ``summary`` is the dict :func:`newest_scan_summary` returns. The scan records
+    ``auto_stacked`` on every run and ``auto_edited`` only when it is non-zero
+    (``webapp/pipeline.py``), so an absent key means **none**, not unknown — and
+    a shape an older build wrote degrades to ``0`` rather than a 500, the same
+    tolerance :func:`needs_a_look` applies to the hold lists.
+
+    **The two keys are not the same shape, which is the whole reason this is a
+    function.** ``auto_stacked`` is the *list of safe names* the scan stacked and
+    ``auto_edited`` is a *count*, so a reader that assumed either would get the
+    other one wrong — a list through ``int()`` reads as 0, which would keep the
+    note silent for ever, and a count through ``len()`` raises. Both are
+    accepted here in either shape, so a summary written by any build (or by the
+    ``Process target`` job, which counts ``auto_edited`` as edit *operations*)
+    still answers.
+
+    Why both numbers and not a verdict: the *difference* is what a reader needs
+    ("it stacked four targets and finished none of them"), and a target can be
+    finished by its own per-target preference while the global switch is off
+    (:mod:`webapp.auto_edit_pref`), so "stacked > 0 and edited == 0" is not the
+    only honest case. The judgement lives in the frontend note, next to the
+    sentence it justifies; this only reports what the scan did.
+    """
+    if not isinstance(summary, dict):
+        return (0, 0)
+    return (_tally(summary.get("auto_stacked")), _tally(summary.get("auto_edited")))
+
+
+def _tally(value: Any) -> int:
+    """A summary figure recorded either as a list of targets or as a count."""
+    if isinstance(value, (list, tuple, set)):
+        return len(value)
+    return _count(value)
 
 
 def _entries(value: Any) -> list[dict]:
