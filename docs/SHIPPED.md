@@ -1,5 +1,119 @@
 # Shipped — the record
 
+## v0.424.0 — 2026-09-11 — ⭐ "Hold back highlights" starts working on the frames it exists for
+
+*(PRIORITY 1, the editor. The backlog entry, filed 2026-08-06 and measured then:
+"**'Hold back highlights' is close to a no-op on the very frames it is most
+needed for, because the shoulder runs before the midtones transfer squashes it
+back together**".)*
+
+**The bug, re-measured before touching anything.** `autostretch` soft-shoulders
+the highlights (`_highlight_rolloff`, knee walked 0.70 → 0.25 by the slider) and
+*then* applies the midtones transfer, whose `m` is solved so the sky lands on
+`target_bg`. When the sky sits far below the 99.5th-percentile normalization
+ceiling, `m` collapses — and with it the whole top of the curve. Measured on a
+bright-core scene (sky at a ten-thousandth of the ceiling, `m` = 0.001):
+
+| strength | knee | display value of the knee | range left for the shoulder | blown (≥0.99) |
+|---|---|---|---|---|
+| 0.0 | 0.700 | 0.99957 | **0.0004** | 8.65 % |
+| 0.5 | 0.475 | 0.99890 | 0.0011 | 8.65 % |
+| 1.0 | 0.250 | 0.99701 | 0.0030 | 8.65 % |
+
+The slider moves the knee its whole range and the finished picture does not
+change: every value above the knee — the core, the entire point of the shoulder —
+renders inside the last thousandth of the display range. The blown fraction is
+identical to three decimals at every strength.
+
+**The fix: the shoulder is given room where the user can see it.** New
+`_reanchor_highlights` runs *after* the tone curve, in display space, and splits
+the finished channel into three bands:
+
+* at or below the **sky's own ceiling** (median + 6σ, `_HIGHLIGHT_SKY_GUARD_SIGMA`)
+  — untouched, bit-for-bit, so the knob can never double as a brightness change;
+* from there to the knee's display value — the mid-tones, compressed into what is
+  left below the shoulder. **This is the cost, and it is the honest one**: display
+  range has to come from somewhere, and the op's help text now says so;
+* above the knee — the shoulder, expanded from whatever sliver the curve left it
+  onto a reserved `_HIGHLIGHT_HEADROOM_MAX` × strength (0.20 at full).
+
+It **declines** — returning its input untouched — whenever there is nothing to
+win or no room to win it in: strength 0 (so every default render in the app is
+byte-for-byte historical), a shoulder that already holds more than the headroom
+(an ordinary compact-core frame gets 0.20 unaided at strength 0 and 0.64 at full,
+so it is never re-anchored), or a sky whose own ceiling is already at the knee —
+where the only way to make room would be to darken the background. Both stretches
+ask; only the STF answers.
+
+**This is not the lever the 2026-08-06 prototype stood down on, and the reason
+matters.** That run built the entry's other suggestion — pick the knee in
+*display* space and map it back through `_mtf`'s inverse — and measured that it
+"only fixes *where* the shoulder starts: above it the MTF is still near-vertical,
+so the shoulder's own top two-thirds still crowd into the last 0.15 % of the
+display range." That is exactly the residual this change addresses, from the other
+end: it does not move the knee at all, it gives the band above the knee somewhere
+to go.
+
+**Its second finding — that the regime is unreachable on real 16-bit data —
+needed refining, and that is what decided this run.** The collapse is not driven
+by `max/sky` (≲ 65 on a Seestar stack, as that run said) but by
+`(p99.5 − sky) / σ_sky`, because the normalization subtracts the 0.5th percentile,
+which sits *at* the sky. A broad bright core covering more than 0.5 % of the frame
+pushes the 99.5th percentile up to the core's own level, and `norm_med` lands at
+~1e-2 or below with a perfectly ordinary 16-bit peak. Measured on 16-bit-realistic
+scenes (sky 1000 ADU ± 20, peak 8 k–64 k, core σ 10–60 px), as **distinct 8-bit
+levels across the core at full strength**, and the blown fraction at strength 0:
+
+| peak | core σ | blown @ 0 | levels, before | levels, after |
+|---|---|---|---|---|
+| 64 000 | 40 px | 3.21 % | **3** | **9** |
+| 40 000 | 30 px | 1.53 % | 8 | 18 |
+| 20 000 | 25 px | 0.42 % | 22 | 27 |
+| 40 000 | 15 px | 0.61 % | 77 | 81 |
+| 64 000 | 10 px | 0.50 % | 109 | 108 |
+| 40 000 | 60 px | 0 % | 6 | 6 *(declined)* |
+| 8 000 | 30 px | 0 % | 21 | 21 *(declined)* |
+
+So the honest claim is not "night and day": it is that a **broad** bright core —
+the M42/M31 shape the knob was written for — rendered in three tonal levels now
+renders in nine, and that the cases where the old path already had room are
+unchanged or untouched. The earlier stand-down's "~10 % more core contrast" was
+measured on the *knee-repositioning* lever; this one is 2–3× the tonal levels on
+the same class of scene.
+
+**Two surfaces start telling the truth as a consequence.** The v0.240.0 "from
+your image" button correctly self-hid on exactly these frames (`_MIN_IMPROVEMENT`
+— "a button that does nothing is worse than no button"), so the owner had no fix
+*and* no offer for a genuinely blown core; it now offers one. And the passive
+`AUTO_EDIT_HIGHLIGHT_PREFIX` reading every unattended auto-edit stamps — the
+evidence the real-data-gated *automatic* highlight cue is waiting on — stops
+recording "nothing to suggest" for the pictures it was meant to catch.
+
+**Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change.
+`highlight_protect` defaults to 0 at every caller (`presets.auto_recipe` keeps it
+at 0 unless a stored taste profile asks), and at 0 this code is not reached — the
+default Auto picture, every preview and every thumbnail are byte-for-byte what
+they were. A saved recipe carrying `highlights > 0` renders *better*, which is the
+change.
+
+**Tests (+12 net, 4 fail-before — each verified by reverting the production guard
+in place and watching them go red):**
+`tests/test_stf_highlight_rolloff.py` — the core the midtones transfer used to
+flatten is reopened (8.65 % blown → 0 %, core std ×20); the shoulder really holds
+its reserved share at 0.5 and 1.0; the sky corner is bit-for-bit identical at
+0.05, 0.5 and 1.0; monotone in strength across all six slider steps; the helper
+declines in all five no-op cases including the divide-by-zero one; it keeps every
+pixel in order across 20 001 samples; it is continuous at **both** band joins; the
+headroom ramp is zero-off/clamped-on; the ordinary compact-core frame is proven
+*not* re-anchored (pinned against a render with the helper patched out, so it says
+"did nothing" rather than "did something small"); and the asinh curve declines for
+a measured reason (its knee lands at display 0.60, keeping 0.40 of the range).
+`tests/test_highlight_suggestion.py` — the very-high-contrast frame now gets a
+suggestion that measurably reopens the core, and the "knob can't help" guard is
+restated against a stretch that ignores the strength, which is what that means.
+*(The old version of that guard used the high-contrast frame as its fixture — it
+was pinning the bug, not the guard.)*
+
 ## v0.423.0 — 2026-09-11 — 🌟 the glossary reaches the app the owner actually runs
 
 `docs/glossary.md` has explained FWHM, drizzle, sigma clipping, coverage maps and
