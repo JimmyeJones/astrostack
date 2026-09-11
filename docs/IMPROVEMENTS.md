@@ -84,7 +84,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 - **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
   question is closed unanswerable. Read before prioritising the audit's items.**
-  - **The pre-D1 saved-recipe crop (⭐ item below): he sees no blurry mosaic cards.** Asked to open his Library
+  - **The pre-D1 saved-recipe crop (⭐ item below — ✅ IT HAS SINCE SHIPPED, don't go looking for it; all three
+    surfaces closed in v0.416.0 + v0.417.0, entries in [`SHIPPED.md`](SHIPPED.md), and the order dependency
+    below is therefore already satisfied): he sees no blurry mosaic cards.** Asked to open his Library
     and look, his answer was *"don't see anything immediately"*. **The likely reason is in Owner Facts:
     `auto_edit_on_autostack` has been OFF on his install**, so the walk-away chain never auto-edited anything —
     a stored recipe only exists where he used the editor or "Process target" **by hand**. So the bug is **real
@@ -2899,42 +2901,35 @@ outright bug in existing behaviour, never to add capability.
 14. **Three yes/no's on residue from shipped features:** a 9:16 portrait zoom clip for Reels/Shorts? A
     noise-delta *picture* beside the "Did it get better?" sentence? Auto-*apply* the classified object
     preset instead of offering it as a chip? Each is small; none is built until wanted.
-15. **Dependencies and network (sign-off, below this list):** an outbound weather lookup for Tonight; a
-    SIMBAD lookup for target identification; a StarNet-class model; satellite-pass forecasts; a
-    star-registration package (astroalign) for the WCS-free fallback. Each is a yes/no plus "is outbound
-    allowed on the NAS?".
+15. **One offline dependency: `astroalign` for the WCS-free star-registration fallback?** *(Cut down
+    2026-09-11 — the four networked items this row used to bundle with it were **declined outright** by
+    Q4's standing LOCAL policy, so asking about them again would re-open a settled question. What is left
+    is not a network question at all.)* **Answer:** yes/no to adding one pure-Python offline package to the
+    image so a faint field whose subs never plate-solve can still be registered against each other.
 
-- **Satellite/aircraft-trail forecast for the Tonight planner (opt-in; needs a data source).** *(Pillar:
-  plan + understand — would be a genuine beginner feature: "the trails in your subs weren't a mistake — three
-  Starlink passes crossed this field between 21:40–22:10; the stack's rejection removed them." Scout 2026-09-01,
-  verified absent from the backlog and code.)* A beginner shooting near a Starlink train sees streaks and
-  assumes their gear or their stacking is broken; naming the cause turns a worry into a "the app handled it"
-  moment, and (plan side) could steer a session away from the worst pass windows. **Why it's here and not in
-  Ideas:** predicting passes needs current orbital elements (TLEs from CelesTrak/Space-Track), i.e. a
-  **networked dependency and a periodic data refresh** — exactly what §9/§10 say an agent must not add on its
-  own. It also risks staleness/liability if the ephemeris is old. If the owner wants it, the safe shape is: a
-  bundled/opt-in TLE fetch behind an explicit setting (off by default), a cache with an honest "elements are N
-  days old" disclosure, and a plain-language post-hoc note on a finished stack ("N bright passes crossed this
-  field during your session") rather than a real-time overlay. File the network-policy check and refresh cadence
-  before building.
-- AI star removal (StarNet-class ONNX): high wow-factor but adds a heavy ML
-  runtime + model download that may hit the network policy. Needs an explicit OK.
+- ~~**Satellite/aircraft-trail forecast for the Tonight planner (opt-in; needs a data source).**~~ —
+  **DECLINED 2026-09-08 by the owner's standing LOCAL policy (AGENTS.md §1 Owner Facts, Q4); struck
+  2026-09-11 as that answer instructed.** Predicting passes needs current orbital elements (TLEs) and a
+  periodic refresh, i.e. the running install reaching the internet — which is the one thing the answer
+  ruled out, permanently and as a policy rather than a per-feature gate. **Do not re-file, re-spec or
+  re-ask it**; the idea was good and it is simply not for this install. Kept as one struck line rather
+  than deleted so a future run recognises it as answered rather than missing. (The *post-hoc* half — "the
+  trails in your subs weren't a mistake; stacking removed them" — needs no network and is already served
+  by the shipped rejection overlay and its caption.)
+- ~~AI star removal (StarNet-class ONNX).~~ — **DECLINED 2026-09-08 by the same answer** (named in it
+  explicitly, as both a network/model-download question and a heavy ML runtime); struck 2026-09-11. Do not
+  re-file or re-ask.
 - Anything that exposes the app publicly, changes auth defaults (e.g. turning auth
   on by default), or is otherwise hard to reverse.
 - Live capture / real-time Seestar streaming integrations (explicitly de-scoped).
-- **Surface SIMBAD target identification in the headless webapp (opt-in).** The engine
-  already has `seestack/post/target_id.py` (`identify_target` → name + friendly object type +
-  bg-flatten hint from a target's median plate-solved RA/Dec), but it is **GUI-only** — the
-  headless webapp never calls it, so a beginner on the web app never learns "you're imaging
-  M42, an emission nebula → use luminance background flatten." Wiring it into the Target page
-  (show the identified object + friendly type, and pre-select the bg-mode hint / feed the
-  existing "nudge luminance for extended-emission" Stack-form idea) would directly serve
-  autonomy + friendliness + image quality. **Why sign-off, not a free build:** it makes an
-  **outward network call** from the live install to CDS/SIMBAD (via `astroquery`), which is an
-  outward-facing change the owner must OK against the deployment's network policy (guardrail
-  §10). If approved it should be **opt-in / off by default** with a cached result per target,
-  never blocking the pipeline. (S–M, autonomy/friendliness/image-quality — owner: OK to let the
-  server query SIMBAD?)
+- ~~**Surface SIMBAD target identification in the headless webapp (opt-in).**~~ — **DECLINED 2026-09-08 by
+  the owner's standing LOCAL policy (AGENTS.md §1 Owner Facts, Q4), which names it; struck 2026-09-11 as
+  that answer instructed.** It makes an outward call from the live install to CDS/SIMBAD, and the policy is
+  a standing rule rather than a per-feature gate. **Do not re-file or re-ask.** The beginner value it was
+  after — "you're imaging M 42, an emission nebula" plus the background-flatten hint — is already served
+  **offline** by the bundled catalogues: `seestack/objectinfo.py::identify_object` feeds the Target page's
+  object card and its blurb, and `seestack/bg_advice.py` supplies the flatten nudge. If anything is still
+  missing there, it is a copy or wiring task on bundled data, not a network one.
 
 _(Normal, tested changes merge to the default branch automatically — see
 AGENTS.md §8. Only the items above need a human's OK first.)_
@@ -2944,6 +2939,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.426.1** — 🐛 BUG (trust, PRIORITY 3), Builder-found and verified by reverting the fix in a scratch revert: **your imaging log was ordered by the afternoon each stack ran, under a comment claiming it put your most recent night on top.** `imaging_log.py` opens by explaining that the nights lead under "Shot" and the processing stamp sits at the end under "Stacked" — but `_collect_imaging_log` still sorted on `r.date`, the processing stamp, so the file's leading column was not monotonic and a **Reprocess everything** (which re-stamps every run within minutes) put the whole log in an order unrelated to when anything was shot. New pure `imaging_log_sort_key` → `(night, stacked)`, applied by `build_imaging_log_csv` itself so one place owns both the columns and the order; a run with no recorded night (schema < 18) falls back to its processing date, the same rule `pictureDateLabel` uses on screen, so the order follows the date each row *displays*; two re-stacks of one night tie-break on the stamp. **Not** the shipped "never flip a *sort* to capture time" rule, which is about lists of **runs** (History, the Library tile — both untouched); this is a list of **nights**, and the distinction is now in the docstring. Row order only — no column moved. Tests +6, one fails before. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.426.0** — 🌟 NEW BEGINNER FEATURE (PRIORITY 2, autonomy), Builder-found gap — the sibling of v0.404.0's auto-stack offer for the *other* switch the walk-away chain waits on: **the Dashboard says when your pictures were stacked but not finished, and offers the one switch that finishes them.** `auto_edit_on_autostack` has shipped on since v0.395.0 but reaches only a *fresh* install (an install that has ever run carries an explicit `false` no upgrade may overwrite, §9), so the sequenced outcome of turning Auto-stack on is a chain that stacks every target overnight and stops one step short of the picture — a linear master, flat and dark, with nothing on any screen saying why (the one surface that mentions auto-editing, `LatestPictureCard`'s per-target opt-out, renders only on a run that *was* auto-edited). New pure `overnight.auto_stack_tallies` reads `(auto_stacked, auto_edited)` off the **same** `newest_scan_summary` read `needs_a_look` already makes, surfaced as two additive `0`-defaulted fields on `/api/last-night`; `autoEditNudge` fires on the *difference*, so a target finished by its own per-target preference counts as finished and a scan that stacked nothing says nothing. The trap worth carrying forward: `_pipeline_body` writes `auto_stacked` as a **list of safe names** and `auto_edited` as a **count**, so `_tally` accepts both shapes — a list through `int()` would have kept the note silent for ever with nothing failing. Tests +22. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.425.1** — 🐛 TWO BUGS (PRIORITY 3, friendliness), Builder-found by dogfooding the running app on the surface v0.424.4 had just made the default, and both invisible to a code read: **the offline Sky Map opens on your newest picture, and a star's name is no longer painted over by the star.** (1) `OfflineSky` opened its camera at `[0, 0, 0.1]` — RA 270°, Dec 0°, 70° across — *whatever the user had shot*, and the backdrop is sixty bright stars over the whole sphere, so the screenshot is a black rectangle with four specks while the badge says *2 images*. "Real sky (online)" has never done this: `AladinSky` centres on the newest picture at six picture-widths. New pure `initialSkyView` does the same, clamped into the viewer's own `[OFFLINE_FOV_MIN, OFFLINE_FOV_MAX]` zoom range so the first scroll can't jump to an edge; with no pictures it opens on the **brightest star in the catalogue the viewer is already drawing** (so it can never aim where the backdrop has nothing), and with neither it returns the old fixed view exactly. Non-finite coordinates are skipped rather than aimed at, Dec is clamped off `OrbitControls`' gimbal singularity, and the aim is decided **once on first render** so a refetch can't yank the view out of where the user dragged it. (2) `StarLabels` centred each name on its star, so the dot was painted through the middle of the word — "Rigel" read as `R∎el` magnified off the screenshot. The span now steps 12 px **below** the star. One fixed offset suffices because three.js sizes an attenuated point from the *viewport height* and not the field of view — now `starPointDiameterPx`, reading the named `BRIGHT_STAR_POINT_SIZE` the material uses. Verified in the running app before and after (`agent-dogfood.sh --build --no-stack`), not only in the suite. Frontend-only; no endpoint, config, schema, on-disk, API-shape or default change. Tests +9, five verified red by a scratch revert. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.425.0** — 🌟 NEW BEGINNER FEATURE (PRIORITY 2–3, autonomy + friendliness), the 2026-07-25 "Features that serve real workflows" entry: **a plateaued target now names the fresh one to point at instead.** The sky-limited verdict has ended on *"a darker sky or a brighter target will do more than extra time on this one"* since v0.207.0 — the right advice, and a dead end: it names the move and leaves a beginner to work out *which* brighter target, on a page with no answer, while the planner that answers exactly that (`/api/plan/suggest`, the showpieces he has not shot that are well-placed tonight) sat two navigations away on the Dashboard. `IntegrationTrendBadge` now asks it for its own best pick and prints it under the sentence — *"Try **M27 · Dumbbell Nebula** on your next clear night — Climbs to 64°, up about 7 h tonight. Moon out of the way. See what else is up →"* — through `suggestionHeading`/`describeSuggestion`, the same two pure helpers the Dashboard card renders, so the two surfaces cannot drift into two descriptions of one object. **The request is gated on the verdict, not on the page:** `enabled` on the *same* boolean that decides whether the component returns `null`, computed before the query so the two cannot disagree — an ordinary target, and a plateaued one whose verdict an add-time nudge is suppressing, issue nothing at all, asserted by two tests on the planner call rather than on the rendering. It shares `["suggest-targets"]` and the 60 s stale time with the Dashboard card. Every way it can have no answer — no location, no dark window, nothing new well-placed, a failed call, an older backend — leaves the verdict rendering exactly as it did before. Frontend-only; no endpoint, config, schema, on-disk, API-shape or default change. Tests +5, one verified red by a scratch revert; the file's harness gained the `QueryClientProvider`/`MemoryRouter` its six existing cases now render inside. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.424.4** — ⭐ BUG (friendliness + the LOCAL policy), the `READY` entry the owner answered 2026-09-11: **the Sky Map opens on the built-in star map instead of the one view that fetches sky imagery from the internet.** `initialSkyMode` (`frontend/src/routes/Sky.tsx`) fell through to `"online"`, so **"Real sky (online)"** — whose `AladinSky` pulls DSS2 tiles from CDS — was what loaded the first time he opened Sky Map on any device, and he said plainly that *"that mode that pulls imagery i am not a huge fan of"*. It also sits the wrong way round against AGENTS.md §1's local rule: the fetch is the browser's rather than the install's, which is why the 2026-09-08 sweep passed it, but defaulting to the only view that reaches out is against its spirit. The fall-through is now `"offline"` — the like-for-like swap, the same drag/zoom sky with his own pictures placed on it, minus the network. **Nothing removed** (his one hard constraint): all three modes stay on the switch, `MODE_KEY` still remembers whatever anyone picks, and `?view=online` still wins, so deep links and the Dashboard's "My map" line are unaffected. The online mode's own hint now names it as *"the only view here that fetches anything from the internet"* rather than the softer "(needs internet)". Frontend-only; no endpoint, config, schema, on-disk, API-shape or backend default change. Tests: the three `initialSkyMode` cases that pinned `"online"` re-pinned on `"offline"`, plus a new one asserting the three ways `"online"` is still reachable (stored, `?view=`, and the fall-through's absence) — fails before.

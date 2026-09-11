@@ -1,5 +1,147 @@
 # Shipped — the record
 
+## v0.426.1 — 2026-09-11 — 🐛 your imaging log is ordered by the night it leads with, not by the afternoon the stack ran
+
+*(PRIORITY 3 — trust. A Builder-found bug, verified by reverting the fix and
+watching the regression test go red.)*
+
+**What was wrong.** `seestack/imaging_log.py` opens by explaining that the two
+dates on a row are different facts: the nights lead, under **"Shot"**, and the
+processing stamp sits at the end, under **"Stacked"** — because a log of "every
+night you've imaged" that led with the stack's timestamp dated a re-stack of a
+back catalogue to the afternoon someone pressed the button. The *ordering* had
+never been moved with the column. `_collect_imaging_log` ended with
+
+```python
+# Newest first, so a beginner's most recent night sits at the top of the log.
+rows.sort(key=lambda r: (r.date or ""), reverse=True)
+```
+
+— a comment about nights over a sort on processing stamps. So the file's leading
+column was not monotonic, and after a **Reprocess everything** (which re-stamps
+every run in the library within minutes of each other) the whole log came out in
+an order that has nothing to do with when anything was shot. The owner's library
+is thousands of subs of back catalogue across many nights, and this file is the
+thing he would print or paste into a forum post.
+
+**What it does now.** New pure `imaging_log_sort_key(row)` →
+`(night, stacked)`, sorted descending by `build_imaging_log_csv` itself rather
+than by the caller, so **one place decides both the columns and the order** and
+they cannot end up answering different questions. `capture_night_start` is
+already the noon-to-noon night key, so comparing the ISO strings *is* comparing
+nights. Nothing on any row moved: both dates are still in their own columns,
+under their own names — only which one decides the order changed.
+
+**The two cases that needed deciding, not guessing.**
+* **A run with no recorded night** (schema < 18 — most of a library that was
+  upgraded rather than re-stacked) falls back to its processing date, which is
+  the same "use the labelled stamp when the real date is unknown" rule
+  `pictureDateLabel` applies on screen. So the order always follows the date the
+  row actually *displays*, and a pre-schema-18 library does not have its entire
+  log sink below its handful of newer runs.
+* **Two re-stacks of one night** tie on the night, so the stacked stamp breaks
+  it and the newer run leads — the one question a processing stamp is the right
+  answer to. The sort is stable, so rows the key cannot separate keep the order
+  they arrived in.
+
+**Not in tension with the shipped "never flip a *sort* to capture time" rule**
+(see "sweep every date", above): that rule is about lists of **runs**, where
+"which run is newest" is the question — History's ordering, and the Library
+tile's, both of which are untouched. This file is a list of **nights**, and says
+so in its first sentence. The distinction is now written down in
+`imaging_log_sort_key`'s docstring so it is not re-litigated in either
+direction.
+
+**Upgrade-safe (§9):** row order only. No column added, removed or moved (a
+spreadsheet built on this file keeps every column where it was), no config,
+schema, on-disk, default or API-shape change, and nothing written anywhere.
+
+**Tests (+6, one fails before).** `tests/test_imaging_log.py`: the regression
+itself on a two-run "reprocessed in one sitting" fixture where night order and
+stamp order are *opposite* (red against the old sort, in a scratch revert); the
+same-night tie-break; the no-recorded-night fallback; stability; and a row with
+no dates at all. `tests/webapp/test_imaging_log.py` adds the end-to-end case
+through `GET /api/imaging-log.csv` on the same reprocessed shape.
+
+## v0.426.0 — 2026-09-11 — 🌟 the second half of the walk-away promise says it is switched off
+
+*(PRIORITY 2 — autonomy. A Builder-found gap, not a backlog entry: the sibling
+of `AutoStackOffNote` (v0.404.0) for the other switch the "drop your subs in and
+come back to a picture" chain waits on.)*
+
+**The gap.** `Settings.auto_edit_on_autostack` has shipped **on** since
+v0.395.0 — but only for a *fresh* install. `SettingsStore` re-saves the whole
+model on every boot, so any box that has ever run carries an explicit
+`"auto_edit_on_autostack": false` in `state/config.json` that no upgrade may
+overwrite (§9: a stored value cannot be told apart from a value its owner
+chose). v0.404.0 closed exactly this hole for `auto_stack` by *telling* the
+owner. Nothing in the app had ever mentioned the second switch, which sits on a
+Settings tab, disabled until Auto-stack is on, behind a sentence 600 characters
+long. So the sequenced outcome of the owner clicking "Turn on auto-stack" — the
+one row still open on his one-sitting list — is a chain that stacks every target
+overnight and then stops one step short of the picture: a linear master, which
+is the raw combine before any stretch, colour or clean-up, and looks flat and
+dark. AGENTS.md §1 records that he has been bitten by an on-by-default
+reframing before, and the inverse holds too: coming back to pictures that look
+worse than the Seestar's own, with nothing on any screen saying why, reads as
+the app being broken. The one surface that *does* mention auto-editing —
+`LatestPictureCard`'s per-target opt-out link — renders only on a run that
+**was** auto-edited (`wasAutoEdited && autoEditPref.data`), so the case where it
+is off is precisely the case nothing speaks to.
+
+**What it does now.** One more self-hiding note on the Dashboard's notice board,
+ranked just below its sibling because the two are sequential: *"AstroStack
+stacked 3 of your targets by itself and left their pictures unfinished. They are
+plain stacks — the raw combine, before any stretch, colour or clean-up, which is
+why they can look flat and dark. Turn on auto-editing and it will finish each
+new picture the same way the editor's Auto-process button does, as soon as it has
+stacked it. An edit you saved yourself is never written over."* with **Turn on
+auto-editing** (a one-key `putSettings` patch) and *See what it does*.
+
+**It reads the scan's own tallies, not the pictures list.** New pure
+`overnight.auto_stack_tallies(summary)` returns `(auto_stacked, auto_edited)`
+off the same `newest_scan_summary` read `needs_a_look` already makes — hoisted
+to one variable in `get_last_night` so the holds and the tallies can never
+describe different scans — surfaced as two additive `0`-defaulted fields on
+`/api/last-night`. The note fires on the **difference**, so a target finished by
+its own per-target preference (`webapp/auto_edit_pref`) counts as finished
+instead of being blamed on the switch, and a scan that stacked nothing by itself
+says nothing at all (with Auto-stack off there is nothing to finish, and
+`AutoStackOffNote` is the note that fits that install).
+
+**The trap worth recording: the two summary keys are not the same shape.**
+`_pipeline_body` writes `auto_stacked` as the **list of safe names** it stacked
+and `auto_edited` as a **count**. A reader that assumed either would get the
+other one wrong in opposite directions — a list through `int()` raises and reads
+as `0`, which would have kept this note silent for ever with nothing failing;
+a count through `len()` raises outright. `_tally` accepts both shapes, so a
+summary written by any build (or by the `Process target` job, which counts
+`auto_edited` as edit *operations*) still answers. The frontend mirrors the same
+tolerance: a missing, fractional or non-finite tally reads as "nothing to say",
+never as zero-and-therefore-complain.
+
+**What it deliberately does not claim.** The behaviour ("it will finish each new
+picture the way Auto does"), never that the result beats what the owner would do
+by hand; and never that a picture is *missing* — the stack is there, it is
+unfinished. The confirmation is honest about the pictures already on disk, which
+turning the switch on does **not** retroactively finish: *"The pictures you
+already have are untouched — open one and press Auto-process to finish it now."*
+
+**Upgrade-safe (§9):** two additive response fields with `0` defaults; no
+config, schema, on-disk, default or API-shape change, and no behaviour change to
+any pipeline — the switch's own default is untouched, and an older frontend
+ignores both fields while an older backend omitting them keeps the note silent.
+The one write it can make is the patch the user clicks.
+
+**Tests (+22).** `autoEditNudge.test.ts` (9 — the offer; the *difference* rather
+than the total; the singular; silent when on, unknown, nothing stacked, or
+everything finished; absent tallies; and junk/negative/fractional tallies),
+`AutoEditOffNote.test.tsx` (10 — the sentence and the Settings link; one click
+patches exactly one key and answers with what happens next *and* what does not;
+the four silences; dismissal surviving a remount; the manual route when the save
+fails), and `tests/webapp/test_overnight_digest.py` (+3 — both summary shapes,
+junk, and the endpoint carrying the tallies off the same scan as `needs_look`).
+
 ## v0.425.1 — 2026-09-11 — 🐛 the offline Sky Map opens on your newest picture, and a star's name is no longer painted over by the star
 
 *(PRIORITY 3, friendliness. Two Builder-found bugs on the surface v0.424.4 had
