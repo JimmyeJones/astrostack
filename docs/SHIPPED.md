@@ -1,5 +1,39 @@
 # Shipped — the record
 
+## v0.428.2 — 2026-09-11 — "goal ~14.5 h (3.63-field mosaic)", two inches under "about 4 fields of sky"
+
+*(Builder, branch `claude/sweet-babbage-s75e9l` — 🟡 friendliness, PRIORITY 3. Found by opening a dogfood
+screenshot at full size rather than by reading the route. Frontend copy only; no endpoint, config, schema,
+on-disk, API-shape or default change, and the goal itself is unmoved.)*
+
+**The finding.** `scripts/agent-dogfood.sh --mosaic`'s desktop shot of the mosaic Target page has the "even
+better" ladder at the top saying *"your 4 min is spread across **about 4 fields of sky**, so each part of this
+picture has 1 min so far"*, and the "Is it enough yet?" chip beside the picture saying
+**"goal ~14.5 h (3.63-field mosaic)"** — the same quantity, on one screen, in two vocabularies, one of them a
+raw two-decimal float in a phrase nobody says.
+
+**It is the bug `perPixel.ts` already names.** `fieldsOfSkyLabel`'s own docstring rounds to a whole field
+because *"the precision is spurious (the canvas includes its uncovered corners) and 'about 4.3 fields of sky'
+reads as a measurement rather than the rough scale it is"*, and `readiness.fmtGoal` exists — comment and all —
+because *"printing it raw is a real friendliness bug"*. The chip's **hours** had been fixed by `fmtGoal`; the
+**scale** in the parenthesis right after them had not, and was still hand-rolled
+(`fieldFulls.toFixed(2).replace(/\.?0+$/, "")`) at both the chip and its tooltip.
+
+**What shipped.** The chip renders `fieldsOfSkyLabel(readiness.fieldFulls)` — *"goal ~14.5 h (about 4 fields of
+sky)"* — which is the same helper, and therefore word-for-word the same phrase, as the ladder above it and the
+thin-stack warning on the same page. The **tooltip keeps the exact multiplier**, because there it is the
+arithmetic rather than a label and a reader who hovers wants to see the working; it is reworded to say it in
+plain words and to close on the figure the chip shows: *"4 h for each frame's worth of sky, and this picture
+covers 3.63× that — so ~14.5 h in all. Click to set your own."* A single-field target and a user-set goal
+render exactly as before (the branch is unchanged, `fieldFulls > 1` and `!customGoal`).
+
+**Tests.** The existing regression — the one that pinned the *hours* being rounded — is re-stated for the
+scale beside them: it now asserts the plain phrase, that `3.63-field` appears nowhere, that the raw
+`14.526…` still doesn't either, and that the exact multiplier is still reachable on the tooltip. **It fails
+before**, verified by putting the hand-rolled formatter back in a scratch edit.
+
+---
+
 ## v0.428.1 — 2026-09-11 — "compared with your other 3 nights" counted this one, and compared against a median it helped set
 
 *(Builder, branch `claude/sweet-babbage-s75e9l` — 🟡 BUG, trust + friendliness, PRIORITY 3. Engine + frontend
