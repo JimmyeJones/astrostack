@@ -369,6 +369,11 @@ class NightPlan:
     # down all night) — the concrete time to complement the phase. ``None`` only
     # when no dark window could be computed. See :class:`MoonWindow`.
     moon_window: dict | None = None
+    # Tonight's Moon as a **subject** rather than as interference — when it is
+    # worth pointing at, and what its phase says it will look like. ``None`` when
+    # there is no dark window, and on the many nights the Moon never gets usefully
+    # high; the UI then shows nothing extra. See :class:`MoonShoot`.
+    moon_shoot: dict | None = None
     # True when a non-empty horizon/tree mask shaped the usable windows below, so
     # the UI can explain that low-altitude obstructions were accounted for.
     horizon_active: bool = False
@@ -461,6 +466,33 @@ def _sun_altitudes(stamps_time, location):  # noqa: ANN001, ANN202
     return np.asarray(altaz.alt.deg, dtype=float)
 
 
+def _widest_true_run(mask) -> tuple[int | None, int | None]:  # noqa: ANN001
+    """Inclusive index bounds of the widest contiguous run of ``True`` in ``mask``,
+    or ``(None, None)`` when there is none.
+
+    Lifted verbatim out of :func:`_dark_window_after_noon` when
+    :func:`moon_shoot_tonight` needed the same scan over a different mask — one
+    definition rather than two that can drift. The ``>=`` tie-break is part of
+    that behaviour and is kept deliberately: two runs of equal length resolve to
+    the **later** one, which is what the dark-window scan has always done.
+    """
+    best_lo = best_hi = None
+    best_len = 0
+    i = 0
+    n = len(mask)
+    while i < n:
+        if mask[i]:
+            j = i
+            while j + 1 < n and mask[j + 1]:
+                j += 1
+            if (j - i) >= best_len:
+                best_len, best_lo, best_hi = (j - i), i, j
+            i = j + 1
+        else:
+            i += 1
+    return best_lo, best_hi
+
+
 def _dark_window_after_noon(location, t_noon: datetime) -> DarkWindow | None:  # noqa: ANN001
     """Widest astronomical-dark span in the 24 h *after* ``t_noon`` (a local noon).
 
@@ -476,21 +508,7 @@ def _dark_window_after_noon(location, t_noon: datetime) -> DarkWindow | None:  #
         below = sun_alt < threshold
         if not below.any():
             continue
-        # Widest contiguous run of "below".
-        best_lo = best_hi = None
-        best_len = 0
-        i = 0
-        n = len(below)
-        while i < n:
-            if below[i]:
-                j = i
-                while j + 1 < n and below[j + 1]:
-                    j += 1
-                if (j - i) >= best_len:
-                    best_len, best_lo, best_hi = (j - i), i, j
-                i = j + 1
-            else:
-                i += 1
+        best_lo, best_hi = _widest_true_run(below)
         if best_lo is None:
             continue
         return DarkWindow(start=stamps[best_lo].astimezone(timezone.utc),
@@ -621,6 +639,168 @@ def moon_window(observer: Observer, window: DarkWindow) -> MoonWindow:
     down_all = bool((~above).all())
     return MoonWindow(rise_utc=rise_utc, set_utc=set_utc,
                       up_all_night=up_all, down_all_night=down_all)
+
+
+# How high the Moon has to get before it is worth pointing at. Low down you are
+# looking through several atmospheres of turbulence, which smears exactly the
+# fine crater detail a lunar session is for — the same reason the planner keeps a
+# ``min_altitude_deg`` floor for deep-sky targets. 20° is the ordinary amateur
+# rule of thumb, and is deliberately *not* a setting: this is a beginner cue, not
+# a knob. Measured consequence, recorded rather than hidden: a **summer** full
+# Moon from northern Europe peaks near **10°** (2026-05-31 and 2026-06-29 from
+# 51.5°N), so it gets no session at all — which is the right answer, a 10° Moon
+# being a shimmering mess. A summer *crescent* still qualifies (2026-06-20
+# peaks at 27°).
+MOON_SHOOT_MIN_ALT_DEG = 20.0
+# …and for how long, before the app calls it a session. A five-minute graze past
+# the floor is not something to plan an evening around, and "up 16:31–16:51"
+# reads as a bug rather than a plan.
+MOON_SHOOT_MIN_MINUTES = 30.0
+
+
+@dataclass
+class MoonShoot:
+    """"Is tonight a good night to shoot the **Moon itself**?"
+
+    Everything else in this module treats the Moon as *interference* — how much it
+    will wash out a faint target (:class:`MoonInterference`, :func:`moon_window`,
+    the score's Moon penalty). But the owner shoots the Moon too (the whole
+    :mod:`seestack.video` lucky-stacking workflow and the Moon & Sun page exist
+    for it), and nothing in the app ever planned such a session: you had to open
+    something else to learn when the Moon was up and whether it would look good.
+
+    The two facts a beginner needs are **when** and **what it will look like**,
+    and both come off numbers the planner already has:
+
+    * *When* — the widest stretch tonight where the Moon is above
+      :data:`MOON_SHOOT_MIN_ALT_DEG` and the Sun is below the horizon.
+    * *What it will look like* — from the phase. This is the one genuinely
+      counter-intuitive fact about lunar imaging, and it runs opposite to a
+      beginner's instinct: a **full** Moon is the *worst* night for surface
+      detail, because the Sun is then almost directly behind the observer and
+      nothing casts a shadow. Craters and mountains show at their most dramatic
+      along the **terminator**, the line between the lit and unlit halves — i.e.
+      at a crescent, quarter or gibbous phase.
+
+    Deliberately no *libration*, no true terminator longitude and no
+    sub-solar-point arithmetic: that is the pro edge, and "phase decides whether
+    there are shadows" is the whole of the useful idea.
+    """
+
+    #: Illuminated fraction of the Moon's disk tonight (0..1).
+    illumination: float
+    #: Waxing (an evening Moon) vs waning (a small-hours one); ``None`` if unknown.
+    waxing: bool | None
+    #: Coarse verdict: "great" | "good" | "flat" | "thin". See
+    #: :func:`_moon_shoot_verdict`.
+    level: str
+    #: One plain-language sentence about what tonight's Moon will *look* like.
+    #: Deliberately carries no clock times — those render in the viewer's own
+    #: zone, so the UI composes them from the two stamps below.
+    text: str
+    #: When the shooting window starts/ends tonight (UTC ISO). Both always
+    #: present: a night with no usable window is ``None`` overall, never a
+    #: :class:`MoonShoot` with nothing in it.
+    start_utc: str
+    end_utc: str
+    #: Highest the Moon gets inside that window (deg) — the "and it gets nicely
+    #: high" half of the answer, which the times alone cannot give.
+    peak_altitude_deg: float
+
+
+def _moon_shoot_verdict(illum: float, waxing: bool | None) -> tuple[str, str]:
+    """Coarse level + a plain-language sentence for tonight's Moon *as a subject*.
+
+    Pure, so the wording is unit-testable without an ephemeris. The bands are
+    about shadows, not about brightness:
+
+    * ``"flat"`` (≥ 97 % lit) — full, or as good as. Sunlight comes from behind
+      the observer, so almost nothing casts a shadow.
+    * ``"good"`` (85–97 %) — nearly full; shadow is down to a strip along one
+      limb, so most of the face reads flat.
+    * ``"great"`` (15–85 %) — crescent through quarter to gibbous, where the
+      terminator crosses the visible face and the relief is at its strongest.
+    * ``"thin"`` (< 15 %) — a sliver. Pretty, but there is very little of it lit,
+      and it hugs the Sun.
+    """
+    pct = round(illum * 100)
+    if illum >= 0.97:
+        return "flat", (
+            f"Tonight's Moon is essentially full ({pct}% lit). Sunlight is coming "
+            "from almost directly behind you, so nothing on the surface casts a "
+            "shadow and the face looks bright and flat. Still a lovely bright "
+            "thing to photograph — but for craters and mountains, a few nights "
+            "either side of full shows far more.")
+    if illum >= 0.85:
+        return "good", (
+            f"Tonight's Moon is {pct}% lit — nearly full. The shadows are down to "
+            "a thin strip along one edge, so most of the face reads flat. Worth "
+            "shooting, and it keeps getting better as the Moon thins out over the "
+            "following nights.")
+    if illum >= 0.15:
+        return "great", (
+            f"Tonight's Moon is {pct}% lit, so sunlight is striking it at a low "
+            "angle along the line between its lit and unlit halves. That line is "
+            "where craters and mountains throw long shadows — it is the best "
+            "surface detail you will get. Aim there rather than at the bright "
+            "middle.")
+    return "thin", (
+        f"Tonight's Moon is a thin sliver ({pct}% lit) — a pretty shot, but there "
+        "is very little of it lit and it stays close to the Sun. Around first or "
+        "last quarter it shows far more crater detail.")
+
+
+def moon_shoot_tonight(
+    observer: Observer, window: DarkWindow, *,
+    illumination: float, waxing: bool | None,
+) -> MoonShoot | None:
+    """Tonight's Moon *as a subject*, or ``None`` when there is nothing to offer.
+
+    ``illumination`` and ``waxing`` are passed in rather than re-derived, because
+    :func:`plan_tonight` has already computed both — this must not become a second
+    Moon-ephemeris path alongside :func:`moon_illumination` and
+    :func:`moon_window`.
+
+    The span scanned is tonight's dark window widened by six hours at each end,
+    which comfortably covers sunset to sunrise (astronomical dark begins well over
+    an hour after the Sun goes down). Inside it the Moon is shootable while it is
+    above :data:`MOON_SHOOT_MIN_ALT_DEG` *and* the Sun is below the horizon; the
+    widest such stretch is the answer. Sampled on a **15-minute** grid, which is
+    all the precision an "up 19:40–23:10" cue deserves and is the step this pass
+    was measured at: it returns bit-identical windows to a 10-minute grid on all
+    four fixture nights while costing ~120 ms instead of ~167 ms of the Tonight
+    endpoint's ~650 ms (measured on this repo's venv).
+
+    ``None`` — say nothing at all — when the Moon never clears the floor during
+    the night, or does so for less than :data:`MOON_SHOOT_MIN_MINUTES`. Both are
+    ordinary: the Moon is not usefully up on a good share of every month's nights.
+    """
+    _configure_iers_offline()
+    location = observer.earth_location()
+    stamps, times = _times_grid(
+        window.start - timedelta(hours=6), window.end + timedelta(hours=6), 15.0)
+    moon_alt = _moon_altitudes(times, location)
+    sun_alt = _sun_altitudes(times, location)
+    usable = (moon_alt >= MOON_SHOOT_MIN_ALT_DEG) & (sun_alt < 0.0)
+
+    lo, hi = _widest_true_run(usable)
+    if lo is None or hi is None:
+        return None
+    start = stamps[lo].astimezone(timezone.utc)
+    end = stamps[hi].astimezone(timezone.utc)
+    if (end - start).total_seconds() / 60.0 < MOON_SHOOT_MIN_MINUTES:
+        return None
+
+    level, text = _moon_shoot_verdict(illumination, waxing)
+    return MoonShoot(
+        illumination=round(float(illumination), 3),
+        waxing=waxing,
+        level=level,
+        text=text,
+        start_utc=start.isoformat(),
+        end_utc=end.isoformat(),
+        peak_altitude_deg=round(float(moon_alt[lo:hi + 1].max()), 1),
+    )
 
 
 @dataclass
@@ -1110,6 +1290,12 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
         "sun_alt_threshold_deg": window.sun_alt_threshold_deg,
     }
     plan.moon_window = asdict(moon_window(observer, window))
+    # …and the other half of the same object: the Moon as something to *shoot*.
+    # Fed the illumination and waxing sense already computed above rather than
+    # re-deriving them, so this stays one ephemeris path rather than two.
+    shoot = moon_shoot_tonight(observer, window,
+                               illumination=illum, waxing=plan.moon_waxing)
+    plan.moon_shoot = asdict(shoot) if shoot is not None else None
 
     # Build the candidate list: library targets first, then catalog objects not
     # already covered by a library target (matched within ~0.75° on the sky).

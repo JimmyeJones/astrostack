@@ -166,6 +166,43 @@ describe("TonightView", () => {
     expect(screen.queryByText(/Nearer \+ brighter/i)).not.toBeInTheDocument();
   });
 
+  it("offers a Moon session when tonight's Moon is worth pointing at", async () => {
+    // The other half of what this page says about the Moon: it is a subject, not
+    // only interference. 2026-01-25 from London, measured — 46% lit, up
+    // 16:35–22:35, peaking at 53°.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      moon_illumination: 0.46, moon_waxing: true,
+      moon_shoot: {
+        illumination: 0.46, waxing: true, level: "great",
+        text: "Tonight's Moon is 46% lit, so sunlight is striking it at a low angle…",
+        start_utc: "2026-01-25T16:35:00+00:00",
+        end_utc: "2026-01-25T22:35:00+00:00",
+        peak_altitude_deg: 53.2,
+      },
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Great for craters")).toBeInTheDocument());
+    expect(screen.getByText(/highest ~53°/)).toBeInTheDocument();
+    // …and a way to act on it, into the page that actually stacks a Moon capture.
+    expect(screen.getByRole("link", { name: /shoot it/i }))
+      .toHaveAttribute("href", "/moon-sun");
+  });
+
+  it("says nothing about shooting the Moon when it isn't usefully up", async () => {
+    // The common case: the Moon is below the horizon, or barely clears it, on a
+    // good share of every month's nights. An older backend sends no field at all
+    // and must read exactly the same way.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      moon_illumination: 0.4, moon_waxing: true, moon_shoot: null,
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Waxing crescent (40%)")).toBeInTheDocument());
+    expect(screen.queryByText(/Great for craters/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /shoot it/i })).not.toBeInTheDocument();
+  });
+
   it("guides a first-timer with no library targets instead of blaming altitude", async () => {
     // No library targets => the "already targeted" table is empty, but the
     // reason is an empty library, not the altitude floor.

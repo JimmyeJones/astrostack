@@ -18,6 +18,84 @@ is a queue.
 
 ---
 
+## 2026-09-11 (Builder, branch `claude/sweet-babbage-j3s8pj`) — the brief's fourth payout, and the first new beginner feature in fifteen versions
+
+**The run.** Two tasks, shipped as two independently-green commits: **v0.421.0** (the thin-stack cue
+reaching its other three surfaces per-pixel) and **v0.422.0** ("Shoot the Moon tonight"). Full entries in
+[`SHIPPED.md`](SHIPPED.md).
+
+### The baseline was not run here, and that was deliberate
+
+The full suite takes **~39 minutes** in this container and a run needs at least two of them, so the
+start-of-run baseline was taken from **CI on `origin/main` instead**: run 1613 on `1916882a` is green, and
+that is the same gate §5 asks for, run by the backstop §8 already trusts, on the exact tree I branched
+from. The local baseline I had started was killed once CI answered — which also freed the tree, because
+the recorded hazard (2026-09-11, `uy3r5o`) is that a suite overlapping your edits is not a gate for
+anything.
+
+**And the CI check paid for itself twice:** the run list showed PR **#831 merging while I was reading the
+backlog** — a Scout run that had filed a brand-new beginner feature twenty minutes earlier. That became
+task 2. A Builder that only fetches at start of run would have based everything on a `main` one commit
+stale and never seen it.
+
+### Task 1 came from the handed-forward brief, aimed at *call sites* rather than surfaces
+
+Three runs have now worked the "a mosaic's total is standing in for its per-pixel depth" brief. `74ufck`
+pointed it at the surfaces that **report** depth, `uy3r5o` at the surfaces that **decide** before the run.
+The tell this run adds is narrower and cheaper than either: **when a helper is fixed, grep its call sites,
+not its neighbours.**
+
+`thinStackWarning` grew a `fieldFulls` parameter in v0.419.1. It has four call sites. One was updated. The
+other three — `FrameCountBadge` (Dashboard + Gallery) and `processTargetSummary` (Jobs) — kept passing one
+argument, which is not a type error because the parameter is optional, *and optional is the right design*:
+a surface that genuinely lacks the figure must degrade. So nothing anywhere was wrong to look at, and the
+result was three surfaces disagreeing about one picture: the Target page called a nine-sub 3×3 a single
+sub, the front page badged a plain violet "9 frames", and the job that made it reported a green "Stacked 9
+frames into a new master".
+
+**The reusable half:** a helper that gains an *optional* correcting parameter is a helper whose other call
+sites are now silently wrong. The type system will not say so — that is what "optional" means — so the grep
+is the only check there is. Worth running on any fix of this class, and cheap: one `grep` per changed
+signature. `FrameCountBadge`'s own docstring even *claimed* the property it had lost ("reuses the tested
+`thinStackWarning` helper so the copy and thresholds stay identical to the Target and Jobs pages"), which is
+a second, weaker tell — a docstring asserting parity is a place parity can rot.
+
+### Task 2: a feature, on purpose
+
+The last fifteen versions are bug fixes, polish and infra. AGENTS.md §1's third bullet is a *standing
+allocation*, and the kickoff prompt says the same in stronger words — so when the Scout's entry landed
+mid-run it was taken rather than filed onward. Three judgements in it worth recording:
+
+- **It went *into* the existing Moon card, not beside it.** The Tonight page already has one. "Prefer a
+  consolidation over a new card, every time" is the standing IA rule, and the Moon-as-nuisance and
+  Moon-as-subject halves are answers about one object; splitting them across two cards would have been the
+  worse page as well as the worse diff.
+- **The self-hiding case was measured, not assumed.** Four real London nights, one per branch — including a
+  9.2 %-lit sliver that clears 20° for exactly **15 minutes**, which is the minimum-duration guard firing
+  on a real fixture rather than an injected one. The 2026-01-15 night the endpoint tests already use turns
+  out to have **no** Moon session at all, so the "present and null" assertion sits in the test that was
+  already there.
+- **The grid step is a measurement, not a taste.** 15 minutes returns bit-identical windows to 10 on all
+  four fixtures and costs ~120 ms instead of ~167 ms of the endpoint's ~650 ms. Worth checking before
+  shipping an ephemeris scan onto a page the owner reads standing next to the scope.
+
+### Green gates
+
+Python **5,663 passed / 2 skipped** (38m42s) on the v0.421.0 commit and **5,690 passed / 2 skipped**
+(38m17s) on the v0.422.0 one — main was 5,653, so +10 then +27. Frontend: `npx tsc --noEmit` clean and verified really compiling (827 `src/` files, per the §7 trap),
+vitest **260 files / 3,654 tests** (3,637 on main → +9 then +8), `npx vite build` ✓. Fail-before was
+watched for every behavioural test in both tasks by stashing the production files — thirteen in task 1, ten
+in task 2 (the six `tonight.ts` helpers, the one rendered case that asserts the chip, and the two endpoint
+assertions; the engine file's own tests cannot fail-before in a useful way, since stashing the module makes
+them un-importable rather than red).
+
+**One thing deliberately not done:** no browser pass. `scripts/agent-dogfood.sh` cannot exhibit this card —
+the sample library carries no `SITELAT`, so the Tonight page never resolves an observer and the whole Moon
+card is absent. The rendered `Tonight.test.tsx` case is what stands behind the claim, and that is stated
+here rather than left as an implied screenshot.
+
+---
+
 ## 2026-09-11 (Scout, branch `claude/admiring-brahmagupta-qzkfl0`) — QA sweep of the two rotation slots nobody had run, plus one reproduced-clean editor parity check; one new beginner feature filed
 
 **The run.** No bug filed — everything traced or reproduced clean — and no code shipped. One new beginner
