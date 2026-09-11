@@ -2121,6 +2121,40 @@ problems. Dogfood it every big-picture run and fix root causes.
 [`SHIPPED.md`](SHIPPED.md) — the engine render and the endpoint flag already existed; only the download was
 missing. Don't re-file it.)*
 
+- **NEW IDEA (Scout 2026-09-11) — "Shoot the Moon tonight": plan the Moon as a *subject*, not only as
+  interference.** *(Pillar: 3 friendliness + 2 autonomy — PRIORITY 2–3; size S–M, frontend card + reuse of
+  the moon ephemeris the app already computes, possibly one additive response field. Confidence the gap is
+  real: grepped `terminator|libration|shoot the moon|lunar.*plan` across the tree — **zero hits**.)*
+  The owner shoots the Moon and Sun — the whole `seestack/video` lucky-stack workflow and the `/moon-sun`
+  route exist for exactly that — but **nothing in the app plans a Moon session**. The Moon appears only two
+  ways: as *interference* to deep-sky imaging (`MoonInterferenceCard`, which already computes illuminated
+  fraction, rise/set, and separation), and as a *stacking target* once a capture is already on disk
+  (`/moon-sun`). A beginner who wants to point the Seestar at the Moon tonight has to open a separate app to
+  learn when it's up and whether it'll look good.
+  **The feature:** one small self-hiding card (on Tonight, or on the Moon/Sun landing) that answers, in plain
+  language, *"is tonight a good night to shoot the Moon?"* from numbers the app already derives:
+  - **When** — the Moon's usable altitude window tonight (rise/set is already computed for the interference
+    card; reuse it, don't add a second ephemeris).
+  - **Phase, framed as expected result** — the grounded beginner fact that a **near-full** Moon is flat and
+    washed out (the Sun is behind the observer, so there are no shadows) while a **crescent/quarter/gibbous**
+    shows dramatic crater shadows along the terminator. So: *"Tonight the Moon is a 34 % waxing crescent, up
+    19:40–23:10 — a great night for crater detail."* vs *"Tonight's Moon is 96 % (nearly full) — it'll look
+    bright and flat; a few nights either side of full shows far more surface detail."* `moonPhaseLabel` in
+    `frontend/src/tonight.ts` already turns illuminated fraction into a friendly label; this adds the
+    one-line *quality* read on top of it.
+  - **(optional, only if it stays simple)** one sentence on the Sun for a solar-filter owner — it's always
+    "full phase", so the useful fact is just altitude/when, not shadows.
+  **Beginner bar ✔** — a non-expert would understand it and use it to get a better Moon picture with less
+  effort; sane default (self-hides when the Moon isn't up tonight or no location is set) and plain language;
+  **no pro/niche knobs**, **no network** (pure ephemeris, astropy is already a hard dependency). Additive and
+  reversible.
+  **Care / grep-first:** (1) reuse `MoonInterferenceCard`'s existing rise/set + illuminated-fraction
+  computation and `tonight.ts::moonPhaseLabel` rather than adding a second moon-ephemeris path — the whole
+  point is that the numbers already exist. (2) Don't over-reach into *libration* or a true terminator
+  longitude: that is the pro edge and fails the beginner bar — "phase → shadows or no shadows" is the whole
+  useful idea. (3) This is a *planning* surface; it must not imply the app will capture for them (it won't —
+  the Seestar does). Validate the phase→quality wording reads sensibly at a few phases before making it loud.
+
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
   *(Pillar: trust + understand — PRIORITY 3; both small, both purely additive on machinery that now exists.)*
