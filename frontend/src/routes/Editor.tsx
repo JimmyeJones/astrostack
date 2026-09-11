@@ -65,7 +65,8 @@ import { pngProgressLabel } from "../components/editor/pngProgress";
 import { isJobPollAbort, pollJobUntilDone } from "../components/editor/pollJob";
 import { opErrorsMessage } from "../components/editor/opErrors";
 import { clippingCaption } from "../components/editor/clipping";
-import { blownCoreButtonLabel, blownCoreCaption } from "../components/editor/blownCore";
+import { BlownCoreNudge } from "../components/editor/BlownCoreNudge";
+import { blownCoreStretchOp } from "../components/editor/blownCore";
 import { previewDebounceMs } from "../components/editor/previewDebounce";
 import { starMaskSizePx } from "../components/editor/starMaskSize";
 import { levelsAtIdentity, resetLevelsPoints } from "../components/editor/levelsReset";
@@ -452,7 +453,20 @@ export function EditorView() {
   // the selected stretch op whatever its mode. Returns null — and the button
   // self-hides — when there's no recoverable blown core, so it never implies the
   // picture has a problem.
-  const highlightSelUid = stretchSel?.uid;
+  // ...and it is asked for the recipe's own Stretch op even when nothing is
+  // selected, because the Auto notes below carry the same nudge — that is where
+  // a beginner who has just pressed Auto (or landed on an auto-edited run) is
+  // actually looking, and the op panel only speaks once they have clicked
+  // "Stretch". Held back until the first preview has rendered so the solve — a
+  // recipe prefix plus a handful of stretches — never competes with the picture
+  // the user is waiting for, and keyed on the same uid either way, so selecting
+  // the op afterwards is a cache hit rather than a second solve.
+  const autoStretchOp = useMemo(() => blownCoreStretchOp(ops), [ops]);
+  const autoNoteShowing = autoSummary !== null
+    || (seedKey !== null && recipeKey === seedKey && !!autoNote.data?.note);
+  const highlightOp = stretchSel
+    ?? (autoNoteShowing && preview.data ? autoStretchOp ?? undefined : undefined);
+  const highlightSelUid = highlightOp?.uid;
   const highlight = useQuery({
     queryKey: ["highlight-suggestion", safe, rid, dKey, highlightSelUid],
     queryFn: () => api.highlightSuggestion(safe, rid, dRecipe, highlightSelUid!),
@@ -460,6 +474,11 @@ export function EditorView() {
     staleTime: 30_000,
     placeholderData: keepPreviousData,  // see `levels` — no per-debounce flash
   });
+  // The Auto notes may only repeat the finding when it is about the very op
+  // their button would change: with a second Stretch op selected the answer on
+  // screen is that one's, and one picture must not get two verdicts.
+  const autoNoteHighlight = autoStretchOp && highlightOp?.uid === autoStretchOp.uid
+    ? highlight.data : undefined;
   // Data-driven starting tone curve for the selected Curves op, measured from the
   // display-space image *entering* that op (all prior ops applied). Enabled only
   // when a Curves op is selected; keyed on the debounced recipe + uid so it
@@ -2324,6 +2343,20 @@ export function EditorView() {
                     </>
                   );
                 })()}
+                {/* The one thing on this picture the app has *measured* and can
+                    fix in a click: a bright core washing out to flat white. The
+                    op panel carries the same nudge, but only once "Stretch" is
+                    selected — and a beginner reading this note has not clicked
+                    anything yet. Conditional on a rare, server-side measurement,
+                    so it is not another always-on line, and it sits inside this
+                    explanation rather than becoming a card of its own. */}
+                {autoStretchOp ? (
+                  <BlownCoreNudge sug={autoNoteHighlight}
+                    current={autoStretchOp.params?.highlights}
+                    onApply={(strength) => setParams(autoStretchOp.uid, {
+                      ...autoStretchOp.params, highlights: strength,
+                    })} />
+                ) : null}
                 <Text size="10px" c="dimmed" mt={4}>
                   These steps were chosen from your image — tweak or remove any of them below.
                 </Text>
@@ -2350,6 +2383,15 @@ export function EditorView() {
                   <Text size="xs" mt={4} c="dimmed">
                     {presetSuggestionSentence(presetSuggest.data)}
                   </Text>
+                ) : null}
+                {/* The same measured blown-core nudge as the sibling note above
+                    — a user who pressed Auto is reading this one instead. */}
+                {autoStretchOp ? (
+                  <BlownCoreNudge sug={autoNoteHighlight}
+                    current={autoStretchOp.params?.highlights}
+                    onApply={(strength) => setParams(autoStretchOp.uid, {
+                      ...autoStretchOp.params, highlights: strength,
+                    })} />
                 ) : null}
                 <Text size="10px" c="dimmed" mt={4}>
                   These steps were chosen from your image — tweak or remove any of them below.
@@ -2669,24 +2711,13 @@ export function EditorView() {
                     washing out and knowing the fix, say so where it can be seen,
                     with the same one click. Same shape as the background-mode
                     nudge above; nothing changes until it's pressed. */}
-                {(() => {
-                  if (selectedOp.id !== "tone.stretch") return null;
-                  const text = blownCoreCaption(
-                    highlight.data, selectedOp.params?.highlights);
-                  if (!text) return null;
-                  return (
-                    <Alert color="blue" variant="light" py={6} mb="xs"
-                      icon={<IconInfoCircle size={16} />}>
-                      <Text size="xs">{text}</Text>
-                      <Button size="compact-xs" variant="light" mt={6}
-                        onClick={() => setParams(selectedOp.uid, {
-                          ...selectedOp.params, highlights: highlight.data!.strength,
-                        })}>
-                        {blownCoreButtonLabel(highlight.data)}
-                      </Button>
-                    </Alert>
-                  );
-                })()}
+                {selectedOp.id === "tone.stretch" ? (
+                  <BlownCoreNudge standalone sug={highlight.data}
+                    current={selectedOp.params?.highlights}
+                    onApply={(strength) => setParams(selectedOp.uid, {
+                      ...selectedOp.params, highlights: strength,
+                    })} />
+                ) : null}
                 {/* Crop: say where the real control is. The four Left/Top/Right/
                     Bottom sliders below are fractions of the frame, which is an
                     honest way to store a crop and a hostile way to aim one — so
