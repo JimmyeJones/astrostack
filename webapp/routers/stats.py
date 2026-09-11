@@ -228,6 +228,14 @@ class LastNightResponse(BaseModel):
     # it reports the newest scan only, so a hold the next scan resolved is gone
     # without any state to go stale.
     needs_look: list[NeedsLookOut] = []
+    # What that same scan did by itself: targets it stacked, and how many of
+    # those it went on to finish into a picture. The *gap* is what the Dashboard
+    # reads — "it stacked four and finished none" is the only fact that says
+    # auto-editing isn't reaching the overnight pictures. Additive with a ``0``
+    # default that reads as "nothing to say", so an older frontend ignores both
+    # and an older backend omitting them keeps the note silent.
+    auto_stacked: int = 0
+    auto_edited: int = 0
 
 
 # The library-progress roll-up opens each project once to read its (optional)
@@ -845,10 +853,17 @@ def get_last_night(request: Request) -> LastNightResponse | None:
     of their own, because they are answers to the same question on a Dashboard
     the owner has called busy (AGENTS.md §1). See :mod:`webapp.overnight` for the
     aggregation, which is pure; this endpoint only supplies it the roll-up the
-    stat tiles are already paying for and the newest scan's own summary."""
+    stat tiles are already paying for and the newest scan's own summary.
+
+    That summary also carries the two tallies ``auto_stacked``/``auto_edited`` —
+    how many targets the scan stacked by itself, and how many of those it went
+    on to finish. They come off the *same* read as ``needs_look`` so the three
+    can never describe different scans."""
     from seestack.activity_calendar import night_date_of
     from seestack.session_recap import early_stop, merge_end_stamps_by_night
-    from webapp.overnight import needs_a_look, new_pictures_since, newest_scan_summary
+    from webapp.overnight import (
+        auto_stack_tallies, needs_a_look, new_pictures_since, newest_scan_summary,
+    )
 
     settings = deps.get_settings(request)
     lib = deps.open_library(request)
@@ -884,10 +899,11 @@ def get_last_night(request: Request) -> LastNightResponse | None:
     if recap is None:
         return None
     made = new_pictures_since(recent, recap.start_utc)
-    held = needs_a_look(
-        newest_scan_summary(deps.get_job_manager(request).list(limit=200)),
-        lambda safe: names.get(safe, safe),
-    )
+    # One read of the newest scan's summary, two answers off it — so the holds
+    # and the stacked/finished tallies can never describe different scans.
+    scan = newest_scan_summary(deps.get_job_manager(request).list(limit=200))
+    held = needs_a_look(scan, lambda safe: names.get(safe, safe))
+    n_auto_stacked, n_auto_edited = auto_stack_tallies(scan)
     early = {}
     for safe, stamps in stamps_by_target.items():
         stop = early_stop(merge_end_stamps_by_night(stamps, night_key))
@@ -928,6 +944,8 @@ def get_last_night(request: Request) -> LastNightResponse | None:
                          panel_depth=h.panel_depth, panels=h.panels)
             for h in held
         ],
+        auto_stacked=n_auto_stacked,
+        auto_edited=n_auto_edited,
     )
 
 

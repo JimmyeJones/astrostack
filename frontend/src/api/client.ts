@@ -924,6 +924,12 @@ export interface LibrarySessionRecap {
   /** Targets the newest hands-off scan deliberately held back. Self-clearing —
    *  it reports the newest scan only. */
   needs_look?: NeedsLook[];
+  /** Targets that same scan stacked by itself. `undefined` on an older backend,
+   *  which every read site must treat as "nothing to say" rather than zero. */
+  auto_stacked?: number;
+  /** How many of those it went on to *finish* into a picture. The gap between
+   *  the two is what `autoEditNudge` reads. */
+  auto_edited?: number;
 }
 
 /** One picture the app made while the owner was away. */

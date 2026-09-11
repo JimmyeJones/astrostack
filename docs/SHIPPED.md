@@ -1,5 +1,84 @@
 # Shipped — the record
 
+## v0.426.0 — 2026-09-11 — 🌟 the second half of the walk-away promise says it is switched off
+
+*(PRIORITY 2 — autonomy. A Builder-found gap, not a backlog entry: the sibling
+of `AutoStackOffNote` (v0.404.0) for the other switch the "drop your subs in and
+come back to a picture" chain waits on.)*
+
+**The gap.** `Settings.auto_edit_on_autostack` has shipped **on** since
+v0.395.0 — but only for a *fresh* install. `SettingsStore` re-saves the whole
+model on every boot, so any box that has ever run carries an explicit
+`"auto_edit_on_autostack": false` in `state/config.json` that no upgrade may
+overwrite (§9: a stored value cannot be told apart from a value its owner
+chose). v0.404.0 closed exactly this hole for `auto_stack` by *telling* the
+owner. Nothing in the app had ever mentioned the second switch, which sits on a
+Settings tab, disabled until Auto-stack is on, behind a sentence 600 characters
+long. So the sequenced outcome of the owner clicking "Turn on auto-stack" — the
+one row still open on his one-sitting list — is a chain that stacks every target
+overnight and then stops one step short of the picture: a linear master, which
+is the raw combine before any stretch, colour or clean-up, and looks flat and
+dark. AGENTS.md §1 records that he has been bitten by an on-by-default
+reframing before, and the inverse holds too: coming back to pictures that look
+worse than the Seestar's own, with nothing on any screen saying why, reads as
+the app being broken. The one surface that *does* mention auto-editing —
+`LatestPictureCard`'s per-target opt-out link — renders only on a run that
+**was** auto-edited (`wasAutoEdited && autoEditPref.data`), so the case where it
+is off is precisely the case nothing speaks to.
+
+**What it does now.** One more self-hiding note on the Dashboard's notice board,
+ranked just below its sibling because the two are sequential: *"AstroStack
+stacked 3 of your targets by itself and left their pictures unfinished. They are
+plain stacks — the raw combine, before any stretch, colour or clean-up, which is
+why they can look flat and dark. Turn on auto-editing and it will finish each
+new picture the same way the editor's Auto-process button does, as soon as it has
+stacked it. An edit you saved yourself is never written over."* with **Turn on
+auto-editing** (a one-key `putSettings` patch) and *See what it does*.
+
+**It reads the scan's own tallies, not the pictures list.** New pure
+`overnight.auto_stack_tallies(summary)` returns `(auto_stacked, auto_edited)`
+off the same `newest_scan_summary` read `needs_a_look` already makes — hoisted
+to one variable in `get_last_night` so the holds and the tallies can never
+describe different scans — surfaced as two additive `0`-defaulted fields on
+`/api/last-night`. The note fires on the **difference**, so a target finished by
+its own per-target preference (`webapp/auto_edit_pref`) counts as finished
+instead of being blamed on the switch, and a scan that stacked nothing by itself
+says nothing at all (with Auto-stack off there is nothing to finish, and
+`AutoStackOffNote` is the note that fits that install).
+
+**The trap worth recording: the two summary keys are not the same shape.**
+`_pipeline_body` writes `auto_stacked` as the **list of safe names** it stacked
+and `auto_edited` as a **count**. A reader that assumed either would get the
+other one wrong in opposite directions — a list through `int()` raises and reads
+as `0`, which would have kept this note silent for ever with nothing failing;
+a count through `len()` raises outright. `_tally` accepts both shapes, so a
+summary written by any build (or by the `Process target` job, which counts
+`auto_edited` as edit *operations*) still answers. The frontend mirrors the same
+tolerance: a missing, fractional or non-finite tally reads as "nothing to say",
+never as zero-and-therefore-complain.
+
+**What it deliberately does not claim.** The behaviour ("it will finish each new
+picture the way Auto does"), never that the result beats what the owner would do
+by hand; and never that a picture is *missing* — the stack is there, it is
+unfinished. The confirmation is honest about the pictures already on disk, which
+turning the switch on does **not** retroactively finish: *"The pictures you
+already have are untouched — open one and press Auto-process to finish it now."*
+
+**Upgrade-safe (§9):** two additive response fields with `0` defaults; no
+config, schema, on-disk, default or API-shape change, and no behaviour change to
+any pipeline — the switch's own default is untouched, and an older frontend
+ignores both fields while an older backend omitting them keeps the note silent.
+The one write it can make is the patch the user clicks.
+
+**Tests (+22).** `autoEditNudge.test.ts` (9 — the offer; the *difference* rather
+than the total; the singular; silent when on, unknown, nothing stacked, or
+everything finished; absent tallies; and junk/negative/fractional tallies),
+`AutoEditOffNote.test.tsx` (10 — the sentence and the Settings link; one click
+patches exactly one key and answers with what happens next *and* what does not;
+the four silences; dismissal surviving a remount; the manual route when the save
+fails), and `tests/webapp/test_overnight_digest.py` (+3 — both summary shapes,
+junk, and the endpoint carrying the tallies off the same scan as `needs_look`).
+
 ## v0.425.1 — 2026-09-11 — 🐛 the offline Sky Map opens on your newest picture, and a star's name is no longer painted over by the star
 
 *(PRIORITY 3, friendliness. Two Builder-found bugs on the surface v0.424.4 had
