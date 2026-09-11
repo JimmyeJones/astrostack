@@ -111,6 +111,71 @@ export function moonWindowNote(
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// "Is tonight a good night to shoot the **Moon itself**?" — the three pure bits
+// the Tonight page's Moon card needs to render the planner's `moon_shoot`.
+//
+// Everything else about the Moon on this page is about interference: how much it
+// will wash out a faint target. The Moon is also a *subject* — the Seestar's
+// lucky-stacking workflow and the whole Moon & Sun page exist for it — and the
+// app never planned such a session. The backend answers with a level, a
+// time-free sentence and the window's two stamps; the wording of the *chip* and
+// the *clock line* live here, so the page renders times in the viewer's own zone
+// like everything else on it.
+//
+// The counter-intuitive half is the level itself: a **full** Moon is the worst
+// night for surface detail, because sunlight then comes from behind the observer
+// and nothing casts a shadow. `seestack/nightplan.py::_moon_shoot_verdict` owns
+// the bands — nothing here re-derives one from the percentage.
+
+// Short chip label for a `moon_shoot.level`, so the verdict reads at a glance. A
+// level this build doesn't know (a newer backend adding a band) falls back to
+// neutral wording rather than rendering an empty chip.
+export function moonShootLabel(level: string | null | undefined): string {
+  switch (level) {
+    case "great":
+      return "Great for craters";
+    case "good":
+      return "Good, but flattening";
+    case "flat":
+      return "Bright but flat";
+    case "thin":
+      return "Thin sliver";
+    default:
+      return "Moon tonight";
+  }
+}
+
+// Mantine colour for the same level — gentle, never alarming: none of these is a
+// problem, they are four different kinds of night.
+export function moonShootColor(level: string | null | undefined): string {
+  switch (level) {
+    case "great":
+      return "teal";
+    case "good":
+      return "lime";
+    case "flat":
+      return "yellow";
+    default:
+      return "gray";
+  }
+}
+
+// "Up 19:40–23:10, highest ~62°" — when tonight the Moon is worth pointing at,
+// in the viewer's local zone. `null` (omit the line) when there is no session or
+// either stamp is unreadable, so the card degrades to the phase alone rather
+// than printing a dash.
+export function moonShootWindowNote(
+  shoot: NightPlan["moon_shoot"] | null | undefined,
+): string | null {
+  if (!shoot) return null;
+  const span = usableWindowNote(shoot.start_utc, shoot.end_utc);
+  if (span == null) return null;
+  const alt = shoot.peak_altitude_deg;
+  const high = alt != null && Number.isFinite(alt)
+    ? `, highest ~${Math.round(alt)}°` : "";
+  return `Up ${span}${high}`;
+}
+
 // A short, dimmed per-row Moon cue from a target's `moon_up_fraction` (0..1) —
 // the share of its usable window the Moon is actually above the horizon. The
 // Moon column shows the separation at a single mid-window instant, which can
