@@ -18,6 +18,81 @@ is a queue.
 
 ---
 
+## 2026-09-11 (Scout, branch `claude/admiring-brahmagupta-qzkfl0`) — QA sweep of the two rotation slots nobody had run, plus one reproduced-clean editor parity check; one new beginner feature filed
+
+**The run.** No bug filed — everything traced or reproduced clean — and no code shipped. One new beginner
+feature added to "Features that serve real workflows" (a *Shoot the Moon tonight* planner). This block is
+the deliverable: three areas swept, so the next Scout doesn't re-sweep them.
+
+### The three sweeps, and why these three
+
+AGENTS.md §1 marks `seestack/stack/*` and `seestack/calibrate/*` **closed** (twenty clean sweeps), and the
+per-pixel-depth-vs-total class on the *reporting* surfaces has been drained hard by the Builder over
+v0.419–v0.420. So I took AGENTS.md §2's rotation rather than the stale Scout-prompt text (which still says
+"lead with the stacking engine" — the exact staleness §2 warns about: that prompt lives in
+`agent-prompt-scout.md`, which the Scout never reads at runtime). The rotation's slots #3 (filesystem side
+effects of ASTAP/ffmpeg) and the priority-1 editor A2 class (preview↔export parity) were the two nobody
+had run recently.
+
+1. **ASTAP filesystem side effects (rotation slot #3) — CLEAN.** `ASTAPSolver._solve_once`
+   (`seestack/solve/astap.py:268`) copies each frame into a `tempfile.TemporaryDirectory` and runs ASTAP
+   on the *copy*, reading the `.wcs`/`.ini` sidecars before the scratch dir is torn down. So ASTAP's
+   sidecar writes (`-wcs`, and the `.ini` it always emits) land in scratch, never beside the source — the
+   `incoming/` read-only guardrail (§10) holds even though `copy_to_cache` is off. `-update` is
+   deliberately never passed. No symlink/hardlink shortcut that would lead a write back to the source.
+
+2. **ffmpeg/ffprobe filesystem side effects (rotation slot #3) — CLEAN.** `seestack/video/ffmpeg.py`:
+   `probe_video` runs ffprobe read-only (metadata, no decode, no output file); `iter_frames` runs ffmpeg
+   with `-f rawvideo -pix_fmt rgb24 -` piping to **stdout** — no output path, stderr → DEVNULL, and the
+   subprocess is killed in the `finally`. The source video is only ever read. A lunar/solar capture living
+   in `incoming/` is safe.
+
+3. **Editor wavelet-denoise preview↔export parity (priority 1, the A2 class) — REPRODUCED CLEAN, with
+   numbers.** The default denoise method (`denoise` op, `method="wavelet"`, `seestack/edit/ops/detail.py:112`)
+   is the one A2-shaped risk I could find that `scaled_px` does *not* touch: `restoration.denoise_wavelet`
+   (BayesShrink, soft) auto-picks its decomposition levels from the image size and estimates the per-subband
+   threshold from the data, with no pixel-unit knob to scale. The proxy is built by **striding**
+   (`proxy.build_proxy`, `rgb[::step, ::step]`), which *preserves* white-noise σ exactly — so the concern was
+   that BayesShrink might still denoise the strided proxy differently from the full-res export. **It does
+   not.** On a pure flat field + white noise (σ=0.03), the op's exact wavelet branch reduced σ by
+   **79.5 % at step 1 (3200²), 79.3 % at step 4, 79.4 % at step 8** — scale-invariant to within 0.2 pp. A
+   bright star's peak was retained **100 % at every scale** (the `full = np.where(norm > 1.0, norm, full)`
+   reinstatement protects unclipped highlights). Earlier "divergences" I saw (6 %→12 %) were pure measurement
+   artefact — a gradient and stray stars inside the σ window, plus the 0.5/99.5-percentile anchor moving with
+   scale. Repro kept in the session scratchpad (`wavelet_parity.py`). **Conclusion: parity-safe, by three
+   coincidences that are worth stating so the next audit doesn't re-chase it** — white sky noise is
+   scale-invariant under striding; BayesShrink reads σ off the finest subband, which sees the same σ; and
+   bright stars are explicitly reinstated so soft-thresholding can never attenuate them.
+
+### Incidental re-confirmations (so they're recorded, not re-read)
+
+- The per-pixel-depth class on the surfaces the Builder's v0.419–v0.420 work did *not* name is also correct:
+  `continueTonight.pickContinueTonight` passes `t.field_fulls` into `integrationReadiness`, and the backend
+  **does** populate it — `plan.py::_annotate_library_targets` calls `target_field_fulls(proj)` (degrading to
+  `None` only on a broken project, where readiness then self-hides). `grainProjection` is scale-consistent by
+  construction (σ∝1/√t is invariant to dividing both sides by the panel count) and defers the
+  widen-vs-deepen distinction to `integrationTrend`'s `plateaued` gate via the `field_fulls` it passes through.
+- The Moon/Sun (video) path is polished, not a source of bugs: the quicklook uses the *same*
+  `normalize_for_display` as the finished still (`webapp/video.py::_write_quicklook`), sharpen runs before the
+  crop on the whole frame, and the soft render is kept beside the sharpened one so strength stays changeable.
+  The accumulators (`WeightedSumAccumulator`, `MinMaxRejectAccumulator`, `WelfordAccumulator`) are NaN/coverage
+  correct (closed core — not re-swept, only read to confirm the lucky stack feeds them correctly).
+
+### The feature, and the honesty note that goes with it
+
+The one thing this run *adds* to the backlog is a **Shoot-the-Moon-tonight planner** (in "Features that serve
+real workflows"). I reached it the long way — I brainstormed ~a dozen beginner features and grepped each, and
+**every one already exists** (planning: Tonight, MoonInterferenceCard, framing-fit, suggest/next-session;
+sharing: recap, wallpaper, keepsake, labelled, deep-sky wall, life list, best-night; understanding: multi-object
+`AnnotatedImage`, rejection breakdown, focus/transparency trends; video keep-% coaching: `sharpness_profile`/
+`VideoSharpnessCard`). This is exactly the state AGENTS.md §4 (R3) describes: **idea supply is not the
+constraint.** The one gap that survived the grep was `terminator|libration|shoot the moon|lunar.*plan` —
+**zero hits** — the Moon is only ever treated as *interference* or as a *stacking target*, never planned as a
+subject. So I filed that single one and stopped, rather than pad the list with near-duplicates that cost a
+Builder an investigation each.
+
+---
+
 ## 2026-09-11 (Builder, branch `claude/sweet-babbage-uy3r5o`) — the handed-forward brief paid out a third time, one page upstream
 
 **The run.** One task, done deeply: **v0.420.0** — the Stack form's per-pixel cautions read a mosaic's
