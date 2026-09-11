@@ -9,7 +9,12 @@ from seestack.edit.registry import (
     EditContext, EditParam, OpSpec, as_rgb, finite_mask, luminance, register,
 )
 
-_MODE_CC = ["gray_star", "gaia"]
+# ``gaia`` is retired (v0.418.0) and deliberately absent: it needed astroquery (in
+# no dependency list, so absent from the shipped image) and a CDS network call,
+# which AGENTS.md §1 declines as standing policy. Offering it meant a mode that
+# silently did nothing. An old recipe naming it is coerced to the default by
+# ``recipe.validate_ops``, and ``_color_calibrate`` degrades it explicitly too.
+_MODE_CC = ["gray_star"]
 
 
 # --- the single stretch boundary -------------------------------------------
@@ -270,10 +275,14 @@ def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndar
         calibrate_color,
     )
 
-    mode = str(params.get("mode", "gray_star"))
-    # gaia needs a WCS + network; on the decimated preview proxy fall back to gray_star.
-    if mode == "gaia" and (ctx.is_proxy or ctx.wcs is None):
-        mode = "gray_star"
+    # ``gaia`` is retired (see MODE_GAIA in seestack.post.color_cal) and no surface
+    # offers it; ``recipe.validate_ops`` already rewrites a stored value to the
+    # default. A value that still arrives here — from a direct engine caller that
+    # never went through the recipe validator — is passed straight through on
+    # purpose: ``calibrate_color`` owns the retirement, solves gray-star and stamps
+    # a note saying so, which is what reaches the editor's read-out. Rewriting it
+    # here instead would make the degradation silent again.
+    mode = str(params.get("mode", MODE_GRAY_STAR))
     # The star-detection geometry is in *full-resolution* pixels; on the decimated
     # preview proxy a 3 px star spans 3/proxy_scale px, so shrink both the finder's
     # FWHM and the photometry aperture by the same factor. Unscaled, the proxy hunted
@@ -314,6 +323,10 @@ def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndar
         # ``proxy_scale > 1`` is the real condition, not ``is_proxy``: a small stack's
         # "proxy" is the full pixels undecimated, so a fallback there is the export's
         # own answer and there is nothing to warn about.
+        # The requested mode is star-based (gray-star, or the retired gaia that now
+        # resolves to it) while the outcome is not — i.e. it fell back to the
+        # starless balance. ``calibrate_color`` never *reports* gaia as used, so
+        # MODE_GAIA only ever appears on the requested side.
         "proxy_fallback": bool(
             ctx.is_proxy and ctx.proxy_scale > 1.0
             and mode in (MODE_GRAY_STAR, MODE_GAIA)
@@ -326,12 +339,15 @@ def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndar
 register(OpSpec(
     id="tone.color_calibrate", label="Color calibration", group="tone",
     stage="linear", apply=_color_calibrate, proxy_safe=True,
-    help="Photometric white balance from star colours (gray-star offline, Gaia on export).",
+    help="Photometric white balance from the colours of your own stars. Works offline.",
+    # The MODE_* constants live in seestack.post.color_cal, which is imported
+    # lazily inside _color_calibrate (it pulls photutils) — so spell the default
+    # here, as the rest of this module's descriptors do.
     params=[EditParam("mode", "Mode", "enum", default="gray_star", options=_MODE_CC,
-                      option_labels={"gray_star": "Gray-star (offline)",
-                                     "gaia": "Gaia catalogue (on export)"},
-                      help="How to find neutral: Gray-star balances from your own star "
-                           "colours (works offline); Gaia uses the catalogue (only on export).")],
+                      option_labels={"gray_star": "Gray-star (offline)"},
+                      help="How to find neutral: the average star in a big enough sample "
+                           "is close to white, so balancing your own stars to grey "
+                           "removes the camera's colour cast. Nothing leaves your box.")],
 ))
 
 register(OpSpec(

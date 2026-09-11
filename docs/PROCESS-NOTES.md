@@ -7424,3 +7424,55 @@ code, so grep the *mechanism* (`zoom`, `north_up`), not the feature's title.**
 **Ended the run at two tasks rather than manufacturing a third.** The feature backlog is
 genuinely dry (the Scout's own 2026-09-06 note says as much), and AGENTS.md §2 is explicit
 that a short run leaving `main` green beats a marginal third item.
+
+## 2026-09-11 — Builder run (branch `claude/sweet-babbage-kg3yfc`): three bug fixes, and why there was no feature to pull
+
+**Baseline:** `main` at 8dacf781 green — **5622 passed, 2 skipped** in 29:50.
+
+**Shipped:** v0.418.0 (the `READY` CI-vs-image entry), v0.418.1 (the retired Gaia colour mode),
+v0.418.2 (the last two vacuous migration fixtures). All three were open entries in
+"Bugs (fix these first)", taken top-down. Full write-ups in `SHIPPED.md`.
+
+**The habit that paid for itself three times this run: revert the fix, watch the test fail.**
+AGENTS.md §8 asks for it; doing it mechanically on every new test caught **two tests of my own
+that would have passed on their own bug**, which is the same defect the entry I was closing was
+*about*:
+
+  * The obvious "no ENV in the Dockerfile names something unread" sweep **passes** on the
+    `ASTROSTACK_PORT` bug, because that name *is* read by our code (`webapp.main:run`). What made
+    it dead was the path the image boots — a different question from reachability. Rewritten to
+    assert consistency (no port ENV against a CMD that hardcodes one) and the generic sweep kept
+    beside it, documented as the weaker companion.
+  * The "asking for gaia never reaches astroquery" test raised an `AssertionError` from a patched
+    `__import__` — which the pre-fix broad `except Exception` **swallowed**. It now *records*
+    attempted imports and asserts the list is empty, which nothing can swallow.
+
+Generalisation worth carrying: **a test that proves a negative by raising is only as strong as the
+code's exception handling.** If the code under test has a broad `except`, record and assert instead.
+
+**A fixture derived from the current schema cannot guard the schema.** The third entry's filed note
+said the v20/v21 migration fixtures were "today's `SCHEMA_SQL` minus one or two columns". The
+deeper problem was not that they were *close* to today's schema but that they were *derived* from
+it: the next column added to `frames` appears in the fixture too, so a forgotten `ALTER` can never
+make the file red. Frozen DDL literals fix that, and with the runtime backfill switched off the
+suite now goes red on a synthetic new column with no migration step — the v0.119.8 live-install
+brick, reproducible here for the first time.
+
+**No feature was pulled, and the reason is not "no time".** "Features that serve real workflows"
+is genuinely dry: every top-level entry in it is shipped, explicitly declined, measured-and-stood-
+down, or fenced with its own "only worth doing once someone actually wants it". The one remaining
+unstruck sub-item (constellation lines at the backdrop radius) is conditional on a constellation
+dataset already being bundled — `seestack/data/` holds `messier.json` and `deepsky_popular.json`
+and nothing else, and the entry says not to add one as a dependency for it. So it declines itself.
+
+**One idea closed by measurement instead of code** (the fourth slot): the "say 'another hour would
+cut its noise about N%' in *one* voice" dedup. Its own first step is "check the wordings agree",
+and they do — `noise_gain_from_more_time` is `1 − √(t/(t+h))` and `integrationTrend`'s projection is
+`1 − 2^−p` at `p ≤ 0.5`, the same expression for `h = t`, agreeing to the decimal (29.29 % vs
+29.29 %) at the one point where both name the same extra time. What looks like a conflict is two
+different `h`, each named out loud in its own sentence. The rest of the slice would add a third
+marginal-return sentence to a UI the owner already calls busy. Numbers and the full table are on
+the entry in `IMPROVEMENTS.md`.
+
+**Backlog accounting (the three-file rule):** two entries cut to `SHIPPED.md` in full, one closed
+in place, three one-line `✅` rows added. Net effect on the working list is a reduction.

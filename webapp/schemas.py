@@ -1147,13 +1147,15 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "help": "Balance the stack's colour so a neutral background reads grey, at stack "
              "time. The editor also offers colour calibration, so you can leave this off "
              "and do it there with a live preview."},
+    # "gaia" is retired (v0.418.0) — see RETIRED_OPTION_VALUES below and MODE_GAIA in
+    # seestack/post/color_cal.py. It needed a CDS network call and an astroquery the
+    # image does not ship, so choosing it did nothing and said nothing.
     {"key": "color_calibration_mode", "label": "Color cal. mode", "type": "enum",
-     "group": "advanced", "options": ["gray_star", "gaia"],
-     "option_labels": {"gray_star": "Gray-star (offline)", "gaia": "Gaia catalogue"},
+     "group": "advanced", "options": ["gray_star"],
+     "option_labels": {"gray_star": "Gray-star (offline)"},
      "depends_on": "color_calibration",
-     "help": "Gray-star balances so the average star is neutral — fully offline and a "
-             "good default. Gaia matches your stars to catalogue colours for a more "
-             "physical result, but needs a plate-solved field and the Gaia data."},
+     "help": "Balances the stack so the average star reads neutral, which removes the "
+             "camera's colour cast. Fully offline — nothing leaves your box."},
     {"key": "mosaic_canvas", "label": "Canvas mode", "type": "enum", "group": "advanced",
      "options": ["auto", "union", "reference"],
      "help": "Output framing when frames don't all cover the same field. Auto uses a "
@@ -1258,6 +1260,37 @@ def strip_non_form_keys(data: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in data.items() if k not in NON_FORM_KEYS}
 
 
+# Enum values a previous version legitimately wrote and this one no longer offers,
+# mapped to what they now mean. Removing a choice from a descriptor's ``options``
+# would otherwise make ``validate_stack_options`` *reject* a value already sitting
+# in someone's ``config.json`` ``default_stack_options`` or in a per-target
+# stack-default — the Stack form would 422 on every submit and the walk-away
+# auto-stack chain would fail with it. AGENTS.md §9 forbids exactly that, so a
+# retired value is translated rather than refused.
+#
+#   color_calibration_mode "gaia" → "gray_star" (v0.418.0): the Gaia mode queried
+#   the CDS archive over the network and needed an astroquery the image does not
+#   ship, so it had always silently fallen back to gray-star anyway.
+RETIRED_OPTION_VALUES: dict[str, dict[str, str]] = {
+    "color_calibration_mode": {"gaia": "gray_star"},
+}
+
+
+def normalise_retired_option_values(data: dict[str, Any]) -> dict[str, Any]:
+    """Return *data* with any retired enum value replaced by its successor.
+
+    A shallow copy; the input is never mutated. Keys with no retirement, and
+    values that are not retired, are passed through untouched — so on every
+    ordinary dict this is the identity.
+    """
+    out = dict(data)
+    for key, mapping in RETIRED_OPTION_VALUES.items():
+        value = out.get(key)
+        if isinstance(value, str) and value in mapping:
+            out[key] = mapping[value]
+    return out
+
+
 def coerce_stack_options(data: dict[str, Any]) -> StackOptions:
     """Build a StackOptions from a (possibly partial) dict, ignoring unknowns.
 
@@ -1274,6 +1307,7 @@ def coerce_stack_options(data: dict[str, Any]) -> StackOptions:
     protects them all — including the walk-away auto-stack.
     """
     valid = {f.name for f in dataclasses.fields(StackOptions)}
+    data = normalise_retired_option_values(data)
     clean = {k: v for k, v in data.items() if k in valid and v is not None}
     return StackOptions(**clean)
 
@@ -1293,6 +1327,9 @@ def validate_stack_options(data: dict[str, Any]) -> None:
     paths (``NON_FORM_KEYS``) and ``None`` values ("use default") are skipped.
     """
     fields = {f.key: f for f in stack_option_fields()}
+    # A retired value is what a previous version wrote, not a bad choice a client
+    # invented — translate before judging, or an upgrade would 422 the Stack form.
+    data = normalise_retired_option_values(data)
     for key, value in data.items():
         if key in NON_FORM_KEYS or value is None:
             continue

@@ -1,5 +1,294 @@
 # Shipped — the record
 
+## v0.321.2 + v0.321.3 — cut from the working list 2026-09-11 — "sweep every date the app shows a beginner"
+
+Filed 2026-08-30 as the generalisation of the v0.311.3 "First light" bug and **finished** across
+v0.321.2 / v0.321.3; it sat in the Ideas list for eleven days after its last surface closed, with
+five paragraphs of completed work under a live-looking `- **NEW IDEA` headline. Cut here verbatim
+under the three-file rule (AGENTS.md §2) — a top-level unstruck bullet is indistinguishable from
+open work, and this one describes a sweep with nothing left in it.
+
+**The rule worth carrying forward** (the rest is record): a stack run's own timestamp is right for
+"which run is newest" and wrong as the caption on a picture. Where both dates matter, say both; and
+never flip a *sort* to capture time. The shared helpers are `pictureDateLabel` and
+`formatStampDateTime` — use them rather than slicing an ISO stamp, which is how every instance in
+this entry got written in the first place.
+
+The entry as it stood:
+
+- **NEW IDEA (Builder 2026-08-30, the generalisation of the v0.311.3 "First light" bug) — sweep every date the
+  app shows a beginner and ask whether it means *when you shot this* or *when the app did something*.**
+  *(Pillar: understand / trust — PRIORITY 3; size S per surface, M for the sweep. Confidence: the class is
+  confirmed — one instance was reproduced in a running app and fixed this run.)* "First light" quoted the
+  target-row **creation** stamp and so told a Seestar owner with a back catalogue that they took up the hobby
+  the week they installed AstroStack. The bug is fixed; **the class is not swept.** The owner's mental model of
+  a date on a picture is *the night I shot it*, and several surfaces show a **processing** date in a place that
+  reads like a capture date — the clearest is the Dashboard's **Recent stacks** strip, whose tile reads
+  `Sample: Orion Nebula (M42) · 6 FRAMES · Aug 30, 2026` where the 30 Aug is when the *stack ran*, while the
+  subs under it are dated 2024-11-15. On a re-stack of old data that is off by years, on the app's front page.
+  **Shape:** enumerate the surfaces (Dashboard recent strip, Gallery cards, History rows, the Library tile, the
+  keepsake/poster) and for each decide which date the *reader* means, rather than which one is cheapest to
+  reach — a stack run's own timestamp is right for "which run is newest", and wrong as the caption on a
+  picture. `Project.earliest_frame_utc()` (new this run) and the existing per-night rollups already answer the
+  capture side, so most of this is a decision plus a label, not new data. **Care:** don't flip a *sort* to
+  capture time — "newest run" is the right ordering for History — and where both dates matter, say both
+  ("shot 15 Nov 2024 · stacked 30 Aug 2026") rather than silently swapping one for the other.
+
+  **✅ THE LAST TWO NAMED SURFACES ARE DONE (Builder, v0.321.2, branch `claude/wizardly-feynman-be4ubk`) — the
+  Gallery card and the History row, which were the two still printing a *raw machine stamp* with no label at
+  all.** The entry names five surfaces; the Dashboard strip, the keepsake and the Target hero were closed by
+  earlier runs, and **the Library tile turns out to show no date at all** (`Library.tsx` reads
+  `last_activity_utc` only to *sort* by it, which is the right use and the Care note's own exception) — so these
+  two were the whole remainder, and the sweep is finished. Both printed `run.timestamp_utc` sliced with `.replace("T", " ")`
+  — `2026-08-30 14:32` on the Gallery card, `2026-08-30T14:32:05` on the History row — which is (a) the moment
+  the *stack ran*, years out from the capture on a re-stack of a back catalogue, and (b) not a date format the
+  app uses anywhere else a person reads.
+
+  **Gallery card → `pictureDateLabel`**, the same helper the Dashboard strip and the Target hero already use, so
+  it says *"Shot 15–18 Nov 2024"* and falls back to a **labelled** *"Stacked 30 Aug 2026"* when the run predates
+  the capture window (schema < 18 — i.e. almost everything in the owner's library today). The night count is
+  deliberately **not** passed: the card's line is already five segments long, and "over 4 nights" belongs on the
+  caption, not the tile. The run's identity there is its `output_basename` printed beside the date, so the clock
+  time was not needed.
+
+  **History row → both dates, each labelled** — *"Shot 15–18 Nov 2024 · Stacked 30 Aug 2026, 14:32"* — because
+  this is the one list where they answer different questions: which run this row *is*, and what the picture is
+  *of*. That is the entry's own "where both dates matter, say both" rule, and the sort is untouched (still newest
+  run first, as the Care note requires). **The clock time is load-bearing here and is why this needed a new
+  helper:** `output_basename` is reused across a re-stack, so two re-stacks made the same afternoon are
+  distinguished by nothing else — a date-only label would collapse two rows into identical text.
+  `formatStampDateTime` is `formatStampDate` plus `HH:MM`, keeping the never-a-numeric-month rule and the same
+  empty-string-on-junk contract.
+
+  **Frontend-only:** no API, schema, config, on-disk or default change; both fields were already on the payloads
+  (`GalleryItem`/`StackRun` have carried `capture_night_start`/`_end` since schema 18) and an older backend
+  omitting them lands on the labelled "Stacked" form, which is exactly right.
+
+  **Tests (+6; the 4 component ones fail before):** `format.test.ts` (+2 — the clock time added to the same named
+  month, and the junk contract), `Gallery.test.tsx` (+2 — a 2024 capture window shown as *Shot* with the 2026
+  processing stamp gone from the card, and the labelled fallback with no "Shot" on a run that has no window) and
+  `History.test.tsx` (+2 — both labels on one line with no raw ISO stamp, and two same-afternoon re-stacks whose
+  lines stay distinct while neither claims a shoot date).
+
+  **✅ AND THE SKY FOOTPRINT LINE, THE LAST ONE ON THE LIST (Builder, v0.321.3, same branch).** The Sky Map's
+  selected-footprint caption read `RA 83.822° · Dec −5.391° · 17 Aug 2026` — a bare, unlabelled date beside a
+  picture, i.e. the exact shape of this whole entry, and the leftover the v0.313.0 run explicitly named. It now
+  goes through the same `pictureDateLabel`. The field it needed was genuinely missing (unlike the Gallery and
+  History, which already had it): `SkyImage` gained **additive optional** `capture_night_start`/`_end`, bucketed
+  with the same `capture_night_range` and the same `Settings.site_lon` the Gallery card and the Nights card use,
+  so all three can't name one session differently. `timestamp_utc` stays on the payload untouched — the viewer
+  draws newer tiles on top by it, which is the right use of a processing stamp and the Care note's own exception.
+  **Upgrade-safe:** two optional response fields (an older frontend ignores them; an older backend omitting them
+  reads as "no capture window", which lands on the labelled "Stacked …" form). **Tests (+5, 4 failing before):**
+  `tests/webapp/test_sky.py` (+2 — the window carried through as observing nights with the stack stamp intact,
+  and a pre-schema-18 run reporting null rather than borrowing it) and `Sky.test.tsx` (+2 new, +1 updated — a
+  capture window shown as "Shot 15–18 Nov 2024" with no 2026 anywhere in the line, and the labelled fallback; the
+  existing "dates it like every other surface" assertion gained the label and keeps its no-raw-ISO check).
+
+
+## v0.418.2 — 2026-09-11 — the last two vacuous migration fixtures, and a guard that catches the next one
+
+The third and final part of the fourth external audit's "fixtures that cannot exhibit their bug"
+entry, which this closes. `test_a_schema_20_project_gains_the_streak_positions_without_losing_rows`
+and `test_a_schema_21_project_gains_the_restoration_stamp_without_losing_rows` both passed with
+their `if from_version < 21` / `if from_version < 22` migration blocks **deleted outright** —
+reproduced before touching anything.
+
+**Two separate problems, and the entry only named one.**
+
+The named one: a purely additive nullable-column migration and the runtime
+`_reconcile_table_columns` net produce the *same* observable schema, and the net derives its column
+list from the same `SCHEMA_SQL` the migration does. So no amount of checking the resulting columns
+can say which of the two did the work. `_disable_the_runtime_backfill` switches the net off for the
+duration of these two tests, which makes `_migrate_schema` the only thing that can satisfy them.
+The net keeps its own direct coverage — the `_EXPECTED_COLUMNS` contract test and the pre-QC-shape
+round-trip, both untouched — so nothing is left unguarded.
+
+The unnamed one, which is where the durable value is: the fixtures built their "old" DB from
+today's `SCHEMA_SQL` and then dropped the new columns back off. A fixture derived from the current
+schema **tracks** it — the next column added to `frames` or `stack_runs` appears in the fixture too,
+so a forgotten `ALTER` step can never make any test in this file go red. That is the exact failure
+mode the file was written for (the v0.119.8 live-install brick) and it was structurally unreachable.
+So `_V20_FRAMES_SQL`, `_V21_FRAMES_SQL` and `_V20_STACK_RUNS_SQL` are now frozen DDL literals, and
+`_assert_tables_are_fully_migrated` asserts the opened DB carries every authoritative column after
+the migration alone.
+
+**Verified against three cases rather than reasoned about**, each by patching
+`seestack/io/project.py` in a scratch run and restoring it:
+
+  * the v21 step deleted → `frames is missing ['streak_cx', 'streak_cy'] after _migrate_schema alone`
+  * the v22 step deleted → `frames is missing ['restored_utc'] …` (both tests)
+  * **a new column added to `SCHEMA_SQL` with no migration step at all** →
+    `frames is missing ['brand_new_col'] …`
+
+The third is the v0.119.8 mistake itself, and it is the first time this suite has been able to go red
+on it. The assertion message says what to do and, pointedly, what not to do: add the step, don't
+widen the frozen DDL.
+
+**Tests-only.** No engine, webapp, frontend, config, schema, on-disk or API change; no test weakened
+or deleted, and the two tests keep every row-integrity assertion they had. Test count unchanged at 6
+in this file — the work was making the existing six mean something.
+
+
+## v0.418.1 — 2026-09-11 — the Gaia colour-calibration mode is retired (entry CLOSED)
+
+The editor and the Stack form both offered `color_calibration_mode = "gaia"`. It imported
+`astroquery.gaia`, which is in no dependency list and is absent from the shipped image, so
+the import raised `ModuleNotFoundError`, the broad `except Exception` in `calibrate_color`
+swallowed it, and the solve silently became gray-star with nothing but a log line. It was
+also a CDS network call, which AGENTS.md §1 declines as standing policy — the app stays
+local. So picking it did nothing and said nothing.
+
+**Reproduced, not inferred.** Restoring the old dispatch in a scratch run logs exactly what
+the audit saw in the image: `Gaia calibration failed (No module named 'astroquery'); falling
+back to gray-star`.
+
+**Removed from every surface that offered it**: `seestack/edit/ops/tone.py`'s `_MODE_CC`, the
+`webapp/schemas.py` StackOptions descriptor, and — for consistency, since offering a dead
+mode is the same defect wherever it is — the historical desktop `stack_dialog.py` combo. The
+help text beside each control said "Requires internet / Most accurate"; it now describes the
+gray-star solve in plain language and says nothing leaves the box.
+
+**The engine branch is inert, and honest about it.** `calibrate_color` answers `MODE_GAIA`
+with the gray-star solve — which is what the swallowed import had always produced — and
+appends `GAIA_RETIRED_NOTE` ("balanced from your own stars (the online catalogue mode was
+removed)") to the result's notes. Nothing imports `astroquery` any more; `_solve_gaia` and the
+`gaia_*` option fields stay so an old persisted options dict still deserialises and the
+existing direct tests of that matcher keep their signature. The editor op deliberately does
+**not** pre-rewrite the value: `calibrate_color` owns the retirement so the note reaches the
+editor's "what Auto did" read-out, where rewriting it upstream would have made the
+degradation silent again.
+
+**The §9 half, which is the part that could have broken a live install.** Removing a choice
+from a descriptor's `options` is a tightening, and `validate_stack_options` *raises* on a
+value outside them — so an install whose `config.json` `default_stack_options` (or a
+per-target stack-defaults blob) held `"gaia"` would have 422'd the Stack form on every submit,
+and with it the unattended auto-stack chain. New `webapp.schemas.RETIRED_OPTION_VALUES` +
+`normalise_retired_option_values` translate a retired value instead of refusing it, wired into
+the four places a stored one surfaces: `coerce_stack_options` and `validate_stack_options` (the
+two chokepoints every stack path funnels through), `_merge_stack_defaults` /
+`_unsaved_stack_options` (so the form's enum control never receives an option that isn't
+there), and the settings write path (so re-saving quietly upgrades the stored value rather
+than writing it back). A value that is simply *wrong* is still rejected — the translation is
+a named mapping, not a blanket accept. A saved editor recipe needed no new code:
+`recipe.validate_ops` already coerces an unknown enum to the op's default, which is
+gray-star. The `stack_dialog` load path gained a two-line fallback so a template naming gaia
+lands on gray-star rather than silently on "Off". `colorCal.ts` keeps reading `mode_used ===
+"gaia"` as a star-based solve, with a comment saying why: the backend can no longer stamp it,
+but a run record written by an older version still carries it.
+
+**Tests: +8, `tests/test_gaia_mode_retired.py`, all eight exhibiting.** Verified by three
+separate scratch reverts rather than by reading the diff: putting the option back in both
+descriptors fails the two "no longer offers" tests; removing the normalisation while leaving
+the descriptor tightened fails the stored-default §9 test; restoring the old network dispatch
+fails the note test, the direct-caller test and the astroquery test. That last one had to be
+rewritten to get there — the first version raised an `AssertionError` from a patched
+`__import__`, which the pre-fix broad `except Exception` swallowed, so it **passed on the
+bug**. It now *records* attempted imports and asserts the list is empty, which nothing can
+swallow.
+
+**Upgrade-safe (§9):** no config, DB-schema, on-disk-layout or API-shape change, and no
+default flipped — `color_calibration_mode` already defaulted to `gray_star`, and
+`color_calibration` itself is still off. The only behaviour change is that a stored `"gaia"`
+now reports what ran instead of failing quietly.
+
+The original entry, as filed by the fourth external audit:
+
+- **🟡 THE EDITOR OFFERS A MODE THE IMAGE CANNOT RUN AND THE OWNER HAS DECLINED (fourth external audit,
+  2026-09-10).** `color_calibration_mode` = `"gaia"` (`webapp/schemas.py` ~1127, `seestack/edit/ops/tone.py`)
+  imports `astroquery.gaia` (`seestack/post/color_cal.py` ~387); `astroquery` is in no dependency list and is
+  absent from the image (`ModuleNotFoundError`), and it is a SIMBAD/CDS network call — declined by the LOCAL
+  rule (AGENTS.md §1). The broad `except Exception` at `color_cal.py` ~156 swallows it and falls back to
+  gray-star with only a log line, so picking it does nothing and says nothing. **Fix:** remove the option from the
+  schema and the op (keep the engine branch inert), and let a stored recipe that names it load as `gray_star`
+  with the auto-note saying so. (S, friendliness; confidence HIGH — checked in the running image.)
+
+
+## v0.418.0 — 2026-09-11 — CI builds what the owner installs (entry CLOSED)
+
+Until now `.github/workflows/ci.yml` had two jobs and both ran against the *checkout*.
+The artifact the owner installs is built from `docker/Dockerfile`'s own, much smaller file
+set (`frontend/`, `seestack/`, `webapp/`, `pyproject.toml`, `README.md` — `tests/` and
+`docs/` are not in the context at all) and runs from `/app` off a **non-editable** install.
+Nothing in this repository had ever built or run that. The 2026-09-09 deploy failure lived
+in exactly that gap and went through a green CI, which is what AGENTS.md §8 now warns about.
+
+**The new `image` job, in two halves.** `docker build --target frontend -f docker/Dockerfile .`
+stops before the Python layer, so there is no ASTAP download (hundreds of MB) and the whole
+thing is cheap — and it fails on any frontend import that reaches outside `frontend/`, on a
+lockfile `npm ci` can no longer satisfy, and on a broken `npm run build`. Then a Python smoke
+copies **only what the Dockerfile copies** to a scratch dir, `pip install`s it
+**non-editably**, and imports `webapp.main`, `webapp.sample_data` and `seestack.nightplan`
+from `cd /`. Each of those three properties is one `pip install -e .` at the repo root cannot
+test: editable leaves the whole tree importable, puts the repo root on `sys.path`, and makes
+package-data that never reached the wheel look present. It also asserts the bundled catalogue
+actually *loaded* (>100 objects), because a missing `seestack/data/*.json` leaves the import
+succeeding and the night planner silently empty. `webapp/static` is removed before the
+install, so the Python layer is checked in the state the `.dockerignore` really leaves it —
+which is also a standing check on v0.414.2's "degrade to 'Frontend not built'" fix.
+
+**Qt is out of the image.** `PySide6>=6.6` sat in the base `[project] dependencies`, so
+`pip install .[web]` — the Dockerfile's own install line — pulled ~650 MB of Qt into a
+1.89 GB image that never imports it (`seestack/core/jobs.py` defers its single PySide6 import
+into a function; `seestack/render/` is deliberately GUI-free). It is now a `gui` extra.
+Measured rather than assumed: a `pip install --dry-run` of `.[web]` against the new
+`pyproject.toml` resolves **zero** PySide6/shiboken distributions, where the old one installed
+them. `scripts/agent-setup.sh` and AGENTS.md §7 move to `.[dev,web,gui]` (without it
+`pytest-qt`'s `pytest_configure` has no binding to import, which is a collection-time
+INTERNALERROR, not a skip); the CI Python job deliberately stays on `.[dev,web]`, since that
+runner has no `libEGL` and could never have imported Qt anyway.
+
+**Three smaller things from the same audit, each traced in PROCESS-NOTES 2026-09-10.**
+`RUN npm install` → `RUN npm ci` with `package-lock.json` copied unconditionally: `npm install`
+was free to resolve a newer transitive dependency than the lockfile CI tested, and the old
+`package-lock.json*` glob meant a *missing* lockfile degraded silently to an unpinned install
+instead of failing the build. `ENV ASTROSTACK_PORT=8000` is gone — it is read only by
+`webapp.main:run` (the `astrostack-web` console script), while this image's `CMD` runs uvicorn
+directly with `--port 8000`, as do `EXPOSE` and `HEALTHCHECK`, so it advertised a knob that
+changed nothing. And `docker-compose.yml`'s `/data` bind moves to the long syntax with
+`create_host_path: false`: with the short `host:container` form Docker *creates* a missing
+source, so a typo in `ASTRO_DATA` brought the app up happily on a brand-new empty directory
+and the library read as having lost every target (reproduced in the audit).
+
+**Tests: +9, `tests/test_image_contract.py`.** Seven of the nine fail on the pre-fix tree,
+each verified by reverting the specific production change in a scratch run rather than by
+reading the diff — Qt in the base deps, the missing `gui` extra, `agent-setup.sh`'s install
+line, `npm install` + the lockfile glob, the short-syntax bind, and the absent CI job. The
+`ASTROSTACK_PORT` one needed its own test and a rewrite to get there: the obvious "no ENV
+names something unread" sweep **passes on the bug**, because `ASTROSTACK_PORT` *is* read by
+our code — in `webapp.main:run` — so a tree grep calls it live. What makes it dead is the path
+this image boots, so the test that exhibits it asserts consistency instead (an ENV for the
+port, against a `CMD` that hardcodes one). The generic sweep is kept beside it, documented as
+the weaker, forward-looking companion. The remaining non-exhibiting test is the Dockerfile↔CI
+copy-set drift guard, which has nothing to exhibit yet — it exists so the smoke learns about
+the next `COPY`.
+
+**Upgrade-safe (§9).** No config, DB-schema, on-disk-layout, API-shape or default change. The
+dependency move only *narrows what gets installed*; the `gui` extra keeps PySide6 available
+for anyone who wants the historical desktop GUI or its three pytest-qt tests. The compose
+change makes a mistyped path fail loudly instead of booting empty, which is strictly safer for
+the owner's data.
+
+The original entry, as filed by the fourth external audit:
+
+- **🟠 CI CERTIFIES THE CHECKOUT, NEVER THE IMAGE (fourth external audit, 2026-09-10) — `READY`, infra, S.**
+  `.github/workflows/ci.yml` has two jobs, both against the source tree; the artifact the owner installs has
+  never been built or run by anything but his terminal (incident 2026-09-09). Add a third job that builds **from
+  the Dockerfile's own file set**: `docker build --target frontend -f docker/Dockerfile .` (fast; no ASTAP
+  download in that stage; fails on any import that reaches outside `frontend/`), then a Python smoke that copies
+  only what the Dockerfile copies (`pyproject.toml README.md seestack/ webapp/`) to a scratch dir, `pip install
+  "<dir>[web]"` **non-editable**, and from `cd /` runs `python -c "import webapp.main, webapp.sample_data;
+  from seestack import nightplan"` (exercises package-data and CWD-independence, which `pip install -e` at the
+  repo root never can). Verified in this audit's build that both would pass today. Batch with the same commit
+  (each traced in PROCESS-NOTES 2026-09-10): `RUN npm install` → `npm ci` with `package-lock.json` copied
+  unconditionally (CI uses `npm ci`; no drift today); **PySide6 is in the base `dependencies`, so `pip install
+  .[web]` installs 650 MB of Qt into a 1.89 GB image that never imports it** — move it to a `gui` extra and update
+  AGENTS.md §7 / `agent-setup.sh` / `ci.yml` to `.[dev,web,gui]`; `ENV ASTROSTACK_PORT` in the Dockerfile is dead
+  (`CMD` hardcodes 8000 — drop the ENV or use it); in `docker-compose.yml` use the long volume syntax with
+  `create_host_path: false` so a mistyped `ASTRO_DATA` fails loudly instead of booting on a fresh empty directory
+  (reproduced: Docker creates the missing host path and the app comes up with an empty library).
+
+
 ## v0.417.0 — 2026-09-10 — the Target-page note and the Dashboard's library-wide count (entry CLOSED)
 
 The two halves v0.416.0 left open, and with them the whole "owner hits this first" entry.

@@ -32,6 +32,7 @@ from webapp.schemas import (
     StackOptionField,
     StackRunOut,
     coerce_stack_options,
+    normalise_retired_option_values,
     stack_option_fields,
     strip_non_form_keys,
     validate_stack_options,
@@ -216,6 +217,10 @@ def _merge_stack_defaults(settings: Any,
     merged = dict(settings.default_stack_options)
     if saved:
         merged.update(saved)
+    # A value a previous version wrote for a choice this one no longer offers
+    # (``color_calibration_mode="gaia"``, retired v0.418.0) would otherwise reach
+    # the form's enum control as an option that isn't there, and 422 on submit.
+    merged = normalise_retired_option_values(merged)
     # For a *never-configured* target (no per-target saved defaults and no
     # global default_stack_options), turn smart auto outlier removal on in the
     # form the beginner sees. auto_reject (v0.143.0) picks min/max vs kappa-sigma
@@ -245,7 +250,7 @@ def _unsaved_stack_options(settings: Any) -> dict[str, Any]:
     what the target stacks with. This is the honest baseline for the one question
     the delta asks — "would leaving this out change anything?"
     """
-    merged = dict(settings.default_stack_options)
+    merged = normalise_retired_option_values(dict(settings.default_stack_options))
     for fld in stack_option_fields():
         merged.setdefault(fld.key, fld.default)
     return merged
