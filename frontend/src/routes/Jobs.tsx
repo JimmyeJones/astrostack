@@ -213,6 +213,10 @@ export function processTargetSummary(r: Record<string, unknown>): {
       typeof stack.rejection_mode === "string" ? stack.rejection_mode : null,
       typeof stack.rejection_fraction === "number" ? stack.rejection_fraction : null,
       Number(stack.n_frames_used ?? 0) || null,
+      // …and the same `field_fulls` the thin-stack cue above reads, so the
+      // min/max sentence names the depth that actually chose the method rather
+      // than the target's total.
+      typeof stack.field_fulls === "number" ? stack.field_fulls : null,
     );
     // The walk-away user's only cue that their subs didn't come off the disk
     // cleanly — files that weren't there at all (Stage-1 cache cleared while the
