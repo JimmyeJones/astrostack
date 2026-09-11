@@ -2559,3 +2559,154 @@ describe("StackView — saved settings that ignore the global defaults", () => {
     expect(screen.queryByTestId("pinned-defaults")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Every caution on this form is a statement about the samples that land on one
+ * *pixel*. On a single field the target's frame count is that number; on a
+ * mosaic it is a panel's depth, and the total is an order of magnitude above it.
+ * These pin the corrected denominator on the owner's own shape — a 3×3 raster
+ * 25 subs deep per panel, 225 in total.
+ */
+describe("StackView — cautions read a mosaic's panel depth, not its total", () => {
+  /** `n` accepted+solved subs, and an estimate that reports `panelDepth` subs on
+   * each patch of sky (`null` = a single field, the pre-mosaic behaviour). */
+  function mockDepthForm(
+    fields: client.StackOptionField[],
+    defaults: Record<string, unknown>,
+    n: number,
+    panelDepth: number | null,
+    frame?: (id: number) => Partial<client.Frame>,
+  ) {
+    mockSchema(fields);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(defaults);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: n }, (_, i): client.Frame => ({
+        id: i + 1, name: `f${i + 1}.fits`, timestamp_utc: null, exposure_s: 30,
+        gain: 80, width_px: 480, height_px: 320, bayer_pattern: "RGGB",
+        solved: true, ra_center_deg: null, dec_center_deg: null,
+        ra_hint_deg: null, dec_hint_deg: null, fwhm_px: null, star_count: null,
+        sky_adu_median: null, eccentricity_median: null, transparency_score: null,
+        streak_detected: false, accept: true, reject_reason: null,
+        user_override: false, ...(frame ? frame(i + 1) : {}),
+      })));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "stackEstimate").mockResolvedValue({
+      n_frames: n, canvas_w: 1440, canvas_h: 960, output_w: 1440, output_h: 960,
+      is_mosaic: panelDepth !== null, panel_depth: panelDepth,
+      peak_bytes: 3e8, peak_gb: 0.3, budget_bytes: 1.4e9, budget_gb: 1.4,
+      would_exceed: false, suggested_drizzle_scale: null,
+      suggested_reference_canvas: false, memory_fix: null,
+      auto_reject_resolved: null,
+    });
+  }
+
+  const drizzleFields: client.StackOptionField[] = [
+    { key: "drizzle", label: "Drizzle", type: "bool", group: "simple",
+      default: false, min: null, max: null, step: null, options: null,
+      help: null, depends_on: null },
+  ];
+
+  it("cautions against Drizzle on a mosaic whose pixels are thin, however many subs the target has", async () => {
+    // The owner's shape: 225 subs across nine panels. The total sails past the
+    // 100-frame floor, so this caution used to stay silent on exactly the canvas
+    // where drizzle hurts most — while the nudge on the other side already
+    // declines to *recommend* drizzle on a mosaic. Fenced one way only.
+    mockDepthForm(drizzleFields, { drizzle: true }, 225, 25);
+
+    renderStack();
+
+    const note = await screen.findByText(/Drizzle is on, but you only have/);
+    expect(note).toHaveTextContent("about 25 subs on each patch of sky");
+    // …and it still names the total, which the Frames table plainly shows.
+    expect(note).toHaveTextContent("225 in total, spread across the mosaic");
+  });
+
+  it("stays quiet about Drizzle on a mosaic that really is deep on every pixel", async () => {
+    mockDepthForm(drizzleFields, { drizzle: true }, 2700, 300);
+
+    renderStack();
+
+    await screen.findByText(/mosaic canvas/);
+    expect(screen.queryByText(/Drizzle is on, but/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the single-field wording when there is no mosaic to correct for", async () => {
+    mockDepthForm(drizzleFields, { drizzle: true }, 40, null);
+
+    renderStack();
+
+    const note = await screen.findByText(/Drizzle is on, but you only have/);
+    expect(note).toHaveTextContent("40 accepted, solved frames");
+    expect(note).not.toHaveTextContent("patch of sky");
+  });
+
+  it("does not urge a tighter κ because a mosaic's totals look like a big stack", async () => {
+    // 225 subs, 25 on a pixel: "the per-pixel spread is very well measured" is
+    // false here, and clipping harder on the thinner statistic is the wrong way.
+    mockDepthForm(
+      [{ key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+         default: true, min: null, max: null, step: null, options: null,
+         help: null, depends_on: null }],
+      { sigma_clip: true, sigma_kappa: 3 }, 225, 25);
+
+    renderStack();
+
+    // Wait for the *estimate* to land, not just the form: the frame list arrives
+    // first, and until the depth is known the form can only word things in
+    // totals. The sizing line is the estimate's own arrival signal.
+    await screen.findByText(/mosaic canvas/);
+    expect(screen.queryByText(/tighter sigma-clip/)).not.toBeInTheDocument();
+  });
+
+  it("still urges a tighter κ when a mosaic is genuinely deep on every pixel", async () => {
+    mockDepthForm(
+      [{ key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+         default: true, min: null, max: null, step: null, options: null,
+         help: null, depends_on: null }],
+      { sigma_clip: true, sigma_kappa: 3 }, 2250, 250);
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/tighter sigma-clip \(κ≈2.5\)/)).toBeInTheDocument());
+  });
+
+  it("warns that a min/max k of 3 can't fully apply on a mosaic only 5 subs deep", async () => {
+    // The sentence already said "frames per pixel" and then quoted the target's
+    // total — 45 here, which clears 2k+1 = 7 comfortably while no pixel does.
+    mockDepthForm(
+      [{ key: "min_max_reject", label: "Min/max rejection", type: "bool",
+         group: "simple", default: false, min: null, max: null, step: null,
+         options: null, help: null, depends_on: null },
+       { key: "min_max_reject_count", label: "Extremes to drop (per side)",
+         type: "int", group: "advanced", default: 1, min: 1, max: 5, step: 1,
+         options: null, help: null, depends_on: "min_max_reject" }],
+      { min_max_reject: true, min_max_reject_count: 3 }, 45, 5);
+
+    renderStack();
+
+    const note = await screen.findByText(
+      /needs at least 7 frames per pixel to fully apply/);
+    expect(note).toHaveTextContent("about 5 subs on each patch of sky");
+    // The k it offers is the largest one a *pixel* can fully apply: (5-1)/2 = 2.
+    expect(await screen.findByRole("button", { name: "Lower k to 2" }))
+      .toBeInTheDocument();
+  });
+
+  it("offers min/max for a streaked mosaic κ-σ is too thin to clean", async () => {
+    // Six subs on a pixel is below κ-σ's ~11-sample reach, but 54 in total is
+    // not — so the one hint that names the streaks QC found used to stand down.
+    mockDepthForm(
+      [{ key: "min_max_reject", label: "Min/max rejection", type: "bool",
+         group: "simple", default: false, min: null, max: null, step: null,
+         options: null, help: null, depends_on: null }],
+      { min_max_reject: false, auto_reject: false, drizzle: false }, 54, 6,
+      (id) => (id === 1 ? { streak_detected: true } : {}));
+
+    renderStack();
+
+    const note = await screen.findByText(/You have 1 streaked frame, and only/);
+    expect(note).toHaveTextContent("about 6 subs on each patch of sky");
+    expect(note).toHaveTextContent(/Min\/max rejection/);
+  });
+});

@@ -668,6 +668,14 @@ def stack_estimate(
         "output_w": est.output_w,
         "output_h": est.output_h,
         "is_mosaic": est.is_mosaic,
+        # How many subs land on one *spot* of this canvas — the denominator every
+        # per-pixel caution on the Stack form is really about. ``null`` on a
+        # single field, where every sub covers every pixel and the frame count
+        # already is that number. Served at the top level (it was already inside
+        # ``auto_reject_resolved``, but that key is null unless Auto is on) so the
+        # drizzle, κ and min/max-k cautions can read the same depth the rejection
+        # answers above are computed from, rather than the target's total.
+        "panel_depth": est.panel_depth,
         "peak_bytes": est.peak_bytes,
         "peak_gb": round(est.peak_bytes / 1e9, 2),
         "budget_bytes": est.budget_bytes,
