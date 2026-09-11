@@ -137,15 +137,26 @@ describe("initialSkyMode", () => {
 
   it("leaves the remembered default alone when no link asked for one", () => {
     expect(initialSkyMode(null, "mine")).toBe("mine");
-    expect(initialSkyMode(null, null)).toBe("online");
+    expect(initialSkyMode(null, null)).toBe("offline");
+  });
+
+  it("opens on the offline star map, not the one that fetches sky imagery", () => {
+    // The owner said the mode that pulls imagery is not one he wants to land
+    // on, and defaulting to the only view that reaches the internet is the
+    // wrong way round for the local rule. "Real sky (online)" is still on the
+    // switch, and picking it is remembered — it just isn't where a first open,
+    // on a new browser or a new device, starts.
+    expect(initialSkyMode(null, null)).toBe("offline");
+    expect(initialSkyMode(null, "online")).toBe("online");
+    expect(initialSkyMode("online", null)).toBe("online");
   });
 
   it("ignores a value that isn't a map, rather than showing nothing", () => {
     // A hand-typed URL, an old bookmark, or a stored value from a build that
     // named its modes differently — all fall through to something that renders.
     expect(initialSkyMode("universe", "mine")).toBe("mine");
-    expect(initialSkyMode("", null)).toBe("online");
-    expect(initialSkyMode(null, "nonsense")).toBe("online");
+    expect(initialSkyMode("", null)).toBe("offline");
+    expect(initialSkyMode(null, "nonsense")).toBe("offline");
   });
 });
 

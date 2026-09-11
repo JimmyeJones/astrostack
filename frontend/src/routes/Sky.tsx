@@ -357,7 +357,7 @@ const SKY_MODES: readonly SkyMode[] = ["online", "offline", "mine"];
 
 /**
  * Which map this page opens on: an explicit `?view=` wins, then the mode the
- * viewer last chose, then the real-sky atlas.
+ * viewer last chose, then the built-in star map.
  *
  * The query parameter exists so something elsewhere can link *to* a particular
  * map — the Dashboard's sky-coverage line points at "My map", which is
@@ -366,13 +366,23 @@ const SKY_MODES: readonly SkyMode[] = ["online", "offline", "mine"];
  * link should show you that map without quietly rewriting the default you come
  * back to. An unknown or absent value falls through, so an old bookmark and a
  * hand-typed URL both behave.
+ *
+ * The fall-through is `"offline"` rather than `"online"` because "Real sky
+ * (online)" is the one mode that fetches sky imagery from the internet, and the
+ * owner said plainly that it is not the mode he wants to land on. It is also
+ * the wrong way round for AGENTS.md §1's local rule — the fetch is the
+ * browser's rather than the install's, but defaulting to the only view that
+ * reaches out is against its spirit. `"offline"` is the like-for-like swap:
+ * the same drag/zoom sky with his own pictures placed on it, minus the network.
+ * All three modes stay on the switch, and anyone who picks "Real sky (online)"
+ * keeps it — `MODE_KEY` remembers it from then on.
  */
 export function initialSkyMode(
   asked: string | null, stored: string | null,
 ): SkyMode {
   if (asked && SKY_MODES.includes(asked as SkyMode)) return asked as SkyMode;
   if (stored && SKY_MODES.includes(stored as SkyMode)) return stored as SkyMode;
-  return "online";
+  return "offline";
 }
 
 export function SkyView() {
@@ -423,7 +433,7 @@ export function SkyView() {
           {mode === "mine"
             ? "The whole sky drawn from your pictures alone — nothing borrowed, no internet. Each one is masked down to the part enough frames actually reached, and shown larger than life so you can see it."
             : mode === "online"
-            ? "Real-sky atlas (needs internet). Drag to pan, scroll to zoom."
+            ? "Real-sky atlas — the only view here that fetches anything from the internet. Drag to pan, scroll to zoom."
             : "Built-in star map (offline). Drag to look around, scroll to zoom."}
           {mode === "mine"
             ? null
