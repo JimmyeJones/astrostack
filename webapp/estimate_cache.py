@@ -25,9 +25,10 @@ estimate after a scan is its own bug, and this is the shape that cannot produce
 one: the fingerprint covers every column of every frame row, and
 ``estimate_stack_basis`` reads nothing else — not the ``meta`` table, not the
 run records, and not the filesystem (it tests that a frame *has* a path, never
-that the file is there). Measured end to end on that project, a hit is
-**1,116 ms → 129 ms**, and a target with a handful of subs was never slow
-enough for either number to matter.
+that the file is there). Measured on that project: a warm lookup is **129 ms**
+against the **1,007 ms** the uncached path costs *every* time, and a cold one
+pays both (1,116 ms). A target with a handful of subs was never slow enough for
+any of those numbers to matter.
 
 Deliberately a plain process-local dict, not a shared store: it holds a handful
 of small dataclasses, it is rebuilt for free after a restart, and every entry is
