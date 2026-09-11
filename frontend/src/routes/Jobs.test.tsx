@@ -676,6 +676,16 @@ describe("qcSolveNudge", () => {
       ?.toContain("Rescue faint fields with a deep-image solve");
   });
 
+  it("describes the rescue rather than telling you to press something", () => {
+    // Both ways in are rendered under this sentence and one of them self-hides
+    // on a target where the rescue would stand down, so an imperative could end
+    // up pointing at nothing. The sentence has to read correctly either way.
+    const nudge = qcSolveNudge({ solve_total: 40, solve_ok: 3 }) ?? "";
+    expect(nudge).toContain("one deeper image");
+    expect(nudge).toContain("on request");
+    expect(nudge).not.toMatch(/below|press|click|button/i);
+  });
+
   it("doesn't lecture over a couple of stragglers on a good night", () => {
     expect(qcSolveNudge({ solve_total: 40, solve_ok: 38 })).toBeNull();
     expect(qcSolveNudge({ solve_total: 40, solve_ok: 40 })).toBeNull();
@@ -1780,5 +1790,62 @@ describe("the scan's video-folder signpost", () => {
     renderJobs();
     await screen.findByText(/40/);
     expect(screen.queryByRole("link", { name: "Moon & Sun" })).not.toBeInTheDocument();
+  });
+});
+
+describe("JobRow offers the rescue where the solve just failed", () => {
+  function renderRow(job: Job) {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    return render(
+      <MantineProvider>
+        <Notifications />
+        <QueryClientProvider client={qc}>
+          <MemoryRouter>
+            <JobRow job={job} onCancel={() => {}} />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+  }
+
+  const failedSolve = (over: Partial<Job> = {}) => mkJob({
+    kind: "qc_solve", state: "done", target: "M_42",
+    result: { qc_total: 40, solve_total: 40, solve_ok: 3 },
+    ...over,
+  });
+
+  it("puts the one-press fix under the advice, beside the way to automate it", async () => {
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: {}, total: 0, deep_rescue_offered: true,
+    } as unknown as Awaited<ReturnType<typeof client.api.rejectSummary>>);
+
+    renderRow(failedSolve());
+    expect(await screen.findByRole("button", { name: "Try harder to locate these" }))
+      .toBeInTheDocument();
+    // The Settings route stays: it answers the other question ("every time from
+    // now on"), and neither answer replaces the other.
+    expect(screen.getByText(/Turn it on in Settings/)).toBeInTheDocument();
+  });
+
+  it("offers nothing extra where the rescue would stand down", async () => {
+    vi.spyOn(client.api, "rejectSummary").mockResolvedValue({
+      counts: {}, total: 0, deep_rescue_offered: false,
+    } as unknown as Awaited<ReturnType<typeof client.api.rejectSummary>>);
+
+    renderRow(failedSolve());
+    await waitFor(() => expect(client.api.rejectSummary).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Try harder to locate these" }))
+      .toBeNull();
+    expect(screen.getByText(/Turn it on in Settings/)).toBeInTheDocument();
+  });
+
+  it("asks nothing at all on a job whose solve went fine", async () => {
+    const read = vi.spyOn(client.api, "rejectSummary");
+    renderRow(failedSolve({ result: { qc_total: 40, solve_total: 40, solve_ok: 40 } }));
+    await waitFor(() =>
+      expect(screen.getByText(/Located all 40 of them/)).toBeInTheDocument());
+    expect(read).not.toHaveBeenCalled();
   });
 });
