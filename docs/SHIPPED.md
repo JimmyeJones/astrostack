@@ -1,5 +1,51 @@
 # Shipped — the record
 
+## v0.428.1 — 2026-09-11 — "compared with your other 3 nights" counted this one, and compared against a median it helped set
+
+*(Builder, branch `claude/sweet-babbage-s75e9l` — 🟡 BUG, trust + friendliness, PRIORITY 3. Engine + frontend
+copy; no endpoint, config, schema, on-disk or API-shape change, and no change to **when** the card appears.)*
+
+**The rule the rest of the app already follows.** "Was last night unusual for you?" is asked three times in
+this app, and two of them state the same rule out loud:
+`session_recap._typical_other_fwhm` — *"Leave-one-out, so a night is never compared against itself"* — and
+`activity_calendar.off_night`, whose gate exists *"so the latest night is never its own yardstick"*. The third,
+`qc.sky_quality.sky_brightness`, took its baseline as `_median` over **every** night including the one it was
+reporting, while the card under it promised *"compared with your **other** N nights on this target"* and its
+own "typical" sentence said *"about as bright as your other N nights"* — with `N` the total, so a target with
+three nights claimed three others.
+
+**What that cost, measured rather than argued.** Two shapes, both in the fixture file:
+
+* **Self-cancelling on an odd night count.** A night that *is* the median of its own set is its own baseline,
+  so the ratio is exactly 1.0 and the verdict is "typical" **by construction**. Three nights at 600 / 3000 /
+  1000 ADU, latest last: it read **typical**; against its own two other nights it is 0.56× — *darker than
+  usual*, which is the read the owner wants on a night that was actually good.
+* **Dragging the baseline toward itself on an even one.** 1000 / 1000 / 1300 / **1310** ADU: the old median
+  (1150) is half made of the night under test, so the latest read **1.14× — "typical"**. Against the three
+  others it is **1.31×**, which is *"about 31% brighter than your typical night … expect a flatter, washed-out
+  result on faint targets"*. The card exists to explain exactly that picture.
+
+**The fix.** `baseline` is now the median of `nights[:-1]`, and `SkyBrightnessRead.nights` is the number of
+those others — which is what its own comment ("how many nights the comparison is based on") always claimed and
+what both sentences count, so the off-by-one goes with it. `MIN_NIGHTS` is still 3 and still measured against
+the **total**, so the card appears on exactly the targets it did before, always with at least two nights behind
+the baseline. An older frontend against this backend renders "your other 2 nights" — correct — and a newer one
+against an older backend renders today's wrong count, i.e. neither direction is worse than now.
+
+**And the date reads like a date.** `SkyBrightnessNote` printed the server's raw `2026-07-23`. Every other
+night label in the app — the Nights card, the imaging calendar, every "Shot …" caption, the best night, the
+year page — goes through the shared `format.formatNightDate`, so this was the one date on the Target page that
+didn't look like one. It now does ("23 Jul 2026"), through that same helper, which answers "—" for a stamp it
+can't parse so an older backend can never leave the sentence mid-air.
+
+**Tests +5.** Two new engine cases are the two shapes above, each written from the numbers rather than from the
+argument; `test_typical_night_reads_as_typical` and the webapp endpoint test had their `nights` assertions
+re-stated for the corrected meaning (neither loosened — both still pin an exact value). Two frontend cases pin
+the formatted date and the unparseable fallback. **Three fail before**, verified by putting the full-night
+median back in a scratch edit — where the 1310-ADU night comes back as `typical`, ratio 1.139.
+
+---
+
 ## v0.428.0 — 2026-09-11 — a night lost to cloud told the owner to go and check his focus
 
 *(Builder, branch `claude/sweet-babbage-s75e9l` — 🟠 BUG, trust + friendliness, PRIORITY 3. Found by reading two
