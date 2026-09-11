@@ -18,6 +18,76 @@ is a queue.
 
 ---
 
+## 2026-09-11 (Builder, branch `claude/sweet-babbage-uy3r5o`) — the handed-forward brief paid out a third time, one page upstream
+
+**The run.** One task, done deeply: **v0.420.0** — the Stack form's per-pixel cautions read a mosaic's
+panel depth rather than the target's frame count. Full entry in [`SHIPPED.md`](SHIPPED.md). Baseline on
+`origin/main` (`68062784`) before any edit: **5,649 passed / 2 skipped** in 38m08s.
+
+### Where it came from: the same brief, aimed *upstream* instead of outward
+
+"Bugs (fix these first)" is still five entries, every one gated on data an agent cannot supply, stood
+down with numbers, or measured and closed — the same state the `74ufck` run found. So I took that run's
+own handed-forward sentence again, but turned it ninety degrees. It had pointed the brief at the
+surfaces that **report** depth on a *finished* run (the Target page, History, the badges). The
+untouched half is the surfaces that report it **before** the run: the Stack form, where the same
+question is asked while the knobs that would fix it are still on screen.
+
+That turned out to be where the machinery was already waiting. `/stack-estimate` had been carrying
+`panel_depth` since v0.399.1 — but **inside `auto_reject_resolved`**, a key that is `null` unless Auto
+is on *and* drizzle is off. Four cautions on the same form asked per-pixel questions in states where
+that key is null, so the number existed a few lines above the code that needed it and could not be read.
+
+**The reusable half.** The `74ufck` note's tell was *"is this number compared against a bar, and is the
+bar about a pixel?"*. This run adds a second, cheaper one: **when a surface has a fenced half and an
+unfenced half, check the fence.** The drizzle *nudge* already stood down on a mosaic
+(`&& !estimate.data.is_mosaic`, fenced for canvas size, for an unrelated reason); the drizzle *caution*
+did not. One of a pair being guarded is strong evidence the pair needed guarding — and it is visible by
+reading two adjacent `const`s, without reasoning about the statistics at all. Three of the four sites
+here were found by walking out from that one.
+
+### The one worth reading twice: a sentence that already knew
+
+`minMaxKTooHighHint` read *"that needs at least 2k+1 frames **per pixel** to fully apply — you have
+45"*. The copy named the right unit and then quoted the wrong number, in the same clause; so did the
+engine descriptor it mirrors (*"Only applied where a pixel has at least 2×this+1 frames"*). Neither was
+vague or hedged — both were exactly right about the rule and wrong about the measurement. **A surface
+whose own wording names a per-pixel unit is a *stronger* candidate for this class, not a weaker one:**
+the writer understood the rule well enough to say it, and then reached for the only count the component
+had.
+
+### Deliberately not changed, so they are decisions rather than oversights
+
+- **The drizzle *nudge*.** Now that the form knows the depth it could offer drizzle on a genuinely deep
+  mosaic. Its `!is_mosaic` fence is about the canvas the nudge would send someone toward, not about
+  depth, so lifting it would be new surface on a different question. Left alone.
+- **`weightingHint.ts`.** Its `n >= 3` mirrors `weights_applied`, whose `n` really is the engine's
+  frame count — the gate is "does the min/max accumulator run at all", not "how deep is a pixel". A
+  faithful mirror, left faithful.
+- **`autoStackNudge.ts`.** Its floor could over-offer on a 3×3 one sub deep, which `auto_stack_min_frames`
+  now holds back. But that module deliberately promises the *behaviour* and never the outcome, and its
+  own docstring reasons about exactly this over-promise. Not worth reopening on a hypothetical.
+- **`stackhealth`.** Swept and already correct — `noise_yardstick_frames`, `coverage_max` and
+  `coverage_median_depth` had this class fixed before. Recorded so it is not re-swept.
+
+### Green gates
+
+Python **5,649 passed / 2 skipped** on the baseline (38m08s) and **5,653 passed / 2 skipped** (36m44s)
+on the finished branch — the +4 is this run's Python tests. Frontend:
+`npx tsc --noEmit` clean and verified really compiling (`--listFiles` shows 826 `src/` files, per the §7
+trap), vitest **260 files / 3,637 tests** (+15), `npx vite build` ✓. Eight of the nineteen new tests were
+watched go **red** first — the four rendered ones by restoring `Stack.tsx` from `HEAD`, the four Python
+ones by restoring `webapp/routers/stack.py`.
+
+**One process cost worth recording.** The baseline suite takes ~38 minutes, and I edited the tree while
+it was still running — including two `git checkout` reverts, to watch tests fail. That run therefore
+finished against a tree that was neither `main` nor the branch, and its green is not a gate for either.
+It happened to be green for both, but the honest fix is the one taken here: **treat a suite that
+overlapped your edits as informational and re-run the whole thing on the committed tree.** Budget for
+two full runs, or do the fail-first reverts in a scratch copy.
+
+---
+
 ## 2026-09-11 (Builder, branch `claude/sweet-babbage-74ufck`) — the handed-forward brief paid out twice, and a clean `--mosaic` dogfood
 
 **The run.** Two tasks, both verified bugs I reproduced myself: **v0.419.0** (the noise-vs-time trend
