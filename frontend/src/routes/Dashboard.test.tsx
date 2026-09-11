@@ -154,6 +154,32 @@ describe("Dashboard recent-stack picture download", () => {
     await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
     expect(screen.queryByLabelText("Download picture of M31")).not.toBeInTheDocument();
   });
+
+  it("flags a recent mosaic that is one sub deep, though it combined nine", async () => {
+    // The strip's "N frames" badge makes a claim about one pixel, so it divides
+    // the run's count by its own `field_fulls` — the same reading the Target
+    // page has used since v0.419.1, on the app's front page.
+    const stats = statsWithRecentStack();
+    stats.recent_stacks[0].n_frames_used = 9;
+    stats.recent_stacks[0].field_fulls = 9;
+    vi.spyOn(client.api, "getStats").mockResolvedValue(stats);
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("9 frames")).toBeInTheDocument());
+    expect(document.querySelector(".tabler-icon-alert-triangle")).not.toBeNull();
+  });
+
+  it("leaves a deep recent stack's badge plain", async () => {
+    const stats = statsWithRecentStack();
+    stats.recent_stacks[0].field_fulls = 9;  // a 3x3, but 100 subs deep
+    vi.spyOn(client.api, "getStats").mockResolvedValue(stats);
+    vi.spyOn(client.api, "getSystem").mockResolvedValue(mkSystem({}));
+
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("100 frames")).toBeInTheDocument());
+    expect(document.querySelector(".tabler-icon-alert-triangle")).toBeNull();
+  });
 });
 
 describe("Dashboard information architecture (IA slice (e))", () => {

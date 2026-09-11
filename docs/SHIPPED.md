@@ -1,5 +1,74 @@
 # Shipped — the record
 
+## v0.421.0 — 2026-09-11 — the thin-stack cue reaches its other three surfaces, per pixel
+
+`thinStackWarning` is the app's answer to the owner's **"gibberish"** report: a picture only a sub or two
+deep comes out as per-pixel colour speckle, so the app says so plainly rather than handing it over as a
+finished result. **v0.419.1 made that reading per-pixel — at one of its four call sites.**
+
+The threshold is `THIN_STACK_MAX_FRAMES = 4`, and its own comment gives the unit away: *"below ~5 frames
+the stack has barely started averaging the sky down"* is a claim about **one pixel**. On a mosaic the
+run's frame count is not that number. Nine subs over a 3×3 raster is one sub everywhere — exactly the
+speckle the cue exists for — and 9 > 4, so three of the four surfaces said nothing:
+
+* **`FrameCountBadge`** — the "N frames" badge on the **Dashboard**'s recent strip and the **Gallery**
+  grid. Its own docstring says it carries the cue *"so a single-sub stack can't masquerade as a good
+  picture there"*, and *"reuses the tested `thinStackWarning` helper so the copy and thresholds stay
+  identical to the Target and Jobs pages"* — a sentence that had quietly stopped being true.
+* **`processTargetSummary`** — the **Jobs** page's "Process target" result. This is the walk-away path,
+  i.e. the one the owner actually meets a thin mosaic on, and it reported a cheerful green
+  *"Stacked 9 frames into a new master"* with a View-result link.
+
+So one picture, three claims: the Target page called it a single sub, the front page badged it a plain
+violet "9 frames", and the job that made it called it nine. **That is the failure this class keeps
+producing — two shipped surfaces, one fact, opposite answers** — and it is the seventh instance of the
+substitution (A2, A6, D1, the readiness goal, `auto_stack_min_frames`, v0.419–v0.420).
+
+### The fix: carry the figure, don't re-derive it
+
+None of the three had the number. `StackRunOut.field_fulls` has served the History listing since
+v0.419.0, so the work is to serve the **same per-run figure**, from the **same helper**, on the two
+listings and the job result:
+
+* `GalleryItem.field_fulls` and `RecentStack.field_fulls` — additive, `None` by default. Both loops
+  already open the project and already parse each run's options, so the only new cost is **one
+  `LIMIT 1` read per target** for the native frame shape (`native_frame_shape`, hoisted out of the run
+  loop exactly as the run listing hoists it), then `field_fulls_of_sky` per run.
+* The stack job's result dict gains `"field_fulls"`, computed while the project is still open, from
+  `result.canvas_shape` — so the Jobs summary reads the canvas the run actually produced.
+
+One new helper: **`field_fulls.drizzle_scale_of(opts)`**. The job holds the options it *ran* as a dict
+(Paths and all), not as stored JSON, so asking `drizzle_scale_from_options` would have meant
+re-serialising them. Rather than hand-roll a second "was this drizzled, and by how much", the JSON
+version now delegates to it — one definition, two callers.
+
+Frontend: `FrameCountBadge` takes an optional `fieldFulls` and passes it straight through; `Dashboard`,
+`Gallery` and `Jobs` supply the row's own value. The badge's **label is untouched** — "9 frames" is what
+combined, and the app must not start misreporting that; what changes is the warning beside it, whose
+mosaic wording (`"Your 9 subs are spread across about 9 fields of sky, so each part of this picture has
+only about 1 sub on it"`) already existed and was simply never reached from here.
+
+### Upgrade-safe (§9)
+
+Three additive, defaulted response fields. `None`/absent reads as **1.0** (`canvasFieldFulls`), which is
+the behaviour before the fields existed — so an older frontend ignores them, an older backend omitting
+them changes nothing, and every single-field target is unaffected in every respect, wording included.
+No config, schema, on-disk, API-shape or default change.
+
+### Tests (+9 Python, +9 vitest)
+
+`tests/webapp/test_thin_stack_depth_surfaces.py` (10, one of them pre-existing coverage of the two
+listings agreeing): the Gallery and the Dashboard strip each report 9.0 for a 3×3 canvas and 1.0 for a
+single field, drizzle super-sampling divides out, the field is **present and `None`** when no frame
+records its shape, the two listings agree about one run, and the stack job's result carries the scale
+for a mosaic canvas, a single field, and a drizzled one (the only caller of `drizzle_scale_of`).
+Frontend: 3 in `FrameCountBadge.test.tsx` (a one-deep 3×3 warns while the count still reads "9 frames";
+a 180-sub 3×3 does not; `1`/`null` behave exactly as before), 1 in `Gallery.test.tsx`, 2 in
+`Dashboard.test.tsx` and 3 in `Jobs.test.tsx` (including an older backend sending no field).
+
+**Thirteen of the nineteen were watched go red first**, by stashing the production files and re-running:
+all ten Python, and the four rendered/unit ones that assert the new warning.
+
 ## v0.420.0 — 2026-09-11 — the Stack form's per-pixel cautions read a mosaic's panel depth, not its total
 
 The same substitution again, one page upstream. Every caution on the Stack form is a statement about

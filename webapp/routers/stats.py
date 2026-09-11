@@ -76,6 +76,15 @@ class RecentStack(BaseModel):
     # made a second picture overnight. Additive, default ``True`` so an older
     # frontend (and any caller that doesn't ask) sees no change.
     is_genuine: bool = True
+    # How many single-frame field-fulls of sky *this run's* canvas covers (see
+    # :mod:`webapp.field_fulls`). The strip's "N frames" badge carries the honest
+    # thin-stack cue, and "thin" is a claim about one pixel, not about a target
+    # row: nine subs over a 3x3 raster is one sub everywhere. Same per-run figure
+    # ``StackRunOut.field_fulls`` and ``GalleryItem.field_fulls`` carry, from the
+    # same helper. Additive, ``None`` on a single field and whenever the frame
+    # shape can't be read — both of which read as "no scaling", i.e. exactly
+    # today's behaviour.
+    field_fulls: float | None = None
 
 
 class StatsResponse(BaseModel):
@@ -655,6 +664,12 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
     )
     from webapp.routers.stack import _preview_is_display_space
 
+    from webapp.field_fulls import (
+        drizzle_scale_from_options,
+        field_fulls_of_sky,
+        native_frame_shape,
+    )
+
     recent: list[RecentStack] = []
     n_stack_runs = 0
     n_targets_with_stacks = 0
@@ -665,6 +680,10 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
         try:
             proj = Project.open(lib.target_dir(t))
             target_runs = 0
+            # One LIMIT-1 read for the target's native sub shape, so each run
+            # below can be scaled to a per-pixel depth without paying for the
+            # lookup once per run (the same split the run listing uses).
+            native_shape = native_frame_shape(proj)
             # Runs the app already shows edited, collected on the pass that is
             # reading these rows anyway — no second listing. It does parse each
             # run's options: measured at 1.38 ms across 400 runs, against 11.45 ms
@@ -702,6 +721,14 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
                     # were hand-mirrored did eventually disagree — v0.338.1).
                     is_genuine=_stack_options_from_run_json(
                         run.options_json) is not None,
+                    field_fulls=(
+                        field_fulls_of_sky(
+                            run.canvas_w, run.canvas_h,
+                            frame_w=native_shape[0], frame_h=native_shape[1],
+                            drizzle_scale=drizzle_scale_from_options(
+                                run.options_json),
+                        ) if native_shape is not None else None
+                    ),
                 ))
             n_stack_runs += target_runs
             if target_runs:

@@ -98,6 +98,18 @@ def drizzle_scale_from_options(options_json: str | None) -> float | None:
         opts: Any = json.loads(options_json)
     except (TypeError, ValueError):
         return None
+    return drizzle_scale_of(opts)
+
+
+def drizzle_scale_of(opts: Any) -> float | None:
+    """The same answer as :func:`drizzle_scale_from_options`, for a caller that
+    already holds the options as a **dict** rather than as stored JSON — the
+    stack job, which knows the options it just ran but would have to re-serialise
+    them (Paths and all) to ask the JSON form. Split out so the two callers share
+    one definition of "was this run drizzled, and by how much".
+
+    ``None`` for anything that isn't a dict describing a drizzled run.
+    """
     if not isinstance(opts, dict):
         return None
     if not opts.get("drizzle"):
