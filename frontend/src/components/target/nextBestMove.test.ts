@@ -125,4 +125,67 @@ describe("nextBestMove", () => {
     expect(nextBestMove({ nFramesUsed: -1 })).toBeNull();
     expect(nextBestMove({ nFramesUsed: 40, nUnsolved: NaN, integrationS: 2 * HOUR })?.kind).toBe("good");
   });
+
+  // Every "how much have I got?" rung is a claim about the part of the picture
+  // the beginner is looking at. On a mosaic the target's totals are not that,
+  // and always in the flattering direction — the owner shoots 5x5 and 12x8
+  // rasters, where a "3 h" target is under two minutes a panel.
+  describe("a mosaic's rungs are asked of one part of the picture", () => {
+    it("nudges more time on a mosaic the totals called genuinely deep", () => {
+      // 9 panels, 4.5 h total → 30 min a panel. Read off the total this cleared
+      // DEEP_INTEGRATION_S and the card said nothing at all.
+      expect(nextBestMove({
+        nFramesUsed: 540, integrationS: 4.5 * HOUR,
+      })).toBeNull();  // …which is the bug, stated.
+      const tip = nextBestMove({
+        nFramesUsed: 540, integrationS: 4.5 * HOUR, fieldFulls: 9,
+      });
+      expect(tip?.kind).toBe("integration");
+      // Names both figures, so it reconciles with the "4.5 h" the same page prints.
+      expect(tip?.phrase).toContain("4.5 h is spread across about 9 fields of sky");
+      expect(tip?.phrase).toContain("30 min so far");
+    });
+
+    it("calls a mosaic one sub deep everywhere thin, not healthy", () => {
+      const tip = nextBestMove({
+        nFramesUsed: 9, integrationS: 9 * 60, fieldFulls: 9,
+      });
+      expect(tip?.kind).toBe("thin");
+      expect(tip?.phrase).toContain("about 1 sub on it");
+      // Without the figure the same run reads as a healthy 9-frame stack.
+      expect(nextBestMove({ nFramesUsed: 9, integrationS: 9 * 60 })?.kind)
+        .toBe("integration");
+    });
+
+    it("still goes quiet on a mosaic that is genuinely deep per panel", () => {
+      // 2x2, 12 h total → 3 h a panel: deep by the bar that means something.
+      expect(nextBestMove({
+        nFramesUsed: 1440, integrationS: 12 * HOUR, fieldFulls: 4,
+      })).toBeNull();
+    });
+
+    it("leaves the locate rung on the honest counts, which are not per-pixel", () => {
+      // "Only N of your M subs were located" is arithmetic about the session,
+      // not about a pixel — dividing it would print a number nothing else shows.
+      const tip = nextBestMove({
+        nFramesUsed: 30, nUnsolved: 30, integrationS: HOUR, fieldFulls: 9,
+      });
+      expect(tip?.kind).toBe("locate");
+      expect(tip?.phrase).toContain("Only 30 of your 60 subs");
+    });
+
+    it("is byte-for-byte the single-field ladder for any non-mosaic figure", () => {
+      for (const input of [
+        { nFramesUsed: 3, integrationS: 5 * 60 },
+        { nFramesUsed: 40, integrationS: 18 * 60 },
+        { nFramesUsed: 120, integrationS: 2 * HOUR },
+        { nFramesUsed: 300, integrationS: 5 * HOUR },
+      ]) {
+        const plain = nextBestMove(input);
+        for (const ff of [null, undefined, 0, 0.5, 1]) {
+          expect(nextBestMove({ ...input, fieldFulls: ff })).toEqual(plain);
+        }
+      }
+    });
+  });
 });

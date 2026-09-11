@@ -29,6 +29,8 @@
  * (`nextBestMove`), which this never duplicates.
  */
 
+import { perPixel } from "./perPixel";
+
 // The deepest measured stack must have at least this much more integration than
 // the shallowest before the two are far enough apart to read a trend from. Two
 // stacks of near-identical depth tell you nothing about the noise-vs-time slope,
@@ -91,11 +93,7 @@ interface RunLike {
  * already clamps for the same reason (`field_fulls_of_sky`). So an older backend
  * that sends no field reproduces the pre-field behaviour exactly. */
 function perPixelSeconds(totalSeconds: number, fieldFulls: number | null | undefined): number {
-  const scale =
-    fieldFulls != null && Number.isFinite(fieldFulls) && fieldFulls > 1
-      ? fieldFulls
-      : 1;
-  return totalSeconds / scale;
+  return perPixel(totalSeconds, fieldFulls);
 }
 
 function measured(v: number | null | undefined): v is number {
