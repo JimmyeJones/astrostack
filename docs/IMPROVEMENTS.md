@@ -2899,42 +2899,35 @@ outright bug in existing behaviour, never to add capability.
 14. **Three yes/no's on residue from shipped features:** a 9:16 portrait zoom clip for Reels/Shorts? A
     noise-delta *picture* beside the "Did it get better?" sentence? Auto-*apply* the classified object
     preset instead of offering it as a chip? Each is small; none is built until wanted.
-15. **Dependencies and network (sign-off, below this list):** an outbound weather lookup for Tonight; a
-    SIMBAD lookup for target identification; a StarNet-class model; satellite-pass forecasts; a
-    star-registration package (astroalign) for the WCS-free fallback. Each is a yes/no plus "is outbound
-    allowed on the NAS?".
+15. **One offline dependency: `astroalign` for the WCS-free star-registration fallback?** *(Cut down
+    2026-09-11 — the four networked items this row used to bundle with it were **declined outright** by
+    Q4's standing LOCAL policy, so asking about them again would re-open a settled question. What is left
+    is not a network question at all.)* **Answer:** yes/no to adding one pure-Python offline package to the
+    image so a faint field whose subs never plate-solve can still be registered against each other.
 
-- **Satellite/aircraft-trail forecast for the Tonight planner (opt-in; needs a data source).** *(Pillar:
-  plan + understand — would be a genuine beginner feature: "the trails in your subs weren't a mistake — three
-  Starlink passes crossed this field between 21:40–22:10; the stack's rejection removed them." Scout 2026-09-01,
-  verified absent from the backlog and code.)* A beginner shooting near a Starlink train sees streaks and
-  assumes their gear or their stacking is broken; naming the cause turns a worry into a "the app handled it"
-  moment, and (plan side) could steer a session away from the worst pass windows. **Why it's here and not in
-  Ideas:** predicting passes needs current orbital elements (TLEs from CelesTrak/Space-Track), i.e. a
-  **networked dependency and a periodic data refresh** — exactly what §9/§10 say an agent must not add on its
-  own. It also risks staleness/liability if the ephemeris is old. If the owner wants it, the safe shape is: a
-  bundled/opt-in TLE fetch behind an explicit setting (off by default), a cache with an honest "elements are N
-  days old" disclosure, and a plain-language post-hoc note on a finished stack ("N bright passes crossed this
-  field during your session") rather than a real-time overlay. File the network-policy check and refresh cadence
-  before building.
-- AI star removal (StarNet-class ONNX): high wow-factor but adds a heavy ML
-  runtime + model download that may hit the network policy. Needs an explicit OK.
+- ~~**Satellite/aircraft-trail forecast for the Tonight planner (opt-in; needs a data source).**~~ —
+  **DECLINED 2026-09-08 by the owner's standing LOCAL policy (AGENTS.md §1 Owner Facts, Q4); struck
+  2026-09-11 as that answer instructed.** Predicting passes needs current orbital elements (TLEs) and a
+  periodic refresh, i.e. the running install reaching the internet — which is the one thing the answer
+  ruled out, permanently and as a policy rather than a per-feature gate. **Do not re-file, re-spec or
+  re-ask it**; the idea was good and it is simply not for this install. Kept as one struck line rather
+  than deleted so a future run recognises it as answered rather than missing. (The *post-hoc* half — "the
+  trails in your subs weren't a mistake; stacking removed them" — needs no network and is already served
+  by the shipped rejection overlay and its caption.)
+- ~~AI star removal (StarNet-class ONNX).~~ — **DECLINED 2026-09-08 by the same answer** (named in it
+  explicitly, as both a network/model-download question and a heavy ML runtime); struck 2026-09-11. Do not
+  re-file or re-ask.
 - Anything that exposes the app publicly, changes auth defaults (e.g. turning auth
   on by default), or is otherwise hard to reverse.
 - Live capture / real-time Seestar streaming integrations (explicitly de-scoped).
-- **Surface SIMBAD target identification in the headless webapp (opt-in).** The engine
-  already has `seestack/post/target_id.py` (`identify_target` → name + friendly object type +
-  bg-flatten hint from a target's median plate-solved RA/Dec), but it is **GUI-only** — the
-  headless webapp never calls it, so a beginner on the web app never learns "you're imaging
-  M42, an emission nebula → use luminance background flatten." Wiring it into the Target page
-  (show the identified object + friendly type, and pre-select the bg-mode hint / feed the
-  existing "nudge luminance for extended-emission" Stack-form idea) would directly serve
-  autonomy + friendliness + image quality. **Why sign-off, not a free build:** it makes an
-  **outward network call** from the live install to CDS/SIMBAD (via `astroquery`), which is an
-  outward-facing change the owner must OK against the deployment's network policy (guardrail
-  §10). If approved it should be **opt-in / off by default** with a cached result per target,
-  never blocking the pipeline. (S–M, autonomy/friendliness/image-quality — owner: OK to let the
-  server query SIMBAD?)
+- ~~**Surface SIMBAD target identification in the headless webapp (opt-in).**~~ — **DECLINED 2026-09-08 by
+  the owner's standing LOCAL policy (AGENTS.md §1 Owner Facts, Q4), which names it; struck 2026-09-11 as
+  that answer instructed.** It makes an outward call from the live install to CDS/SIMBAD, and the policy is
+  a standing rule rather than a per-feature gate. **Do not re-file or re-ask.** The beginner value it was
+  after — "you're imaging M 42, an emission nebula" plus the background-flatten hint — is already served
+  **offline** by the bundled catalogues: `seestack/objectinfo.py::identify_object` feeds the Target page's
+  object card and its blurb, and `seestack/bg_advice.py` supplies the flatten nudge. If anything is still
+  missing there, it is a copy or wiring task on bundled data, not a network one.
 
 _(Normal, tested changes merge to the default branch automatically — see
 AGENTS.md §8. Only the items above need a human's OK first.)_
