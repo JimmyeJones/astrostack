@@ -1,5 +1,61 @@
 # Shipped — the record
 
+## v0.425.0 — 2026-09-11 — 🌟 a plateaued target now names the fresh one to point at instead
+
+*(PRIORITY 2–3, autonomy + friendliness. The 2026-07-25 "Features that serve
+real workflows" entry, filed as a follow-on to the v0.207.0 `integrationTrend`
+verdict and open since.)*
+
+**What it looked like.** `IntegrationTrendBadge` has told a beginner since
+v0.207.0 when a target has gone sky-limited — *"Your noise has stopped dropping
+even as you added time (4.0 h in) — this target looks sky-limited from here, so
+more subs won't help it much. A darker sky or a brighter target will do more
+than extra time on this one."* That last sentence is the right advice and it is
+also a dead end: it names the move and leaves the beginner to work out **which**
+brighter target, on a page that has no answer. Meanwhile the machinery that
+answers exactly that question — `/api/plan/suggest`, the famous showpieces this
+owner has not shot that are well-placed tonight — has been on the Dashboard
+("Try something new tonight") and behind the Tonight page the whole time, two
+navigations away from the one moment it is most useful.
+
+**What it does now.** While the plateau verdict is on screen, the badge asks the
+planner for its own best pick and prints it under the sentence:
+
+> Try **M27 · Dumbbell Nebula** on your next clear night — Climbs to 64°, up
+> about 7 h tonight. Moon out of the way. *See what else is up →*
+
+The heading and the observability line are `suggestionHeading` and
+`describeSuggestion`, the same two pure helpers the Dashboard card renders, so
+the two surfaces cannot drift into two descriptions of one object; the link is
+`/tonight`, the same destination as that card's "See all →".
+
+**The request is gated on the verdict, not on the page.** `enabled: showing`,
+where `showing` is the *same* boolean that decides whether the component returns
+`null` — computed before the query so the two cannot disagree about whether the
+sentence is up. An ordinary target, and a plateaued one whose verdict is
+suppressed by an add-time coaching nudge (`ADD_TIME_KINDS`), issue nothing at
+all; two tests assert the planner is never called in either case rather than
+merely that nothing is rendered. It shares `["suggest-targets"]` and the 60 s
+stale time with the Dashboard card, so arriving from the Dashboard costs nothing.
+
+**Every way it can have no answer leaves the verdict exactly as it was**: no
+location set, no dark window, nothing new well-placed, a rejected call, or an
+older backend all yield no suggestion and no link, and the plateau sentence
+renders alone — which is what it did before this change. Nothing is removed and
+no threshold moved; `integrationTrend` itself is untouched.
+
+**Upgrade-safe (§9):** frontend-only. No endpoint, config, schema, on-disk,
+API-shape or default change — `/api/plan/suggest` is called exactly as the
+Dashboard already calls it.
+
+**Tests (+5, in `IntegrationTrendBadge.test.tsx`, whose harness gained the
+`QueryClientProvider`/`MemoryRouter` the six existing cases now render inside):**
+the pick is named with the Dashboard's own line and the link points at
+`/tonight` (**verified red** by restoring the pre-change component in a scratch
+revert); the planner is not called on an improving target; not called while an
+add-time nudge suppresses the verdict; the verdict stands alone on an empty
+suggestion list; and it stands alone on a failed call.
+
 ## v0.424.3 — 2026-09-11 — 🟡 the Stack form's advice panel stops blinking out on every knob nudge
 
 *(PRIORITY 1/3 — §1's "clunky and confusing controls". The client half of the
