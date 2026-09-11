@@ -2123,6 +2123,23 @@ export interface LifeList {
   counts: LifeListCounts;
 }
 
+/** One entry of the app's glossary — a heading, the prose under it, and a
+ *  stable anchor so `/glossary#fwhm` lands on it. `body` is markdown (a couple
+ *  of entries need a bullet list), rendered by `glossaryMarkdown.tsx`. The
+ *  heading carries every spelling of the term, including the expansion in its
+ *  brackets, so searching it as a substring needs no separate alias list. */
+export interface GlossaryTerm {
+  slug: string;
+  term: string;
+  body: string;
+}
+
+export interface Glossary {
+  /** The page's own lead paragraph, written in the same file as the terms. */
+  intro: string;
+  terms: GlossaryTerm[];
+}
+
 /** One object still missing from a nearly-finished constellation. The
  *  observability fields are set only on the one that's best placed tonight
  *  (`tonight_catalog_id`); every other row leaves them null. */
@@ -3614,6 +3631,10 @@ export const api = {
   // The famous objects you've captured and the ones still to get. Read-only and
   // offline: the catalog ships with the app and the match reads only the target
   // registry, so it is cheap enough to ask on every visit.
+  // The plain-language term reference the /glossary page renders. Bundled
+  // markdown parsed server-side (`seestack/glossary.py`) — no library read, no
+  // network, and the same file the historical desktop GUI's F1 key opened.
+  getGlossary: () => req<Glossary>("/api/glossary"),
   getLifeList: () => req<LifeList>("/api/life-list"),
   // Just the tally, for the Dashboard's one-line nudge: the same counts block
   // `getLifeList` carries, without the ~160 catalog rows and the per-target

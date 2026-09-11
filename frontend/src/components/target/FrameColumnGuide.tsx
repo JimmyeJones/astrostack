@@ -1,5 +1,6 @@
 import { Anchor, Collapse, Stack, Text } from "@mantine/core";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { FRAME_COLUMNS } from "./frameColumns";
 
 /**
@@ -67,6 +68,17 @@ export function FrameColumnGuide() {
           <Text size="xs" c="dimmed">
             With a keyboard: <b>j</b>/<b>k</b> move between frames, <b>a</b>{" "}
             accepts the selected one, <b>r</b> rejects it.
+          </Text>
+          {/* Out to the full reference. These four hints are a sentence each,
+              which is the right size *here*; the glossary is where the same
+              words get a paragraph, and it is the one surface that can answer
+              "what is drizzle?" as well as "what is FWHM?". Each link lands on
+              that term's own anchor, not on the top of the page. */}
+          <Text size="xs" c="dimmed">
+            Longer explanations of these and every other term are in the{" "}
+            <Anchor component={Link} to="/glossary#fwhm" size="xs" inherit>
+              glossary
+            </Anchor>.
           </Text>
         </Stack>
         ) : null}
