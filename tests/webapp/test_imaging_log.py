@@ -1,5 +1,6 @@
 """`GET /api/imaging-log.csv`: the downloadable *Your imaging log* record —
-cross-target aggregation, newest-first ordering, and the empty-library case."""
+cross-target aggregation, newest-**night**-first ordering, and the empty-library
+case."""
 
 from __future__ import annotations
 
@@ -151,3 +152,27 @@ def test_per_run_stack_fwhm_is_reported_over_the_target_median(client, solved_li
     star_size_col = IMAGING_LOG_COLUMNS.index("Typical star size (px)")
     run_row = next(r for r in rows[1:] if r[-1] == "2026-06-10")
     assert run_row[star_size_col] == "1.8"
+
+
+def test_a_reprocessed_library_still_comes_out_newest_night_first(
+    client, solved_library,
+):
+    """End to end, on the shape "Reprocess everything" produces: every run
+    re-stamped inside the same hour, so the processing stamps say nothing about
+    the nights. The file has to come out in night order, because that is the
+    column it leads with."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_run(solved_library, safe, basename="old-night", n_frames=100,
+                  exposure_s=3000, timestamp="2026-07-24T15:00:00Z",
+                  capture_start_utc="2024-11-15T22:00:00Z",
+                  capture_end_utc="2024-11-15T23:00:00Z")
+    _register_run(solved_library, safe, basename="new-night", n_frames=200,
+                  exposure_s=6000, timestamp="2026-07-24T09:00:00Z",
+                  capture_start_utc="2026-06-01T22:00:00Z",
+                  capture_end_utc="2026-06-01T23:00:00Z")
+
+    rows = _parse(client.get("/api/imaging-log.csv").text)
+    shot = [r[0] for r in rows[1:]]
+    assert shot == ["2026-06-01", "2024-11-15"]
+    # Both stamps are still on every row; only which one orders them changed.
+    assert [r[-1] for r in rows[1:]] == ["2026-07-24", "2026-07-24"]

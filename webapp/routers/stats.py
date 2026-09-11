@@ -1734,8 +1734,11 @@ def _collect_imaging_log(lib, targets, lon_deg: float | None = None) -> list:
         finally:
             if proj is not None:
                 proj.close()
-    # Newest first, so a beginner's most recent night sits at the top of the log.
-    rows.sort(key=lambda r: (r.date or ""), reverse=True)
+    # Newest-night-first ordering is `build_imaging_log_csv`'s, so the column the
+    # log leads with and the order the rows come out in cannot answer different
+    # questions — see `seestack.imaging_log.imaging_log_sort_key`. This used to
+    # sort on `r.date`, the *processing* stamp, under a comment claiming it put
+    # the most recent night on top.
     return rows
 
 
@@ -1744,8 +1747,9 @@ def get_imaging_log(request: Request) -> Response:
     """Download a plain-CSV record of every finished stack — the beginner's
     imaging journal. One row per stack run (the nights it was shot, target, subs,
     integration, typical star size, calibration, mosaic, noise, app version, and
-    the day it was stacked), newest first. An empty library yields a header-only
-    file, never an error."""
+    the day it was stacked), **newest night first** — ordered by the same date
+    the file leads with, not by the afternoon the stack ran. An empty library
+    yields a header-only file, never an error."""
     from seestack.imaging_log import build_imaging_log_csv
 
     settings = deps.get_settings(request)

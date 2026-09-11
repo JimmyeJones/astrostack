@@ -11,7 +11,11 @@ print, or paste into a forum post.
 leading column used to be headed "Date" and filled with the *stack's* timestamp,
 so a log of "every night you've imaged" dated a re-stack of a back catalogue to
 the afternoon the button was pressed. The nights now lead, under "Shot"; the
-processing stamp keeps its place at the end, under "Stacked".
+processing stamp keeps its place at the end, under "Stacked". And the rows are
+**ordered by the night too** (:func:`imaging_log_sort_key`) — the column the file
+leads with had been left non-monotonic by a sort on the processing stamp, which
+after a "Reprocess everything" put the whole log in an order unrelated to when
+anything was shot.
 
 Pure/offline/testable: the webapp gathers :class:`ImagingLogRow` values from the
 library and hands them here to render the CSV. No engine recompute, no new DB
@@ -140,16 +144,50 @@ def imaging_log_row_values(row: ImagingLogRow) -> list[str]:
     ]
 
 
+def imaging_log_sort_key(row: ImagingLogRow) -> tuple[str, str]:
+    """How recent this row is, for a **descending** sort: ``(night, stacked)``.
+
+    A log of "every night you've imaged" is ordered by the *night*, which is the
+    column it leads with — not by the afternoon the computer did its part. The
+    two used to disagree: the caller sorted on the processing stamp while the
+    leading column carried the capture window, so the log's first column was not
+    monotonic, and after a **Reprocess everything** (which re-stamps every run
+    within minutes of each other) the whole file came out in an order that has
+    nothing to do with when anything was shot. Every row shows both dates, so
+    neither value is hidden by this — only which one decides the order.
+
+    ``capture_night_start`` is already the noon-to-noon night key
+    (``webapp.capture_nights``), so comparing the ISO strings *is* comparing
+    nights. A run recorded before the app tracked the window (schema < 18, i.e.
+    most of a library upgraded rather than re-stacked) has no night, and falls
+    back to its processing date — the same "use the labelled stamp when the real
+    date is unknown" rule ``pictureDateLabel`` applies on screen, so the order
+    always follows the date each row actually displays. The stacked stamp is the
+    tie-break, so two re-stacks of one night lead with the newer run.
+
+    **Not** in tension with the shipped rule "never flip a *sort* to capture
+    time" (see ``SHIPPED.md``, "sweep every date"): that rule is about lists of
+    **runs**, where "which run is newest" is the question — History's ordering,
+    and the Library tile's. This file is a list of **nights**.
+    """
+    night = (row.capture_night_start or "").strip()[:10]
+    stacked = _format_date(row.date)
+    return (night or stacked, stacked)
+
+
 def build_imaging_log_csv(rows: list[ImagingLogRow]) -> str:
     """Render the imaging-log rows to CSV text (header + one line per run).
 
-    Rows are written in the order given (the caller sorts newest-first). An empty
-    list yields a header-only file, never an error, so a brand-new library still
-    downloads a valid (if empty) log.
+    Ordered here, newest night first (:func:`imaging_log_sort_key`), rather than
+    by the caller: one place decides both the columns and the order, so the
+    leading column and the row order cannot end up answering different
+    questions. The sort is stable, so rows the key cannot separate keep the
+    order they arrived in. An empty list yields a header-only file, never an
+    error, so a brand-new library still downloads a valid (if empty) log.
     """
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(IMAGING_LOG_COLUMNS)
-    for row in rows:
+    for row in sorted(rows, key=imaging_log_sort_key, reverse=True):
         writer.writerow(imaging_log_row_values(row))
     return buf.getvalue()
