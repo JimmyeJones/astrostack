@@ -1044,13 +1044,16 @@ def asinh_stretch(
 
     ``highlight_protect`` (0..1, default 0) walks the highlight shoulder's knee
     down (:func:`highlight_knee_for`) so a bright core is compressed harder and
-    keeps its detail. 0 is byte-for-byte the historical behaviour.
+    keeps its detail, and reserves the shoulder a share of the finished display
+    range where the curve would otherwise leave it none
+    (:func:`_reanchor_highlights`). 0 is byte-for-byte the historical behaviour.
 
     ``stats`` pins the curve to statistics measured elsewhere — see
     :class:`AsinhStats`. Omitted (the default), the curve is derived from ``rgb``
     itself, exactly as it always has been.
     """
     knee = highlight_knee_for(highlight_protect)
+    headroom = _highlight_headroom_for(highlight_protect)
     img = rgb.astype(np.float32, copy=True)
     if img.ndim == 2:
         img = np.stack([img, img, img], axis=-1)
@@ -1097,7 +1100,22 @@ def asinh_stretch(
         # core detail; `protect_highlights=False` restores the old hard clip.
         xr = (chan[finite] - shadows) / rng
         x = _highlight_rolloff(xr, knee) if protect_highlights else np.clip(xr, 0.0, 1.0)
-        out[..., c][finite] = np.clip(np.arcsinh(x / a) / denom, 0.0, 1.0)
+        vals = np.clip(np.arcsinh(x / a) / denom, 0.0, 1.0)
+        if headroom > 0.0 and protect_highlights:
+            # …and then give that shoulder room the asinh curve above it may have
+            # squeezed out of it — see `_reanchor_highlights`. At the default
+            # strength (`headroom` 0) this is skipped entirely.
+            def curve(v: float) -> float:
+                return float(np.clip(math.asinh(v / a) / denom, 0.0, 1.0))
+
+            sky_ceiling = (med + _HIGHLIGHT_SKY_GUARD_SIGMA * sigma - shadows) / rng
+            vals = _reanchor_highlights(
+                vals,
+                knee_display=curve(knee),
+                anchor=curve(min(sky_ceiling, knee)),
+                headroom=headroom,
+            )
+        out[..., c][finite] = vals
 
     return out
 
@@ -1135,8 +1153,11 @@ def autostretch(
 
     ``highlight_protect`` (0..1, default 0) walks the highlight shoulder's knee
     down (:func:`highlight_knee_for`), compressing more of the bright range so a
-    high-dynamic-range core keeps its structure instead of washing out. It moves
-    only values *above* the knee, so the sky still lands on ``target_bg``
+    high-dynamic-range core keeps its structure instead of washing out — and,
+    because the midtones transfer below can squash that whole shoulder back into
+    a thousandth of the display range, reserves it a visible share of the
+    finished picture (:func:`_reanchor_highlights`). It moves nothing at or below
+    the sky's own ceiling, so the background still lands on ``target_bg``
     unchanged; 0 reproduces the historical output byte-for-byte.
 
     ``stats`` pins the curve to statistics measured elsewhere, exactly as the
@@ -1154,6 +1175,7 @@ def autostretch(
     other caller's array untouched, as it always has been.
     """
     knee = highlight_knee_for(highlight_protect)
+    headroom = _highlight_headroom_for(highlight_protect)
     img = rgb.astype(np.float32, copy=copy)
     if img.ndim == 2:
         # A 2-D (mono) array is treated as a grey image — expand to 3 channels
@@ -1218,7 +1240,20 @@ def autostretch(
         norm_med = max((med - shadows) / rng, 1e-6)
         m = _midtones_for(norm_med, target_bg)
         out_chan = out[..., c]
-        out_chan[finite] = np.clip(_mtf(x, m), 0.0, 1.0)
+        vals = np.clip(_mtf(x, m), 0.0, 1.0)
+        if headroom > 0.0 and protect_highlights:
+            # …and then give that shoulder room the midtones transfer above it
+            # may have squeezed out of it — see `_reanchor_highlights`. At the
+            # default strength (`headroom` 0) this is skipped entirely, so the
+            # historical curve is reproduced byte-for-byte.
+            sky_ceiling = (med + _HIGHLIGHT_SKY_GUARD_SIGMA * sigma - shadows) / rng
+            vals = _reanchor_highlights(
+                vals,
+                knee_display=float(_mtf(knee, m)),
+                anchor=float(_mtf(min(sky_ceiling, knee), m)),
+                headroom=headroom,
+            )
+        out_chan[finite] = vals
 
     return out
 
@@ -1295,6 +1330,92 @@ def _highlight_rolloff(x: np.ndarray, knee: float = _HIGHLIGHT_KNEE) -> np.ndarr
         span = 1.0 - knee
         t = (x[over] - knee) / span                 # >= 0, open-ended
         out[over] = knee + span * (t / (1.0 + t))   # -> [knee, 1), asymptotic
+    return out
+
+
+#: Share of the *display* range the shoulder is guaranteed at full "hold back
+#: highlights" strength, when the tone curve above it would otherwise leave the
+#: shoulder none (see :func:`_reanchor_highlights`). 0.20 is about what the knob
+#: already wins unaided on an ordinary compact-core frame, measured: there the
+#: shoulder holds 0.20 of the display range at strength 0 and 0.64 at full, so a
+#: guaranteed fifth is in the same idiom rather than a new one.
+_HIGHLIGHT_HEADROOM_MAX = 0.20
+
+#: How far above its own median the sky is allowed to reach before a pixel stops
+#: counting as sky. Everything at or below this is left **bit-for-bit** alone by
+#: the re-anchoring, so "hold back highlights" can never double as a brightness
+#: change. 6σ is far past the brightest pixel of any real sky patch (a million
+#: samples of Gaussian noise top out near 5σ) and far below a core.
+_HIGHLIGHT_SKY_GUARD_SIGMA = 6.0
+
+
+def _highlight_headroom_for(protect: float = 0.0) -> float:
+    """Display range to reserve for the shoulder at a 0..1 protect strength.
+
+    0 — every caller's default — reserves nothing, so the historical curve is
+    reproduced byte-for-byte. Non-finite / out-of-range input is treated the same
+    way :func:`highlight_knee_for` treats it, since both read the same value.
+    """
+    p = float(protect)
+    if not math.isfinite(p) or p <= 0.0:
+        return 0.0
+    return float(min(p, 1.0) * _HIGHLIGHT_HEADROOM_MAX)
+
+
+def _reanchor_highlights(y: np.ndarray, *, knee_display: float, anchor: float,
+                         headroom: float) -> np.ndarray:
+    """Give the highlight shoulder real room in the *finished* display range.
+
+    :func:`_highlight_rolloff` compresses the open-ended highlights into
+    ``[knee, 1)`` **before** the tone curve above it (the STF midtones transfer,
+    or the asinh curve) runs — and that curve can squash the whole shoulder back
+    together again. Measured on a high-dynamic-range frame whose sky sits at a
+    ten-thousandth of the normalization ceiling: the midtones transfer solves to
+    ``m ≈ 0.001``, which puts the knee at display **0.9996**, so the entire core —
+    every value above the knee, the whole point of the shoulder — renders inside
+    the last **0.0004** of the display range. Walking the knee down (i.e. the
+    "hold back highlights" slider, 0.70 → 0.25) moves that to 0.003: the picture
+    does not visibly change, at any strength.
+
+    So the knob's promise can only be kept where the user can see it — in display
+    space, after the curve. ``y`` is the finished channel, ``knee_display`` the
+    display value the knee landed on, and ``headroom`` the share of the range the
+    shoulder should hold. Three bands, continuous at both joins:
+
+      * ``y <= anchor`` — untouched, bit-for-bit. ``anchor`` is the display value
+        of the sky's own ceiling (:data:`_HIGHLIGHT_SKY_GUARD_SIGMA`), so the
+        background lands exactly where it did.
+      * ``anchor < y <= knee_display`` — the mid-tones, compressed into what is
+        left below the shoulder. This is the cost of the knob, and it is the
+        honest one: display range has to come from somewhere.
+      * ``y > knee_display`` — the shoulder, expanded from whatever sliver the
+        curve left it onto the reserved ``headroom``.
+
+    It declines — returning ``y`` unchanged — whenever there is nothing to win or
+    no room to win it in: no headroom asked for, a shoulder that already holds
+    more than ``headroom``, or an anchor at/above where the shoulder would have
+    to start (a frame whose sky is *itself* near the knee, where the only way to
+    make room would be to darken the sky).
+    """
+    if headroom <= 0.0:
+        return y
+    top = 1.0 - headroom
+    if not (math.isfinite(knee_display) and math.isfinite(anchor)):
+        return y
+    if knee_display >= 1.0 or 1.0 - knee_display >= headroom:
+        return y                                    # the shoulder has room already
+    if anchor >= top or anchor >= knee_display:
+        return y                                    # no room without moving the sky
+
+    out = y.copy()
+    mid = (y > anchor) & (y <= knee_display)
+    if np.any(mid):
+        out[mid] = anchor + (y[mid] - anchor) * ((top - anchor)
+                                                 / (knee_display - anchor))
+    high = y > knee_display
+    if np.any(high):
+        out[high] = top + (y[high] - knee_display) * ((1.0 - top)
+                                                      / (1.0 - knee_display))
     return out
 
 
