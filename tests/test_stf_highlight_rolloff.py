@@ -273,6 +273,42 @@ def test_reanchoring_is_monotone_in_strength():
         prev_blown = blown
 
 
+def test_reanchoring_does_not_shift_the_core_s_colour():
+    """Each channel is re-anchored on its own numbers (its own sky median, its own
+    `m`), so the risk worth pinning is the one a per-channel curve carries: a grey
+    core must stay grey, and a coloured core must get its colour *back* rather
+    than swing hue.
+
+    Measured on a core whose channels are 1.0 / 0.75 / 0.6 over unequal sky
+    levels: the blown core rendered as R:G:B = 1 : 0.995 : 0.999 (i.e. white,
+    which is what "blown" means) and now renders 1 : 0.987 : 0.976 — more of its
+    own colour, by 0.023 at most."""
+    img = _high_contrast_target()
+    core = autostretch(img, highlight_protect=1.0)[120:181, 120:181]
+    assert np.allclose(core[..., 0], core[..., 1], atol=1e-6)
+    assert np.allclose(core[..., 1], core[..., 2], atol=1e-6)
+
+    yy, xx = np.mgrid[0:300, 0:300]
+    r2 = (yy - 150) ** 2 + (xx - 150) ** 2
+    rng = np.random.default_rng(2)
+    chans = [
+        sky + 1500.0 * c * np.exp(-r2 / (2 * 80.0**2))
+        + 40000.0 * c * np.exp(-r2 / (2 * 30.0**2))
+        + rng.normal(0.0, 20.0, size=(300, 300))
+        for sky, c in zip((1000.0, 1050.0, 980.0), (1.0, 0.75, 0.6))
+    ]
+    colour = np.stack(chans, axis=-1).astype(np.float32)
+
+    def core_ratio(out):
+        mean = out[140:161, 140:161].reshape(-1, 3).mean(axis=0)
+        return mean / max(float(mean.max()), 1e-9)
+
+    before = core_ratio(autostretch(colour))
+    after = core_ratio(autostretch(colour, highlight_protect=1.0))
+    assert np.max(np.abs(after - before)) < 0.05          # no hue swing
+    assert after[1] < before[1] and after[2] < before[2]   # less white, more colour
+
+
 def test_reanchoring_declines_when_the_shoulder_already_has_room(monkeypatch):
     """An ordinary compact-core frame already gives the shoulder a fifth of the
     display range, so there is nothing to take from the mid-tones — the render is
