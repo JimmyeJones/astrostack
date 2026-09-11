@@ -1407,6 +1407,14 @@ export interface StackRun {
   // offer "leave this target's pictures alone" exactly where someone meets a
   // picture they did not make.
   auto_edited?: boolean;
+  // How many single-frame **field-fulls of sky** this run's own canvas covers —
+  // 1.0 for a single field, ~4.0 for a 2×2 mosaic. A mosaic's canvas grows as
+  // its panels are shot, so `total_exposure_s` alone can't say whether a target
+  // got deeper or merely wider between two runs; `integrationTrend` divides by
+  // this to fit its noise falloff against per-pixel depth. Null/absent on a
+  // target with no measured frame shape and on an older backend — read as 1.0,
+  // which reproduces the pre-field behaviour exactly.
+  field_fulls?: number | null;
 }
 
 /** The per-target answer to "should the app finish my pictures of this one?" */

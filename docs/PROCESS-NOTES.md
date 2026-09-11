@@ -18,6 +18,79 @@ is a queue.
 
 ---
 
+## 2026-09-11 (Builder, branch `claude/sweet-babbage-74ufck`) — the handed-forward brief paid out twice, and a clean `--mosaic` dogfood
+
+**The run.** Two tasks, both verified bugs I reproduced myself: **v0.419.0** (the noise-vs-time trend
+fitted against a mosaic's *total* integration, so a growing mosaic read as sky-limited) and
+**v0.419.1** (the Target page's coaching ladder and thin-stack warning asked per-pixel questions of
+target-wide numbers). Full entries in [`SHIPPED.md`](SHIPPED.md). Baseline on `origin/main`
+(`108fc908`) before any edit: **5,639 passed / 2 skipped** in 28m59s.
+
+### Where they came from: a brief, not a sweep
+
+Neither came from the backlog — "Bugs (fix these first)" is five entries, every one gated, stood down
+with numbers, or measured and closed. Both came from the sentence the 2026-09-10 `dg6420` run left at
+the end of its own note:
+
+> *"A2/A6/D1 and now this are the same class four times over; the brief is not exhausted, and the next
+> place to point it is the surfaces that **report** depth rather than decide from it."*
+
+That is the whole method, and it worked in about twenty minutes of reading: grep the frontend for the
+places that turn a run's numbers into a sentence about how good the picture is, and ask of each one
+*"what does this describe on a mosaic?"*. `noiseReductionBadge`, `noiseVsExpectedNote`,
+`integrationReadiness` and `noiseReductionHint` all came back **already correct** — the first three
+were fixed by earlier instances of this class, and the fourth is correct by accident worth recording:
+`1 − √(t/(t+h))` is **scale-invariant**, so dividing both the captured time and the extra hour by the
+panel count leaves it unchanged. Then `integrationTrend`, `thinStackWarning` and `nextBestMove`
+answered "nothing".
+
+**The reusable half, for whoever picks the brief up next.** The tell is not "does this divide by a
+frame count" — it is **"is this number compared against a bar, and is the bar about a pixel?"** Every
+one of the three had a named constant whose own comment gave it away: *"below ~5 frames the stack has
+barely started averaging the sky down"*, *"below ~1 hour a deep-sky target has barely started building
+signal-to-noise"*. Those are sentences about a pixel, held up against a number about a target. The
+surfaces that came back clean are the ones with no absolute bar at all (a *ratio* of two of the
+target's own runs, like `integrationTrend`'s exponent — which is why only its **canvas growth**, not
+its scale, was wrong).
+
+### The one that is worth reading twice: two of the app's own surfaces already disagreed
+
+`auto_stack_min_frames` was fixed in v0.415.0 to hold back a mosaic that is one sub deep everywhere,
+on the grounds that the picture is single-frame speckle. The **thin-stack warning** — same threshold
+family, same picture — could not fire on that mosaic at all, because nine subs is more than four. So
+the walk-away pass had been refusing to publish a picture that, had it been made by hand, the Target
+page would have called healthy. Neither surface was internally inconsistent, and neither test could
+have caught it: **the contradiction only exists between them.** That is the AGENTS.md §7 dogfood
+question ("could a beginner hold all of these at once?") applied to two code paths rather than to two
+sentences on a screen, and it is the cheapest place this class has been found yet.
+
+### Dogfood: CLEAN (`scripts/agent-dogfood.sh --mosaic`, exit 0)
+
+- **Mosaic trim: Auto would cut 7.9 %** of the union canvas — the same figure the last several passes
+  recorded, well under the ~15 % §1 calls a bug. No drift.
+- **Page probes clean on both samples.** Nothing overflowing, no console errors. Tallest phone pages:
+  mosaic `/targets/Sample_M42_mosaic_2_2` 3,407 px, field `/life-list` 3,094 px — in line with the
+  standing baselines, no IA slice indicated.
+- **The app's sentences about the mosaic, read as one paragraph** (§7): the panel map, the
+  grain-uneven note and the seam verdict all agree with each other this time — *"about 23 % of the
+  picture has 3 subs on it where most of it has 6"*, *"the sky matches across the joins, so where the
+  picture looks grainier that is a difference in depth, not a step in the sky"*, and the panel map's
+  *"about 30 s there against 1 min on a typical panel"*. One picture, three consistent statements.
+  **That paragraph is also what the v0.419.1 fix is calibrated against**: `thinStackWarning(21, 3.5)`
+  must stay silent, because the app's own health panel says that picture is 6 subs deep — and a test
+  pins exactly that pair, so the two can't drift apart later.
+
+### Green gates
+
+Python **5,639 passed / 2 skipped** on the baseline (28m59s) and **5,649 passed / 2 skipped** (28m12s)
+on the finished branch — the +10 is this run's Python tests; `tests/webapp` **2,085 passed** after task
+1. Frontend: `npx tsc --noEmit` clean (verified it was really compiling — `--listFiles` shows 823
+`src/` files, per the §7 trap), vitest **259 files / 3,622 tests** (+22 across the two tasks), `npx
+vite build` ✓. Every mosaic assertion in both tasks was watched go **red** first —
+task 1 by stashing `integrationTrend.ts`, task 2 by neutering `canvasFieldFulls` to `return 1`.
+
+---
+
 ## 2026-09-10 — collision #14, and the one kind of collision the §11 rules do not cover
 
 **What happened.** Two Builders picked the fourth external audit's ⭐🔴 "owner hits
