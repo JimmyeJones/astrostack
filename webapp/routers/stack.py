@@ -19,7 +19,7 @@ from seestack.io.project import readable_frame_path
 from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
 from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
 from seestack.stackhealth import grain_verdict, seam_verdict
-from webapp import deps, pipeline
+from webapp import deps, estimate_cache, pipeline
 from webapp.capture_nights import capture_night_count, capture_night_range
 from webapp.field_fulls import (
     drizzle_scale_from_options,
@@ -442,7 +442,7 @@ def rejection_outlook(safe: str, request: Request) -> dict[str, Any]:
     makes every surface gated on "is this the user's own setting?" fall silent
     rather than warn about a setting no longer in force.
     """
-    from seestack.stack.stacker import estimate_stack, rejection_reach
+    from seestack.stack.stacker import estimate_stack_from_basis, rejection_reach
     from webapp.walkaway import (
         apply_unattended_rejection,
         parse_saved_stack_defaults,
@@ -466,8 +466,13 @@ def rejection_outlook(safe: str, request: Request) -> dict[str, Any]:
         apply_unattended_rejection(opts_dict, override_saved_choice=override)
         options = coerce_stack_options(opts_dict)
         try:
-            est = estimate_stack(proj, options,
-                                 memory_budget_gb=settings.max_stack_memory_gb)
+            # Through the shared basis cache, like ``/stack-estimate``: this
+            # question is asked on every Target-page load and its answer needs
+            # only the frame count and the panel depth, both of which come off a
+            # canvas the saved options cannot move.
+            est = estimate_stack_from_basis(
+                estimate_cache.canvas_basis(proj, options.mosaic_canvas),
+                options, memory_budget_gb=settings.max_stack_memory_gb)
         except ValueError:
             # Nothing solved yet — there is no stack to have an opinion about.
             # A 200 with no verdict rather than a 422: this is a background
@@ -580,7 +585,6 @@ def stack_estimate(
         StackOptions,
         _resolve_auto_reject,
         auto_reject_switch_frames,
-        estimate_stack_basis,
         estimate_stack_from_basis,
         rejection_reach,
     )
@@ -603,8 +607,12 @@ def stack_estimate(
         try:
             # The canvas is the whole cost of a sizing (one WCS per sub), and it
             # depends on ``mosaic_canvas`` alone — so it is computed once and the
-            # two sizings this response carries are priced off it.
-            basis = estimate_stack_basis(proj, options.mosaic_canvas)
+            # two sizings this response carries are priced off it. Every *other*
+            # query param below changes the peak or the rejection answer without
+            # being able to move the canvas, so nudging κ used to re-pay the
+            # whole second; ``estimate_cache`` keeps the basis across requests and
+            # revalidates it against the frames it was built from.
+            basis = estimate_cache.canvas_basis(proj, options.mosaic_canvas)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         # This target's own past runs, read while the project is open — the time

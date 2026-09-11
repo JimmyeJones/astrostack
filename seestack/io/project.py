@@ -21,6 +21,7 @@ add complexity for no win at this scale.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import sqlite3
@@ -1096,6 +1097,42 @@ class Project:
         sql += " ORDER BY id"
         for row in self._conn.execute(sql):
             yield _row_to_frame(row)
+
+    def frames_fingerprint(self) -> str:
+        """A short hash of the **entire** ``frames`` table — every column of
+        every row, in id order.
+
+        For a caller that wants to memoise something derived from this target's
+        frames and needs to know, without argument, when that derivation has
+        gone stale. Two properties make it usable as a cache key where a cheaper
+        summary (a count, a max rowid, a sum of lengths) is not:
+
+        * **Complete by construction.** It is ``SELECT *``, so it covers a
+          re-solve that rewrites one frame's ``wcs_json`` to the same length, an
+          accept flipped by grading, a frame deleted, a column added by a future
+          migration — every change a derivation could possibly depend on, with
+          no list of columns to keep in step.
+        * **Cheap next to what it guards.** Measured on a 9-panel, 5,477-sub
+          project (the §1 owner's largest): **129 ms**, against the ~1,007 ms
+          canvas computation :mod:`webapp.estimate_cache` uses it to skip.
+
+        It over-invalidates rather than under-invalidates — a QC pass that
+        touches an unrelated column costs the holder a recompute — which is the
+        safe direction for a cache key.
+        """
+        assert self._conn is not None
+        cursor = self._conn.cursor()
+        # Plain tuples rather than this connection's ``sqlite3.Row``: a Row's
+        # ``repr`` is its *memory address*, so hashing one would produce a fresh
+        # value on every call and the "fingerprint" would never match itself.
+        cursor.row_factory = None
+        digest = hashlib.blake2b(digest_size=16)
+        try:
+            for row in cursor.execute("SELECT * FROM frames ORDER BY id"):
+                digest.update(repr(row).encode("utf-8", "surrogatepass"))
+        finally:
+            cursor.close()
+        return digest.hexdigest()
 
     def solved_frame_geometry(self) -> tuple[float, int, int] | None:
         """``(pixscale_arcsec, width_px, height_px)`` of a solved frame, or ``None``.
