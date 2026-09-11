@@ -76,9 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- Builder, branch `claude/sweet-babbage-s75e9l` — reject-reason cause agreement
-  (`grading.metric_cause`, `session_recap._REJECT_BUCKETS`,
-  `rejection_summary._metric_bucket`), and whatever else this run finds.
+*No live claims.*
 
 ---
 
