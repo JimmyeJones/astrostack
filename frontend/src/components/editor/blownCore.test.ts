@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { blownCoreButtonLabel, blownCoreCaption } from "./blownCore";
+import {
+  blownCoreButtonLabel, blownCoreCaption, blownCoreStretchOp,
+} from "./blownCore";
 
 describe("blownCoreCaption", () => {
   it("names the problem and promises only what the fix actually does", () => {
@@ -45,5 +47,33 @@ describe("blownCoreButtonLabel", () => {
   it("shows the strength it will apply", () => {
     expect(blownCoreButtonLabel({ strength: 0.6 }))
       .toBe("Hold back highlights (0.6)");
+  });
+});
+
+describe("blownCoreStretchOp", () => {
+  const stretch = { uid: "s1", id: "tone.stretch", enabled: true };
+  const curves = { uid: "c1", id: "tone.curves", enabled: true };
+
+  it("picks the recipe's first Stretch, like the server's own fallback", () => {
+    // `solve_highlight_protect` with no uid solves for the *first* tone.stretch,
+    // so the nudge on the Auto note must name the same op — otherwise the note
+    // and the op panel could offer two answers about one picture.
+    const second = { uid: "s2", id: "tone.stretch", enabled: true };
+    expect(blownCoreStretchOp([curves, stretch, second])).toBe(stretch);
+  });
+
+  it("says nothing when the recipe has no Stretch at all", () => {
+    expect(blownCoreStretchOp([curves])).toBeNull();
+    expect(blownCoreStretchOp([])).toBeNull();
+    expect(blownCoreStretchOp(undefined)).toBeNull();
+  });
+
+  it("says nothing when the Stretch is switched off", () => {
+    // A bypassed op is not rendering, so there is nothing to offer to change.
+    expect(blownCoreStretchOp([{ ...stretch, enabled: false }])).toBeNull();
+  });
+
+  it("treats an op with no `enabled` field as on", () => {
+    expect(blownCoreStretchOp([{ uid: "s1", id: "tone.stretch" }])).not.toBeNull();
   });
 });

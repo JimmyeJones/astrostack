@@ -18,6 +18,90 @@ is a queue.
 
 ---
 
+## 2026-09-11 (Builder, branch `claude/sweet-babbage-zeh63i`) — a month-old measurement finished; a stand-down re-opened for the right reason; and a mosaic dogfood pass CLEAN
+
+**The run.** Two tasks, each its own independently-green commit: **v0.424.0** (the
+"Hold back highlights" knob starts working on the frames it exists for) and
+**v0.424.1** (that finding reaches the Auto notes, not only the selected op
+panel). Full entries in [`SHIPPED.md`](SHIPPED.md).
+
+### Re-opening a stand-down: the part that is worth carrying forward
+
+The backlog entry v0.424.0 closes carried a **deliberate non-ship** from
+2026-08-06: a prototype, measured, declined. AGENTS.md §1 says not to
+re-litigate a stand-down that carries numbers, and that rule held — what made
+this one re-openable is that its numbers were about **a different lever**. That
+run had moved the shoulder's *knee* and measured that "above it the MTF is still
+near-vertical, so the shoulder's own top two-thirds still crowd into the last
+0.15 % of the display range". That sentence is not an argument against fixing the
+crowding; it is a description of what was left to fix. **The test that let this
+run proceed was: does the stand-down's measurement bound *my* change, or the one
+it made?**
+
+Its second finding did have to be checked rather than accepted, and it did not
+survive: *"that regime looks unreachable from real data — a Seestar stack is
+derived from a 16-bit sensor, so max/sky ≲ 65"*. The collapse is not a function
+of `max/sky`. `autostretch` normalises against the **0.5th percentile**, which
+sits at the sky, so what drives `m` to its floor is `(p99.5 − sky) / σ_sky` — and
+a broad bright core covering more than 0.5 % of the frame pulls the 99.5th
+percentile up to the core's own level at a perfectly ordinary 16-bit peak. Swept
+on 16-bit-realistic scenes it is reachable at 8 k–64 k peaks, and the knob's
+before/after there is **3 → 9 distinct 8-bit levels** across the core. The lesson
+is narrow and worth keeping: *a bound stated on one ratio does not transfer to a
+formula that uses a different one — re-derive it from the code rather than
+quoting the number.*
+
+### The dogfood pass (`--mosaic --editor`): CLEAN
+
+Run on the merged v0.424.0 tree, both samples, per AGENTS.md §7. Mosaic trim Auto
+would apply: **7.9 %** (the §1 bug line is ~15 %). All 21 ops added one at a time
+on **both** the field and the mosaic run — every one re-rendered the live preview,
+no console error, no failed request, undo and redo clean. Nothing overflowed at
+420 px. Tallest page, phone: the mosaic Target page at **3,447 px**.
+
+Read as one paragraph (§7's "could a beginner hold all of these at once?"), the
+six sentences the app says about that mosaic are consistent this time — the panel
+map's *"a little behind at the top-right: about 30 s there against 1 min"* and the
+health panel's *"about 23 % of the picture has 3 subs on it where most of it has
+6… about 1.4× grainier"* are the same fact in two currencies, each naming the
+30 s, and the min/max praise is honest at a per-pixel depth of 3 (v0.422.1's
+floor). No finding; recorded because a clean sweep is a record, not a bug.
+
+### A container-disk trap that reads exactly like "main is red"
+
+The third full-suite run of this session died at 99 % in a **wall of `E`s** —
+hundreds of errors, no `FAILED` lines, and a traceback ending
+`OSError: [Errno 28] No space left on device` inside pytest's own cache write.
+Nothing was wrong with the tree. **`/tmp/pytest-of-root` held 28 GB**: pytest
+keeps the last *three* runs' `tmp_path` trees, this suite's fixtures write real
+FITS canvases, and a run costs ~9 GB — so the third full run of a session fills
+the container's writable allowance on its own. `scripts/agent-dogfood.sh`'s
+scratch (another ~1 GB, `/tmp/astrostack-dogfood`) sits beside it.
+
+Two things worth carrying forward. **The tell:** errors rather than failures, at
+the *end* of the run, with `No space left on device` somewhere below the summary
+— the same shape as the documented dogfood/`webapp/static` collision (AGENTS.md
+§7), and just as easy to misread as "the baseline is red, fixing it is task #1".
+**The fix:** `rm -rf /tmp/pytest-of-root` before a second or third full run, and
+`rm -rf /tmp/astrostack-dogfood` once a dogfood pass has been read. `df -h /`
+answers in a second.
+
+*(Also confirmed the §7 warning the hard way and got away with it: I ran
+`npx vite build` — via a dogfood-free `vitest`/build check — while a pytest run
+was in progress. The build empties `webapp/static/` for ~12 s and any
+`tests/webapp` test calling `create_app()` in that window errors at fixture
+setup. It happened to be running early-alphabet tests. Serialise them anyway.)*
+
+### Where the tasks came from, since "Bugs (fix these first)" is still dry
+
+Seventh consecutive run to report it so. The open **Ideas** are mostly gated on
+real data, deliberately stood down with numbers, or already closed-in-place. What
+made this run's pick findable was scanning for entries whose gate is a
+*measurement an agent can make in the repo* rather than one needing the owner's
+frames — this entry's was exactly that, and the measurement took twenty minutes.
+
+---
+
 ## 2026-09-11 (Builder, branch `claude/sweet-babbage-okb3cy`) — one feature, end to end; the docstring-caller audit terminated clean; and a page that was 8,194 px before a browser said so
 
 **The run.** One task, shipped as one independently-green commit: **v0.423.0** — the
