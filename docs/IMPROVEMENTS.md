@@ -105,36 +105,19 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   **equals** `(5/400, 5/400, 395/400, 395/400)` — the border rule's own answer, measured — with the ~95 % kept
   fraction a consequence rather than the check; on the reverted rule it was 0.902, inside the old
   `0.90 < kept < 0.99` window.
-  **Still open: (3, note only)** the v20/v21 fixtures in
+  ~~**(3, note only)** the v20/v21 fixtures in
   `tests/test_project_schema_drift.py` are today's `SCHEMA_SQL` minus one or two columns, which
-  `_reconcile_table_columns` restores even with the migration steps deleted — the v9–v14 tests in
-  `tests/test_project.py` hand-write the old tables and are the pattern to copy. (S; Confidence: HIGH.)
-
-- **🟠 CI CERTIFIES THE CHECKOUT, NEVER THE IMAGE (fourth external audit, 2026-09-10) — `READY`, infra, S.**
-  `.github/workflows/ci.yml` has two jobs, both against the source tree; the artifact the owner installs has
-  never been built or run by anything but his terminal (incident 2026-09-09). Add a third job that builds **from
-  the Dockerfile's own file set**: `docker build --target frontend -f docker/Dockerfile .` (fast; no ASTAP
-  download in that stage; fails on any import that reaches outside `frontend/`), then a Python smoke that copies
-  only what the Dockerfile copies (`pyproject.toml README.md seestack/ webapp/`) to a scratch dir, `pip install
-  "<dir>[web]"` **non-editable**, and from `cd /` runs `python -c "import webapp.main, webapp.sample_data;
-  from seestack import nightplan"` (exercises package-data and CWD-independence, which `pip install -e` at the
-  repo root never can). Verified in this audit's build that both would pass today. Batch with the same commit
-  (each traced in PROCESS-NOTES 2026-09-10): `RUN npm install` → `npm ci` with `package-lock.json` copied
-  unconditionally (CI uses `npm ci`; no drift today); **PySide6 is in the base `dependencies`, so `pip install
-  .[web]` installs 650 MB of Qt into a 1.89 GB image that never imports it** — move it to a `gui` extra and update
-  AGENTS.md §7 / `agent-setup.sh` / `ci.yml` to `.[dev,web,gui]`; `ENV ASTROSTACK_PORT` in the Dockerfile is dead
-  (`CMD` hardcodes 8000 — drop the ENV or use it); in `docker-compose.yml` use the long volume syntax with
-  `create_host_path: false` so a mistyped `ASTRO_DATA` fails loudly instead of booting on a fresh empty directory
-  (reproduced: Docker creates the missing host path and the app comes up with an empty library).
-
-- **🟡 THE EDITOR OFFERS A MODE THE IMAGE CANNOT RUN AND THE OWNER HAS DECLINED (fourth external audit,
-  2026-09-10).** `color_calibration_mode` = `"gaia"` (`webapp/schemas.py` ~1127, `seestack/edit/ops/tone.py`)
-  imports `astroquery.gaia` (`seestack/post/color_cal.py` ~387); `astroquery` is in no dependency list and is
-  absent from the image (`ModuleNotFoundError`), and it is a SIMBAD/CDS network call — declined by the LOCAL
-  rule (AGENTS.md §1). The broad `except Exception` at `color_cal.py` ~156 swallows it and falls back to
-  gray-star with only a log line, so picking it does nothing and says nothing. **Fix:** remove the option from the
-  schema and the op (keep the engine branch inert), and let a stored recipe that names it load as `gray_star`
-  with the auto-note saying so. (S, friendliness; confidence HIGH — checked in the running image.)
+  `_reconcile_table_columns` restores even with the migration steps deleted~~ — **FIXED v0.418.2**
+  (Builder 2026-09-11), and the entry is now CLOSED. Reproduced first: both tests passed with their
+  `if from_version < 21` / `< 22` blocks **deleted outright**. Two things were wrong, and only one of
+  them was the fixture. The *observation* was that a purely additive nullable-column migration and
+  the runtime backfill produce the same schema, so `_disable_the_runtime_backfill` now switches the
+  net off and makes the migration the only thing that can satisfy the assertions. The *fixture* is now
+  a frozen DDL literal instead of `SCHEMA_SQL` minus the new columns — which is the half that buys
+  something durable: a derived fixture grows every column the schema grows, so it can never be missing
+  one, whereas a frozen one goes red the moment a column reaches `SCHEMA_SQL` with no `ALTER` step.
+  Verified against all three cases, including a synthetic new column with no migration — the v0.119.8
+  live-install brick, red in this suite for the first time. Full entry in [`SHIPPED.md`](SHIPPED.md).
 
 - **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** ~~No validator
   stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
@@ -471,75 +454,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   note — a button earns its place by being *conditional on something rare*; an advisory that fires on most
   stacks stays a sentence. But there is no backlog of un-actioned sentences left on the Stack form to sweep.
 
-- **NEW IDEA (Builder 2026-08-30, the generalisation of the v0.311.3 "First light" bug) — sweep every date the
-  app shows a beginner and ask whether it means *when you shot this* or *when the app did something*.**
-  *(Pillar: understand / trust — PRIORITY 3; size S per surface, M for the sweep. Confidence: the class is
-  confirmed — one instance was reproduced in a running app and fixed this run.)* "First light" quoted the
-  target-row **creation** stamp and so told a Seestar owner with a back catalogue that they took up the hobby
-  the week they installed AstroStack. The bug is fixed; **the class is not swept.** The owner's mental model of
-  a date on a picture is *the night I shot it*, and several surfaces show a **processing** date in a place that
-  reads like a capture date — the clearest is the Dashboard's **Recent stacks** strip, whose tile reads
-  `Sample: Orion Nebula (M42) · 6 FRAMES · Aug 30, 2026` where the 30 Aug is when the *stack ran*, while the
-  subs under it are dated 2024-11-15. On a re-stack of old data that is off by years, on the app's front page.
-  **Shape:** enumerate the surfaces (Dashboard recent strip, Gallery cards, History rows, the Library tile, the
-  keepsake/poster) and for each decide which date the *reader* means, rather than which one is cheapest to
-  reach — a stack run's own timestamp is right for "which run is newest", and wrong as the caption on a
-  picture. `Project.earliest_frame_utc()` (new this run) and the existing per-night rollups already answer the
-  capture side, so most of this is a decision plus a label, not new data. **Care:** don't flip a *sort* to
-  capture time — "newest run" is the right ordering for History — and where both dates matter, say both
-  ("shot 15 Nov 2024 · stacked 30 Aug 2026") rather than silently swapping one for the other.
-
-  **✅ THE LAST TWO NAMED SURFACES ARE DONE (Builder, v0.321.2, branch `claude/wizardly-feynman-be4ubk`) — the
-  Gallery card and the History row, which were the two still printing a *raw machine stamp* with no label at
-  all.** The entry names five surfaces; the Dashboard strip, the keepsake and the Target hero were closed by
-  earlier runs, and **the Library tile turns out to show no date at all** (`Library.tsx` reads
-  `last_activity_utc` only to *sort* by it, which is the right use and the Care note's own exception) — so these
-  two were the whole remainder, and the sweep is finished. Both printed `run.timestamp_utc` sliced with `.replace("T", " ")`
-  — `2026-08-30 14:32` on the Gallery card, `2026-08-30T14:32:05` on the History row — which is (a) the moment
-  the *stack ran*, years out from the capture on a re-stack of a back catalogue, and (b) not a date format the
-  app uses anywhere else a person reads.
-
-  **Gallery card → `pictureDateLabel`**, the same helper the Dashboard strip and the Target hero already use, so
-  it says *"Shot 15–18 Nov 2024"* and falls back to a **labelled** *"Stacked 30 Aug 2026"* when the run predates
-  the capture window (schema < 18 — i.e. almost everything in the owner's library today). The night count is
-  deliberately **not** passed: the card's line is already five segments long, and "over 4 nights" belongs on the
-  caption, not the tile. The run's identity there is its `output_basename` printed beside the date, so the clock
-  time was not needed.
-
-  **History row → both dates, each labelled** — *"Shot 15–18 Nov 2024 · Stacked 30 Aug 2026, 14:32"* — because
-  this is the one list where they answer different questions: which run this row *is*, and what the picture is
-  *of*. That is the entry's own "where both dates matter, say both" rule, and the sort is untouched (still newest
-  run first, as the Care note requires). **The clock time is load-bearing here and is why this needed a new
-  helper:** `output_basename` is reused across a re-stack, so two re-stacks made the same afternoon are
-  distinguished by nothing else — a date-only label would collapse two rows into identical text.
-  `formatStampDateTime` is `formatStampDate` plus `HH:MM`, keeping the never-a-numeric-month rule and the same
-  empty-string-on-junk contract.
-
-  **Frontend-only:** no API, schema, config, on-disk or default change; both fields were already on the payloads
-  (`GalleryItem`/`StackRun` have carried `capture_night_start`/`_end` since schema 18) and an older backend
-  omitting them lands on the labelled "Stacked" form, which is exactly right.
-
-  **Tests (+6; the 4 component ones fail before):** `format.test.ts` (+2 — the clock time added to the same named
-  month, and the junk contract), `Gallery.test.tsx` (+2 — a 2024 capture window shown as *Shot* with the 2026
-  processing stamp gone from the card, and the labelled fallback with no "Shot" on a run that has no window) and
-  `History.test.tsx` (+2 — both labels on one line with no raw ISO stamp, and two same-afternoon re-stacks whose
-  lines stay distinct while neither claims a shoot date).
-
-  **✅ AND THE SKY FOOTPRINT LINE, THE LAST ONE ON THE LIST (Builder, v0.321.3, same branch).** The Sky Map's
-  selected-footprint caption read `RA 83.822° · Dec −5.391° · 17 Aug 2026` — a bare, unlabelled date beside a
-  picture, i.e. the exact shape of this whole entry, and the leftover the v0.313.0 run explicitly named. It now
-  goes through the same `pictureDateLabel`. The field it needed was genuinely missing (unlike the Gallery and
-  History, which already had it): `SkyImage` gained **additive optional** `capture_night_start`/`_end`, bucketed
-  with the same `capture_night_range` and the same `Settings.site_lon` the Gallery card and the Nights card use,
-  so all three can't name one session differently. `timestamp_utc` stays on the payload untouched — the viewer
-  draws newer tiles on top by it, which is the right use of a processing stamp and the Care note's own exception.
-  **Upgrade-safe:** two optional response fields (an older frontend ignores them; an older backend omitting them
-  reads as "no capture window", which lands on the labelled "Stacked …" form). **Tests (+5, 4 failing before):**
-  `tests/webapp/test_sky.py` (+2 — the window carried through as observing nights with the stack stamp intact,
-  and a pre-schema-18 run reporting null rather than borrowing it) and `Sky.test.tsx` (+2 new, +1 updated — a
-  capture window shown as "Shot 15–18 Nov 2024" with no 2026 anywhere in the line, and the labelled fallback; the
-  existing "dates it like every other surface" assertion gained the label and keeps its no-raw-ISO check).
-
+- ~~**NEW IDEA (Builder 2026-08-30, the generalisation of the v0.311.3 "First light" bug) — sweep every date the app shows a beginner and ask whether it means *when you shot this* or *when the app did something*.**~~ — **✅ SWEEP FINISHED; cut to [`SHIPPED.md`](SHIPPED.md) 2026-09-11 (search "sweep every date") — do not re-pick it.** All five named surfaces are closed (Dashboard strip, keepsake and Target hero by earlier runs; the Gallery card and History row as v0.321.2; the Sky footprint line as v0.321.3), and the Library tile was measured to show no date at all — it reads `last_activity_utc` only to *sort*, which is the Care note's own exception. The rule that survives, and the only part still worth reading: **a stack run's own timestamp is right for "which run is newest" and wrong as the caption on a picture**; where both dates matter, say both ("shot 15 Nov 2024 · stacked 30 Aug 2026") and never flip a *sort* to capture time. `pictureDateLabel` / `formatStampDateTime` are the shared helpers — use them rather than slicing an ISO stamp.
 - **NEW IDEA (Builder 2026-08-30, the one case the v0.312.1 tint fix deliberately fenced off rather than
   solved) — a many-sub stack whose canvas is no bigger than its preview still gets the cyan wash.**
   *(Pillar: trust — PRIORITY 3; size S–M; **low urgency, and check the case is reachable before building**.)*
@@ -777,6 +692,33 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   add the same sentence, and check the wordings agree on the *direction* and *magnitude* of the claim. **Care:**
   don't collapse genuinely different questions into one — "have I shot enough?" (a goal) and "would another hour
   help?" (a marginal return) are related but not the same; this is about the *marginal-return* sentence only.
+
+  **⚪ MEASURED AND STOOD DOWN — do NOT build this; the disagreement it exists to fix is not there
+  (Builder 2026-09-11, branch `claude/sweet-babbage-kg3yfc`).** I did the entry's own first step — "check the
+  wordings agree on the *direction* and *magnitude* of the claim" — against the real code rather than from
+  recall, and it closes the idea instead of sizing it.
+
+  **The two sentences are already one voice: the same formula, in the same currency.**
+  `nightplan.noise_gain_from_more_time` is `1 − √(t/(t+h))`; `integrationTrend`'s projection is
+  `1 − 2^−p` with `p` clamped to the ideal `0.5`, which is *the same expression* for `h = t`. Measured at
+  the one point where both name the same extra time (a 1-hour target, where "another hour" **is** "double
+  your time") they agree to the decimal: **29.29 % vs 29.29 %**. Direction agrees everywhere, and
+  `integrationTrend` uses the target's own *measured* falloff exponent capped at ideal, so it can only ever
+  under-claim relative to the theory — never over-claim.
+
+  **What looks like a conflict is two different `h`, each stated in its own sentence.** At 20 h captured the
+  Tonight card says ~**2.4 %** (for `h` = 1 hour) and the Target page says ~**29.3 %** (for `h` = 20 hours) —
+  both correct, and neither is ambiguous, because each sentence names its own extra time out loud ("another
+  hour" / "double your 20.0 h"). Full table, if it is ever re-examined (captured → +1 h → double-at-ideal):
+  0.25 h → 55.3 / 29.3; 0.75 → 34.5 / 29.3; 1.0 → 29.3 / 29.3; 2.0 → 18.4 / 29.3; 5.0 → 8.7 / 29.3;
+  20.0 → 2.4 / 29.3.
+
+  **And the other half of the slice is a cost, not a win.** "So the readiness surface can add the same
+  sentence" means putting a *third* marginal-return sentence on a page, against a standing owner complaint
+  that the UI is busy and AGENTS.md §1's "prefer a consolidation over a new card". The retrospective
+  surfaces this entry lists alongside them — `oneFrameVsStack` / `StackNoiseBadge`'s "stacking cut your noise
+  ~N×" — answer *"what did stacking already buy me?"*, which the entry's own Care note fences off as a
+  genuinely different question. So there is nothing left that is both in scope and worth doing.
 - **NEW (Builder 2026-07-30, found while shipping the Check & locate outcome line v0.222.2) — the legacy desktop
   dialog reports "solved N/M" from a *progress counter*, so it claims a perfect solve on a field where nothing
   located.** *(Correctness of a user-facing figure — but in the **deprioritised** desktop GUI, so low priority;
@@ -2997,6 +2939,9 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.418.2** — 🟠 the **third and final** part of the fourth external audit's "fixtures that cannot exhibit their bug" entry, closing it: **the v20/v21 migration tests passed with their migration steps deleted outright** (reproduced first). Two problems, and the entry named one. Named: an additive nullable-column migration and the runtime `_reconcile_table_columns` net produce the same schema, so `_disable_the_runtime_backfill` switches the net off and leaves `_migrate_schema` as the only thing that can pass. Unnamed, and where the durable value is: a fixture built from today's `SCHEMA_SQL` **tracks** it, so a forgotten `ALTER` could never make this file red — the fixtures are now **frozen DDL literals** (`_V20_FRAMES_SQL`, `_V21_FRAMES_SQL`, `_V20_STACK_RUNS_SQL`) and `_assert_tables_are_fully_migrated` checks every authoritative column arrived. Verified against three scratch reverts: the v21 step deleted, the v22 step deleted, and **a new `SCHEMA_SQL` column with no migration step** — the v0.119.8 live-install brick, red in this suite for the first time. Tests-only; nothing weakened. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.418.1** — 🟡 FRIENDLINESS (PRIORITY 3) + §9, a bug from the fourth external audit reproduced and closed: **the editor and the Stack form offered a colour-calibration mode the image cannot run and the owner has declined.** `color_calibration_mode="gaia"` imported an `astroquery` that is in no dependency list and absent from the image, the broad `except` swallowed the `ModuleNotFoundError`, and the solve silently became gray-star — and it was a CDS **network** call, which AGENTS.md §1 declines as standing policy. Reproduced by restoring the old dispatch: `Gaia calibration failed (No module named 'astroquery')`. The option is gone from `_MODE_CC`, the StackOptions descriptor and the historical `stack_dialog` combo; `calibrate_color` answers a stored `MODE_GAIA` with the gray-star solve **and stamps `GAIA_RETIRED_NOTE`** so the editor's read-out says what ran, and nothing imports `astroquery` any more. **The §9 half is the load-bearing one:** removing an enum choice makes `validate_stack_options` *reject* a value an old `default_stack_options` legitimately holds — a 422 on every Stack submit and on the auto-stack chain — so new `RETIRED_OPTION_VALUES` + `normalise_retired_option_values` translate it at the four places it surfaces (both chokepoints, the form merge, the settings write), while a genuinely wrong value is still refused. Tests +8, **all eight fail before**, verified by three scratch reverts — one rewritten because the pre-fix broad `except` swallowed the assertion and it *passed on the bug*. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.418.0** — 🟠 INFRA / upgrade-safety (AGENTS.md §8 "green means the checkout passed, not that the owner's install works"), the `READY` entry from the fourth external audit: **CI now builds and runs what the owner installs, not only the checkout.** A third `image` job does `docker build --target frontend -f docker/Dockerfile .` (cheap — stops before the ASTAP download) and then a Python smoke that copies *only* what the Dockerfile copies, `pip install`s it **non-editably** and imports `webapp.main` / `webapp.sample_data` / `seestack.nightplan` from `cd /` — the three properties `pip install -e .` at the repo root can never test (package-data that never reached the wheel, CWD-dependence, a tree that is importable anyway). **Plus `PySide6` out of the base `dependencies` into a new `gui` extra**, so the image's own `pip install .[web]` stops pulling ~650 MB of Qt it never imports — measured with a `--dry-run` resolve (zero PySide6/shiboken, where the old pyproject installed them); `agent-setup.sh` and AGENTS.md §7 move to `.[dev,web,gui]`. And three smaller ones from the same audit: `npm install` → `npm ci` with the lockfile copied unconditionally, the dead `ENV ASTROSTACK_PORT` dropped, and compose's `/data` bind given `create_host_path: false` so a mistyped `ASTRO_DATA` fails loudly instead of booting on an empty library. Tests +9 (`tests/test_image_contract.py`), **seven fail before**, each verified by a scratch revert — including one rewritten because the obvious version *passed on the bug*. No config, schema, on-disk, API or default change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.417.1** — 🟠 two fixtures from the fourth external audit that **passed on the bug they name**, each now verified red against a scratch revert of the production fix. `displayspace.assert_shadow_clip` replays the pre-A1 `_sky_mode` histogram and requires the clipped-zero bin to *win* it (the old guard only said the clip was *present*), and `test_the_sky_stays_put_at_every_stack_depth` — which had drifted onto a hand-rolled `clipped_fraction > 0.005` instead of the shared guard — carries an explicit `exhibits_a1` flag, the measured boundary being between 0.001 and 0.0008. `test_a_ragged_mosaic_still_gets_its_fringe_trimmed` now asserts the exact rect `(5/400, 5/400, 395/400, 395/400)` rather than a `0.90 < kept < 0.99` window the reverted rule's 0.902 sat inside. Tests-only: no engine, webapp, frontend, config, schema or on-disk change.
 - **v0.417.0** — ⭐ 🔴 PRIORITY 1, the **remaining two halves** of the fourth external audit's "owner hits this first" entry, closing it: the same over-trim note on the **Target page** (`OverTrimmedTargetNote`) and the **library-wide count on the Dashboard** (`OverTrimmedNote` over a new `GET /api/over-trimmed-pictures`), so the question "*which* of my pictures is this?" has an answer without opening every target. Both read one server-side verdict — new `webapp/stale_crop.py` + `…/editor/crop-health`, factored through `editor.crop_health_for_run` so the scan and the per-run answer cannot name different pictures — and that verdict adopts the editor's shipped rule verbatim (`STALE_CROP_KEEP_RATIO` 0.25, silent when the border rule proposes no trim), with a drift test grepping `mosaicTrim.OVER_TRIM_KEEP_RATIO` so the two copies can't diverge. `sharePctLabel` is now shared, so all three surfaces round one measurement the same way. Read-only throughout: a saved recipe is never rewritten. Tests +27. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.416.0** — ⭐ 🔴 PRIORITY 1 (the editor), the **editor half** of the fourth external audit's "owner hits this first" entry, filed the same day and reproduced in the shipped image: **a mosaic Auto-edited before the D1 fixes keeps the old over-trim in its *saved recipe*, and every surface shows the sliver.** The fixes re-derive the trim; nothing compared a stored crop against it. New `mosaicTrim.overTrimmedVerdict` weighs the recipe's live enabled crops (`cropCoverageFraction`) against the rectangle `/editor/trim-suggestion` already fetches, and under `OVER_TRIM_KEEP_RATIO` (0.25) of what the canvas offers says so — *"cropped down to about 3% of the stack, but about 92% of it is well covered"* — with **Re-trim border**, which is the existing trim *preview*, so the user sees the rectangle before `applyTrimCrop` replaces only the Crop op. Where the stored "what Auto did" note is on screen the Alert also says its trim figure describes the crop being replaced, closing the gap between two sentences a beginner reads together. A quarter rather than the entry's suggested half, because at 0.5 a deliberate crop to the middle 40 % of a mosaic gets accused while the measured case is 3.4 % against 92.4 %. Frontend-only, no new endpoint and no new request; the Target-page note and the Dashboard library-wide count stay open on the entry. Tests +9, two fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).

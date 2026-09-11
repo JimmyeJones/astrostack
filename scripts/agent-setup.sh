@@ -46,8 +46,8 @@ source .venv/bin/activate
 # `ReadTimeoutError` from files.pythonhosted.org mid-resolve), so retry once with
 # a longer budget before giving up. `-q` is dropped on the retry — if the second
 # attempt fails too, the run needs to see why.
-pip install -q -e ".[dev,web]" \
-  || pip install --timeout 120 --retries 5 -e ".[dev,web]" \
+pip install -q -e ".[dev,web,gui]" \
+  || pip install --timeout 120 --retries 5 -e ".[dev,web,gui]" \
   || PY_DEPS_FAILED=1
 # Verify rather than assume. This script is `source`d, and its `set -e` has been
 # observed NOT to stop a failed `pip install` here — the run then read a cheerful
@@ -61,12 +61,12 @@ if [ -d frontend ] && [ ! -d frontend/node_modules ]; then
 fi
 
 if [ "${PY_DEPS_FAILED:-0}" = "1" ]; then
-  echo "ERROR: the Python environment is NOT ready — 'pip install -e \".[dev,web]\"'"
+  echo "ERROR: the Python environment is NOT ready — 'pip install -e \".[dev,web,gui]\"'"
   echo "       did not leave an importable toolchain in .venv (see the output above)."
   echo "       This is an install failure, usually a PyPI read timing out — the"
   echo "       checkout is fine. Retry the install before doing anything else:"
   echo "         source .venv/bin/activate"
-  echo "         pip install --timeout 120 --retries 5 -e \".[dev,web]\""
+  echo "         pip install --timeout 120 --retries 5 -e \".[dev,web,gui]\""
   echo "       Do NOT read 'No module named pytest' as a broken repo."
   return 1 2>/dev/null || exit 1
 fi

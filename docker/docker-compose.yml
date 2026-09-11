@@ -30,7 +30,17 @@ services:
     volumes:
       # Host data path from .env (ASTRO_DATA); falls back to the placeholder
       # below only if you never set it — which is almost certainly wrong.
-      - ${ASTRO_DATA:-/mnt/CHANGE_ME/astro}:/data
+      #
+      # The long syntax is here for `create_host_path: false`: with the short
+      # `host:container` form Docker *creates* a missing host path, so a typo in
+      # ASTRO_DATA brings the app up happily on a brand-new empty directory and
+      # the library looks like it lost every target. Refusing to create it turns
+      # that into a loud startup failure naming the path instead.
+      - type: bind
+        source: ${ASTRO_DATA:-/mnt/CHANGE_ME/astro}
+        target: /data
+        bind:
+          create_host_path: false
       # Optional: mount an ASTAP install instead of bundling it in the image.
       # - /mnt/tank/apps/astap:/opt/astap:ro
     environment:

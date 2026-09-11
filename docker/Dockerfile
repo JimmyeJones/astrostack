@@ -5,8 +5,12 @@
 # ---------------------------------------------------------------------------
 FROM node:20-slim AS frontend
 WORKDIR /build
-COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
+# `package-lock.json` is copied unconditionally (no `*` glob) and installed with
+# `npm ci`, so the image is built from the exact tree CI tested — `npm install`
+# was free to resolve a newer transitive dependency than the lockfile names, and
+# a missing lockfile silently degraded to an unpinned install instead of failing.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
 COPY frontend/ ./
 # Vite is configured to emit into ../webapp/static; redirect it here instead.
 RUN npm run build -- --outDir /build/dist --emptyOutDir
@@ -61,7 +65,11 @@ RUN --mount=type=cache,target=/root/.cache/pip pip install .[web]
 
 ENV SEESTACK_ASTAP_PATH=/opt/astap/astap
 ENV ASTROSTACK_DATA=/data
-ENV ASTROSTACK_PORT=8000
+# No ASTROSTACK_PORT here on purpose. It is read only by `webapp.main:run` (the
+# `astrostack-web` console script), and this image's CMD runs uvicorn directly
+# with `--port 8000` — as do EXPOSE and HEALTHCHECK. Setting it would have
+# advertised a knob that changes nothing. The container's port is fixed at 8000;
+# remap it on the host with compose's `ports:` instead.
 # Import seestack/webapp (and the built webapp/static) from the source tree in
 # /app, so the SPA is found regardless of wheel package-data behaviour.
 ENV PYTHONPATH=/app

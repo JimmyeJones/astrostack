@@ -41,8 +41,15 @@ def _sanitize_patch(clean: dict[str, Any]) -> dict[str, Any]:
     Mutates and returns *clean*. Raises ``HTTPException(422)`` on a bad value."""
     dso = clean.get("default_stack_options")
     if isinstance(dso, dict):
-        from webapp.schemas import strip_non_form_keys, validate_stack_options
-        stripped = strip_non_form_keys(dso)
+        from webapp.schemas import (
+            normalise_retired_option_values,
+            strip_non_form_keys,
+            validate_stack_options,
+        )
+        # Translate a retired choice before validating *and* before persisting, so
+        # re-saving settings quietly upgrades an old value instead of writing it
+        # back for the next version to trip over (v0.418.0, "gaia").
+        stripped = normalise_retired_option_values(strip_non_form_keys(dso))
         try:
             validate_stack_options(stripped)
         except ValueError as exc:

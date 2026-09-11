@@ -313,14 +313,14 @@ class StackOptionsDialog(QDialog):
         self._color_cal = QComboBox()
         self._color_cal.addItem("Off", userData=None)
         self._color_cal.addItem("Gray-star (offline)", userData="gray_star")
-        self._color_cal.addItem("Gaia catalog (online)", userData="gaia")
+        # The "Gaia catalog (online)" item is gone with the mode itself (retired
+        # v0.418.0 — see MODE_GAIA in seestack/post/color_cal.py). A stored
+        # template naming it still loads: _load_options falls through to
+        # gray_star when the value matches no item.
         self._color_cal.setToolTip(
             "Photometric color calibration applied to the final stack.\n\n"
             "<b>Gray-star</b>: assumes the average star in the field is "
-            "neutral white. Works offline; good for dense star fields.\n\n"
-            "<b>Gaia</b>: cross-matches detected stars to the Gaia catalog "
-            "and uses each star's published colour to predict the correct "
-            "R/G/B ratio. Requires internet. Most accurate."
+            "neutral white. Works offline; good for dense star fields."
         )
         form.addRow("Color calibration:", self._color_cal)
 
@@ -455,6 +455,12 @@ class StackOptionsDialog(QDialog):
         self._final_grad.setChecked(opts.final_gradient_removal)
         cc_data = opts.color_calibration_mode if opts.color_calibration else None
         idx = self._color_cal.findData(cc_data)
+        if idx < 0 and opts.color_calibration:
+            # A template naming the retired "gaia" mode (v0.418.0) matches no item.
+            # Land on gray-star — what the engine now runs for it — rather than
+            # leaving the combo on "Off", which would silently drop the calibration
+            # the template asked for.
+            idx = self._color_cal.findData("gray_star")
         if idx >= 0:
             self._color_cal.setCurrentIndex(idx)
         idx = self._tiff_mode.findData(opts.tiff_mode)
