@@ -1,5 +1,104 @@
 # Shipped — the record
 
+## v0.422.1 — 2026-09-11 — 🐛 the min/max drop has a per-pixel floor too, and the finished picture was the one surface that did not know
+
+**The claim that was false.** A run combined with the order-statistic min/max
+reject gets one unconditional line of reassurance on "How's my stack?":
+
+> *Dropped the brightest and darkest value at each pixel, so a lone satellite or
+> plane trail can't show up in your final image.*
+
+"At each pixel" is a whole-canvas claim, and it is not true at a pixel fewer than
+**three** subs reached. `MinMaxRejectAccumulator.result` says so in its own
+docstring — *"1 ≤ count < 3 — can't spare two: plain mean of whatever covered the
+pixel"* — and the accumulator was run to confirm it rather than trusted: a pixel
+covered twice, by 10 and by a 1000-ADU "satellite", comes out **505**; covered
+three times it comes out **10**. So wherever the canvas is one or two subs deep
+the trail is averaged in at full weight, and this sentence promised the opposite.
+
+**Why that is reachable, and on the owner's own shape.** The floor is a *pixel*
+count, not the target's. `combine_method` dispatches min/max on `n >= 3` across
+the whole run, and `auto_reject` sizes the method from the thinnest *substantial*
+panel (≥ 3 subs, `AUTO_REJECT_PANEL_MIN_FRAMES`) — so a mosaic part-way through
+its panels records `REJMODE = min-max-reject` on the strength of one panel while
+half its canvas sits at one or two subs and was never trimmed. That is a mosaic in
+progress, which is what a heavy mosaic user has most nights (AGENTS.md §1).
+
+**The tell was in the code's own contract.** `lone_outlier_min_depth`'s docstring
+names *"the one definition of the bound behind three answers that must never
+disagree"*: `rejection_reach`'s pre-run verdict on the Stack form, `stackhealth`'s
+`rejection_blind` note on the finished picture, and the `REJNEED`/`REJREACH` cards
+in the master's own header. Two of the three already read it and already answered
+min/max correctly — `rejection_reach` sizes by `min(n, depth)` and returns the
+order-statistic floor, and `_build_output_header_meta` stamps
+`REJREACH = peak_depth >= 3`. `stackhealth` was the one that did not: it called
+`kappa_min_frames` directly and gated the note on
+`blind_mode in ("sigma-clip", "drizzle-reject")`, with a comment explaining that
+min/max "cannot trip this" because it works from three subs up — true about the
+*method*, false about a *pixel*. So the Stack form warned before the run and the
+picture praised after it, about the same stack.
+
+**The fix is to read the shared helper.** `stackhealth` now takes its floor from
+`lone_outlier_min_depth(blind_mode, κ)` — each mode brings its own bound and none
+of them is spelled in this file any more — and admits `min-max-reject` to the
+`rejection_blind` note under the two claims the κ-σ branch already makes, both
+provable from the run's own coverage map:
+
+* `coverage_max < need` → *"With no more than 2 subs overlapping at any one spot
+  in this picture, the min/max outlier drop couldn't drop anything…"*
+* `coverage_median_depth < need ≤ coverage_max` → *"Over at least half of this
+  picture no more than 2 subs overlap, the min/max outlier drop couldn't drop
+  anything there…"*
+
+The *reason* differs from κ-σ's, so the sentence is built from a per-mode `why`
+rather than sharing one: *"it needs 3 subs on a pixel before there is a brightest
+and a darkest it can spare, and below that it averages them all in."* And the
+*cure* differs too — there is no switch. min/max is already the method that
+reaches furthest down and κ-σ would need about four times the depth, so the note
+says *"More subs on that part of the sky is the only fix"* and carries
+**`action=None`**, the same choice the uneven-grain note makes for the same
+reason. Naming "Auto outlier removal" here would point a beginner at a control
+that changes nothing.
+
+**One picture, one answer.** The reassurance now stands down when the blind note
+fires, the exact complement the "even coverage" praise already follows — nothing
+removed, and the run that really was trimmed keeps its sentence verbatim.
+
+**And the same qualifier on History's chip**, where the other half of the pair
+lives: `rejectionSummaryText` called a min/max fraction *"structural, by design —
+never a caution"*, so a **0 %** drop read as "it ran and this is what it does". 0 %
+on this mode means no pixel had three samples to spare, which is why the κ-σ
+branch two lines below already appends *"not enough subs on a pixel for it to
+reach"* off the run's own `REJREACH`. Same fact, same words, now on both branches;
+a run stacked before the engine stamped that verdict keeps the plain label.
+
+**What did not change.** The stored κ-σ / drizzle sentences are byte-for-byte what
+they were (the refactor moves "it " into the per-mode `why` and reassembles the
+same string), the engine rejects nothing differently, and no threshold moved.
+
+**Upgrade-safe (§9).** Advisory copy only: no config, DB-schema, on-disk, API-shape
+or default change, and no `SCHEMA_VERSION` bump. `coverage_median_depth` and
+`coverage_max` are columns that already exist and are already written on **every**
+path, min/max included — a stale comment in `stackhealth` claimed the min/max path
+"has no median", and the dogfood library disproved it (a min-max-reject mosaic run
+carrying `coverage_median_depth = 6.0`); the comment is corrected. A run recorded
+before those columns existed reports `None`/`0`, the depth falls back to the frame
+count, and for min/max that is ≥ 3 by construction — so an old library gains no
+notes it cannot prove.
+
+**Tests (+6, three fail-before, verified red by stashing the production file).**
+`tests/test_stackhealth.py` (+4): the note fires when nothing anywhere had three
+samples, naming min/max's own floor and never κ-σ's 11, with no action and no
+switch offered; it fires on the half-a-mosaic case with the "over at least half"
+wording; the praise survives a stack that really was trimmed; and a run with no
+coverage recorded gains nothing. `tests/test_rejection_reach.py` (+2): the
+"one definition, two surfaces" contract extended to min/max — walked over per-pixel
+depths 1, 2, 3, 4, 8, requiring `rejection_reach().reaches is not blind` at each —
+and a test that runs the **real accumulator** either side of `MIN_MAX_MIN_FRAMES`
+and requires the extreme to survive below it and be gone at it, so the constant the
+sentence quotes cannot drift from the behaviour it describes.
+`frontend/src/routes/History.test.tsx` (+2), one fail-before.
+
 ## v0.422.0 — 2026-09-11 — "Shoot the Moon tonight": the app plans a Moon session, not only a Moon nuisance
 
 The Scout filed this the same morning, and the gap it names is real: the owner **shoots the Moon** — the

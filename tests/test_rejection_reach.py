@@ -200,6 +200,58 @@ def test_reach_and_the_note_agree_on_a_drizzled_run_too():
         assert blind is (not reach.reaches), f"disagreed at {n} frames"
 
 
+def test_reach_and_the_note_agree_on_a_min_max_run_too():
+    """The third mode, and the one the contract used to miss. ``rejection_reach``
+    has always sized min/max by the *pixel* depth (``reach_n = min(n, depth)``),
+    while ``stackhealth`` excluded the mode outright — so a mosaic two subs deep
+    was warned about on the Stack form and then praised on the finished picture.
+    Walk the floor in both directions and require one answer."""
+    from seestack.io.project import StackRunRow
+    from seestack.stackhealth import stack_health
+
+    opts = StackOptions(min_max_reject=True, sigma_clip=False)
+    for depth in (1, 2, 3, 4, 8):
+        reach = rejection_reach(opts, 20, depth=depth)
+        run = StackRunRow(
+            id=1, timestamp_utc="2026-09-11T00:00:00+00:00", output_basename="m42",
+            fits_path="m42.fits", tiff_path=None, preview_path=None,
+            n_frames_used=20, canvas_h=1080, canvas_w=1920,
+            coverage_min=depth, coverage_max=depth, coverage_thin_frac=0.0,
+            coverage_median_depth=float(depth),
+            options_json='{"min_max_reject": true, "sigma_clip": false}',
+            rejection_mode="min-max-reject",
+            calstat="dark+flat", is_mosaic=True,
+        )
+        blind = any(note.kind == "rejection_blind" for note in stack_health(run, []))
+        assert blind is (not reach.reaches), f"disagreed at depth {depth}"
+
+
+def test_the_min_max_floor_is_the_depth_the_accumulator_actually_trims_at():
+    """The note's number has to be the accumulator's own behaviour, not a
+    constant that happens to match today. Run the real accumulator either side of
+    :data:`MIN_MAX_MIN_FRAMES` and require that the extreme survives below it and
+    is gone at it — the fact the sentence ("below that it averages them all in")
+    asserts to the user."""
+    import numpy as np
+
+    from seestack.stack.accumulator import MinMaxRejectAccumulator
+    from seestack.stack.stacker import MIN_MAX_MIN_FRAMES, lone_outlier_min_depth
+
+    floor = MIN_MAX_MIN_FRAMES
+    assert lone_outlier_min_depth("min-max-reject", 3.0) == floor
+
+    for depth in (floor - 1, floor):
+        acc = MinMaxRejectAccumulator((1, 1), dtype=np.float32)
+        acc.add(np.full((1, 1), 1000.0, dtype=np.float32))   # the "satellite"
+        for _ in range(depth - 1):
+            acc.add(np.full((1, 1), 10.0, dtype=np.float32))
+        out = float(acc.result()[0, 0])
+        if depth < floor:
+            assert out > 10.0, f"the outlier should survive at depth {depth}"
+        else:
+            assert out == 10.0, f"the outlier should be gone at depth {depth}"
+
+
 # --- lone_outlier_min_depth: the one definition the three surfaces share -------
 
 def test_min_depth_is_the_order_statistic_floor_for_min_max():

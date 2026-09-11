@@ -1688,6 +1688,31 @@ describe("rejectionSummaryText", () => {
     expect(small).toBe("Rejection dropped the ~2.0% most-extreme samples (min/max reject)");
     expect(small).not.toContain("κ");
   });
+  it("does NOT let a 0% min/max drop read as by-design when it could not reach", () => {
+    // min/max drops nothing at a pixel fewer than three subs reached (the
+    // accumulator averages them in instead), so 0 % on this mode means the
+    // canvas was too thin to trim — not that the drop happened and found
+    // nothing. Same sentence as the κ-σ branch, because it is the same fact.
+    expect(
+      rejectionSummaryText({
+        mode: "min-max-reject", fraction: 0, n_rejected: 0, n_contributed: 40,
+        reaches: false, peak_depth: 2, min_depth: 3,
+      }),
+    ).toBe("Rejection dropped the ~0% most-extreme samples "
+           + "(min/max reject — not enough subs on a pixel for it to reach)");
+  });
+  it("keeps the plain min/max label when the run says the drop did reach", () => {
+    expect(
+      rejectionSummaryText({
+        mode: "min-max-reject", fraction: 0, n_rejected: 0, n_contributed: 40,
+        reaches: true, peak_depth: 8, min_depth: 3,
+      }),
+    ).toBe("Rejection dropped the ~0% most-extreme samples (min/max reject)");
+    // …and an older run, with no verdict stamped, is untouched.
+    expect(
+      rejectionSummaryText({ mode: "min-max-reject", fraction: 0 }),
+    ).toBe("Rejection dropped the ~0% most-extreme samples (min/max reject)");
+  });
   it("words drizzle-reject with the data-driven sigma-clip wording, not min/max's", () => {
     // Two-pass drizzle rejection is a genuine κ-σ clip (contributions outside
     // mean ± κ·σ), so its fraction is data-driven and reuses the sigma-clip
