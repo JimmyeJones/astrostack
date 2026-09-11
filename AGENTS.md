@@ -575,7 +575,11 @@ Recreate tooling at the start of each run if missing:
 # Python engine + webapp (needs Python 3.12 specifically; pyproject pins
 # >=3.12,<3.13 — use python3.12 explicitly if the default python3 is older).
 python3.12 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,web]"
+# `gui` is the PySide6 extra. It is NOT in the base dependencies (v0.418.0 moved
+# it out, so the Docker image's own `pip install .[web]` stops dragging 650 MB of
+# Qt into a deploy that never imports it) — so the three pytest-qt tests and
+# `pytest-qt`'s own configure hook need it asked for explicitly here.
+pip install -e ".[dev,web,gui]"
 
 # Headless container extras: PySide6/pytest-qt need libEGL at import time even
 # though the webapp never opens a window. ffmpeg is the decoder behind "Stack

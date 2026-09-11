@@ -1,5 +1,90 @@
 # Shipped — the record
 
+## v0.418.0 — 2026-09-11 — CI builds what the owner installs (entry CLOSED)
+
+Until now `.github/workflows/ci.yml` had two jobs and both ran against the *checkout*.
+The artifact the owner installs is built from `docker/Dockerfile`'s own, much smaller file
+set (`frontend/`, `seestack/`, `webapp/`, `pyproject.toml`, `README.md` — `tests/` and
+`docs/` are not in the context at all) and runs from `/app` off a **non-editable** install.
+Nothing in this repository had ever built or run that. The 2026-09-09 deploy failure lived
+in exactly that gap and went through a green CI, which is what AGENTS.md §8 now warns about.
+
+**The new `image` job, in two halves.** `docker build --target frontend -f docker/Dockerfile .`
+stops before the Python layer, so there is no ASTAP download (hundreds of MB) and the whole
+thing is cheap — and it fails on any frontend import that reaches outside `frontend/`, on a
+lockfile `npm ci` can no longer satisfy, and on a broken `npm run build`. Then a Python smoke
+copies **only what the Dockerfile copies** to a scratch dir, `pip install`s it
+**non-editably**, and imports `webapp.main`, `webapp.sample_data` and `seestack.nightplan`
+from `cd /`. Each of those three properties is one `pip install -e .` at the repo root cannot
+test: editable leaves the whole tree importable, puts the repo root on `sys.path`, and makes
+package-data that never reached the wheel look present. It also asserts the bundled catalogue
+actually *loaded* (>100 objects), because a missing `seestack/data/*.json` leaves the import
+succeeding and the night planner silently empty. `webapp/static` is removed before the
+install, so the Python layer is checked in the state the `.dockerignore` really leaves it —
+which is also a standing check on v0.414.2's "degrade to 'Frontend not built'" fix.
+
+**Qt is out of the image.** `PySide6>=6.6` sat in the base `[project] dependencies`, so
+`pip install .[web]` — the Dockerfile's own install line — pulled ~650 MB of Qt into a
+1.89 GB image that never imports it (`seestack/core/jobs.py` defers its single PySide6 import
+into a function; `seestack/render/` is deliberately GUI-free). It is now a `gui` extra.
+Measured rather than assumed: a `pip install --dry-run` of `.[web]` against the new
+`pyproject.toml` resolves **zero** PySide6/shiboken distributions, where the old one installed
+them. `scripts/agent-setup.sh` and AGENTS.md §7 move to `.[dev,web,gui]` (without it
+`pytest-qt`'s `pytest_configure` has no binding to import, which is a collection-time
+INTERNALERROR, not a skip); the CI Python job deliberately stays on `.[dev,web]`, since that
+runner has no `libEGL` and could never have imported Qt anyway.
+
+**Three smaller things from the same audit, each traced in PROCESS-NOTES 2026-09-10.**
+`RUN npm install` → `RUN npm ci` with `package-lock.json` copied unconditionally: `npm install`
+was free to resolve a newer transitive dependency than the lockfile CI tested, and the old
+`package-lock.json*` glob meant a *missing* lockfile degraded silently to an unpinned install
+instead of failing the build. `ENV ASTROSTACK_PORT=8000` is gone — it is read only by
+`webapp.main:run` (the `astrostack-web` console script), while this image's `CMD` runs uvicorn
+directly with `--port 8000`, as do `EXPOSE` and `HEALTHCHECK`, so it advertised a knob that
+changed nothing. And `docker-compose.yml`'s `/data` bind moves to the long syntax with
+`create_host_path: false`: with the short `host:container` form Docker *creates* a missing
+source, so a typo in `ASTRO_DATA` brought the app up happily on a brand-new empty directory
+and the library read as having lost every target (reproduced in the audit).
+
+**Tests: +9, `tests/test_image_contract.py`.** Seven of the nine fail on the pre-fix tree,
+each verified by reverting the specific production change in a scratch run rather than by
+reading the diff — Qt in the base deps, the missing `gui` extra, `agent-setup.sh`'s install
+line, `npm install` + the lockfile glob, the short-syntax bind, and the absent CI job. The
+`ASTROSTACK_PORT` one needed its own test and a rewrite to get there: the obvious "no ENV
+names something unread" sweep **passes on the bug**, because `ASTROSTACK_PORT` *is* read by
+our code — in `webapp.main:run` — so a tree grep calls it live. What makes it dead is the path
+this image boots, so the test that exhibits it asserts consistency instead (an ENV for the
+port, against a `CMD` that hardcodes one). The generic sweep is kept beside it, documented as
+the weaker, forward-looking companion. The remaining non-exhibiting test is the Dockerfile↔CI
+copy-set drift guard, which has nothing to exhibit yet — it exists so the smoke learns about
+the next `COPY`.
+
+**Upgrade-safe (§9).** No config, DB-schema, on-disk-layout, API-shape or default change. The
+dependency move only *narrows what gets installed*; the `gui` extra keeps PySide6 available
+for anyone who wants the historical desktop GUI or its three pytest-qt tests. The compose
+change makes a mistyped path fail loudly instead of booting empty, which is strictly safer for
+the owner's data.
+
+The original entry, as filed by the fourth external audit:
+
+- **🟠 CI CERTIFIES THE CHECKOUT, NEVER THE IMAGE (fourth external audit, 2026-09-10) — `READY`, infra, S.**
+  `.github/workflows/ci.yml` has two jobs, both against the source tree; the artifact the owner installs has
+  never been built or run by anything but his terminal (incident 2026-09-09). Add a third job that builds **from
+  the Dockerfile's own file set**: `docker build --target frontend -f docker/Dockerfile .` (fast; no ASTAP
+  download in that stage; fails on any import that reaches outside `frontend/`), then a Python smoke that copies
+  only what the Dockerfile copies (`pyproject.toml README.md seestack/ webapp/`) to a scratch dir, `pip install
+  "<dir>[web]"` **non-editable**, and from `cd /` runs `python -c "import webapp.main, webapp.sample_data;
+  from seestack import nightplan"` (exercises package-data and CWD-independence, which `pip install -e` at the
+  repo root never can). Verified in this audit's build that both would pass today. Batch with the same commit
+  (each traced in PROCESS-NOTES 2026-09-10): `RUN npm install` → `npm ci` with `package-lock.json` copied
+  unconditionally (CI uses `npm ci`; no drift today); **PySide6 is in the base `dependencies`, so `pip install
+  .[web]` installs 650 MB of Qt into a 1.89 GB image that never imports it** — move it to a `gui` extra and update
+  AGENTS.md §7 / `agent-setup.sh` / `ci.yml` to `.[dev,web,gui]`; `ENV ASTROSTACK_PORT` in the Dockerfile is dead
+  (`CMD` hardcodes 8000 — drop the ENV or use it); in `docker-compose.yml` use the long volume syntax with
+  `create_host_path: false` so a mistyped `ASTRO_DATA` fails loudly instead of booting on a fresh empty directory
+  (reproduced: Docker creates the missing host path and the app comes up with an empty library).
+
+
 ## v0.417.0 — 2026-09-10 — the Target-page note and the Dashboard's library-wide count (entry CLOSED)
 
 The two halves v0.416.0 left open, and with them the whole "owner hits this first" entry.

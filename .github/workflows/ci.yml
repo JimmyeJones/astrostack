@@ -34,6 +34,9 @@ jobs:
         # feature would go unguarded.
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Install
+        # No `gui` extra: PySide6 lives there (v0.418.0) and this runner has no
+        # libEGL, so Qt could never be imported here anyway. The three GUI test
+        # files are ignored below and pytest-qt is disabled with it.
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,web]"
@@ -80,3 +83,68 @@ jobs:
       - name: Unit tests
         working-directory: frontend
         run: npm run test    # vitest run
+
+  image:
+    # The two jobs above certify the *checkout*. The artifact the owner installs
+    # is built from docker/Dockerfile's own, much smaller file set (frontend/,
+    # seestack/, webapp/, pyproject.toml, README.md — tests/ and docs/ are not
+    # there) and runs from /app off a NON-editable install. Nothing had ever
+    # built or run that before the owner's terminal did, which is exactly how the
+    # 2026-09-09 deploy failure got through a green CI (AGENTS.md §8).
+    name: Image contract (Dockerfile file set)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the frontend stage from the Dockerfile
+        # Fails on any import that reaches outside frontend/, on a lockfile that
+        # no longer satisfies `npm ci`, and on a broken `npm run build`. Stops at
+        # --target frontend so there is no ASTAP download (hundreds of MB) and no
+        # Python layer — the cheap half of the build that catches most breaks.
+        run: docker build --target frontend -f docker/Dockerfile .
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install exactly what the image installs, non-editably
+        # `pip install -e .` at the repo root can never catch these: it leaves the
+        # whole tree importable and puts the repo root on sys.path, so a module
+        # that reads a data file relative to CWD, or a package-data entry that
+        # never made it into the wheel, still works there and fails in the image.
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/imgsrc
+          cp pyproject.toml README.md /tmp/imgsrc/
+          cp -r seestack webapp /tmp/imgsrc/
+          # webapp/static is the SPA the frontend stage overlays in; it is
+          # .dockerignore'd out of the build context, so the Python layer must
+          # import without it (it degrades to "Frontend not built").
+          rm -rf /tmp/imgsrc/webapp/static
+          python -m pip install --upgrade pip
+          pip install "/tmp/imgsrc[web]"
+
+      - name: Import from / — package-data and CWD-independence
+        working-directory: /
+        run: |
+          set -euxo pipefail
+          python -c "import webapp.main, webapp.sample_data; from seestack import nightplan"
+          # The bundled offline catalogues are package-data; if they are missing
+          # from the wheel the import above still succeeds and the night planner
+          # is silently empty, so assert one actually loaded.
+          python -c "from seestack import nightplan; n = len(nightplan.load_catalog()); assert n > 100, n; print('catalog objects:', n)"
+
+      - name: The image must not be carrying Qt
+        # PySide6 is ~650 MB installed and the headless web app never imports it.
+        # It lived in the base dependencies until v0.418.0, so `.[web]` — the
+        # image's own install line — pulled all of Qt into every deploy.
+        working-directory: /
+        run: |
+          python - <<'PY'
+          import importlib.util, sys
+          spec = importlib.util.find_spec("PySide6")
+          if spec is not None:
+              sys.exit(f"PySide6 is installed by .[web]: {spec.origin}. Keep Qt in the 'gui' extra.")
+          print("no Qt in the image install")
+          PY
