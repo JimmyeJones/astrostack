@@ -660,8 +660,26 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # paths turn it on for you, so this only fires for a run whose options said
     # otherwise — a saved default from before that existed, or an explicit choice.
     # Keyed off the *recorded* rejection mode, the authoritative account of what
-    # actually ran: an auto-picked small stack records "min-max-reject", whose
-    # drop is an order statistic rather than a κ·σ clip, so it cannot trip this.
+    # actually ran.
+    #
+    # **min/max has its own floor, and it is a per-pixel one** (added 2026-09-11,
+    # reproduced first). The order-statistic drop is not blind the way κ-σ is —
+    # it removes an extreme from three samples up — but below three it does not
+    # run at all: ``MinMaxRejectAccumulator.result`` falls through to
+    # ``1 ≤ count < 3 → plain mean of whatever covered the pixel``, verified on
+    # the accumulator itself (a pixel covered twice by 10 and 1000 comes out 505;
+    # covered three times it comes out 10). That is a *pixel* count, not the
+    # target's, so a mosaic part-way through its panels can record
+    # ``REJMODE = min-max-reject`` while half its canvas was never trimmed — and
+    # the clean-up note below then says, of that same picture, that "a lone
+    # satellite or plane trail can't show up in your final image". Two of the
+    # three surfaces ``lone_outlier_min_depth`` exists to keep in step already
+    # answered this correctly for min/max — ``rejection_reach``'s pre-run warning
+    # on the Stack form, and the ``REJNEED``/``REJREACH`` cards in the master's
+    # own header — so the finished picture was the one contradicting them.
+    # Reading the shared helper rather than ``kappa_min_frames`` is what makes
+    # that structural: each mode brings its own floor and none of them is spelled
+    # here.
     #
     # A **drizzled** run ("drizzle-reject") *can*, and used to be excluded here
     # for no better reason than that it is a different code path. Its two-pass
@@ -697,8 +715,11 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # looking. ``coverage_median_depth`` is the honest number and, unlike a panel
     # depth, it is *provable*: half the picture is at or below it by construction,
     # which is exactly what the wording below then claims. Runs recorded before
-    # that column existed (and the min/max path, which has no median) report None
-    # and keep today's peak test to the letter.
+    # that column existed report None and keep the peak test to the letter.
+    # (It is written on *every* path, min/max included — a claim that it was not
+    # stood here until 2026-09-11 and was wrong: ``run_stack`` records it from the
+    # same ``cov_2d`` whichever accumulator produced it, which is exactly why the
+    # half-of-the-picture claim below can be made for min/max too.)
     n_combined = run.n_frames_used
     peak_depth = (min(n_combined, run.coverage_max)
                   if run.coverage_max and run.coverage_max > 0 else n_combined)
@@ -706,16 +727,24 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
                   if run.coverage_median_depth and run.coverage_median_depth > 0
                   else None)
     blind_mode = (run.rejection_mode or "").strip()
-    if blind_mode in ("sigma-clip", "drizzle-reject") and n_combined >= 1:
-        from seestack.stack.stacker import kappa_min_frames
+    #: Set when the note below fires, so the reassurance further down cannot
+    #: praise the very pass this one has just said did nothing. One picture, one
+    #: answer — the same rule the "even coverage" praise already follows.
+    rejection_was_blind = False
+    if (blind_mode in ("sigma-clip", "drizzle-reject", "min-max-reject")
+            and n_combined >= 1):
+        from seestack.stack.stacker import lone_outlier_min_depth
 
-        need = kappa_min_frames(_run_sigma_kappa(run.options_json))
-        # Two claims, strongest first: the peak below the floor means κ-σ could
-        # not clip *anywhere*; the median below it means it could not clip over
-        # at least half the picture. Both are provable from the run's own map.
-        half_blind = (peak_depth >= need and half_depth is not None
-                      and half_depth < need)
-        if peak_depth < need or half_blind:
+        need = lone_outlier_min_depth(blind_mode,
+                                      _run_sigma_kappa(run.options_json))
+        # Two claims, strongest first: the peak below the floor means the pass
+        # could not remove anything *anywhere*; the median below it means it
+        # could not over at least half the picture. Both are provable from the
+        # run's own map.
+        half_blind = (need is not None and peak_depth >= need
+                      and half_depth is not None and half_depth < need)
+        if need is not None and (peak_depth < need or half_blind):
+            rejection_was_blind = True
             # Name the count the user can actually act on. On a mosaic that is
             # not the target's frame count — saying "with only 12 subs" about a
             # 12-frame mosaic reads as nonsense next to a 12-sub badge — so say
@@ -731,16 +760,34 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
                         f"With no more than {peak_depth} sub"
                         f"{'s' if peak_depth != 1 else ''} overlapping at any one "
                         "spot in this picture")
-            # Same measurement, two cures. Sigma clipping has a one-switch fix;
-            # a drizzled run does not, because Auto outlier removal cannot
-            # override drizzle — so name the two things that would actually
-            # work, in the order a beginner should try them.
+            # Same measurement, three cures — and for min/max a different
+            # *reason*, so the sentence is built from both halves rather than
+            # sharing one. Sigma clipping has a one-switch fix; a drizzled run
+            # does not, because Auto outlier removal cannot override drizzle — so
+            # name the two things that would actually work, in the order a
+            # beginner should try them. min/max has no switch at all: it is
+            # already the method that reaches furthest down, and κ-σ needs four
+            # times the depth, so the only honest answer is more light on that
+            # part of the sky — which is why this branch offers no ``action``,
+            # the same choice the uneven-grain note makes for the same reason.
+            why = (f"it needs about {need} frames before a passing satellite or "
+                   "cosmic-ray hit stands out enough to clip")
+            action: str | None = "restack"
             if blind_mode == "drizzle-reject":
                 what = "drizzle's own outlier removal"
                 cure = ("More subs on that part of the sky is the real fix; "
                         "re-stacking with drizzle off and \"Auto outlier "
                         "removal\" switched on would use the min/max method "
                         "instead, which works from 3 subs up.")
+            elif blind_mode == "min-max-reject":
+                what = "the min/max outlier drop"
+                why = (f"it needs {need} subs on a pixel before there is a "
+                       "brightest and a darkest it can spare, and below that it "
+                       "averages them all in")
+                cure = ("More subs on that part of the sky is the only fix — no "
+                        "setting removes a trail from two samples, and sigma "
+                        "clipping would need far more depth still.")
+                action = None
             else:
                 what = "sigma-clip outlier removal"
                 cure = ("Re-stack with \"Auto outlier removal\" switched on and "
@@ -751,10 +798,9 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
                 severity="info",
                 message=(f"{deep}, "
                          f"{what} couldn't drop anything"
-                         f"{' there' if half_blind else ''} — it "
-                         f"needs about {need} frames before a passing satellite or "
-                         f"cosmic-ray hit stands out enough to clip. {cure}"),
-                action="restack",
+                         f"{' there' if half_blind else ''} — "
+                         f"{why}. {cure}"),
+                action=action,
             )))
 
     # --- Star shape: elongation (unitless, gentle) -----------------------------
@@ -990,7 +1036,14 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
                          "they're not in your final image."),
                 action=None,
             )))
-    elif rej_mode == "min-max-reject":
+    elif rej_mode == "min-max-reject" and not rejection_was_blind:
+        # …and only when it really did. "At each pixel" is a whole-canvas claim,
+        # and the drop does not happen at a pixel fewer than three subs reached
+        # (:class:`~seestack.stack.accumulator.MinMaxRejectAccumulator` averages
+        # those in instead), so on a mosaic part-way through its panels this
+        # sentence promised protection the picture does not have. The note above
+        # says what happened there; this one stands down rather than contradict
+        # it — the exact complement, like the "even coverage" praise.
         scored.append((65, HealthNote(
             kind="rejection",
             severity="good",

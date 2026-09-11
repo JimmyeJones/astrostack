@@ -267,8 +267,19 @@ export function rejectionSummaryText(
   const noun = isMinMax ? "most-extreme samples" : "of samples";
   let note: string;
   if (isMinMax) {
-    // Structural, by design — never a caution; just name the method.
-    note = label;
+    // Structural, by design — never a caution; just name the method. With one
+    // exception, and it is the same one the κ-σ branch below has: min/max needs
+    // three samples on a pixel before there is a brightest and a darkest it can
+    // spare, so a 0 % drop here does not mean "nothing needed removing", it
+    // means no pixel was deep enough to trim — the picture can still have a
+    // satellite in it. The run's own `REJREACH` card already answers that for
+    // min/max (`lone_outlier_min_depth` returns the order-statistic floor for
+    // this mode too), so say it in the same words the other branch uses rather
+    // than inventing a second phrasing. A run stacked before the engine stamped
+    // it carries no `reaches` and keeps the plain label.
+    note = pct === 0 && rejection.reaches === false
+      ? `${label} — not enough subs on a pixel for it to reach`
+      : label;
   } else if (pct === 0) {
     // "Clean" is only one of the two ways a κ·σ clip records 0 %, and the other
     // one is a picture that still has a satellite in it: the test is against

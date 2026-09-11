@@ -96,6 +96,90 @@ here rather than left as an implied screenshot.
 
 ---
 
+## 2026-09-11 (Builder, branch `claude/sweet-babbage-2xp5ja`) — a full §2 dogfood pass that came back CLEAN on all four probes, and the bug it did **not** find, which a read of the accumulator did
+
+**The run.** Baseline green before any change (**5,656 passed / 2 skipped**, full
+suite headless, 26:18, on `414f53f9`). Shipped **v0.422.1** and **v0.422.2** — one
+bug in three surfaces; write-ups in [`SHIPPED.md`](SHIPPED.md). Backlog untouched
+apart from two Shipped one-liners.
+
+### Dogfood: CLEAN on all four probes, and how it was run beside `pytest`
+
+`scripts/agent-dogfood.sh --mosaic --editor`, then `--empty`. AGENTS.md §7 says to
+serialise those against `pytest` because `vite build` empties `webapp/static`
+mid-suite — **the way round that, if a run is short of time, is to dogfood a
+throwaway copy of the tree**: `tar` the repo into the scratchpad excluding
+`.venv`, `.git`, `node_modules` and `webapp/static`, symlink `frontend/node_modules`
+back to the real one, and run the script from there with `DOGFOOD_DIR` and
+`ASTROSTACK_PORT` set. `vite.config.ts`'s `outDir` is relative, so the build lands
+in the *copy's* `webapp/static` and the repo's is never touched (verified during
+the run: the real tree still had no `webapp/static` while the copy's app was
+serving). The editable install resolves `webapp` from the copy's cwd, so no
+reinstall is needed. Both halves then ran at once on four cores with no
+interference beyond CPU.
+
+- **Field sample** — nothing overflowing, no console errors. Tallest `[phone]
+  /life-list` **3,094 px**, `[phone] /targets/…` 3,078 px, editor 3,055 px.
+- **Mosaic sample** — **Auto would trim 7.9 %** of the union canvas, unchanged
+  across every measurement since v0.386.0 and comfortably under the ~15 % §1 calls
+  a bug. Nothing overflowing, no console errors. Tallest `[phone]
+  /targets/<mosaic>` **3,447 px** (3,369 px at v0.386.0, i.e. +78 px over ~36
+  versions). **So the standing IA banner still says what it has said for four
+  passes: do not open a speculative slice.**
+- **Editor drive, both samples** — all **21** ops added one at a time, every one
+  re-rendering the live preview with no console error and no failed request, then
+  Undo and Redo. Clean on the field run *and* on the mosaic run.
+- **First-run (`--empty`)** — matches the 2026-09-07 baseline **to the pixel**
+  (`/life-list` 2,779 / 1,224, `/` 1,402 / 1,028, `/library` 1,252 / 923,
+  `/combine` 1,196, `/settings` 1,067). Nothing overflowing, no console errors.
+  `/sky` again never reaches network-idle and is probed anyway — still not a defect.
+- **The app's own sentences about the mosaic, read together** (§7's "could a
+  beginner hold all of these at once?"): the panel map's *"a little behind at the
+  top-right: about 30 s there against 1 min on a typical panel… it evens out on
+  its own"* and the health panel's *"about 23% of the picture has 3 subs on it
+  where most of it has 6, so that part looks about 1.4× grainier… only about 30 s
+  behind"* agree in both direction and magnitude. No gap this time.
+
+### …and the finding came from reading the accumulator, not from the browser
+
+The bug shipped this run was **invisible to every probe above**, because a probe
+reports console errors and this was a *sentence*: the min/max reject's health note
+promising that "a lone satellite or plane trail can't show up in your final image"
+on a canvas where the drop never ran. Two things led to it, both cheap:
+
+1. **Reading a `--mosaic` run's own DB rather than its screenshots.** The
+   dogfood library's `stack_runs` row said `rejection_mode = min-max-reject`,
+   `coverage_min = 0`, `coverage_median_depth = 6.0` — and the last of those
+   disproved a comment in `stackhealth` claiming the min/max path "has no median",
+   which is what had made the half-of-the-picture claim look unavailable for that
+   mode.
+2. **Taking a docstring's contract as an assertion to check.**
+   `lone_outlier_min_depth` names *"the one definition of the bound behind three
+   answers that must never disagree"* and lists them. Two of the three read it;
+   the third called `kappa_min_frames` directly and excluded the mode. A docstring
+   that enumerates its own callers is a testable claim, and this one was false.
+
+**Generalisation worth keeping:** where this repo has converged on "one definition,
+N surfaces", the *definition* is usually right and the drift is a caller that
+never adopted it. Grepping a shared helper's callers against the list its
+docstring gives is a five-minute audit with a good hit rate — and unlike a sweep
+it terminates.
+
+### Backlog state — the fifth consecutive run to report it dry
+
+"Bugs (fix these first)" still holds no startable entry: every one is gated on data
+no agent has (a real cloudy night's subs, a real solved frame with field rotation,
+a legacy library shape), a deliberate stand-down that already carries its
+measurement, or filed-not-built with the reasoning attached. "Features that serve
+real workflows" had exactly one fresh item — the Scout's *Shoot the Moon tonight* —
+and the concurrent Builder on `claude/sweet-babbage-j3s8pj` had already pushed it
+when this run fetched (it merged as **v0.422.0** mid-run), so §11's "claimed on a
+branch pushed within the last two hours → pick the next" applied and there was no
+next. Nothing was manufactured to fill the gap; the two tasks shipped are one
+verified bug and its third surface.
+
+---
+
 ## 2026-09-11 (Scout, branch `claude/admiring-brahmagupta-qzkfl0`) — QA sweep of the two rotation slots nobody had run, plus one reproduced-clean editor parity check; one new beginner feature filed
 
 **The run.** No bug filed — everything traced or reproduced clean — and no code shipped. One new beginner

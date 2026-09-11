@@ -666,6 +666,81 @@ def test_rejection_blind_note_leaves_min_max_alone():
     assert "rejection_blind" not in _kinds(notes)
 
 
+def test_rejection_blind_note_fires_when_min_max_had_nothing_to_spare():
+    """min/max has a floor of its own, and it is a **per-pixel** one: the
+    accumulator drops nothing where fewer than three subs reached the pixel
+    (``test_min_max_reject_small_coverage_falls_back_to_mean`` pins that — two
+    samples come out as their plain mean, outlier included). So a run can record
+    ``REJMODE = min-max-reject`` while no pixel on the canvas was trimmed at all,
+    and the reassurance below used to promise, of that same picture, that a lone
+    trail "can't show up in your final image"."""
+    notes = stack_health(
+        _run(n_frames_used=8, coverage_min=1, coverage_max=2, is_mosaic=True,
+             coverage_median_depth=2.0, rejection_mode="min-max-reject",
+             rejection_fraction=0.0,
+             options_json='{"auto_reject": true, "min_max_reject": true}'),
+        [_frame() for _ in range(8)],
+    )
+    note = _note(notes, "rejection_blind")
+    assert note is not None
+    assert "2 subs overlapping at any one spot" in note.message
+    # The floor named is min/max's own order-statistic one, never κ-σ's 11.
+    assert "3 subs on a pixel" in note.message
+    assert "11" not in note.message
+    # No switch helps here, so the note offers no re-stack action and no knob.
+    assert note.action is None
+    assert "Auto outlier removal" not in note.message
+    # …and the praise stands down rather than contradicting it.
+    assert "rejection" not in _kinds(notes)
+
+
+def test_rejection_blind_note_fires_where_half_a_mosaic_is_under_the_min_max_floor():
+    """The reachable shape: a mosaic part-way through its panels. The overlaps
+    clear the floor, so the *peak* says nothing is wrong — but over at least half
+    the canvas only two subs landed, and there min/max averaged the trail in."""
+    notes = stack_health(
+        _run(n_frames_used=20, coverage_min=1, coverage_max=8, is_mosaic=True,
+             coverage_median_depth=2.0, rejection_mode="min-max-reject",
+             rejection_fraction=0.05,
+             options_json='{"auto_reject": true, "min_max_reject": true}'),
+        [_frame() for _ in range(20)],
+    )
+    note = _note(notes, "rejection_blind")
+    assert note is not None
+    assert "Over at least half of this picture no more than 2 subs" in note.message
+    assert "couldn't drop anything there" in note.message
+    assert "rejection" not in _kinds(notes)
+
+
+def test_min_max_praise_survives_a_stack_that_really_was_trimmed():
+    """The control, and the half that must not change: a min/max run whose
+    pixels are genuinely deep enough keeps its reassurance and stays silent."""
+    notes = stack_health(
+        _run(n_frames_used=6, coverage_min=6, coverage_max=6,
+             coverage_median_depth=6.0, rejection_mode="min-max-reject",
+             rejection_fraction=0.3,
+             options_json='{"auto_reject": true, "min_max_reject": true}'),
+        [_frame() for _ in range(6)],
+    )
+    assert "rejection_blind" not in _kinds(notes)
+    assert "brightest and darkest" in _note(notes, "rejection").message
+
+
+def test_min_max_blind_note_stays_silent_on_a_run_with_no_coverage_recorded():
+    """An older run records no median and a zero peak, so the depth falls back to
+    the frame count — which for min/max is three or more by construction
+    (``combine_method`` will not dispatch it below that). Nothing fires, i.e. the
+    upgrade adds notes only where the stored map proves one."""
+    notes = stack_health(
+        _run(n_frames_used=5, coverage_min=0, coverage_max=0,
+             coverage_median_depth=None, rejection_mode="min-max-reject",
+             options_json='{"min_max_reject": true}'),
+        [_frame() for _ in range(5)],
+    )
+    assert "rejection_blind" not in _kinds(notes)
+    assert _note(notes, "rejection") is not None
+
+
 def test_rejection_blind_note_silent_when_no_rejection_pass_was_recorded():
     """An old run (pre-schema-10) records no mode; we can't claim what its
     rejection did or didn't do, so say nothing rather than guess."""
