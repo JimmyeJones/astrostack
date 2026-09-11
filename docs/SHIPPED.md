@@ -1,5 +1,98 @@
 # Shipped — the record
 
+## v0.422.0 — 2026-09-11 — "Shoot the Moon tonight": the app plans a Moon session, not only a Moon nuisance
+
+The Scout filed this the same morning, and the gap it names is real: the owner **shoots the Moon** — the
+whole `seestack/video` lucky-stacking workflow and the Moon & Sun page exist for it — but nothing in the app
+ever *planned* such a night. The Moon appeared exactly twice: as **interference** to a faint target
+(`MoonInterferenceCard`, `moon_window`, the planner's score penalty) and as a **stacking input** once a
+capture was already on disk. To find out whether tonight was any good for it you opened another app.
+
+### What it says, and the one fact that makes it worth saying
+
+New `nightplan.moon_shoot_tonight` answers two questions from numbers the planner already computes:
+
+* **When** — the widest stretch tonight where the Moon is above `MOON_SHOOT_MIN_ALT_DEG` (20°, the ordinary
+  amateur floor: lower than that you are looking through several atmospheres of turbulence, which smears
+  exactly the crater detail a lunar session is for) **and** the Sun is below the horizon. Sampled on a
+  **15-minute** grid across the dark window widened six hours each way, which comfortably spans sunset to
+  sunrise — measured to return bit-identical windows to a 10-minute grid on all four fixture nights while
+  costing ~120 ms instead of ~167 ms of the Tonight endpoint's ~650 ms.
+* **What it will look like** — from the phase, and this is the half that earns the feature. It runs
+  *opposite* to a beginner's instinct: a **full** Moon is the **worst** night for surface detail, because
+  the Sun is then almost directly behind the observer and nothing casts a shadow. Craters and mountains
+  show at their most dramatic along the **terminator** — i.e. at a crescent, quarter or gibbous phase.
+
+Four bands (`_moon_shoot_verdict`, pure): `flat` (≥97 % lit — "sunlight is coming from almost directly
+behind you, so nothing casts a shadow"), `good` (85–97 %), `great` (15–85 % — "aim at the line between its
+lit and unlit halves rather than at the bright middle"), `thin` (<15 %).
+
+**Deliberately not built:** libration, a true terminator longitude, any sub-solar-point arithmetic. That is
+the pro edge and fails the §1 beginner bar; "phase decides whether there are shadows" is the whole of the
+useful idea. Also not built: any suggestion that the app will capture for you — it won't, the Seestar does.
+
+### Where it goes: into the Moon card, not beside it
+
+The Tonight page already has a **Moon** card (phase + rise/set). A second Moon card would be exactly the
+"one more always-on card" the standing "the pages are extremely busy" priority forbids, and both halves are
+answers about one object — so the existing card gains a chip and one line:
+
+> **Moon** · Waxing crescent (46%) · sets ~22:35, dark after
+> `[Great for craters]` **Shoot it** → · Up 16:35–22:35, highest ~53°
+
+The chip is a `HintAnchor`, so the full sentence opens on a **tap** as well as a hover — this page is read
+standing next to the scope. "Shoot it" links to Moon & Sun, the page that actually stacks the capture.
+
+### Self-hiding, and honestly so
+
+`moon_shoot_tonight` returns `None` — the card renders nothing extra — when the Moon never clears the floor
+during the night, or does so for less than `MOON_SHOOT_MIN_MINUTES` (30). Both are common, and both were
+measured on real nights from London rather than assumed:
+
+| night | lit | result |
+|---|---|---|
+| 2026-01-03 | 99.6 % | up 18:38–06:38, peak 63° → `flat` |
+| 2026-01-25 | 45.9 % | up 16:35–22:35, peak 53° → `great` |
+| 2026-01-21 |  9.2 % | above 20° for **15 minutes** → declined (too short to be a session) |
+| 2026-01-15 |  8.5 % | never above 20° while the Sun is down → nothing said |
+
+One consequence recorded rather than hidden: a **summer full Moon from northern Europe peaks at ~10°**
+(measured, 2026-05-31 and 2026-06-29 from 51.5°N), so it gets no card at all. That is the right answer — a
+10° Moon is a shimmering mess — and a summer *crescent* still qualifies (2026-06-20 peaks at 27°).
+
+### Reuse, not a second ephemeris
+
+The Scout's first care note was "reuse the existing computation rather than adding a second moon-ephemeris
+path", and it is honoured literally: `illumination` and `waxing` are **passed in** from the values
+`plan_tonight` has already computed, and the altitudes come from the module's own `_moon_altitudes` /
+`_sun_altitudes` / `_times_grid`. The one new shared piece is `_widest_true_run`, lifted **verbatim** out of
+`_dark_window_after_noon` (`>=` tie-break and all) so the two scans cannot drift — pinned by its own unit
+test *and* by a test that the January dark window is still 18:23–05:55 UTC. `plan_tonight` is the only
+caller in the tree, so the extra ~95-sample scan is paid once per Tonight page load, never multiplied.
+
+### Upgrade-safe (§9)
+
+One additive `NightPlan.moon_shoot`, defaulting to `None`, serialised by the `asdict(plan)` the endpoint
+already does. An older frontend ignores it; an older backend omitting it reads as "no session", which is
+what the card does on most nights anyway. No config, schema, on-disk, API-shape or default change, and no
+existing sentence on the page was altered or removed.
+
+### Tests (+28 Python, +8 vitest)
+
+`tests/test_moon_shoot.py` (26): the verdict at every band boundary and each band's wording (a full Moon is
+named as the *worst* night for detail, and says why and what to do instead; every band names its
+percentage and ends in a real sentence); the four real nights above, asserted by property — inside the
+scanned span, above the floor, long enough to be a session — with the Sun and Moon altitudes **re-checked
+against the ephemeris** across the returned window rather than against the mask that produced it; the
+short-window decline pinned to *why* it declined (there is a stretch, it is just under 30 minutes); the
+level agreeing with the night's own illumination and the sentence carrying no clock time; the plan carrying
+it, and not carrying it on a moonless night or in polar summer; and `_widest_true_run` plus the unchanged
+dark window. `tests/webapp/test_plan.py` (+2): the field's exact shape on the wire, and present-and-null on
+a night with no session. Frontend: 6 in `tonight.test.ts` (labels, the neutral fallback for an unknown
+level, colours, the clock line, silence on null/undefined, and the times surviving a missing altitude) and
+2 rendered in `Tonight.test.tsx` (the chip, the measured altitude and the link to Moon & Sun; and nothing
+at all when there is no session).
+
 ## v0.421.0 — 2026-09-11 — the thin-stack cue reaches its other three surfaces, per pixel
 
 `thinStackWarning` is the app's answer to the owner's **"gibberish"** report: a picture only a sub or two

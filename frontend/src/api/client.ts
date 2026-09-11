@@ -198,6 +198,23 @@ export interface NightPlan {
     up_all_night: boolean;
     down_all_night: boolean;
   } | null;
+  // Tonight's Moon as a **subject** rather than as interference: when it is
+  // worth pointing at, and what the phase says it will look like (a full Moon is
+  // the *worst* night for crater detail — sunlight comes from behind you and
+  // nothing casts a shadow). Null/absent when the Moon never gets usefully high
+  // tonight, when no dark window could be computed, and on an older backend —
+  // the card then simply shows nothing extra. `text` carries no clock times on
+  // purpose: those are composed here, in the viewer's own zone.
+  moon_shoot?: {
+    illumination: number;
+    waxing: boolean | null;
+    /** "great" | "good" | "flat" | "thin" — see `tonight.ts::moonShootLabel`. */
+    level: string;
+    text: string;
+    start_utc: string;
+    end_utc: string;
+    peak_altitude_deg: number;
+  } | null;
   min_altitude_deg: number;
   // True when a horizon/tree mask (Settings → Observing site) shaped the usable
   // windows, so the UI can note that low-sky obstructions were accounted for.
