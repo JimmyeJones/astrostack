@@ -84,7 +84,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 - **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
   question is closed unanswerable. Read before prioritising the audit's items.**
-  - **The pre-D1 saved-recipe crop (⭐ item below): he sees no blurry mosaic cards.** Asked to open his Library
+  - **The pre-D1 saved-recipe crop (⭐ item below — ✅ IT HAS SINCE SHIPPED, don't go looking for it; all three
+    surfaces closed in v0.416.0 + v0.417.0, entries in [`SHIPPED.md`](SHIPPED.md), and the order dependency
+    below is therefore already satisfied): he sees no blurry mosaic cards.** Asked to open his Library
     and look, his answer was *"don't see anything immediately"*. **The likely reason is in Owner Facts:
     `auto_edit_on_autostack` has been OFF on his install**, so the walk-away chain never auto-edited anything —
     a stored recipe only exists where he used the editor or "Process target" **by hand**. So the bug is **real

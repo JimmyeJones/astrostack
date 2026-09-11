@@ -18,6 +18,95 @@ is a queue.
 
 ---
 
+## 2026-09-11 (Builder, branch `claude/sweet-babbage-vmy6e9`) — the baseline suite is now slower than the run that waits on it, and the backlog scan that says what is actually left
+
+**The run.** Three tasks, three independently-green commits — **v0.426.0** (the
+Dashboard offers the switch that *finishes* your pictures), **v0.426.1** (the
+imaging log is ordered by the night it leads with), and one docs-only commit
+striking the four network-declined sign-off entries as the owner's Q4 answer
+had instructed three days earlier. Full entries in [`SHIPPED.md`](SHIPPED.md).
+
+### Confirming the baseline: read `main`'s CI conclusion, don't wait an hour for a run you then invalidate
+
+AGENTS.md §2 says to confirm the baseline suite green *before changing
+anything*. In this container the full headless suite took **over an hour** to
+reach 75 % (≈5,750 tests). Started at the top of the run, it was still going
+when the first task was written — and because pytest imports application
+modules lazily inside fixtures, **editing the tree under a running suite makes
+its result neither a baseline nor a gate**: the new tests were never collected,
+and an already-collected test could pick up new code half-way. It reported no
+`F`, no `E` and no `s` through 75 %, which is evidence, but not the evidence §2
+asks for.
+
+**The cheap, *valid* answer was one API call.** `.github/workflows/ci.yml` runs
+the full Python + frontend suites on every push to `main`, so
+`actions_list(ci.yml, branch=main)` gives an independent green/red for
+`origin/main`'s exact head — here `success` on `e3dd3991` — in a second. That is
+a better baseline than a local run, because it is of `main` rather than of a
+tree an agent has started editing.
+
+**So the sequence worth copying on a slow box:** (1) read `main`'s CI conclusion
+for the head you are about to branch from; (2) work, running only the *targeted*
+test files, which take seconds; (3) run the full suite **once**, at the end, on
+the finished branch, as the merge gate §5 requires. One full run per run,
+positioned where its answer is load-bearing. And the §7 ordering trap still
+holds in a second costume: `npx vite build` empties `webapp/static/`, so the
+end-of-run build has to come **before** the final pytest, not beside it.
+
+### Backlog scan: what is actually left in `IMPROVEMENTS.md`, and why a Builder bounces off it
+
+Recorded because two runs in a row can otherwise spend their first half hour
+re-deriving it. A script over the file (every top-level `- **` bullet, its
+section, and whether its body contains `SHIPPED`/`CLOSED`/`STOOD DOWN`/
+`DECLINED`/`do NOT build`) leaves **~60** apparently-open entries. Reading them:
+
+* **"Bugs (fix these first)" is drained of actionable work.** The ⭐ pre-D1
+  saved-recipe crop the 2026-09-11 owner-answers block points at *"below"* is
+  **gone — it shipped as v0.416.0 + v0.417.0**, which is worth knowing before
+  hunting for it. What remains is the ASTAP ladder budget (explicitly declined,
+  with the measurement), the watcher clock-skew note (needs a yes/no), the
+  colour-chain bisect (gated on the owner deploying), the sky-atlas `CROTA2`
+  sign (gated on one real `.wcs`), the weighted-coverage over-trim residual
+  (measured, "probably not worth building"), and a batch of unreachable
+  defensive nits that are mostly struck as already fixed.
+* **No `READY` entry is left anywhere in the Ideas sections** (grep it: every
+  hit is in prose or in `ALREADY`). The two `⭐ READY — GATE OPEN` items shipped
+  in v0.390.0 / v0.391.0.
+* **Several "open" Ideas are closed in their own bodies**, one or two screens
+  down — the marker is on the *fourth* paragraph, so a grep for open bullets
+  surfaces them as live. The three-file rule is the fix and it is being applied,
+  but the arrears are what a Builder meets.
+
+**Where the two shipped tasks came from, then: neither was a backlog entry.**
+Both were found by asking "what does the *code* say, and does the app say the
+same thing?" over one subsystem each — `webapp/overnight.py` + the Dashboard's
+notice board, and `seestack/imaging_log.py` + its endpoint. Both were
+one-sentence contradictions between a comment and the code under it, of the
+class AGENTS.md §7 keeps recording from the *running* app; the useful news is
+that this class is also findable by reading, if you read a module's opening
+docstring and then check the code below it still does what it claims.
+
+### The find worth generalising: v0.404.0's shape has a second instance, and there may be more
+
+`auto_stack` shipped on, reached only fresh installs (§9 forbids overwriting a
+stored `false`), and **v0.404.0 closed that by telling the owner**. The same
+three facts hold for `auto_edit_on_autostack` (on since v0.395.0), and nothing
+had told him — which is v0.426.0. **The identifying test for a third instance:**
+a `Settings` field whose default was *flipped* in some version, where
+`SettingsStore` re-saving the whole model means the flip cannot reach an
+existing install, and where nothing on any screen mentions the switch. The tell
+is the phrase **"On for new installs"** in `frontend/src/routes/Settings.tsx`'s
+hint map, which is how both of these describe themselves.
+
+**Checked, so nobody re-walks it: there are exactly two occurrences today** —
+`auto_stack` and `auto_edit_on_autostack` — and as of v0.426.0 both have their
+note. So this sweep is **finished for now**; the test above is for the *next*
+default flip, and the rule it implies is worth stating once: a default flip that
+§9 keeps off existing installs is not shipped until something on a screen says
+so. Ship the flip and its note in the same run.
+
+---
+
 ## 2026-09-11 (Builder, branch `claude/sweet-babbage-50a90t`) — DOGFOOD RECORD: clean on every automated axis, and two real bugs one page further in
 
 **The run.** Three tasks, three independently-green commits — **v0.424.4** (the
