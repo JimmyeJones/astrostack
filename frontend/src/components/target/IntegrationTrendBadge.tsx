@@ -1,8 +1,12 @@
 import { useMemo } from "react";
-import { Alert, Text } from "@mantine/core";
+import { Alert, Anchor, Text } from "@mantine/core";
 import { IconChartLine } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { integrationTrend } from "./integrationTrend";
 import type { NextBestMoveKind } from "./nextBestMove";
+import { api } from "../../api/client";
+import { describeSuggestion, suggestionHeading } from "../suggestTargets";
 
 /** Coaching kinds that nudge the user to add more *time* to this target. When
  * "next best move" is showing one of these, a "more time won't help" plateau
@@ -33,6 +37,19 @@ const ADD_TIME_KINDS: ReadonlySet<NextBestMoveKind> = new Set(["integration", "g
  *
  * `runs` must be the target's stack runs (order doesn't matter — the trend reads
  * by integration time, not chronology).
+ *
+ * **It also names a target to point at instead.** The verdict's last sentence
+ * has always ended on "a brighter target will do more than extra time on this
+ * one" and then left the beginner to work out which — while the planner that
+ * answers exactly that has been sitting on the Dashboard ("Try something new
+ * tonight") and on the Tonight page all along. So when the plateau is on screen
+ * it asks `/api/plan/suggest` for the best showpiece they haven't shot yet and
+ * names it, with the same observability line that card prints. The request is
+ * `enabled` on the verdict, not on the page — an ordinary target never issues it
+ * — and it shares the Dashboard card's query key and stale time, so a user who
+ * has just come from the Dashboard pays nothing at all. Everything about it
+ * self-hides: no location set, no dark window, nothing new well-placed, or a
+ * failed/older backend all leave the verdict exactly as it was.
  */
 export function IntegrationTrendBadge(
   {
@@ -46,8 +63,24 @@ export function IntegrationTrendBadge(
   },
 ) {
   const trend = useMemo(() => integrationTrend(runs), [runs]);
-  if (!trend || trend.level !== "plateaued") return null;
-  if (coachKind != null && ADD_TIME_KINDS.has(coachKind)) return null;
+  // Decided before the query so the two cannot disagree about whether the
+  // verdict is up: the suggestion is a footnote to the sentence, and asking for
+  // one on a target that isn't showing the sentence would be a request nobody
+  // ever sees the answer to.
+  const showing = trend?.level === "plateaued"
+    && !(coachKind != null && ADD_TIME_KINDS.has(coachKind));
+  const suggest = useQuery({
+    queryKey: ["suggest-targets"],
+    queryFn: () => api.suggestTargets(),
+    staleTime: 60_000,
+    enabled: showing,
+  });
+
+  if (!trend || !showing) return null;
+
+  // Best-first, so the head of the list is the planner's own pick. Anything
+  // short of one real suggestion leaves the verdict as it was.
+  const pick = suggest.data?.suggestions?.[0] ?? null;
 
   return (
     <Alert
@@ -57,6 +90,13 @@ export function IntegrationTrendBadge(
       title="📉 About as clean as your sky allows"
     >
       <Text size="sm">{trend.sentence}</Text>
+      {pick ? (
+        <Text size="sm" mt={8}>
+          Try <Text span fw={600}>{suggestionHeading(pick)}</Text> on your next clear
+          night — {describeSuggestion(pick)}{" "}
+          <Anchor component={Link} to="/tonight">See what else is up →</Anchor>
+        </Text>
+      ) : null}
     </Alert>
   );
 }
