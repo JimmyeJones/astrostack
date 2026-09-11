@@ -1,5 +1,61 @@
 # Shipped — the record
 
+## v0.420.0 — 2026-09-11 — the Stack form's per-pixel cautions read a mosaic's panel depth, not its total
+
+The same substitution again, one page upstream. Every caution on the Stack form is a statement about
+the samples that land on **one pixel** — drizzle fills an output pixel from the dither-phased samples
+that hit it, κ-σ estimates each pixel's spread across the frames that hit it, a min/max trim of `k`
+needs `2k+1` frames *per pixel* to fully apply — and four of them were computed from
+`solvedAccepted`, the **target's** accepted+solved count. On a single field those are the same number.
+On the owner's 3×3 they are 25 and 225.
+
+**The asymmetry is what makes this a bug rather than a rounding error.** The *nudge* toward drizzle
+already stands down on a mosaic (`&& !estimate.data.is_mosaic`, fenced for the canvas size). The
+*caution against* it did not: `drizzleTooFewHint` fires below 100 frames, so a nine-panel raster at 225
+subs sailed past it and the form said **nothing at all** while drizzle spread 25 samples a pixel across
+a finer grid — "slower and can leave a noisier, gappier result", in the hint's own words. The way in is
+ordinary: **"Reuse settings"** from a single-field run that legitimately wanted drizzle.
+
+Three more on the same rule:
+
+- `sigmaKappaLargeHint` urged a **tighter** κ≈2.5 at 200+ frames because "the per-pixel spread is very
+  well measured" — on a mosaic, advice to clip harder on the thinner statistic.
+- `minMaxKTooHighHint`'s sentence already said *"needs at least 2k+1 frames **per pixel**"* and then
+  quoted the target's total. A 45-sub mosaic 5 deep cleared `2k+1 = 7` while no pixel did.
+- `minMaxRejectHint` — the one hint that names the streaks QC actually found and offers min/max — fires
+  between 3 and 11 frames. A 54-sub mosaic 6 deep is inside κ-σ's blind band on every pixel and outside
+  the hint's window on the total, so it stood down on exactly the stack it exists for.
+
+**The fix is one served number and one shared rule.** `/stack-estimate` now carries `panel_depth` at
+the **top level** — the same `auto_reject_depth` its own `rejection_reach` and `auto_reject_resolved`
+answers are already computed from. It was previously only inside `auto_reject_resolved`, which is
+`null` unless Auto is on *and* drizzle is off — precisely the state the drizzle caution fires in, which
+is how the field came to exist beside a caution that could not read it. Deliberately **not** a second
+depth definition (`typical_panel_depth` would have been a defensible answer and a drift risk): a form
+that warned from one depth while naming a method chosen from another is what these fixes keep undoing.
+
+`frontend/src/samplesPerPixel.ts` owns the correction and the wording — `samplesPerPixel` (the depth,
+or the frame count when there is nothing to correct), `spreadAcrossPanels`, and
+`samplesPerPixelPhrase`, which keeps today's exact sentence on a single field and on a mosaic says
+*"about 25 subs on each patch of sky (225 in total, spread across the mosaic)"*. The total has to
+appear: a caution that only said 25 would read as the app having lost the frames the Frames table
+plainly shows.
+
+**Upgrade-safe (§9):** one additive response field and one optional client field. Missing, `null`,
+non-finite and non-positive all read as "no correction", so an older backend and every single-field
+target are byte-for-byte unchanged; a depth above the frame count is clamped away, because the
+direction that inflates depth is the one that hides the bug.
+
+**Tests (+8 unit, +7 rendered, +4 python; 4 of the rendered and all 4 python fail before).**
+`samplesPerPixel.test.ts` covers the rule and both wordings. `Stack.test.tsx` gains a describe block on
+the owner's shape: the drizzle caution firing at 225/25 and staying silent at 2700/300, the single-field
+wording preserved, κ's hint withheld at 225/25 and still given at 2250/250, the `k=3` warning on a
+45/5 mosaic offering *"Lower k to 2"* (the largest k a **pixel** can apply), and the streak hint
+appearing on a 54/6 mosaic. `tests/webapp/test_stack_estimate.py` pins the field served with
+`auto_reject_resolved` **null**, `null` on a single field, equal to `estimate_stack_basis`'s own answer
+rather than to a literal, and unmoved by drizzle / the rejection knobs — a caution whose denominator
+shifted when you toggled the setting it warns about would be unfalsifiable on screen.
+
 ## v0.419.1 — 2026-09-11 — the Target page's coaching read a mosaic's totals as its depth
 
 The second instance of the same substitution, found by pointing the same brief at the neighbouring

@@ -1819,6 +1819,12 @@ export interface StackEstimate {
   output_w: number;
   output_h: number;
   is_mosaic: boolean;
+  // How many subs land on one *spot* of this canvas — the denominator every
+  // per-pixel caution on the Stack form is about (drizzle's dither samples, the
+  // per-pixel σ κ-σ estimates, min/max's `2k+1` frames per pixel). null on a
+  // single field, where the frame count already is that number. Optional so an
+  // older backend simply leaves every caution worded in frames, as before.
+  panel_depth?: number | null;
   peak_bytes: number;
   peak_gb: number;
   budget_bytes: number;
