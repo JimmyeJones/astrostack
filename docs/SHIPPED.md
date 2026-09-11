@@ -1,5 +1,91 @@
 # Shipped — the record
 
+## v0.321.2 + v0.321.3 — cut from the working list 2026-09-11 — "sweep every date the app shows a beginner"
+
+Filed 2026-08-30 as the generalisation of the v0.311.3 "First light" bug and **finished** across
+v0.321.2 / v0.321.3; it sat in the Ideas list for eleven days after its last surface closed, with
+five paragraphs of completed work under a live-looking `- **NEW IDEA` headline. Cut here verbatim
+under the three-file rule (AGENTS.md §2) — a top-level unstruck bullet is indistinguishable from
+open work, and this one describes a sweep with nothing left in it.
+
+**The rule worth carrying forward** (the rest is record): a stack run's own timestamp is right for
+"which run is newest" and wrong as the caption on a picture. Where both dates matter, say both; and
+never flip a *sort* to capture time. The shared helpers are `pictureDateLabel` and
+`formatStampDateTime` — use them rather than slicing an ISO stamp, which is how every instance in
+this entry got written in the first place.
+
+The entry as it stood:
+
+- **NEW IDEA (Builder 2026-08-30, the generalisation of the v0.311.3 "First light" bug) — sweep every date the
+  app shows a beginner and ask whether it means *when you shot this* or *when the app did something*.**
+  *(Pillar: understand / trust — PRIORITY 3; size S per surface, M for the sweep. Confidence: the class is
+  confirmed — one instance was reproduced in a running app and fixed this run.)* "First light" quoted the
+  target-row **creation** stamp and so told a Seestar owner with a back catalogue that they took up the hobby
+  the week they installed AstroStack. The bug is fixed; **the class is not swept.** The owner's mental model of
+  a date on a picture is *the night I shot it*, and several surfaces show a **processing** date in a place that
+  reads like a capture date — the clearest is the Dashboard's **Recent stacks** strip, whose tile reads
+  `Sample: Orion Nebula (M42) · 6 FRAMES · Aug 30, 2026` where the 30 Aug is when the *stack ran*, while the
+  subs under it are dated 2024-11-15. On a re-stack of old data that is off by years, on the app's front page.
+  **Shape:** enumerate the surfaces (Dashboard recent strip, Gallery cards, History rows, the Library tile, the
+  keepsake/poster) and for each decide which date the *reader* means, rather than which one is cheapest to
+  reach — a stack run's own timestamp is right for "which run is newest", and wrong as the caption on a
+  picture. `Project.earliest_frame_utc()` (new this run) and the existing per-night rollups already answer the
+  capture side, so most of this is a decision plus a label, not new data. **Care:** don't flip a *sort* to
+  capture time — "newest run" is the right ordering for History — and where both dates matter, say both
+  ("shot 15 Nov 2024 · stacked 30 Aug 2026") rather than silently swapping one for the other.
+
+  **✅ THE LAST TWO NAMED SURFACES ARE DONE (Builder, v0.321.2, branch `claude/wizardly-feynman-be4ubk`) — the
+  Gallery card and the History row, which were the two still printing a *raw machine stamp* with no label at
+  all.** The entry names five surfaces; the Dashboard strip, the keepsake and the Target hero were closed by
+  earlier runs, and **the Library tile turns out to show no date at all** (`Library.tsx` reads
+  `last_activity_utc` only to *sort* by it, which is the right use and the Care note's own exception) — so these
+  two were the whole remainder, and the sweep is finished. Both printed `run.timestamp_utc` sliced with `.replace("T", " ")`
+  — `2026-08-30 14:32` on the Gallery card, `2026-08-30T14:32:05` on the History row — which is (a) the moment
+  the *stack ran*, years out from the capture on a re-stack of a back catalogue, and (b) not a date format the
+  app uses anywhere else a person reads.
+
+  **Gallery card → `pictureDateLabel`**, the same helper the Dashboard strip and the Target hero already use, so
+  it says *"Shot 15–18 Nov 2024"* and falls back to a **labelled** *"Stacked 30 Aug 2026"* when the run predates
+  the capture window (schema < 18 — i.e. almost everything in the owner's library today). The night count is
+  deliberately **not** passed: the card's line is already five segments long, and "over 4 nights" belongs on the
+  caption, not the tile. The run's identity there is its `output_basename` printed beside the date, so the clock
+  time was not needed.
+
+  **History row → both dates, each labelled** — *"Shot 15–18 Nov 2024 · Stacked 30 Aug 2026, 14:32"* — because
+  this is the one list where they answer different questions: which run this row *is*, and what the picture is
+  *of*. That is the entry's own "where both dates matter, say both" rule, and the sort is untouched (still newest
+  run first, as the Care note requires). **The clock time is load-bearing here and is why this needed a new
+  helper:** `output_basename` is reused across a re-stack, so two re-stacks made the same afternoon are
+  distinguished by nothing else — a date-only label would collapse two rows into identical text.
+  `formatStampDateTime` is `formatStampDate` plus `HH:MM`, keeping the never-a-numeric-month rule and the same
+  empty-string-on-junk contract.
+
+  **Frontend-only:** no API, schema, config, on-disk or default change; both fields were already on the payloads
+  (`GalleryItem`/`StackRun` have carried `capture_night_start`/`_end` since schema 18) and an older backend
+  omitting them lands on the labelled "Stacked" form, which is exactly right.
+
+  **Tests (+6; the 4 component ones fail before):** `format.test.ts` (+2 — the clock time added to the same named
+  month, and the junk contract), `Gallery.test.tsx` (+2 — a 2024 capture window shown as *Shot* with the 2026
+  processing stamp gone from the card, and the labelled fallback with no "Shot" on a run that has no window) and
+  `History.test.tsx` (+2 — both labels on one line with no raw ISO stamp, and two same-afternoon re-stacks whose
+  lines stay distinct while neither claims a shoot date).
+
+  **✅ AND THE SKY FOOTPRINT LINE, THE LAST ONE ON THE LIST (Builder, v0.321.3, same branch).** The Sky Map's
+  selected-footprint caption read `RA 83.822° · Dec −5.391° · 17 Aug 2026` — a bare, unlabelled date beside a
+  picture, i.e. the exact shape of this whole entry, and the leftover the v0.313.0 run explicitly named. It now
+  goes through the same `pictureDateLabel`. The field it needed was genuinely missing (unlike the Gallery and
+  History, which already had it): `SkyImage` gained **additive optional** `capture_night_start`/`_end`, bucketed
+  with the same `capture_night_range` and the same `Settings.site_lon` the Gallery card and the Nights card use,
+  so all three can't name one session differently. `timestamp_utc` stays on the payload untouched — the viewer
+  draws newer tiles on top by it, which is the right use of a processing stamp and the Care note's own exception.
+  **Upgrade-safe:** two optional response fields (an older frontend ignores them; an older backend omitting them
+  reads as "no capture window", which lands on the labelled "Stacked …" form). **Tests (+5, 4 failing before):**
+  `tests/webapp/test_sky.py` (+2 — the window carried through as observing nights with the stack stamp intact,
+  and a pre-schema-18 run reporting null rather than borrowing it) and `Sky.test.tsx` (+2 new, +1 updated — a
+  capture window shown as "Shot 15–18 Nov 2024" with no 2026 anywhere in the line, and the labelled fallback; the
+  existing "dates it like every other surface" assertion gained the label and keeps its no-raw-ISO check).
+
+
 ## v0.418.2 — 2026-09-11 — the last two vacuous migration fixtures, and a guard that catches the next one
 
 The third and final part of the fourth external audit's "fixtures that cannot exhibit their bug"
