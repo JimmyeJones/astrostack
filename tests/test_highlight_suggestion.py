@@ -95,11 +95,38 @@ def test_a_star_field_is_not_mistaken_for_a_blown_core():
 
 
 def test_no_suggestion_when_the_knob_cannot_meaningfully_help():
-    """On a very high-contrast frame the midtones transfer squashes the whole
-    shoulder back together, so even full strength barely moves the core. A button
-    that does nothing is worse than no button."""
+    """A button that does nothing is worse than no button: if the strength the
+    slider can reach doesn't reopen the core, say nothing.
+
+    Stated against a stretch that ignores the strength, which is what "the knob
+    can't help" *means*. It used to be stated against a very high-contrast frame
+    — but that frame was the v0.424.0 bug (the midtones transfer squashed the
+    whole shoulder back together), not a property of the knob, and the test below
+    now pins that the same frame gets a real suggestion."""
+    img = _target()
+    deaf = lambda p: autostretch(img, highlight_protect=0.0)   # noqa: E731
+    assert hl.suggest_highlight_protect(img, deaf) is None
+
+
+def test_a_very_high_contrast_core_gets_a_suggestion_too():
+    """The frame the knob is most needed for — a huge bright core over a sky at a
+    ten-thousandth of the normalization ceiling — used to be the one frame where
+    it was offered *nothing*, because the stretch squashed the shoulder flat
+    (v0.424.0). Now the slider reopens it, so the button appears."""
     img = _target(core_sigma=22.0, core_amp=6e6)
-    assert hl.suggest_highlight_protect(img, _stf(img)) is None
+    found = hl.suggest_highlight_protect(img, _stf(img))
+    assert found is not None
+    assert 0.0 < found.strength <= 1.0
+    assert found.core_px > 1000
+    # And it delivers: applying the suggested strength really does reopen a large
+    # share of what was flat. (A core this wide is genuinely flat at its very
+    # centre, so the solver's full-reopen target isn't reachable — what matters is
+    # that the button now changes the picture, which is what it used to fail.)
+    core, structure, area = hl.measure_blown_core(autostretch(img), img)
+    flat_after = hl._recoverable_flat_fraction(
+        autostretch(img, highlight_protect=found.strength), core, structure, area)
+    assert found.flat_fraction - flat_after >= hl._MIN_IMPROVEMENT
+    assert flat_after < 0.6 * found.flat_fraction
 
 
 def test_works_on_the_manual_asinh_curve_too():

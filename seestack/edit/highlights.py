@@ -75,11 +75,15 @@ _MIN_SEVERITY = 0.10
 _TARGET_FLAT = 0.10
 
 #: How much of the core the strongest setting must actually reopen before the
-#: button is worth offering. The knob walks the shoulder's knee down *before*
-#: the midtones transfer, so on a very high-contrast frame (a sky median at a
-#: thousandth of the normalization ceiling) the transfer squashes the whole
-#: shoulder back together and the slider barely moves the picture. Offering a
-#: suggestion there would be a button that does nothing, so say nothing instead.
+#: button is worth offering. Offering a suggestion the slider cannot deliver
+#: would be a button that does nothing, so say nothing instead. *(Until v0.424.0
+#: this fired on exactly the frames the knob is most needed for: the knee walks
+#: down **before** the midtones transfer, and on a very high-contrast frame — a
+#: sky median at a ten-thousandth of the normalization ceiling — the transfer
+#: squashed the whole shoulder back into the last thousandth of the display
+#: range, so the slider did not visibly move the picture at any strength. The
+#: stretch now reserves the shoulder display room of its own, so the guard is
+#: back to catching only genuinely hopeless cores.)*
 _MIN_IMPROVEMENT = 0.05
 
 #: The op's slider bounds/step (``tone.stretch``'s ``highlights`` param).

@@ -16,7 +16,8 @@ import numpy as np
 import pytest
 
 from seestack.render.thumbnail import (
-    _HIGHLIGHT_KNEE, _highlight_rolloff, asinh_stretch, autostretch,
+    _HIGHLIGHT_HEADROOM_MAX, _HIGHLIGHT_KNEE, _highlight_headroom_for,
+    _highlight_rolloff, _reanchor_highlights, asinh_stretch, autostretch,
     highlight_knee_for,
 )
 
@@ -190,3 +191,180 @@ def test_protect_is_monotone_in_strength():
         for p in (0.0, 0.5, 1.0)
     ]
     assert blown[0] >= blown[1] >= blown[2]
+
+
+# --- the shoulder has to survive the tone curve above it --------------------
+#
+# Measured (2026-09-11): on a frame whose sky sits at a ten-thousandth of the
+# normalization ceiling the midtones transfer solves to m ≈ 0.001, which puts the
+# knee at display 0.9996 — so the *entire* shoulder, the thing "hold back
+# highlights" moves, rendered inside the last 0.0004 of the display range and the
+# slider changed the picture by less than a thousandth at any strength. The knee
+# walking 0.70 → 0.25 only moved that to 0.003. `_reanchor_highlights` reserves
+# the shoulder a visible share of the finished range instead, taking it from the
+# mid-tones and never from the sky.
+
+
+def _high_contrast_target(h=300, w=300):
+    """A huge bright core over a very faint sky — the shape whose sky median
+    lands at a ten-thousandth of the 99.5th-percentile ceiling, which is what
+    collapses the midtones transfer's top end."""
+    yy, xx = np.mgrid[0:h, 0:w]
+    r2 = (yy - h / 2) ** 2 + (xx - w / 2) ** 2
+    core = 6e6 * np.exp(-r2 / (2 * 22.0**2))
+    rng = np.random.default_rng(0)
+    base = 1000.0 + 1500.0 * np.exp(-r2 / (2 * 60.0**2)) + core
+    base = base + rng.normal(0.0, 20.0, size=(h, w))
+    return np.stack([base, base, base], axis=-1).astype(np.float32)
+
+
+def test_protect_reopens_a_core_the_midtones_transfer_used_to_flatten():
+    """The fail-before case: at strength 0 the core is a solid white plateau, and
+    before this fix it stayed one at *every* strength."""
+    img = _high_contrast_target()
+    base = autostretch(img)[..., 0]
+    held = autostretch(img, highlight_protect=1.0)[..., 0]
+
+    # Strength 0 really is the blown picture this is about.
+    assert np.mean(base >= 0.99) > 0.05
+    # ...and the knob clears it. (Before: 8.65 % blown at 0, 0.5 *and* 1.0.)
+    assert np.mean(held >= 0.99) < 0.01
+    # The core keeps a gradient worth looking at, not a thousandth of one.
+    core = (slice(120, 181), slice(120, 181))
+    assert held[core].std() > 20.0 * base[core].std()
+    assert held[core].max() - held[core].min() > 0.05
+
+
+def test_the_shoulder_gets_its_reserved_share_of_the_display_range():
+    """The promise is specific: at full strength the shoulder holds
+    ``_HIGHLIGHT_HEADROOM_MAX`` of the finished range, so what was 0.0004 wide is
+    now 0.20 wide."""
+    img = _high_contrast_target()
+    for p in (0.5, 1.0):
+        held = autostretch(img, highlight_protect=p)[..., 0]
+        # Nothing above the shoulder's floor, and the brightest pixel close to
+        # (but below) white: the whole band is in use.
+        floor = 1.0 - _highlight_headroom_for(p)
+        assert held.max() < 1.0
+        assert held.max() > floor
+        # The core spans a real part of that band rather than sitting on it.
+        core = held[120:181, 120:181]
+        assert core.max() - core.min() > 0.3 * _highlight_headroom_for(p)
+
+
+def test_reanchoring_never_moves_the_sky():
+    """It takes its room from the mid-tones, never from the background — a sky
+    corner is bit-for-bit identical at every strength."""
+    img = _high_contrast_target()
+    base = autostretch(img)
+    for p in (0.05, 0.5, 1.0):
+        held = autostretch(img, highlight_protect=p)
+        assert np.array_equal(held[:40, :40], base[:40, :40])
+
+
+def test_reanchoring_is_monotone_in_strength():
+    """The knob keeps one honest direction on this frame too: more protection
+    never blows more of the core, at every step the slider offers."""
+    img = _high_contrast_target()
+    prev_blown = 1.0
+    for p in (0.0, 0.05, 0.25, 0.5, 0.75, 1.0):
+        blown = float(np.mean(autostretch(img, highlight_protect=p)[..., 0] >= 0.99))
+        assert blown <= prev_blown + 1e-12
+        prev_blown = blown
+
+
+def test_reanchoring_declines_when_the_shoulder_already_has_room(monkeypatch):
+    """An ordinary compact-core frame already gives the shoulder a fifth of the
+    display range, so there is nothing to take from the mid-tones — the render is
+    byte-for-byte what the knee walk alone produces.
+
+    Pinned against a render with the re-anchoring switched off entirely, so this
+    says "it did nothing here" rather than "it did something small"."""
+    from seestack.render import thumbnail
+
+    img = _hdr_target()
+    real = {p: autostretch(img, highlight_protect=p) for p in (0.25, 1.0)}
+    monkeypatch.setattr(thumbnail, "_reanchor_highlights", lambda y, **kw: y)
+    for p, held in real.items():
+        assert np.array_equal(held, autostretch(img, highlight_protect=p))
+
+
+def test_headroom_for_is_zero_off_and_clamped_on():
+    """Same input contract as the knee it rides with: 0 (and anything unusable)
+    reserves nothing, so the default render is byte-for-byte historical."""
+    assert _highlight_headroom_for(0.0) == 0.0
+    assert _highlight_headroom_for() == 0.0
+    for bad in (float("nan"), float("inf"), -1.0):
+        assert _highlight_headroom_for(bad) == 0.0
+    assert _highlight_headroom_for(1.0) == pytest.approx(_HIGHLIGHT_HEADROOM_MAX)
+    assert _highlight_headroom_for(5.0) == _highlight_headroom_for(1.0)
+    assert _highlight_headroom_for(0.5) == pytest.approx(_HIGHLIGHT_HEADROOM_MAX / 2)
+
+
+def test_reanchor_helper_declines_rather_than_guessing():
+    """Every case where there is nothing to win, or no room to win it in, returns
+    the input untouched — including the one that would divide by zero."""
+    y = np.linspace(0.0, 1.0, 101)
+    same = dict(knee_display=0.9996, anchor=0.26)
+    # No headroom asked for.
+    assert np.array_equal(_reanchor_highlights(y, headroom=0.0, **same), y)
+    # The shoulder already holds more than the headroom.
+    assert np.array_equal(
+        _reanchor_highlights(y, knee_display=0.5, anchor=0.2, headroom=0.2), y)
+    # The sky's ceiling is at or above where the shoulder starts — the only way
+    # to make room would be to move the background.
+    assert np.array_equal(
+        _reanchor_highlights(y, knee_display=0.9996, anchor=0.9996, headroom=0.2), y)
+    assert np.array_equal(
+        _reanchor_highlights(y, knee_display=0.9996, anchor=0.85, headroom=0.2), y)
+    # Non-finite inputs degrade to "do nothing" rather than raising.
+    assert np.array_equal(
+        _reanchor_highlights(y, knee_display=float("nan"), anchor=0.2,
+                             headroom=0.2), y)
+
+
+def test_reanchor_helper_keeps_every_pixel_in_order():
+    """Ordering is the one thing a tone curve may never break — a brighter pixel
+    must stay brighter, across both band joins."""
+    y = np.linspace(0.0, 1.0, 20001)
+    out = _reanchor_highlights(y, knee_display=0.9996, anchor=0.26, headroom=0.2)
+    assert np.all(np.diff(out) >= 0.0)
+    assert out.min() == 0.0 and out.max() <= 1.0
+
+
+def test_reanchor_helper_is_continuous_at_both_joins():
+    """A tone curve with a step in it would show as a hard edge in a smooth
+    gradient — the two band joins must meet."""
+    knee_d, anchor, head = 0.9996, 0.26, 0.2
+    eps = 1e-7
+    probe = np.array([anchor - eps, anchor, anchor + eps,
+                      knee_d - eps, knee_d, knee_d + eps])
+    out = _reanchor_highlights(probe, knee_display=knee_d, anchor=anchor,
+                               headroom=head)
+    assert out[0] == pytest.approx(anchor, abs=1e-6)
+    assert out[1] == pytest.approx(anchor)          # the anchor itself is fixed
+    assert out[2] == pytest.approx(anchor, abs=1e-6)
+    assert out[4] == pytest.approx(1.0 - head)      # the knee lands on the floor
+    assert out[3] == pytest.approx(1.0 - head, abs=1e-6)
+    assert out[5] == pytest.approx(1.0 - head, abs=1e-4)
+    assert np.all(np.diff(out) >= 0.0)
+
+
+def test_the_asinh_curve_keeps_its_own_shoulder_and_so_declines(monkeypatch):
+    """The manual curve asks the same question and gets a different answer, which
+    is why the guard is shared rather than STF-only.
+
+    Measured on the same frame that collapses the midtones transfer to a 0.0004
+    shoulder: asinh is log-like, so its knee lands at display 0.60 at full
+    strength and the shoulder keeps **0.40** of the range unaided. So the
+    re-anchoring declines and the asinh render is exactly the knee walk — while
+    the guard stays in the path, in case a stretch/black combination ever does
+    squeeze the shoulder out."""
+    from seestack.render import thumbnail
+
+    img = _high_contrast_target()
+    real = {p: asinh_stretch(img, highlight_protect=p) for p in (0.0, 0.5, 1.0)}
+    monkeypatch.setattr(thumbnail, "_reanchor_highlights", lambda y, **kw: y)
+    for p, held in real.items():
+        assert np.array_equal(held, asinh_stretch(img, highlight_protect=p))
+    assert np.array_equal(real[0.0], asinh_stretch(img))
