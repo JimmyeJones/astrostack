@@ -77,7 +77,7 @@ already does. An older frontend ignores it; an older backend omitting it reads a
 what the card does on most nights anyway. No config, schema, on-disk, API-shape or default change, and no
 existing sentence on the page was altered or removed.
 
-### Tests (+28 Python, +8 vitest)
+### Tests (+27 Python, +8 vitest)
 
 `tests/test_moon_shoot.py` (26): the verdict at every band boundary and each band's wording (a full Moon is
 named as the *worst* night for detail, and says why and what to do instead; every band names its
@@ -87,8 +87,8 @@ against the ephemeris** across the returned window rather than against the mask 
 short-window decline pinned to *why* it declined (there is a stretch, it is just under 30 minutes); the
 level agreeing with the night's own illumination and the sentence carrying no clock time; the plan carrying
 it, and not carrying it on a moonless night or in polar summer; and `_widest_true_run` plus the unchanged
-dark window. `tests/webapp/test_plan.py` (+2): the field's exact shape on the wire, and present-and-null on
-a night with no session. Frontend: 6 in `tonight.test.ts` (labels, the neutral fallback for an unknown
+dark window. `tests/webapp/test_plan.py` (+1, plus two assertions on the existing settings-location test): the
+field's exact shape on the wire, and present-and-null on a night with no session. Frontend: 6 in `tonight.test.ts` (labels, the neutral fallback for an unknown
 level, colours, the clock line, silence on null/undefined, and the times surviving a missing altitude) and
 2 rendered in `Tonight.test.tsx` (the chip, the measured altitude and the link to Moon & Sun; and nothing
 at all when there is no session).
