@@ -11,6 +11,7 @@ import {
   calibrationMismatchNote, heldForSubsLine, missingSubsNote, readErrorsNote,
   storageTroubleAlert,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
+  rescueUnsolvedNote,
   skippedFolders, videoFoldersNote, broughtFolderInNote,
 } from "./Jobs";
 import * as client from "../api/client";
@@ -589,6 +590,40 @@ describe("bootstrapRescueNote", () => {
   });
 });
 
+describe("rescueUnsolvedNote", () => {
+  it("says nothing when the rescue worked — that line is bootstrapRescueNote's", () => {
+    // Two surfaces must not congratulate the user in two different voices.
+    expect(rescueUnsolvedNote({ bootstrap_propagated: 6 })).toBeNull();
+  });
+
+  it("explains a stand-down in the user's terms, not the engine's", () => {
+    expect(rescueUnsolvedNote({ bootstrap_reason: "enough subs already solved" }))
+      ?.toContain("already located in the sky");
+    expect(rescueUnsolvedNote({ bootstrap_reason: "too few unsolved subs to bootstrap" }))
+      ?.toContain("Shoot more of this target");
+    expect(rescueUnsolvedNote({ bootstrap_reason: "too few readable subs to integrate" }))
+      ?.toContain("drive holding them is connected");
+    expect(rescueUnsolvedNote({
+      bootstrap_reason: "too few subs registered to a common frame",
+    })).toContain("aren't all pointing at the same thing");
+  });
+
+  it("never leaves a finished job silent, whatever reason the engine gave", () => {
+    // A job the user pressed a button for must always say what came of it — so
+    // an unrecognised (or missing) reason still gets an honest sentence.
+    for (const r of [
+      {},
+      { bootstrap_reason: "deep image did not solve" },
+      { bootstrap_reason: "a reason nobody has written yet" },
+      { bootstrap_engaged: true, bootstrap_propagated: 0 },
+    ]) {
+      expect(rescueUnsolvedNote(r)).toBeTruthy();
+    }
+    expect(rescueUnsolvedNote({ bootstrap_reason: "deep image did not solve" }))
+      ?.toContain("nothing was lost");
+  });
+});
+
 describe("qcSolveSummary", () => {
   it("states what the job checked and what it located", () => {
     expect(qcSolveSummary({
@@ -988,6 +1023,7 @@ describe("jobKindLabel", () => {
   it("translates every known engine job kind to plain language", () => {
     expect(jobKindLabel("pipeline")).toBe("Importing & processing new frames");
     expect(jobKindLabel("qc_solve")).toBe("Quality check & plate-solve");
+    expect(jobKindLabel("rescue_unsolved")).toBe("Locating your un-located subs together");
     expect(jobKindLabel("process_target")).toBe("Processing target (check, solve & stack)");
     expect(jobKindLabel("stack")).toBe("Stacking");
     expect(jobKindLabel("reprocess_all")).toBe("Reprocessing all targets");

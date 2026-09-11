@@ -18,7 +18,9 @@ import { bucketAction, verdictAction, type RejectionAction } from "./rejectionAc
  * Plate Solve action — the one destination that isn't a route, because the
  * control is on the page this renders on; without it that advice stays plain
  * text, so a surface that has no such button degrades to today's behaviour
- * instead of offering a dead one.
+ * instead of offering a dead one. `onTryHarder` (the deep-image rescue) is the
+ * same shape and degrades the same way, and is only ever *reached* when the
+ * server says the rescue would engage (`deepRescueOffered`).
  */
 const TONE_COLOR: Record<RejectionSummary["verdict"]["tone"], string> = {
   good: "teal",
@@ -27,8 +29,10 @@ const TONE_COLOR: Record<RejectionSummary["verdict"]["tone"], string> = {
 };
 
 function ActionLink(
-  { action, onRunPlateSolve }: {
-    action: RejectionAction | null; onRunPlateSolve?: () => void;
+  { action, onRunPlateSolve, onTryHarder }: {
+    action: RejectionAction | null;
+    onRunPlateSolve?: () => void;
+    onTryHarder?: () => void;
   },
 ) {
   if (!action) return null;
@@ -39,9 +43,10 @@ function ActionLink(
       </Anchor>
     );
   }
-  if (!onRunPlateSolve) return null;
+  const onClick = action.kind === "deepRescue" ? onTryHarder : onRunPlateSolve;
+  if (!onClick) return null;
   return (
-    <Button size="compact-xs" variant="light" mt={4} onClick={onRunPlateSolve}>
+    <Button size="compact-xs" variant="light" mt={4} onClick={onClick}>
       {action.label}
     </Button>
   );
@@ -56,12 +61,15 @@ function actionId(action: RejectionAction | null): string | null {
 }
 
 export function RejectionBreakdown(
-  { summary, onRunPlateSolve }: {
-    summary: RejectionSummary; onRunPlateSolve?: () => void;
+  { summary, onRunPlateSolve, onTryHarder, deepRescueOffered = false }: {
+    summary: RejectionSummary;
+    onRunPlateSolve?: () => void;
+    onTryHarder?: () => void;
+    deepRescueOffered?: boolean;
   },
 ) {
   const { verdict, buckets, used, dropped } = summary;
-  const headline = verdictAction(verdict.key);
+  const headline = verdictAction(verdict.key, deepRescueOffered);
   // Offered at the top, where the advice that earned it is — so a bucket
   // repeating that advice further down doesn't repeat the control too.
   const shown = new Set([actionId(headline)].filter(Boolean) as string[]);
@@ -71,13 +79,14 @@ export function RejectionBreakdown(
       <Text size="xs" c={TONE_COLOR[verdict.tone]} fw={500}>
         {verdict.text}
       </Text>
-      <ActionLink action={headline} onRunPlateSolve={onRunPlateSolve} />
+      <ActionLink action={headline} onRunPlateSolve={onRunPlateSolve}
+        onTryHarder={onTryHarder} />
       <Text size="xs" c="dimmed">
         {used} of {used + dropped} frames went into your picture.
       </Text>
       <Stack gap={6} mt={2}>
         {buckets.map((b) => {
-          const act = bucketAction(b.key);
+          const act = bucketAction(b.key, deepRescueOffered);
           const id = actionId(act);
           const dup = id != null && shown.has(id);
           if (id != null) shown.add(id);
@@ -88,7 +97,8 @@ export function RejectionBreakdown(
               <Text size="xs" fw={600}>{b.count}</Text>
             </Group>
             <Text size="xs" c="dimmed">{b.note}</Text>
-            <ActionLink action={dup ? null : act} onRunPlateSolve={onRunPlateSolve} />
+            <ActionLink action={dup ? null : act} onRunPlateSolve={onRunPlateSolve}
+              onTryHarder={onTryHarder} />
           </div>
           );
         })}

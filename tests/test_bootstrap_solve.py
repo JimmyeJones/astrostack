@@ -511,3 +511,135 @@ def test_pick_solved_anchor_returns_nothing_when_no_sub_has_solved(tmp_path):
         assert pick_solved_anchor(frames, (H, W)) is None
     finally:
         proj.close()
+
+
+# ---------------------------------------------------------------------------
+# "Try harder to locate these" — the on-demand rescue (v0.427.0)
+# ---------------------------------------------------------------------------
+
+def test_the_engagement_gate_is_one_rule_both_halves_of_the_app_read():
+    """``rescue_would_engage`` is the gate ``bootstrap_solve`` itself decides with.
+
+    The offer a user is shown and the job that then runs must agree, so the rule
+    lives in one pure function rather than being re-spelled next to the button.
+    """
+    from seestack.solve.bootstrap import DEFAULT_MIN_FRAMES, rescue_would_engage
+
+    m = DEFAULT_MIN_FRAMES
+    assert rescue_would_engage(0, m)              # nothing located, enough to try
+    assert rescue_would_engage(m - 1, m)          # a few located, still too thin
+    assert not rescue_would_engage(m, m)          # already a real stack's worth
+    assert not rescue_would_engage(0, m - 1)      # too few to make a deep image
+    assert not rescue_would_engage(0, 0)
+    # …and it honours a caller's own floor rather than hard-coding the default.
+    assert rescue_would_engage(2, 3, min_frames=3)
+    assert not rescue_would_engage(3, 3, min_frames=3)
+
+
+def test_the_gate_the_engine_uses_is_the_function_not_a_copy_of_it(tmp_path):
+    """Reach into the real thing: a target the predicate calls too thin must be
+    declined by ``bootstrap_solve``, and one it accepts must engage."""
+    from seestack.solve.bootstrap import rescue_would_engage
+
+    proj, _ = _make_project_with_faint_subs(tmp_path, n=4)
+    try:
+        n_unsolved = sum(1 for f in proj.iter_frames() if f.wcs_json is None)
+        assert not rescue_would_engage(0, n_unsolved, min_frames=8)
+        res = bootstrap_solve(proj, min_frames=8, deep_solver=_ref_wcs_solver)
+        assert not res.engaged
+        assert res.reason == "too few unsolved subs to bootstrap"
+
+        assert rescue_would_engage(0, n_unsolved, min_frames=4)
+        res = bootstrap_solve(proj, min_frames=4, deep_solver=_ref_wcs_solver)
+        assert res.engaged
+    finally:
+        proj.close()
+
+
+def test_offering_the_rescue_also_needs_the_plain_solve_to_have_been_beaten():
+    """"Try *harder*" presupposes a first try.
+
+    A freshly-scanned target with automatic solving off has every sub un-located
+    and none of them attempted: the rescue *would* engage there, but it would
+    hand each sub a position propagated from a neighbour where the ordinary
+    solver would have given it its own verified one. So the offer waits.
+    """
+    from seestack.solve.bootstrap import (
+        DEFAULT_MIN_FRAMES,
+        rescue_is_worth_offering,
+        rescue_would_engage,
+    )
+
+    m = DEFAULT_MIN_FRAMES
+    # Never solved: the engine would engage, the offer stands down.
+    assert rescue_would_engage(0, m)
+    assert not rescue_is_worth_offering(0, m, 0)
+    # Tried on some, but not enough of them to call the solver beaten.
+    assert not rescue_is_worth_offering(0, m, m - 1)
+    # Tried on all of them and beaten → this is what the button is for.
+    assert rescue_is_worth_offering(0, m, m)
+    # Still never offered where the engine itself would stand down.
+    assert not rescue_is_worth_offering(m, m, m)
+    assert not rescue_is_worth_offering(0, m - 1, m - 1)
+
+
+def test_the_rescue_can_be_asked_for_on_its_own_without_a_second_solve_pass(
+    tmp_path, monkeypatch,
+):
+    """The "try harder" job runs the rescue and *not* the per-sub ladder.
+
+    Re-running the ladder that already failed on every one of these subs costs
+    minutes and locates nothing new, so the button must not do it. Fails before
+    the bootstrap moved out of the ``run_solve`` block: with ``run_solve=False``
+    it never ran at all.
+    """
+    import seestack.solve.bootstrap as bootstrap_mod
+    from seestack.io.scanner import run_qc_and_solve
+    from seestack.solve.bootstrap import BootstrapResult
+
+    calls = {"bootstrap": 0, "solve": 0}
+
+    def _fake_bootstrap(project, **kwargs):
+        calls["bootstrap"] += 1
+        return BootstrapResult(engaged=True, deep_solved=True, n_propagated=5,
+                               reason="rescued 5 sub(s) from a deep image")
+
+    def _fake_solve_one(*args, **kwargs):
+        calls["solve"] += 1
+        raise AssertionError("the per-sub ladder must not run for a rescue job")
+
+    monkeypatch.setattr(bootstrap_mod, "bootstrap_solve", _fake_bootstrap)
+    monkeypatch.setattr("seestack.solve.runner.solve_one", _fake_solve_one)
+
+    proj, _ = _make_project_with_faint_subs(tmp_path, n=8)
+    try:
+        summary = run_qc_and_solve(
+            proj, run_qc=False, run_solve=False, serial=True,
+            bootstrap_solve=True,
+        )
+        assert calls["bootstrap"] == 1
+        assert calls["solve"] == 0
+        assert summary["bootstrap_propagated"] == 5
+        # The progress counters are seeded by the function and stay at zero —
+        # neither phase was entered, so neither priced a single frame.
+        assert summary["solve_total"] == 0
+        assert summary["qc_total"] == 0
+        assert "solve_ok" not in summary  # the solve phase never reported
+    finally:
+        proj.close()
+
+
+def test_a_rescue_that_stood_down_says_why_instead_of_nothing(tmp_path):
+    """A job the user pressed a button for must never finish on an empty summary."""
+    from seestack.io.scanner import run_qc_and_solve
+
+    proj, _ = _make_project_with_faint_subs(tmp_path, n=2)
+    try:
+        summary = run_qc_and_solve(
+            proj, run_qc=False, run_solve=False, serial=True,
+            bootstrap_solve=True,
+        )
+        assert "bootstrap_engaged" not in summary
+        assert summary["bootstrap_reason"] == "too few unsolved subs to bootstrap"
+    finally:
+        proj.close()

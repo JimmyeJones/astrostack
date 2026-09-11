@@ -6,11 +6,17 @@ import { MemoryRouter } from "react-router-dom";
 import { RejectionBreakdown } from "./RejectionBreakdown";
 import type { RejectionBucket, RejectionSummary } from "../../api/client";
 
-function renderBreakdown(summary: RejectionSummary, onRunPlateSolve?: () => void) {
+function renderBreakdown(
+  summary: RejectionSummary,
+  onRunPlateSolve?: () => void,
+  opts: { onTryHarder?: () => void; deepRescueOffered?: boolean } = {},
+) {
   return render(
     <MantineProvider>
       <MemoryRouter>
-        <RejectionBreakdown summary={summary} onRunPlateSolve={onRunPlateSolve} />
+        <RejectionBreakdown summary={summary} onRunPlateSolve={onRunPlateSolve}
+          onTryHarder={opts.onTryHarder}
+          deepRescueOffered={opts.deepRescueOffered} />
       </MemoryRouter>
     </MantineProvider>,
   );
@@ -115,5 +121,70 @@ describe("RejectionBreakdown advice you can act on", () => {
     renderBreakdown(SUMMARY, vi.fn());  // trailed + clouds, verdict with no key
     expect(screen.queryByRole("link")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+});
+
+describe("RejectionBreakdown — trying harder on a faint field", () => {
+  it("offers the deep-image rescue instead of Plate Solve once the server says it would work", () => {
+    // These subs have already been offered to the plate solver and beaten it, so
+    // running it again would spend the same minutes for the same answer. One
+    // control, and it is the one that can actually change the outcome.
+    const tryHarder = vi.fn();
+    renderBreakdown({ ...SUMMARY, buckets: [bucket("unsolved")] }, vi.fn(), {
+      onTryHarder: tryHarder, deepRescueOffered: true,
+    });
+    expect(screen.queryByRole("button", { name: "Run Plate Solve" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try harder to locate these" }));
+    expect(tryHarder).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Plate Solve where the rescue would do nothing", () => {
+    const run = vi.fn();
+    const tryHarder = vi.fn();
+    renderBreakdown({ ...SUMMARY, buckets: [bucket("unsolved")] }, run, {
+      onTryHarder: tryHarder, deepRescueOffered: false,
+    });
+    expect(screen.queryByRole("button", { name: "Try harder to locate these" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Run Plate Solve" }));
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(tryHarder).not.toHaveBeenCalled();
+  });
+
+  it("says nothing against an older backend that omits the flag", () => {
+    // `deepRescueOffered` left undefined is exactly what an older backend's
+    // response reads as — the page must behave as it always did.
+    renderBreakdown({ ...SUMMARY, buckets: [bucket("unsolved")] }, vi.fn(), {
+      onTryHarder: vi.fn(),
+    });
+    expect(screen.getByRole("button", { name: "Run Plate Solve" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try harder to locate these" })).toBeNull();
+  });
+
+  it("offers no rescue button on a surface that has no such action", () => {
+    renderBreakdown({ ...SUMMARY, buckets: [bucket("unsolved")] }, undefined, {
+      deepRescueOffered: true,
+    });
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("resolves a dominant-unsolved verdict to the rescue too, through the same map", () => {
+    const tryHarder = vi.fn();
+    renderBreakdown({
+      ...SUMMARY,
+      verdict: { tone: "warn", key: "dominant:unsolved", text: "Mostly subs not located yet…" },
+      buckets: [bucket("clouds")],
+    }, vi.fn(), { onTryHarder: tryHarder, deepRescueOffered: true });
+    fireEvent.click(screen.getByRole("button", { name: "Try harder to locate these" }));
+    expect(tryHarder).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers one control, not two, when the verdict is about the unsolved bucket below it", () => {
+    renderBreakdown({
+      ...SUMMARY,
+      verdict: { tone: "warn", key: "dominant:unsolved", text: "Mostly subs not located yet…" },
+      buckets: [bucket("unsolved"), bucket("clouds")],
+    }, vi.fn(), { onTryHarder: vi.fn(), deepRescueOffered: true });
+    expect(screen.getAllByRole("button", { name: "Try harder to locate these" }))
+      .toHaveLength(1);
   });
 });

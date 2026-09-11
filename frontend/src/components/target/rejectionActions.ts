@@ -21,7 +21,8 @@ import { settingsLink } from "../../settingsSections";
  */
 export type RejectionAction =
   | { kind: "route"; label: string; to: string }
-  | { kind: "runPlateSolve"; label: string };
+  | { kind: "runPlateSolve"; label: string }
+  | { kind: "deepRescue"; label: string };
 
 const SOLVE_SETTINGS: RejectionAction = {
   kind: "route",
@@ -34,12 +35,29 @@ const RUN_PLATE_SOLVE: RejectionAction = {
   label: "Run Plate Solve",
 };
 
+const DEEP_RESCUE: RejectionAction = {
+  kind: "deepRescue",
+  label: "Try harder to locate these",
+};
+
 /** The action for one bucket of left-out frames, or null when its note names
  *  nothing the app can take you to (most buckets: "a satellite crossed these"
- *  has no destination, and inventing one would be noise). */
-export function bucketAction(key: string): RejectionAction | null {
+ *  has no destination, and inventing one would be noise).
+ *
+ *  `deepRescueOffered` is the server's answer to "would the deep-image rescue
+ *  actually do something here?" (`reject-summary.deep_rescue_offered`). When it
+ *  is true the un-located subs have already been offered to the plate solver and
+ *  beaten it, so "Run Plate Solve" would spend the same minutes over again for
+ *  the same result — the rescue **replaces** it rather than sitting beside it,
+ *  because two buttons on one line is exactly the clutter the owner asked us to
+ *  stop adding, and only one of them is the right next move. Plate Solve stays
+ *  where it has always been, on the page itself. Defaults to false, i.e. today's
+ *  behaviour, so an older backend and every ordinary target are unchanged. */
+export function bucketAction(
+  key: string, deepRescueOffered = false,
+): RejectionAction | null {
   if (key === "solve_timeout") return SOLVE_SETTINGS;
-  if (key === "unsolved") return RUN_PLATE_SOLVE;
+  if (key === "unsolved") return deepRescueOffered ? DEEP_RESCUE : RUN_PLATE_SOLVE;
   return null;
 }
 
@@ -49,8 +67,10 @@ export function bucketAction(key: string): RejectionAction | null {
  * the same bucket map — one definition, and a verdict can never point somewhere
  * different from the bucket it is about. An older backend sends no key at all,
  * which reads as "no action", i.e. exactly today's behaviour. */
-export function verdictAction(key: string | undefined | null): RejectionAction | null {
+export function verdictAction(
+  key: string | undefined | null, deepRescueOffered = false,
+): RejectionAction | null {
   if (!key) return null;
   const bucket = key.startsWith("dominant:") ? key.slice("dominant:".length) : key;
-  return bucketAction(bucket);
+  return bucketAction(bucket, deepRescueOffered);
 }
