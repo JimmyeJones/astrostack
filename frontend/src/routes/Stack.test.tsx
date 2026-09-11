@@ -2719,7 +2719,7 @@ describe("StackView — cautions read a mosaic's panel depth, not its total", ()
  * new query — and the sizing line, the time estimate, the memory verdict, the
  * print plan, the per-pixel cautions and the drizzle nudge are all derived
  * from that one value, so they used to vanish and reappear *together* on every
- * tick of the κ slider. `webapp.estimate_cache` (v0.424.1) took the server
+ * tick of the κ slider. `webapp.estimate_cache` (v0.424.2) took the server
  * side of that to ~130 ms; this is the other half, and a fast answer that
  * still blanks the panel first reads as a flicker rather than as a form
  * keeping up.

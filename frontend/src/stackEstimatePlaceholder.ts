@@ -13,7 +13,7 @@
  * dragging the κ slider makes the entire advice block under it blink — on the
  * §1 owner's largest target, for about a second a tick, because the server was
  * rebuilding a canvas those knobs cannot move. `webapp.estimate_cache`
- * (v0.424.1) took that to ~130 ms; this is the other half, and the two are
+ * (v0.424.2) took that to ~130 ms; this is the other half, and the two are
  * worth having together: a fast answer that still blanks the panel first reads
  * as a flicker rather than as a form keeping up.
  *

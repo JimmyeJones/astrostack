@@ -42,3 +42,25 @@ export function blownCoreCaption(
 export function blownCoreButtonLabel(sug: HighlightSuggestion | undefined): string {
   return `Hold back highlights (${sug?.strength ?? 0})`;
 }
+
+/** The Stretch op the nudge is about when the user has not selected one.
+ *
+ * The measurement only ever reached the screen while the Stretch op was the
+ * *selected* control — so a beginner who opened the editor on an Auto recipe,
+ * saw a white blob where their galaxy core should be and did not think to click
+ * "Stretch" was shown nothing, on a picture the app had already measured. The
+ * Auto notes are where that user is looking, so they ask too.
+ *
+ * This mirrors the server's own fallback (`solve_highlight_protect` with no
+ * uid: the recipe's **first** `tone.stretch`), so the nudge in the note and the
+ * one on the op panel can never end up about two different ops. ``null`` when
+ * the recipe has no Stretch, or when its Stretch is switched off — there is
+ * nothing to offer on an op that is not rendering.
+ */
+export function blownCoreStretchOp<T extends { id: string; enabled?: boolean }>(
+  ops: readonly T[] | undefined,
+): T | null {
+  const first = (ops ?? []).find((o) => o.id === "tone.stretch");
+  if (!first || first.enabled === false) return null;
+  return first;
+}
