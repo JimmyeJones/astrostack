@@ -1,5 +1,49 @@
 # Shipped — the record
 
+## v0.418.2 — 2026-09-11 — the last two vacuous migration fixtures, and a guard that catches the next one
+
+The third and final part of the fourth external audit's "fixtures that cannot exhibit their bug"
+entry, which this closes. `test_a_schema_20_project_gains_the_streak_positions_without_losing_rows`
+and `test_a_schema_21_project_gains_the_restoration_stamp_without_losing_rows` both passed with
+their `if from_version < 21` / `if from_version < 22` migration blocks **deleted outright** —
+reproduced before touching anything.
+
+**Two separate problems, and the entry only named one.**
+
+The named one: a purely additive nullable-column migration and the runtime
+`_reconcile_table_columns` net produce the *same* observable schema, and the net derives its column
+list from the same `SCHEMA_SQL` the migration does. So no amount of checking the resulting columns
+can say which of the two did the work. `_disable_the_runtime_backfill` switches the net off for the
+duration of these two tests, which makes `_migrate_schema` the only thing that can satisfy them.
+The net keeps its own direct coverage — the `_EXPECTED_COLUMNS` contract test and the pre-QC-shape
+round-trip, both untouched — so nothing is left unguarded.
+
+The unnamed one, which is where the durable value is: the fixtures built their "old" DB from
+today's `SCHEMA_SQL` and then dropped the new columns back off. A fixture derived from the current
+schema **tracks** it — the next column added to `frames` or `stack_runs` appears in the fixture too,
+so a forgotten `ALTER` step can never make any test in this file go red. That is the exact failure
+mode the file was written for (the v0.119.8 live-install brick) and it was structurally unreachable.
+So `_V20_FRAMES_SQL`, `_V21_FRAMES_SQL` and `_V20_STACK_RUNS_SQL` are now frozen DDL literals, and
+`_assert_tables_are_fully_migrated` asserts the opened DB carries every authoritative column after
+the migration alone.
+
+**Verified against three cases rather than reasoned about**, each by patching
+`seestack/io/project.py` in a scratch run and restoring it:
+
+  * the v21 step deleted → `frames is missing ['streak_cx', 'streak_cy'] after _migrate_schema alone`
+  * the v22 step deleted → `frames is missing ['restored_utc'] …` (both tests)
+  * **a new column added to `SCHEMA_SQL` with no migration step at all** →
+    `frames is missing ['brand_new_col'] …`
+
+The third is the v0.119.8 mistake itself, and it is the first time this suite has been able to go red
+on it. The assertion message says what to do and, pointedly, what not to do: add the step, don't
+widen the frozen DDL.
+
+**Tests-only.** No engine, webapp, frontend, config, schema, on-disk or API change; no test weakened
+or deleted, and the two tests keep every row-integrity assertion they had. Test count unchanged at 6
+in this file — the work was making the existing six mean something.
+
+
 ## v0.418.1 — 2026-09-11 — the Gaia colour-calibration mode is retired (entry CLOSED)
 
 The editor and the Stack form both offered `color_calibration_mode = "gaia"`. It imported
