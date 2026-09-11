@@ -1,5 +1,82 @@
 # Shipped — the record
 
+## v0.425.1 — 2026-09-11 — 🐛 the offline Sky Map opens on your newest picture, and a star's name is no longer painted over by the star
+
+*(PRIORITY 3, friendliness. Two Builder-found bugs on the surface v0.424.4 had
+just made the default, both found by dogfooding the running app and both
+invisible to a code read — the second one only by magnifying a screenshot.)*
+
+**What it looked like.** `OfflineSky` opened its camera at `[0, 0, 0.1]` looking
+at the origin — RA 270°, Dec 0° in this file's own convention — **whatever the
+user had shot**, with a 70° field. The backdrop is the bundled bright-star
+catalogue, **sixty stars over the whole celestial sphere**, so that fixed patch
+drew about four dots on black and the user's pictures were nowhere in the view.
+The first-run screenshot is a black rectangle with four specks; the
+sample-loaded one, with *2 images* in the badge, is the same black rectangle. It
+reads as a map that failed to load. "Real sky (online)" has never done this —
+`AladinSky` centres on the newest picture and frames it at six picture-widths —
+and v0.424.4 had just made the offline view the one a beginner opens on.
+
+**What it does now.** New pure `initialSkyView(images, stars)`, in three rules:
+
+1. **The newest picture**, framed at `OFFLINE_FRAME_MARGIN` (6) picture-widths —
+   the same margin `AladinSky` uses, so switching modes lands on the same
+   framing — clamped into `[OFFLINE_FOV_MIN, OFFLINE_FOV_MAX]`, the viewer's own
+   zoom range, so the first scroll cannot jump to an edge. "Newest" is
+   `sortOldestFirst`'s last: the same picture the online viewer picks, and the
+   one drawn on top where footprints overlap.
+2. **The brightest star in the backdrop**, wide, when there are no pictures — so
+   a first-run install opens on something named and recognisable. Taken from the
+   catalogue the viewer is already drawing rather than hard-coded, so it can
+   never aim where the backdrop has nothing.
+3. **`OFFLINE_FALLBACK`** — RA 270°, Dec 0°, 70°, *exactly* the old direction and
+   field — when there is neither.
+
+A picture or star with a non-finite coordinate is skipped rather than aimed at.
+Dec is clamped to ±89.9°, because looking straight along ±Y is `OrbitControls`'
+own gimbal singularity and a tenth of a degree is sub-pixel at every FOV here.
+`offlineCameraPosition` puts the camera at `−r·v̂`: it sits a hair off the centre
+of the sphere and is aimed at the origin, so it looks along the negative of its
+own position.
+
+**The aim is decided once, on first render** (`useState` initialiser), not
+derived from the current data: the page's query can refetch on a window focus,
+and re-deriving the camera props would yank the view out of wherever the user
+had dragged it.
+
+**The second bug, found by magnifying the screenshot.** `StarLabels` rendered
+each name in a drei `<Html center>` — centred on the star — so the star's own
+dot was painted through the middle of its own word: "Rigel" read as `R∎el`. The
+span now steps `STAR_LABEL_OFFSET_PX` (12) **below** the star (below rather than
+beside, so a label never reaches towards the next star along); drei owns the
+box's transform, which is why the offset is on the span. One fixed offset is
+enough because of a property worth recording: three.js sizes an attenuated point
+at `size × (viewportHeight / 2) ÷ distance` pixels, which **does not contain the
+field of view** — the sprite stays ~6 px across at every zoom, and it is the
+viewport height, not the zoom, that decides whether the offset clears it. That
+arithmetic is now `starPointDiameterPx`, and the material's size is the named
+`BRIGHT_STAR_POINT_SIZE` it reads, so the two cannot be changed apart.
+
+**Verified in the running app, not only in the suite** — `agent-dogfood.sh
+--build --no-stack`, before and after: the Sky Map screenshot goes from an empty
+black field to the M42 mosaic footprint dead centre with Rigel labelled beside
+it, and the magnified crop of that label goes from `R∎el` to a legible "Rigel"
+under its dot.
+
+**Upgrade-safe (§9):** frontend-only. No endpoint, config, schema, on-disk,
+API-shape or default change; `GET /api/sky` is read exactly as before.
+
+**Tests (+9, in `Sky.test.tsx`):** opens on the newest picture by stack time and
+not by position; the opening FOV clamped at both ends; the brightest-star
+fallback; the no-data fallback equal to the old fixed view, from `[]`/`[]` and
+from `null`/`null`; a non-finite coordinate skipped rather than aimed at; the
+pole clamp; the camera position's direction property and its reduction to the
+old `[0, 0, 0.1]`; the label clearing the dot at every viewport height this
+viewer runs at; and the dot scaling with the viewport rather than the zoom.
+**Five of them verified red** by standing the aim down to the fallback in a
+scratch revert — the four that describe unchanged behaviour correctly stayed
+green.
+
 ## v0.425.0 — 2026-09-11 — 🌟 a plateaued target now names the fresh one to point at instead
 
 *(PRIORITY 2–3, autonomy + friendliness. The 2026-07-25 "Features that serve
