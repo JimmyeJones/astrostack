@@ -1,5 +1,55 @@
 # Shipped — the record
 
+## v0.422.2 — 2026-09-11 — 🐛 the same guarantee on the walk-away surface, and it was quoting the wrong number
+
+v0.422.1 fixed the two surfaces a user reaches by *opening* something — the
+finished picture's health panel and History's chip. The third one is the one they
+do not have to open: the Jobs card's **"Process target"** result, where a
+walk-away stack lands. `frontend/src/components/target/rejectionNote.ts` says the
+same thing there, and its own docstring claims it is *"kept honest and consistent
+with the engine's `stackhealth.py`"* — so after yesterday's engine half it was the
+copy that disagreed.
+
+**Two things were wrong, and the second is the reachable one.**
+
+1. **The guarantee, unconditional.** *"…dropped the brightest and darkest value at
+   each pixel, so a lone satellite or plane trail can't show up in your final
+   image"* — false wherever fewer than three subs reached the pixel, exactly as in
+   v0.422.1. New mirrored `MIN_MAX_MIN_SAMPLES` (guarded against the engine's
+   `MIN_MAX_MIN_FRAMES` by `tests/test_min_max_floor_mirror.py`, the `fullres.ts`
+   arrangement) makes the helper withhold the sentence below the floor rather than
+   soften it. In the app the thin-stack warning already wins at that depth and
+   nulls this note — this makes the helper honest on its own terms, and it
+   retires an existing test that pinned *"only 1 sub stacked, AstroStack dropped
+   the brightest and darkest value at each pixel"*, a sentence that cannot be
+   true.
+2. **"Because only N subs stacked" named the target's total.** This is the
+   v0.419–v0.421 substitution in a sentence those four runs walked past. The
+   reason min/max was picked is the **panel depth** — `_resolve_auto_reject` sizes
+   the method from the thinnest substantial panel, which is what v0.399.1 fixed on
+   the Stack form — so on a mosaic the count in this sentence is neither the
+   reason nor the depth the guarantee is about. **Measured on the mosaic sample
+   this run dogfooded**: 21 subs, canvas 907×615 ≈ 3.6 field-fulls, per-pixel
+   depth ≈ 6 — and the card read *"Because only 21 subs stacked…"*. It now reads
+   *"Your 21 subs are spread across about 4 fields of sky, so with about 6 subs on
+   each part of this picture AstroStack dropped…"*, naming both figures the way
+   `thinStackWarning` does, from the **same** `field_fulls` the Jobs payload has
+   carried since v0.421.0 and the thin cue two lines above already reads. No new
+   request, no new field.
+
+**Unchanged on a single field, to the byte** — `spansMoreThanOneField(null)` is
+false, depth *is* the frame count, and a test asserts the three no-figure forms
+(`null`, `1`, `undefined`) return the identical string. κ-σ and drizzle wording
+untouched.
+
+**Tests (+6, three fail-before).** `rejectionNote.test.ts`: the floor withheld at
+1 and at `MIN_MAX_MIN_SAMPLES − 1` and spoken at the floor itself; the mosaic
+wording and a mosaic under the floor saying nothing; the single-field/older-backend
+identity. `Jobs.test.tsx`: the real summary naming the depth and *not* the total.
+`tests/test_min_max_floor_mirror.py`: the hand-mirrored constant against
+`MIN_MAX_MIN_FRAMES`, failing loudly if the declaration is renamed rather than
+passing on a missed match.
+
 ## v0.422.1 — 2026-09-11 — 🐛 the min/max drop has a per-pixel floor too, and the finished picture was the one surface that did not know
 
 **The claim that was false.** A run combined with the order-statistic min/max

@@ -1136,6 +1136,22 @@ describe("processTargetSummary", () => {
     expect(cleaned).toMatch(/only 8 subs stacked/);
     expect(cleaned).toMatch(/brightest and darkest/);
   });
+  it("names the min/max clean-up by the mosaic's depth, not its total", () => {
+    // The depth is what chose the method (`_resolve_auto_reject` sizes it from
+    // the thinnest substantial panel), and it is what the guarantee is about —
+    // so "because only 21 subs stacked" under a four-panel mosaic names a
+    // number that is neither, on the surface the walk-away owner reads.
+    const { cleaned } = processTargetSummary({
+      stacked: true, solved_accepted: 21,
+      stack: {
+        n_frames_used: 21, field_fulls: 3.5,
+        rejection_mode: "min-max-reject", rejection_fraction: null,
+      },
+    });
+    expect(cleaned).toMatch(/Your 21 subs are spread across/);
+    expect(cleaned).toMatch(/about 6 subs on each part of this picture/);
+    expect(cleaned).not.toMatch(/only 21 subs stacked/);
+  });
   it("names a κ-σ clean-up as a percentage on a healthy stack", () => {
     const { cleaned } = processTargetSummary({
       stacked: true, solved_accepted: 40,

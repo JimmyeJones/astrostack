@@ -5,6 +5,7 @@ import {
   formatRejectPct,
   REJECTION_NOTE_MIN_FRACTION,
   REJECTION_NOTE_MAX_FRACTION,
+  MIN_MAX_MIN_SAMPLES,
 } from "./rejectionNote";
 import rejectPctCases from "../rejectPct.cases.json";
 
@@ -57,11 +58,43 @@ describe("rejectionNote", () => {
     expect(note).not.toMatch(/%/);
   });
 
-  it("min/max singular for a one-sub context and generic without a count", () => {
-    expect(rejectionNote("min-max-reject", null, 1)).toMatch(/only 1 sub stacked/);
+  it("withholds the guarantee below the floor, where nothing was dropped", () => {
+    // Rewritten 2026-09-11 with v0.422.1's engine half; it used to pin
+    // `rejectionNote("min-max-reject", null, 1)` as "only 1 sub stacked,
+    // AstroStack dropped the brightest and darkest value at each pixel" — a
+    // sentence that cannot be true. `MinMaxRejectAccumulator` needs three
+    // samples on a pixel before there is a brightest and a darkest to spare;
+    // below that it averages them all in, trail included. So the honest answer
+    // is no sentence, not a softened one.
+    expect(rejectionNote("min-max-reject", null, 1)).toBeNull();
+    expect(rejectionNote("min-max-reject", null, MIN_MAX_MIN_SAMPLES - 1)).toBeNull();
+    expect(rejectionNote("min-max-reject", null, MIN_MAX_MIN_SAMPLES))
+      .toMatch(/only 3 subs stacked/);
+  });
+
+  it("min/max stays generic without a count", () => {
     const generic = rejectionNote("min-max-reject", null);
     expect(generic).toMatch(/^AstroStack dropped/);
     expect(generic).not.toMatch(/only/);
+  });
+
+  it("reads the depth, not the total, when the run's canvas is a mosaic", () => {
+    // The reason min/max was picked is the *panel* depth (`_resolve_auto_reject`
+    // sizes it from the thinnest substantial panel), so "because only 21 subs
+    // stacked" under a four-panel mosaic names neither the reason nor the depth.
+    const note = rejectionNote("min-max-reject", null, 21, 3.5);
+    expect(note).toMatch(/Your 21 subs are spread across/);
+    expect(note).toMatch(/about 6 subs on each part of this picture/);
+    expect(note).toMatch(/brightest and darkest value at each pixel/);
+    // …and a mosaic whose panels are under the floor says nothing at all.
+    expect(rejectionNote("min-max-reject", null, 7, 3.5)).toBeNull();
+  });
+
+  it("is byte-for-byte unchanged on a single field and on an older backend", () => {
+    const plain = rejectionNote("min-max-reject", null, 8);
+    expect(rejectionNote("min-max-reject", null, 8, null)).toBe(plain);
+    expect(rejectionNote("min-max-reject", null, 8, 1)).toBe(plain);
+    expect(rejectionNote("min-max-reject", null, 8, undefined)).toBe(plain);
   });
 
   it("returns null for a plain-mean stack (no rejection pass) or unknown mode", () => {
