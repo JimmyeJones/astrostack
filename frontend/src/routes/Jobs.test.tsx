@@ -1151,6 +1151,37 @@ describe("processTargetSummary", () => {
     expect(thin?.level).toBe("thin");
     expect(cleaned).toBeNull();
   });
+  it("flags a walk-away mosaic that is one sub deep, though it stacked nine", () => {
+    // The walk-away path is where the owner actually meets a thin mosaic, and
+    // the summary's heads-up is a claim about one pixel: nine subs over a 3x3
+    // raster is a single sub everywhere. Read off the count alone (9 > 4) the
+    // Jobs page reported a cheerful green "Stacked 9 frames" while the Target
+    // page called the very same picture a single sub.
+    const { line, thin } = processTargetSummary({
+      stacked: true, solved_accepted: 9,
+      stack: { n_frames_used: 9, field_fulls: 9 },
+    });
+    // The line still reports what actually combined…
+    expect(line).toBe("Stacked 9 frames into a new master.");
+    // …and the warning explains what that means per part of the picture.
+    expect(thin?.level).toBe("single");
+    expect(thin?.message).toMatch(/spread across about 9 fields of sky/);
+  });
+  it("leaves a genuinely deep mosaic's summary unwarned", () => {
+    const { thin } = processTargetSummary({
+      stacked: true, solved_accepted: 180,
+      stack: { n_frames_used: 180, field_fulls: 9 },
+    });
+    expect(thin).toBeNull();
+  });
+  it("reads the count itself when the backend sends no field_fulls", () => {
+    // An older backend omits the field; the summary must behave exactly as it
+    // did before it existed.
+    const { thin } = processTargetSummary({
+      stacked: true, solved_accepted: 9, stack: { n_frames_used: 9 },
+    });
+    expect(thin).toBeNull();
+  });
   it("notes auto-graded drops and singularises one frame", () => {
     const { line, stacked, thin } = processTargetSummary({
       stacked: true, solved_accepted: 1, auto_graded: 2, stack: { n_frames_used: 1 },

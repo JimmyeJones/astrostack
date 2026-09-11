@@ -125,6 +125,22 @@ describe("Gallery batch apply", () => {
     expect(document.querySelector(".tabler-icon-alert-triangle")).toBeNull();
   });
 
+  it("flags a mosaic tile that is one sub deep, though it combined nine", async () => {
+    // The card's badge asks a per-pixel question, so it has to divide by the
+    // run's own `field_fulls`: nine subs over a 3x3 raster is a single sub
+    // everywhere, and the Target page has called that out since v0.419.1.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), n_frames_used: 9, field_fulls: 9 }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getByText("9 frames")).toBeInTheDocument());
+    expect(document.querySelector(".tabler-icon-alert-triangle")).not.toBeNull();
+  });
+
   it("shows a run's label and filters by it (and by target name)", async () => {
     vi.spyOn(client.api, "getGallery").mockResolvedValue({
       items: [
