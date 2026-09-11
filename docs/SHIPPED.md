@@ -1,5 +1,140 @@
 # Shipped — the record
 
+## v0.423.0 — 2026-09-11 — 🌟 the glossary reaches the app the owner actually runs
+
+`docs/glossary.md` has explained FWHM, drizzle, sigma clipping, coverage maps and
+twenty-odd other words in plain language since the desktop days. Its own opening
+line said *"the goal is that nobody has to leave the app to understand any
+setting."* The web app — the only UI the owner has — has never been able to show
+a single one of them.
+
+**Why, exactly.** `docker/Dockerfile` copies `frontend/`, `seestack/`, `webapp/`,
+`pyproject.toml` and `README.md`, and nothing else. A file in `docs/` is therefore
+present in every checkout, every test run and every CI job, and **absent from the
+only build the owner installs** — the exact shape AGENTS.md §8 warns about
+("green means the checkout passed, not that the owner's install works"), arrived
+at from the other direction. The one reader it ever had was the historical
+PySide6 GUI's F1 key, on a desktop app this deployment does not run.
+
+**The move is the feature.** The markdown is now `seestack/data/glossary.md`,
+declared as package data (`seestack = ["data/*.json", "data/*.md"]`), beside the
+sky catalogs that are bundled for the same reason.
+`tests/test_image_contract.py` gained the general form of the rule — every
+extension present in `seestack/data/` must be declared, or it silently misses a
+non-editable install — verified red by reverting the pattern.
+`seestack/gui/glossary_viewer.find_glossary_path` prefers the packaged copy and
+still falls back to the old `docs/` locations, so an older checkout opens
+something rather than nothing.
+
+**One definition, not two copies.** `tests/test_glossary.py` asserts
+`docs/glossary.md` is *gone*: two copies of a glossary is how the app and the
+docs start disagreeing about a word.
+
+### The parser (`seestack/glossary.py`, pure)
+
+`load_glossary()` → `(intro, [GlossaryTerm(slug, term, body)])`, in document
+order. The intro is the file's own lead paragraph — the page needs one, and
+writing a second one in the frontend is how two accounts of one page begin to
+disagree. A heading with no prose is not offered as a term; a missing file is an
+empty glossary, never an exception, because a reference page must not take its
+route down with it.
+
+`_slugify` is the part worth reading. The anchor is the *lead* name — brackets
+and anything after a **spaced** slash dropped — so `"Cache (Stage 1 / Stage 2)"`
+is `cache` and `"Sub / sub-frame / light frame"` is `sub`. The slash has to be
+spaced, because a bare one is part of one name rather than a list of synonyms:
+`"Min/max rejection"` is `min-max-rejection`, not `min`. Non-ASCII is dropped
+rather than transliterated (`"Noise σ (sigma)"` → `noise`), so every anchor is
+typeable in a URL bar. Uniqueness is asserted against the **real** file, which is
+the only place a collision could come from.
+
+**There is deliberately no alias list.** The obvious design — split
+`"Alignment / registration"` into searchable synonyms — was written, and then
+removed on the evidence: every one of those spellings is a *substring of the
+heading*, so a plain substring search already finds the entry by any of them, and
+the alias branch turned out to be a rule only a synthetic fixture could ever
+exercise. That is the same trap as the audit's "fixtures that cannot exhibit
+their bug", caught before it shipped rather than after.
+
+### The endpoint and the page
+
+`GET /api/glossary` (`webapp/routers/glossary.py`) serves `{intro, terms}`,
+`lru_cache`d: it is a file inside the image and cannot change while the app runs.
+It opens no library, no project DB and no network — pinned by a test that makes
+`Library.open_or_create` fatal and still gets an answer.
+
+`/glossary` is one flat, readable page: 38 entries fit, scanning beats clicking,
+and every heading is an `id`, so a tooltip anywhere in the app can link at the
+word it just used. The page scrolls a `#fwhm` deep link into view itself, because
+the browser cannot honour one on first paint — the element does not exist until
+the terms arrive.
+
+The search box reads the **explanations** as well as the names, which is how a
+beginner actually searches: not "sigma clipping", but *"satellite"*. Heading
+matches rank above body-only ones, in document order, and that is the whole
+ranking — burying "Drizzle" under three entries that merely mention drizzle is
+how a search box stops being believed.
+
+`glossaryMarkdown.tsx` renders the four constructs the file uses — paragraphs,
+`- ` lists, bold/italic/code — and nothing else. No markdown dependency and no
+HTML sanitiser to go with it; every span is a React child, so there is no path
+from the glossary file to raw markup in the DOM, and there is no
+`dangerouslySetInnerHTML` in the file.
+
+### The content was refreshed, not just moved
+
+A reference page that teaches a control the app no longer has is worse than no
+page, so the prose was read against the current app rather than trusted:
+
+- the **Gaia** colour-calibration mode (retired in v0.418.0, because it needed a
+  network this app declines) is gone — pinned by a test that greps every body;
+- **ASTAP** is described as bundled with the container, not as something to
+  download from a URL;
+- the **cache** entry points at the Storage page, not at "the GUI";
+- the desktop-only **Conservative / Balanced / Aggressive** presets, which this
+  app does not have, are replaced by **Auto-grade** — the thing that actually
+  answers "which subs get left out?" here. This is a content correction, not a
+  removed feature: the entry described something the web app never shipped;
+- twelve terms the app says out loud and the file never defined were added:
+  integration time, seeing, auto-grade, dithering, min/max rejection, panel
+  depth, linear vs display-space, recipe / non-destructive editing, SCNR, master
+  dark/flat/bias, hot pixel, noise σ, auto-stack / walk-away and the incoming
+  folder (which says, as the Storage page does, that those subs are the only copy
+  there is).
+
+**Panel depth** is in there on purpose: v0.419–v0.422 spent four runs teaching
+the app's sentences to say "how many subs one *pixel* got" rather than the
+target's total, and until now there was nowhere that explained what the
+distinction is.
+
+### IA, and what it costs
+
+One nav link, in the existing **System** group — not a new group, because a
+heading over a single link is noise (the sidebar's own rule for the Dashboard),
+and the cross-link from `FrameColumnGuide` puts the page's most-wanted entry one
+tap from the table that raises the question. Nothing was removed and no existing
+page grew: the glossary is a destination, which the owner's IA brief allows
+explicitly ("even if they need to add pages, that is fine").
+
+### Upgrade-safety (§9) and tests
+
+Additive throughout: a new endpoint, a new route, one new package-data pattern.
+No config, DB schema, on-disk layout, API shape or default changed, and nothing
+in the processing path is touched — an install that somehow lacks the file gets a
+page that says so and an app that is otherwise identical.
+
+Tests **+14 Python** — `tests/test_glossary.py` (parser and the real file: unique
+anchors, the spot-check that the words a beginner meets are explained, the
+no-Gaia grep, and the assertion that the file lives in the package and not in
+`docs/`), `tests/webapp/test_glossary.py` (the wire shape, the markdown arriving
+un-stripped, and the no-disk-access trap), and two in
+`tests/test_image_contract.py`, the packaging one **verified red** by reverting
+the `data/*.md` pattern — and **+34 vitest** across `glossarySearch.test.ts`,
+`glossaryMarkdown.test.tsx`, `Glossary.test.tsx` and one added to
+`FrameColumnGuide.test.tsx` (whose harness gained a `MemoryRouter`, since the
+disclosure now links out; no assertion was weakened).
+
+
 ## v0.422.2 — 2026-09-11 — 🐛 the same guarantee on the walk-away surface, and it was quoting the wrong number
 
 v0.422.1 fixed the two surfaces a user reaches by *opening* something — the

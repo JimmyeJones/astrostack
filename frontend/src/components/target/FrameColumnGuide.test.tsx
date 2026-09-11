@@ -1,13 +1,17 @@
 import { MantineProvider } from "@mantine/core";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { FrameColumnGuide } from "./FrameColumnGuide";
 import { FRAME_COLUMNS } from "./frameColumns";
 
+// A router, because the disclosure now ends with a link out to the glossary.
+// The component has only ever been rendered inside one (`routes/Target.tsx`);
+// this harness was simply the narrower of the two.
 function renderGuide() {
   return render(
     <MantineProvider>
-      <FrameColumnGuide />
+      <MemoryRouter><FrameColumnGuide /></MemoryRouter>
     </MantineProvider>,
   );
 }
@@ -83,5 +87,14 @@ describe("FrameColumnGuide", () => {
     renderGuide();
     expect(screen.getByTestId("frame-column-guide-toggle"))
       .toHaveStyle({ alignSelf: "flex-start" });
+  });
+
+  it("points out to the full glossary, at the term it was just explaining", () => {
+    // The four hints here are a sentence each; the glossary is where the same
+    // words get a paragraph. The link lands on the term's own anchor.
+    renderGuide();
+    fireEvent.click(screen.getByText("What do these numbers mean? →"));
+    expect(screen.getByRole("link", { name: "glossary" }))
+      .toHaveAttribute("href", "/glossary#fwhm");
   });
 });

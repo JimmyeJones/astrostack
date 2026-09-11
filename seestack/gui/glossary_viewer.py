@@ -1,9 +1,10 @@
 """
 Glossary viewer.
 
-A simple read-only panel that renders ``docs/glossary.md`` (which lives next
-to the source tree). Used from the Help menu as the one-stop reference for
-every term used in the GUI.
+A simple read-only panel that renders the bundled ``seestack/data/glossary.md``
+(see :mod:`seestack.glossary`). Used from the Help menu as the one-stop
+reference for every term used in the GUI; the web app serves the same file at
+``/glossary``.
 
 Markdown is rendered via Qt's built-in ``setMarkdown`` — no extra dependency.
 """
@@ -25,10 +26,18 @@ from PySide6.QtWidgets import (
 
 
 def find_glossary_path() -> Path | None:
-    """Return the path to docs/glossary.md if we can find it; else None."""
-    # Source layout: <root>/docs/glossary.md, this file at <root>/seestack/gui/.
+    """Return the path to the bundled glossary markdown, else None.
+
+    It lives in the package (``seestack/data/glossary.md``) rather than in
+    ``docs/``, so the web app can serve it from an installed wheel — see
+    :mod:`seestack.glossary`. The old ``docs/`` locations are still tried, so a
+    checkout that predates the move still opens something.
+    """
+    from seestack.glossary import glossary_path
+
     here = Path(__file__).resolve()
     for candidate in (
+        glossary_path(),
         here.parent.parent.parent / "docs" / "glossary.md",
         here.parent.parent / "docs" / "glossary.md",
     ):

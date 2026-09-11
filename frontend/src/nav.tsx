@@ -1,5 +1,5 @@
 import {
-  IconActivity, IconAntenna, IconAward, IconChecklist, IconDatabase, IconFileText, IconFlask, IconGauge,
+  IconActivity, IconAntenna, IconAward, IconBook2, IconChecklist, IconDatabase, IconFileText, IconFlask, IconGauge,
   IconLayoutGrid,
   IconGalaxy,
   IconMoon, IconPalette, IconRadar2, IconSettings, IconSparkles, IconStars, IconTelescope,
@@ -81,6 +81,11 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: "/jobs", label: "Jobs", icon: <IconActivity size={18} /> },
       { to: "/storage", label: "Storage", icon: <IconDatabase size={18} /> },
       { to: "/logs", label: "Logs", icon: <IconFileText size={18} /> },
+      // The term reference. It sits here rather than in a "Help" group of its
+      // own because a heading over a single link is noise (see the Dashboard
+      // above), and because this is where someone goes to look something up
+      // rather than to look at their pictures.
+      { to: "/glossary", label: "Glossary", icon: <IconBook2 size={18} /> },
       { to: "/settings", label: "Settings", icon: <IconSettings size={18} /> },
     ],
   },

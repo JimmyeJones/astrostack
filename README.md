@@ -59,10 +59,10 @@ seestack/
   gui/     PySide6 application
   render/  headless debayer / autostretch / thumbnails (no Qt)
   core/    GPU/CPU shim, cache manager, job runner
+  data/    bundled offline data: sky catalogs + the beginner glossary (/glossary)
 webapp/    FastAPI web service: job manager, folder watcher, REST API, SPA
 frontend/  React + Vite + TypeScript web UI (built into webapp/static)
 docker/    Dockerfile + docker-compose.yml for TrueNAS / Docker
 docs/
-  glossary.md   beginner-friendly term glossary (linked from the GUI)
   webapp.md     AstroStack Web: deployment + usage
 ```

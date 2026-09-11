@@ -79,8 +79,11 @@ include = ["seestack*", "webapp*"]
 # The built React SPA (produced by `npm run build` into webapp/static).
 webapp = ["static/*", "static/assets/*"]
 # Bundled static data (the Messier + curated NGC/IC catalogs for the offline
-# night planner).
-seestack = ["data/*.json"]
+# night planner, and the plain-language glossary the app serves at /glossary).
+# `docker/Dockerfile` copies `seestack/` and not `docs/`, so anything the running
+# app reads has to live here to reach the owner's install at all — see
+# `seestack/glossary.py` and `tests/test_image_contract.py`.
+seestack = ["data/*.json", "data/*.md"]
 
 [tool.ruff]
 line-length = 100
