@@ -3,11 +3,12 @@ import {
   compassPoint, difficultyRowBadge, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge,
   recentreNudgeRowBadge,
   isoDate, minAltOptions, MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel,
+  moonShootColor, moonShootLabel, moonShootWindowNote,
   moonWindowNote, notUpTonightNote, objectTypeBucket, partitionByUpTonight,
   planDateBounds, planNightLabel, scoreColor, splitTargets, typeFilterOptions,
   usableWindowNote,
 } from "./tonight";
-import type { PlannedTarget } from "./api/client";
+import type { NightPlan, PlannedTarget } from "./api/client";
 
 function mk(id: string, already: boolean, score = 50): PlannedTarget {
   return {
@@ -418,5 +419,60 @@ describe("recentreNudgeRowBadge", () => {
     // could disagree with the sentence, the badge simply doesn't appear.
     expect(recentreNudgeRowBadge(
       { direction: "west", degrees: 0.42, text: "…about 0.4° west…" })).toBeNull();
+  });
+});
+
+describe("moonShoot* — tonight's Moon as a subject", () => {
+  const shoot = (
+    over: Partial<NonNullable<NightPlan["moon_shoot"]>> = {},
+  ): NonNullable<NightPlan["moon_shoot"]> => ({
+    illumination: 0.46, waxing: true, level: "great",
+    text: "Tonight's Moon is 46% lit…",
+    start_utc: "2026-01-25T16:35:00+00:00",
+    end_utc: "2026-01-25T22:35:00+00:00",
+    peak_altitude_deg: 53.2,
+    ...over,
+  });
+
+  it("names each phase band in words a beginner can act on", () => {
+    expect(moonShootLabel("great")).toBe("Great for craters");
+    expect(moonShootLabel("good")).toBe("Good, but flattening");
+    expect(moonShootLabel("flat")).toBe("Bright but flat");
+    expect(moonShootLabel("thin")).toBe("Thin sliver");
+  });
+
+  it("falls back to neutral wording for a level it doesn't know", () => {
+    // A newer backend adding a band must not render an empty chip.
+    expect(moonShootLabel("supermoon")).toBe("Moon tonight");
+    expect(moonShootLabel(undefined)).toBe("Moon tonight");
+    expect(moonShootColor("supermoon")).toBe("gray");
+  });
+
+  it("colours the verdict gently — none of these is a problem", () => {
+    expect(moonShootColor("great")).toBe("teal");
+    expect(moonShootColor("good")).toBe("lime");
+    expect(moonShootColor("flat")).toBe("yellow");
+    expect(moonShootColor("thin")).toBe("gray");
+  });
+
+  it("says when it is up, and how high it gets", () => {
+    const note = moonShootWindowNote(shoot());
+    expect(note).toMatch(/^Up /);
+    expect(note).toContain("–");
+    expect(note).toContain("highest ~53°");
+  });
+
+  it("says nothing at all when there is no session to plan", () => {
+    // The self-hiding case — the Moon not usefully up tonight — and an older
+    // backend that never sends the field.
+    expect(moonShootWindowNote(null)).toBeNull();
+    expect(moonShootWindowNote(undefined)).toBeNull();
+  });
+
+  it("still gives the times when the altitude is missing", () => {
+    const note = moonShootWindowNote(
+      shoot({ peak_altitude_deg: undefined as unknown as number }));
+    expect(note).toMatch(/^Up /);
+    expect(note).not.toContain("highest");
   });
 });

@@ -21,7 +21,8 @@ import { settingsLink } from "../settingsSections";
 import {
   difficultyRowBadge, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge, minAltOptions,
   recentreNudgeRowBadge,
-  moonCueForTarget, moonPhaseLabel, moonWindowNote, notUpTonightNote,
+  moonCueForTarget, moonPhaseLabel, moonShootColor, moonShootLabel,
+  moonShootWindowNote, moonWindowNote, notUpTonightNote,
   partitionByUpTonight, planDateBounds, planNightLabel, scoreColor, splitTargets,
   typeFilterOptions, usableWindowNote,
 } from "../tonight";
@@ -382,6 +383,26 @@ export function TonightView() {
           ) : (
             <Text size="xs" c="dimmed">Nearer + brighter = worse for faint targets</Text>
           )}
+          {/* …and the other half of the same object: the Moon is a *subject*
+              too. Folded into this card rather than added as a second Moon card
+              — the standing "the pages are extremely busy" priority says prefer
+              a consolidation, and both halves answer questions about one thing.
+              Self-hides whenever the planner found no stretch worth pointing at,
+              which is most nights of the month. */}
+          {data.moon_shoot ? (
+            <Group gap={8} wrap="nowrap" mt={6}>
+              <HintAnchor label={data.moon_shoot.text} multiline w={280} withArrow>
+                <Badge size="sm" variant="light"
+                  color={moonShootColor(data.moon_shoot.level)}>
+                  {moonShootLabel(data.moon_shoot.level)}
+                </Badge>
+              </HintAnchor>
+              <Anchor component={Link} to="/moon-sun" size="xs">Shoot it</Anchor>
+            </Group>
+          ) : null}
+          {moonShootWindowNote(data.moon_shoot) ? (
+            <Text size="xs" c="dimmed">{moonShootWindowNote(data.moon_shoot)}</Text>
+          ) : null}
         </Card>
         <Card withBorder padding="sm">
           <Text size="xs" c="dimmed">Observing from</Text>

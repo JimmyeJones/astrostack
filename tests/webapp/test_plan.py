@@ -13,6 +13,12 @@ from webapp.site_location import site_from_header as _site_from_header
 
 # A fixed winter evening in the northern hemisphere → a real dark window.
 JAN_EVENING = "2026-01-15T20:00:00+00:00"
+# …and a fixed late-January evening where the Moon is 46% lit and up 16:35–22:35
+# from London, so the planner has a Moon *session* to offer. JAN_EVENING has
+# none — its waning crescent never clears the altitude floor while the Sun is
+# down, which is the self-hiding case and the common one. (Both measured; the
+# values themselves are pinned in ``tests/test_moon_shoot.py``.)
+JAN_MOON_EVENING = "2026-01-25T20:00:00+00:00"
 
 
 def test_parse_angle_handles_float_and_sexagesimal():
@@ -62,6 +68,11 @@ def test_tonight_with_settings_location(client, solved_library):
     assert mw is not None
     assert set(mw) == {"rise_utc", "set_utc", "up_all_night", "down_all_night"}
     assert not (mw["up_all_night"] and mw["down_all_night"])
+    # The Moon-as-a-subject half is present and **null** on this night: the
+    # crescent never clears the altitude floor while the Sun is down, so there is
+    # no session to plan and the card shows nothing extra.
+    assert "moon_shoot" in body
+    assert body["moon_shoot"] is None
 
     targets = body["targets"]
     assert targets, "expected a ranked target list"
@@ -100,6 +111,27 @@ def test_tonight_with_settings_location(client, solved_library):
         assert m31["difficulty"]["level"] == "easy"
         assert m31["difficulty"]["label"] == "Easy"
         assert m31["difficulty"]["text"]
+
+
+def test_tonight_offers_a_moon_session_when_there_is_one(client, solved_library):
+    """The other half of what the plan says about the Moon: it is a *subject*,
+    not only interference. Shape-pinned here (what the card reads); the astronomy
+    is pinned in ``tests/test_moon_shoot.py``."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/tonight", params={"when": JAN_MOON_EVENING}).json()
+
+    shoot = body["moon_shoot"]
+    assert shoot is not None
+    assert set(shoot) == {"illumination", "waxing", "level", "text",
+                          "start_utc", "end_utc", "peak_altitude_deg"}
+    # A 46%-lit Moon is the terminator night — the one the feature exists for.
+    assert shoot["level"] == "great"
+    assert shoot["start_utc"] < shoot["end_utc"]
+    assert shoot["peak_altitude_deg"] >= 20.0
+    # The card renders this sentence verbatim, so it must name the phase and
+    # carry **no** clock time — those render in the viewer's own zone.
+    assert "%" in shoot["text"]
+    assert ":" not in shoot["text"]
 
 
 def test_tonight_already_targeted_rows_carry_object_type(client, solved_library):

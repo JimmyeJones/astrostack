@@ -76,9 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- **`claude/sweet-babbage-j3s8pj` (Builder 2026-09-11)** — (1) the thin-stack cue reaching its other three
-  surfaces per-pixel (Dashboard strip, Gallery grid, Jobs "Process target" summary), a bug I reproduced
-  myself; (2) the Scout's "Shoot the Moon tonight" beginner feature, filed the same day.
+*No live claims.*
 
 ---
 
@@ -2123,40 +2121,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 [`SHIPPED.md`](SHIPPED.md) — the engine render and the endpoint flag already existed; only the download was
 missing. Don't re-file it.)*
 
-- **NEW IDEA (Scout 2026-09-11) — "Shoot the Moon tonight": plan the Moon as a *subject*, not only as
-  interference.** *(Pillar: 3 friendliness + 2 autonomy — PRIORITY 2–3; size S–M, frontend card + reuse of
-  the moon ephemeris the app already computes, possibly one additive response field. Confidence the gap is
-  real: grepped `terminator|libration|shoot the moon|lunar.*plan` across the tree — **zero hits**.)*
-  The owner shoots the Moon and Sun — the whole `seestack/video` lucky-stack workflow and the `/moon-sun`
-  route exist for exactly that — but **nothing in the app plans a Moon session**. The Moon appears only two
-  ways: as *interference* to deep-sky imaging (`MoonInterferenceCard`, which already computes illuminated
-  fraction, rise/set, and separation), and as a *stacking target* once a capture is already on disk
-  (`/moon-sun`). A beginner who wants to point the Seestar at the Moon tonight has to open a separate app to
-  learn when it's up and whether it'll look good.
-  **The feature:** one small self-hiding card (on Tonight, or on the Moon/Sun landing) that answers, in plain
-  language, *"is tonight a good night to shoot the Moon?"* from numbers the app already derives:
-  - **When** — the Moon's usable altitude window tonight (rise/set is already computed for the interference
-    card; reuse it, don't add a second ephemeris).
-  - **Phase, framed as expected result** — the grounded beginner fact that a **near-full** Moon is flat and
-    washed out (the Sun is behind the observer, so there are no shadows) while a **crescent/quarter/gibbous**
-    shows dramatic crater shadows along the terminator. So: *"Tonight the Moon is a 34 % waxing crescent, up
-    19:40–23:10 — a great night for crater detail."* vs *"Tonight's Moon is 96 % (nearly full) — it'll look
-    bright and flat; a few nights either side of full shows far more surface detail."* `moonPhaseLabel` in
-    `frontend/src/tonight.ts` already turns illuminated fraction into a friendly label; this adds the
-    one-line *quality* read on top of it.
-  - **(optional, only if it stays simple)** one sentence on the Sun for a solar-filter owner — it's always
-    "full phase", so the useful fact is just altitude/when, not shadows.
-  **Beginner bar ✔** — a non-expert would understand it and use it to get a better Moon picture with less
-  effort; sane default (self-hides when the Moon isn't up tonight or no location is set) and plain language;
-  **no pro/niche knobs**, **no network** (pure ephemeris, astropy is already a hard dependency). Additive and
-  reversible.
-  **Care / grep-first:** (1) reuse `MoonInterferenceCard`'s existing rise/set + illuminated-fraction
-  computation and `tonight.ts::moonPhaseLabel` rather than adding a second moon-ephemeris path — the whole
-  point is that the numbers already exist. (2) Don't over-reach into *libration* or a true terminator
-  longitude: that is the pro edge and fails the beginner bar — "phase → shadows or no shadows" is the whole
-  useful idea. (3) This is a *planning* surface; it must not imply the app will capture for them (it won't —
-  the Seestar does). Validate the phase→quality wording reads sensibly at a few phases before making it loud.
-
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
   *(Pillar: trust + understand — PRIORITY 3; both small, both purely additive on machinery that now exists.)*
@@ -2975,6 +2939,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.422.0** — 🌟 NEW BEGINNER FEATURE (PRIORITY 2–3), the Scout's "Shoot the Moon tonight" idea filed the same morning: **the app plans a Moon *session*, not only a Moon nuisance.** The owner shoots the Moon — the whole `seestack/video` lucky-stacking workflow and the Moon & Sun page exist for it — but the Moon appeared in the app only as *interference* to a faint target and as a *stacking input* once a capture was already on disk; to learn whether tonight was any good for it you opened another app. New `nightplan.moon_shoot_tonight` answers **when** (the widest stretch the Moon is above `MOON_SHOOT_MIN_ALT_DEG`=20° while the Sun is down) and **what it will look like** — the one counter-intuitive fact about lunar imaging, which runs opposite to a beginner's instinct: a **full** Moon is the *worst* night for surface detail, because sunlight then comes from behind you and nothing casts a shadow, while a crescent/quarter/gibbous throws long shadows along the terminator. Four bands (`_moon_shoot_verdict`, pure). It goes **into** the Tonight page's existing Moon card, not beside it (a chip + one line + a link to Moon & Sun), per the standing "prefer a consolidation over a new card". Self-hides — `None` — when the Moon never clears the floor or does so for under 30 minutes, both measured on real London nights (2026-01-03 up 18:38–06:38 peak 63° → `flat`; 2026-01-25 up 16:35–22:35 peak 53° → `great`; 2026-01-21 above 20° for 15 min → declined; 2026-01-15 never → silent). **No libration, no terminator longitude, no network** — and no second ephemeris path: the illumination and waxing sense are passed in from what `plan_tonight` already computed, and `_widest_true_run` was lifted verbatim out of the dark-window scan so the two cannot drift. One additive `NightPlan.moon_shoot`, `None` by default. Tests +27 Python / +8 vitest, the endpoint pair and all eight frontend ones verified red first. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.421.0** — 🟠 the seventh instance of the per-pixel/target-total substitution, and the first that left one surface *disagreeing with another about the same picture*: **the thin-stack cue reaches its other three surfaces on a mosaic, not just the Target page.** `thinStackWarning` exists for the owner's "gibberish" case, and v0.419.1 made it read a run's own `field_fulls` — but only at the Target page's call site. Its three others still passed the bare count: `FrameCountBadge` on the **Dashboard** strip and the **Gallery** grid (whose own docstring says it is there "so a single-sub stack can't masquerade as a good picture"), and `processTargetSummary` on the **Jobs** page — the walk-away path, i.e. where the owner actually meets a thin mosaic. Nine subs over a 3x3 raster is one sub everywhere: the Target page called that picture a single sub while the front page badged it a plain violet "9 frames" and the job reported a green "Stacked 9 frames". Neither listing carried the figure at all, so the fix is one additive `field_fulls` on `GalleryItem`, `RecentStack` and the stack job's result dict, each from the same `webapp.field_fulls` helper the History listing uses (one `LIMIT 1` frame-shape read per target, not per run); plus `drizzle_scale_of`, so the job — which holds its options as a dict — shares one definition of "was this drizzled" rather than re-serialising. Tests +9 Python / +9 vitest, **all thirteen of the new behavioural ones verified red first** by stashing the production files. No config, schema, on-disk, API-shape or default change; every field is `None`/absent on a single field and on an older backend, which reads as today's behaviour exactly. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.420.0** — 🟠 the same substitution one page *upstream* — the pre-run **Stack form**. Every caution there is a claim about the samples on **one pixel** (drizzle fills an output pixel from the dither-phased samples that hit it; κ-σ estimates each pixel's spread; a min/max trim of `k` needs `2k+1` frames *per pixel*), and four were computed from `solvedAccepted`, the **target's** total — 25 vs 225 on the owner's 3×3. The asymmetry is the bug: the *nudge* toward drizzle already stands down on a mosaic (`!estimate.data.is_mosaic`), while `drizzleTooFewHint` fires below 100 **frames**, so a nine-panel raster at 225 subs sailed past it and the form said nothing while drizzle spread 25 samples a pixel across a finer grid — reached the ordinary way, via **“Reuse settings”** from a single-field run. Also `sigmaKappaLargeHint` (urging a *tighter* κ≈2.5 because “the per-pixel spread is very well measured”), `minMaxKTooHighHint` (whose sentence already said *“frames per pixel”* and then quoted the total) and `minMaxRejectHint` (3–11 frames, so a 54-sub mosaic 6 deep is inside κ-σ's blind band on every pixel and outside the window on the total). Fixed by serving `panel_depth` at the **top level** of `/stack-estimate` — the same `auto_reject_depth` its own `rejection_reach`/`auto_reject_resolved` answers use, not a second definition — and one shared `frontend/src/samplesPerPixel.ts` (`samplesPerPixel` / `spreadAcrossPanels` / `samplesPerPixelPhrase`). Mosaic copy names both figures (*“about 25 subs on each patch of sky (225 in total, spread across the mosaic)”*); single-field wording is byte-for-byte unchanged, as is an older backend. +19 tests, 8 of them red before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.419.1** — 🟠 the same substitution one surface further out, verified the same way: the Target page's **"💡 To make this even better"** ladder and the **thin-stack warning** asked per-pixel questions (`THIN_STACK_MAX_FRAMES` 4; `SHORT_INTEGRATION_S`/`DEEP_INTEGRATION_S` 1 h/3 h) of the target's totals. Nine subs over a 3×3 is one sub everywhere and the warning stayed silent because 9 > 4 — while v0.415.0's `auto_stack_min_frames` *holds that very mosaic back*, so the two surfaces disagreed about one picture; and a 12×8 raster at 3 h (under two minutes a panel) returned `null`, "genuinely deep and healthy". Fixed with a shared `perPixel.ts` (`canvasFieldFulls`/`perPixel`/`spansMoreThanOneField`/`fieldsOfSkyLabel`) that `integrationTrend` now shares; the **locate** rung is deliberately left on the honest session counts. Mosaic copy names **both** figures and the spread that reconciles them. Not wired to the Gallery/Dashboard/Jobs surfaces, which would need a per-target read on endpoints that iterate every target — recorded as a decision. +17 tests. Full entry in [`SHIPPED.md`](SHIPPED.md).
