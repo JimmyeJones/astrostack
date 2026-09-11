@@ -82,6 +82,46 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **⭐ READY — OWNER ANSWERED (2026-09-11): the Sky Map opens on the internet-backed view by default, and he
+  does not want it. Make **"Stars (offline)"** the default; keep all three modes.** *(Size XS — a one-line
+  default plus its test. Pillar: friendliness + the LOCAL policy. Confidence: verified in code.)*
+  `initialSkyMode` (`frontend/src/routes/Sky.tsx:370`) ends `return "online"`, so **"Real sky (online)"** is
+  what loads the first time he opens Sky Map on any device — the mode whose `AladinSky` fetches DSS2 tiles from
+  CDS (`SURVEY = "P/DSS2/color"`). Asked directly, the owner said he **does** use the Sky Map but *"that mode
+  that pulls imagery i am not a huge fan of"*. It also sits awkwardly against **AGENTS.md §1's LOCAL rule**:
+  the fetch is the browser's, not the install's, which is why it survived the 2026-09-08 sweep — but the rule's
+  spirit is that the app doesn't reach the internet, and defaulting to the one view that does is the wrong way
+  round.
+  **Change:** `return "offline"`. It is the like-for-like replacement — same drag/zoom sky with his own
+  pictures placed on it, minus the network — where `"mine"` is a different question. **Do NOT remove the online
+  mode** (his standing "nothing may be removed" rule); it stays in the switch, and the existing
+  `localStorage` memory means anyone who picks it keeps it. Note the `?view=` query parameter already overrides
+  both, so deep links are unaffected. Update the test that pins today's default, and say in the mode's own hint
+  copy that it is the only view needing internet.
+
+- **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
+  question is closed unanswerable. Read before prioritising the audit's items.**
+  - **The pre-D1 saved-recipe crop (⭐ item below): he sees no blurry mosaic cards.** Asked to open his Library
+    and look, his answer was *"don't see anything immediately"*. **The likely reason is in Owner Facts:
+    `auto_edit_on_autostack` has been OFF on his install**, so the walk-away chain never auto-edited anything —
+    a stored recipe only exists where he used the editor or "Process target" **by hand**. So the bug is **real
+    and still worth fixing** (the audit reproduced it in the shipped image over a real v0.277 volume), but its
+    blast radius *on this owner* is small, and it is **not** the emergency the audit's placement implies.
+    **Re-prioritise accordingly — and note the order dependency:** it becomes materially *more* important the
+    moment `auto_edit_on_autostack` is turned on, which is an approved-and-pending change. **Fix it before that
+    flips**, not after. Absence of a visible symptom is not proof of absence — he looked quickly, at cards, not
+    at every target.
+  - **Root-owned files under `library/targets/` — low impact, confirmed.** The container runs as root, so
+    everything it writes is root-owned. Asked whether he browses that share from Windows, he said he browses
+    **only to upload new subs** — i.e. he writes into `incoming/` over SMB (TrueNAS-owned) and has no need to
+    read or write the app's own `library/targets/` tree from a client. **Keep the finding open as hygiene, drop
+    its priority**; it is not blocking him and a UID/GID change to a live install is exactly the kind of
+    migration §9 says to be careful with.
+  - **Which version he upgraded from: unanswerable, stop asking.** *"don't remember"*, and the upgrade has
+    already happened, so the pre-upgrade schema and config are gone. **Do not spend a run reconstructing it.**
+    Anything that genuinely needs it should be re-derived from what is on disk now (run records, schema
+    version, `config.json` keys) rather than from his memory.
+
 > **Open bugs and nothing else** (the three-file rule, AGENTS.md §2). The 227 resolved
 > entries and 24 QA sweep records this section used to carry were cut to
 > [`SHIPPED.md`](SHIPPED.md) and [`PROCESS-NOTES.md`](PROCESS-NOTES.md) on 2026-09-05,
