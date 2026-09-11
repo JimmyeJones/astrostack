@@ -176,6 +176,51 @@ def test_count_accepted_unreadable_is_the_unsolved_qc_error_subset(proj):
     assert proj.count_accepted_unsolved() == 3
 
 
+def test_count_solved_is_every_located_sub_accepted_or_not(proj):
+    """The population the deep-image rescue measures itself against. A sub that
+    located in the sky stays located whatever its accept flag later became — one
+    of them can anchor the rescue — so the accept flag is deliberately not part
+    of this count. A blank sidecar is not a plate solve."""
+    proj.add_frames([FrameRow(source_path=f"s{i}.fit") for i in range(4)])
+    proj.update_frame(1, wcs_json="{}")
+    # A *rejected* sub that solved still counts: it is still located.
+    proj.update_frame(2, accept=False, reject_reason="user", wcs_json="{}")
+    #   (frames 3, 4 left untouched: accepted, never solved)
+
+    assert proj.count_solved() == 2
+    assert proj.count_accepted_unsolved() == 2
+
+    # An empty sidecar is not a plate solve — this count matches the engine's own
+    # ``if f.wcs_json`` truthiness test rather than a bare ``IS NOT NULL``, so the
+    # rescue and the offer read the same population. (``count_accepted_unsolved``
+    # spells it ``IS NULL`` and so reads a blank as located; nothing writes a
+    # blank, and the disagreement could only ever make the offer *more*
+    # conservative, so it is recorded here rather than changed underneath a
+    # counter half the app already reads.)
+    proj.update_frame(3, wcs_json="")
+    assert proj.count_solved() == 2
+
+
+def test_count_accepted_unsolved_tried_is_the_subset_the_solver_has_beaten(proj):
+    """"Try harder" presupposes a first try, so the offer counts only the subs
+    ASTAP actually ran on and failed to place — not ones it has never seen."""
+    proj.add_frames([FrameRow(source_path=f"t{i}.fit") for i in range(6)])
+    proj.update_frame(1, reject_reason="solve_failed:no solution")
+    proj.update_frame(2, reject_reason="solve_failed:solve timed out")
+    # Never offered to the solver (a fresh scan with solving off).
+    #   (frame 3 left untouched)
+    # Tried and failed once, but has since solved — no longer un-located.
+    proj.update_frame(4, reject_reason="solve_failed:no solution", wcs_json="{}")
+    # A different kind of failure is not a beaten plate solve.
+    proj.update_frame(5, reject_reason="qc_error:truncated file")
+    # A rejected frame is not a sub the rescue would act on.
+    proj.update_frame(6, accept=False, reject_reason="solve_failed:no solution")
+
+    assert proj.count_accepted_unsolved_tried() == 2
+    # Genuinely a subset of the accepted-unsolved tally (frames 1, 2, 3, 5).
+    assert proj.count_accepted_unsolved() == 4
+
+
 def test_frame_night_counts_buckets_by_capture_date(proj):
     """The storage headroom estimate needs frames-per-capture-night. The tally
     keys on the UTC date, counts rejected frames too (they consume disk), and

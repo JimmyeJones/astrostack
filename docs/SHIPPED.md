@@ -1,5 +1,84 @@
 # Shipped — the record
 
+## v0.427.0 — 2026-09-11 — "Try harder to locate these": the faint-field rescue becomes a button instead of a switch you have to know about
+
+*(Builder, the 2026-07-23 backlog entry "Try harder to locate these: a more-sensitive plate-solve re-pass for
+the accepted-but-unsolved subs" — PRIORITY 2, autonomy. Additive: one new endpoint, one additive response
+field, no default, config, schema, on-disk or API-shape change.)*
+
+**The gap.** On a faint / star-poor target a single 10 s Seestar sub has too few stars for ASTAP, so most subs
+stay **accepted but un-located** — and `run_stack` combines only accepted **and** solved frames, so the
+"stack" is the handful that happened to solve. That is the owner's own single-frame-speckle report, and the
+app has had the cure since v0.184: `seestack/solve/bootstrap.py` integrates the un-located subs into one
+deeper image, solves **that** once, and propagates the position back to each sub. It was measured to work (at
+a faintness where one sub detects 0–2 stars — below ASTAP's ≥3-star abort — a mean of 8–16 detects 6–12).
+
+The only way to reach it was `astap_bootstrap_solve`, a switch inside Settings → Plate solving, off by
+default. The Target page's advice for the un-located bucket was **"Run Plate Solve"** — which re-runs the very
+ladder that already failed on every one of those subs — and the Jobs page's follow-up named the Settings
+switch and left the reader to find it. A beginner sitting on 200 subs with 2 located never gets there.
+
+**What shipped.** The un-located bucket of "Why some frames were left out" now offers **"Try harder to locate
+these"**, on the hover card *and* on the phone-reachable `RejectionBreakdownCard`. It posts
+`POST /api/targets/{safe}/rescue-unsolved` → `pipeline.submit_rescue_unsolved`, a `rescue_unsolved` job that
+runs `run_qc_and_solve(run_qc=False, run_solve=False, bootstrap_solve=True)` — **only** the rescue.
+
+**Three decisions worth carrying forward.**
+
+1. **The button does not re-run the solve ladder.** The backlog entry's own framing ("re-running the same
+   ladder that already failed won't help") is the design: the rescue is the new lever, and the per-sub pass
+   would cost minutes and locate nothing new. That needed the bootstrap block moved **out of** the
+   `if run_solve:` block in `scanner.run_qc_and_solve`, which is a no-op for every existing caller — all four
+   pass `run_solve=True` alongside `bootstrap_solve`, and the cancel check is the same one it had inside.
+
+2. **The entry's real-data gate dissolves rather than being crossed.** It required "the exact ASTAP flags
+   (sensitivity, extra `-z` rungs, radius) … validated against the owner's real faint-field subs", because a
+   blind sensitivity bump can cost solve time on every sub or mis-solve a sparse field. Routing the button at
+   the **already-measured** bootstrap instead of a new ASTAP profile means no flag is chosen blind and the
+   default first-pass ladder is untouched — so nothing here is waiting on data no agent has.
+
+3. **"Try *harder*" presupposes a first try.** The offer is the server's own answer, not a rule mirrored next
+   to the button: `reject-summary` gained an additive `deep_rescue_offered`, computed by
+   `bootstrap.rescue_is_worth_offering(n_solved, n_unsolved, n_tried_and_failed)`. That builds on
+   `rescue_would_engage`, which is now the gate `bootstrap_solve` itself decides with (it no longer re-spells
+   the rule), plus one condition: at least `DEFAULT_MIN_FRAMES` of the un-located subs must carry a
+   `solve_failed:` reason. Without it, a freshly-scanned target on an install with automatic solving off — every
+   sub un-located, none attempted — would be offered the rescue, which *would* engage and would hand each sub a
+   position **propagated** from a neighbour where the ordinary solver would have given it its own verified one.
+   The first move there is the plate solve. Where the rescue *is* offered it **replaces** "Run Plate Solve"
+   rather than sitting beside it: only one of the two can change the outcome, and a second button on that line
+   is exactly the clutter the standing IA priority asks us to stop adding (Plate Solve stays where it has always
+   been, on the page itself — nothing removed).
+
+**Two new counters, both pure queries.** `Project.count_solved()` (every frame with a WCS, accepted or not —
+the population the rescue measures itself against, and one of them can anchor it) matches the engine's own
+`if f.wcs_json` truthiness rather than a bare `IS NOT NULL`; `Project.count_accepted_unsolved_tried()` is the
+`solve_failed:%` subset of `count_accepted_unsolved()`. Two `COUNT(*)`s on a page-load fetch.
+
+**Honest when it stands down.** A job the user pressed a button for must never finish on a bare "done", and a
+rescue-only job has no `qc_*`/`solve_*` counters to report. `run_qc_and_solve` now carries the bootstrap's own
+`reason` as `bootstrap_reason` (engaged or not), and `Jobs.tsx`'s new pure `rescueUnsolvedNote` turns the four
+stand-down reasons into plain language — with an honest generic fallback, so a reason string nobody has written
+yet can never leave a finished job silent. Success keeps `bootstrapRescueNote`'s existing wording, so the two
+surfaces cannot congratulate the user in two different voices.
+
+**Upgrade-safe (§9).** One additive endpoint; one additive response field whose absence reads as `false`, i.e.
+exactly today's behaviour on an older backend; no setting is read or written by the button (`astap_bootstrap_solve`
+keeps its own separate meaning — "do this automatically from now on"); no schema, on-disk, default or API-shape
+change. Non-destructive by construction: the rescue only ever *adds* a WCS to a sub that had none, never touches
+an already-solved or rejected sub, and skips any member it cannot register confidently.
+
+**Tests (+24; every production change verified red by a scratch revert).** Python: `test_bootstrap_solve.py` +5
+(the gate's truth table; the gate the engine uses *is* the function, reached through a real project at the
+boundary; the offer's extra condition; the rescue asked for on its own with the per-sub ladder monkeypatched to
+raise if entered; a stand-down that says why). `test_project.py` +2 (both counters, each with the rows that must
+*not* count). `tests/webapp/test_deep_rescue.py` +8, new (offered when the solver has been beaten; not before it
+has run; not once enough subs are located; not below the floor; never on a healthy target; the endpoint's answer
+and the engine's verdict walked together across the boundary; the button's job runs the rescue and prices no
+solve pass; 404 on an unknown target). Vitest +9 across `RejectionBreakdown`, `RejectionBreakdownCard` and
+`Jobs`. Scratch reverts: re-indenting the bootstrap back under `run_solve` reddens 3; dropping the
+`deepRescueOffered` swap reddens 4; loosening the offer to ignore `count_accepted_unsolved_tried` reddens 1.
+
 ## v0.426.1 — 2026-09-11 — 🐛 your imaging log is ordered by the night it leads with, not by the afternoon the stack ran
 
 *(PRIORITY 3 — trust. A Builder-found bug, verified by reverting the fix and

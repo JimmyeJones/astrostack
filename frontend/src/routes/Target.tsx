@@ -618,6 +618,22 @@ export function TargetView() {
     },
   });
 
+  // "Try harder to locate these": the deep-image rescue, for subs the ordinary
+  // plate solve has already been beaten on. Offered only where the server says
+  // it would engage, so this never starts a job with nothing to do.
+  const tryHarder = useMutation({
+    mutationFn: () => api.rescueUnsolved(safe),
+    onSuccess: () => {
+      notifications.show({
+        message: "Trying harder — combining your un-located subs into one deeper "
+          + "image to locate them together. Watch Jobs for progress.",
+        color: "violet",
+      });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
   // One-click "just do it": QC + plate-solve, auto-grade (when enabled) and stack
   // this target in a single job — the whole middle of the workflow without a form.
   const process = useMutation({
@@ -1219,7 +1235,9 @@ export function TargetView() {
                   // Plain-language grouped breakdown + verdict (v0.159.2+).
                   <RejectionBreakdown
                     summary={rejectSummary.data.summary}
-                    onRunPlateSolve={() => qcSolve.mutate()} />
+                    onRunPlateSolve={() => qcSolve.mutate()}
+                    onTryHarder={() => tryHarder.mutate()}
+                    deepRescueOffered={rejectSummary.data.deep_rescue_offered} />
                 ) : rejectSummary.data && Object.keys(rejectSummary.data.counts).length ? (
                   // Fallback for an older backend without the friendly summary.
                   <>
@@ -1738,7 +1756,9 @@ export function TargetView() {
                   nothing was left out. */}
               <RejectionBreakdownCard
                 summary={rejectSummary.data?.summary}
-                onRunPlateSolve={() => qcSolve.mutate()} />
+                onRunPlateSolve={() => qcSolve.mutate()}
+                onTryHarder={() => tryHarder.mutate()}
+                deepRescueOffered={rejectSummary.data?.deep_rescue_offered} />
               <FocusTrendCard safe={safe} />
               <TransparencyTrendCard safe={safe} />
               <StackHealthCard safe={safe} />

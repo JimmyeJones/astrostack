@@ -19,15 +19,18 @@ import { RejectionBreakdown } from "./RejectionBreakdown";
  * nothing (so its tab doesn't appear on a target that kept every sub).
  */
 export function RejectionBreakdownCard(
-  { summary, onRunPlateSolve }: {
+  { summary, onRunPlateSolve, onTryHarder, deepRescueOffered }: {
     summary: RejectionSummary | null | undefined;
     onRunPlateSolve?: () => void;
+    onTryHarder?: () => void;
+    deepRescueOffered?: boolean;
   },
 ) {
   if (!summary || summary.buckets.length === 0) return null;
   return (
     <Paper withBorder p="md" radius="md">
-      <RejectionBreakdown summary={summary} onRunPlateSolve={onRunPlateSolve} />
+      <RejectionBreakdown summary={summary} onRunPlateSolve={onRunPlateSolve}
+        onTryHarder={onTryHarder} deepRescueOffered={deepRescueOffered} />
     </Paper>
   );
 }

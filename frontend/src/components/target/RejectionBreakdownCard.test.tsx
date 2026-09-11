@@ -1,7 +1,7 @@
 import { MantineProvider } from "@mantine/core";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { RejectionBreakdownCard } from "./RejectionBreakdownCard";
 import type { RejectionSummary } from "../../api/client";
@@ -49,5 +49,29 @@ describe("RejectionBreakdownCard", () => {
   it("renders nothing without a summary (older backend, or still loading)", () => {
     expect(renderCard(undefined).container.querySelector(".mantine-Paper-root")).toBeNull();
     expect(renderCard(null).container.querySelector(".mantine-Paper-root")).toBeNull();
+  });
+
+  it("passes the deep-image rescue through, so the phone surface offers it too", () => {
+    // The hover card and this card are two renderings of one breakdown; a fix
+    // reachable on a mouse and not on a phone is the gap this card exists for.
+    const tryHarder = vi.fn();
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <RejectionBreakdownCard
+            summary={summary({ buckets: [{
+              key: "unsolved",
+              label: "Not located yet",
+              count: 88,
+              note: "These subs haven't been placed in the sky.",
+            }] })}
+            onRunPlateSolve={vi.fn()}
+            onTryHarder={tryHarder}
+            deepRescueOffered />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Try harder to locate these" }));
+    expect(tryHarder).toHaveBeenCalledTimes(1);
   });
 });

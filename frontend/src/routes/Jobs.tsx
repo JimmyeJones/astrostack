@@ -45,6 +45,7 @@ const COLOR: Record<string, string> = {
 const KIND_LABEL: Record<string, string> = {
   pipeline: "Importing & processing new frames",
   qc_solve: "Quality check & plate-solve",
+  rescue_unsolved: "Locating your un-located subs together",
   process_target: "Processing target (check, solve & stack)",
   stack: "Stacking",
   reprocess_all: "Reprocessing all targets",
@@ -409,6 +410,45 @@ export function bootstrapRescueNote(r: Record<string, unknown>): string | null {
       + "image — it's in your stack now."
     : `Located ${n} more subs by combining your un-located frames into a `
       + "deeper image — they're in your stack now.";
+}
+
+/** Plain-language outcome of a finished "Try harder to locate these" job, or
+ * null when there is nothing to say (pure, tested).
+ *
+ * That job runs only the deep-image rescue — no QC pass, no per-sub solve — so
+ * none of the `qc_*`/`solve_*` counters exist on its result and `qcSolveSummary`
+ * would (correctly) say nothing. Its whole outcome is `bootstrap_propagated`
+ * when it worked, and the engine's own `bootstrap_reason` when it didn't. The
+ * success line is `bootstrapRescueNote`'s, so the two surfaces cannot end up
+ * congratulating the user in two different voices; this is the *failure* half,
+ * which no surface had before because the rescue used to be a silent passenger
+ * on a bigger job.
+ *
+ * Reasons are matched on the engine's stable phrases rather than reproduced, and
+ * anything unrecognised falls back to one honest generic sentence — a new reason
+ * string must never leave a finished job saying nothing at all. */
+export function rescueUnsolvedNote(r: Record<string, unknown>): string | null {
+  if (bootstrapRescuedCount(r) > 0) return null;  // bootstrapRescueNote speaks
+  const reason = typeof r.bootstrap_reason === "string" ? r.bootstrap_reason : "";
+  if (reason.includes("enough subs already solved")) {
+    return "Nothing to do — enough of your subs are already located in the sky.";
+  }
+  if (reason.includes("too few unsolved subs")) {
+    return "There aren't enough un-located subs to combine into a deeper image "
+      + "yet. Shoot more of this target and try again.";
+  }
+  if (reason.includes("too few readable subs")) {
+    return "Your un-located subs couldn't be read from disk — check that the "
+      + "drive holding them is connected, then try again.";
+  }
+  if (reason.includes("too few subs registered")) {
+    return "Your un-located subs couldn't be lined up with each other, so a "
+      + "deeper image couldn't be built from them. This usually means they "
+      + "aren't all pointing at the same thing.";
+  }
+  return "Couldn't locate them this time — the deeper image built from your "
+    + "un-located subs still couldn't be placed in the sky. They're unchanged, "
+    + "so nothing was lost.";
 }
 
 /** Plain-language outcome of a finished "Quality check & plate-solve" job
@@ -1072,6 +1112,19 @@ function JobResultActions({ job }: { job: Job }) {
             </Button>
           </Group>
         ) : null}
+      </Stack>
+    );
+  }
+  if (job.kind === "rescue_unsolved") {
+    // The on-demand deep-image rescue. One line either way: what it located, or
+    // why it couldn't — a job the user pressed a button for must never finish on
+    // a bare "done".
+    const rescue = bootstrapRescueNote(r);
+    const note = rescueUnsolvedNote(r);
+    return (
+      <Stack gap={2} mt="xs">
+        {rescue ? <Text size="sm">{rescue}</Text> : null}
+        {note ? <Text size="sm">{note}</Text> : null}
       </Stack>
     );
   }
