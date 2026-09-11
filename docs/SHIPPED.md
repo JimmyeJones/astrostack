@@ -1,5 +1,156 @@
 # Shipped — the record
 
+## v0.424.3 — 2026-09-11 — 🟡 the Stack form's advice panel stops blinking out on every knob nudge
+
+*(PRIORITY 1/3 — §1's "clunky and confusing controls". The client half of the
+same lead v0.424.2 fixed on the server; the two are one change in two places.)*
+
+**What it looked like.** Every knob on the Stack form is in the estimate query's
+key — the drizzle scale, κ, sigma clipping, the min/max count, "Auto outlier
+removal" — and it has to be, because the *answer* genuinely differs for each.
+But the whole advice block under the form is derived from one value,
+`estimate.data`: the sizing line, the time estimate, the memory verdict and its
+one-click fix, the print plan, the per-pixel cautions, the rejection-reach note,
+the drizzle nudge. Every one of them reads `est?.…`, so on a key change they all
+went `undefined` together and came back together. Dragging the κ slider emptied
+the block and refilled it, once per tick; on the §1 owner's largest target each
+of those holes was about a second wide, because the server was rebuilding a
+canvas those knobs cannot move.
+
+v0.424.2 closed the second. This closes the flicker — and the ordering matters:
+a fast answer that still blanks the panel first reads as a *flicker* rather than
+as a form keeping up, so shipping one without the other would have traded a
+visible stall for a visible twitch.
+
+**Why not `placeholderData: keepPreviousData`.** The editor already uses that
+bare form, correctly, for its preview. Here it would be wrong: react-router does
+**not** remount this route when only the `:safe` param changes, so walking from
+one target's Stack page to another's would leave the first target's frame count,
+canvas size and memory verdict sitting under the second one's title until the
+request landed. Showing the knob values you moved away from a moment ago is
+honest — it is this picture, a beat ago. Showing another target's is not.
+
+So `frontend/src/stackEstimatePlaceholder.ts` owns the rule as a pure predicate,
+`estimateIsForTarget(previousKey, safe)`, and the query is
+
+```ts
+placeholderData: (previous, previousQuery) =>
+  estimateIsForTarget(previousQuery?.queryKey, safe) ? previous : undefined,
+```
+
+It is defensive about the key's shape — anything that is not this query's own
+`[key, safe, …]` answers `false` — so an unexpected shape degrades to today's
+behaviour (a blank panel) rather than to a wrong one, and an empty `safe` (what
+`useParams` hands back before the route param is known) never matches. The
+module also owns `STACK_ESTIMATE_QUERY_KEY`, which the four `invalidateQueries`
+calls elsewhere in the file now share instead of re-spelling the literal.
+
+**Nothing else changed.** Frontend-only: no endpoint, no response field, no
+config, schema, on-disk or default change; the estimate is still re-requested on
+every key change and still shows the server's answer the moment it arrives —
+`queryByText` on the old figure asserts it is *gone*, so this holds the panel
+rather than freezing it.
+
+**Tests (+7 vitest).** `stackEstimatePlaceholder.test.ts` (5): the same-target
+hold; the other-target refusal (the case the bare `keepPreviousData` would get
+wrong, and the one a component test cannot reach without a navigation harness
+that would prove nothing about the rule); a key belonging to another query;
+nothing held yet, in three shapes; and the empty-`safe` first render.
+`routes/Stack.test.tsx` (2, in their own describe with self-contained fixtures):
+the sizing line survives a sigma-clip toggle **while the second request is still
+in flight** — a deferred mock, so the assertion is made in exactly the window
+that used to be blank — and is then replaced by the new answer; and a first
+visit shows nothing at all until the first answer lands. The first was verified
+red by deleting the `placeholderData` line.
+
+## v0.424.2 — 2026-09-11 — 🟡 the Stack form stops rebuilding the canvas for knobs that cannot move it
+
+*(PRIORITY 3, performance/friendliness. The backlog entry: "Performance (only
+with a measurement)" → the `/stack-estimate` lead's shapes **(b)** and **(d)**,
+both of which this closes. (a) shipped as v0.374.9 and (c) as v0.376.1.)*
+
+**What was slow, and why it was slow for a silly reason.** Sizing a stack is two
+jobs of wildly different cost: unioning every sub's footprint into a canvas
+reads one WCS per sub, and everything after that — peak bytes, the drizzle scale
+that fits, the print plan, the memory fix, the rejection reach — is arithmetic on
+`dst_shape`. `StackCanvasBasis` (v0.376.1) already said so in the type system,
+and `estimate_stack_basis` already takes `mosaic_canvas` and nothing else.
+
+But `/stack-estimate` carries **nine** query params, and the Stack form's query
+key carries all nine, because the response genuinely differs for each: the
+drizzle knobs multiply the output, `min_max_reject`/`min_max_reject_count` add
+canvas planes the guard charges for, and `auto_reject`/`sigma_kappa`/`sigma_clip`
+decide the rejection answers. None of them can move the canvas. So on the owner's
+largest target every κ nudge, every drizzle-scale keystroke, re-paid a full
+canvas computation to refresh a sentence — and `/rejection-outlook`, which the
+Target page fires on load, paid it again.
+
+**Measured first, on the entry's own shape** (a 9-panel mosaic of **5,477**
+synthetic solved subs, this box, min of 3–5):
+
+| | ms |
+|---|---|
+| `estimate_stack_basis(proj, "auto")` | **1,007** |
+| `Project.frames_fingerprint()` — `SELECT *`, hashed | **129** |
+| a cold `estimate_cache.canvas_basis` (fingerprint + basis) | 1,116 |
+| a **warm** one | **129** |
+
+**The shape that shipped is (b), not (d) — because (d) is not available.** The
+entry leads with "split the *rejection* answer out of `/stack-estimate`", on the
+grounds that the rejection params don't affect the canvas. True, but they do
+affect the **peak**: `estimate_stack_from_basis` resolves `auto_reject` through
+`_resolve_auto_reject` (which reads `sigma_kappa`) and charges
+`_min_max_reject_arrays(min_max_reject_count)` extra planes, so four of the five
+params (d) names cannot be lifted out of the sizing. Only the *canvas* is
+option-independent — and since `drizzle*` cannot move it either, memoising it
+makes the drizzle controls instant as well, which the split would not have.
+
+**The staleness trade (b) was warned off does not apply, because the basis is
+revalidated rather than trusted.** `webapp/estimate_cache.py` keys on
+`(project db path, canvas mode)` and stores `(fingerprint, basis)`; *every*
+lookup recomputes the fingerprint and throws the basis away if it has moved.
+That is why the fingerprint had to be complete rather than cheap. The one the
+entry proposes — "count + max rowid + accept/solve state" — is blind to the
+change that matters most: **a re-solve rewrites one frame's `wcs_json` in place
+with different numbers of the same width**, leaving count, max rowid and
+accept/solve identical, and the memo would then serve a canvas built from where
+the subs used to be. So `Project.frames_fingerprint()` is `SELECT * FROM frames
+ORDER BY id`, blake2b over every column of every row: complete as a property of
+the *query*, with no column list for a future migration to fall out of step
+with, and it over-invalidates (a QC pass touching an unrelated column costs a
+recompute) which is the safe direction. `estimate_stack_basis` reads nothing
+else — not `meta`, not the run records, and not the filesystem (it tests that a
+frame *has* a path, never that the file is there).
+
+**One trap worth recording.** The first draft hashed `repr(row)` on the
+connection's `sqlite3.Row` factory, whose `repr` is its **memory address** — so
+the "fingerprint" was a fresh random value on every call and never matched
+itself. Caught by the first test written (`is stable while nothing changes`),
+which is the reason to write that one first: it looks like a tautology and it is
+the only test that can catch a hash that is not a hash. The fix is a cursor with
+`row_factory = None`; plain tuples, and 10 % faster than converting.
+
+**Upgrade-safe (§9).** Nothing persists — the cache is a process-local
+`OrderedDict` bounded at `MAX_ENTRIES = 16` small dataclasses, rebuilt for free
+after a restart and re-validated on use, so an upgrade is indistinguishable from
+it. No config, schema, on-disk, API-shape or default change; `/stack-estimate`
+and `/rejection-outlook` return exactly what they returned.
+
+**Tests (+15).** `tests/test_project_fingerprint.py` (6) pins completeness the
+only way it can be pinned — one change at a time, each required to move the
+hash: the same-length re-solve, an accept flip, a column the canvas never reads,
+an added frame, stability across a reopen, and (content addressing, not a
+counter) an undone change restoring the previous value. Verified red by swapping
+in the count/rowid/length summary the entry proposed: **3 of 6 fail**, including
+the re-solve case. `tests/webapp/test_estimate_cache.py` (9) works the endpoints:
+six rejection/drizzle nudges cost **one** canvas build between them; the canvas
+mode is its own entry; a fourth sub arriving mid-session and a re-solve that
+re-points one sub are each answered freshly (both verified red by deleting the
+fingerprint comparison — they are the fail-before pair); `/rejection-outlook`
+shares the held basis; a "nothing solved yet" failure is not cached; the cache is
+bounded and evicts least-recently-used; two targets never share an entry; and the
+whole warm response is byte-identical to a cold one, which is what makes this a
+pure optimisation rather than a second sizing rule.
 ## v0.424.1 — 2026-09-11 — the measured blown core reaches the note a beginner is actually reading
 
 *(PRIORITY 1, the editor — the surfacing half of v0.424.0, shipped the same run

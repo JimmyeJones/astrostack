@@ -28,6 +28,9 @@ import { rejectionReachNudge } from "../rejectionReachNudge";
 import { streakRejectionAdvice } from "../streakRejectionAdvice";
 import { savedRejectionClause } from "../savedRejectionClause";
 import {
+  STACK_ESTIMATE_QUERY_KEY, estimateIsForTarget,
+} from "../stackEstimatePlaceholder";
+import {
   adoptGlobalsPatch, pinnedLine, pinnedSummary,
 } from "../pinnedStackOptions";
 import { memoryFixAction } from "../stackMemoryFix";
@@ -139,9 +142,9 @@ export function StackView() {
   // where the engine default (true) is the right assumption.
   const sigmaClipOn = values.sigma_clip == null ? true : !!values.sigma_clip;
   const estimate = useQuery({
-    queryKey: ["stack-estimate", safe, drizzleOn, drizzleScale, drizzleReject,
-      mosaicCanvas, minMaxReject, minMaxRejectCount, autoReject, sigmaKappa,
-      sigmaClipOn],
+    queryKey: [STACK_ESTIMATE_QUERY_KEY, safe, drizzleOn, drizzleScale,
+      drizzleReject, mosaicCanvas, minMaxReject, minMaxRejectCount, autoReject,
+      sigmaKappa, sigmaClipOn],
     queryFn: () => api.stackEstimate(safe, {
       drizzle: drizzleOn, drizzle_scale: drizzleScale,
       drizzle_reject: drizzleReject, mosaic_canvas: mosaicCanvas,
@@ -150,6 +153,15 @@ export function StackView() {
     }),
     enabled: Object.keys(values).length > 0,
     retry: false,
+    // Every knob above is in the key, so each nudge is a new query — and the
+    // whole advice block below this form is derived from `estimate.data`, so
+    // without this it all blinks out and back on every tick of the κ slider.
+    // Held only for the *same* target: this route does not remount when only
+    // `:safe` changes, and one target's frame count under another's title
+    // would be a wrong answer rather than a slightly old one.
+    // See `stackEstimatePlaceholder.ts`.
+    placeholderData: (previous, previousQuery) =>
+      estimateIsForTarget(previousQuery?.queryKey, safe) ? previous : undefined,
   });
   // Proactive Drizzle feasibility check (see the nudge derivation below the other
   // hints). A Seestar auto-dithers every capture, so a *large* accepted set is
@@ -228,7 +240,7 @@ export function StackView() {
       }
       qc.invalidateQueries({ queryKey: ["frames", safe] });
       qc.invalidateQueries({ queryKey: ["auto-grade-preview", safe] });
-      qc.invalidateQueries({ queryKey: ["stack-estimate", safe] });
+      qc.invalidateQueries({ queryKey: [STACK_ESTIMATE_QUERY_KEY, safe] });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
@@ -239,7 +251,7 @@ export function StackView() {
       notifications.show({ message: "Re-accepted the dropped frames", color: "violet" });
       qc.invalidateQueries({ queryKey: ["frames", safe] });
       qc.invalidateQueries({ queryKey: ["auto-grade-preview", safe] });
-      qc.invalidateQueries({ queryKey: ["stack-estimate", safe] });
+      qc.invalidateQueries({ queryKey: [STACK_ESTIMATE_QUERY_KEY, safe] });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
@@ -258,7 +270,7 @@ export function StackView() {
         color: "violet",
       });
       qc.invalidateQueries({ queryKey: ["frames", safe] });
-      qc.invalidateQueries({ queryKey: ["stack-estimate", safe] });
+      qc.invalidateQueries({ queryKey: [STACK_ESTIMATE_QUERY_KEY, safe] });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
@@ -268,7 +280,7 @@ export function StackView() {
       setMixedRejected(null);
       notifications.show({ message: "Re-accepted the odd-target frames", color: "violet" });
       qc.invalidateQueries({ queryKey: ["frames", safe] });
-      qc.invalidateQueries({ queryKey: ["stack-estimate", safe] });
+      qc.invalidateQueries({ queryKey: [STACK_ESTIMATE_QUERY_KEY, safe] });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
