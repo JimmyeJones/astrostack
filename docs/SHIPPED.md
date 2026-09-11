@@ -1,5 +1,66 @@
 # Shipped — the record
 
+## v0.419.0 — 2026-09-11 — the noise trend measured a mosaic getting *wider* and called it sky-limited
+
+**Verified by reproduction, and it is the "reports depth rather than decides from it" half of the
+rotation brief the 2026-09-10 `dg6420` run handed forward** (PROCESS-NOTES: *"the next place to point
+it is the surfaces that report depth rather than decide from it"*). Same class as A2 / A6 / D1 and the
+`auto_stack_min_frames` floor: **a number that describes the whole target standing in for one that
+describes a panel.**
+
+**The bug.** `integrationTrend` (`frontend/src/components/target/integrationTrend.ts`) fits a noise
+falloff exponent `p` in `σ ∝ t^-p` across a target's shallowest and deepest measured stacks, and calls
+the target **sky-limited / plateaued** at `p ≤ 0.15`. `t` was each run's `total_exposure_s`. On a single
+field that is right — every sub covers the whole canvas, so the target's total *is* what one pixel got.
+**A mosaic's canvas grows as its panels are shot**, and then it is not: a target whose first stack
+covered a 2×2 raster at 0.5 h a panel and whose next covered 3×3 at 0.5 h a panel has **2.25× the
+total light and identical grain**, because no pixel ever received more. The fit reads that as *"your
+noise stopped dropping even as you added time"* — and `IntegrationTrendBadge` puts it on the Target
+page as **"📉 About as clean as your sky allows … more subs won't help it much. A darker sky or a
+brighter target will do more than extra time on this one."** That is advice to abandon a mosaic that is
+a few subs deep everywhere, shown to the one owner this app is for, who is a heavy mosaic user. The
+same wrong verdict also silences `cardGrainProjection`, which stands down on a plateau.
+
+**Reproduced before fixing**, in the helper's own test file: the two runs above returned
+`{ level: "plateaued", … }` where the fix returns `null`, and a three-run mosaic whose *biggest total*
+is its *widest* canvas fitted `p = 0.161` where the honest per-pixel answer is `0.5`. Both go red with
+the production change reverted (checked by stashing `integrationTrend.ts` alone).
+
+**The fix: fit against per-pixel integration, keep printing the total.** A new `perPixelSeconds(total,
+field_fulls)` divides each run's total by how many single-frame field-fulls of sky **its own canvas**
+covers. The scale divides out of the ratio whenever two runs share a canvas, so every single-field
+target — and every mosaic that is not growing — is bit-for-bit unchanged, which is pinned directly:
+one case runs the same pair through `null`, `undefined`, `0`, `0.4`, `1` and `4` and asserts the same
+level, exponent, hours **and sentence** each time. What the sentence *says* stays the target's total
+(`hoursNow` is the deepest run's `total_exposure_s`, not its per-pixel share) — every other surface
+prints the total, and "double your 3 h" of a 12-hour mosaic is arithmetic nobody could reconcile.
+
+**Where the number comes from.** `webapp.field_fulls.field_fulls_of_sky` already existed — it is what
+the readiness verdict uses to stop telling a 2×2 mosaic at 1 h a panel that it has "plenty for a clean
+image" — but only ever for a target's *newest* run. The growing-mosaic case needs it **per run**, so
+`StackRunOut` gained an additive `field_fulls: float | None` computed from that run's own
+`canvas_w`/`canvas_h` and `drizzle_scale`. The native frame shape it is measured against is read
+**once per listing**, not once per run: `native_frame_shape(proj)` is split out of `target_field_fulls`
+(same `LIMIT 1` query, one definition), so the listing costs exactly one extra row read however many
+runs a target has.
+
+**Upgrade-safe (§9):** one additive, defaulted response field; no config, schema, on-disk or default
+change. An older frontend ignores it; an older backend omitting it makes `perPixelSeconds` fall back
+to 1.0, which is the pre-fix behaviour exactly. A value at or below 1.0 is clamped to 1.0 on **both**
+sides (the backend already did, for the same reason — a scale below one would inflate the apparent
+depth).
+
+**Tests (+11).** `integrationTrend.test.ts` +5: the growing mosaic says nothing; a mosaic that stopped
+improving **at a fixed size** is still called plateaued (the fix must not make the verdict unreachable
+on a mosaic) and still names its total in the sentence; a mosaic that genuinely deepened is still
+credited as improving; the shared-figure invariance sweep above; and "deepest" chosen by depth rather
+than by total. `tests/webapp/test_stack_run_field_fulls.py` (new, 5): the single-field 1.0, the 2×2
+4.0, **each run reporting its own canvas rather than the newest**, drizzle divided out, and the field
+present-but-null when no frame records a shape. `tests/test_field_fulls.py` +6 for
+`native_frame_shape`'s degraded shapes (no connection, no row, a raising DB, a zero/missing dimension)
+— every one must answer `None` rather than raise, because a broken project DB must not cost a page its
+picture list.
+
 ## v0.321.2 + v0.321.3 — cut from the working list 2026-09-11 — "sweep every date the app shows a beginner"
 
 Filed 2026-08-30 as the generalisation of the v0.311.3 "First light" bug and **finished** across

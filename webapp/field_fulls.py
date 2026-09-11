@@ -20,6 +20,13 @@ integration against `goal_hours * field_fulls`, i.e. an honest per-panel depth.
 Kept a pure function of the numbers themselves so it stays cheap to test and
 easy to wire in wherever a caller already knows a target's newest run + its
 frame shape (the two things the routers already have to hand).
+
+The same number also travels **per stack run** on the History listing
+(``StackRunOut.field_fulls``), because a mosaic's canvas grows as its panels are
+shot: two runs of one target can span very different areas of sky, and a
+noise-vs-time trend read from their *total* integration then measures the canvas
+growing rather than the picture deepening. The consumer is
+``frontend/src/components/target/integrationTrend.ts``.
 """
 
 from __future__ import annotations
@@ -142,21 +149,45 @@ def target_field_fulls(proj) -> float | None:  # noqa: ANN001 — any open Proje
     options_json = (
         run_row["options_json"] if "options_json" in run_row.keys() else None
     )
-    try:
-        frame_row = conn.execute(
-            "SELECT width_px, height_px FROM frames "
-            "WHERE width_px IS NOT NULL AND height_px IS NOT NULL "
-            "LIMIT 1"
-        ).fetchone()
-    except Exception:  # noqa: BLE001 — same rule as above
+    shape = native_frame_shape(proj)
+    if shape is None:
         return None
-    if frame_row is None:
-        return None
-    frame_w = frame_row["width_px"] if "width_px" in frame_row.keys() else None
-    frame_h = frame_row["height_px"] if "height_px" in frame_row.keys() else None
+    frame_w, frame_h = shape
     drizzle = drizzle_scale_from_options(options_json)
     return field_fulls_of_sky(
         canvas_w, canvas_h,
         frame_w=frame_w, frame_h=frame_h,
         drizzle_scale=drizzle,
     )
+
+
+def native_frame_shape(proj) -> tuple[float, float] | None:  # noqa: ANN001
+    """The target's native sub dimensions in pixels, or ``None``.
+
+    One ``LIMIT 1`` read on the already-open project — a target's subs are all
+    the same shape, so any measured frame answers for the target. Split out of
+    :func:`target_field_fulls` so a caller that wants the figure for **every**
+    stack run (the History listing, which has each run's own canvas to hand)
+    pays for the frame shape once rather than once per run.
+
+    ``None`` when the DB can't be read or no frame records its dimensions; every
+    caller then falls back to the un-scaled behaviour rather than guessing.
+    """
+    conn = getattr(proj, "_conn", None)
+    if conn is None:
+        return None
+    try:
+        frame_row = conn.execute(
+            "SELECT width_px, height_px FROM frames "
+            "WHERE width_px IS NOT NULL AND height_px IS NOT NULL "
+            "LIMIT 1"
+        ).fetchone()
+    except Exception:  # noqa: BLE001 — a broken DB must not sink a card
+        return None
+    if frame_row is None:
+        return None
+    frame_w = frame_row["width_px"] if "width_px" in frame_row.keys() else None
+    frame_h = frame_row["height_px"] if "height_px" in frame_row.keys() else None
+    if not _positive(frame_w) or not _positive(frame_h):
+        return None
+    return float(frame_w), float(frame_h)
