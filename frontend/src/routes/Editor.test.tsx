@@ -2142,6 +2142,65 @@ describe("EditorView", () => {
       expect(screen.queryByText(/washing out to flat white/i)).not.toBeInTheDocument();
     });
 
+  // ...and the op panel is still a place you have to *go*. A beginner who lands
+  // on an auto-edited run, or has just pressed Auto, is reading the note — and
+  // until v0.424.1 the app could have measured that their galaxy core was a white
+  // blob and said nothing until they thought to click "Stretch".
+
+  it("puts the blown-core finding in the auto-edited note, with nothing selected",
+    async () => {
+      mockStretchOpWith("stf");
+      vi.spyOn(client.api, "autoNote").mockResolvedValue({
+        note: "Auto-edited: flattened the background, then applied a natural stretch.",
+      });
+      vi.spyOn(client.api, "highlightSuggestion").mockResolvedValue(
+        { strength: 0.4, flat_fraction: 0.22, core_px: 241 });
+
+      renderEditor();
+
+      expect(await screen.findByText("This picture was auto-edited")).toBeInTheDocument();
+      // No op selected, no accordion opened — and the finding is on screen.
+      expect(screen.queryByLabelText("Set Hold back highlights from your data")).toBeNull();
+      expect(await screen.findByText(/washing out to flat white/i)).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /Hold back highlights \(0.4\)/i }));
+      // It applies to the recipe's own Stretch op, and then goes quiet.
+      await waitFor(() =>
+        expect(screen.queryByText(/washing out to flat white/i)).not.toBeInTheDocument());
+    });
+
+  it("keeps the auto-edited note quiet when there is no blown core", async () => {
+    // The honest empty state on the surface a beginner cannot avoid seeing: most
+    // pictures have no washed-out core, and the note must not imply otherwise.
+    mockStretchOpWith("stf");
+    vi.spyOn(client.api, "autoNote").mockResolvedValue({
+      note: "Auto-edited: flattened the background, then applied a natural stretch.",
+    });
+    vi.spyOn(client.api, "highlightSuggestion").mockResolvedValue({ strength: null });
+
+    renderEditor();
+
+    expect(await screen.findByText("This picture was auto-edited")).toBeInTheDocument();
+    expect(screen.queryByText(/washing out to flat white/i)).not.toBeInTheDocument();
+  });
+
+  it("does not ask for a highlight measurement on a recipe with no auto note",
+    async () => {
+      // The solve costs a recipe prefix plus a handful of stretches, so it is only
+      // worth paying where the answer is shown. On a hand-built recipe with nothing
+      // selected, nobody is reading a note — so nothing is asked.
+      mockStretchOpWith("stf");
+      vi.spyOn(client.api, "autoNote").mockResolvedValue({ note: null });
+      const solve = vi.spyOn(client.api, "highlightSuggestion")
+        .mockResolvedValue({ strength: 0.4, flat_fraction: 0.22, core_px: 241 });
+
+      renderEditor();
+
+      await screen.findByText("Stretch");
+      await waitFor(() => expect(screen.queryByText("Updating…")).toBeNull());
+      expect(solve).not.toHaveBeenCalled();
+    });
+
   it("sets a gentle starting curve via the header 'Auto curve'", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({

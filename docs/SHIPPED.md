@@ -1,5 +1,60 @@
 # Shipped — the record
 
+## v0.424.1 — 2026-09-11 — the measured blown core reaches the note a beginner is actually reading
+
+*(PRIORITY 1, the editor — the surfacing half of v0.424.0, shipped the same run
+because the fix is what made it worth having.)*
+
+The app measures whether the brightest core in your picture is washing out to
+flat white, and knows the exact slider strength that reopens it
+(`suggest_highlight_protect`, v0.240.0). Until now that finding only ever reached
+the screen while the **Stretch op was selected**: `blownCoreCaption` was rendered
+inside the op panel, under `if (selectedOp.id !== "tone.stretch") return null`.
+
+So the surface it appeared on was one a beginner has to go and find. The editor
+seeds Auto on first open (v0.390.0) and explains itself in one of two notes — *"This
+picture was auto-edited"* on a run a background job processed, *"What Auto-process
+did"* after the button — and a user reading either of those, looking at a white
+blob where their galaxy core should be, was shown nothing at all unless they
+thought to click "Stretch" in the pipeline list. That is the app having measured
+the problem, knowing the one-click fix, and keeping both to itself.
+
+**Both notes now carry the same nudge.** One shared `BlownCoreNudge` component
+(the op panel's copy moved into it, so there is one definition of the sentence and
+the button rather than three), rendered inline inside the note rather than as an
+alert of its own — the owner's standing "put it inside the existing grouping"
+rule, and it is conditional on a rare server-side measurement rather than being
+another always-on line.
+
+**Which op it is about is not guessed.** New pure `blownCoreStretchOp` mirrors the
+server's own fallback — `solve_highlight_protect` with no uid solves for the
+recipe's **first** `tone.stretch` — so the note and the op panel can never end up
+offering two answers about one picture, and the note stands down entirely when a
+*second* Stretch op is the selected one (the answer on screen is then that op's).
+It says nothing when the recipe's Stretch is switched off: there is nothing to
+offer on an op that is not rendering.
+
+**What it costs, and when.** The solve is a recipe prefix plus a handful of
+stretches on the proxy, so it is asked for only while one of the notes is up
+**and** the first preview has already rendered — it never competes with the
+picture the user is waiting for, and a hand-built recipe with nothing selected
+asks for nothing (pinned by a test that fails if the endpoint is called at all).
+The query is keyed on the same uid either way, so selecting the Stretch op
+afterwards is a cache hit, not a second solve.
+
+Frontend-only: no endpoint, config, schema, on-disk, API-shape or default change.
+
+**Tests (+8):** three in `Editor.test.tsx` — the finding appears in the
+auto-edited note with nothing selected and applies to the recipe's own Stretch op
+(verified red by reverting the one line that widens the query); the note stays
+quiet when there is no blown core; and nothing is asked for on a recipe with no
+note. Four in `blownCore.test.ts` for the op-picking rule (first Stretch, no
+Stretch, a disabled Stretch, an op with no `enabled` field). Plus one that belongs
+to v0.424.0's curve and is landing a commit late: the re-anchoring runs per
+channel, on each channel's own `m`, so a grey core must stay grey and a coloured
+one must get its colour *back* rather than swing hue — measured at 1 : 0.995 :
+0.999 (white, which is what "blown" means) before and 1 : 0.987 : 0.976 after.
+
 ## v0.424.0 — 2026-09-11 — ⭐ "Hold back highlights" starts working on the frames it exists for
 
 *(PRIORITY 1, the editor. The backlog entry, filed 2026-08-06 and measured then:
@@ -96,7 +151,7 @@ default Auto picture, every preview and every thumbnail are byte-for-byte what
 they were. A saved recipe carrying `highlights > 0` renders *better*, which is the
 change.
 
-**Tests (+12 net, 4 fail-before — each verified by reverting the production guard
+**Tests (+11 net, 4 fail-before — each verified by reverting the production guard
 in place and watching them go red):**
 `tests/test_stf_highlight_rolloff.py` — the core the midtones transfer used to
 flatten is reopened (8.65 % blown → 0 %, core std ×20); the shoulder really holds
