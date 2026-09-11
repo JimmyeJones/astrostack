@@ -397,7 +397,8 @@ register(OpSpec(
                   min=0.0, max=1.0, step=0.05, group="advanced",
                   help="Compress the very brightest tones so a bright galaxy or nebula "
                        "core keeps its detail instead of washing out to flat white. "
-                       "Leaves the sky and midtones alone; 0 = as before."),
+                       "Your sky stays exactly where it is; on a very bright core the "
+                       "midtones dim a little to make room for it. 0 = as before."),
     ],
 ))
 
