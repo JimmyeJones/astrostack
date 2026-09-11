@@ -243,3 +243,42 @@ def test_the_ci_smoke_copies_every_directory_the_dockerfile_does(dockerfile: str
         f"the Dockerfile's runtime stage now copies {sorted(dirs)}; teach the "
         "`image` CI job's copy step about the change too"
     )
+
+
+# --------------------------------------------------------------------------
+# Bundled data reaches the wheel
+# --------------------------------------------------------------------------
+
+
+def test_every_bundled_data_file_is_declared_as_package_data(pyproject: dict) -> None:
+    """``seestack/data/`` holds files the *running app* reads, not fixtures.
+
+    A non-editable install (which is what the image does) copies only what
+    ``[tool.setuptools.package-data]`` names, so a new extension dropped in here
+    is silently absent from the owner's install while every test and CI job —
+    all of which run from the tree — keep passing. That is exactly the gap the
+    glossary sat in for its whole life, from the other direction: it was in
+    ``docs/``, which the Dockerfile does not copy at all.
+    """
+    patterns = pyproject["tool"]["setuptools"]["package-data"]["seestack"]
+    declared = {p.rsplit(".", 1)[-1] for p in patterns if p.startswith("data/")}
+    present = {p.suffix.lstrip(".") for p in (_ROOT / "seestack" / "data").iterdir()
+               if p.is_file()}
+    missing = present - declared
+    assert not missing, (
+        f"seestack/data holds {sorted(missing)} files that package-data does not "
+        f"declare ({patterns}) — they will not reach a non-editable install"
+    )
+
+
+def test_the_glossary_the_app_serves_ships_inside_the_package() -> None:
+    """The named instance of the rule above, pinned where a reader will find it.
+
+    ``GET /api/glossary`` reads ``seestack/data/glossary.md``. Moving it back to
+    ``docs/`` — or forgetting the ``data/*.md`` pattern — makes the page empty in
+    the image and full in every checkout.
+    """
+    from seestack.glossary import glossary_path
+
+    assert glossary_path().is_file()
+    assert glossary_path().is_relative_to(_ROOT / "seestack")

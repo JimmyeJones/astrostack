@@ -33,6 +33,7 @@ import { LiveView } from "./routes/Live";
 import { SkySoFarView } from "./routes/SkySoFar";
 import { YourYearView } from "./routes/YourYear";
 import { MoonSunView } from "./routes/MoonSun";
+import { GlossaryView } from "./routes/Glossary";
 
 // Lazy-load the 3D sky viewer so three.js stays out of the main bundle.
 const SkyView = React.lazy(() =>
@@ -76,6 +77,7 @@ const router = createBrowserRouter([
       // is bookmarkable and the nav gains no extra entry.
       { path: "sky-so-far/:year", element: <YourYearView /> },
       { path: "life-list", element: <LifeListView /> },
+      { path: "glossary", element: <GlossaryView /> },
       { path: "moon-sun", element: <MoonSunView /> },
       { path: "targets/:safe", element: <TargetView /> },
       { path: "targets/:safe/stack", element: <StackView /> },

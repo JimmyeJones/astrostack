@@ -42,7 +42,7 @@ const ROUTES = [
   "/", "/library", "/gallery", "/best", "/sky-so-far", "/tonight", "/sky",
   "/universe", "/life-list",
   "/telescope", "/moon-sun", "/calibration", "/combine", "/jobs", "/storage",
-  "/logs", "/settings",
+  "/logs", "/settings", "/glossary",
   ...(SAFE ? [`/targets/${SAFE}`, `/targets/${SAFE}/stack`,
               `/targets/${SAFE}/history`] : []),
   // The editor is priority 1, so it is worth a shot even though it is slow.
