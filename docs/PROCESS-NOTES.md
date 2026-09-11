@@ -18,6 +18,68 @@ is a queue.
 
 ---
 
+## 2026-09-11 (Builder, branch `claude/sweet-babbage-50a90t`) — DOGFOOD RECORD: clean on every automated axis, and two real bugs one page further in
+
+**The run.** Three tasks, three independently-green commits — **v0.424.4** (the
+Sky Map's default mode), **v0.425.0** (a plateaued target names the fresh one to
+point at) and **v0.425.1** (the offline viewer's aim, and its star labels).
+Full entries in [`SHIPPED.md`](SHIPPED.md).
+
+### The dogfood pass, recorded because it was CLEAN — and that is the point
+
+`scripts/agent-dogfood.sh --mosaic --editor`, then `--empty`, on a baseline of
+`5746 passed, 2 skipped`:
+
+* **Page probe, field sample:** nothing overflowing, no console errors. Tallest
+  page `[phone] /life-list` at **3,094 px**; the Target page **3,078 px**.
+* **Page probe, mosaic sample:** clean. Tallest `[phone]
+  /targets/Sample_M42_mosaic_2_2` at **3,447 px**.
+* **First-run (`--empty`):** clean. Tallest `[phone] /glossary` **2,803 px**;
+  the Dashboard **1,402 px**.
+* **Editor drive, both samples:** all **21** ops added one at a time, every one
+  re-rendering the live preview with no console error and no failed request,
+  then Undo and Redo. Clean on the field sample *and* on the mosaic.
+* **Mosaic trim:** Auto would cut **7.9 %** of the canvas — well under the
+  ~15 % §1 calls a bug.
+* **The sentences, read as one paragraph** (the §7 instruction): they hold
+  together. `mosaic-map` returns `thin: null` while the health panel calls out a
+  thinner quarter, which looks like the 2026-09-09 class of finding and **is
+  not**: the shortfall is 30 s against `THIN_MIN_SHORTFALL_S` = 300 s, and the
+  map's own `behind` branch says exactly that in the same words the health note
+  uses ("only about 30 s behind, so it evens out on its own"). Checked in
+  `seestack/mosaicmap.py` rather than assumed.
+
+### What that clean pass still missed, and the lesson
+
+**Both bugs this run shipped as v0.425.1 were on a page the pass had just
+photographed and called clean**, because a clean pass is a statement about
+console errors and box overflow — §7 says so about *sentences*, and this run is
+the same lesson about *pixels*.
+
+1. The offline Sky Map opened on a fixed patch of sky. The screenshot is a black
+   rectangle with four specks and a badge reading *2 images*. No error, no
+   overflow, nothing to grep for; you have to **open the PNG and ask whether it
+   looks like a working map**.
+2. `Rigel` rendered as `R∎el` — the star's dot painted through its own label.
+   Invisible at the 1,440 px screenshot's scale. It took cropping that label out
+   and magnifying it 6× to see at all.
+
+So the habit worth keeping: after a CLEAN pass, **look at two or three of the
+shots at full size, and magnify anything that looks like text next to a
+graphic.** Both of these were reachable that way and by no other means in this
+repo's toolchain.
+
+### The pass and `pytest` still cannot overlap, and the run was shaped around it
+
+Serialised deliberately per §7: baseline suite first (27:45), then the dogfood
+passes, then the final suite before merging. Worth noting for planning — the
+baseline alone is ~28 minutes, so a run that wants both a green baseline *and* a
+dogfood pass *and* a green final suite has about an hour of pure waiting in it.
+Starting the baseline in the background as the very first action, before reading
+the backlog, is what made three tasks fit.
+
+---
+
 ## 2026-09-11 (Builder, branch `claude/sweet-babbage-mggx1q`) — two halves of one lead, and a "fingerprint" that was a memory address
 
 **The run.** Two tasks, two independently-green commits: **v0.424.2** (the Stack

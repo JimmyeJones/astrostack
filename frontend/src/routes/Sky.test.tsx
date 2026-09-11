@@ -1,7 +1,13 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
-import { MyMap, SkyView, initialSkyMode, myMapFilename, myMapSaveOffered, skyFootprintLine } from "./Sky";
+import {
+  BRIGHT_STAR_POINT_SIZE, MyMap, OFFLINE_FOV_MAX, OFFLINE_FOV_MIN,
+  STAR_LABEL_FONT_PX, STAR_LABEL_OFFSET_PX, SkyView, initialSkyMode, initialSkyView,
+  myMapFilename, myMapSaveOffered, offlineCameraPosition, skyFootprintLine,
+  starPointDiameterPx,
+} from "./Sky";
+import { raDecToVector, type SkyImage, type SkyStar } from "../sky/projection";
 import { MantineProvider } from "@mantine/core";
 import { api } from "../api/client";
 import * as client from "../api/client";
@@ -137,15 +143,149 @@ describe("initialSkyMode", () => {
 
   it("leaves the remembered default alone when no link asked for one", () => {
     expect(initialSkyMode(null, "mine")).toBe("mine");
-    expect(initialSkyMode(null, null)).toBe("online");
+    expect(initialSkyMode(null, null)).toBe("offline");
+  });
+
+  it("opens on the offline star map, not the one that fetches sky imagery", () => {
+    // The owner said the mode that pulls imagery is not one he wants to land
+    // on, and defaulting to the only view that reaches the internet is the
+    // wrong way round for the local rule. "Real sky (online)" is still on the
+    // switch, and picking it is remembered — it just isn't where a first open,
+    // on a new browser or a new device, starts.
+    expect(initialSkyMode(null, null)).toBe("offline");
+    expect(initialSkyMode(null, "online")).toBe("online");
+    expect(initialSkyMode("online", null)).toBe("online");
   });
 
   it("ignores a value that isn't a map, rather than showing nothing", () => {
     // A hand-typed URL, an old bookmark, or a stored value from a build that
     // named its modes differently — all fall through to something that renders.
     expect(initialSkyMode("universe", "mine")).toBe("mine");
-    expect(initialSkyMode("", null)).toBe("online");
-    expect(initialSkyMode(null, "nonsense")).toBe("online");
+    expect(initialSkyMode("", null)).toBe("offline");
+    expect(initialSkyMode(null, "nonsense")).toBe("offline");
+  });
+});
+
+describe("initialSkyView", () => {
+  // Found by dogfooding the app after "Stars (offline)" became the mode Sky Map
+  // opens in: the offline viewer opened on a fixed patch of sky (RA 18h) that
+  // held four of the sixty bundled bright stars and none of the user's own
+  // pictures — a black rectangle that reads as a map which failed to load.
+  // "Real sky (online)" has always centred on the newest picture.
+  function pic(over: Partial<SkyImage> = {}): SkyImage {
+    return {
+      safe: "M42", name: "Orion Nebula",
+      ra_deg: 83.82, dec_deg: -5.39,
+      width_deg: 2.1, height_deg: 1.4, rotation_deg: 0,
+      preview_url: "/p.png", timestamp_utc: "2026-09-01T00:00:00Z", run_id: 1,
+      ...over,
+    };
+  }
+  const CATALOG: SkyStar[] = [
+    { name: "Arcturus", ra_deg: 213.9, dec_deg: 19.2, mag: -0.05 },
+    { name: "Sirius", ra_deg: 101.3, dec_deg: -16.7, mag: -1.46 },
+    { name: "Vega", ra_deg: 279.2, dec_deg: 38.8, mag: 0.03 },
+  ];
+
+  it("opens on the newest picture, framed the way the online viewer frames it", () => {
+    const older = pic({ run_id: 1, timestamp_utc: "2026-08-01T00:00:00Z" });
+    const newest = pic({
+      run_id: 2, timestamp_utc: "2026-09-05T00:00:00Z",
+      ra_deg: 10.68, dec_deg: 41.27, width_deg: 3,
+    });
+    // Deliberately out of order: "newest" is the stack time, not the position.
+    const v = initialSkyView([newest, older], CATALOG);
+    expect(v.raDeg).toBeCloseTo(10.68);
+    expect(v.decDeg).toBeCloseTo(41.27);
+    expect(v.fovDeg).toBeCloseTo(18);  // 3° × the 6 picture-widths Aladin uses
+  });
+
+  it("keeps the opening FOV inside the range the viewer's own zoom allows", () => {
+    // A Seestar field is ~2°, so six of them is already below the floor; an
+    // all-sky mosaic would be above the ceiling. Either way the first scroll
+    // must not jump to an edge.
+    expect(initialSkyView([pic({ width_deg: 0.5 })], CATALOG).fovDeg).toBe(OFFLINE_FOV_MIN);
+    expect(initialSkyView([pic({ width_deg: 90 })], CATALOG).fovDeg).toBe(OFFLINE_FOV_MAX);
+  });
+
+  it("opens on the brightest star in the backdrop when there are no pictures yet", () => {
+    // A first-run install. The star comes from the catalogue the viewer is
+    // already drawing, so it can never aim where the backdrop has nothing.
+    const v = initialSkyView([], CATALOG);
+    expect(v.raDeg).toBeCloseTo(101.3);   // Sirius, mag -1.46
+    expect(v.decDeg).toBeCloseTo(-16.7);
+    expect(v.fovDeg).toBe(OFFLINE_FOV_MAX);
+  });
+
+  it("still opens somewhere real with no pictures and no catalogue at all", () => {
+    // The old fixed direction, kept exactly: RA 270°, Dec 0°, 70° across.
+    expect(initialSkyView([], [])).toEqual({ raDeg: 270, decDeg: 0, fovDeg: 70 });
+    expect(initialSkyView(null, null)).toEqual({ raDeg: 270, decDeg: 0, fovDeg: 70 });
+  });
+
+  it("skips a picture or a star it cannot place, rather than aiming at NaN", () => {
+    const broken = pic({ run_id: 9, timestamp_utc: "2026-09-09T00:00:00Z", ra_deg: NaN });
+    // The newest picture has no usable position, so the older placed one wins.
+    const v = initialSkyView([pic({ ra_deg: 120, dec_deg: 5 }), broken], CATALOG);
+    expect(v.raDeg).toBeCloseTo(120);
+    expect(v.decDeg).toBeCloseTo(5);
+    const starless = initialSkyView([], [{ name: "?", ra_deg: NaN, dec_deg: 0, mag: -9 }]);
+    expect(starless).toEqual({ raDeg: 270, decDeg: 0, fovDeg: 70 });
+  });
+
+  it("stays off the poles, where the viewer's orbit controls have no azimuth", () => {
+    expect(initialSkyView([pic({ dec_deg: 90 })], CATALOG).decDeg).toBeCloseTo(89.9);
+    expect(initialSkyView([pic({ dec_deg: -90 })], CATALOG).decDeg).toBeCloseTo(-89.9);
+  });
+});
+
+describe("the star labels clear their own stars", () => {
+  // Also found by dogfooding: the label was centred on the star, so the star's
+  // dot was painted through the middle of its own name — magnified from the
+  // screenshot, "Rigel" read as "R∎el".
+  it("steps the name below the dot at every height this viewer runs at", () => {
+    // A phone in portrait through a 1440p desktop. The dot's size does not
+    // depend on the zoom (see `starPointDiameterPx`), so one offset covers the
+    // whole range — but it does grow with the viewport, so the tallest screen
+    // is the one that decides.
+    for (const viewportHeightPx of [600, 800, 1000, 1400]) {
+      const dotRadius = starPointDiameterPx(BRIGHT_STAR_POINT_SIZE, viewportHeightPx) / 2;
+      const textTopEdge = STAR_LABEL_OFFSET_PX - STAR_LABEL_FONT_PX / 2;
+      expect(textTopEdge).toBeGreaterThanOrEqual(dotRadius);
+    }
+  });
+
+  it("scales the dot with the viewport and not with the zoom", () => {
+    // The property the single fixed offset rests on. three.js sizes an
+    // attenuated point from the renderer height alone; the field of view moves
+    // it around the screen without resizing it.
+    expect(starPointDiameterPx(BRIGHT_STAR_POINT_SIZE, 800)).toBeCloseTo(6.4);
+    expect(starPointDiameterPx(BRIGHT_STAR_POINT_SIZE, 1600))
+      .toBeCloseTo(2 * starPointDiameterPx(BRIGHT_STAR_POINT_SIZE, 800));
+  });
+});
+
+describe("offlineCameraPosition", () => {
+  it("puts the camera where looking at the centre looks at the asked-for sky", () => {
+    // The camera sits a hair off the centre of the sphere and is aimed at the
+    // origin, so it looks along the negative of its own position.
+    const view = { raDeg: 83.82, decDeg: -5.39, fovDeg: 30 };
+    const [x, y, z] = offlineCameraPosition(view, 0.1);
+    const want = raDecToVector(view.raDeg, view.decDeg, 1);
+    const len = Math.hypot(x, y, z);
+    expect(len).toBeCloseTo(0.1);
+    expect(-x / len).toBeCloseTo(want.x);
+    expect(-y / len).toBeCloseTo(want.y);
+    expect(-z / len).toBeCloseTo(want.z);
+  });
+
+  it("reproduces the old fixed camera for the no-data fallback", () => {
+    // RA 270°, Dec 0° is exactly [0, 0, 0.1] looking at the origin — what the
+    // viewer did unconditionally before it learned to aim.
+    const [x, y, z] = offlineCameraPosition({ raDeg: 270, decDeg: 0, fovDeg: 70 });
+    expect(x).toBeCloseTo(0);
+    expect(y).toBeCloseTo(0);
+    expect(z).toBeCloseTo(0.1);
   });
 });
 

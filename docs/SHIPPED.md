@@ -1,5 +1,138 @@
 # Shipped — the record
 
+## v0.425.1 — 2026-09-11 — 🐛 the offline Sky Map opens on your newest picture, and a star's name is no longer painted over by the star
+
+*(PRIORITY 3, friendliness. Two Builder-found bugs on the surface v0.424.4 had
+just made the default, both found by dogfooding the running app and both
+invisible to a code read — the second one only by magnifying a screenshot.)*
+
+**What it looked like.** `OfflineSky` opened its camera at `[0, 0, 0.1]` looking
+at the origin — RA 270°, Dec 0° in this file's own convention — **whatever the
+user had shot**, with a 70° field. The backdrop is the bundled bright-star
+catalogue, **sixty stars over the whole celestial sphere**, so that fixed patch
+drew about four dots on black and the user's pictures were nowhere in the view.
+The first-run screenshot is a black rectangle with four specks; the
+sample-loaded one, with *2 images* in the badge, is the same black rectangle. It
+reads as a map that failed to load. "Real sky (online)" has never done this —
+`AladinSky` centres on the newest picture and frames it at six picture-widths —
+and v0.424.4 had just made the offline view the one a beginner opens on.
+
+**What it does now.** New pure `initialSkyView(images, stars)`, in three rules:
+
+1. **The newest picture**, framed at `OFFLINE_FRAME_MARGIN` (6) picture-widths —
+   the same margin `AladinSky` uses, so switching modes lands on the same
+   framing — clamped into `[OFFLINE_FOV_MIN, OFFLINE_FOV_MAX]`, the viewer's own
+   zoom range, so the first scroll cannot jump to an edge. "Newest" is
+   `sortOldestFirst`'s last: the same picture the online viewer picks, and the
+   one drawn on top where footprints overlap.
+2. **The brightest star in the backdrop**, wide, when there are no pictures — so
+   a first-run install opens on something named and recognisable. Taken from the
+   catalogue the viewer is already drawing rather than hard-coded, so it can
+   never aim where the backdrop has nothing.
+3. **`OFFLINE_FALLBACK`** — RA 270°, Dec 0°, 70°, *exactly* the old direction and
+   field — when there is neither.
+
+A picture or star with a non-finite coordinate is skipped rather than aimed at.
+Dec is clamped to ±89.9°, because looking straight along ±Y is `OrbitControls`'
+own gimbal singularity and a tenth of a degree is sub-pixel at every FOV here.
+`offlineCameraPosition` puts the camera at `−r·v̂`: it sits a hair off the centre
+of the sphere and is aimed at the origin, so it looks along the negative of its
+own position.
+
+**The aim is decided once, on first render** (`useState` initialiser), not
+derived from the current data: the page's query can refetch on a window focus,
+and re-deriving the camera props would yank the view out of wherever the user
+had dragged it.
+
+**The second bug, found by magnifying the screenshot.** `StarLabels` rendered
+each name in a drei `<Html center>` — centred on the star — so the star's own
+dot was painted through the middle of its own word: "Rigel" read as `R∎el`. The
+span now steps `STAR_LABEL_OFFSET_PX` (12) **below** the star (below rather than
+beside, so a label never reaches towards the next star along); drei owns the
+box's transform, which is why the offset is on the span. One fixed offset is
+enough because of a property worth recording: three.js sizes an attenuated point
+at `size × (viewportHeight / 2) ÷ distance` pixels, which **does not contain the
+field of view** — the sprite stays ~6 px across at every zoom, and it is the
+viewport height, not the zoom, that decides whether the offset clears it. That
+arithmetic is now `starPointDiameterPx`, and the material's size is the named
+`BRIGHT_STAR_POINT_SIZE` it reads, so the two cannot be changed apart.
+
+**Verified in the running app, not only in the suite** — `agent-dogfood.sh
+--build --no-stack`, before and after: the Sky Map screenshot goes from an empty
+black field to the M42 mosaic footprint dead centre with Rigel labelled beside
+it, and the magnified crop of that label goes from `R∎el` to a legible "Rigel"
+under its dot.
+
+**Upgrade-safe (§9):** frontend-only. No endpoint, config, schema, on-disk,
+API-shape or default change; `GET /api/sky` is read exactly as before.
+
+**Tests (+9, in `Sky.test.tsx`):** opens on the newest picture by stack time and
+not by position; the opening FOV clamped at both ends; the brightest-star
+fallback; the no-data fallback equal to the old fixed view, from `[]`/`[]` and
+from `null`/`null`; a non-finite coordinate skipped rather than aimed at; the
+pole clamp; the camera position's direction property and its reduction to the
+old `[0, 0, 0.1]`; the label clearing the dot at every viewport height this
+viewer runs at; and the dot scaling with the viewport rather than the zoom.
+**Five of them verified red** by standing the aim down to the fallback in a
+scratch revert — the four that describe unchanged behaviour correctly stayed
+green.
+
+## v0.425.0 — 2026-09-11 — 🌟 a plateaued target now names the fresh one to point at instead
+
+*(PRIORITY 2–3, autonomy + friendliness. The 2026-07-25 "Features that serve
+real workflows" entry, filed as a follow-on to the v0.207.0 `integrationTrend`
+verdict and open since.)*
+
+**What it looked like.** `IntegrationTrendBadge` has told a beginner since
+v0.207.0 when a target has gone sky-limited — *"Your noise has stopped dropping
+even as you added time (4.0 h in) — this target looks sky-limited from here, so
+more subs won't help it much. A darker sky or a brighter target will do more
+than extra time on this one."* That last sentence is the right advice and it is
+also a dead end: it names the move and leaves the beginner to work out **which**
+brighter target, on a page that has no answer. Meanwhile the machinery that
+answers exactly that question — `/api/plan/suggest`, the famous showpieces this
+owner has not shot that are well-placed tonight — has been on the Dashboard
+("Try something new tonight") and behind the Tonight page the whole time, two
+navigations away from the one moment it is most useful.
+
+**What it does now.** While the plateau verdict is on screen, the badge asks the
+planner for its own best pick and prints it under the sentence:
+
+> Try **M27 · Dumbbell Nebula** on your next clear night — Climbs to 64°, up
+> about 7 h tonight. Moon out of the way. *See what else is up →*
+
+The heading and the observability line are `suggestionHeading` and
+`describeSuggestion`, the same two pure helpers the Dashboard card renders, so
+the two surfaces cannot drift into two descriptions of one object; the link is
+`/tonight`, the same destination as that card's "See all →".
+
+**The request is gated on the verdict, not on the page.** `enabled: showing`,
+where `showing` is the *same* boolean that decides whether the component returns
+`null` — computed before the query so the two cannot disagree about whether the
+sentence is up. An ordinary target, and a plateaued one whose verdict is
+suppressed by an add-time coaching nudge (`ADD_TIME_KINDS`), issue nothing at
+all; two tests assert the planner is never called in either case rather than
+merely that nothing is rendered. It shares `["suggest-targets"]` and the 60 s
+stale time with the Dashboard card, so arriving from the Dashboard costs nothing.
+
+**Every way it can have no answer leaves the verdict exactly as it was**: no
+location set, no dark window, nothing new well-placed, a rejected call, or an
+older backend all yield no suggestion and no link, and the plateau sentence
+renders alone — which is what it did before this change. Nothing is removed and
+no threshold moved; `integrationTrend` itself is untouched.
+
+**Upgrade-safe (§9):** frontend-only. No endpoint, config, schema, on-disk,
+API-shape or default change — `/api/plan/suggest` is called exactly as the
+Dashboard already calls it.
+
+**Tests (+5, in `IntegrationTrendBadge.test.tsx`, whose harness gained the
+`QueryClientProvider`/`MemoryRouter` the six existing cases now render inside):**
+the pick is named with the Dashboard's own line and the link points at
+`/tonight` (**verified red** by restoring the pre-change component in a scratch
+revert); the planner is not called on an improving target; not called while an
+add-time nudge suppresses the verdict; the verdict stands alone on an empty
+suggestion list; and it stands alone on a failed call.
+
 ## v0.424.3 — 2026-09-11 — 🟡 the Stack form's advice panel stops blinking out on every knob nudge
 
 *(PRIORITY 1/3 — §1's "clunky and confusing controls". The client half of the
