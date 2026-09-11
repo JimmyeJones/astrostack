@@ -31,6 +31,16 @@ log = logging.getLogger(__name__)
 
 
 MODE_GRAY_STAR = "gray_star"
+# RETIRED (v0.418.0). ``gaia`` asked the CDS/Gaia archive over the network, which
+# AGENTS.md §1 has declined as a standing policy — this app stays local — and
+# ``astroquery`` is in no dependency list, so in the shipped image the import below
+# raises ``ModuleNotFoundError``, the broad ``except`` swallows it, and the solve
+# silently became gray-star with nothing but a log line. It is no longer offered
+# anywhere (``seestack.edit.ops.tone``, ``webapp.schemas``); the constant and
+# :func:`_solve_gaia` stay so an old saved recipe, an old stack-run record or an
+# old ``default_stack_options`` still *names* something we recognise, and
+# :func:`calibrate_color` turns it into an honest gray-star solve that says so
+# rather than a failed network call that doesn't.
 MODE_GAIA = "gaia"
 # Starless fallback used when neither star-based solver can run (too few stars):
 # equalise the per-channel *sky-background* medians so the background is neutral
@@ -57,21 +67,36 @@ DEFAULT_APERTURE_RADIUS_PX = 4.0
 MIN_DETECT_FWHM_PX = 1.0
 MIN_APERTURE_RADIUS_PX = 1.5
 
+# Appended to the note when a caller asked for the retired ``gaia`` mode, so the
+# provenance reads as what ran rather than what was requested. Kept short and
+# plain — it reaches the editor's "what Auto did" read-out.
+GAIA_RETIRED_NOTE = "balanced from your own stars (the online catalogue mode was removed)"
+
+
+def _join_notes(*parts: str) -> str:
+    """Join non-empty note fragments with '; ' — the existing note idiom."""
+    return "; ".join(p for p in parts if p)
+
 
 @dataclass
 class ColorCalibrationOptions:
     enabled: bool = False
-    mode: str = MODE_GRAY_STAR  # 'gray_star' | 'gaia'
+    # 'gray_star' — the only offered mode. 'gaia' is retired (see MODE_GAIA) and
+    # is accepted here only so an old recipe/run record deserialises; it solves
+    # gray-star and says so.
+    mode: str = MODE_GRAY_STAR
     detect_threshold_sigma: float = 6.0
     # Both in the pixels of the array passed to :func:`calibrate_color` — scale
     # them for a decimated render (see the note above the defaults).
     detect_fwhm_px: float = DEFAULT_DETECT_FWHM_PX
     aperture_radius_px: float = DEFAULT_APERTURE_RADIUS_PX
     min_stars: int = 20
-    # Gaia-only knobs:
+    # Gaia-only knobs. Retired with the mode and unread by :func:`calibrate_color`;
+    # kept as fields so an old persisted options dict still deserialises and so
+    # ``_solve_gaia`` (exercised directly by tests) keeps its signature.
     gaia_max_stars: int = 500
     gaia_max_g_mag: float = 17.0
-    gaia_timeout_s: float = 45.0  # network query is bounded by this
+    gaia_timeout_s: float = 45.0
 
 
 @dataclass
@@ -123,37 +148,19 @@ def calibrate_color(
         )
 
     # 3. Solve for scale factors.
-    if options.mode == MODE_GAIA and wcs is not None:
-        try:
-            # The Gaia query hits the network — bound it with a timeout so a
-            # slow or unreachable server can't hang the whole stack. On
-            # timeout (or any failure) we fall back to the offline gray-star
-            # solver instead of blocking forever.
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FTimeout
-
-            # NB: don't use `with ThreadPoolExecutor(...)` — its __exit__ calls
-            # shutdown(wait=True), which would block on the still-running Gaia
-            # query and defeat the timeout entirely. Shut down with wait=False
-            # on timeout and let the orphaned thread die on its own.
-            ex = ThreadPoolExecutor(max_workers=1)
-            try:
-                fut = ex.submit(_solve_gaia, rgb, fluxes, detections, wcs, options)
-                try:
-                    scale, n, note = fut.result(timeout=options.gaia_timeout_s)
-                except FTimeout:
-                    fut.cancel()
-                    ex.shutdown(wait=False)
-                    raise RuntimeError(
-                        f"Gaia query exceeded {options.gaia_timeout_s:.0f}s"
-                    ) from None
-                ex.shutdown(wait=False)
-            except BaseException:
-                ex.shutdown(wait=False)
-                raise
-            calibrated = _apply_scale(rgb, scale)
-            return calibrated, ColorCalibrationResult(scale, n, "gaia", note)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Gaia calibration failed (%s); falling back to gray-star", exc)
+    #
+    # ``gaia`` is retired (see MODE_GAIA): it is not offered by any surface, and a
+    # value that still names it comes from a saved recipe / run record / stored
+    # default written before v0.418.0. Answer it with the gray-star solve — the
+    # same thing the swallowed ModuleNotFoundError used to produce — but *say* so
+    # in the note, so "mode_used" is the truth rather than a mode that never ran.
+    if options.mode == MODE_GAIA:
+        scale, n, note = _solve_gray_star(fluxes)
+        calibrated = _apply_scale(rgb, scale)
+        return calibrated, ColorCalibrationResult(
+            scale, n, MODE_GRAY_STAR,
+            _join_notes(note, GAIA_RETIRED_NOTE),
+        )
 
     scale, n, note = _solve_gray_star(fluxes)
     calibrated = _apply_scale(rgb, scale)

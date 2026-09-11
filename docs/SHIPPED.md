@@ -1,5 +1,79 @@
 # Shipped — the record
 
+## v0.418.1 — 2026-09-11 — the Gaia colour-calibration mode is retired (entry CLOSED)
+
+The editor and the Stack form both offered `color_calibration_mode = "gaia"`. It imported
+`astroquery.gaia`, which is in no dependency list and is absent from the shipped image, so
+the import raised `ModuleNotFoundError`, the broad `except Exception` in `calibrate_color`
+swallowed it, and the solve silently became gray-star with nothing but a log line. It was
+also a CDS network call, which AGENTS.md §1 declines as standing policy — the app stays
+local. So picking it did nothing and said nothing.
+
+**Reproduced, not inferred.** Restoring the old dispatch in a scratch run logs exactly what
+the audit saw in the image: `Gaia calibration failed (No module named 'astroquery'); falling
+back to gray-star`.
+
+**Removed from every surface that offered it**: `seestack/edit/ops/tone.py`'s `_MODE_CC`, the
+`webapp/schemas.py` StackOptions descriptor, and — for consistency, since offering a dead
+mode is the same defect wherever it is — the historical desktop `stack_dialog.py` combo. The
+help text beside each control said "Requires internet / Most accurate"; it now describes the
+gray-star solve in plain language and says nothing leaves the box.
+
+**The engine branch is inert, and honest about it.** `calibrate_color` answers `MODE_GAIA`
+with the gray-star solve — which is what the swallowed import had always produced — and
+appends `GAIA_RETIRED_NOTE` ("balanced from your own stars (the online catalogue mode was
+removed)") to the result's notes. Nothing imports `astroquery` any more; `_solve_gaia` and the
+`gaia_*` option fields stay so an old persisted options dict still deserialises and the
+existing direct tests of that matcher keep their signature. The editor op deliberately does
+**not** pre-rewrite the value: `calibrate_color` owns the retirement so the note reaches the
+editor's "what Auto did" read-out, where rewriting it upstream would have made the
+degradation silent again.
+
+**The §9 half, which is the part that could have broken a live install.** Removing a choice
+from a descriptor's `options` is a tightening, and `validate_stack_options` *raises* on a
+value outside them — so an install whose `config.json` `default_stack_options` (or a
+per-target stack-defaults blob) held `"gaia"` would have 422'd the Stack form on every submit,
+and with it the unattended auto-stack chain. New `webapp.schemas.RETIRED_OPTION_VALUES` +
+`normalise_retired_option_values` translate a retired value instead of refusing it, wired into
+the four places a stored one surfaces: `coerce_stack_options` and `validate_stack_options` (the
+two chokepoints every stack path funnels through), `_merge_stack_defaults` /
+`_unsaved_stack_options` (so the form's enum control never receives an option that isn't
+there), and the settings write path (so re-saving quietly upgrades the stored value rather
+than writing it back). A value that is simply *wrong* is still rejected — the translation is
+a named mapping, not a blanket accept. A saved editor recipe needed no new code:
+`recipe.validate_ops` already coerces an unknown enum to the op's default, which is
+gray-star. The `stack_dialog` load path gained a two-line fallback so a template naming gaia
+lands on gray-star rather than silently on "Off". `colorCal.ts` keeps reading `mode_used ===
+"gaia"` as a star-based solve, with a comment saying why: the backend can no longer stamp it,
+but a run record written by an older version still carries it.
+
+**Tests: +8, `tests/test_gaia_mode_retired.py`, all eight exhibiting.** Verified by three
+separate scratch reverts rather than by reading the diff: putting the option back in both
+descriptors fails the two "no longer offers" tests; removing the normalisation while leaving
+the descriptor tightened fails the stored-default §9 test; restoring the old network dispatch
+fails the note test, the direct-caller test and the astroquery test. That last one had to be
+rewritten to get there — the first version raised an `AssertionError` from a patched
+`__import__`, which the pre-fix broad `except Exception` swallowed, so it **passed on the
+bug**. It now *records* attempted imports and asserts the list is empty, which nothing can
+swallow.
+
+**Upgrade-safe (§9):** no config, DB-schema, on-disk-layout or API-shape change, and no
+default flipped — `color_calibration_mode` already defaulted to `gray_star`, and
+`color_calibration` itself is still off. The only behaviour change is that a stored `"gaia"`
+now reports what ran instead of failing quietly.
+
+The original entry, as filed by the fourth external audit:
+
+- **🟡 THE EDITOR OFFERS A MODE THE IMAGE CANNOT RUN AND THE OWNER HAS DECLINED (fourth external audit,
+  2026-09-10).** `color_calibration_mode` = `"gaia"` (`webapp/schemas.py` ~1127, `seestack/edit/ops/tone.py`)
+  imports `astroquery.gaia` (`seestack/post/color_cal.py` ~387); `astroquery` is in no dependency list and is
+  absent from the image (`ModuleNotFoundError`), and it is a SIMBAD/CDS network call — declined by the LOCAL
+  rule (AGENTS.md §1). The broad `except Exception` at `color_cal.py` ~156 swallows it and falls back to
+  gray-star with only a log line, so picking it does nothing and says nothing. **Fix:** remove the option from the
+  schema and the op (keep the engine branch inert), and let a stored recipe that names it load as `gray_star`
+  with the auto-note saying so. (S, friendliness; confidence HIGH — checked in the running image.)
+
+
 ## v0.418.0 — 2026-09-11 — CI builds what the owner installs (entry CLOSED)
 
 Until now `.github/workflows/ci.yml` had two jobs and both ran against the *checkout*.
