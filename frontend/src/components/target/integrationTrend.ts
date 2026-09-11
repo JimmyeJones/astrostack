@@ -16,6 +16,12 @@
  * to ~0. Purely relative to the target's own history — no absolute "good" bar, no
  * per-camera calibration, so it can't false-claim across Seestar models.
  *
+ * It reads each run's **per-pixel** integration, not the target's total: a
+ * mosaic's canvas grows as its panels are shot, so more total light can buy a
+ * wider picture rather than a deeper one, and fitting the falloff against the
+ * total would call a growing mosaic sky-limited (see `perPixelSeconds`). A
+ * single-field target is unaffected — there the two figures are the same number.
+ *
  * Fail-safe: returns `null` (say nothing) unless there are at least two stacks
  * that both measured a noise σ *and* span a real integration increase — below
  * that there simply isn't enough signal to judge the trend honestly. A single
@@ -39,7 +45,10 @@ export type IntegrationLevel = "improving" | "slowing" | "plateaued";
 
 export interface IntegrationTrend {
   level: IntegrationLevel;
-  /** Deepest measured stack's integration, in hours. */
+  /** The deepest measured stack's **total** integration, in hours — the figure
+   * every other surface prints for that run. "Deepest" is decided on per-pixel
+   * integration (see `perPixelSeconds`); on a single field the two are the same
+   * number and the same run. */
   hoursNow: number;
   /** Measured falloff exponent (σ ∝ t^-exponent); ideal √t is 0.5. */
   exponent: number;
@@ -52,6 +61,41 @@ export interface IntegrationTrend {
 interface RunLike {
   total_exposure_s?: number | null;
   noise_sigma?: number | null;
+  /** How many single-frame field-fulls of sky *this run's* canvas covers (see
+   * `webapp/field_fulls.py`). 1.0 / null / absent on a single field, ~4.0 on a
+   * 2×2 mosaic. Read here so the trend is fitted against per-pixel integration
+   * rather than the target's total — see `perPixelSeconds`. */
+  field_fulls?: number | null;
+}
+
+/** The integration a *pixel* of this run's canvas actually received, in seconds.
+ *
+ * The noise a stack comes out with is a property of a pixel: it falls with the
+ * square root of the light **that pixel** collected. On a single field that is
+ * the run's whole integration, because every sub covers the whole canvas — which
+ * is why this helper reads as a no-op there, and why the trend has been fitted
+ * against `total_exposure_s` since it was written.
+ *
+ * A mosaic breaks that identity in the one direction that matters, because its
+ * canvas **grows as its panels are shot**. A target whose first stack covered a
+ * 2×2 raster and whose next covered 3×3 at the same per-panel depth has 2.25×
+ * the total integration and the *same* grain — which the total-time fit reads as
+ * "noise stopped falling as you added time", i.e. a sky-limited plateau, and the
+ * badge then tells a beginner to move on from a mosaic that is only a few subs
+ * deep everywhere. Dividing by the run's own field-fulls measures the depth
+ * instead of the width, and the two runs above correctly come out as *no
+ * increase to judge* rather than as a plateau.
+ *
+ * A missing/garbled figure, and anything at or below 1.0, both fall back to 1.0
+ * — a scale below one would *inflate* the apparent depth, and the backend
+ * already clamps for the same reason (`field_fulls_of_sky`). So an older backend
+ * that sends no field reproduces the pre-field behaviour exactly. */
+function perPixelSeconds(totalSeconds: number, fieldFulls: number | null | undefined): number {
+  const scale =
+    fieldFulls != null && Number.isFinite(fieldFulls) && fieldFulls > 1
+      ? fieldFulls
+      : 1;
+  return totalSeconds / scale;
 }
 
 function measured(v: number | null | undefined): v is number {
@@ -71,7 +115,8 @@ function fmtHours(h: number): string {
  * `runs` is the target's stack runs (order doesn't matter here — the trend is
  * read by integration time, not chronology). Returns `null` unless at least two
  * runs measured a noise σ and the deepest spans `MIN_TIME_RATIO`× the
- * shallowest. Non-mutating.
+ * shallowest **per-pixel** integration (`perPixelSeconds`, which is the run's
+ * own total on every single-field target). Non-mutating.
  */
 export function integrationTrend(
   runs: RunLike[] | null | undefined,
@@ -79,10 +124,18 @@ export function integrationTrend(
   if (!runs) return null;
   const points = runs
     .filter((r) => measured(r.total_exposure_s) && measured(r.noise_sigma))
-    .map((r) => ({ t: r.total_exposure_s as number, sigma: r.noise_sigma as number }));
+    .map((r) => ({
+      // What the *fit* uses: the light one pixel of this run's canvas got.
+      t: perPixelSeconds(r.total_exposure_s as number, r.field_fulls),
+      // What the *sentence* names: the target's own total, the figure every
+      // other surface prints ("2.3 h · 840 subs"). Saying "double your 3 h" of
+      // a 12-hour mosaic would be arithmetic nobody could reconcile.
+      totalT: r.total_exposure_s as number,
+      sigma: r.noise_sigma as number,
+    }));
   if (points.length < 2) return null;
 
-  // Compare the shallowest vs deepest measured stack by integration time.
+  // Compare the shallowest vs deepest measured stack by per-pixel integration.
   let shallow = points[0];
   let deep = points[0];
   for (const p of points) {
@@ -92,7 +145,7 @@ export function integrationTrend(
   const ratio = deep.t / shallow.t;
   if (ratio < MIN_TIME_RATIO) return null;  // not enough spread to judge
 
-  const hoursNow = deep.t / 3600;
+  const hoursNow = deep.totalT / 3600;
 
   // Effective falloff exponent p: σ_deep/σ_shallow = (t_deep/t_shallow)^-p, so
   // p = ln(σ_shallow/σ_deep) / ln(t_deep/t_shallow). Ideal √t → 0.5; a plateau

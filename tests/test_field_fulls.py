@@ -12,7 +12,11 @@ import json
 
 import pytest
 
-from webapp.field_fulls import drizzle_scale_from_options, field_fulls_of_sky
+from webapp.field_fulls import (
+    drizzle_scale_from_options,
+    field_fulls_of_sky,
+    native_frame_shape,
+)
 
 
 class TestFieldFullsOfSky:
@@ -116,3 +120,55 @@ class TestDrizzleScaleFromOptions:
         assert drizzle_scale_from_options(
             json.dumps({"drizzle": True, "drizzle_scale": 0})
         ) is None
+
+
+class TestNativeFrameShape:
+    """The one ``LIMIT 1`` read the History listing hoists out of its per-run
+    loop. Every degraded shape must answer ``None`` rather than raise: the
+    callers fall back to the un-scaled behaviour, and a broken project DB must
+    never cost a page its picture list."""
+
+    class _Row(dict):
+        """A stand-in for ``sqlite3.Row`` — ``keys()`` plus ``__getitem__``."""
+
+    class _Conn:
+        def __init__(self, row):
+            self._row = row
+
+        def execute(self, *_args, **_kwargs):
+            if isinstance(self._row, Exception):
+                raise self._row
+            return self
+
+        def fetchone(self):
+            return self._row
+
+    class _Proj:
+        def __init__(self, conn):
+            self._conn = conn
+
+    def _proj(self, row):
+        return self._Proj(self._Conn(row))
+
+    def test_a_measured_frame_gives_its_shape(self):
+        proj = self._proj(self._Row(width_px=1920, height_px=1080))
+        assert native_frame_shape(proj) == (1920.0, 1080.0)
+
+    def test_a_project_with_no_connection_declines(self):
+        class Bare:
+            pass
+
+        assert native_frame_shape(Bare()) is None
+
+    def test_no_frame_has_ever_recorded_its_shape(self):
+        assert native_frame_shape(self._proj(None)) is None
+
+    def test_a_broken_db_declines_rather_than_raising(self):
+        assert native_frame_shape(self._proj(RuntimeError("no such table"))) is None
+
+    def test_a_non_positive_or_missing_dimension_declines(self):
+        # A half-written row must not become a zero-area "native frame", which
+        # would make every canvas an infinite number of field-fulls.
+        assert native_frame_shape(self._proj(self._Row(width_px=0, height_px=1080))) is None
+        assert native_frame_shape(self._proj(self._Row(width_px=1920, height_px=None))) is None
+        assert native_frame_shape(self._proj(self._Row())) is None

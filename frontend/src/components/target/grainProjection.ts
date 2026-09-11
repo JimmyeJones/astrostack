@@ -101,6 +101,13 @@ interface RunLike {
   /** Genuine stack runs are reusable; an editor-export / combine run is not, and
    * its σ isn't measured on the same kind of image. */
   reusable?: boolean;
+  /** Not read here — the projection is quoted in *total* hours, and on a fixed
+   * canvas quadrupling the total quadruples what every pixel gets, which is the
+   * claim it makes. Declared so `cardGrainProjection`'s pass-through to
+   * `integrationTrend` (which *does* read it, to tell a mosaic deepening from a
+   * mosaic widening) is visible in the type rather than surviving on structural
+   * typing alone. */
+  field_fulls?: number | null;
 }
 
 function measured(v: number | null | undefined): v is number {
