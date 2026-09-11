@@ -34,6 +34,7 @@ import { memoryFixAction } from "../stackMemoryFix";
 import { printBiggerAction } from "../stackPrintBigger";
 import { stackTimeLine } from "../stackTimeEstimate";
 import { minMaxIgnoresWeightingHint as minMaxIgnoresWeighting } from "../weightingHint";
+import { samplesPerPixel, samplesPerPixelPhrase } from "../samplesPerPixel";
 import { JobError } from "./Jobs";
 
 // Linear-interpolated percentile of an unsorted numeric sample (p in [0, 100]).
@@ -569,6 +570,15 @@ export function StackView() {
   // Block it in the UI (rather than letting the job error) when there are none.
   const solvedAccepted = (frames.data ?? []).filter((f) => f.accept && f.solved).length;
   const noSolved = !frames.isLoading && frames.data !== undefined && solvedAccepted === 0;
+  // What one *pixel* of this canvas will actually be made of. Every caution
+  // below is a statement about samples on a pixel — drizzle's dither phases,
+  // κ-σ's per-pixel spread, min/max's `2k+1` per pixel — and on a mosaic the
+  // target's total is an order of magnitude above that. `panel_depth` is the
+  // same depth the estimate's own rejection answers are computed from; it is
+  // null on a single field and on an older backend, where this is the frame
+  // count, exactly as before. See `samplesPerPixel.ts`.
+  const perPixelSamples = samplesPerPixel(solvedAccepted, estimate.data?.panel_depth);
+  const perPixelPhrase = samplesPerPixelPhrase(solvedAccepted, estimate.data?.panel_depth);
   const excludedFrames = (job?.result?.excluded_frames as string[] | undefined) ?? [];
 
   // "Keep streaked frames" leaves satellite/plane-trailed subs accepted so that
@@ -584,28 +594,35 @@ export function StackView() {
   // handles exactly that. Suggest it when a small stack carries streaked frames
   // and min/max reject isn't already on (and we're on the standard, non-drizzle
   // path, where it applies). Advisory only; the pick stands.
+  // The frame count in this test is a count *per pixel*: κ's blindness is a
+  // property of the samples that land on one spot, so on a mosaic it is the
+  // panel depth that decides, not the target's total. Before that correction a
+  // 54-sub mosaic six deep read as "plenty" and the hint stayed silent on
+  // exactly the stack κ-σ cannot clean.
   const MINMAX_SUGGEST_MAX_FRAMES = 11;
   const minMaxRejectHint =
     !frames.isLoading && streakedAccepted > 0 && !values.min_max_reject
     && !values.auto_reject  // auto already picks min/max for a small stack
     && !values.drizzle
-    && solvedAccepted >= 3 && solvedAccepted < MINMAX_SUGGEST_MAX_FRAMES
-      ? `You have ${streakedAccepted} streaked frame${streakedAccepted === 1 ? "" : "s"} in a small stack of ${solvedAccepted}. Sigma clipping can't reliably reject a lone satellite/plane trail below ~${MINMAX_SUGGEST_MAX_FRAMES} frames (a single outlier's deviation stays within κ), but “Min/max rejection” drops the single highest and lowest value at each pixel — removing the trail while keeping the rest.`
+    && perPixelSamples >= 3 && perPixelSamples < MINMAX_SUGGEST_MAX_FRAMES
+      ? `You have ${streakedAccepted} streaked frame${streakedAccepted === 1 ? "" : "s"}, and only ${perPixelPhrase}. Sigma clipping can't reliably reject a lone satellite/plane trail below ~${MINMAX_SUGGEST_MAX_FRAMES} samples on a pixel (a single outlier's deviation stays within κ), but “Min/max rejection” drops the single highest and lowest value at each pixel — removing the trail while keeping the rest.`
       : null;
 
   // Min/max reject count (k) advisory: the top/bottom-k trim only applies its full
   // k-drop where a pixel is covered by ≥ 2k+1 frames; below that it silently
   // degrades to a single min/max drop (v0.58.0). A user who bumps k up on a stack
   // too small to support it gets almost no extra benefit and no signal why —
-  // fire when 2k+1 > accepted+solved (the best case where every pixel is covered
-  // by every frame), suggesting the largest k the stack can fully apply. Advisory
-  // only; the pick stands.
+  // fire when 2k+1 > the samples a pixel actually gets, suggesting the largest k
+  // the stack can fully apply. That used to be the accepted+solved count — "the
+  // best case where every pixel is covered by every frame", which is true of a
+  // single field and false of a mosaic, where the sentence's own "frames per
+  // pixel" is a panel's depth. Advisory only; the pick stands.
   const minMaxK = Number(values.min_max_reject_count ?? 1);
-  const minMaxKSuggested = Math.max(1, Math.floor((solvedAccepted - 1) / 2));
+  const minMaxKSuggested = Math.max(1, Math.floor((perPixelSamples - 1) / 2));
   const minMaxKTooHighHint =
     !frames.isLoading && minMaxEffective && !values.drizzle
-    && minMaxK > 1 && solvedAccepted >= 3 && (2 * minMaxK + 1) > solvedAccepted
-      ? `Min/max reject is set to drop the ${minMaxK} highest and lowest values (k=${minMaxK}) at each pixel, but that needs at least ${2 * minMaxK + 1} frames per pixel to fully apply — you have ${solvedAccepted}, so it will mostly fall back to a single min/max drop. Lower k to ${minMaxKSuggested} or add more frames.`
+    && minMaxK > 1 && perPixelSamples >= 3 && (2 * minMaxK + 1) > perPixelSamples
+      ? `Min/max reject is set to drop the ${minMaxK} highest and lowest values (k=${minMaxK}) at each pixel, but that needs at least ${2 * minMaxK + 1} frames per pixel to fully apply — you have ${perPixelPhrase}, so it will mostly fall back to a single min/max drop. Lower k to ${minMaxKSuggested} or add more frames.`
       : null;
 
   // Auto-suggest a min/max reject count (k) from the streaked-frame count. With
@@ -683,23 +700,27 @@ export function StackView() {
   // only fires for a user who deliberately loosened κ. Advisory; the pick stands.
   const SIGMA_CLIP_MIN_FRAMES = 5;
   const sigmaClipWarning =
-    sigmaClipEffective && !frames.isLoading && solvedAccepted > 0
-    && solvedAccepted < SIGMA_CLIP_MIN_FRAMES
+    sigmaClipEffective && !frames.isLoading && perPixelSamples > 0
+    && perPixelSamples < SIGMA_CLIP_MIN_FRAMES
     && rejectionReach?.method === "sigma-clip" && rejectionReach.reaches
-      ? `Sigma-clip rejection estimates each pixel's spread across frames, but you only have ${solvedAccepted} accepted, solved frame${solvedAccepted === 1 ? "" : "s"}. With fewer than ~${SIGMA_CLIP_MIN_FRAMES} it can reject real signal as an outlier — consider turning it off for this stack.`
+      ? `Sigma-clip rejection estimates each pixel's spread across frames, but you only have ${perPixelPhrase}. With fewer than ~${SIGMA_CLIP_MIN_FRAMES} on a pixel it can reject real signal as an outlier — consider turning it off for this stack.`
       : null;
 
   // The flip side of the low-frame caution: with a big stack the per-pixel σ is
   // very well estimated, so the default κ=3 leaves a lot of satellite/plane/
   // cosmic-ray signal in that a tighter clip would safely reject. Suggest
   // nudging κ down for very large stacks. Advisory only; the pick stands.
+  // …and "very well measured" is a claim about the samples on a pixel, so a
+  // mosaic qualifies on its panel depth, not on its total. Recommending a
+  // tighter clip because a 9-panel raster has 225 subs, when a pixel has 25,
+  // is advice to clip harder on the thinner statistic.
   const SIGMA_CLIP_LARGE_FRAMES = 200;
   const kappa = Number(values.sigma_kappa ?? 3);
   const SIGMA_KAPPA_TIGHTER = 2.5;
   const sigmaKappaLargeHint =
     sigmaClipEffective && !frames.isLoading
-    && solvedAccepted >= SIGMA_CLIP_LARGE_FRAMES && kappa >= 3
-      ? `With ${solvedAccepted} accepted frames the per-pixel spread is very well measured, so a tighter sigma-clip (κ≈2.5) can safely reject more satellites, planes and cosmic rays than the default κ=${kappa % 1 === 0 ? kappa.toFixed(0) : kappa}.`
+    && perPixelSamples >= SIGMA_CLIP_LARGE_FRAMES && kappa >= 3
+      ? `With ${perPixelPhrase} the per-pixel spread is very well measured, so a tighter sigma-clip (κ≈2.5) can safely reject more satellites, planes and cosmic rays than the default κ=${kappa % 1 === 0 ? kappa.toFixed(0) : kappa}.`
       : null;
 
   // Transparency-night hint: compare the median transparency of the frames that
@@ -836,11 +857,17 @@ export function StackView() {
   // on Seestar data (drizzle_path.py). Drizzle is off by default, so this only
   // fires when the user turned it on (manually or via "Reuse settings") on a
   // small stack. Advisory; mirrors the sigma-clip-too-few-frames caution.
+  // The count that decides is the one a *pixel* gets: drizzle fills an output
+  // pixel from the dither-phased samples that land on it, and `drizzle_path.py`
+  // counts them per pixel too. On a mosaic the target's total is the sum over
+  // the raster, so this caution used to stay silent on exactly the canvas where
+  // drizzle hurts most — while the nudge on the other side already declined to
+  // recommend drizzle there. The nudge is fenced and the caution was not.
   const DRIZZLE_TOO_FEW_FRAMES = 100;
   const drizzleTooFewHint =
-    !frames.isLoading && !!values.drizzle && solvedAccepted > 0
-    && solvedAccepted < DRIZZLE_TOO_FEW_FRAMES
-      ? `Drizzle is on, but you only have ${solvedAccepted} accepted, solved frame${solvedAccepted === 1 ? "" : "s"}. Drizzle spreads each sub across a finer output grid, so it needs lots of dithered frames (typically 200+) to fill it — with this few it's slower and can leave a noisier, gappier result${drizzleScale > 1 ? ` (more so at ${drizzleScale % 1 === 0 ? drizzleScale.toFixed(0) : drizzleScale}× scale)` : ""}, while the ordinary stack path gives faster, equally clean results on Seestar data. Consider turning Drizzle off for this stack.`
+    !frames.isLoading && !!values.drizzle && perPixelSamples > 0
+    && perPixelSamples < DRIZZLE_TOO_FEW_FRAMES
+      ? `Drizzle is on, but you only have ${perPixelPhrase}. Drizzle spreads each sub across a finer output grid, so it needs lots of dithered frames on every pixel (typically 200+) to fill it — with this few it's slower and can leave a noisier, gappier result${drizzleScale > 1 ? ` (more so at ${drizzleScale % 1 === 0 ? drizzleScale.toFixed(0) : drizzleScale}× scale)` : ""}, while the ordinary stack path gives faster, equally clean results on Seestar data. Consider turning Drizzle off for this stack.`
       : null;
 
   // Drizzle accumulates in a single pass, so the sigma-clip toggle doesn't

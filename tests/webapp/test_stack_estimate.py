@@ -652,3 +652,85 @@ def test_a_deep_mosaic_still_resolves_to_sigma_clipping(client, solved_library):
                           params={"auto_reject": "true"}).json()["auto_reject_resolved"]
     assert resolved["panel_depth"] == 20
     assert resolved["method"] == "sigma_clip"
+
+
+def test_panel_depth_is_served_even_when_auto_outlier_removal_is_off(
+        client, solved_library):
+    """The depth has to be readable with ``auto_reject_resolved`` null.
+
+    That key is the only place the per-pixel depth used to appear, and it is
+    ``null`` unless Auto is on and drizzle is off — which is precisely the state
+    the Stack form's *drizzle* caution fires in. So the caution asked its
+    "is a pixel thin?" question of the target's total and, on a nine-panel
+    raster, stayed silent on the one canvas where drizzle hurts most.
+
+    Fails before v0.420.0: there was no top-level ``panel_depth``."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _repoint(solved_library, safe, [
+        (83.6, -5.4, 5), (84.4, -5.4, 5), (83.6, -4.6, 5), (84.4, -4.6, 5),
+    ])
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"drizzle": "true"}).json()
+    assert data["auto_reject_resolved"] is None    # auto off, drizzle on
+    assert data["n_frames"] == 20                  # …and the total says "plenty"
+    assert data["panel_depth"] == 5                # while a pixel has five
+
+
+def test_panel_depth_is_null_on_a_single_field(client, solved_library):
+    """Where every sub covers every pixel there is nothing to correct, and the
+    frontend reads ``null`` as "use the frame count" — byte-for-byte the
+    behaviour every caution had before the field existed."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    data = client.get(f"/api/targets/{safe}/stack-estimate").json()
+    assert data["is_mosaic"] is False
+    assert data["panel_depth"] is None
+
+
+def test_panel_depth_is_the_engine_s_own_depth_not_a_second_definition(
+        client, solved_library):
+    """Asserted against the engine's picker rather than against a literal, so
+    the form's cautions and the method it names can never be computed from two
+    different depths — the drift these fixes keep undoing."""
+    from seestack.io.library import Library
+    from seestack.stack.stacker import estimate_stack_basis
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _repoint(solved_library, safe, [
+        (83.6, -5.4, 9), (84.4, -5.4, 4), (83.6, -4.6, 7),
+    ])
+    served = client.get(f"/api/targets/{safe}/stack-estimate").json()["panel_depth"]
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            basis = estimate_stack_basis(proj, "auto")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert served == basis.panel_depth
+    assert served == 4          # the thinnest substantial panel, not the mean
+
+
+def test_panel_depth_is_unmoved_by_the_knobs_the_form_cautions_about(
+        client, solved_library):
+    """It is a property of the canvas, so drizzle and the rejection knobs cannot
+    move it. A caution whose own denominator shifted when you toggled the very
+    setting it warns about would be unfalsifiable on screen."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _repoint(solved_library, safe, [
+        (83.6, -5.4, 6), (84.4, -5.4, 6), (83.6, -4.6, 6),
+    ])
+    base = f"/api/targets/{safe}/stack-estimate"
+    depths = {
+        client.get(base, params=p).json()["panel_depth"]
+        for p in (
+            {},
+            {"drizzle": "true", "drizzle_scale": "2.0"},
+            {"min_max_reject": "true", "min_max_reject_count": "3"},
+            {"auto_reject": "true"},
+            {"sigma_clip": "false"},
+        )
+    }
+    assert depths == {6}
