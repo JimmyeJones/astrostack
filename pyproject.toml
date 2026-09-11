@@ -25,7 +25,6 @@ dependencies = [
     # in — without it the editor's default "Wavelet (recommended)" denoise silently
     # falls back to a mislabelled TV denoise. Make it a hard dep so wavelet works.
     "PyWavelets>=1.5",
-    "PySide6>=6.6",
     "Pillow>=10.2",
     "tifffile>=2024.2.12",
     "tqdm>=4.66",
@@ -35,6 +34,16 @@ dependencies = [
 
 [project.optional-dependencies]
 gpu = ["cupy-cuda12x>=13.0"]
+# The historical desktop GUI (`seestack/gui/`, the `seestack` console script) and
+# the three pytest-qt tests. Qt is ~650 MB installed and the headless web app
+# never imports it — `seestack/core/jobs.py` defers its one PySide6 import into a
+# function, and `seestack/render/` is deliberately GUI-free — so keeping it out of
+# the base dependencies is what stops `pip install .[web]` (which is exactly what
+# docker/Dockerfile runs) from dragging all of Qt into the deployed image.
+# Install it with `.[dev,web,gui]` when you want the GUI or its tests; the CI
+# Python job omits it on purpose (the runner has no libEGL, so those tests are
+# skipped there anyway — see AGENTS.md §7).
+gui = ["PySide6>=6.6"]
 # Headless web service (TrueNAS / Docker). Deliberately excludes PySide6.
 web = [
     "fastapi>=0.110",
