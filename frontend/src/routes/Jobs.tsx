@@ -18,6 +18,7 @@ import { HintIcon } from "../components/HintIcon";
 import { settingsLink } from "../settingsSections";
 import { CalibrationSkippedNote } from "../components/CalibrationSkippedNote";
 import { StackNoiseBadge } from "../components/StackNoiseBadge";
+import { TryHarderButton } from "../components/TryHarderButton";
 import { thinStackWarning, type ThinStackWarning } from "../components/target/thinStack";
 import { rejectionNote } from "../components/target/rejectionNote";
 import { type EtaSample, etaLabel, updateEtaAnchor } from "../jobEta";
@@ -45,6 +46,7 @@ const COLOR: Record<string, string> = {
 const KIND_LABEL: Record<string, string> = {
   pipeline: "Importing & processing new frames",
   qc_solve: "Quality check & plate-solve",
+  rescue_unsolved: "Locating your un-located subs together",
   process_target: "Processing target (check, solve & stack)",
   stack: "Stacking",
   reprocess_all: "Reprocessing all targets",
@@ -411,6 +413,45 @@ export function bootstrapRescueNote(r: Record<string, unknown>): string | null {
       + "deeper image — they're in your stack now.";
 }
 
+/** Plain-language outcome of a finished "Try harder to locate these" job, or
+ * null when there is nothing to say (pure, tested).
+ *
+ * That job runs only the deep-image rescue — no QC pass, no per-sub solve — so
+ * none of the `qc_*`/`solve_*` counters exist on its result and `qcSolveSummary`
+ * would (correctly) say nothing. Its whole outcome is `bootstrap_propagated`
+ * when it worked, and the engine's own `bootstrap_reason` when it didn't. The
+ * success line is `bootstrapRescueNote`'s, so the two surfaces cannot end up
+ * congratulating the user in two different voices; this is the *failure* half,
+ * which no surface had before because the rescue used to be a silent passenger
+ * on a bigger job.
+ *
+ * Reasons are matched on the engine's stable phrases rather than reproduced, and
+ * anything unrecognised falls back to one honest generic sentence — a new reason
+ * string must never leave a finished job saying nothing at all. */
+export function rescueUnsolvedNote(r: Record<string, unknown>): string | null {
+  if (bootstrapRescuedCount(r) > 0) return null;  // bootstrapRescueNote speaks
+  const reason = typeof r.bootstrap_reason === "string" ? r.bootstrap_reason : "";
+  if (reason.includes("enough subs already solved")) {
+    return "Nothing to do — enough of your subs are already located in the sky.";
+  }
+  if (reason.includes("too few unsolved subs")) {
+    return "There aren't enough un-located subs to combine into a deeper image "
+      + "yet. Shoot more of this target and try again.";
+  }
+  if (reason.includes("too few readable subs")) {
+    return "Your un-located subs couldn't be read from disk — check that the "
+      + "drive holding them is connected, then try again.";
+  }
+  if (reason.includes("too few subs registered")) {
+    return "Your un-located subs couldn't be lined up with each other, so a "
+      + "deeper image couldn't be built from them. This usually means they "
+      + "aren't all pointing at the same thing.";
+  }
+  return "Couldn't locate them this time — the deeper image built from your "
+    + "un-located subs still couldn't be placed in the sky. They're unchanged, "
+    + "so nothing was lost.";
+}
+
 /** Plain-language outcome of a finished "Quality check & plate-solve" job
  * (pure, tested), or null when the result carries nothing to report.
  *
@@ -464,10 +505,16 @@ export function qcSolveSummary(r: Record<string, unknown>): string | null {
  *
  * An un-located sub can't stack, so a mostly-failed solve is the single most
  * common reason a beginner's picture stays thin and noisy — and the app already
- * has the cure (the opt-in deep-image rescue). Only speaks up when the miss rate
+ * has the cure (the deep-image rescue). Only speaks up when the miss rate
  * is high enough to actually be the problem; a couple of stragglers on an
  * otherwise good night are normal and get no lecture. Stays silent when the
- * bootstrap already rescued them — that note says its own piece. */
+ * bootstrap already rescued them — that note says its own piece.
+ *
+ * Deliberately describes the *capability* rather than issuing an instruction:
+ * the two ways to reach it are rendered beneath this sentence, and one of them
+ * (`TryHarderButton`) self-hides on a target where the rescue would stand down.
+ * A "press the button below" that pointed at nothing would be worse than the
+ * plain description, so the sentence reads correctly either way. */
 export function qcSolveNudge(r: Record<string, unknown>): string | null {
   const total = typeof r.solve_total === "number" ? r.solve_total : 0;
   const ok = typeof r.solve_ok === "number" ? r.solve_ok : null;
@@ -476,9 +523,10 @@ export function qcSolveNudge(r: Record<string, unknown>): string | null {
   if (missed === 0 || missed < total / 2) return null;
   if (bootstrapRescuedCount(r) > 0) return null;
   return "Subs that can't be placed in the sky are left out of your stack. "
-    + "This is usual on a faint or star-poor target — turning on "
-    + "\"Rescue faint fields with a deep-image solve\" in Settings lets the app "
-    + "locate them together instead of one at a time.";
+    + "This is usual on a faint or star-poor target — the app can combine the "
+    + "un-located subs into one deeper image and locate them together instead "
+    + "of one at a time, either on request or, with \"Rescue faint fields with "
+    + "a deep-image solve\" in Settings, by itself every time.";
 }
 
 /** How many subs auto-grade *put back* in this job result, or 0 when it gave
@@ -1075,6 +1123,19 @@ function JobResultActions({ job }: { job: Job }) {
       </Stack>
     );
   }
+  if (job.kind === "rescue_unsolved") {
+    // The on-demand deep-image rescue. One line either way: what it located, or
+    // why it couldn't — a job the user pressed a button for must never finish on
+    // a bare "done".
+    const rescue = bootstrapRescueNote(r);
+    const note = rescueUnsolvedNote(r);
+    return (
+      <Stack gap={2} mt="xs">
+        {rescue ? <Text size="sm">{rescue}</Text> : null}
+        {note ? <Text size="sm">{note}</Text> : null}
+      </Stack>
+    );
+  }
   if (job.kind === "qc_solve") {
     // A Check/Plate-solve job used to finish with a bare "done" unless the
     // stack-then-solve bootstrap happened to engage. Lead with what the job
@@ -1094,8 +1155,14 @@ function JobResultActions({ job }: { job: Job }) {
         {nudge ? (
           <>
             <Text size="xs" c="dimmed">{nudge}</Text>
-            {/* The nudge names a switch; this is the way to it, rather than
-                leaving the reader to find which Settings page holds it. */}
+            {/* The nudge names two things and, until now, offered only the
+                second. "Do it to this target, now" is the one the reader wants
+                at this moment — they have just watched the solve fail — so it
+                leads; it self-hides unless the server says the rescue would
+                actually engage here. The Settings link stays underneath because
+                it answers the *other* question, "do this automatically from now
+                on", and neither answer replaces the other. */}
+            {job.target ? <TryHarderButton safe={job.target} /> : null}
             <Anchor component={Link} to={settingsLink("plate-solving")} size="xs" fw={500}>
               Turn it on in Settings &rarr; Plate solving &rarr;
             </Anchor>

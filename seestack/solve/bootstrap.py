@@ -77,6 +77,61 @@ DEFAULT_MAX_SHIFT_PX = 200.0
 ANCHOR_LOAD_ATTEMPTS = 3
 
 
+def rescue_would_engage(
+    n_solved: int, n_unsolved: int, *, min_frames: int = DEFAULT_MIN_FRAMES,
+) -> bool:
+    """Would :func:`bootstrap_solve` engage on a target with these counts?
+
+    The engagement gate, as a pure function of two numbers, so a caller can ask
+    *before* starting a job — and so the answer it gives a user can never drift
+    from the answer the rescue itself gives. :func:`bootstrap_solve` decides with
+    this function, it does not re-spell the rule.
+
+    ``n_solved`` is how many of the target's frames carry a WCS (rejected ones
+    included — a solved sub is a solved sub whatever its accept flag says, and
+    that is the population the deep image competes with). ``n_unsolved`` is how
+    many accepted-but-unsolved subs there are to integrate.
+
+    Both halves matter: with ``min_frames`` subs already located there is
+    already a real stack's worth and the rescue stands down, and with fewer than
+    ``min_frames`` to integrate the deep image would not clear ASTAP's detection
+    floor (see the module docstring's measurement).
+
+    Note the caller's ``n_unsolved`` may count subs whose files can't be read
+    right now; the rescue checks that itself and declines honestly if too few
+    survive. So this is "would it engage", not a promise that it succeeds.
+    """
+    return n_solved < min_frames and n_unsolved >= min_frames
+
+
+def rescue_is_worth_offering(
+    n_solved: int,
+    n_unsolved: int,
+    n_tried_and_failed: int,
+    *,
+    min_frames: int = DEFAULT_MIN_FRAMES,
+) -> bool:
+    """Should a user be *offered* the rescue on a target with these counts?
+
+    Stricter than :func:`rescue_would_engage`, by one condition: the ordinary
+    per-sub solve must already have been tried on at least ``min_frames`` of the
+    un-located subs and failed (``n_tried_and_failed`` — accepted subs with no
+    WCS carrying a ``solve_failed:`` reason).
+
+    That condition is the difference between "try *harder*" and "try at all". A
+    freshly-scanned target on an install with automatic solving off has every sub
+    un-located and none of them attempted; the rescue *would* engage there and
+    would probably even work — but it would hand each sub a position **propagated**
+    from a neighbour when the ordinary solver would have given it its own verified
+    one. The first move there is the plate solve, not the rescue, so the button
+    stays out of the way until the plate solve has actually been beaten.
+    """
+    return (
+        rescue_would_engage(n_solved, n_unsolved, min_frames=min_frames)
+        and n_tried_and_failed >= min_frames
+    )
+
+
 @dataclass
 class BootstrapResult:
     """Outcome of a bootstrap attempt (all counts default to a no-op)."""
@@ -401,11 +456,9 @@ def bootstrap_solve(
         and readable_frame_path(f) is not None
     ]
 
-    if n_solved >= min_frames:
-        result.reason = "enough subs already solved"
-        return result
-    if len(unsolved) < min_frames:
-        result.reason = "too few unsolved subs to bootstrap"
+    if not rescue_would_engage(n_solved, len(unsolved), min_frames=min_frames):
+        result.reason = ("enough subs already solved" if n_solved >= min_frames
+                         else "too few unsolved subs to bootstrap")
         return result
 
     # Best-first, capped at max_frames — the richest subs make the deepest image.

@@ -25,6 +25,7 @@ from seestack.solve.astap import (
     SOLVE_SETUP_NO_DATABASE,
     classify_solve_setup_error,
 )
+from seestack.solve.bootstrap import rescue_is_worth_offering
 from webapp import deps
 from webapp.rejection_summary import summarize_rejections
 from webapp.schemas import (
@@ -261,6 +262,18 @@ def reject_summary(safe: str, request: Request) -> dict:
         # (reconnect the drive and it's gone), not a reason a frame was dropped,
         # and folding it into the buckets would double-count QC errors.
         n_missing_files = count_unreadable_frames(proj.iter_frames(accepted_only=True))
+        # Would "Try harder to locate these" do anything on this target? The
+        # answer is the deep-image rescue's own engagement gate, asked here
+        # rather than mirrored in the frontend, so the button can never be
+        # offered where the job would immediately stand down (nor hidden where it
+        # would work). Two COUNT(*)s on an indexed table, on a page-load fetch.
+        # ``n_unsolved`` is the accepted-but-unsolved bucket the rescue acts on;
+        # ``count_solved()`` is over *all* frames, matching the rescue's own
+        # reading of "how many of this target's subs are already located"; and
+        # ``count_accepted_unsolved_tried()`` is what makes it "try *harder*" —
+        # the solver must already have been beaten on these, not merely never run.
+        rescue_offered = rescue_is_worth_offering(
+            proj.count_solved(), n_unsolved, proj.count_accepted_unsolved_tried())
     finally:
         proj.close()
         lib.close()
@@ -281,6 +294,11 @@ def reject_summary(safe: str, request: Request) -> dict:
         # second request; both are omitted by older backends, so the UI self-hides.
         "n_missing_files": n_missing_files,
         "n_accepted": n_accepted,
+        # Additive: True when the on-demand deep-image rescue would engage on
+        # this target, so the "N not located yet" advice can offer the button
+        # that runs it instead of naming a Settings switch. Omitted by older
+        # backends, which reads as False — i.e. exactly today's behaviour.
+        "deep_rescue_offered": rescue_offered,
     }
 
 

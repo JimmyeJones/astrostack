@@ -1268,6 +1268,24 @@ class Project:
         mid = n // 2
         return vals[mid] if n % 2 else (vals[mid - 1] + vals[mid]) / 2
 
+    def count_solved(self) -> int:
+        """Count frames that carry a plate-solve WCS, accepted or not.
+
+        The population the deep-image rescue measures itself against
+        (:func:`seestack.solve.bootstrap.rescue_would_engage`): a sub that
+        located in the sky stays located whatever its accept flag later became,
+        and one of them can anchor the rescue, so the accept flag is deliberately
+        not part of this count. Distinct from :meth:`count_accepted_unsolved`,
+        which is about the subs the rescue would *act on*.
+
+        Empty-string ``wcs_json`` is excluded as well as NULL, so this matches
+        the engine's own ``if f.wcs_json`` truthiness test exactly — a blank
+        sidecar is not a plate solve, and the two must not disagree about it."""
+        assert self._conn is not None
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM frames WHERE wcs_json IS NOT NULL AND wcs_json != ''"
+        ).fetchone()[0]
+
     def count_accepted_unsolved(self) -> int:
         """Count accepted frames that have no plate-solve WCS yet.
 
@@ -1299,6 +1317,28 @@ class Project:
             "SELECT COUNT(*) FROM frames "
             "WHERE accept = 1 AND wcs_json IS NULL "
             "AND reject_reason LIKE 'qc_error%'"
+        ).fetchone()[0]
+
+    def count_accepted_unsolved_tried(self) -> int:
+        """Count accepted, still-unsolved frames the **solver has already tried**.
+
+        A solve failure keeps the frame accepted and stamps a ``solve_failed:…``
+        ``reject_reason``, so this is the subset of
+        :meth:`count_accepted_unsolved` that was offered to ASTAP and came back
+        without a position — as opposed to one that has simply never been solved
+        (solving off, or a scan that hasn't reached it yet).
+
+        The distinction is what lets a surface say "try *harder*" only where the
+        ordinary attempt has genuinely been beaten
+        (:func:`seestack.solve.bootstrap.rescue_is_worth_offering`). A prefix
+        match is safe here — unlike a tally, which needs canonical reasons —
+        because every spelling under this prefix means the same thing: the solver
+        ran on this frame and did not place it."""
+        assert self._conn is not None
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM frames "
+            "WHERE accept = 1 AND wcs_json IS NULL "
+            "AND reject_reason LIKE 'solve_failed:%'"
         ).fetchone()[0]
 
     def count_accepted_unsolved_with_reason(self, reason: str) -> int:

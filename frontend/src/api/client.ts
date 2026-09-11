@@ -3218,6 +3218,11 @@ export const api = {
       // omit both, so the callout self-hides.
       n_missing_files?: number;
       n_accepted?: number;
+      // True when the on-demand deep-image rescue would actually engage on this
+      // target — the server's own answer, so the "Try harder to locate these"
+      // button is never offered where the job would stand down. Older backends
+      // omit it, which reads as false and shows no button (today's behaviour).
+      deep_rescue_offered?: boolean;
     }>(
       `/api/targets/${safe}/frames/reject-summary`,
     ),
@@ -3529,6 +3534,14 @@ export const api = {
   },
   qcSolve: (safe: string) =>
     req<{ job_id: string }>(`/api/targets/${safe}/qc-solve`, { method: "POST" }),
+  // "Try harder to locate these subs": combine the un-located subs of a faint
+  // target into one deeper image, plate-solve that once, and copy the position
+  // back to each sub so the whole night can stack. Runs the rescue only — not
+  // the per-sub solve ladder that already failed on every one of them.
+  rescueUnsolved: (safe: string) =>
+    req<{ job_id: string }>(
+      `/api/targets/${safe}/rescue-unsolved`, { method: "POST" },
+    ),
   processTarget: (safe: string) =>
     req<{ job_id: string }>(`/api/targets/${safe}/process`, { method: "POST" }),
 
