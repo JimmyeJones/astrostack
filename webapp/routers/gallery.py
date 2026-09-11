@@ -22,6 +22,11 @@ from seestack.stack.output import save_display_jpeg
 from seestack.stackhealth import grain_verdict, seam_verdict
 from webapp import deps, picturesarchive
 from webapp.capture_nights import capture_night_count, capture_night_range
+from webapp.field_fulls import (
+    drizzle_scale_from_options,
+    field_fulls_of_sky,
+    native_frame_shape,
+)
 from webapp.run_options import parse_run_options, run_has_reusable_options
 from webapp.site_location import resolve_site_lon
 
@@ -113,6 +118,16 @@ class GalleryItem(BaseModel):
     # is what every run recorded without `StackOptions.record_rejection_map` is
     # (that option is off by default, so today that is nearly all of them).
     has_rejection_map: bool = False
+    # How many single-frame field-fulls of sky *this run's* canvas covers (see
+    # :mod:`webapp.field_fulls`). The card's "N frames" badge carries the honest
+    # thin-stack cue, and "thin" is a claim about one pixel: nine subs over a 3x3
+    # raster is one sub everywhere, which is the speckle the cue exists for. Same
+    # per-run figure `StackRunOut.field_fulls` serves the History listing, from
+    # the same helper, so the two surfaces cannot disagree about one picture.
+    # Additive and `None` on a single field, on an older backend, and whenever
+    # the frame shape can't be read — every one of which reads as "no scaling",
+    # i.e. exactly today's behaviour.
+    field_fulls: float | None = None
 
 
 class VideoStillItem(BaseModel):
@@ -212,6 +227,10 @@ def get_gallery(request: Request) -> GalleryResponse:
             try:
                 proj = Project.open(lib.target_dir(t))
                 runs = list(proj.iter_stack_runs())
+                # One LIMIT-1 read for the target's native sub shape, so every
+                # run below can be scaled to a per-pixel depth without paying
+                # for it once per run (the same split the run listing uses).
+                native_shape = native_frame_shape(proj)
             except Exception:  # noqa: BLE001 — a broken project must not 500 the gallery
                 # One unreadable/corrupt project DB — or one stamped with a newer
                 # schema after an image rollback (Project.open raises RuntimeError)
@@ -226,7 +245,7 @@ def get_gallery(request: Request) -> GalleryResponse:
                         items.append(_gallery_item(
                             t, run, proj, RECIPE_META_PREFIX,
                             EXPORTED_RECIPE_META_PREFIX, _unexported_edit,
-                            AUTO_EDIT_BAKED_LOOK_PREFIX, lon,
+                            AUTO_EDIT_BAKED_LOOK_PREFIX, lon, native_shape,
                         ))
                     except Exception:  # noqa: BLE001 — one bad run must not hide the rest
                         # Every required field is NOT NULL today, so nothing here
@@ -252,7 +271,9 @@ def get_gallery(request: Request) -> GalleryResponse:
 
 def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
                   unexported_edit, baked_look_prefix: str = "",
-                  lon_deg: float | None = None) -> GalleryItem:  # noqa: ANN001
+                  lon_deg: float | None = None,
+                  native_shape: tuple[float, float] | None = None,
+                  ) -> GalleryItem:  # noqa: ANN001
     """One finished stack's gallery card. Split out so the loop above can skip a
     single unreadable run without losing every other target's pictures."""
     has_preview = bool(run.preview_path and Path(run.preview_path).exists())
@@ -289,6 +310,13 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         calstat=run.calstat,
         seam_verdict=seam_verdict(run.seam_residual),
         grain_verdict=grain_verdict(run.grain_ratio),
+        field_fulls=(
+            field_fulls_of_sky(
+                run.canvas_w, run.canvas_h,
+                frame_w=native_shape[0], frame_h=native_shape[1],
+                drizzle_scale=drizzle_scale_from_options(run.options_json),
+            ) if native_shape is not None else None
+        ),
         # Three extra keyed reads on the project DB the caller already has open —
         # the same near-free lookups the run listing does, which is what made
         # this affordable library-wide.

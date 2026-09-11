@@ -395,7 +395,10 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
             never-exported edit isn't in it — say so here too, not just on
             History and the Target hero. */}
         <UnexportedEditBadge show={item.unexported_edit} />
-        <FrameCountBadge nFramesUsed={item.n_frames_used} />
+        <FrameCountBadge
+          nFramesUsed={item.n_frames_used}
+          fieldFulls={item.field_fulls}
+        />
       </Group>
       {item.notes ? (
         <Text size="sm" c="violet.4" fw={500} truncate title={item.notes}>

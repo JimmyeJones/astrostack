@@ -402,7 +402,11 @@ export function Dashboard() {
               </Card.Section>
               <Text fw={600} mt="xs" lineClamp={1}>{s.target_name}</Text>
               <Group justify="space-between" mt={4}>
-                <FrameCountBadge nFramesUsed={s.n_frames_used} color="violet" />
+                <FrameCountBadge
+                  nFramesUsed={s.n_frames_used}
+                  fieldFulls={s.field_fulls}
+                  color="violet"
+                />
                 {/* The picture's date, and *which* date it is. This used to be
                     a bare stamp — and it was the run's own, i.e. when the stack
                     ran, which anyone reads as the night they shot it. On a
