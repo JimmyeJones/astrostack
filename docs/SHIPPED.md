@@ -1,5 +1,63 @@
 # Shipped — the record
 
+## v0.419.1 — 2026-09-11 — the Target page's coaching read a mosaic's totals as its depth
+
+The second instance of the same substitution, found by pointing the same brief at the neighbouring
+surfaces once v0.419.0's per-run `field_fulls` existed to fix them with. Three rungs of the Target
+page's *"💡 To make this even better"* ladder, and the thin-stack warning above it, asked a **per-pixel**
+question of a **target-wide** number.
+
+**What was wrong, in the owner's own shapes.** `THIN_STACK_MAX_FRAMES` (4) and
+`SHORT_INTEGRATION_S`/`DEEP_INTEGRATION_S` (1 h / 3 h) are all claims about one pixel — the √N curve
+"has barely started averaging the sky down", "a deep-sky target has barely started building
+signal-to-noise". The owner shoots 5×5, 10×10 and 12×8 rasters (`coverage_trim.py`'s own docstring),
+where a target-wide figure is one to two orders of magnitude off:
+
+- **Nine subs over a 3×3 is one sub everywhere** — the per-pixel colour speckle the thin-stack warning
+  exists for — and the warning stayed silent, because 9 > 4. v0.415.0 had already fixed the *decision*
+  half of exactly this (`auto_stack_min_frames` now **holds such a mosaic back** rather than publishing
+  it), so the two surfaces disagreed about one picture: the walk-away pass called it too thin to
+  publish and the Target page called it healthy.
+- **A 12×8 raster at 3 h total is under two minutes a panel**, and `nextBestMove` returned `null`
+  — *"genuinely deep and healthy → nothing worth nudging"* — on a picture whose single biggest lever
+  is more time. A 9-panel mosaic at 4.5 h likewise: silent.
+
+**The fix.** One shared `perPixel.ts` — `canvasFieldFulls` (clamp), `perPixel` (divide),
+`spansMoreThanOneField`, `fieldsOfSkyLabel` — owns the correction and its reasoning, and
+`integrationTrend`'s own copy from v0.419.0 moved onto it. `thinStackWarning(nFramesUsed, fieldFulls?)`
+and `nextBestMove`'s thin / short-integration / deep rungs now read the depth; the **locate** rung
+deliberately does not, because *"only 30 of your 60 subs were located"* is arithmetic about the
+session, not about a pixel, and dividing it would print a number nothing else on the page shows.
+
+**The wording is half the fix.** A card that says *"only 1 sub"* under a picture the same page says
+took 27 has told the reader two things that cannot both be true. Every mosaic sentence therefore names
+**both** figures and the spread that reconciles them — *"Your 9 subs are spread across about 9 fields
+of sky, so each part of this picture has only about 1 sub on it"*, *"your 4.5 h is spread across about
+9 fields of sky, so each part of this picture has 30 min so far"* — and the add-subs advice becomes
+*"more passes over the same mosaic"*, which is what a mosaic owner actually does next.
+
+**Deliberately not wired** (recorded so it is a decision, not an oversight): the same
+`FrameCountBadge` on the **Gallery** and **Dashboard** grids, and the thin note on the **Jobs** card.
+None of the three has `field_fulls` to hand, and serving it would mean a per-target frame-shape read
+on endpoints that iterate every target — the cost
+`test_target_list_does_not_pay_for_field_fulls_on_every_row` already refuses for the readiness figure.
+They keep today's behaviour exactly (the parameter is optional and defaults to no correction), and the
+Target page is where the coaching lives.
+
+**Upgrade-safe (§9):** frontend-only, no new endpoint, field or default. Every helper takes the scale
+as an optional argument that reads as 1.0 when absent, so an older backend, a caller that doesn't pass
+it, and every single-field target are bit-for-bit unchanged — asserted directly rather than argued, by
+running each pre-existing case through `null`/`undefined`/`0`/`0.5`/`1` and `toEqual`-ing the
+un-scaled result.
+
+**Tests (+15).** `perPixel.test.ts` (new, 8) for the clamp, the identity, the division and the
+"never *about 1 field*" floor; `thinStack.test.ts` +5 (one sub deep everywhere, 2–4 deep, a genuinely
+deep mosaic, the **dogfood mosaic sample's own 21 subs over ~3.5 fields ≈ 6 deep** — which is what the
+app's health panel says about that picture — and the invariance sweep); `nextBestMove.test.ts` +5,
+including one that asserts the bug in the same case as the fix (`nextBestMove` without the figure
+returns `null` on the 9-panel 4.5 h run, with it returns the add-time rung). All six mosaic assertions
+were watched go red with `canvasFieldFulls` neutered to `return 1`.
+
 ## v0.419.0 — 2026-09-11 — the noise trend measured a mosaic getting *wider* and called it sky-limited
 
 **Verified by reproduction, and it is the "reports depth rather than decides from it" half of the

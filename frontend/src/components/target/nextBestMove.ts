@@ -25,6 +25,8 @@
  */
 
 import { THIN_STACK_MAX_FRAMES } from "./thinStack";
+import { fieldsOfSkyLabel, perPixel, spansMoreThanOneField } from "./perPixel";
+import { formatIntegration } from "../../format";
 import { settingsLink } from "../../settingsSections";
 import type { SoftStars } from "./softStars";
 
@@ -39,6 +41,14 @@ export const LOCATE_MIN_FRACTION = 0.25;
 // Below ~1 hour a deep-sky target has barely started building signal-to-noise;
 // galaxies and nebulae reward multiple hours. Universal to the OSC deep-sky
 // workflow, so it needs no per-camera calibration.
+//
+// Both of these bars are **per-pixel** quantities — "how much light has landed
+// where I am looking?" — so on a mosaic they are compared against the run's
+// integration divided by the sky its canvas covers (`perPixel.ts`), not against
+// the target's total. Read off the total, a 12x8 raster at 3 h is "genuinely
+// deep" at under two minutes a panel, and the card goes silent on a picture
+// whose single biggest lever is more time. A single field is unaffected: there
+// the two figures are the same number.
 export const SHORT_INTEGRATION_S = 60 * 60; // 1 hour
 // At/above this the stack is genuinely deep; with a healthy frame count there's
 // nothing to nudge, so stay silent rather than nag a good result.
@@ -66,6 +76,10 @@ export interface NextBestMoveInput {
    * (from `softerThanUsual(runs)`). Present only when the newest stack came out
    * materially softer than usual; drives the "refocus" rung. */
   softStars?: SoftStars | null;
+  /** How many single-frame field-fulls of sky the stack's canvas covers
+   * (`StackRun.field_fulls`). Omit / null / ≤1 on a single field and on any
+   * caller without the figure — the ladder is then exactly what it was. */
+  fieldFulls?: number | null;
 }
 
 function finite(v: number | null | undefined): number | null {
@@ -77,11 +91,12 @@ function finite(v: number | null | undefined): number | null {
  *
  * Fixed priority ladder (only the top unmet lever ever fires):
  *   1. `locate`      — a real share of subs failed to plate-solve.
- *   2. `thin`        — barely any frames combined (also covered by the louder
- *                      thin-stack warning; kept here so the ladder is complete).
+ *   2. `thin`        — barely any subs on any one part of the picture (also
+ *                      covered by the louder thin-stack warning; kept here so
+ *                      the ladder is complete).
  *   3. `soft`        — a healthy stack whose stars came out softer than usual for
  *                      this target (relative to its own history) → check focus.
- *   4. `integration` — a healthy stack but under ~1 hour total.
+ *   4. `integration` — a healthy stack but under ~1 hour *per pixel*.
  *   5. `good`        — decent result; encourage + name the one lever (time) that
  *                      still helps. Silent once the stack is genuinely deep.
  */
@@ -92,6 +107,12 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
 
   const nUnsolved = Math.max(0, finite(input.nUnsolved) ?? 0);
   const integrationS = finite(input.integrationS);
+  // On a mosaic the two "how much have I got?" rungs below are asked of one
+  // part of the picture, not of the target — see the constants above.
+  const mosaic = spansMoreThanOneField(input.fieldFulls);
+  const depth = mosaic ? Math.round(perPixel(nUsed, input.fieldFulls)) : nUsed;
+  const perPixelS =
+    integrationS == null ? null : perPixel(integrationS, input.fieldFulls);
 
   // 1. Can't-locate-subs. The unsolved subs never reached the stacker, so
   //    getting them to plate-solve adds real frames — the biggest lever when a
@@ -117,14 +138,20 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
     };
   }
 
-  // 2. Too-thin. Barely any frames combined, so the noise never averages down.
-  if (nUsed <= THIN_STACK_MAX_FRAMES) {
+  // 2. Too-thin. Barely any subs on any one part of the picture, so the noise
+  //    never averages down there.
+  if (depth <= THIN_STACK_MAX_FRAMES) {
     return {
       kind: "thin",
-      phrase:
-        `This stack combined only ${nUsed} ${nUsed === 1 ? "sub" : "subs"} — ` +
-        `too few to smooth out the noise. Adding more subs is the biggest win ` +
-        `here; a stack only gets cleaner as it combines more frames.`,
+      phrase: mosaic
+        ? `Your ${nUsed} subs are spread across ${fieldsOfSkyLabel(input.fieldFulls)}, ` +
+          `so each part of this picture has only about ${depth} ` +
+          `${depth === 1 ? "sub" : "subs"} on it — too few to smooth out the ` +
+          `noise. More passes over the same mosaic is the biggest win here; ` +
+          `a stack only gets cleaner as it combines more frames.`
+        : `This stack combined only ${depth} ${depth === 1 ? "sub" : "subs"} — ` +
+          `too few to smooth out the noise. Adding more subs is the biggest win ` +
+          `here; a stack only gets cleaner as it combines more frames.`,
     };
   }
 
@@ -148,24 +175,29 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
 
   // The integration-based levers need a known total exposure. Without it, a
   // healthy stack gets no guess — stay silent rather than invent advice.
-  if (integrationS == null) return null;
+  if (integrationS == null || perPixelS == null) return null;
 
-  // 3. Short-integration. A healthy frame count but not much total time; more
-  //    hours is the lever that pulls out faint detail on deep-sky targets.
-  if (integrationS < SHORT_INTEGRATION_S) {
-    const mins = Math.round(integrationS / 60);
+  // 3. Short-integration. A healthy frame count but not much light where the
+  //    beginner is looking; more hours is the lever that pulls out faint detail
+  //    on deep-sky targets.
+  if (perPixelS < SHORT_INTEGRATION_S) {
+    const mins = Math.round(perPixelS / 60);
     const soFar = mins > 0 ? `${mins} min so far` : "only a few minutes so far";
     return {
       kind: "integration",
-      phrase:
-        `Add more time — ${soFar}. Galaxies and nebulae reward hours, so ` +
-        `another clear night or two on this target would pull out much more ` +
-        `faint detail.`,
+      phrase: mosaic
+        ? `Add more time — your ${formatIntegration(integrationS)} is spread across ` +
+          `${fieldsOfSkyLabel(input.fieldFulls)}, so each part of this picture ` +
+          `has ${soFar}. Galaxies and nebulae reward hours, so more passes over ` +
+          `the same mosaic would pull out much more faint detail.`
+        : `Add more time — ${soFar}. Galaxies and nebulae reward hours, so ` +
+          `another clear night or two on this target would pull out much more ` +
+          `faint detail.`,
     };
   }
 
   // Genuinely deep and healthy → nothing worth nudging; stay silent.
-  if (integrationS >= DEEP_INTEGRATION_S) return null;
+  if (perPixelS >= DEEP_INTEGRATION_S) return null;
 
   // 4. All good (decent depth, but more time always still helps).
   return {
