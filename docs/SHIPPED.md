@@ -1,5 +1,60 @@
 # Shipped — the record
 
+## v0.428.0 — 2026-09-11 — a night lost to cloud told the owner to go and check his focus
+
+*(Builder, branch `claude/sweet-babbage-s75e9l` — 🟠 BUG, trust + friendliness, PRIORITY 3. Found by reading two
+modules that explain the same fact, reproduced and pinned by reverting the fix. Pure mapping change: no config,
+schema, on-disk, API-shape or default change.)*
+
+**The bug.** Auto-grade flags a clouded sub on its **star count** — that is the metric solid cloud moves most,
+and when a sub goes starless the log-domain z-score saturates at `_Z_MAX`, so `auto:grade:star_count` is the
+reason a heavily clouded frame is *most likely* to carry. `grading._reason_text` writes that rejection out in
+words as *"far fewer stars than typical (120 vs 404) — likely cloud"*, and `_METRICS` annotates the metric
+"≥30% of the stars gone: **cloud**, not detection jitter".
+
+`session_recap._REJECT_BUCKETS` had `star_count` in the **soft** row, beside FWHM and eccentricity. So one set
+of rejections, on one night, was described to the same beginner two opposite ways:
+
+* the run's "why were frames left out?" panel (`webapp.rejection_summary`, which had it right):
+  **"Cloud, haze or moonlight — fewer stars or a brighter sky than usual"**, and on a high-drop night
+  *"a clearer, darker night will keep more of them"*;
+* the **Nights** card and the session recap: **soft**, and *"it's worth checking focus (and dew on the lens)"*.
+
+Two consequences beyond the wrong words. The night's one-word verdict counts **only** the `cloudy` bucket
+(`NIGHT_HAZY_CLOUD_FRACTION`, 40 %), so a night graded out on star count scored a 0.0 cloud fraction and could
+never reach **hazy** — the verdict whose whole job is to say *the sky, not your focus, was the problem*. It
+landed on "soft" instead: a yellow badge sitting directly beside the one-click **Set aside** button, over a
+night nothing could have been done about. And `livesession._conditions` buckets the same way, so the live
+"how is tonight going?" line said *"Mostly soft stars — worth re-checking focus"* **while the owner was still
+outside**, on a night that was clouding over.
+
+**The fix is to delete one of the two copies.** Which metric means which physical cause is
+`seestack.qc.grading`'s call — it is the module that grades the frame *and* writes the plain-language reason —
+so it now owns `CLOUD_METRIC_NAMES` / `SEEING_METRIC_NAMES` and a `metric_cause()` that answers `"cloud"` /
+`"seeing"` / `None`, matched by prefix so both spellings a reason carries resolve the same way (the grading
+attr `sky_adu_median`, and the short label form a `qc:`/`bulk:` reason uses, `sky`). `rejection_summary` and
+`session_recap` keep only their own bucket **names** and resolve the cause through it, exactly as
+`PER_POINTING_METRICS` is already the one place that says which metrics are position-dependent. An unknown
+metric answers `None` rather than defaulting to a cause, so a metric added later cannot be quietly filed under
+the wrong physical explanation — `rejection_summary` already bucketed it "other", and `session_recap`'s trailing
+`grade` catch-all still keeps it out of "cloudy".
+
+**Nothing else moves.** Every other reason string — `auto:streak`, `bulk:streaked`/`bulk:trailed`, `qc_error`,
+`solve_failed*`, `user`, the file-missing reason — buckets exactly as it did, on both surfaces, and the bucket
+keys on the wire (`cloudy`/`trailed`/`soft`/`unreadable`, and `clouds`/`soft`/…) are unchanged, so no frontend
+change was needed.
+
+**Tests (+42).** `tests/test_reject_cause_agreement.py` is the enforcement rather than a comment: it drives
+**both** mappings from `grading`'s own metric list, across all three namespaces and both spellings, so a metric
+added with no cause or a bucket table that drifts back to a private copy fails here instead of in front of the
+owner. Plus the named regression on both surfaces, the "unknown metric is not guessed at" case, two assertions
+in `test_session_recap.py::test_bucket_reject_reason_direct`, and
+`test_a_night_graded_out_on_star_count_is_hazy_not_soft` — a 50 %-clouded night whose survivors are sharp, which
+must read **hazy**. **Six of them fail before**, verified by reverting `_REJECT_BUCKETS` to its old two rows in
+a scratch edit and watching them go red.
+
+---
+
 ## v0.427.1 — 2026-09-11 — the rescue reaches the moment it is wanted: the job that just failed to locate your subs
 
 *(Builder, the surfacing half of v0.427.0 — PRIORITY 2/3, autonomy + friendliness. Frontend only; no endpoint,
