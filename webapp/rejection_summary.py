@@ -16,6 +16,7 @@ mapping can be reused anywhere the counts are known.
 from __future__ import annotations
 
 from seestack.io.project import REJECT_REASON_FILE_MISSING
+from seestack.qc import grading
 from seestack.solve.astap import SOLVE_FAILED_TIMEOUT
 
 # Ordered bucket definitions. Each raw ``reject_reason`` is matched by the first
@@ -23,21 +24,16 @@ from seestack.solve.astap import SOLVE_FAILED_TIMEOUT
 # the order buckets are presented to the user (most reassuring / most common
 # first). ``auto:grade:<metric>`` splits into "clouds" vs "soft" by which metric
 # fired, so a beginner sees the physical cause, not the internal metric name.
-# Metric names appear in two forms — the grading attr (``fwhm_px``,
-# ``eccentricity_median``, ``sky_adu_median``) and the shorter label form a
-# ``qc:``/``bulk:`` reason may carry (``fwhm``, ``eccentricity``) — so match by
-# prefix rather than an exact set.
-_SOFT_PREFIXES = ("fwhm", "eccentric")
-_CLOUD_PREFIXES = ("sky", "star_count", "transparency")
+# Which metric means which physical cause is ``seestack.qc.grading``'s call —
+# it is the module that grades the frame and writes the plain-language reason —
+# so the split comes from :func:`~seestack.qc.grading.metric_cause` rather than
+# from a second copy here. Only the bucket *names* are this module's own.
+_CAUSE_BUCKETS = {grading.CAUSE_SEEING: "soft", grading.CAUSE_CLOUD: "clouds"}
 
 
 def _metric_bucket(metric: str) -> str | None:
     """Bucket for a grading metric name (either the attr or its label form)."""
-    if metric.startswith(_SOFT_PREFIXES):
-        return "soft"
-    if metric.startswith(_CLOUD_PREFIXES):
-        return "clouds"
-    return None
+    return _CAUSE_BUCKETS.get(grading.metric_cause(metric) or "")
 
 # Canonical bucket order + copy. Keep the notes plain-language and non-alarming:
 # dropping bad frames is the stacker doing its job, not a failure of the night.

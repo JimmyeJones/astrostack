@@ -31,6 +31,7 @@ from statistics import median
 from typing import Callable, Hashable, Sequence, TypeVar
 
 from seestack.io.project import FrameRow, Project
+from seestack.qc.grading import CLOUD_METRIC_NAMES, SEEING_METRIC_NAMES
 
 # Any row whose first element is its capture time — see ``_split_sessions``.
 _TimedT = TypeVar("_TimedT", bound=Sequence)
@@ -74,10 +75,19 @@ FWHM_DRIFT_ABS_PX = 0.6             # ≥ 0.6 px worse in absolute terms — bot
 # Map a raw ``reject_reason`` to a plain-language bucket a beginner understands.
 # Ordered, substring-matched (the raw reasons are ``auto:grade:<metric>``,
 # ``auto:streak``, ``bulk:streaked``/``bulk:trailed``, ``qc_error``, ``user`` …).
+#
+# Which metric means cloud and which means seeing is ``seestack.qc.grading``'s
+# call (:data:`~seestack.qc.grading.CLOUD_METRIC_NAMES`), not a second list
+# here: ``star_count`` used to sit in the "soft" row, so a night solid cloud
+# graded out on "far fewer stars than typical — likely cloud" was reported to
+# the same beginner as *soft stars, check your focus* — and, because the
+# "hazy" verdict below counts only the ``cloudy`` bucket, never as the night
+# the sky was to blame for. ``grade`` stays as the trailing catch-all for an
+# ``auto:grade:`` reason naming a metric grading doesn't know.
 _REJECT_BUCKETS: list[tuple[tuple[str, ...], str]] = [
     (("streak", "trail"), "trailed"),
-    (("sky", "transparency"), "cloudy"),
-    (("fwhm", "eccentric", "star_count", "grade"), "soft"),
+    (CLOUD_METRIC_NAMES, "cloudy"),
+    (SEEING_METRIC_NAMES + ("grade",), "soft"),
     (("qc_error", "error", "unreadable"), "unreadable"),
     (("user",), "set aside by you"),
 ]

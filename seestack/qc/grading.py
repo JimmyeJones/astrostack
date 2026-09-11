@@ -161,6 +161,40 @@ PER_POINTING_METRICS: frozenset[str] = frozenset(
     m.attr for m in _METRICS if m.per_pointing
 )
 
+CAUSE_CLOUD, CAUSE_SEEING = "cloud", "seeing"
+
+# What a rejection on one metric physically *means* — the same answer
+# :func:`_reason_text` already gives in words. Fewer stars, dimmer stars or a
+# brighter sky is cloud, haze or moonlight ("far fewer stars than typical —
+# likely cloud"); fat or elongated stars are seeing, focus or tracking.
+#
+# The single source of truth for that line, for the same reason
+# ``PER_POINTING_METRICS`` is one: every surface that explains a
+# ``…:<metric>`` rejection to a beginner resolves it here, so two of them
+# cannot describe one rejection in opposite terms — which is exactly what
+# ``webapp.rejection_summary`` ("Cloud, haze or moonlight") and
+# ``seestack.session_recap`` ("soft") did for ``auto:grade:star_count``.
+#
+# Matched by prefix, because a reason carries the metric in either spelling:
+# the grading attr (``sky_adu_median``, ``eccentricity_median``) or the short
+# label form a ``qc:``/``bulk:`` reason uses (``sky``, ``eccentricity``).
+CLOUD_METRIC_NAMES: tuple[str, ...] = ("sky", "star_count", "transparency")
+SEEING_METRIC_NAMES: tuple[str, ...] = ("fwhm", "eccentric")
+
+
+def metric_cause(metric: str) -> str | None:
+    """``"cloud"`` / ``"seeing"`` for one QC metric name, or ``None``.
+
+    ``metric`` may be the grading attr or the short label form a ``qc:`` /
+    ``bulk:`` reason carries; ``None`` means "this name isn't one of the graded
+    metrics", which a caller should bucket as *other* rather than guess at.
+    """
+    if metric.startswith(SEEING_METRIC_NAMES):
+        return CAUSE_SEEING
+    if metric.startswith(CLOUD_METRIC_NAMES):
+        return CAUSE_CLOUD
+    return None
+
 
 def _reason_text(metric: str, value: float, typical: float) -> str:
     """Plain-language explanation a beginner can act on."""

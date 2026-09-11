@@ -27,8 +27,18 @@ Method
    satellite), bucketing by observing night (local noon-to-noon, the same
    convention the activity calendar uses, so subs either side of midnight are one
    night).
-4. Compare the most recent night's rate against the median of all this target's
-   nights. The ratio is what gets bucketed and phrased.
+4. Compare the most recent night's rate against the median of this target's
+   **other** nights — leave-one-out, so a night is never part of the yardstick
+   it is measured against (the same rule
+   :func:`seestack.session_recap._typical_other_fwhm` and
+   :func:`seestack.activity_calendar.off_night` already follow, and the same
+   rule the card's own wording — "compared with your other N nights" — has
+   always promised). Including it made the card quietly self-cancelling: on an
+   odd number of nights, a night that *is* the median is its own baseline, so
+   the ratio is exactly 1.0 and the verdict is "typical" by construction, and
+   on any count a genuinely unusual night drags the yardstick toward itself and
+   under-reports how unusual it was. The ratio is what gets bucketed and
+   phrased.
 
 Everything here is pure and deterministic, so it is unit-testable without a DB.
 """
@@ -65,8 +75,12 @@ class SkyBrightnessRead:
     label: str          # short chip text
     text: str           # one-sentence explanation + what to do about it
     night: str          # ISO date of the night being reported (YYYY-MM-DD)
-    nights: int         # how many nights the comparison is based on
-    ratio: float        # latest night's sky rate ÷ the median night's
+    # How many nights the comparison is based on — the reported night's own
+    # **other** nights, never itself (see the module docstring's step 4). It is
+    # what the card's "compared with your other N nights" counts, so a target
+    # with three qualifying nights reports 2.
+    nights: int
+    ratio: float        # latest night's sky rate ÷ the median of the others
 
     def as_dict(self) -> dict:
         return {
@@ -133,6 +147,8 @@ def night_sky_rates(
 
 
 def _phrase(level: str, ratio: float, nights: int) -> tuple[str, str]:
+    """Label + sentence for one verdict. ``nights`` is the number of **other**
+    nights behind the baseline, which is what "your other N nights" counts."""
     percent = abs(round((ratio - 1.0) * 100))
     if level == "darker":
         return ("Darker than usual", (
@@ -174,7 +190,11 @@ def sky_brightness(
         return None
     nights = sorted(rates)
     latest = nights[-1]
-    baseline = _median([rates[n] for n in nights])
+    # Leave-one-out: the latest night is never part of its own yardstick (see
+    # the module docstring). ``MIN_NIGHTS`` is 3, so there are always at least
+    # two others — the gate on when the card appears at all is unchanged.
+    others = [rates[n] for n in nights[:-1]]
+    baseline = _median(others)
     if not (baseline > 0.0):
         return None
     ratio = rates[latest] / baseline
@@ -187,8 +207,8 @@ def sky_brightness(
         level = "brighter"
     else:
         level = "typical"
-    label, text = _phrase(level, ratio, len(nights))
+    label, text = _phrase(level, ratio, len(others))
     return SkyBrightnessRead(
         level=level, label=label, text=text, night=latest.isoformat(),
-        nights=len(nights), ratio=ratio,
+        nights=len(others), ratio=ratio,
     )

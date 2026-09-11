@@ -491,7 +491,10 @@ def test_sky_brightness_calls_out_a_much_brighter_night(client, built_library, d
     assert read is not None
     assert read["level"] == "much_brighter"
     assert read["night"] == "2026-07-23"
-    assert read["nights"] == 4
+    # The three *other* nights — the reported night is never part of the
+    # yardstick it is measured against, which is what "your other N nights"
+    # counts.
+    assert read["nights"] == 3
     assert read["ratio"] > 1.8
     assert "darker night" in read["text"]
 

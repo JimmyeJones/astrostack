@@ -35,9 +35,20 @@ describe("SkyBrightnessNote", () => {
 
   it("names the night, the verdict and what to do about it", () => {
     renderNote(bright);
-    expect(screen.getByText(/night of 2026-07-23: much brighter than usual/i))
+    // The night reads like every other night label in the app ("23 Jul 2026"),
+    // not like the server's raw `2026-07-23` — it printed the ISO string until
+    // v0.428.1, the one date on the Target page that didn't read like a date.
+    expect(screen.getByText(/night of 23 Jul 2026: much brighter than usual/i))
       .toBeInTheDocument();
+    expect(screen.queryByText(/2026-07-23/)).toBeNull();
     expect(screen.getByText(/save this target for a darker night/i)).toBeInTheDocument();
+  });
+
+  it("falls back rather than blanking when the night can't be parsed", () => {
+    // `formatNightDate` answers "—" for anything it can't read, so a stamp from
+    // an older backend can never leave the sentence mid-air.
+    renderNote({ ...bright, night: "" });
+    expect(screen.getByText(/night of —: much brighter than usual/i)).toBeInTheDocument();
   });
 
   it("says how the read was made, and that it is not an absolute rating", () => {

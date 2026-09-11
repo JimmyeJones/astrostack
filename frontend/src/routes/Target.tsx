@@ -65,6 +65,7 @@ import { FRAME_COLUMNS, type SortKey } from "../components/target/frameColumns";
 import { cardGrainProjection } from "../components/target/grainProjection";
 import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadge";
 import { nextBestMove } from "../components/target/nextBestMove";
+import { fieldsOfSkyLabel } from "../components/target/perPixel";
 import { softerThanUsual } from "../components/target/softStars";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { SavePictureMenu } from "../components/SavePictureMenu";
@@ -1478,9 +1479,11 @@ export function TargetView() {
                         style={{ whiteSpace: "nowrap", cursor: "pointer" }}
                         title={
                           !readiness.customGoal && readiness.fieldFulls > 1
-                            ? `${readiness.baseGoalHours} h per field-full of sky, × `
-                              + `${readiness.fieldFulls.toFixed(2).replace(/\.?0+$/, "")} `
-                              + "field-fulls this mosaic covers. Click to set your own."
+                            ? `${readiness.baseGoalHours} h for each frame's worth of sky, `
+                              + `and this picture covers `
+                              + `${readiness.fieldFulls.toFixed(2).replace(/\.?0+$/, "")}× that `
+                              + `— so ~${fmtGoal(readiness.goalHours)} h in all. `
+                              + "Click to set your own."
                             : "Set your own integration goal for this target"
                         }
                         onClick={() => {
@@ -1488,8 +1491,17 @@ export function TargetView() {
                           setEditingGoal(true);
                         }}>
                         {readiness.customGoal ? "your goal" : "goal"} ~{fmtGoal(readiness.goalHours)} h
+                        {/* The rounded scale, in the same words the "even better"
+                            ladder and the thin-stack warning use on this very page
+                            — `fieldsOfSkyLabel`. The chip used to print the raw
+                            scale to two decimals ("3.63-field mosaic"), which is
+                            the precision `perPixel.ts` calls spurious (the canvas
+                            counts its uncovered corners) in the same breath as
+                            `fmtGoal` exists to stop the *hours* being printed raw.
+                            The exact multiplier is still one hover away, where it
+                            explains the arithmetic. */}
                         {!readiness.customGoal && readiness.fieldFulls > 1
-                          ? ` (${readiness.fieldFulls.toFixed(2).replace(/\.?0+$/, "")}-field mosaic)`
+                          ? ` (${fieldsOfSkyLabel(readiness.fieldFulls)})`
                           : ""}
                         {" "}✎
                       </Text>

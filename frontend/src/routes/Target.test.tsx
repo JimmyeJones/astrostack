@@ -600,6 +600,12 @@ describe("TargetView readiness card", () => {
     // A nebula (4 h/field default) shot as a 3.63-field mosaic scales the goal to
     // 4 × 3.63… = 14.526171875 h. The verdict already rounds via fmtGoal; the
     // inline "goal ~N h" chip used to print the raw float. Regression for that.
+    //
+    // The *scale* beside it went the same way in v0.428.2: it read
+    // "(3.63-field mosaic)" — the precision `perPixel.ts` calls spurious in the
+    // same breath as `fmtGoal` exists to stop the hours being printed raw, and
+    // a second vocabulary for a number the "even better" ladder on this same
+    // page already says as "about 4 fields of sky". It now says that too.
     vi.spyOn(client.api, "getTarget").mockResolvedValue(
       mkTarget({ total_exposure_s: 240, field_fulls: 3.6315429688 }),
     );
@@ -616,10 +622,16 @@ describe("TargetView readiness card", () => {
     await waitFor(() =>
       expect(screen.getByText("Is it enough yet?")).toBeInTheDocument());
     expect(
-      screen.getByText(/goal ~14\.5 h \(3\.63-field mosaic\)/),
+      screen.getByText(/goal ~14\.5 h \(about 4 fields of sky\)/),
     ).toBeInTheDocument();
-    // The raw unrounded float must not appear anywhere on the page.
+    // The raw unrounded float must not appear anywhere on the page — and nor
+    // must the two-decimal scale the chip used to show beside it.
     expect(screen.queryByText(/14\.526/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/3\.63-field/)).not.toBeInTheDocument();
+    // The exact multiplier is still one hover away, where it is the arithmetic
+    // rather than a label: the tooltip has to be able to show its working.
+    expect(screen.getByTitle(/4 h for each frame's worth of sky, and this picture covers 3\.63× that/))
+      .toBeInTheDocument();
   });
 
   it("answers 'is more time worth it?' from the measured stack, replacing the √N line", async () => {
