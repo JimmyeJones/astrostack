@@ -1,5 +1,45 @@
 # Shipped — the record
 
+## v0.427.1 — 2026-09-11 — the rescue reaches the moment it is wanted: the job that just failed to locate your subs
+
+*(Builder, the surfacing half of v0.427.0 — PRIORITY 2/3, autonomy + friendliness. Frontend only; no endpoint,
+config, schema, on-disk, API-shape or default change.)*
+
+**The gap.** `Jobs.tsx::qcSolveNudge` has spoken up since v0.276 when a "Check & locate" job left most subs
+un-located — the single most common reason a beginner's picture stays thin — and what it said was *"turning on
+'Rescue faint fields with a deep-image solve' in Settings lets the app locate them together instead of one at a
+time"*, under a link to that Settings section. That is the right answer to *"should this happen automatically
+from now on?"*, and it is not the question the reader has. They have just watched forty subs fail to be placed
+and want **these** located. v0.427.0 built exactly that action but put it only on the Target page's rejection
+breakdown, one navigation away from the screen they are already looking at.
+
+**What shipped.** A new `frontend/src/components/TryHarderButton.tsx` — the deep-image rescue as a self-hiding
+control any surface can drop in — now sits under that nudge, above the Settings link. It asks the server whether
+the rescue would engage on that target (`reject-summary.deep_rescue_offered`, the engine's own gate) and renders
+**nothing at all** until the answer is yes: an ordinary target, a target never plate-solved, a still-loading or
+failed read, and an older backend that omits the field all leave the card exactly as it was. The advice above it
+is useful on its own, so a dead button under it would be worse than no button.
+
+**One thing the pure helper had to change, and why.** The nudge's sentence now *describes* the capability
+instead of naming only the Settings switch — *"the app can combine the un-located subs into one deeper image and
+locate them together instead of one at a time, either on request or, with 'Rescue faint fields with a deep-image
+solve' in Settings, by itself every time."* It deliberately issues **no** instruction: `qcSolveNudge` is a pure
+function of the job result and cannot know whether the button below it rendered, so a "press the button below"
+would point at nothing on a target with too few un-located subs to rescue (the nudge fires at a 50 % miss rate;
+the rescue needs eight). A test pins that the sentence contains no imperative, so the next edit to this copy
+cannot reintroduce the coupling.
+
+**Both answers stay.** The Settings link is untouched: "do it to this target now" and "do it every time from now
+on" are different questions and neither replaces the other. The button shares the Target page's own
+`["reject-summary", safe]` query key, so opening that target next — the likely follow-up — costs no extra read,
+and pressing it invalidates both surfaces.
+
+**Tests (+9).** `TryHarderButton.test.tsx` (5, new): the offer and the call it makes; nothing rendered when the
+server declines, when the field is absent, while loading, or after a failed read; and a failed *start* surfaced
+as a notification rather than swallowed. `Jobs.test.tsx` (+4): the button under the advice beside the Settings
+link, nothing extra where the rescue would stand down, **no request at all** on a job whose solve went fine, and
+the nudge's no-imperative rule. Scratch revert: deleting the one line that renders the button reddens 2.
+
 ## v0.427.0 — 2026-09-11 — "Try harder to locate these": the faint-field rescue becomes a button instead of a switch you have to know about
 
 *(Builder, the 2026-07-23 backlog entry "Try harder to locate these: a more-sensitive plate-solve re-pass for

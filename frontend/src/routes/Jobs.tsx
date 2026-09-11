@@ -18,6 +18,7 @@ import { HintIcon } from "../components/HintIcon";
 import { settingsLink } from "../settingsSections";
 import { CalibrationSkippedNote } from "../components/CalibrationSkippedNote";
 import { StackNoiseBadge } from "../components/StackNoiseBadge";
+import { TryHarderButton } from "../components/TryHarderButton";
 import { thinStackWarning, type ThinStackWarning } from "../components/target/thinStack";
 import { rejectionNote } from "../components/target/rejectionNote";
 import { type EtaSample, etaLabel, updateEtaAnchor } from "../jobEta";
@@ -504,10 +505,16 @@ export function qcSolveSummary(r: Record<string, unknown>): string | null {
  *
  * An un-located sub can't stack, so a mostly-failed solve is the single most
  * common reason a beginner's picture stays thin and noisy — and the app already
- * has the cure (the opt-in deep-image rescue). Only speaks up when the miss rate
+ * has the cure (the deep-image rescue). Only speaks up when the miss rate
  * is high enough to actually be the problem; a couple of stragglers on an
  * otherwise good night are normal and get no lecture. Stays silent when the
- * bootstrap already rescued them — that note says its own piece. */
+ * bootstrap already rescued them — that note says its own piece.
+ *
+ * Deliberately describes the *capability* rather than issuing an instruction:
+ * the two ways to reach it are rendered beneath this sentence, and one of them
+ * (`TryHarderButton`) self-hides on a target where the rescue would stand down.
+ * A "press the button below" that pointed at nothing would be worse than the
+ * plain description, so the sentence reads correctly either way. */
 export function qcSolveNudge(r: Record<string, unknown>): string | null {
   const total = typeof r.solve_total === "number" ? r.solve_total : 0;
   const ok = typeof r.solve_ok === "number" ? r.solve_ok : null;
@@ -516,9 +523,10 @@ export function qcSolveNudge(r: Record<string, unknown>): string | null {
   if (missed === 0 || missed < total / 2) return null;
   if (bootstrapRescuedCount(r) > 0) return null;
   return "Subs that can't be placed in the sky are left out of your stack. "
-    + "This is usual on a faint or star-poor target — turning on "
-    + "\"Rescue faint fields with a deep-image solve\" in Settings lets the app "
-    + "locate them together instead of one at a time.";
+    + "This is usual on a faint or star-poor target — the app can combine the "
+    + "un-located subs into one deeper image and locate them together instead "
+    + "of one at a time, either on request or, with \"Rescue faint fields with "
+    + "a deep-image solve\" in Settings, by itself every time.";
 }
 
 /** How many subs auto-grade *put back* in this job result, or 0 when it gave
@@ -1147,8 +1155,14 @@ function JobResultActions({ job }: { job: Job }) {
         {nudge ? (
           <>
             <Text size="xs" c="dimmed">{nudge}</Text>
-            {/* The nudge names a switch; this is the way to it, rather than
-                leaving the reader to find which Settings page holds it. */}
+            {/* The nudge names two things and, until now, offered only the
+                second. "Do it to this target, now" is the one the reader wants
+                at this moment — they have just watched the solve fail — so it
+                leads; it self-hides unless the server says the rescue would
+                actually engage here. The Settings link stays underneath because
+                it answers the *other* question, "do this automatically from now
+                on", and neither answer replaces the other. */}
+            {job.target ? <TryHarderButton safe={job.target} /> : null}
             <Anchor component={Link} to={settingsLink("plate-solving")} size="xs" fw={500}>
               Turn it on in Settings &rarr; Plate solving &rarr;
             </Anchor>
