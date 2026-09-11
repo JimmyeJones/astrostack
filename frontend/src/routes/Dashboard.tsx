@@ -23,6 +23,7 @@ import { NewSubsWaitingNote } from "../components/dashboard/NewSubsWaitingNote";
 import { OverTrimmedNote } from "../components/dashboard/OverTrimmedNote";
 import { StackFailuresNote } from "../components/dashboard/StackFailuresNote";
 import { PointHereTonightCard } from "../components/dashboard/PointHereTonightCard";
+import { AutoEditOffNote } from "../components/dashboard/AutoEditOffNote";
 import { AutoStackOffNote } from "../components/dashboard/AutoStackOffNote";
 import { UnexportedEditsNote } from "../components/dashboard/UnexportedEditsNote";
 import { FrameCountBadge } from "../components/target/FrameCountBadge";
@@ -255,6 +256,12 @@ export function Dashboard() {
           // stacked nothing, and never again once dismissed.
           { key: "auto-stack-off", priority: NOTICE_PRIORITY.advisory,
             node: <AutoStackOffNote /> },
+          // The same offer for the step *after* stacking. Ranked just below its
+          // sibling because the two are sequential: with auto-stack off there is
+          // nothing to finish, and this note stays silent until the scan really
+          // has stacked something and left it as a linear master.
+          { key: "auto-edit-off", priority: NOTICE_PRIORITY.advisory,
+            node: <AutoEditOffNote /> },
           // The same shape for the other direction: not work of theirs the app
           // isn't showing, but light of theirs the picture doesn't have yet.
           // The Target page has said this per target since v0.90.0; with
