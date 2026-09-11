@@ -1,5 +1,94 @@
 # Shipped — the record
 
+## v0.424.1 — 2026-09-11 — 🟡 the Stack form stops rebuilding the canvas for knobs that cannot move it
+
+*(PRIORITY 3, performance/friendliness. The backlog entry: "Performance (only
+with a measurement)" → the `/stack-estimate` lead's shapes **(b)** and **(d)**,
+both of which this closes. (a) shipped as v0.374.9 and (c) as v0.376.1.)*
+
+**What was slow, and why it was slow for a silly reason.** Sizing a stack is two
+jobs of wildly different cost: unioning every sub's footprint into a canvas
+reads one WCS per sub, and everything after that — peak bytes, the drizzle scale
+that fits, the print plan, the memory fix, the rejection reach — is arithmetic on
+`dst_shape`. `StackCanvasBasis` (v0.376.1) already said so in the type system,
+and `estimate_stack_basis` already takes `mosaic_canvas` and nothing else.
+
+But `/stack-estimate` carries **nine** query params, and the Stack form's query
+key carries all nine, because the response genuinely differs for each: the
+drizzle knobs multiply the output, `min_max_reject`/`min_max_reject_count` add
+canvas planes the guard charges for, and `auto_reject`/`sigma_kappa`/`sigma_clip`
+decide the rejection answers. None of them can move the canvas. So on the owner's
+largest target every κ nudge, every drizzle-scale keystroke, re-paid a full
+canvas computation to refresh a sentence — and `/rejection-outlook`, which the
+Target page fires on load, paid it again.
+
+**Measured first, on the entry's own shape** (a 9-panel mosaic of **5,477**
+synthetic solved subs, this box, min of 3–5):
+
+| | ms |
+|---|---|
+| `estimate_stack_basis(proj, "auto")` | **1,007** |
+| `Project.frames_fingerprint()` — `SELECT *`, hashed | **129** |
+| a cold `estimate_cache.canvas_basis` (fingerprint + basis) | 1,116 |
+| a **warm** one | **129** |
+
+**The shape that shipped is (b), not (d) — because (d) is not available.** The
+entry leads with "split the *rejection* answer out of `/stack-estimate`", on the
+grounds that the rejection params don't affect the canvas. True, but they do
+affect the **peak**: `estimate_stack_from_basis` resolves `auto_reject` through
+`_resolve_auto_reject` (which reads `sigma_kappa`) and charges
+`_min_max_reject_arrays(min_max_reject_count)` extra planes, so four of the five
+params (d) names cannot be lifted out of the sizing. Only the *canvas* is
+option-independent — and since `drizzle*` cannot move it either, memoising it
+makes the drizzle controls instant as well, which the split would not have.
+
+**The staleness trade (b) was warned off does not apply, because the basis is
+revalidated rather than trusted.** `webapp/estimate_cache.py` keys on
+`(project db path, canvas mode)` and stores `(fingerprint, basis)`; *every*
+lookup recomputes the fingerprint and throws the basis away if it has moved.
+That is why the fingerprint had to be complete rather than cheap. The one the
+entry proposes — "count + max rowid + accept/solve state" — is blind to the
+change that matters most: **a re-solve rewrites one frame's `wcs_json` in place
+with different numbers of the same width**, leaving count, max rowid and
+accept/solve identical, and the memo would then serve a canvas built from where
+the subs used to be. So `Project.frames_fingerprint()` is `SELECT * FROM frames
+ORDER BY id`, blake2b over every column of every row: complete as a property of
+the *query*, with no column list for a future migration to fall out of step
+with, and it over-invalidates (a QC pass touching an unrelated column costs a
+recompute) which is the safe direction. `estimate_stack_basis` reads nothing
+else — not `meta`, not the run records, and not the filesystem (it tests that a
+frame *has* a path, never that the file is there).
+
+**One trap worth recording.** The first draft hashed `repr(row)` on the
+connection's `sqlite3.Row` factory, whose `repr` is its **memory address** — so
+the "fingerprint" was a fresh random value on every call and never matched
+itself. Caught by the first test written (`is stable while nothing changes`),
+which is the reason to write that one first: it looks like a tautology and it is
+the only test that can catch a hash that is not a hash. The fix is a cursor with
+`row_factory = None`; plain tuples, and 10 % faster than converting.
+
+**Upgrade-safe (§9).** Nothing persists — the cache is a process-local
+`OrderedDict` bounded at `MAX_ENTRIES = 16` small dataclasses, rebuilt for free
+after a restart and re-validated on use, so an upgrade is indistinguishable from
+it. No config, schema, on-disk, API-shape or default change; `/stack-estimate`
+and `/rejection-outlook` return exactly what they returned.
+
+**Tests (+15).** `tests/test_project_fingerprint.py` (6) pins completeness the
+only way it can be pinned — one change at a time, each required to move the
+hash: the same-length re-solve, an accept flip, a column the canvas never reads,
+an added frame, stability across a reopen, and (content addressing, not a
+counter) an undone change restoring the previous value. Verified red by swapping
+in the count/rowid/length summary the entry proposed: **3 of 6 fail**, including
+the re-solve case. `tests/webapp/test_estimate_cache.py` (9) works the endpoints:
+six rejection/drizzle nudges cost **one** canvas build between them; the canvas
+mode is its own entry; a fourth sub arriving mid-session and a re-solve that
+re-points one sub are each answered freshly (both verified red by deleting the
+fingerprint comparison — they are the fail-before pair); `/rejection-outlook`
+shares the held basis; a "nothing solved yet" failure is not cached; the cache is
+bounded and evicts least-recently-used; two targets never share an entry; and the
+whole warm response is byte-identical to a cold one, which is what makes this a
+pure optimisation rather than a second sizing rule.
+
 ## v0.424.0 — 2026-09-11 — ⭐ "Hold back highlights" starts working on the frames it exists for
 
 *(PRIORITY 1, the editor. The backlog entry, filed 2026-08-06 and measured then:
