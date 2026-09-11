@@ -18,6 +18,146 @@ is a queue.
 
 ---
 
+## 2026-09-11 (Builder, branch `claude/sweet-babbage-mggx1q`) — two halves of one lead, and a "fingerprint" that was a memory address
+
+**The run.** Two tasks, two independently-green commits: **v0.424.2** (the Stack
+form's canvas is held between requests) and **v0.424.3** (its advice panel stops
+blinking while the next answer loads). Both are the same backlog lead — the
+`/stack-estimate` performance entry under "Performance (only with a
+measurement)" — from opposite ends, and they close its last two open shapes,
+`(b)` and `(d)`. Full entries in [`SHIPPED.md`](SHIPPED.md).
+
+### The baseline came from CI again, and it should keep coming from CI
+
+CI run **1627** on `0749f92a` — the exact tree I branched from — is green. I had
+started a local baseline and killed it the moment CI answered, which freed the
+tree ~25 minutes earlier than it otherwise would have been. That is now the
+third consecutive run to record this; treat it as the default.
+
+### Where the task came from, since "Bugs (fix these first)" is still dry
+
+Seventh consecutive run to report it so — every entry there is gated on data no
+agent has, stood down with numbers, or closed. "Features that serve real
+workflows" is dry too (the Scout's Moon planner shipped as v0.422.0 and the
+glossary as v0.423.0). So I read the **Performance** section, whose entries are
+the ones that come with their own measurement and their own care notes, and
+picked the lead that had two shapes left.
+
+### The entry told me not to do (b). It was right about the danger and wrong
+### about the conclusion
+
+The lead's `(b)` is *memoise the canvas per target, keyed on a frame-set
+fingerprint (count + max rowid + accept/solve state)*, and the entry warns it
+off: "the staleness trade **v0.374.6 explicitly warned about** … it needs the
+fingerprint to be genuinely complete, not 'good enough'." Then `(d)` — *split
+the rejection answer out* — is called "the sharpest of the four".
+
+Both judgements moved once I read the code rather than the entry:
+
+- **(d) is not available.** It rests on "the rejection params don't affect the
+  canvas", which is true and not the point: `estimate_stack_from_basis` resolves
+  `auto_reject` through `_resolve_auto_reject` (which reads `sigma_kappa`) and
+  charges `_min_max_reject_arrays(min_max_reject_count)` extra planes, so four of
+  the five params it names move the **peak** and cannot leave the sizing.
+- **(b)'s danger is real and its fix is cheap.** The fingerprint the entry
+  proposes is blind to exactly the change that matters — a re-solve rewrites one
+  frame's `wcs_json` in place with different numbers of the same width, leaving
+  count, max rowid and accept/solve identical. But a *complete* fingerprint is
+  `SELECT * FROM frames ORDER BY id` hashed, and it **measured at 129 ms against
+  the 1,007 ms it guards**. There was never a reason to want the cheap one.
+
+**The generalisation worth carrying:** when a backlog entry rejects a shape for
+a named hazard, the question to ask is not "is the hazard real" (it usually is)
+but **"what does removing the hazard actually cost?"** — and that is a
+measurement, not a judgement. Here it cost 12 % of the thing being saved. The
+entry could not know that because it was written before anyone timed the
+alternative.
+
+### The trap: a "fingerprint" that was a fresh random value every call
+
+The first draft hashed `repr(row)` over `self._conn.execute("SELECT * …")`. This
+connection sets `row_factory = sqlite3.Row`, and **`repr(sqlite3.Row)` is its
+memory address** — so the digest changed on every call and the cache could never
+hit. Three of the six fingerprint tests went red immediately, including the one
+that reads like a tautology:
+
+```python
+first = proj.frames_fingerprint()
+assert first == proj.frames_fingerprint()
+```
+
+**Write that one first.** It looks like it is testing nothing, and it is the
+only test in the file that can catch a hash which is not a function of the data.
+The fix is a cursor with `row_factory = None`; plain tuples, and 10 % faster
+than converting each Row.
+
+### Both fixes were watched go red, per §8
+
+Not asserted — run. `webapp/estimate_cache.py` with the `held[0] == fingerprint`
+comparison deleted: the two staleness tests fail. `Project.frames_fingerprint`
+replaced by the count/rowid/length summary the backlog proposed: 3 of 6 fail,
+including the same-length re-solve. `Stack.tsx` with the `placeholderData` line
+deleted: the blink test fails. That is three reverts for three claims, and the
+frontend one needed a **deferred mock** — a promise the test resolves by hand —
+so the assertion lands inside the window that used to be blank rather than after
+it.
+
+### The measurement rig, for whoever profiles this next
+
+A `Project.create` + `add_frames` of 5,477 rows across 9 pointings, each with a
+real `wcs_to_text` header, builds in **1.7 s** in a scratch dir. That is the
+owner's largest target at full size, and it is cheap enough to keep re-making
+rather than caching. Profiling the cold path on it says the remaining 1,007 ms
+is **1,147 ms of `wcs_from_text` cumulative** (i.e. essentially all of it, post
+v0.374.9), and the double `iter_frames` — `pick_reference_frame` reads the
+frames and then `estimate_stack_basis` reads them again — is only ~100 ms of it.
+So **do not** go after the double read: it is 9 % of a path whose cost is the
+5,477 WCS constructions, and those are already optimised.
+
+### The two halves belong together, which is why they are one PR
+
+v0.424.2 alone would have turned a ~1 s hole in the advice panel into a ~130 ms
+one, and a fast answer that still blanks the panel reads as a *flicker* rather
+than as a form keeping up. v0.424.3 alone would have held a stale panel on
+screen for a second at a time. Neither is wrong alone; together they are the
+form behaving.
+
+### Collision #15 — not on the item, on the *version line*, and it cost nothing
+
+A concurrent Builder (`claude/sweet-babbage-zeh63i`) merged **v0.424.1** while
+this branch was in flight. No overlap on the work — that run is in the editor
+(`blownCore`, `BlownCoreNudge`), this one in the Stack form's sizing — so §11's
+"pick uniformly at random among the top four" did its job. What collided was
+the one line §11 already names as the hot spot, `webapp/__init__.py`, plus the
+two docs both runs append to.
+
+Resolved exactly as §11 prescribes and recorded here because the *mechanics*
+are the reusable part: both sides of every `IMPROVEMENTS.md` / `SHIPPED.md`
+conflict kept, this branch's two entries renumbered **.1→.2 and .2→.3**, and —
+the half that is easy to forget — **their internal cross-references followed
+through**, in the backlog line, the SHIPPED entry, this note, *and* two source
+comments (`stackEstimatePlaceholder.ts`, `Stack.test.tsx`) that name the
+sibling version. `grep -rn '0\.424\.[12]'` over the tree is what found the
+last two; a renumber that only touches the docs leaves the code saying
+something false.
+
+The two topic commits keep their original subjects, so the merge commit says
+out loud which numbers they were written as and which they ship as, rather than
+rewriting a branch that was already pushed.
+
+### Green gates
+
+Python **5,746 passed / 2 skipped** (27:03), on the merged tree. Frontend: `npx tsc --noEmit` clean and
+verified really compiling (`--listFiles` shows 834 `src/` files, per the §7
+trap — and the same trap bit once this run in its other costume: `npx tsc |
+head` reported `EXIT=0` over ten real type errors, because a pipeline's status
+is the last command's. Redirect, never pipe, applies to `tsc` as much as to
+`pytest`.), vitest **264 files / 3,707 tests** (263/3,693 on `0749f92a`), `npx
+vite build` ✓. All re-run on the merged tree, after `origin/main`'s v0.424.1
+came in.
+
+---
+
 ## 2026-09-11 (Builder, branch `claude/sweet-babbage-zeh63i`) — a month-old measurement finished; a stand-down re-opened for the right reason; and a mosaic dogfood pass CLEAN
 
 **The run.** Two tasks, each its own independently-green commit: **v0.424.0** (the
