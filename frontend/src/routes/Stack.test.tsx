@@ -2710,3 +2710,105 @@ describe("StackView — cautions read a mosaic's panel depth, not its total", ()
     expect(note).toHaveTextContent(/Min\/max rejection/);
   });
 });
+
+
+/**
+ * The advice panel holds still while the next answer loads.
+ *
+ * Every knob on this form is in the estimate's query key, so each nudge is a
+ * new query — and the sizing line, the time estimate, the memory verdict, the
+ * print plan, the per-pixel cautions and the drizzle nudge are all derived
+ * from that one value, so they used to vanish and reappear *together* on every
+ * tick of the κ slider. `webapp.estimate_cache` (v0.424.1) took the server
+ * side of that to ~130 ms; this is the other half, and a fast answer that
+ * still blanks the panel first reads as a flicker rather than as a form
+ * keeping up.
+ */
+describe("StackView — the sizing panel doesn't blink between answers", () => {
+  function fields(): client.StackOptionField[] {
+    return [
+      { key: "sigma_clip", label: "Sigma clipping", type: "bool", group: "simple",
+        default: true, min: null, max: null, step: null, options: null,
+        help: null, depends_on: null },
+    ];
+  }
+
+  function frame(id: number): client.Frame {
+    return {
+      id, name: `f${id}.fits`, timestamp_utc: null, exposure_s: 30, gain: 80,
+      width_px: 480, height_px: 320, bayer_pattern: "RGGB", solved: true,
+      ra_center_deg: null, dec_center_deg: null, ra_hint_deg: null,
+      dec_hint_deg: null, fwhm_px: null, star_count: null, sky_adu_median: null,
+      eccentricity_median: null, transparency_score: null,
+      streak_detected: false, accept: true, reject_reason: null,
+      user_override: false,
+    };
+  }
+
+  function sizing(n: number): client.StackEstimate {
+    return {
+      n_frames: n, canvas_w: 480, canvas_h: 320, output_w: 480, output_h: 320,
+      is_mosaic: false, peak_bytes: 3e8, peak_gb: 0.3,
+      budget_bytes: 1.4e9, budget_gb: 1.4, would_exceed: false,
+      suggested_drizzle_scale: null, suggested_reference_canvas: false,
+      memory_fix: null, auto_reject_resolved: null,
+    };
+  }
+
+  function mockForm() {
+    mockSchema(fields());
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([frame(1), frame(2)]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+  }
+
+  it("keeps the sizing on screen while a knob change re-asks for it", async () => {
+    mockForm();
+    let landTheSecond: (e: client.StackEstimate) => void = () => {};
+    const estimate = vi.spyOn(client.api, "stackEstimate")
+      .mockResolvedValueOnce(sizing(250))
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        landTheSecond = resolve;
+      }));
+
+    renderStack();
+    await waitFor(() =>
+      expect(screen.getByText(/250 accepted, solved frames/)).toBeInTheDocument());
+
+    // Turning sigma clipping off is a new key, so a request goes out…
+    fireEvent.click(screen.getByRole("switch", { name: "Sigma clipping" }));
+    await waitFor(() => expect(estimate).toHaveBeenCalledTimes(2));
+    // …and the figures the user was reading are still there while it flies.
+    expect(screen.getByText(/250 accepted, solved frames/)).toBeInTheDocument();
+
+    // Then the new answer replaces them — held, not frozen.
+    await act(async () => { landTheSecond(sizing(301)); });
+    await waitFor(() =>
+      expect(screen.getByText(/301 accepted, solved frames/)).toBeInTheDocument());
+    expect(screen.queryByText(/250 accepted, solved frames/))
+      .not.toBeInTheDocument();
+  });
+
+  it("shows nothing at all until the first answer lands", async () => {
+    // The placeholder is the *previous* answer for this target, so a first
+    // visit still has nothing honest to show — and must say nothing rather
+    // than reach for another page's numbers. (Which target an answer belongs
+    // to is pinned directly on the predicate, in
+    // `stackEstimatePlaceholder.test.ts`: this route does not remount on a
+    // `:safe` change, so a component test cannot reach that case without a
+    // navigation harness that would prove nothing about the rule itself.)
+    mockForm();
+    let land: (e: client.StackEstimate) => void = () => {};
+    vi.spyOn(client.api, "stackEstimate").mockImplementation(
+      () => new Promise((resolve) => { land = resolve; }));
+
+    renderStack();
+    await waitFor(() =>
+      expect(screen.getByText("Start stacking")).toBeInTheDocument());
+    expect(screen.queryByText(/accepted, solved frame/)).not.toBeInTheDocument();
+
+    await act(async () => { land(sizing(250)); });
+    await waitFor(() =>
+      expect(screen.getByText(/250 accepted, solved frames/)).toBeInTheDocument());
+  });
+});

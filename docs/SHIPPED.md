@@ -1,5 +1,68 @@
 # Shipped — the record
 
+## v0.424.2 — 2026-09-11 — 🟡 the Stack form's advice panel stops blinking out on every knob nudge
+
+*(PRIORITY 1/3 — §1's "clunky and confusing controls". The client half of the
+same lead v0.424.1 fixed on the server; the two are one change in two places.)*
+
+**What it looked like.** Every knob on the Stack form is in the estimate query's
+key — the drizzle scale, κ, sigma clipping, the min/max count, "Auto outlier
+removal" — and it has to be, because the *answer* genuinely differs for each.
+But the whole advice block under the form is derived from one value,
+`estimate.data`: the sizing line, the time estimate, the memory verdict and its
+one-click fix, the print plan, the per-pixel cautions, the rejection-reach note,
+the drizzle nudge. Every one of them reads `est?.…`, so on a key change they all
+went `undefined` together and came back together. Dragging the κ slider emptied
+the block and refilled it, once per tick; on the §1 owner's largest target each
+of those holes was about a second wide, because the server was rebuilding a
+canvas those knobs cannot move.
+
+v0.424.1 closed the second. This closes the flicker — and the ordering matters:
+a fast answer that still blanks the panel first reads as a *flicker* rather than
+as a form keeping up, so shipping one without the other would have traded a
+visible stall for a visible twitch.
+
+**Why not `placeholderData: keepPreviousData`.** The editor already uses that
+bare form, correctly, for its preview. Here it would be wrong: react-router does
+**not** remount this route when only the `:safe` param changes, so walking from
+one target's Stack page to another's would leave the first target's frame count,
+canvas size and memory verdict sitting under the second one's title until the
+request landed. Showing the knob values you moved away from a moment ago is
+honest — it is this picture, a beat ago. Showing another target's is not.
+
+So `frontend/src/stackEstimatePlaceholder.ts` owns the rule as a pure predicate,
+`estimateIsForTarget(previousKey, safe)`, and the query is
+
+```ts
+placeholderData: (previous, previousQuery) =>
+  estimateIsForTarget(previousQuery?.queryKey, safe) ? previous : undefined,
+```
+
+It is defensive about the key's shape — anything that is not this query's own
+`[key, safe, …]` answers `false` — so an unexpected shape degrades to today's
+behaviour (a blank panel) rather than to a wrong one, and an empty `safe` (what
+`useParams` hands back before the route param is known) never matches. The
+module also owns `STACK_ESTIMATE_QUERY_KEY`, which the four `invalidateQueries`
+calls elsewhere in the file now share instead of re-spelling the literal.
+
+**Nothing else changed.** Frontend-only: no endpoint, no response field, no
+config, schema, on-disk or default change; the estimate is still re-requested on
+every key change and still shows the server's answer the moment it arrives —
+`queryByText` on the old figure asserts it is *gone*, so this holds the panel
+rather than freezing it.
+
+**Tests (+7 vitest).** `stackEstimatePlaceholder.test.ts` (5): the same-target
+hold; the other-target refusal (the case the bare `keepPreviousData` would get
+wrong, and the one a component test cannot reach without a navigation harness
+that would prove nothing about the rule); a key belonging to another query;
+nothing held yet, in three shapes; and the empty-`safe` first render.
+`routes/Stack.test.tsx` (2, in their own describe with self-contained fixtures):
+the sizing line survives a sigma-clip toggle **while the second request is still
+in flight** — a deferred mock, so the assertion is made in exactly the window
+that used to be blank — and is then replaced by the new answer; and a first
+visit shows nothing at all until the first answer lands. The first was verified
+red by deleting the `placeholderData` line.
+
 ## v0.424.1 — 2026-09-11 — 🟡 the Stack form stops rebuilding the canvas for knobs that cannot move it
 
 *(PRIORITY 3, performance/friendliness. The backlog entry: "Performance (only
