@@ -135,3 +135,68 @@ def test_mosaic_flag_wording():
     assert imaging_log_row_values(_row(is_mosaic=True))[6] == "yes"
     assert imaging_log_row_values(_row(is_mosaic=False))[6] == "no"
     assert imaging_log_row_values(_row(is_mosaic=None))[6] == ""
+
+
+def test_the_log_is_ordered_by_the_night_it_leads_with_not_the_day_it_was_stacked():
+    """The bug the ordering had: the leading column is the *night*, and the sort
+    was on the *processing stamp*, so the first column of the file was not
+    monotonic. The fixture is a re-stack of a back catalogue done in one sitting
+    — exactly what "Reprocess everything" produces — where the two orders are
+    opposite.
+    """
+    old_night_restacked_last = _row(
+        target_name="old night", capture_night_start="2024-11-15",
+        capture_night_end="2024-11-15", date="2026-07-24T15:00:00+00:00")
+    new_night_restacked_first = _row(
+        target_name="new night", capture_night_start="2026-06-01",
+        capture_night_end="2026-06-01", date="2026-07-24T09:00:00+00:00")
+    parsed = _parse(build_imaging_log_csv(
+        [old_night_restacked_last, new_night_restacked_first]))
+    assert [r[1] for r in parsed[1:]] == ["new night", "old night"]
+    # Both dates are still on every row — the fix moved which one *orders*, not
+    # which one is shown.
+    assert parsed[1][0] == "2026-06-01" and parsed[1][-1] == "2026-07-24"
+
+
+def test_two_restacks_of_one_night_lead_with_the_newer_run():
+    """The tie-break: the night cannot separate them, so "which run is newest"
+    decides — the one question the processing stamp is the right answer to."""
+    parsed = _parse(build_imaging_log_csv([
+        _row(target_name="older run", date="2026-07-20T09:00:00+00:00"),
+        _row(target_name="newer run", date="2026-07-24T09:00:00+00:00"),
+    ]))
+    assert [r[1] for r in parsed[1:]] == ["newer run", "older run"]
+
+
+def test_a_run_with_no_recorded_night_is_placed_by_the_date_it_does_show():
+    """A pre-schema-18 run (most of a library that was upgraded rather than
+    re-stacked) has no night, so it is ordered by its processing date — the same
+    "fall back to the labelled stamp" rule the screen's date label uses, so the
+    order always follows the date the row actually displays. It must not sink to
+    the bottom of an upgraded library's whole log, and must not claim a night."""
+    parsed = _parse(build_imaging_log_csv([
+        _row(target_name="night known", capture_night_start="2024-11-15",
+             capture_night_end="2024-11-15", date="2026-07-01T09:00:00+00:00"),
+        _row(target_name="no night", capture_night_start=None,
+             capture_night_end=None, date="2026-07-20T09:00:00+00:00"),
+    ]))
+    assert [r[1] for r in parsed[1:]] == ["no night", "night known"]
+    assert parsed[1][0] == ""
+
+
+def test_rows_the_ordering_cannot_separate_keep_the_order_they_arrived_in():
+    """A stable sort, so a caller's own grouping survives where the key ties."""
+    parsed = _parse(build_imaging_log_csv([
+        _row(target_name="M 31"), _row(target_name="M 42"),
+        _row(target_name="M 81"),
+    ]))
+    assert [r[1] for r in parsed[1:]] == ["M 31", "M 42", "M 81"]
+
+
+def test_a_row_with_no_dates_at_all_still_renders():
+    parsed = _parse(build_imaging_log_csv([
+        _row(target_name="dateless", date=None,
+             capture_night_start=None, capture_night_end=None),
+        _row(target_name="dated"),
+    ]))
+    assert [r[1] for r in parsed[1:]] == ["dated", "dateless"]

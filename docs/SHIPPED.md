@@ -1,5 +1,68 @@
 # Shipped — the record
 
+## v0.426.1 — 2026-09-11 — 🐛 your imaging log is ordered by the night it leads with, not by the afternoon the stack ran
+
+*(PRIORITY 3 — trust. A Builder-found bug, verified by reverting the fix and
+watching the regression test go red.)*
+
+**What was wrong.** `seestack/imaging_log.py` opens by explaining that the two
+dates on a row are different facts: the nights lead, under **"Shot"**, and the
+processing stamp sits at the end, under **"Stacked"** — because a log of "every
+night you've imaged" that led with the stack's timestamp dated a re-stack of a
+back catalogue to the afternoon someone pressed the button. The *ordering* had
+never been moved with the column. `_collect_imaging_log` ended with
+
+```python
+# Newest first, so a beginner's most recent night sits at the top of the log.
+rows.sort(key=lambda r: (r.date or ""), reverse=True)
+```
+
+— a comment about nights over a sort on processing stamps. So the file's leading
+column was not monotonic, and after a **Reprocess everything** (which re-stamps
+every run in the library within minutes of each other) the whole log came out in
+an order that has nothing to do with when anything was shot. The owner's library
+is thousands of subs of back catalogue across many nights, and this file is the
+thing he would print or paste into a forum post.
+
+**What it does now.** New pure `imaging_log_sort_key(row)` →
+`(night, stacked)`, sorted descending by `build_imaging_log_csv` itself rather
+than by the caller, so **one place decides both the columns and the order** and
+they cannot end up answering different questions. `capture_night_start` is
+already the noon-to-noon night key, so comparing the ISO strings *is* comparing
+nights. Nothing on any row moved: both dates are still in their own columns,
+under their own names — only which one decides the order changed.
+
+**The two cases that needed deciding, not guessing.**
+* **A run with no recorded night** (schema < 18 — most of a library that was
+  upgraded rather than re-stacked) falls back to its processing date, which is
+  the same "use the labelled stamp when the real date is unknown" rule
+  `pictureDateLabel` applies on screen. So the order always follows the date the
+  row actually *displays*, and a pre-schema-18 library does not have its entire
+  log sink below its handful of newer runs.
+* **Two re-stacks of one night** tie on the night, so the stacked stamp breaks
+  it and the newer run leads — the one question a processing stamp is the right
+  answer to. The sort is stable, so rows the key cannot separate keep the order
+  they arrived in.
+
+**Not in tension with the shipped "never flip a *sort* to capture time" rule**
+(see "sweep every date", above): that rule is about lists of **runs**, where
+"which run is newest" is the question — History's ordering, and the Library
+tile's, both of which are untouched. This file is a list of **nights**, and says
+so in its first sentence. The distinction is now written down in
+`imaging_log_sort_key`'s docstring so it is not re-litigated in either
+direction.
+
+**Upgrade-safe (§9):** row order only. No column added, removed or moved (a
+spreadsheet built on this file keeps every column where it was), no config,
+schema, on-disk, default or API-shape change, and nothing written anywhere.
+
+**Tests (+6, one fails before).** `tests/test_imaging_log.py`: the regression
+itself on a two-run "reprocessed in one sitting" fixture where night order and
+stamp order are *opposite* (red against the old sort, in a scratch revert); the
+same-night tie-break; the no-recorded-night fallback; stability; and a row with
+no dates at all. `tests/webapp/test_imaging_log.py` adds the end-to-end case
+through `GET /api/imaging-log.csv` on the same reprocessed shape.
+
 ## v0.426.0 — 2026-09-11 — 🌟 the second half of the walk-away promise says it is switched off
 
 *(PRIORITY 2 — autonomy. A Builder-found gap, not a backlog entry: the sibling
