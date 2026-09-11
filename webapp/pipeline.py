@@ -826,6 +826,61 @@ def submit_qc_solve(settings: Settings, jm: JobManager, safe: str) -> Job:
     return jm.submit("qc_solve", body, target=safe)
 
 
+def submit_rescue_unsolved(settings: Settings, jm: JobManager, safe: str) -> Job:
+    """"Try harder to locate these subs" — the deep-image rescue, on demand.
+
+    On a faint / star-poor target a single 10 s sub has too few stars for ASTAP,
+    so most subs stay *accepted but un-located* and ``run_stack`` silently leaves
+    them out — the beginner's picture stays a noisy handful of frames. The cure
+    already exists and is measured (``seestack.solve.bootstrap``: integrate the
+    un-located subs into one deeper image, solve **that** once, and propagate the
+    position back to each sub), but until now it could only be reached by finding
+    ``astap_bootstrap_solve`` in Settings — which is exactly the user who does not
+    know to look.
+
+    So this runs **only** the rescue: no QC pass and, deliberately, no per-sub
+    solve pass. Re-running the ladder that already failed on every one of these
+    subs would cost minutes and locate nothing new; the rescue is the new lever,
+    and it is what the button promises.
+
+    Independent of ``settings.astap_bootstrap_solve``: the user asked for it by
+    pressing the button, which is a stronger signal than a global default. The
+    setting keeps its own meaning — "do this automatically from now on" — and is
+    neither read nor written here, so nothing about the install changes.
+
+    Non-destructive: the rescue only ever *adds* a WCS to a sub that had none,
+    never touches an already-solved or rejected sub, and skips any member it
+    cannot register confidently (see the module docstring).
+    """
+    def body(job: Job) -> dict[str, Any]:
+        lib = Library.open_or_create(settings.resolved_library_root)
+        try:
+            proj = lib.open_target(safe)
+            try:
+                summary = dict(run_qc_and_solve(
+                    proj,
+                    astap_path=settings.astap_path,
+                    astap_fov_deg=settings.astap_fov_deg,
+                    astap_timeout_s=settings.astap_timeout_s,
+                    max_workers=settings.cpu_workers,
+                    run_qc=False,
+                    run_solve=False,
+                    bootstrap_solve=True,
+                    progress=_progress(jm, job),
+                    should_stop=job.cancel_requested,
+                ))
+            finally:
+                proj.close()
+            lib.refresh_target_stats(safe)
+            if job.cancel_requested():
+                summary["cancelled"] = True
+            return summary
+        finally:
+            lib.close()
+
+    return jm.submit("rescue_unsolved", body, target=safe)
+
+
 def submit_process_target(settings: Settings, jm: JobManager, safe: str) -> Job:
     """One-click "process this target": QC + plate-solve every frame, auto-grade
     (when enabled), then stack — the whole ``drop files → good image`` middle in

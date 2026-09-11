@@ -83,6 +83,26 @@ def trigger_qc_solve(safe: str, request: Request) -> dict[str, str]:
     return {"job_id": job.id}
 
 
+@router.post("/api/targets/{safe}/rescue-unsolved")
+def trigger_rescue_unsolved(safe: str, request: Request) -> dict[str, str]:
+    """"Try harder to locate these subs" — run the deep-image rescue on demand.
+
+    The un-located subs of a faint target are combined into one deeper image,
+    that image is plate-solved once, and the position is copied back to each sub
+    so the whole night can finally stack. Additive and non-destructive (a sub
+    that already has a position is never touched), and it runs regardless of the
+    ``astap_bootstrap_solve`` setting — pressing the button *is* the consent;
+    the setting stays the separate question of doing it automatically."""
+    settings = deps.get_settings(request)
+    jm = deps.get_job_manager(request)
+    # Ensure target exists.
+    lib, proj = deps.open_target_project(request, safe)
+    proj.close()
+    lib.close()
+    job = pipeline.submit_rescue_unsolved(settings, jm, safe)
+    return {"job_id": job.id}
+
+
 @router.post("/api/targets/{safe}/process")
 def trigger_process_target(safe: str, request: Request) -> dict[str, str]:
     """One-click "process this target": QC + solve, auto-grade (when enabled),

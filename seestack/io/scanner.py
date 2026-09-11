@@ -1238,42 +1238,55 @@ def run_qc_and_solve(
                         retry_ok, project.get_meta("name"),
                     )
 
-        # Stack-then-solve bootstrap: if the per-sub pass left most subs unsolved
-        # (a faint / sparse-star field), integrate the accepted-but-unsolved subs
-        # into a deep image, solve that once, and propagate the WCS back — so the
-        # whole burst can stack instead of the handful that solved individually.
-        # Opt-in and self-guarded (a no-op unless enough subs stayed unsolved).
-        if bootstrap_solve and not _stopped(should_stop):
-            try:
-                from seestack.solve.bootstrap import bootstrap_solve as _bootstrap
+    # Stack-then-solve bootstrap: if the per-sub pass left most subs unsolved
+    # (a faint / sparse-star field), integrate the accepted-but-unsolved subs
+    # into a deep image, solve that once, and propagate the WCS back — so the
+    # whole burst can stack instead of the handful that solved individually.
+    # Opt-in and self-guarded (a no-op unless enough subs stayed unsolved).
+    #
+    # Deliberately **outside** the ``run_solve`` block, so the rescue can also be
+    # asked for on its own (``run_qc=False, run_solve=False, bootstrap_solve=True``)
+    # — that is the "try harder to locate these" action, which must not re-run the
+    # per-sub ladder that already failed on every one of these subs. Every caller
+    # that asks for the bootstrap alongside a solve pass is unaffected: they pass
+    # ``run_solve=True``, and the cancel check is the same one it had inside.
+    if bootstrap_solve and not _stopped(should_stop):
+        try:
+            from seestack.solve.bootstrap import bootstrap_solve as _bootstrap
 
-                bres = _bootstrap(
-                    project,
-                    astap_path=str(astap_path) if astap_path is not None else None,
-                    fov_deg=astap_fov_deg if astap_fov_deg is not None else 1.3,
-                    timeout_s=astap_timeout_s if astap_timeout_s is not None else 60.0,
-                )
-                if bres.engaged:
-                    summary["bootstrap_engaged"] = True
-                    summary["bootstrap_solved"] = bres.deep_solved
-                    # Which of the two references the burst was given: a deep
-                    # image this run solved, or an already-solved sub's own
-                    # verified WCS. Additive and read by nobody yet — it is what
-                    # makes a job summary say *how* the rescue happened.
-                    summary["bootstrap_anchored"] = bres.anchored_on_solved_sub
-                    summary["bootstrap_propagated"] = bres.n_propagated
-                    if bres.n_propagated:
-                        # ``Project`` has no ``.name`` attribute — the target's name
-                        # lives in its meta table. Reading the attribute raised
-                        # *inside* this try, so the one line that reports a
-                        # **successful** rescue turned into the "bootstrap failed"
-                        # warning below it.
-                        log.info(
-                            "stack-then-solve bootstrap rescued %d sub(s) for %s",
-                            bres.n_propagated, project.get_meta("name"),
-                        )
-            except Exception as exc:  # noqa: BLE001 — a bootstrap failure is non-fatal
-                log.warning("stack-then-solve bootstrap failed: %s", exc)
+            bres = _bootstrap(
+                project,
+                astap_path=str(astap_path) if astap_path is not None else None,
+                fov_deg=astap_fov_deg if astap_fov_deg is not None else 1.3,
+                timeout_s=astap_timeout_s if astap_timeout_s is not None else 60.0,
+            )
+            if bres.engaged:
+                summary["bootstrap_engaged"] = True
+                summary["bootstrap_solved"] = bres.deep_solved
+                # Which of the two references the burst was given: a deep
+                # image this run solved, or an already-solved sub's own
+                # verified WCS. Additive and read by nobody yet — it is what
+                # makes a job summary say *how* the rescue happened.
+                summary["bootstrap_anchored"] = bres.anchored_on_solved_sub
+                summary["bootstrap_propagated"] = bres.n_propagated
+                if bres.n_propagated:
+                    # ``Project`` has no ``.name`` attribute — the target's name
+                    # lives in its meta table. Reading the attribute raised
+                    # *inside* this try, so the one line that reports a
+                    # **successful** rescue turned into the "bootstrap failed"
+                    # warning below it.
+                    log.info(
+                        "stack-then-solve bootstrap rescued %d sub(s) for %s",
+                        bres.n_propagated, project.get_meta("name"),
+                    )
+            # What it made of the target, engaged or not — the bootstrap's own
+            # sentence. Additive, and the only thing a job that asked for *just*
+            # the rescue ("try harder") has to report when it rescued nothing:
+            # without it such a job finishes on an empty summary.
+            if bres.reason:
+                summary["bootstrap_reason"] = bres.reason
+        except Exception as exc:  # noqa: BLE001 — a bootstrap failure is non-fatal
+            log.warning("stack-then-solve bootstrap failed: %s", exc)
 
     return summary
 
