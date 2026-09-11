@@ -3185,6 +3185,16 @@ def _stack_target(
     Stack form for a never-configured target, so a watching beginner sent it too.
     """
     from seestack.stack.stacker import run_stack
+    from webapp.field_fulls import (
+        drizzle_scale_of,
+        field_fulls_of_sky,
+        native_frame_shape,
+    )
+
+    # How many field-fulls of sky this run's canvas ends up covering — filled in
+    # below, once the stack has a canvas and while the project is still open.
+    # None until then, and on any target whose native frame shape can't be read.
+    _field_fulls: float | None = None
 
     # Option precedence:
     #   global settings.default_stack_options
@@ -3339,6 +3349,21 @@ def _stack_target(
                     proj.set_meta(
                         f"{CALIBRATION_WARNINGS_META_PREFIX}{result.run_id}",
                         json.dumps(_cal_warnings))
+        # How many single-frame field-fulls of sky this run's canvas covers, so
+        # the Jobs summary's thin-stack heads-up is a claim about a *pixel*
+        # rather than about the target's frame count (see
+        # :mod:`webapp.field_fulls`). Read here, while the project is still
+        # open, from the same helper the History/Gallery/Dashboard listings use.
+        # Best-effort: any failure leaves it None, which every reader treats as
+        # "no scaling" — the behaviour before this field existed.
+        with contextlib.suppress(Exception):
+            _shape = native_frame_shape(proj)
+            if _shape is not None and result.canvas_shape:
+                _field_fulls = field_fulls_of_sky(
+                    result.canvas_shape[1], result.canvas_shape[0],
+                    frame_w=_shape[0], frame_h=_shape[1],
+                    drizzle_scale=drizzle_scale_of(opts_dict),
+                )
     finally:
         proj.close()
     lib.refresh_target_stats(safe)
@@ -3348,6 +3373,13 @@ def _stack_target(
         "run_id": result.run_id,
         "n_frames_used": result.n_frames_used,
         "canvas_shape": list(result.canvas_shape),
+        # How many single-frame field-fulls of sky that canvas covers (see
+        # :mod:`webapp.field_fulls`). The Jobs summary's thin-stack heads-up is a
+        # claim about one *pixel* — nine subs over a 3x3 raster is one sub
+        # everywhere — and the frame count above cannot answer it on a mosaic.
+        # None on a single field and whenever the frame shape can't be read;
+        # every reader treats that as "no scaling", i.e. today's behaviour.
+        "field_fulls": _field_fulls,
         "cancelled": result.cancelled,
         "errors": result.errors,
         "excluded_frames": result.excluded_frames,

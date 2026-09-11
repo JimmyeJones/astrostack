@@ -1168,6 +1168,11 @@ export interface DashboardStats {
      *  four — and the count is what makes a picture sound like the work it was.
      *  Absent for a run recorded before the app tracked it; say nothing then. */
     capture_nights?: number | null;
+    /** How many single-frame field-fulls of sky this run's canvas covers, so
+     *  the "N frames" badge's thin-stack cue is a claim about one pixel rather
+     *  than about the target's total (see `components/target/perPixel.ts`).
+     *  Absent on an older backend and on a single field — both read as 1. */
+    field_fulls?: number | null;
   }[];
   disk: {
     total_gb?: number; used_gb?: number; free_gb?: number;
@@ -2020,6 +2025,11 @@ export interface GalleryItem {
   // "no overlay for this one" — the correct answer for every run that didn't
   // record one.
   has_rejection_map?: boolean;
+  /** How many single-frame field-fulls of sky this run's canvas covers, so the
+   *  card's "N frames" badge asks its thin-stack question of one pixel rather
+   *  than of the target's total (see `components/target/perPixel.ts`). Absent
+   *  on an older backend and on a single field — both read as 1. */
+  field_fulls?: number | null;
 }
 
 // A finished Moon/Sun still, as the Gallery lists it alongside stack runs. It is

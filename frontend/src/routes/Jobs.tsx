@@ -194,11 +194,17 @@ export function processTargetSummary(r: Record<string, unknown>): {
     const used = Number(stack.n_frames_used ?? 0) || solved;
     let line = `Stacked ${used} frame${used === 1 ? "" : "s"} into a new master`;
     if (graded > 0) line += ` (auto-grade dropped ${graded})`;
-    // A thin auto-stack (≤4 combined frames) is the owner's "gibberish" case:
-    // the Jobs page would otherwise cheerfully report a green "Stacked 1 frame"
-    // with a View-result link and no hint the picture is just noise. Surface the
-    // same honest heads-up the Target page shows, right where the result lands.
-    const thin = thinStackWarning(used);
+    // A thin auto-stack (≤4 subs on one part of the picture) is the owner's
+    // "gibberish" case: the Jobs page would otherwise cheerfully report a green
+    // "Stacked 1 frame" with a View-result link and no hint the picture is just
+    // noise. Surface the same honest heads-up the Target page shows, right where
+    // the result lands — and read it per *pixel*, from the run's own
+    // `field_fulls`, or a 3x3 raster one sub deep reports "Stacked 9 frames"
+    // with no warning at all while the Target page calls it a single sub.
+    const thin = thinStackWarning(
+      used,
+      typeof stack.field_fulls === "number" ? stack.field_fulls : null,
+    );
     // Name the invisible outlier-rejection clean-up (e.g. the lone satellite/
     // plane trail a small walk-away auto-stack removed with min/max) — the honest
     // counterpart to "some frames were left out". Omit it on a thin stack, where
