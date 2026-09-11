@@ -18,6 +18,130 @@ is a queue.
 
 ---
 
+## 2026-09-11 (Builder, branch `claude/sweet-babbage-okb3cy`) — one feature, end to end; the docstring-caller audit terminated clean; and a page that was 8,194 px before a browser said so
+
+**The run.** One task, shipped as one independently-green commit: **v0.423.0** — the
+glossary reaches the web app. Full entry in [`SHIPPED.md`](SHIPPED.md). A single
+substantial feature was the whole run, which AGENTS.md §2 allows explicitly; the
+alternative on offer was a marginal one, and the backlog is still dry.
+
+### The baseline came from CI, and that is now the second run to do it
+
+CI run **1621** on `c07309b9` — the exact tree I branched from — is green. That is
+the §5 gate run by the backstop §8 already trusts, and it costs nothing, where a
+local baseline costs ~31 minutes and, worse, **cannot be edited around**: the
+local one I had started was killed the moment CI answered, which freed the tree.
+The `j3s8pj` run recorded this first; it is worth doing every time.
+
+### Where the task came from, since "Bugs (fix these first)" is still dry
+
+Sixth consecutive run to report it so. Nothing in "Features that serve real
+workflows" was startable either (the Scout's Moon planner shipped as v0.422.0 the
+run before). So the task came from **§1's standing "audit every screen for
+jargon"** item — and the thing that made it worth a whole run rather than a
+tooltip was found by grepping rather than by reasoning:
+
+`docs/glossary.md` had existed since the desktop days, saying in its own first
+paragraph *"the goal is that nobody has to leave the app to understand any
+setting"* — and `docker/Dockerfile` copies `frontend/`, `seestack/`, `webapp/`,
+`pyproject.toml` and `README.md` and nothing else. **A promise the shipped image
+could not physically keep**, invisible to every checkout, test run and CI job by
+construction. The generalisation worth keeping: **§8's rule has a second
+direction.** The written form ("green means the checkout passed, not that the
+owner's install works") points at things that *break* in the image. This one
+never broke — it was simply not there, and nothing anywhere was red. So the
+question to ask of a file the app reads is not only "does the image build with
+it?" but **"is it in the image at all?"**. `tests/test_image_contract.py` now
+carries the general form: every extension present in `seestack/data/` must be
+declared as package data.
+
+### The finding a browser made and no amount of code reading would have
+
+The first build of `/glossary` rendered all 38 entries open. It passed `tsc`,
+vitest, the endpoint tests and a dogfood pass with **no console errors and
+nothing overflowing** — the probe's definition of CLEAN — and it was
+**8,194 px tall on a 420 px phone**: nearly three times the tallest page in the
+app (`/life-list`, 3,094 px), on the product whose standing owner complaint is
+*"I have to scroll a fair bit to get to the actual info."* Collapsed into the
+`FrameColumnGuide` disclosure idiom it measures **2,803 px**.
+
+Two things about that are reusable:
+
+1. **The probe's height list is a finding, not a footnote.** It is printed on
+   every pass and is usually stable, so it reads as background — but it is the
+   only automatic check on the one thing the owner has actually complained about,
+   and here it caught a regression that *every other gate called clean*. Read it
+   on any run that adds a page.
+2. **Dogfood the change, not just the build.** The measurement cost one extra
+   pass, taken from a **throwaway copy of the tree** (the `2xp5ja` run's trick:
+   `tar` the repo into the scratchpad excluding `.venv`/`.git`/`node_modules`/
+   `webapp/static`, symlink `frontend/node_modules` back, run with `DOGFOOD_DIR`
+   and `ASTROSTACK_PORT` set) so it never touched the repo's `webapp/static`
+   while `pytest` was running. `/glossary` is now in `dogfood_probe.mjs`'s route
+   table; a new route that is never probed is measured by nobody.
+
+### The alias list that was written and then deleted
+
+The parser originally split `"Alignment / registration"` into searchable aliases.
+The first test written against a *real* heading disproved the whole idea: every
+alias is a **substring of the heading it came from**, so the page's plain
+substring search already finds the entry by any of them, and the alias branch was
+a rule only a synthetic fixture could ever exercise. That is the audit's
+"fixtures that cannot exhibit their bug" shape, caught before shipping rather
+than after. The tell was cheap and general: **a test that has to invent data the
+production source cannot produce is testing a branch the production source cannot
+reach.**
+
+### The "one definition, N surfaces" audit — RUN, and CLEAN
+
+The `2xp5ja` run handed forward a method: *grep a shared helper's callers against
+the list its own docstring gives*, which found v0.422.1–.2 and, unlike a sweep,
+terminates. I ran it. `grep -rniE "one definition|the one place|must never
+disagree|never drift|single source of truth|N surfaces"` over `seestack/`,
+`webapp/` and `frontend/src/` returns ~60 claim sites; the ones that **enumerate**
+their readers were checked against the actual call sites:
+
+- `qc/grading.PER_POINTING_METRICS` ("every caller that ranks or compares frames
+  must split by pointing for these and only these") — **holds**. The rankers are
+  `grade_frames`, `qc/bulk_select`, `stack/weighting._positional_medians` (per
+  panel, with a `_MIN_PANEL_FRAMES` fallback) and
+  `stacker._panel_transparency_ratios`; all four split. `reference.pick_central_frame`
+  ranks on FWHM, which is correctly target-wide.
+- `coverage_trim.well_covered_mask` ("the one place the 'enough frames landed
+  here' rule lives") — **holds**: `largest_covered_rect` and
+  `thumbnail.stack_detail_mask`, both named.
+- `fullres.ts` ("the four surfaces cannot drift into four different claims") —
+  **holds**: `SavePictureMenu` (Target hero + History), the Dashboard strip and
+  `ImageLightbox`. The editor's own "Download full-res PNG" is a *different*
+  render (`write_full_res_png`, genuinely uncapped), so it is right not to use
+  these helpers.
+- `stale_crop.py` / `mosaicTrim.sharePctLabel` (three surfaces, one ratio) —
+  **holds**, and the constant is already grep-guarded across the language
+  boundary.
+- `gallery._scan_unexported_edits` (two callers), `calibration.folder_as_master`
+  / `existing_master_like` (one definition of "covers"),
+  `io/scanner._MOSAIC_TARGET_SUFFIX` (three dependants),
+  `stacker.kappa_min_frames` / `auto_reject_method` — all **hold**.
+
+**Nothing was found.** Recorded so the next run does not re-run it: this vein is
+drained until a new shared helper is written, and the productive moment to re-run
+it is *when a helper gains a caller or an optional parameter*, not on a schedule.
+
+### Green gates
+
+Python **5,719 passed / 2 skipped** (31:01). Because three frontend files and
+`scripts/dogfood_probe.mjs` were edited *during* that run, every Python test that
+reads a file from the tree (the mirror/drift/contract set, 44 files, 1,016 tests)
+was re-run afterwards — clean. Frontend: `npx tsc --noEmit` clean and verified
+really compiling (`--listFiles` shows 833 `src/` files, per the §7 trap), vitest
+**263 files / 3,693 tests** (260/3,654 on main), `npx vite build` ✓. The
+package-data test was watched go red by reverting the `data/*.md` pattern, and
+the artifact was checked as an artifact: `pip wheel --no-deps` and
+`zipfile.namelist()` confirm `seestack/data/glossary.md` is *in the wheel*, which
+is the only form of "it ships" that means anything here.
+
+---
+
 ## 2026-09-11 (Builder, branch `claude/sweet-babbage-j3s8pj`) — the brief's fourth payout, and the first new beginner feature in fifteen versions
 
 **The run.** Two tasks, shipped as two independently-green commits: **v0.421.0** (the thin-stack cue
