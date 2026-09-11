@@ -760,6 +760,33 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   add the same sentence, and check the wordings agree on the *direction* and *magnitude* of the claim. **Care:**
   don't collapse genuinely different questions into one — "have I shot enough?" (a goal) and "would another hour
   help?" (a marginal return) are related but not the same; this is about the *marginal-return* sentence only.
+
+  **⚪ MEASURED AND STOOD DOWN — do NOT build this; the disagreement it exists to fix is not there
+  (Builder 2026-09-11, branch `claude/sweet-babbage-kg3yfc`).** I did the entry's own first step — "check the
+  wordings agree on the *direction* and *magnitude* of the claim" — against the real code rather than from
+  recall, and it closes the idea instead of sizing it.
+
+  **The two sentences are already one voice: the same formula, in the same currency.**
+  `nightplan.noise_gain_from_more_time` is `1 − √(t/(t+h))`; `integrationTrend`'s projection is
+  `1 − 2^−p` with `p` clamped to the ideal `0.5`, which is *the same expression* for `h = t`. Measured at
+  the one point where both name the same extra time (a 1-hour target, where "another hour" **is** "double
+  your time") they agree to the decimal: **29.29 % vs 29.29 %**. Direction agrees everywhere, and
+  `integrationTrend` uses the target's own *measured* falloff exponent capped at ideal, so it can only ever
+  under-claim relative to the theory — never over-claim.
+
+  **What looks like a conflict is two different `h`, each stated in its own sentence.** At 20 h captured the
+  Tonight card says ~**2.4 %** (for `h` = 1 hour) and the Target page says ~**29.3 %** (for `h` = 20 hours) —
+  both correct, and neither is ambiguous, because each sentence names its own extra time out loud ("another
+  hour" / "double your 20.0 h"). Full table, if it is ever re-examined (captured → +1 h → double-at-ideal):
+  0.25 h → 55.3 / 29.3; 0.75 → 34.5 / 29.3; 1.0 → 29.3 / 29.3; 2.0 → 18.4 / 29.3; 5.0 → 8.7 / 29.3;
+  20.0 → 2.4 / 29.3.
+
+  **And the other half of the slice is a cost, not a win.** "So the readiness surface can add the same
+  sentence" means putting a *third* marginal-return sentence on a page, against a standing owner complaint
+  that the UI is busy and AGENTS.md §1's "prefer a consolidation over a new card". The retrospective
+  surfaces this entry lists alongside them — `oneFrameVsStack` / `StackNoiseBadge`'s "stacking cut your noise
+  ~N×" — answer *"what did stacking already buy me?"*, which the entry's own Care note fences off as a
+  genuinely different question. So there is nothing left that is both in scope and worth doing.
 - **NEW (Builder 2026-07-30, found while shipping the Check & locate outcome line v0.222.2) — the legacy desktop
   dialog reports "solved N/M" from a *progress counter*, so it claims a perfect solve on a field where nothing
   located.** *(Correctness of a user-facing figure — but in the **deprioritised** desktop GUI, so low priority;
