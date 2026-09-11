@@ -77,13 +77,40 @@ function Stars({ stars }: { stars: SkyStar[] }) {
   return (
     <group>
       <points geometry={brightGeom}>
-        <pointsMaterial size={1.6} sizeAttenuation vertexColors depthWrite={false} />
+        <pointsMaterial size={BRIGHT_STAR_POINT_SIZE} sizeAttenuation vertexColors depthWrite={false} />
       </points>
       <points geometry={faintGeom}>
         <pointsMaterial size={0.9} sizeAttenuation vertexColors depthWrite={false} />
       </points>
     </group>
   );
+}
+
+/** The `pointsMaterial` size the bright half of the backdrop is drawn at. Named
+ * because `starPointDiameterPx` converts it to the pixels the label has to
+ * clear, so the two cannot be changed apart. */
+export const BRIGHT_STAR_POINT_SIZE = 1.6;
+export const STAR_LABEL_FONT_PX = 10;
+/** How far **below** the star its name is drawn. The label used to be centred
+ * on the star itself, so the star's own dot was painted through the middle of
+ * its own word — "Rigel" read as "R∎el" on the dogfood screenshots. Below,
+ * rather than beside, so a label never reaches towards the next star along. */
+export const STAR_LABEL_OFFSET_PX = 12;
+
+/**
+ * How wide the star's dot is drawn, in screen pixels.
+ *
+ * three.js draws an attenuated point at `size × (viewportHeight / 2) ÷
+ * distance` pixels across. Note what is *not* in that: the field of view. The
+ * projection matrix moves the point around the screen as you zoom, but the
+ * sprite stays the same handful of pixels — which is why one fixed label offset
+ * works across the whole zoom range, and why it is the *viewport height* that
+ * decides whether it is enough.
+ */
+export function starPointDiameterPx(
+  worldSize: number, viewportHeightPx: number, distance = STAR_RADIUS,
+): number {
+  return (worldSize * viewportHeightPx) / (2 * distance);
 }
 
 /** Labels for the most recognisable stars (kept small to avoid clutter). */
@@ -98,9 +125,13 @@ function StarLabels({ stars }: { stars: SkyStar[] }) {
         const v = raDecToVector(s.ra_deg, s.dec_deg, STAR_RADIUS - 1);
         return (
           <Html key={s.name} position={[v.x, v.y, v.z]} center style={{ pointerEvents: "none" }}>
+            {/* `center` puts this box on the star; the span then steps down off
+                it, because drei owns the box's own transform. */}
             <span style={{
-              color: "rgba(220,228,255,0.7)", fontSize: 10, whiteSpace: "nowrap",
+              color: "rgba(220,228,255,0.7)", fontSize: STAR_LABEL_FONT_PX, whiteSpace: "nowrap",
               textShadow: "0 0 4px #000",
+              display: "inline-block",
+              transform: `translateY(${STAR_LABEL_OFFSET_PX}px)`,
             }}>
               {s.name}
             </span>
@@ -162,7 +193,15 @@ function ImagePlane({
  * has zoom disabled, so two fingers are free for us). preventDefault stops the
  * page from scrolling/pinch-zooming underneath.
  */
-function FovZoom({ min = 12, max = 85, step = 0.06 }: { min?: number; max?: number; step?: number }) {
+/** The narrowest and widest the offline viewer's own zoom will go. Exported
+ * because `initialSkyView` opens the camera inside the same range — an initial
+ * FOV outside it would jump to an edge on the viewer's first scroll. */
+export const OFFLINE_FOV_MIN = 12;
+export const OFFLINE_FOV_MAX = 85;
+
+function FovZoom({ min = OFFLINE_FOV_MIN, max = OFFLINE_FOV_MAX, step = 0.06 }: {
+  min?: number; max?: number; step?: number;
+}) {
   const { camera, gl } = useThree();
   useEffect(() => {
     const el = gl.domElement;
@@ -227,12 +266,122 @@ function Scene({ stars, images, onSelect }: {
   );
 }
 
+/** How many picture-widths of sky to frame around the picture the viewer opens
+ * on — the same margin `AladinSky` has always used for its own initial `fov`,
+ * so switching between the two modes lands on the same framing. */
+const OFFLINE_FRAME_MARGIN = 6;
+/** The direction the viewer used to open on, unconditionally: the camera sat at
+ * `[0, 0, 0.1]` looking at the origin, i.e. down −Z, which in this file's
+ * convention (`raDecToVector`) is RA 270°, Dec 0°. Kept exactly, as the answer
+ * for a sky with neither a picture nor a star to aim at. */
+const OFFLINE_FALLBACK: SkyView = { raDeg: 270, decDeg: 0, fovDeg: 70 };
+/** Dec is clamped this far off the poles. Looking straight along ±Y is
+ * `OrbitControls`' own gimbal singularity — the azimuth it derives from the
+ * camera position is undefined there — and a tenth of a degree is well under a
+ * pixel at every FOV this viewer allows. */
+const OFFLINE_MAX_DEC = 89.9;
+
+export interface SkyView {
+  raDeg: number;
+  decDeg: number;
+  fovDeg: number;
+}
+
+function finite(v: number | null | undefined): v is number {
+  return v != null && Number.isFinite(v);
+}
+
+/**
+ * Where the offline star viewer opens: **on your newest picture**.
+ *
+ * It used to open on a fixed patch of sky — RA 18h, Dec 0 — whatever the user
+ * had shot, which the "Real sky (online)" viewer has never done (`AladinSky`
+ * centres on the newest picture and frames it). The backdrop is the bundled
+ * bright-star catalogue, sixty stars over the whole celestial sphere, so at the
+ * old 70° FOV that fixed patch drew about four dots on black with the user's
+ * own pictures nowhere in the view. Landing there reads as a map that failed to
+ * load, and it is the first thing a beginner now sees, because "Stars
+ * (offline)" is the mode Sky Map opens in.
+ *
+ * The rules, in order:
+ *   1. **The newest picture**, framed the way `AladinSky` frames it
+ *      (`OFFLINE_FRAME_MARGIN` picture-widths), clamped into the viewer's own
+ *      zoom range. "Newest" is `sortOldestFirst`'s last, the same picture the
+ *      online viewer picks and the one drawn on top where footprints overlap.
+ *   2. **The brightest star in the backdrop**, wide, when there are no pictures
+ *      — a first-run install then opens on something named and recognisable
+ *      instead of on empty sky. Taken from the catalogue the viewer is already
+ *      drawing rather than hard-coded, so it cannot point somewhere the
+ *      backdrop has nothing.
+ *   3. `OFFLINE_FALLBACK` — exactly the old direction and FOV — when there is
+ *      neither.
+ *
+ * A picture or star with an unusable coordinate is skipped rather than aimed
+ * at: NaN would leave the camera pointing nowhere at all.
+ */
+export function initialSkyView(
+  images: readonly SkyImage[] | null | undefined,
+  stars: readonly SkyStar[] | null | undefined,
+): SkyView {
+  const placed = sortOldestFirst(
+    (images ?? []).filter((i) => finite(i.ra_deg) && finite(i.dec_deg)),
+  );
+  const newest = placed.length > 0 ? placed[placed.length - 1] : null;
+  if (newest) {
+    const width = newest.width_deg;
+    const fov = finite(width) && width > 0
+      ? width * OFFLINE_FRAME_MARGIN
+      : OFFLINE_FALLBACK.fovDeg;
+    return aim(newest.ra_deg, newest.dec_deg, fov);
+  }
+  let brightest: SkyStar | null = null;
+  for (const s of stars ?? []) {
+    if (!finite(s.ra_deg) || !finite(s.dec_deg) || !finite(s.mag)) continue;
+    if (brightest === null || s.mag < brightest.mag) brightest = s;
+  }
+  if (brightest) return aim(brightest.ra_deg, brightest.dec_deg, OFFLINE_FOV_MAX);
+  return OFFLINE_FALLBACK;
+}
+
+function aim(raDeg: number, decDeg: number, fovDeg: number): SkyView {
+  return {
+    raDeg,
+    decDeg: Math.min(OFFLINE_MAX_DEC, Math.max(-OFFLINE_MAX_DEC, decDeg)),
+    fovDeg: Math.min(OFFLINE_FOV_MAX, Math.max(OFFLINE_FOV_MIN, fovDeg)),
+  };
+}
+
+/** Where to put the camera so that looking at the origin looks at `view`.
+ *
+ * The camera sits a hair off the centre of the sphere and `OrbitControls` aims
+ * it at the origin, so the direction it ends up looking is from the camera
+ * *towards* the centre — the negative of its own position. Putting it at
+ * `−r · v̂` therefore looks along `+v̂`, which is the coordinate asked for. */
+export function offlineCameraPosition(
+  view: SkyView, radius = 0.1,
+): [number, number, number] {
+  const v = raDecToVector(view.raDeg, view.decDeg, -radius);
+  return [v.x, v.y, v.z];
+}
+
 /** Self-contained Three.js viewer (bright-star backdrop, no internet). */
 function OfflineSky({ stars, images, onSelect }: {
   stars: SkyStar[]; images: SkyImage[]; onSelect: (i: SkyImage) => void;
 }) {
+  // Decided once, on the first render, and never again: this is where the
+  // camera *opens*, not where it belongs. The page's own query can refetch (a
+  // window focus is enough), and re-deriving the camera props from newer data
+  // would yank the view back out of wherever the user had dragged it.
+  const [view] = useState(() => initialSkyView(images, stars));
   return (
-    <Canvas camera={{ position: [0, 0, 0.1], fov: 70, near: 0.01, far: 1000 }}>
+    <Canvas
+      camera={{
+        position: offlineCameraPosition(view),
+        fov: view.fovDeg,
+        near: 0.01,
+        far: 1000,
+      }}
+    >
       <Scene stars={stars} images={images} onSelect={onSelect} />
     </Canvas>
   );
