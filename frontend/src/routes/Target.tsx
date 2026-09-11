@@ -521,7 +521,9 @@ export function TargetView() {
   // look noisy (a stack only smooths noise as it combines more subs), so say so
   // rather than presenting a single-sub result as a finished picture.
   const thinStack = useMemo(
-    () => thinStackWarning(latestRun?.n_frames_used),
+    // …judged on how deep the picture is where you look, not on the target's
+    // frame count: a mosaic spreads its subs across the raster (`field_fulls`).
+    () => thinStackWarning(latestRun?.n_frames_used, latestRun?.field_fulls),
     [latestRun],
   );
   // Which "next best move" tip is currently in play (or null when none) — the
@@ -534,6 +536,7 @@ export function TargetView() {
         integrationS: latestRun?.total_exposure_s,
         nUnsolved: unsolvedCount,
         softStars: softerThanUsual(runs.data),
+        fieldFulls: latestRun?.field_fulls,
       })?.kind ?? null,
     [latestRun, unsolvedCount, runs.data],
   );
@@ -1153,6 +1156,7 @@ export function TargetView() {
               integrationS={latestRun.total_exposure_s}
               nUnsolved={unsolvedCount}
               runs={runs.data}
+              fieldFulls={latestRun.field_fulls}
             />
           ) : null },
           /* "About as clean as your sky allows": when this target's measured noise

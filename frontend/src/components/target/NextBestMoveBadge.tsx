@@ -28,6 +28,7 @@ export function NextBestMoveBadge(
     integrationS,
     nUnsolved,
     runs,
+    fieldFulls,
   }: {
     name: string;
     nFramesUsed: number | null | undefined;
@@ -37,6 +38,11 @@ export function NextBestMoveBadge(
      * derive the relative soft-star signal. Optional; the tip degrades to the
      * non-soft ladder when it's missing. */
     runs?: { stack_fwhm_px?: number | null }[] | null;
+    /** How many field-fulls of sky the stack's canvas covers
+     * (`StackRun.field_fulls`), so the "how much have I got?" rungs are asked
+     * of one part of a mosaic rather than of the whole raster. Optional — a
+     * single field, and any caller without it, read exactly as before. */
+    fieldFulls?: number | null;
   },
 ) {
   const tip = useMemo(
@@ -46,8 +52,9 @@ export function NextBestMoveBadge(
         integrationS,
         nUnsolved,
         softStars: softerThanUsual(runs),
+        fieldFulls,
       }),
-    [nFramesUsed, integrationS, nUnsolved, runs],
+    [nFramesUsed, integrationS, nUnsolved, runs, fieldFulls],
   );
   if (!tip) return null;
 

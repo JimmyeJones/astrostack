@@ -869,6 +869,15 @@ class StackRunOut(BaseModel):
     # those surfaces say so — and offer to finish the export — instead of
     # silently presenting the wrong image. False for every ordinary run.
     unexported_edit: bool = False
+    # How many single-frame *field-fulls of sky* this run's canvas covers — 1.0
+    # for a single field, ~4.0 for a 2x2 no-overlap mosaic (see
+    # :mod:`webapp.field_fulls`). A mosaic's canvas grows as its panels are shot,
+    # so ``total_exposure_s`` alone cannot say whether a target got *deeper* or
+    # merely *wider* between two runs; dividing by this gives the per-pixel
+    # integration the noise-vs-time trend actually depends on. None when the
+    # target records no native frame shape or the run no canvas — the reader then
+    # treats it as 1.0, which is exactly the pre-field behaviour. Additive.
+    field_fulls: float | None = None
     # True when the *unattended* pass finished this run into a picture for the
     # user (it stamped a "what Auto did" note beside the run). Lets the hero
     # offer "leave this target's pictures alone" exactly where someone meets a

@@ -21,6 +21,11 @@ from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
 from seestack.stackhealth import grain_verdict, seam_verdict
 from webapp import deps, pipeline
 from webapp.capture_nights import capture_night_count, capture_night_range
+from webapp.field_fulls import (
+    drizzle_scale_from_options,
+    field_fulls_of_sky,
+    native_frame_shape,
+)
 from webapp.preview_orient import (
     baked_north_up_deg,
     recovered_north_up_deg,
@@ -841,6 +846,14 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             r.id: bool(proj.get_meta(f"{AUTO_EDIT_NOTE_PREFIX}{r.id}"))
             for r in runs
         }
+        # The target's native sub shape, read **once** for the whole listing, so
+        # each run can report how many field-fulls of sky its own canvas covers.
+        # A mosaic's canvas grows as its panels are shot, and a noise-vs-time
+        # trend read from total integration alone then measures the canvas
+        # widening rather than the picture deepening (see
+        # ``integrationTrend``). None on a target with no measured frame shape —
+        # every run then reports None and the readers fall back to 1.0.
+        native_shape = native_frame_shape(proj)
         # The observer's longitude, so each run's capture window can be named by
         # the *observing night* it belongs to — the same noon-to-noon bucket the
         # Nights card and the imaging calendar use. Resolved while the library is
@@ -911,6 +924,13 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             engine_version=r.engine_version,
             unexported_edit=unexported.get(r.id, False),
             auto_edited=auto_edited.get(r.id, False),
+            field_fulls=(
+                field_fulls_of_sky(
+                    r.canvas_w, r.canvas_h,
+                    frame_w=native_shape[0], frame_h=native_shape[1],
+                    drizzle_scale=drizzle_scale_from_options(r.options_json),
+                ) if native_shape is not None else None
+            ),
         ))
     return out
 
