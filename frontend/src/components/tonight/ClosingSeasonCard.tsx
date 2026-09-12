@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { api } from "../../api/client";
-import { CLOSING_WHY, closingHeadline, closingTargetLine } from "../../closingSeason";
+import {
+  CLOSING_URGENT_WEEKS, CLOSING_WHY, closingHeadline, closingTargetLine,
+} from "../../closingSeason";
 
 /**
  * "Shoot these before they're gone" — your own targets whose season is ending.
@@ -54,7 +56,7 @@ export function ClosingSeasonCard({ minAlt }: { minAlt?: number }) {
             <Anchor component={Link} to={`/targets/${t.safe}`} fw={600}>
               {t.name}
             </Anchor>
-            {t.weeks_left <= 1 ? (
+            {t.weeks_left <= CLOSING_URGENT_WEEKS ? (
               <Badge size="sm" color="orange" variant="light">Last chance</Badge>
             ) : null}
             <Text size="xs" c="dimmed">{closingTargetLine(t)}</Text>

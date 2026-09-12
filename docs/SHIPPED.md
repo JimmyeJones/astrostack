@@ -1,5 +1,33 @@
 # Shipped — the record
 
+## v0.430.1 — 2026-09-12 — the last week of a season reaches the screen you were already looking at
+
+*(Builder, branch `claude/sweet-babbage-uawq1j` — the surfacing half of v0.430.0, PRIORITY 2–3. Frontend
+only: no endpoint, engine, config, schema, on-disk, API-shape or default change.)*
+
+**Why the card alone was not enough.** v0.430.0's whole premise is that *nobody goes looking* — a season
+closes quietly and the owner finds out next year. Putting the answer on the Tonight page answers it for
+somebody who already decided to plan, which is the same person `best_months` already served. The case that
+cannot wait for that decision is the narrow one: **a target whose season ends this week**. Spend the next
+clear night elsewhere and it is gone for a year.
+
+**So the narrow case, and only it, joins the Dashboard's notice board.** `ClosingSeasonNote` is one line and
+a link — a pointer, not the answer, with the detail left on the planner — ranked `advisory` (nothing is
+broken; it is an offer with a deadline), and self-hiding on an older backend, on a failed fetch, and most of
+the year. It goes *inside* the existing `NoticeBoard` rather than becoming one more always-on banner, which
+is the standing information-architecture rule (AGENTS.md §1).
+
+**One constant decides "urgent", for both surfaces.** `CLOSING_URGENT_WEEKS = 1` now drives the Tonight
+card's "Last chance" badge *and* what the Dashboard note will speak about, so the two can never disagree
+about which targets are the urgent ones — the drift that the "two surfaces answering one question in two
+roundings" family of bugs is made of. The Tonight card still lists the whole season; the Dashboard sees only
+the last week of it.
+
+**Tests (+6 vitest):** `urgentlyClosing` keeping only the rows at or under the bar; the sentence naming the
+target, the "last week" and "about a week" phrasings, and the singular/plural of the others in the same week
+("1 other target … is", "2 other targets … are"); and the note rendering nothing for a season five weeks
+out, for an empty answer, and for a backend that 404s.
+
 ## v0.430.0 — 2026-09-12 — "Shoot these before they're gone": the targets whose season is ending, before it ends
 
 *(Builder, branch `claude/sweet-babbage-uawq1j` — 🌟 NEW BEGINNER FEATURE, PRIORITY 2–3 (autonomy +
