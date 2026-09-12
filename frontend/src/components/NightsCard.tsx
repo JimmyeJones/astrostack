@@ -128,6 +128,34 @@ export function verdictBadge(verdict: string): { color: string; label: string } 
   }
 }
 
+/**
+ * Stop a `Badge` in this table shrinking below its own word.
+ *
+ * A Mantine `Badge` is `overflow: hidden; text-overflow: ellipsis`, so inside a
+ * table cell it contributes **no** min-content width: the column can be squeezed
+ * to nothing and the word silently becomes "SH…" — and because the clipping is
+ * *inside* the badge, scrolling the table never reveals it. Measured in a real
+ * browser at 420 px on the mosaic sample: the verdict `sharp` rendered 29 px wide
+ * against the 36 px its text needs, on the one column that exists to carry a
+ * word, under copy that tells the reader to act on it ("Spotted a soft or hazy
+ * night? Set it aside").
+ *
+ * `max-content` makes the badge ask for its own text, so the **table** grows and
+ * the scroll container scrolls — the honest failure for a table too wide for a
+ * phone, and the only one a gesture can undo. Content-independent: it follows
+ * whatever the label says rather than a width picked against today's three words.
+ */
+const NO_SHRINK = { minWidth: "max-content" } as const;
+
+/** …and the night's own date is one line, not three.
+ *
+ *  Same squeeze, other half: at 420 px the first column wrapped "16 Nov 2024"
+ *  over three lines and the rows stood 70 px tall against 31 px on a desktop.
+ *  Measured together with the badge fix: 70 px → 31 px a row, which on a target
+ *  shot across many nights is the standing "the pages are extremely busy"
+ *  priority paid back rather than spent. */
+const NO_WRAP = { whiteSpace: "nowrap" } as const;
+
 function NightRow({
   n,
   onSetAside,
@@ -147,11 +175,13 @@ function NightRow({
   const canSetAside = n.n_kept > 0 && !!n.start_utc && !!n.end_utc;
   return (
     <Table.Tr>
-      <Table.Td>
+      <Table.Td style={NO_WRAP}>
         <Group gap={6} wrap="nowrap">
           <Text size="sm">{nightDateLabel(n)}</Text>
           {n.is_best ? (
-            <Badge size="xs" variant="light" color="violet">sharpest</Badge>
+            <Badge size="xs" variant="light" color="violet" style={NO_SHRINK}>
+              sharpest
+            </Badge>
           ) : null}
           {earlyTip ? (
             // A marker on the night it describes, not another banner: the
@@ -159,7 +189,7 @@ function NightRow({
             // in the tooltip (and in `aria-label`, so it is reachable without a
             // pointer) exactly as the verdict badge's does.
             <HintAnchor label={earlyTip} multiline w={260}>
-              <Badge size="xs" variant="light" color="orange"
+              <Badge size="xs" variant="light" color="orange" style={NO_SHRINK}
                 aria-label={`ended early: ${earlyTip}`}>
                 ended early
               </Badge>
@@ -171,7 +201,7 @@ function NightRow({
             // so it is reachable without a pointer). Ten rows of prose would be a
             // wall on the page the owner already calls busy.
             <HintAnchor label={moonTip} multiline w={280}>
-              <Badge size="xs" variant="light" color="gray"
+              <Badge size="xs" variant="light" color="gray" style={NO_SHRINK}
                 aria-label={`bright Moon: ${moonTip}`}>
                 bright Moon
               </Badge>
@@ -200,13 +230,13 @@ function NightRow({
           // advertise itself as answerable.
           tip ? (
             <HintAnchor label={tip} multiline w={240}>
-              <Badge size="sm" variant="light" color={badge.color}
+              <Badge size="sm" variant="light" color={badge.color} style={NO_SHRINK}
                 aria-label={`${badge.label}: ${tip}`}>
                 {badge.label}
               </Badge>
             </HintAnchor>
           ) : (
-            <Badge size="sm" variant="light" color={badge.color}>
+            <Badge size="sm" variant="light" color={badge.color} style={NO_SHRINK}>
               {badge.label}
             </Badge>
           )

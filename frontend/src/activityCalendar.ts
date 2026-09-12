@@ -119,3 +119,45 @@ export function nightLabel(night: NightActivity, formatIntegration: (s: number) 
     night.targets.length > 0 ? ` across ${night.targets.join(", ")}` : "";
   return `${date} · ${formatIntegration(night.exposure_s)}${across}`;
 }
+
+/**
+ * The ISO dates of the cells that actually have a night, oldest first.
+ *
+ * The grid is drawn as week *columns*, so walking `weeks` and then days inside
+ * each is already chronological — this just drops the empty days and the leading
+ * padding. It is what makes the heatmap reachable without a pointer: the card
+ * keeps exactly one of these cells in the tab order (a roving `tabIndex`) and
+ * steps along this list with the arrow keys, instead of putting a tab stop on
+ * every night the owner has ever imaged.
+ */
+export function nightDates(weeks: DayCell[][]): string[] {
+  const dates: string[] = [];
+  for (const week of weeks) {
+    for (const day of week) {
+      if (day.night && day.date) dates.push(day.date);
+    }
+  }
+  return dates;
+}
+
+/**
+ * The date the arrow keys move to from `from`, or `null` at either end.
+ *
+ * `step` is +1 for "later" (ArrowRight/ArrowDown) and −1 for "earlier".
+ *
+ * With nothing to step from, **either** direction lands on the most recent
+ * night rather than on that direction's far end. The card always passes the
+ * cell that actually holds the tab stop, so this branch is the defensive one —
+ * but "earliest" would be wrong even there: the key was pressed on a cell, and
+ * answering it by jumping a year across the grid is not a step.
+ */
+export function stepNight(
+  dates: string[], from: string | null, step: 1 | -1,
+): string | null {
+  if (dates.length === 0) return null;
+  if (from === null) return dates[dates.length - 1];
+  const at = dates.indexOf(from);
+  if (at < 0) return null;
+  const next = at + step;
+  return next >= 0 && next < dates.length ? dates[next] : null;
+}

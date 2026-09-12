@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MosaicMapCard } from "./MosaicMapCard";
 import { panelGrid, panelShade, panelTooltip } from "./mosaicMap";
@@ -74,6 +74,71 @@ describe("MosaicMapCard", () => {
     // The map is readable without a pointer: every cell carries its numbers.
     expect(screen.getByLabelText("1 min over 8 subs — the thinnest panel")).toBeTruthy();
     expect(screen.getAllByLabelText("20 min over 120 subs").length).toBe(3);
+  });
+
+  it("answers a tap, which is the only gesture a phone has", async () => {
+    // Fail-before: the cells were wrapped in a plain `Tooltip`, which opens on
+    // `mouseenter` and on nothing else — so on the device this app is mostly
+    // read on, "how deep is that corner?" had no answer at all.
+    const thin = panel({ row: 1, col: 1, n_frames: 8, exposure_s: 80 });
+    vi.spyOn(client.api, "mosaicMap").mockResolvedValue(
+      map({
+        panels: [
+          panel({ row: 0, col: 0 }), panel({ row: 0, col: 1 }),
+          panel({ row: 1, col: 0 }), thin,
+        ],
+        thin,
+        text: "Your 2×2 mosaic is thinnest at the bottom-right.",
+      }),
+    );
+    renderCard();
+
+    await screen.findByText(/thinnest at the bottom-right/);
+    const cell = screen.getByLabelText("1 min over 8 subs — the thinnest panel");
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    fireEvent.click(cell);
+    // The sentence is now on the page as text, not only as the cell's own name.
+    await waitFor(() =>
+      expect(screen.getAllByText("1 min over 8 subs — the thinnest panel").length)
+        .toBeGreaterThan(0));
+
+    // …and hovering still does what it always did, for anyone with a mouse.
+    fireEvent.click(cell);
+    await waitFor(() =>
+      expect(screen.queryByText("1 min over 8 subs — the thinnest panel")).toBeNull());
+    fireEvent.mouseEnter(cell);
+    await waitFor(() =>
+      expect(screen.getAllByText("1 min over 8 subs — the thinnest panel").length)
+        .toBeGreaterThan(0));
+  });
+
+  it("puts ONE panel in the tab order, and the arrow keys walk the rest", async () => {
+    // `HintAnchor` gives its child `tabIndex=0`, which is right for a chip and
+    // wrong for a grid: this owner shoots wide mosaics and the engine allows 24
+    // panels a side, so one stop per cell would put dozens on the busiest page
+    // in the app. Fail-before: every cell was a tab stop.
+    vi.spyOn(client.api, "mosaicMap").mockResolvedValue(map());
+    renderCard();
+    await screen.findByText("Your mosaic, panel by panel");
+
+    const cells = screen.getAllByLabelText("20 min over 120 subs");
+    expect(cells.length).toBe(4);
+    expect(cells.map((c) => c.getAttribute("tabindex")))
+      .toEqual(["0", "-1", "-1", "-1"]);
+
+    fireEvent.keyDown(cells[0], { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(screen.getAllByLabelText("20 min over 120 subs")
+        .map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "0", "-1", "-1"]));
+
+    // …and it stops at the last panel rather than wrapping back to the first.
+    for (const key of ["ArrowRight", "ArrowRight", "ArrowRight"]) {
+      fireEvent.keyDown(screen.getAllByLabelText("20 min over 120 subs")[0], { key });
+    }
+    await waitFor(() =>
+      expect(screen.getAllByLabelText("20 min over 120 subs")
+        .map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "-1", "-1", "0"]));
   });
 
   it("renders nothing at all when the target isn't a mosaic", async () => {

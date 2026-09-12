@@ -11,7 +11,15 @@
 //     primary button rendering as "Edit imag" (v0.263.4);
 //   * a SQUEEZE PROBE — text shrunk *below* its own words without overflowing,
 //     which is the ribbon the overflow probe is blind to by construction (the
-//     Dashboard sample card, v0.264.4, was found by eye instead).
+//     Dashboard sample card, v0.264.4, was found by eye instead);
+//   * a CLIPPED-LABEL PROBE — a badge/chip narrower than the one word it exists
+//     to say. This is the overflow probe's own blind spot, and it is worth its
+//     own pass because the exclusion that creates it is right in general and
+//     wrong here: `text-overflow: ellipsis` reads as "the author chose to
+//     truncate", but Mantine's `Badge` ships it as component style, so *every*
+//     badge is silently exempt. That is how the Nights table's verdict went four
+//     dogfood passes rendering as "SH…" at 420 px — ellipsised inside the badge,
+//     where scrolling the table could never reveal it (v0.434.1).
 //
 // It also reports each page's full-page height, tallest first: the standing
 // information-architecture work is scored on exactly that number, and it kept
@@ -122,6 +130,41 @@ function overflowingLeaves() {
   return out;
 }
 
+/** Badges and chips rendered narrower than the single word they carry.
+ *
+ * A `Badge` is a label, not prose: there is no "read the rest elsewhere" for it,
+ * so an ellipsis inside one is never the deliberate truncation the overflow
+ * probe's `text-overflow` exclusion assumes. And because the clip is *inside*
+ * the badge, it survives any amount of scrolling — unlike a table that is merely
+ * too wide, which a swipe fixes.
+ *
+ * Deliberately narrow: only badge-shaped anchors, and only when the label really
+ * does not fit. Measured across 23 routes at 420 px on the sample library, that
+ * was exactly one hit before the fix and none after, so it is a signal rather
+ * than a wall of noise. The cure is `min-width: max-content` on the badge — let
+ * the container grow (and scroll) rather than eat the word. */
+function clippedLabels() {
+  const out = [];
+  for (const el of document.querySelectorAll(
+    '[class*="mantine-Badge-root"], [class*="mantine-Chip-"]')) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) continue;              // hidden
+    // The badge itself clips, or its inner label does.
+    const parts = [el, ...el.querySelectorAll("*")];
+    for (const p of parts) {
+      const s = getComputedStyle(p);
+      if (s.overflowX !== "hidden" && s.overflowX !== "clip") continue;
+      if (p.scrollWidth - p.clientWidth <= 1) continue;
+      out.push({
+        text: (el.textContent || "").trim().slice(0, 40),
+        clientWidth: p.clientWidth, scrollWidth: p.scrollWidth,
+      });
+      break;
+    }
+  }
+  return out;
+}
+
 const browser = await chromium.launch(
   BUNDLED ? { executablePath: BUNDLED } : {},
 );
@@ -180,6 +223,13 @@ for (const { name, width, height } of WIDTHS) {
       console.log(
         `[${name}] ${route}: SQUEEZED <${s.tag}> ${s.width}px of a ${s.parentWidth}px ` +
         `row, ${s.lines} lines — "${s.text}"`,
+      );
+    }
+    for (const c of await page.evaluate(clippedLabels)) {
+      findings++;
+      console.log(
+        `[${name}] ${route}: CLIPPED LABEL ${c.clientWidth}px box vs ` +
+        `${c.scrollWidth}px word — "${c.text}" (scrolling cannot reveal it)`,
       );
     }
     for (const e of errors.slice(0, 3)) {

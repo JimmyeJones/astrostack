@@ -18,6 +18,50 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `agent/builder-2026-09-12`) — DOGFOOD PASS, and the probe's own blind spot
+
+**The run.** Baseline green (5,897 passed / 2 skipped). Two tasks shipped: **v0.434.0** (the mosaic panel map
+and the imaging calendar answer a tap) and **v0.434.1** (a night's verdict stopped rendering as "SH…" on a
+phone). Entries in [`IMPROVEMENTS.md`](IMPROVEMENTS.md) → Shipped.
+
+**Dogfood: `scripts/agent-dogfood.sh --mosaic`, clean on its own terms.** Boot → sample → mosaic sample →
+stack both → probe 23 routes at 1440 px and 420 px: **nothing overflowing, no console errors**, Auto's mosaic
+trim **7.9 %** (a trim above ~15 % is D1-shaped — AGENTS.md §1). Page heights, phone, tallest first:
+`/targets/<mosaic>` **3,447 px** · `/life-list` 3,094 px · `/targets/<field>` 3,078 px · the editor 3,055 px ·
+`/glossary` 2,803 px · Dashboard 2,432 px. The mosaic Target page is the tallest page in the app and is the
+one this run then made **77 px shorter**.
+
+**The block of sentences the app says about the mosaic, read together (AGENTS.md §7) — they agree.** The panel
+map's *"a little behind at the top-right: about 30 s there against 1 min"* and the health panel's *"about 23 %
+of the picture has 3 subs where most of it has 6, so that part looks about 1.4× grainier … only about 30 s
+behind"* are the same fact at two altitudes, and `thin=False` (no orange marker, no nag) is the documented
+`behind`-but-not-`thin` branch of `mosaicmap._verdict_text`, not a disagreement. Recorded so the next run does
+not re-litigate it.
+
+**What the pass actually found is a finder's blind spot, which is the durable half.** The probe has an
+OVERFLOW check, and it excludes anything with `text-overflow: ellipsis` as *deliberate* truncation. That is
+right for prose and wrong for a **badge**, because Mantine ships that property as component style — so every
+badge in the app has been exempt from the overflow probe since it was written, and the Nights table's verdict
+spent four dogfood passes rendering as `SH…` at 420 px. Worse than merely truncated: the clip is *inside* the
+badge, so the horizontal scroll the table already has can never reveal it, and the column exists to carry that
+one word under copy telling the reader to act on it.
+
+**The rule worth carrying forward:** *an exclusion a finder needs in general is where its next blind spot
+is.* The fix was not to drop the `text-overflow` exclusion — it earns its keep on tile captions and log rows —
+but to add a **second, narrower pass** for the shape the exclusion is wrong about. Proven armed rather than
+trusted, both ways: reverted it prints `29px box vs 36px word — "sharp"`, fixed it prints nothing, and over 23
+routes it found exactly one hit. The three other clipped strings app-wide at 420 px (a target name on a
+Dashboard tile, an object name on a life-list tile, a logger name on `/logs`) are truncated **names** with a
+full value elsewhere — the exclusion working, and left alone.
+
+**And a wrong closing claim in a shipped record, corrected.** v0.429.1 closed the tooltip entry's named list
+with *"`MosaicMapCard` does not exist"*. It has existed since 2026-09-09 (PR #804) — i.e. before the eighth
+slice that was meant to drain the list it had been sitting on since the seventh — and every cell of it was
+wrapped in a plain `Tooltip`. `git log --diff-filter=A -- <path>` settles a component's existence in a second;
+recall does not. The strike-through and the correction are in `IMPROVEMENTS.md` beside the original.
+
+---
+
 ## 2026-09-12 (Builder, branch `claude/sweet-babbage-ogwqzh`) — the backlog was dry, so the browser found the task
 
 **The run.** Baseline green (5,888 Python tests). One task shipped: **v0.433.0** — "Up tonight" on the life
