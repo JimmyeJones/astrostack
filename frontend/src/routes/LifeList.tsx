@@ -24,7 +24,7 @@ import { WishlistStar } from "../components/WishlistStar";
 // Everything here is read-only and offline — the catalog ships with the app and
 // the match is done server-side against plate-solved target centres.
 
-type Filter = "all" | "captured" | "todo";
+type Filter = "all" | "captured" | "todo" | "tonight";
 
 // How many not-yet-shot tiles the "All" view draws before the rest go behind a
 // count. The whole catalog rendered eagerly made this the tallest page in the
@@ -119,19 +119,42 @@ function Grid({ items }: { items: LifeListItem[] }) {
   );
 }
 
-function Section({ title, note, items, filter }: {
+/** Keep only what the chosen filter asks for, in the order that filter means.
+ *
+ * `tonightRank` maps a catalog id to its place in the planner's best-first
+ * answer, and is `null` whenever the "Up tonight" view isn't in play. In that
+ * view — and *only* there — catalog order is replaced by the planner's: M1…M110
+ * is a sequence chosen in the 1770s, which is exactly the right order for
+ * counting a collection and exactly the wrong one for "which of these should I
+ * point at this evening?". Everywhere else the order is untouched.
+ */
+export function applyFilter(
+  items: LifeListItem[], filter: Filter, tonightRank: Map<string, number> | null,
+): LifeListItem[] {
+  if (filter === "tonight") {
+    const rank = tonightRank ?? new Map<string, number>();
+    return items
+      .filter((i) => rank.has(i.catalog_id))
+      .sort((a, b) => (rank.get(a.catalog_id) ?? 0) - (rank.get(b.catalog_id) ?? 0));
+  }
+  return items.filter((i) =>
+    filter === "all" || (filter === "captured" ? i.captured : !i.captured));
+}
+
+function Section({ title, note, items, filter, tonightRank }: {
   title: string; note: string; items: LifeListItem[]; filter: Filter;
+  tonightRank?: Map<string, number> | null;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const shown = items.filter((i) =>
-    filter === "all" || (filter === "captured" ? i.captured : !i.captured));
+  const shown = applyFilter(items, filter, tonightRank ?? null);
   // Catalog order is kept inside each half — this only groups them, so the ones
   // the owner actually has come first instead of being scattered through a
   // hundred greyed-out tiles.
   const got = shown.filter((i) => i.captured);
   const todo = shown.filter((i) => !i.captured);
   // "Still to shoot" is the list the user just asked for, so it is never
-  // shortened there; only the mixed "All" view collapses its tail.
+  // shortened there; only the mixed "All" view collapses its tail. "Up tonight"
+  // is an explicit ask too, and already short — the sky does the narrowing.
   const collapsible = filter === "all" && !expanded && todo.length > TODO_PREVIEW;
   const todoShown = collapsible ? todo.slice(0, TODO_PREVIEW) : todo;
   const bothHalves = got.length > 0 && todo.length > 0;
@@ -143,9 +166,11 @@ function Section({ title, note, items, filter }: {
       </div>
       {shown.length === 0 ? (
         <Text size="sm" c="dimmed">
-          {filter === "captured"
-            ? "None of these yet — every one of them is still ahead of you."
-            : "You've got every one of these. Nothing left on this list!"}
+          {filter === "tonight"
+            ? "None of these clear your altitude floor for long enough tonight — they're a different season's sky."
+            : filter === "captured"
+              ? "None of these yet — every one of them is still ahead of you."
+              : "You've got every one of these. Nothing left on this list!"}
         </Text>
       ) : (
         <>
@@ -249,7 +274,33 @@ function WishlistTile({ item }: { item: WishlistItem }) {
 
 export function LifeListView() {
   const list = useQuery({ queryKey: ["lifeList"], queryFn: () => api.getLifeList() });
+  // The other half of this page's own headline. Separate query, and a failure is
+  // swallowed to `null` rather than surfaced: against a backend without the
+  // route — or an install with no observing location — the page is exactly the
+  // page it was before, minus one chip. Never an error card for a filter.
+  const tonight = useQuery({
+    queryKey: ["lifeListTonight"],
+    queryFn: () => api.lifeListTonight().catch(() => null),
+    // The dark window moves by minutes an hour, and the page is read for far
+    // longer than that in one sitting; re-asking costs an ephemeris pass.
+    staleTime: 10 * 60_000,
+    retry: false,
+  });
   const [filter, setFilter] = useState<Filter>("all");
+
+  // id → its place in the planner's best-first answer. `null` (rather than an
+  // empty map) whenever there is nothing to filter by, which is what decides
+  // both that the chip is absent and that the view falls back to "All".
+  const tonightRank = useMemo(() => {
+    const ids = tonight.data?.ids ?? [];
+    if (ids.length === 0) return null;
+    return new Map(ids.map((id, i) => [id, i]));
+  }, [tonight.data]);
+  // Selecting "Up tonight" and then having the answer go away (the query
+  // refetches after midnight, a location is cleared) must not leave the page on
+  // a filter whose chip is gone, showing nothing with no way back.
+  const effectiveFilter: Filter =
+    filter === "tonight" && tonightRank === null ? "all" : filter;
 
   const headline = useMemo(() => {
     const c = list.data?.counts;
@@ -318,28 +369,50 @@ export function LifeListView() {
 
       <WishlistSection />
 
+      {/* One more chip in the row that is already there, rather than another
+          card — and only when the sky can actually answer, so a fresh install
+          with no location set sees exactly today's three. */}
       <SegmentedControl
-        value={filter}
+        value={effectiveFilter}
         onChange={(v) => setFilter(v as Filter)}
         data={[
           { label: "All", value: "all" },
           { label: "Captured", value: "captured" },
           { label: "Still to shoot", value: "todo" },
+          ...(tonightRank !== null
+            ? [{ label: "Up tonight", value: "tonight" }] : []),
         ]}
         w="fit-content"
       />
+      {/* No number here the browser had to work out: the count and the floor
+          both come off the answer itself, and "for long enough" is deliberately
+          words rather than the engine's minutes — mirroring that constant here
+          would be a tenth hand-copied threshold, and 45 minutes means nothing
+          to a beginner anyway. */}
+      {effectiveFilter === "tonight" ? (
+        <Text size="sm" c="dimmed">
+          {tonightRank?.size === 1
+            ? "One object on this list climbs"
+            : `${tonightRank?.size ?? 0} objects on this list climb`} above{" "}
+          {tonight.data?.min_altitude_deg ?? 0}° for long enough in tonight's
+          dark window. Best first — the same reading the Tonight page uses.
+          Everything else is still there under “All”.
+        </Text>
+      ) : null}
 
       <Section
         title={`Messier · ${counts.messier_captured} of ${counts.messier_total}`}
         note="The classic list every beginner works through — 110 objects Charles Messier catalogued in the 1770s, all of them within reach of a Seestar."
         items={messier}
-        filter={filter}
+        filter={effectiveFilter}
+        tonightRank={tonightRank}
       />
       <Section
         title={`Also worth getting · ${counts.other_captured} of ${counts.other_total}`}
         note="Popular NGC and IC objects that aren't on Messier's list but are just as rewarding to shoot."
         items={other}
-        filter={filter}
+        filter={effectiveFilter}
+        tonightRank={tonightRank}
       />
     </Stack>
   );
