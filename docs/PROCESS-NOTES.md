@@ -18,6 +18,86 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `claude/sweet-babbage-1uozcm`) — two bugs, both from the same question asked of *numbers* rather than of sentences
+
+**The run.** Two tasks, two independently-green commits — **v0.428.3**
+(`nextBestMove.integrationBars`: the coaching line stops telling a star cluster
+it is a nebula) and **v0.428.4** (`nightplan._depth_only_picks`: "Worth more
+time" is ordered by the number it prints). Full entries in
+[`SHIPPED.md`](SHIPPED.md). Backlog: "Bugs (fix these first)" is dry for the
+ninth consecutive run and no `READY` entry is left, so neither task came from
+it.
+
+### The baseline came from CI, for the fifth consecutive run
+
+`actions_list(ci.yml, branch=main)` → run **1641** on `421c177c`, the exact
+tree this branch started from: **success**. A local full suite was started out
+of habit first and killed the moment CI answered. The local run is the *merge*
+gate, once, at the end — that is now five runs of evidence and should be read
+as the default, not a shortcut.
+
+### The finding method, extended: ask it of two *numbers*, not two sentences
+
+The 09-11 run's question — *does the app state this fact in two places, and do
+the two agree?* — has been asked of prose. Both of this run's bugs were the
+same question asked of **constants and orderings**, which prose-reading does
+not reach:
+
+1. **Two constants that are secretly one formula.** `nextBestMove`'s
+   `SHORT_INTEGRATION_S` (1 h) and `DEEP_INTEGRATION_S` (3 h) look independent.
+   They are `readiness.ts`'s own ladder boundaries — **0.25** and **0.75** of
+   the goal — evaluated at its **4 h** default: 0.25 × 4 = 1 and 0.75 × 4 = 3,
+   exactly. Once seen, the bug is forced: the ladder was written for one bucket
+   and applied to every object, so it agreed with the readiness card on a
+   nebula and disagreed with it on everything else. The tell was the *page*, not
+   the code — a cluster badge reading "usually looks good in well under an
+   hour" sitting above "another clear night or two".
+2. **A tiebreak that is really the whole ranking.**
+   `_depth_only_picks` sorts `(-score, -hours_captured)`, which looks like a
+   nicety — until you notice `_depth_component` **saturates** at 15 %, which
+   every target under ~2.6 h clears, so every pick scores exactly 100.0 and the
+   tiebreak decides everything. It decided it backwards, against the sentence
+   printed directly above it.
+
+**The generalisation to carry forward:** when two modules answer one question,
+check whether one's *constants* are the other's *formula evaluated at a default*
+— and whenever a score is clipped or saturated, ask what the tiebreak is doing,
+because a saturating score turns its tiebreak into the ranking.
+
+### v0.428.4 was found by opening a screenshot, again
+
+`--mosaic` reported CLEAN and the sentence block held together. The Tonight
+page's "Worth more time" list read **77 %** above **87 %** — visible only in the
+full-size desktop shot, and only if you read the two rows against the heading
+above them. That is three consecutive runs where the full-size-screenshot habit
+found a bug the console-clean pass did not.
+
+### Dogfood record, for the file
+
+`scripts/agent-dogfood.sh --mosaic --editor`, on a baseline of CI-green `main`:
+
+* **Page probe, field sample:** clean. Tallest `[phone] /life-list` **3,094 px**.
+* **Page probe, mosaic sample:** clean. Tallest
+  `[phone] /targets/Sample_M42_mosaic_2_2` **3,447 px**. Both identical to the
+  09-11 measurements — no drift.
+* **Mosaic trim:** **7.9 %**, unchanged and well under the ~15 % §1 calls a bug.
+* **Editor drive:** all **21** ops on both samples, every one re-rendering with
+  no console error and no failed request, then Undo/Redo. Clean.
+* **The sentences:** hold together, including the `thin=False` / "23 % is 1.4×
+  grainier" pair the two previous runs already reconciled.
+
+### One non-bug, checked and recorded so it is not re-investigated
+
+The mosaic Nights table shows the 16 Nov night with **3 subs and a blank
+FWHM and no verdict**, which reads like a missing measurement. It is
+deliberate: `_session_median_fwhm` returns `None` below
+`SESSION_QUALITY_MIN_FRAMES` (4), because a 3-frame median describes the frames
+rather than the night — and that same guard is what keeps the "soft" badge, which
+sits beside a one-click **Set aside**, from nudging toward discarding a good
+night on thin evidence.
+
+---
+
 ## 2026-09-11 (Builder, branch `claude/sweet-babbage-s75e9l`) — three bugs, none of them in the backlog, all three found by asking "does the app say this twice?"
 
 **The run.** Three tasks, three independently-green commits — **v0.428.0**
