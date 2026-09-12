@@ -145,6 +145,58 @@ def test_a_young_mosaic_is_told_the_fact_without_the_nag():
     assert "a little behind at the right" in m.text
     assert "grainier" not in m.text                   # the fact, not the nag
     assert "1 min" in m.text and "4 min" in m.text
+    # …and the gap it names is its own subtraction: 4 min − 1 min.
+    assert "only about 3 min behind" in m.text
+
+
+def test_the_gap_the_card_names_is_the_one_it_just_printed():
+    """Found by the `--mosaic` dogfood pass, on the bundled 2×2 sample's own
+    figures.
+
+    This branch fires for any shortfall below ``THIN_MIN_SHORTFALL_S`` — so
+    anywhere in (0, 5 min] — and it used to close with the fixed phrase *"It's
+    only a few minutes' difference at this stage"*, which is true only at the
+    very top of that range. On the sample the gap is **30 seconds**, and the card
+    read *"about 30 s there against 1 min on a typical panel. It's only a few
+    minutes' difference"*: two figures of its own, then a third that contradicts
+    their subtraction.
+
+    And it was not alone on the page. The stack-health note printed directly
+    beneath it says *"it's only about 30 s behind"* (see
+    ``tests/test_coverage_grain.py::test_a_panel_only_minutes_behind_is_not_sent_out_for_another_night``,
+    which quotes the map's old clause as the sentence it stopped agreeing with) —
+    so one picture carried two answers to "how far behind is it?". The card now
+    names the gap it measured, in the app's one duration vocabulary."""
+    # The sample's shape: 6-sub panels and one 3-sub panel, 10 s subs.
+    m = mosaic_depth_map(_grid(2, 2, subs=6, per_panel={(0, 0): 3}))
+
+    assert m is not None
+    assert m.thin is None                             # still not worth a night
+    assert "about 30 s there against 1 min on a typical panel" in m.text
+    assert "only about 30 s behind" in m.text
+    assert "few minutes" not in m.text
+    # The closing clause is the health note's, word for word, so the two
+    # sentences on one page cannot characterise one gap two ways.
+    assert m.text.endswith(
+        "It's only about 30 s behind, so it evens out on its own as you keep "
+        "shooting."
+    )
+
+
+def test_a_gap_too_small_to_name_does_not_print_a_zero():
+    """The one degenerate printout the measured gap could give. Panels this
+    short are not real Seestar data — a sub is ten seconds — but "It's only
+    about 0 s behind" would be worse than saying nothing about the size, so a
+    sub-second gap drops the figure instead of rounding it to zero."""
+    frames = [(ra, dec, 0.06) for ra, dec, _ in
+              _grid(1, 3, subs=15, per_panel={(0, 2): 6})]
+    m = mosaic_depth_map(frames)          # 0.9 s vs 0.36 s — a 0.54 s gap
+
+    assert m is not None
+    assert "a little behind" in m.text
+    assert "0 s behind" not in m.text
+    assert "barely behind at all" in m.text
+    assert m.text.endswith("so it evens out on its own as you keep shooting.")
 
 
 def test_the_median_is_the_yardstick_not_the_mean():
