@@ -7,6 +7,7 @@ import { HintAnchor } from "./HintAnchor";
 import { formatIntegration } from "../format";
 import {
   pickContinueTonight,
+  type DifficultyBySafe,
   type GoalSecondsBySafe,
   type TonightPick,
 } from "../continueTonight";
@@ -96,7 +97,14 @@ export function ContinueTonightCard() {
   });
 
   const goals: GoalSecondsBySafe = {};
-  for (const p of progress.data ?? []) goals[p.safe] = p.goal_s;
+  // …and each target's vetted difficulty from the same rows, so "done" means the
+  // same thing here as it does on the Target page. Both maps come off one
+  // already-cached response; neither costs a request.
+  const difficulties: DifficultyBySafe = {};
+  for (const p of progress.data ?? []) {
+    goals[p.safe] = p.goal_s;
+    difficulties[p.safe] = p.difficulty;
+  }
 
   // Hold off while that answer is still in flight rather than render a pick we
   // may have to swap a moment later: a recommendation that changes target under
@@ -104,7 +112,8 @@ export function ContinueTonightCard() {
   if (best.isPending) return null;
   const alreadyShown = (best.data?.picks ?? []).map((p) => p.safe);
 
-  const plan = pickContinueTonight(tonight.data, goals, 2, alreadyShown);
+  const plan = pickContinueTonight(tonight.data, goals, 2, alreadyShown,
+                                   difficulties);
   if (!plan) return null;
 
   const { pick, runnersUp } = plan;

@@ -145,6 +145,97 @@ describe("integrationReadiness", () => {
     });
   });
 
+  // The difficulty axis — the *other* wrong denominator. The per-type table is
+  // coarse by its own admission ("can't tell a bright emission nebula from a
+  // faint one"), and the app has carried the missing discriminator all along:
+  // `seestack/target_difficulty.py` exists precisely because M31 and M33 share a
+  // type and sit at opposite ends of hard-for-a-Seestar. Until this, the Target
+  // page printed that verdict as a badge and then quoted both objects the same
+  // 6 h goal two cards up.
+  describe("sharpens the per-type goal with the vetted difficulty verdict", () => {
+    const curated = (level: string) => ({ level, curated: true });
+
+    it("moves an easy galaxy down and a challenging one up (M31 vs M33)", () => {
+      // Same type, same bucket, same 6 h base — two different goals, because
+      // the catalog knows the difference and now says so in one voice.
+      const m31 = integrationReadiness(3.2 * H, "galaxy", null, null,
+                                       curated("easy"));
+      const m33 = integrationReadiness(3.2 * H, "galaxy", null, null,
+                                       curated("challenging"));
+      expect(m31?.goalHours).toBe(3);
+      expect(m33?.goalHours).toBe(9);
+      // Before this axis existed both read the same, against the same 6 h.
+      expect(integrationReadiness(3.2 * H, "galaxy")?.goalHours).toBe(6);
+    });
+
+    it("moves the verdict itself, in both directions", () => {
+      // The goal is only worth sharpening if the sentence changes with it. A
+      // bright Andromeda is *finished* at 3.2 h where the coarse goal called it
+      // half-done; a Triangulum at 2 h has barely *started* where the coarse
+      // goal called it a solid third of the way.
+      expect(integrationReadiness(3.2 * H, "galaxy")?.level).toBe("solid");
+      expect(integrationReadiness(3.2 * H, "galaxy", null, null,
+                                  curated("easy"))?.level).toBe("plenty");
+
+      expect(integrationReadiness(2 * H, "galaxy")?.level).toBe("solid");
+      expect(integrationReadiness(2 * H, "galaxy", null, null,
+                                  curated("challenging"))?.level).toBe("starting");
+    });
+
+    it("leaves a moderate verdict on the per-type goal", () => {
+      const r = integrationReadiness(1 * H, "nebula", null, null,
+                                     curated("moderate"));
+      expect(r).toEqual(integrationReadiness(1 * H, "nebula"));
+    });
+
+    it("ignores the cluster type rule, which restates the bucket", () => {
+      // `target_difficulty` calls every cluster easy from the *type* alone, so
+      // acting on it would halve a goal for a fact the 1.5 h Cluster bucket has
+      // already priced in. `curated` is what separates the two.
+      const typeRule = integrationReadiness(1 * H, "open cluster", null, null,
+                                            { level: "easy", curated: false });
+      expect(typeRule?.goalHours).toBe(1.5);
+      expect(typeRule).toEqual(integrationReadiness(1 * H, "open cluster"));
+    });
+
+    it("changes nothing without a usable verdict", () => {
+      const baseline = integrationReadiness(2 * H, "nebula");
+      for (const d of [null, undefined, {}, { level: "easy" },
+                       { level: null, curated: true },
+                       { level: "unheard-of", curated: true }]) {
+        expect(integrationReadiness(2 * H, "nebula", null, null, d as never))
+          .toEqual(baseline);
+      }
+    });
+
+    it("never touches a goal the owner set themselves", () => {
+      const r = integrationReadiness(2 * H, "galaxy", 10, null,
+                                     curated("challenging"));
+      expect(r?.goalHours).toBe(10);
+      expect(r?.customGoal).toBe(true);
+    });
+
+    it("composes with the mosaic field-fulls scaling", () => {
+      // 4 h nebula, easy → 2 h a panel, four panels → 8 h for the raster.
+      const r = integrationReadiness(2 * H, "nebula", null, 4, curated("easy"));
+      expect(r?.baseGoalHours).toBe(2);
+      expect(r?.goalHours).toBe(8);
+      expect(r?.fieldFulls).toBe(4);
+    });
+
+    it("keeps clusters the quickest thing a Seestar shoots", () => {
+      // The claim the factor's comment makes, pinned rather than asserted in
+      // prose: the lowest a curated verdict can pull any goal is still above
+      // the Cluster bucket, so nothing overtakes a star cluster for "done".
+      const clusterGoal = integrationReadiness(1 * H, "open cluster")?.goalHours;
+      for (const type of ["galaxy", "nebula", "supernova remnant", "whatever"]) {
+        const easiest = integrationReadiness(1 * H, type, null, null,
+                                             curated("easy"))?.goalHours;
+        expect(easiest).toBeGreaterThan(clusterGoal!);
+      }
+    });
+  });
+
   it("maps each level to a distinct progress colour", () => {
     expect(readinessColor("starting")).toBe("gray");
     expect(readinessColor("solid")).toBe("blue");

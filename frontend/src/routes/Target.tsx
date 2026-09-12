@@ -539,6 +539,7 @@ export function TargetView() {
         softStars: softerThanUsual(runs.data),
         fieldFulls: latestRun?.field_fulls,
         objectType: identity.data?.type,
+        difficulty: identity.data?.difficulty,
       })?.kind ?? null,
     [latestRun, unsolvedCount, runs.data, identity.data],
   );
@@ -778,6 +779,11 @@ export function TargetView() {
             identity.data?.type,
             goal.data?.goal_s != null ? goal.data.goal_s / 3600 : null,
             target.data.field_fulls,
+            // The vetted difficulty verdict this page already prints as a badge
+            // a few cards down. Without it the two sentences disagree in the
+            // same units about one question: "it usually looks good in well
+            // under an hour" over a goal of six.
+            identity.data?.difficulty,
           )
         : null,
     [target.data, identity.data, goal.data],
@@ -1176,6 +1182,7 @@ export function TargetView() {
               runs={runs.data}
               fieldFulls={latestRun.field_fulls}
               objectType={identity.data?.type}
+              difficulty={identity.data?.difficulty}
             />
           ) : null },
           /* "About as clean as your sky allows": when this target's measured noise
