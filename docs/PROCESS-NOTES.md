@@ -18,6 +18,42 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `agent/run-2026-09-12`) — the pass that had an observing site, and what four passes had been measuring instead
+
+**The run.** Baseline: `origin/main` at 4321d9e9 with a green CI run, re-verified locally after task 1
+(5,931 passed / 2 skipped, 37:42 headless with Qt). Four tasks shipped: **v0.436.0** (the drizzle bar,
+counted per pixel), **v0.436.1** (the dogfood site step), **v0.436.2** (the Tonight score badge) and
+**v0.437.0** (the Tonight IA slice). The last three are all one thread: a tooling fix and the two bugs it
+found in its first hour.
+
+**The lesson worth carrying, and it is not about Tonight.** The previous run filed a lead saying the bundled
+samples carry no `SITELAT`/`SITELONG`, so `_resolve_observer` answers `"none"` and the whole plan-a-night
+half of the app renders empty. That was filed as a *coverage* note. What it actually meant is that **four
+consecutive "dogfood CLEAN" records, and the IA banner's "the tallest page is 3,014 px", were measurements
+of a different app** — one where `/tonight` was a location prompt. The first pass that set a site found, on
+that one page, a 10,430 px height (3.4× the next page) and 145 clipped badges of a class fixed four days
+earlier on another table. Neither needed new probes; both needed the page to have rows in it.
+
+So: **a screen in its empty state is not evidence about that screen.** When a pass reports CLEAN, the honest
+question is not "did anything error?" (the standing §7 note) and not only "could a beginner hold these
+sentences at once?" (the v0.406.x note) — it is also **"was there anything on the page at all?"** Two of the
+three things in this run's ledger were found by answering that once.
+
+**A second, smaller one, from v0.436.0.** The Stack form's print panel carried a comment asserting it could
+"never recommend the thing it would then warn against", and the comment was false: it read the target's
+frame *total* where the caution beside it read the per-pixel depth. Equal on a single field, wrong on every
+mosaic. **A comment claiming two things agree is worth reading as a claim to check, not as documentation** —
+this is the third time in a fortnight that a fix's own comment named the sentence it had stopped agreeing
+with (see the v0.435.4 entry below).
+
+**And a test-fixture note.** No existing test could have caught that, because `mockPrintForm` handed the
+form **two** frames beside a 250-frame estimate and the old gate read the estimate. A fixture whose two
+halves describe different stacks will pass whichever half the code happens to read — the same shape as the
+"fixtures that cannot exhibit their bug" batch (v0.417.1, v0.418.2). It now builds the frames list from the
+estimate it is paired with.
+
+---
+
 ## 2026-09-12 (Builder, branch `claude/sweet-babbage-iddonp`) — DOGFOOD PASS: `--mosaic --editor` plus `--empty`, and two sentences that were only wrong next to another sentence
 
 **The run.** Baseline green (5,915 passed / 2 skipped, 31:05 headless with Qt). The backlog's ready work is
