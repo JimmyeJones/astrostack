@@ -1171,6 +1171,65 @@ def test_histogram_flags_star_reduce_preview_divergence(client, solved_library):
     assert undecimated["star_reduce_preview_overstates"] is False
 
 
+def test_histogram_flags_the_bilateral_denoise_preview_shortfall(client, solved_library):
+    """Noise reduction's **bilateral** method leaves visibly more grain in the
+    live preview than in the export — its spatial sigma is scaled onto the proxy
+    correctly, but a stride is not an average, so the matched window has far fewer
+    samples to work with (measured up to 2x the export's remaining grain; see
+    tests/test_edit_proxy_parity.py). The histogram reports
+    ``denoise_preview_understates`` so the editor can say so, instead of letting
+    someone raise the strength until the preview looks clean and save a picture
+    smoothed twice as hard as the one they judged.
+
+    Wavelet (the default) and TV match their export at every proxy step and must
+    never be flagged, and neither must a gentle bilateral, a disabled op, or an
+    undecimated run where the preview *is* the export.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # A wide master (1700 px) → proxy_scale 2, where a pushed bilateral already
+    # leaves ~1.2x the export's grain and a gentle one leaves none of it.
+    rid = _make_run(solved_library, safe, basename="wide_denoise", h=120, w=1700)
+
+    def hist_for(recipe):
+        q = _enc(recipe)
+        return client.get(
+            f"/api/targets/{safe}/stack-runs/{rid}/editor/histogram?recipe={q}").json()
+
+    pushed = hist_for({"ops": [{"id": "detail.denoise",
+                                "params": {"method": "bilateral", "strength": 0.9}}]})
+    assert pushed["proxy_scale"] >= 2.0
+    assert pushed["denoise_preview_understates"] is True
+
+    # The same strength on the default method previews what it saves.
+    wavelet = hist_for({"ops": [{"id": "detail.denoise",
+                                 "params": {"method": "wavelet", "strength": 0.9}}]})
+    assert wavelet["denoise_preview_understates"] is False
+
+    # A gentle bilateral is honest on this proxy — the advisory is not a nag
+    # about the method, it is about the shortfall.
+    gentle = hist_for({"ops": [{"id": "detail.denoise",
+                                "params": {"method": "bilateral", "strength": 0.4}}]})
+    assert gentle["denoise_preview_understates"] is False
+
+    # A disabled denoise op doesn't count.
+    disabled = hist_for({"ops": [{"id": "detail.denoise", "enabled": False,
+                                  "params": {"method": "bilateral", "strength": 0.9}}]})
+    assert disabled["denoise_preview_understates"] is False
+
+    # A recipe with no denoise op is never flagged.
+    none = hist_for({"ops": [{"id": "tone.stretch", "params": {}}]})
+    assert none["denoise_preview_understates"] is False
+
+    # ...and neither is a run small enough that the "proxy" is the real pixels.
+    small_rid = _make_run(solved_library, safe, basename="small_denoise", h=80, w=100)
+    q = _enc({"ops": [{"id": "detail.denoise",
+                       "params": {"method": "bilateral", "strength": 0.9}}]})
+    undecimated = client.get(
+        f"/api/targets/{safe}/stack-runs/{small_rid}/editor/histogram?recipe={q}").json()
+    assert undecimated["proxy_scale"] == 1.0
+    assert undecimated["denoise_preview_understates"] is False
+
+
 def test_trim_suggestion_mosaic(client, solved_library):
     """On a mosaic, the trim endpoint returns a fractional crop to the largest
     well-covered rectangle, excluding the ragged low-coverage border."""
