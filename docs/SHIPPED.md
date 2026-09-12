@@ -1,5 +1,108 @@
 # Shipped — the record
 
+## v0.435.0 — 2026-09-12 — the Tonight page stops promising something your own library disproves
+
+*(Builder, branch `claude/sweet-babbage-kv0v5m` — 🟡 FRIENDLINESS / TRUST, PRIORITY 3. Found by
+dogfooding, not taken from the backlog.)*
+
+**What was wrong, photographed in a browser.** With the bundled sample loaded and stacked — **27
+plate-solved subs**, a Library full of "Solved" badges — the Tonight page said:
+
+> *"The planner needs to know where you're observing from. It reads your location automatically from a
+> plate-solved Seestar frame — **so once you've solved some subs it'll just work**."*
+
+It had not worked, and no amount of solving would make it: the sample's frames carry no
+`SITELAT`/`SITELONG`. A beginner reading that sentence with solved subs in front of them concludes the
+app is broken. This is the class of defect this project keeps converging on — **a sentence the state on
+the same screen disproves** — and it is the whole of the app's "PLAN A NIGHT" section that sits behind
+it (Tonight, the life list's "Up tonight" chip, the wishlist's "the Tonight page will tell you when",
+"nearly there", the Dashboard's "Worth more time" aside).
+
+**Why one sentence served three different situations.** `detect_site_from_library` returned `None` for
+all of "no frames at all", "frames whose headers carry no site" and "frames nothing could read", and
+every surface downstream had only that `None` to go on. The advice differs completely between them: more
+subs genuinely is the fix for the first, only Settings is the fix for the second, and neither is the fix
+for the third.
+
+**The fix.** New `webapp.site_location.SiteProbe(site, reason)` and `probe_site_from_library` — the
+*same* walk, counting what it touched: `"found"`, `"no-frames"` (nothing probed), `"unreadable"` (every
+probed path failed to load) or `"no-site-header"` (headers read, none carried a site).
+`_no_site_reason` is deliberately conservative about `"unreadable"` — it is claimed only when *every*
+probed path failed, because one missing file among headerless ones is a header problem, not a storage
+one. `detect_site_from_library` and `detect_site_cached` are now one-line wrappers returning `.site`, so
+**all fifteen existing callers are unchanged**; `probe_site_cached` shares the same memo entry (the
+cached reason is written beside the site, and an entry without one re-probes rather than guessing).
+
+`plan._resolve_observer_detail` carries the reason to `GET /api/plan/tonight` as an additive
+`location_reason`, always present so a reader never has to tell "this build doesn't send it" from
+"there is nothing to explain" — `null` is the latter. `_resolve_observer` stays as it was for the other
+fourteen endpoints.
+
+`frontend/src/siteUnknown.ts` owns the wording, so the surfaces cannot drift into three claims about one
+fact. `"no-site-header"` says the subs don't carry a location and that more of the same won't help, and
+points at Settings; `"unreadable"` points at the storage and **withholds the Settings link**, because a
+typed-in location would light the planner up over a library that is still unreachable; anything else —
+including an older backend, `null`, and an unrecognised value — falls back to **today's exact
+sentence**. No FITS keyword reaches the screen, keeping the rule the existing test pins.
+
+**Upgrade-safe (§9):** one additive response key on one endpoint, one additive optional client field. No
+config, schema, on-disk, default or existing-response-shape change; the probe walk itself is byte-for-byte
+what it was.
+
+**Keeping the seam is load-bearing, and the suite proved it.** An earlier shape of this change made
+`probe_site_from_library` the primitive and `detect_site_from_library` the wrapper — at which point the
+**ten call sites across five test modules** that monkeypatch `detect_site_from_library` were patching a
+function nothing called. Nine still passed, because they were forcing the value the real probe returns on
+a synth library anyway (`None`), *including* the one that raises from it to prove the probe does **not**
+run when a longitude is configured; only the tenth, which forces a non-`None` site, went red.
+`test_the_reason_rides_on_the_one_walk_every_caller_already_stands_in_front_of` now pins the seam,
+verified red by bypassing it.
+
+**Tests +14** (8 Python, 5 vitest unit, 2 rendered, net of one). Four of the Python ones verified red by
+scratch reverts — three by collapsing the classifier back to one answer, one by bypassing the seam; the
+rendered Tonight cases assert the old promise is *absent*.
+
+## v0.435.1 — 2026-09-12 — "Next:" stops pointing at a step you already went past
+
+*(Builder, same branch — 🟡 FRIENDLINESS, PRIORITY 3. Found in the same dogfood pass.)*
+
+**What was wrong.** The Dashboard's "Your first image" card read **"5 of 6 done"** over five
+struck-through lines — frames, graded, stacked, finished, saved — and led with:
+
+> *"**Next:** Plate solving (ASTAP) is how AstroStack recognises the patch of sky in each sub, so it can
+> line them all up. Set it up once and forget it."*
+
+i.e. it told someone holding a finished, saved picture that the next thing to do was step two. Reachable
+on the app's own first-run path: the bundled sample ships pre-solved and the Dashboard offers a "Stack
+it" button for it, so a beginner can walk the whole journey without ASTAP — and also on any install
+whose ASTAP path breaks after it solved frames.
+
+**Why.** `firstImageNextStep` returned the first unticked step, and the ticks are **not monotonic**:
+`solve` measures *setup* (is ASTAP installed?) while the steps around it measure *outcomes*. An earlier
+run had already fixed the label/tick disagreement here (v0.3xx, "Set up plate solving (ASTAP)"); the
+lead line was the same bug one surface along.
+
+**The fix, and why position alone could not do it.** The first attempt — "the first unticked step after
+the last ticked one" — is wrong, and a test caught it: `checked` ticks from QC, which grades a sub with
+no plate solution at all, so a *real* first-timer with no ASTAP sits at `[frames ✓, solve ✗, checked ✓,
+…]` and solving genuinely **is** their next step. Only `stack` and beyond prove a solve happened. So each
+step now declares `passedWhen` — the keys whose completion *proves* it was walked past — and "next" is
+the first unticked step nothing proves they overtook. `firstImageSkippedSteps` names the rest, and
+`firstImageLeadText` words both cases: `Next: …` when something is ahead, and *"You've been all the way
+through. One step below is still open, and you'll need it for your own subs — …"* when nothing is.
+
+**Nothing is hidden** (the owner's standing rule): the skipped step stays in the list, unticked, with its
+link, and the ASTAP readiness banner that owns that fact is on the same screen either way.
+
+**Frontend-only**; no endpoint, config, schema, on-disk, API-shape or default change.
+
+**Tests +9** (8 unit, 1 rendered). Four verified red by a scratch revert that disables `passedWhen`,
+including the rendered card case. One existing assertion was **rewritten, not weakened**: it pinned
+`firstImageNextStep` → `"solve"` on exactly the state the dogfood pass photographed as wrong; it now pins
+the corrected answer plus the skipped step, and the test's real subject (the step's *label*) is untouched.
+
+
+
 ## v0.433.0 — 2026-09-12 — "Up tonight" on the life list: which of the 110 can I actually shoot this evening?
 
 *(Builder, branch `claude/sweet-babbage-ogwqzh` — a 🌟 NEW BEGINNER FEATURE (PRIORITY 2–3, the "plan"

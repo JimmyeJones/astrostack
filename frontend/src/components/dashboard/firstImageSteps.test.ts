@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DashboardStats, SystemInfo } from "../../api/client";
 import {
   firstImageComplete, firstImageDone, firstImageDoneMessage, firstImageHasPicture,
-  firstImageNextStep, firstImageSteps,
+  firstImageLeadText, firstImageNextStep, firstImageSkippedSteps, firstImageSteps,
 } from "./firstImageSteps";
 
 function sys(over: Partial<SystemInfo["astap"]> = {}): SystemInfo {
@@ -109,9 +109,15 @@ describe("firstImageSteps", () => {
     expect(solve?.done).toBe(false);
     expect(solve?.label).toBe("Set up plate solving (ASTAP)");
     // The sample's own journey, exactly as the dogfood run found it: everything
-    // but the setup ticked, and the card leading with the setup.
+    // up to the stack ticked, with the setup step skipped over.
     expect(steps.map((s) => s.done)).toEqual([true, false, true, true, false, false]);
-    expect(firstImageNextStep(steps)?.key).toBe("solve");
+    // "Next" is what is *ahead* of them — the editor — not the setup step they
+    // already overtook. (This assertion used to read "solve"; it was pinning the
+    // behaviour the 2026-09-12 dogfood pass photographed as wrong, not a
+    // property worth keeping. The setup step is still listed, still unticked and
+    // still linked below, and `firstImageSkippedSteps` names it.)
+    expect(firstImageNextStep(steps)?.key).toBe("edit");
+    expect(firstImageSkippedSteps(steps).map((s) => s.key)).toEqual(["solve"]);
   });
 
   it("counts solving as not-ready when the star database is missing", () => {
@@ -218,5 +224,100 @@ describe("firstImageHasPicture", () => {
     expect(firstImageHasPicture(firstImageSteps(sys(), nothing), nothing)).toBe(false);
     const video = stats({ n_video_stills: 1 });
     expect(firstImageHasPicture(firstImageSteps(sys(), video), video)).toBe(true);
+  });
+});
+
+describe("the step that is actually ahead of you", () => {
+  // Photographed 2026-09-12 on the bundled sample, which is the app's own
+  // first-run path (the Dashboard offers a "Stack it" button for it): the card
+  // read "5 of 6 done" over five struck-through lines and led with **"Next:
+  // Plate solving (ASTAP) is how AstroStack recognises the patch of sky in each
+  // sub…"**. The ticks are not monotonic — `solve` measures *setup* while the
+  // steps around it measure *outcomes* — so "the first unticked step" and "the
+  // next thing to do" are different questions.
+
+  const sampleFinished = () => firstImageSteps(sys({ found: false }), stats({
+    n_frames: 6, n_frames_accepted: 6, n_stack_runs: 1,
+    n_edited_runs: 1, n_finished_pictures: 1,
+  }));
+
+  it("never announces a step the user has already gone past", () => {
+    const steps = sampleFinished();
+    expect(steps.map((s) => s.done)).toEqual([true, false, true, true, true, true]);
+    expect(firstImageNextStep(steps)).toBeNull();
+    expect(firstImageLeadText(steps)).not.toMatch(/^Next:/);
+  });
+
+  it("still names the skipped step, and why it will matter", () => {
+    // Nothing is hidden: ASTAP genuinely isn't set up and their own subs will
+    // need it. It just stops being announced as what to do *next*.
+    const steps = sampleFinished();
+    expect(firstImageSkippedSteps(steps).map((s) => s.key)).toEqual(["solve"]);
+    const lead = firstImageLeadText(steps);
+    expect(lead).toMatch(/been all the way through/);
+    expect(lead).toMatch(/your own subs/);
+    expect(lead).toContain(steps[1].hint);
+  });
+
+  it("leads with the real next step whenever there is one ahead", () => {
+    // The ordinary mid-journey case is untouched: nothing after `stack` is done,
+    // so `stack` is both the first unticked step and the next thing to do.
+    const steps = firstImageSteps(sys(), stats({ n_frames: 40, n_frames_accepted: 32 }));
+    expect(firstImageNextStep(steps)?.key).toBe("stack");
+    expect(firstImageSkippedSteps(steps)).toEqual([]);
+    expect(firstImageLeadText(steps)).toBe(`Next: ${steps[3].hint}`);
+  });
+
+  it("keeps the plain description for a brand-new install", () => {
+    // Nothing done at all: `frames` is ahead, so this is still a "Next:" line.
+    const steps = firstImageSteps(sys({ found: false }), stats());
+    expect(firstImageSkippedSteps(steps)).toEqual([]);
+    expect(firstImageLeadText(steps)).toBe(`Next: ${steps[0].hint}`);
+  });
+
+  it("still sends a real first-timer with no ASTAP to the setup step", () => {
+    // The guard on the fix. QC grades a sub with no plate solution at all, so
+    // `checked` ticks for someone who cannot stack a thing — and a rule that
+    // read "any later step is done" would call the setup overtaken and point
+    // them at stacking, which is exactly what they can't do. Only `stack` and
+    // beyond prove a solve happened, which is what `passedWhen` says.
+    const steps = firstImageSteps(sys({ found: false }),
+      stats({ n_frames: 40, n_frames_accepted: 32 }));
+    expect(steps.map((s) => s.done)).toEqual([true, false, true, false, false, false]);
+    expect(firstImageSkippedSteps(steps)).toEqual([]);
+    expect(firstImageNextStep(steps)?.key).toBe("solve");
+  });
+
+  it("doesn't read an ASTAP install as progress through the journey", () => {
+    // Setup done and nothing else: the one thing they have is the *second*
+    // step, and the first is still genuinely ahead of them.
+    const steps = firstImageSteps(sys(), stats());
+    expect(steps.map((s) => s.done)).toEqual([false, true, false, false, false, false]);
+    expect(firstImageNextStep(steps)?.key).toBe("frames");
+    expect(firstImageSkippedSteps(steps)).toEqual([]);
+  });
+
+  it("only ever claims a step was passed by one that truly needs it", () => {
+    // The table read back as a property: every key named in a `passedWhen` is a
+    // real step, and it is always a *later* one — a step can only be proved by
+    // something downstream of it.
+    const steps = firstImageSteps(sys(), stats());
+    const index = new Map(steps.map((s, i) => [s.key, i]));
+    for (const [i, s] of steps.entries()) {
+      for (const k of s.passedWhen ?? []) {
+        expect(index.has(k)).toBe(true);
+        expect(index.get(k)).toBeGreaterThan(i);
+      }
+    }
+  });
+
+  it("says it in the plural when more than one step was skipped", () => {
+    // ASTAP missing *and* nothing edited, with a saved picture at the end — the
+    // export-without-save shape, one step further along.
+    const steps = firstImageSteps(sys({ found: false }), stats({
+      n_frames: 6, n_frames_accepted: 0, n_stack_runs: 1, n_finished_pictures: 1,
+    }));
+    expect(firstImageSkippedSteps(steps).map((s) => s.key)).toEqual(["solve", "checked"]);
+    expect(firstImageLeadText(steps)).toMatch(/aren't ticked/);
   });
 });
