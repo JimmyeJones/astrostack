@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FieldObject, ScaleBar, SkyDirections } from "../api/client";
+import { moonDiscLayout } from "../moonDisc";
 
 /**
  * "What's in this picture?" — overlay named catalog objects on a finished stack.
@@ -461,7 +462,7 @@ function CompassArm({ letter, dx, dy }: { letter: string; dx: number; dy: number
 
 export function AnnotatedImage({
   src, alt, imgWidth, imgHeight, objects, show, height, onClick,
-  scaleBar, showScale, directions, showCompass, overlaySrc,
+  scaleBar, showScale, directions, showCompass, showMoon, overlaySrc,
 }: {
   src: string;
   alt: string;
@@ -481,6 +482,12 @@ export function AnnotatedImage({
   directions?: SkyDirections | null;
   /** Draw the North/East rose. When false it isn't shown. */
   showCompass?: boolean;
+  /**
+   * Draw the "Moon for scale" disc — a faint circle the true angular size of the
+   * full Moon, from the same `scaleBar`. Off by default; and even when asked for
+   * it self-hides on a field too tight to carry it (`moonDiscLayout`).
+   */
+  showMoon?: boolean;
   /**
    * A transparent PNG laid over the picture — the "what stacking removed" tint.
    * Rendered with the *same* contain-fit as the picture and at the same pixel
@@ -516,6 +523,9 @@ export function AnnotatedImage({
     ? scaleBarLayout(scaleBar, imgWidth, imgHeight, box.w, box.h)
     : null;
   const rose = showCompass ? compassLayout(directions, box.w, box.h) : null;
+  const moon = showMoon
+    ? moonDiscLayout(scaleBar, imgWidth, imgHeight, box.w, box.h)
+    : null;
 
   return (
     <div
@@ -597,6 +607,36 @@ export function AnnotatedImage({
             borderRadius: 2, boxShadow: "0 0 3px rgba(0,0,0,0.9)",
             borderLeft: "2px solid rgba(223,241,255,0.95)",
             borderRight: "2px solid rgba(223,241,255,0.95)",
+          }} />
+        </div>
+      ) : null}
+      {/* "Moon for scale": a faint circle exactly as wide as the full Moon
+          would look in this field, so the bar's sentence ("about 2.5 full Moons
+          wide") is something you can *see*. An outline, never a fill — the
+          picture underneath is the point. Bottom-right is the one corner the
+          bar (bottom-left) and the rose (top-right) both leave free, and the
+          label is right-aligned over the circle so a small disc can't push its
+          chip off the edge. (The baked share picture tucks the disc under the
+          bar instead, because its own bottom edge is the caption zone.) */}
+      {moon ? (
+        <div
+          data-testid="moon-disc"
+          style={{
+            position: "absolute", right: 10, bottom: 8, pointerEvents: "none",
+            display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3,
+          }}
+        >
+          <span style={{
+            fontSize: 11, lineHeight: 1.1, color: "#dff1ff", whiteSpace: "nowrap",
+            padding: "1px 4px", borderRadius: 4, background: "rgba(8,12,22,0.72)",
+            textShadow: "0 1px 2px rgba(0,0,0,0.9)",
+          }}>
+            Full Moon
+          </span>
+          <div style={{
+            width: moon.diameterPx, height: moon.diameterPx, borderRadius: "50%",
+            border: "2px solid rgba(223,241,255,0.95)",
+            boxShadow: "0 0 3px rgba(0,0,0,0.9), inset 0 0 3px rgba(0,0,0,0.9)",
           }} />
         </div>
       ) : null}

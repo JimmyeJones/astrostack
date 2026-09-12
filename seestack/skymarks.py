@@ -15,9 +15,17 @@ downloads or shares the picture, both marks are gone. This module bakes them
 into the pixels, the same way :mod:`seestack.nameplate` bakes the acquisition
 caption.
 
+An optional third mark, off unless asked for, is the **"Moon for scale" disc**:
+a faint circle drawn at the true angular size of the full Moon, tucked under the
+scale bar. It is the visual twin of the bar's own
+:attr:`~seestack.scalebar.ScaleBar.moon_comparison` sentence — "about 2.5 full
+Moons wide" is a fact a beginner has to do arithmetic on, while a circle beside
+the nebula is a fact they simply *see*.
+
 Two deliberate choices worth knowing:
 
-* **The marks live along the *top* edge** (bar top-left, rose top-right). The
+* **The marks live along the *top* edge** (bar top-left, disc under it, rose
+  top-right). The
   bottom of a shared picture is already the app's caption zone — the nameplate
   draws its footer bar there and the keepsake sets its caption beneath — so
   putting the sky marks anywhere along the bottom would mean one covering the
@@ -55,6 +63,22 @@ HALO_RGB = (8, 12, 22)
 #: way the tangent does, so we shrink the on-sky step instead of widening the RA.
 _MAX_RA_STEP_DEG = 1.0
 
+#: The "Moon for scale" disc is drawn only while its diameter stays within this
+#: share of the picture's **short** side. Past it the Moon is no longer a *mark*
+#: on the picture — it is most of the picture — and a circle that big reads as
+#: damage rather than as a size cue. A field that tight is exactly where
+#: :attr:`seestack.scalebar.ScaleBar.moon_comparison` already says the honest
+#: thing in words ("about 80% the width of the full Moon"), so the sentence
+#: carries it and the disc stands aside. Mirrored in ``frontend/src/moonDisc.ts``
+#: (pinned by ``tests/test_moon_disc_mirror.py``) so screen and file agree on
+#: when it appears.
+MOON_DISC_MAX_SHORT_FRACTION = 0.5
+
+#: The disc's label. Kept next to the constant above because the two together are
+#: the whole of what a reader sees, and because it must stay drawable with the
+#: bundled face (plain ASCII — see :func:`_text`).
+MOON_DISC_LABEL = "Full Moon"
+
 
 @dataclass(frozen=True)
 class SkyDirections:
@@ -81,13 +105,21 @@ class SkyMarks:
     ascii_label` — the ′/″ prime characters have no glyph and would bake a
     hollow box into the picture).
 
-    Either half may be absent: ``bar_px``/``bar_label`` for a run with no usable
-    pixel scale, ``directions`` for one with no usable orientation.
+    ``moon_px`` is the full Moon's **diameter** in those same pixels — the
+    "Moon for scale" disc, off unless asked for. It comes off the very same
+    :class:`~seestack.scalebar.ScaleBar` as ``bar_px`` (``moon_fraction`` is
+    derived from ``fraction``), so the disc and the bar cannot disagree about
+    how much sky one pixel is.
+
+    Any part may be absent: ``bar_px``/``bar_label`` for a run with no usable
+    pixel scale, ``directions`` for one with no usable orientation, ``moon_px``
+    whenever the disc wasn't asked for.
     """
 
     bar_px: float | None = None
     bar_label: str = ""
     directions: SkyDirections | None = None
+    moon_px: float | None = None
 
     @property
     def has_scale(self) -> bool:
@@ -97,10 +129,22 @@ class SkyMarks:
     def has_compass(self) -> bool:
         return self.directions is not None
 
+    @property
+    def has_moon(self) -> bool:
+        """Whether a Moon disc was asked for *and* is a sensible size to draw.
+
+        The size test is here rather than at the drawing site so ``mark_zones``
+        and :func:`draw_sky_marks` can never disagree about whether the disc
+        exists — one of them keeping a zone clear for a circle the other decided
+        not to draw is exactly the drift the shared-derivation rule exists to
+        prevent. It needs the picture's size, so the property answers the half it
+        can (asked for at all) and :func:`_moon_diameter` answers the rest."""
+        return bool(self.moon_px and self.moon_px > 0)
+
     def __bool__(self) -> bool:
         """False when there is nothing to draw, so a caller can gate on the
         marks themselves rather than testing both halves."""
-        return self.has_scale or self.has_compass
+        return self.has_scale or self.has_compass or self.has_moon
 
 
 def _norm180(deg: float) -> float:
@@ -233,6 +277,44 @@ def _text(draw, xy, text: str, font, anchor: str) -> None:  # noqa: ANN001
               anchor=anchor, stroke_width=2, stroke_fill=HALO_RGB)
 
 
+def _moon_disc_box(width: int, height: int, marks: SkyMarks):  # noqa: ANN202
+    """Where the "Moon for scale" disc goes on a ``width`` × ``height`` picture.
+
+    ``(x0, y0, x1, y1)`` for the circle itself, or ``None`` when there is no
+    disc to draw — not asked for, or too big to be a mark
+    (:data:`MOON_DISC_MAX_SHORT_FRACTION`), or a picture with no room for it.
+
+    It sits **directly under the scale bar**, top-left, because the two answer
+    the same question ("how big is this piece of sky?") and a reader should meet
+    them together — put them in opposite corners and they read as two unrelated
+    decorations. That also keeps it clear of the rose (top-right) and of the
+    bottom edge, which is the caption zone the module docstring describes.
+
+    One function so :func:`mark_zones` and :func:`draw_sky_marks` share the
+    arithmetic instead of mirroring it."""
+    if not marks.has_moon or width <= 0 or height <= 0:
+        return None
+    short = max(1, min(width, height))
+    diameter = float(marks.moon_px or 0.0)
+    if not (diameter > 0) or diameter > short * MOON_DISC_MAX_SHORT_FRACTION:
+        return None
+    margin = max(_MIN_MARGIN_PX, round(short * _MARGIN_FRACTION))
+    line_w = max(_MIN_LINE_PX, round(short * _LINE_FRACTION))
+    label_px = max(_MIN_LABEL_PX, round(short * _LABEL_FRACTION))
+    gap = max(6, round(short * 0.018))
+    # Clear the bar's own zone when there is a bar; otherwise start at the margin.
+    top = float(margin)
+    if marks.has_scale:
+        serif = max(line_w * 2, round(short * 0.010))
+        top = margin + serif + line_w + label_px * 1.4 + gap
+    x0, y0 = float(margin), top
+    x1, y1 = x0 + diameter, y0 + diameter
+    # The label is set below the circle, so the *label* is what has to fit.
+    if x1 > width or y1 + label_px * 1.4 > height:
+        return None
+    return (x0, y0, x1, y1)
+
+
 def mark_zones(width: int, height: int, marks: SkyMarks):  # noqa: ANN201
     """The pixel boxes :func:`draw_sky_marks` will ink on a ``width`` × ``height``
     picture, as ``(x0, y0, x1, y1)`` rectangles.
@@ -271,12 +353,28 @@ def mark_zones(width: int, height: int, marks: SkyMarks):  # noqa: ANN201
         # circle its longest reach (arm + gap + letter) sweeps out.
         reach = rose + gap + label_px
         zones.append((cx - reach, cy - reach, cx + reach, cy + reach))
+    disc = _moon_disc_box(width, height, marks)
+    if disc is not None:
+        # The circle, its stroke (which the rasteriser rounds outward off a
+        # fractional box), and the label set beneath it. Every allowance here is
+        # deliberately generous — the box exists to be *avoided*, so
+        # over-claiming costs a catalog name a few pixels of room while
+        # under-claiming buries it, and the exact extent of a stroked line
+        # depends on face metrics this module stays free of PIL to avoid asking
+        # for. The half-width allowance matters because the label is centred on
+        # the circle and can be wider than a small disc.
+        x0, y0, x1, y1 = disc
+        half = max((x1 - x0) / 2.0, len(MOON_DISC_LABEL) * label_px * 0.6 / 2.0)
+        mid = (x0 + x1) / 2.0
+        zones.append((mid - half - line_w, y0 - line_w, mid + half + line_w,
+                      y1 + line_w + label_px * 2.0))
     return tuple(zones)
 
 
 def draw_sky_marks(img, marks: SkyMarks):  # noqa: ANN001, ANN201
     """Return a new RGB ``PIL.Image``: ``img`` with the scale bar drawn at the
-    top-left and the North/East rose at the top-right.
+    top-left, the optional Moon-for-scale disc beneath it, and the North/East
+    rose at the top-right.
 
     The canvas size is unchanged — these are marks *on* the picture, not a frame
     around it, so a wallpaper stays wallpaper-shaped. When ``marks`` has nothing
@@ -312,6 +410,17 @@ def draw_sky_marks(img, marks: SkyMarks):  # noqa: ANN001, ANN201
         _line(draw, (x1, y - serif), (x1, y + serif), line_w)
         _text(draw, ((x0 + x1) / 2.0, y + serif + line_w), marks.bar_label,
               font, "ma")
+
+    disc = _moon_disc_box(width, height, marks)
+    if disc is not None:
+        # "Moon for scale": a faint circle exactly as wide as the full Moon would
+        # look in this field. An outline, never a fill — the picture underneath
+        # is the whole point, and a filled disc would hide the very thing being
+        # measured. Haloed like every other mark so it survives a bright core.
+        x0, y0, x1, y1 = disc
+        draw.ellipse([x0, y0, x1, y1], outline=HALO_RGB, width=line_w + 2)
+        draw.ellipse([x0, y0, x1, y1], outline=MARK_RGB, width=line_w)
+        _text(draw, ((x0 + x1) / 2.0, y1 + line_w), MOON_DISC_LABEL, font, "ma")
 
     if marks.directions is not None:
         rose = max(_MIN_ROSE_PX, round(short * _ROSE_FRACTION))

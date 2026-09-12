@@ -11,6 +11,10 @@ image dimensions it chooses a round bar length that spans a comfortable fraction
 of the frame and returns its label, its length as a fraction of the image width
 (so the frontend can draw it over any scaled preview), and a Moon comparison.
 No WCS object, no astropy, no I/O — trivially unit-tested.
+
+:attr:`ScaleBar.moon_fraction` is the same Moon comparison as a *number* — how
+wide to draw a disc the true angular size of the full Moon — so the picture can
+show the comparison as well as say it.
 """
 
 from __future__ import annotations
@@ -52,6 +56,33 @@ class ScaleBar:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    @property
+    def moon_fraction(self) -> float:
+        """The full Moon's **diameter** as a fraction of the image width (0–1+).
+
+        The visual twin of :attr:`moon_comparison`: the sentence says "about 2.5
+        full Moons wide", this is the number you need to *draw* one on the
+        picture at its true angular size. ``0.24`` means a disc a quarter of the
+        picture wide is exactly how big the Moon would look in this field.
+
+        Deliberately **derived from** :attr:`fraction` rather than stored beside
+        it. Both are "an angular length as a share of this picture's width", and
+        :attr:`fraction` is re-based whenever the picture is not the whole canvas
+        (an auto-edit crop, a North-up turn that grew the frame — see
+        ``webapp.routers.stack._bar_on_turned_canvas``). A second stored field
+        would have to be re-based at every one of those sites and would go stale
+        the first time one was missed; riding on :attr:`fraction` makes that
+        impossible by construction.
+
+        Returns ``0.0`` for a degenerate bar, so a caller can gate on ``> 0``
+        without a special case. Values above 1 are honest and expected — on a
+        tight field the Moon really is wider than the frame — and it is the
+        *drawing* side that decides a disc that big is no longer a mark
+        (:data:`seestack.skymarks.MOON_DISC_MAX_SHORT_FRACTION`)."""
+        if not (self.arcsec > 0) or not (self.fraction > 0):
+            return 0.0
+        return self.fraction * MOON_DIAMETER_ARCSEC / self.arcsec
 
     @property
     def ascii_label(self) -> str:

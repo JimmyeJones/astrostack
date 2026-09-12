@@ -2101,32 +2101,9 @@ problems. Dogfood it every big-picture run and fix root causes.
 [`SHIPPED.md`](SHIPPED.md) — the engine render and the endpoint flag already existed; only the download was
 missing. Don't re-file it.)*
 
-- **🌟 NEW BEGINNER FEATURE (Scout 2026-09-12) — draw the full Moon *to scale* on the shareable picture, not
-  only in words.** *(Pillar: understand + enjoy/share — PRIORITY 3; size S; **grep before building, and check
-  the reachability note**.)* The scale bar already carries a full-Moon comparison **as a sentence** —
-  `seestack/scalebar.py::_moon_comparison` → *"the whole frame is about 2.5 full Moons wide"*, surfaced as
-  `moon_comparison` on the run's scale-bar payload (`webapp/routers/stack.py` ~1964) and baked onto the share
-  JPEG (v0.284.0). What is missing is the thing every beginner instantly reads: **a faint disc the true angular
-  size of the full Moon**, drawn in a corner of the picture, the way "Moon for scale" comparisons circulate
-  online. It answers "how big is this bit of sky, really?" at a glance, and it is the classic beginner way to
-  make a nebula's size land — far more legible than "2.5 full Moons wide".
-  **Why it's small and safe:** the two numbers it needs already exist and agree by construction — the Moon's mean
-  diameter (`scalebar._MOON_ARCSEC`, ~31′) and the run's own local pixel scale (the same one the scale bar's
-  `bar_arcsec`/`fraction` come from), so the disc's diameter in preview pixels is one division off machinery the
-  scale bar already computes. No new WCS, no network, no dependency. Draw it beside the existing scale bar
-  overlay so the two size cues live together and can't disagree.
-  **Beginner bar ✔:** sane default (**off** — an optional toggle next to the scale-bar / caption-bar controls,
-  exactly like "Add caption bar (target, exposure, date)" on the editor's Export panel), one plain-language line
-  (*"a faint circle the size of the full Moon, so you can see how big your target really is"*). Not pro tooling.
-  **Shape:** it is the visual twin of an existing text feature, so mirror that feature's plumbing rather than
-  inventing a new one — add it to the same overlay the in-app scale bar draws (frontend, over the preview) **and**
-  the same bake path the share JPEG's scale bar / rose already use (`seestack` render side), so screen and file
-  agree; a test pinning the drawn disc diameter against `_MOON_ARCSEC / local_scale` is the whole correctness
-  story. **Care / reachability:** on the owner's S30 (2.1° field) the full Moon (~0.5°) is ~¼ of the frame width —
-  comfortably drawable; on a heavy crop or a tight single object the disc could exceed the frame, so it must
-  self-hide (or clamp + label) when the Moon would be larger than the visible field, the same way
-  `preview_scale_bar` already re-chooses its rung for the visible field. Keep it a *complement* to the sentence,
-  never a replacement — the words stay for screen-readers and copy-paste captions.
+*(The Scout's 2026-09-12 "draw the full Moon to scale" entry shipped as v0.432.0 and was cut to
+[`SHIPPED.md`](SHIPPED.md) — `ScaleBar.moon_fraction` + `skymarks._moon_disc_box` + `frontend/src/moonDisc.ts`,
+off by default. Don't re-file it.)*
 
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
@@ -2933,6 +2910,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.432.0** — **the full Moon, drawn to scale on your picture** (PRIORITY 3, beginner feature): the scale bar's own sentence (*"about 2.5 full Moons wide"*) as a faint disc at the Moon's true angular size, on screen (`AnnotatedImage`, bottom-right) and baked into the shared JPEG (`skymarks._moon_disc_box`, under the bar). `ScaleBar.moon_fraction` is **derived from** the bar's `fraction`, so it follows the auto-edit crop and a North-up save's re-basing for free and needed no new response field. Self-hides past `MOON_DISC_MAX_SHORT_FRACTION` (half the short side) rather than clamping — the sentence already answers a field that tight. Off by default; nested under History's "Scale & compass" and offered only where it fits, so the Save/share menu gains no item and the Target hero is unchanged. `tests/test_moon_disc_mirror.py` pins screen against file. Tests +36. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.431.1** — infra/trust: **the ninth hand-mirrored engine constant gets the drift guard the other eight have.** `weightingHint.ts`'s `WEIGHTING_MIN_MAX_MIN_FRAMES = 3` is the engine's `weights_applied` gate, quoted verbatim in the caution the Stack form and the Settings defaults both show, and nothing pinned it — a stale copy would tell a beginner their quality weighting is ignored on a stack where it is honoured, or stay silent on one where it is not. `tests/test_weighting_hint_mirror.py` pins the literal to `stacker.MIN_MAX_MIN_FRAMES` **and** pins that constant to `combine_method`'s own behaviour across the boundary (drizzle included), rather than to another copy of itself; both halves verified red by scratch edits. `combine_method` also stops spelling its gate `n >= 3` twenty lines above the constant that names it — the sigma-clip floor beside it deliberately stays a literal, since `DRIZZLE_REJECT_MIN_FRAMES` is a different claim that shares the number. Tests +2; no behaviour change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.431.0** — PRIORITY 2–3 (autonomy + friendliness), found by dogfooding the Target page rather than from the backlog: **"is it enough yet?" stops quoting M31 and M33 the same 6 h.** `readiness.ts` admits in its own comment that its per-type table "can't tell a bright emission nebula from a faint one"; `seestack/target_difficulty.py` exists precisely because it can, and the Target page has been printing its verdict as a badge beside the contradicting number all along ("usually looks good in well under an hour" over "3.0 h of ~6 h — a solid start"). A new `GOAL_DIFFICULTY_FACTOR` (easy ×0.5, moderate ×1, challenging ×1.5) applies the **curated** half of that verdict — never the "clusters are uniformly easy" type rule, which only restates the 1.5 h Cluster bucket — via a derived `DifficultyHint.curated` flag. Threaded to every surface that quotes a goal (readiness card, `nextBestMove`'s rungs, Dashboard progress, "Point here tonight", the Tonight row, mosaic effort), because a sharpened goal on one screen and a coarse one on the next is the same bug with the seam moved — and that threading found a second instance: an already-targeted Tonight row had been dropping the difficulty a catalog row of the same object carries. Additive and conservative everywhere: no verdict, an un-curated one, a user-set goal or an older backend all leave the goal exactly where it is today. Tests +8 Python / +9 vitest; five verified red by scratch reverts. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.430.1** — the surfacing half of v0.430.0 (PRIORITY 2–3): **the last week of a season reaches the screen the owner was already looking at.** The whole premise of "Shoot these before they're gone" is that nobody goes looking, so answering it only on the Tonight page serves the same person `best_months` already served. `ClosingSeasonNote` — one line and a link, ranked `advisory` — joins the Dashboard's existing `NoticeBoard` (inside the grouping, not one more always-on banner) for the narrow case that cannot wait for somebody to decide to plan: a target whose season ends **this week**. One constant, `CLOSING_URGENT_WEEKS`, decides "urgent" for both the note and the Tonight card's "Last chance" badge, so the two surfaces cannot drift apart about which targets those are. Self-hiding on an older backend, on a failed fetch, and most of the year. Tests +6 vitest. Full entry in [`SHIPPED.md`](SHIPPED.md).
