@@ -85,6 +85,49 @@ def field_fulls_of_sky(
     return max(1.0, ratio)
 
 
+def samples_per_pixel_of_run(
+    canvas_w: int | float | None,
+    canvas_h: int | float | None,
+    *,
+    n_frames_used: int | float | None,
+    frame_w: int | float | None,
+    frame_h: int | float | None,
+    options_json: str | None = None,
+) -> float | None:
+    """How many subs landed on **one pixel** of a finished run's canvas.
+
+    The per-run companion to :func:`field_fulls_of_sky`, and the denominator
+    correction of :mod:`frontend/src/samplesPerPixel` applied *after* the stack
+    rather than before it: a run's ``n_frames_used`` is the total that went in,
+    while every sentence about what a pixel has seen — drizzle's dither-phased
+    fill, κ-σ's per-pixel spread, "is it deep enough to print bigger?" — is
+    about the depth. On a single field the two are the same number; on a mosaic
+    the total flatters the picture by the number of field-fulls it spans.
+
+    Deliberately derived from the canvas rather than from the run's coverage
+    FITS: the callers are cheap endpoints that promise no file read, and
+    ``field_fulls_of_sky`` is the same measure four other surfaces already use,
+    so this cannot drift into a second definition of "depth".
+
+    ``None`` whenever the answer would be a guess (no canvas, no native frame
+    shape, no usable frame count) — every caller then keeps its
+    depth-unaware behaviour, which is exactly what it did before.
+    """
+    fulls = field_fulls_of_sky(
+        canvas_w, canvas_h,
+        frame_w=frame_w, frame_h=frame_h,
+        drizzle_scale=drizzle_scale_from_options(options_json),
+    )
+    if fulls is None or fulls <= 0:
+        return None
+    if not _positive(n_frames_used):
+        return None
+    depth = float(n_frames_used) / fulls  # type: ignore[arg-type]
+    if not math.isfinite(depth) or depth <= 0:
+        return None
+    return depth
+
+
 def drizzle_scale_from_options(options_json: str | None) -> float | None:
     """Extract ``drizzle_scale`` from a stack run's stored ``options_json``.
 

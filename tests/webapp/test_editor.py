@@ -20,7 +20,7 @@ def _make_run(data_root, safe, basename="master", h=80, w=100,
               coverage_min=1, coverage_max=5, is_mosaic=None,
               ts="2026-05-02T00:00:00Z",
               capture_start_utc=None, capture_end_utc=None,
-              with_preview=False):
+              with_preview=False, n_frames_used=5, options_json="{}"):
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -44,9 +44,10 @@ def _make_run(data_root, safe, basename="master", h=80, w=100,
             return proj.add_stack_run(StackRunRow(
                 id=None, timestamp_utc=ts, output_basename=basename,
                 fits_path=str(fp), tiff_path=None, preview_path=preview_path,
-                n_frames_used=5,
+                n_frames_used=n_frames_used,
                 canvas_h=h, canvas_w=w, coverage_min=coverage_min,
-                coverage_max=coverage_max, options_json="{}", is_mosaic=is_mosaic,
+                coverage_max=coverage_max, options_json=options_json,
+                is_mosaic=is_mosaic,
                 capture_start_utc=capture_start_utc,
                 capture_end_utc=capture_end_utc,
             ))
@@ -2184,6 +2185,82 @@ def test_print_sizes_says_what_would_unlock_a_bigger_print(client, solved_librar
         "/editor/print-sizes").json()
     assert tiny["sizes"] == []
     assert tiny["bigger"] is not None and tiny["bigger"]["name"] == "6×4 in"
+
+
+def test_print_sizes_does_not_send_a_thin_picture_off_to_drizzle(
+        client, solved_library):
+    """The nudge's lever is Drizzle — and the app's *own* Stack form answers a
+    re-stack of a picture this thin with "Consider turning Drizzle off for this
+    stack". One screen was recommending what the other withdraws, and on a
+    mosaic that is the ordinary case: the fixture's subs are 480×320, so a
+    2000×1500 canvas spans ~19.5 fields and 120 subs is ~6 on any one pixel.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    thin = _make_run(solved_library, safe, basename="thin", h=1500, w=2000,
+                     n_frames_used=120)
+    bigger = client.get(
+        f"/api/targets/{safe}/stack-runs/{thin}/editor/print-sizes"
+    ).json()["bigger"]
+    assert bigger is not None and bigger["name"] == "A3"
+    assert "about 6 subs" in bigger["text"], bigger["text"]
+    assert "keep shooting this target first" in bigger["text"]
+
+    # …and a picture that clears the bar still gets the plain recommendation,
+    # so the correction hedges the thin case rather than every case.
+    deep = _make_run(solved_library, safe, basename="deep", h=1500, w=2000,
+                     n_frames_used=3000)
+    deep_text = client.get(
+        f"/api/targets/{safe}/stack-runs/{deep}/editor/print-sizes"
+    ).json()["bigger"]["text"]
+    assert "keep shooting" not in deep_text
+    assert "Drizzle" in deep_text
+
+
+def test_print_sizes_divides_out_a_run_s_own_drizzle_before_judging_its_depth(
+        client, solved_library):
+    """A drizzled canvas has more pixels covering the same sky, so counting its
+    area as extra field-fulls would under-report the depth and nag a stack that
+    is genuinely deep enough. Same run, same subs — only the stored options
+    differ."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # The pair is chosen to straddle the bar: a 2000×1500 canvas over 480×320
+    # subs is ~19.5 fields at face value and ~4.9 once a ×2 drizzle is divided
+    # out, so 586 subs is ~30 a pixel counted naively and ~120 counted right.
+    driz = json.dumps({"drizzle": True, "drizzle_scale": 2.0})
+    deep = _make_run(solved_library, safe, basename="driz", h=1500, w=2000,
+                     n_frames_used=586, options_json=driz)
+    deep_text = client.get(
+        f"/api/targets/{safe}/stack-runs/{deep}/editor/print-sizes"
+    ).json()["bigger"]["text"]
+    assert "keep shooting" not in deep_text, deep_text
+
+    # The identical canvas and count with no drizzle recorded really did only
+    # get ~30 subs on a pixel, and is nagged — so the line above is the drizzle
+    # division doing work, not the bar being loose.
+    plain = _make_run(solved_library, safe, basename="plain", h=1500, w=2000,
+                      n_frames_used=586)
+    plain_text = client.get(
+        f"/api/targets/{safe}/stack-runs/{plain}/editor/print-sizes"
+    ).json()["bigger"]["text"]
+    assert "about 30 subs" in plain_text, plain_text
+
+
+def test_print_sizes_keeps_its_general_wording_when_the_depth_is_unknowable(
+        client, solved_library, monkeypatch):
+    """A library with no measured frame shape (an older project, a broken row)
+    must read exactly as it did before the depth was passed at all — never as
+    "about 1 sub", which would nag every picture on the install."""
+    from webapp import field_fulls
+
+    monkeypatch.setattr(field_fulls, "native_frame_shape", lambda _proj: None)
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="noshape", h=1500, w=2000,
+                    n_frames_used=120)
+    text = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/print-sizes"
+    ).json()["bigger"]["text"]
+    assert "keep shooting" not in text
+    assert "pays off when you have plenty of subs" in text
 
 
 def test_print_sizes_404s_for_a_run_that_does_not_exist(client, solved_library):

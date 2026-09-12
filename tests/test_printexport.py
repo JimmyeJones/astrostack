@@ -17,6 +17,7 @@ from seestack.printexport import (
     BIGGER_PRINT_MAX_SCALE,
     DEFAULT_MIN_DPI,
     DRIZZLE_MAX_USEFUL_SCALE,
+    DRIZZLE_MIN_SAMPLES_PER_PIXEL,
     MAX_DPI,
     PAPER_SIZES,
     bigger_print,
@@ -198,6 +199,63 @@ def test_the_next_size_is_always_bigger_than_what_the_picture_already_prints():
         by_name = {p.name: p for p in PAPER_SIZES}
         assert all(by_name[nudge.name].long_in > by_name[n].long_in
                    for n in printable), (w, h, nudge.name, printable)
+
+
+def test_a_thin_picture_is_told_to_shoot_first_rather_than_to_drizzle_now():
+    """The nudge names Drizzle. On a picture with too few subs *on a pixel* for
+    super-resolution to pay off, the app's own Stack form would answer that
+    re-stack with "Consider turning Drizzle off for this stack" — so one screen
+    was recommending what the other withdraws. Handed the depth, the sentence
+    orders the two steps instead."""
+    thin = bigger_print(2000, 1500, samples_per_pixel=6)
+    assert thin is not None and thin.scale <= DRIZZLE_MAX_USEFUL_SCALE
+    assert "about 6 subs" in thin.text
+    assert f"~{DRIZZLE_MIN_SAMPLES_PER_PIXEL}" in thin.text
+    assert "keep shooting this target first" in thin.text
+    # It still names the lever — the picture does need pixels, not exposure.
+    assert "Drizzle" in thin.text
+    assert "cleaner, not bigger" in thin.text
+
+
+def test_a_deep_picture_keeps_the_plain_drizzle_recommendation():
+    """The correction must not hedge every picture: a stack that clears the bar
+    reads exactly as it did before the depth was passed at all."""
+    deep = bigger_print(2000, 1500, samples_per_pixel=DRIZZLE_MIN_SAMPLES_PER_PIXEL)
+    assert deep is not None
+    assert deep.text == bigger_print(2000, 1500).text
+    assert "keep shooting" not in deep.text
+    # …and one sub below the bar is where it changes.
+    just_under = bigger_print(
+        2000, 1500, samples_per_pixel=DRIZZLE_MIN_SAMPLES_PER_PIXEL - 1)
+    assert just_under is not None and just_under.text != deep.text
+
+
+def test_an_unknown_or_nonsense_depth_reads_as_unknown_not_as_empty():
+    """Every caller that cannot work out a depth (no canvas dims, a library with
+    no measured frame shape, an older run) passes None — and must get the
+    behaviour it had before this argument existed, never "about 1 sub"."""
+    plain = bigger_print(2000, 1500).text
+    for bad in [None, 0, -3, float("nan"), float("inf"), "lots"]:
+        assert bigger_print(2000, 1500, samples_per_pixel=bad).text == plain, bad
+
+
+def test_a_fractional_depth_is_never_rounded_down_to_no_subs():
+    """A thin mosaic panel can average below one sub per pixel; saying "about 0
+    subs" of a picture the user is looking at would read as a bug."""
+    nudge = bigger_print(2000, 1500, samples_per_pixel=0.4)
+    assert nudge is not None
+    assert "about 1 sub," in nudge.text
+
+
+def test_the_mosaic_branch_is_untouched_by_the_depth():
+    """Past DRIZZLE_MAX_USEFUL_SCALE the answer is a mosaic, not drizzle, so the
+    drizzle bar has nothing to say about it either way."""
+    for depth in [None, 3, 500]:
+        nudge = bigger_print(400, 300, samples_per_pixel=depth)
+        assert nudge is not None and nudge.scale > DRIZZLE_MAX_USEFUL_SCALE
+        assert "mosaic" in nudge.text
+        assert "Drizzle" not in nudge.text
+        assert "keep shooting" not in nudge.text
 
 
 def test_degenerate_sizes_get_no_nudge():
