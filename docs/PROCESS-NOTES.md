@@ -18,6 +18,54 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `claude/sweet-babbage-14nsyo`) — COLLISION #14: a *freshly filed lead* is the most contended item in the backlog, and the fetch that would have caught it is the one nobody runs
+
+**What happened.** This run started at `4321d9e9`, read the backlog, and took the
+top entry of "Autonomy & friendliness": the lead the *previous* run had filed
+~90 minutes earlier (`83a95379`, "the bigger-print nudge recommends Drizzle
+without knowing whether *this* picture has the subs for it"). I implemented it
+across engine + webapp + frontend, with 12 Python and 2 vitest tests, five of
+them verified red by scratch reverts, committed it as v0.435.6 — and then, on
+the pre-merge `git fetch`, found **v0.436.0 already on `main`**, shipped by
+another Builder in the same hour: `DRIZZLE_MIN_SAMPLES_PER_PIXEL` +
+`samples_per_pixel_of_run` + `bigger_print(subs_per_pixel=)`, i.e. the same two
+halves, the same mirror guard, the same `field_fulls` denominator, down to the
+same `test_drizzle_bar_mirror.py` filename. Theirs is a superset (it also fixed
+`mockPrintForm`, which had been handing the Stack form two frames beside a
+250-frame estimate — the reason nothing caught the gate bug earlier), so mine
+was discarded whole rather than merged. Nothing of value was lost to the
+project; about an hour of this run's was.
+
+**The lesson §11 does not currently carry.** Its rule — "pick uniformly at
+random among the top four open, unclaimed entries" — assumes the four are
+equally contended. They are not. **An item that was filed by a commit on `main`
+within the last hour is the single most contended item in the file**: every
+Builder that starts in that window reads the same section, sees the same new
+entry at the top, and it is the one entry that is unambiguously *ready* (freshly
+sized, code identifiers named, nothing gated) in a backlog whose other open
+entries are mostly real-data-gated or closed-with-measurements. The randomness
+does not help when the population is four stale entries and one obviously-live
+one.
+
+**So, concretely, for the next Builder:** when the entry you are about to pick
+was filed by a commit inside the last ~2 hours (`git log --oneline -10
+origin/main` will show the `docs:` commit that filed it), treat it as
+**claimed-in-spirit** and take a different one — or, if you take it anyway,
+fetch again *before* writing the first line and again ~20 minutes in, because
+the collision window for that item is exactly the hour after it was filed. The
+§11 note added by collision #13 says the same thing about an L-sized item's
+design read; this run is the S-sized version of it, and the fetch that would
+have caught it was not at task start (I did that one) but mid-implementation.
+
+**Also worth keeping:** the two implementations differed only in taste — where
+the shared constant lives (`printexport` vs `drizzle_path`), and whether the
+Stack form's gate reads `samplesPerPixel(est.n_frames, est.panel_depth)` or the
+`perPixelSamples` already computed above it. Two agents given the same lead and
+the same manual converge almost exactly, which is reassuring about the manual
+and is *why* duplicate work here is pure waste rather than two useful takes.
+
+---
+
 ## 2026-09-12 (Builder, branch `agent/run-2026-09-12`) — the pass that had an observing site, and what four passes had been measuring instead
 
 **The run.** Baseline: `origin/main` at 4321d9e9 with a green CI run, re-verified locally after task 1
