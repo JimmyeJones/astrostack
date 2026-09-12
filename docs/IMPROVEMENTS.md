@@ -435,6 +435,24 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **LEAD (Builder 2026-09-12, seen in a `--mosaic` dogfood screenshot of the editor's print panel; sized and
+  NOT started, because it is engine+webapp+frontend and this run had no room to finish it properly) — the
+  bigger-print nudge recommends Drizzle without knowing whether *this* picture has the subs for it.**
+  *(Pillar: autonomy — PRIORITY 2; size M. **Confirm it is worth it before building**: the sentence is
+  hedged and not false, so this is a "name the number we already have" improvement, not a bug.)*
+  `printexport._bigger_print_text` closes with *"What adds detail is re-stacking with Drizzle
+  (super-resolution) switched on, which pays off when you have plenty of subs."* — a general clause, because
+  the function is handed a paper size and a scale and nothing about the run. On the bundled 2×2 mosaic
+  (21 subs, ~6 on each part of the picture) the app's **own** Stack form would fire `drizzleTooFewHint` and
+  offer *"Turn off Drizzle"* for exactly that stack, so one screen names the lever the other withdraws.
+  **The shape, if it is worth it:** the bar already exists as a shared constant (`Stack.tsx` ~L921 calls it
+  "the *same* bar"), and v0.420.0 settled that the question is **per-pixel**, not the target's total — so
+  read the run's own depth (`field_fulls`, as four other surfaces already do) and either name the shortfall
+  (*"about 6 subs on each part of this picture; Drizzle needs about N before it pays off, so more subs
+  first"*) or keep today's clause when the depth clears the bar. **Care:** the bar is a hand-mirrored engine
+  constant, so it needs a `test_*_mirror.py` drift guard like the other nine; and the print advice is
+  rendered into a **baked** print file as well as the panel, so both readers have to agree.
+
 - **NEW IDEA (Builder 2026-09-03, the cost the v0.335.0 endpoint knowingly accepted) — `/rejection-outlook`
   pays for a whole `estimate_stack` to learn two numbers.** *(Pillar: performance — size XS; **only if the
   note is ever un-gated**, see the entry two above.)* It needs the accepted+solved count and the mosaic's
