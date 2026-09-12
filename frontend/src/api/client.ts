@@ -584,6 +584,12 @@ export interface AutoStackHold {
   readable: number;
   unreadable: number;
   reason?: string | null;
+  /** The **mosaic** case: the subs that can still be read are spread over the
+   * panels, so the picture they would make is this many subs deep at a typical
+   * pixel. 0 on a single field, on the other reasons, and against a backend that
+   * predates the measurement. */
+  panel_depth?: number;
+  panels?: number;
   when_utc?: string | null;
 }
 

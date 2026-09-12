@@ -497,6 +497,8 @@ def target_autostack_hold(safe: str, request: Request) -> AutoStackHoldOut | Non
                     unreadable=int(entry.get("unreadable") or 0),
                     reason=(entry.get("reason") if isinstance(
                         entry.get("reason"), str) else None),
+                    panel_depth=int(entry.get("panel_depth") or 0),
+                    panels=int(entry.get("panels") or 0),
                     when_utc=job.finished_utc,
                 )
         return None

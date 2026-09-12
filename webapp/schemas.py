@@ -273,12 +273,22 @@ class AutoStackHoldOut(BaseModel):
     their picture lives. Same numbers, same wording, at the surface they
     actually stare at. Read-only, and derived from the most recent finished scan
     only, so it disappears by itself the moment a scan stacks the target.
+
+    ``panel_depth``/``panels`` are the mosaic case, and say *why* the hold is
+    right when the plain readable count looks healthy: the subs that can still be
+    read are spread over the mosaic's panels, so the picture they would make is
+    ``panel_depth`` subs deep at a typical pixel. ``0`` on a single field, on the
+    other reasons, and on a scan recorded by a build before the depth was
+    measured — the same "unknown, say nothing extra" default
+    :class:`AutoStackThinHoldOut` uses.
     """
 
     offered: int
     readable: int
     unreadable: int
     reason: str | None = None
+    panel_depth: int = 0
+    panels: int = 0
     when_utc: str | None = None
 
 
