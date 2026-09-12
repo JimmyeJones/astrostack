@@ -152,6 +152,38 @@ def test_tonight_already_targeted_rows_carry_object_type(client, solved_library)
         assert m42_prog["object_type"] == m42["type"]
 
 
+def test_tonight_already_targeted_rows_carry_the_difficulty_verdict(
+        client, solved_library):
+    """The same shape of regression as the object type above, on the other input
+    to the goal.
+
+    A *catalog* row has carried its "how hard for a Seestar?" verdict since the
+    badge shipped; an already-targeted row did not — so the same object lost its
+    verdict the moment the owner started shooting it. Cosmetically that dropped a
+    badge; behind the badge it meant this row's readiness hint judged the target
+    against the plain per-type goal while the Target page, the Dashboard card and
+    "Point here tonight" all judged it against the sharpened one.
+    """
+    from seestack.objectinfo import identify_object
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    m42 = next(t for t in body["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    expected = identify_object("M 42").difficulty
+    assert expected is not None
+    assert m42["difficulty"] == {
+        "level": expected.level, "label": expected.label,
+        "text": expected.text, "curated": expected.curated,
+    }
+    # …and it is the same answer /api/library-progress gives for that target, so
+    # the two screens cannot quote two goals for one picture.
+    prog = client.get("/api/library-progress").json()
+    m42_prog = next((r for r in prog if r["safe"] == "M_42"), None)
+    if m42_prog is not None:
+        assert m42_prog["difficulty"] == m42["difficulty"]
+
+
 def test_tonight_already_targeted_rows_carry_a_user_set_goal(client, solved_library):
     """A goal the owner set has to reach the planner, or the two screens disagree
     about the same target: Tonight would say "Plenty — try something new" from the

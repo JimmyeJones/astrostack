@@ -15,7 +15,7 @@
 import type { MosaicPlan } from "./api/client";
 import { clearNightsFromPace, nightWord } from "./components/clearNights";
 import { formatIntegration } from "./format";
-import { goalHoursForType } from "./readiness";
+import { goalHoursForType, type GoalDifficulty } from "./readiness";
 
 /**
  * How long a mosaic of this object would take, in the owner's own clear nights.
@@ -47,9 +47,10 @@ export function mosaicEffortText(
   mosaic: MosaicPlan | null | undefined,
   type: string | null | undefined,
   usualPaceSeconds?: number | null,
+  difficulty?: GoalDifficulty,
 ): string | null {
   if (!mosaic || !Number.isFinite(mosaic.panels) || mosaic.panels < 2) return null;
-  const totalSeconds = mosaic.panels * goalHoursForType(type) * 3600;
+  const totalSeconds = mosaic.panels * goalHoursForType(type, difficulty) * 3600;
   const est = clearNightsFromPace(totalSeconds, usualPaceSeconds);
   if (!est || est.nights === null) return null;
   // The assumption is stated, not hidden: the number only means anything if you
@@ -78,8 +79,9 @@ export function withMosaicEffort(
   mosaic: MosaicPlan | null | undefined,
   type: string | null | undefined,
   usualPaceSeconds?: number | null,
+  difficulty?: GoalDifficulty,
 ): { label: string; color: string; tooltip: string } | null {
   if (!badge) return null;
-  const effort = mosaicEffortText(mosaic, type, usualPaceSeconds);
+  const effort = mosaicEffortText(mosaic, type, usualPaceSeconds, difficulty);
   return effort ? { ...badge, tooltip: `${badge.tooltip} ${effort}` } : badge;
 }

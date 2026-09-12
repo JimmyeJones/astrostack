@@ -118,6 +118,14 @@ class DifficultyHintOut(BaseModel):
     level: str  # "easy" | "moderate" | "challenging"
     label: str  # one-word badge text, e.g. "Easy"
     text: str
+    # True when the verdict came from the hand-curated per-object table rather
+    # than the "clusters are uniformly easy" type rule — i.e. when it knows
+    # something a per-type answer does not (see
+    # :class:`seestack.target_difficulty.DifficultyHint`). Additive with a False
+    # default, so an older frontend ignores it and an older backend omitting it
+    # reads as "type rule", which is the conservative answer: the integration
+    # goal then stays exactly where it is today.
+    curated: bool = False
 
 
 class BackgroundModeHintOut(BaseModel):

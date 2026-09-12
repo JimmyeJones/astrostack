@@ -139,3 +139,45 @@ def _iter_curated_levels():
     from seestack.target_difficulty import _CURATED
 
     yield from _CURATED.items()
+
+
+def test_a_curated_verdict_says_so_and_a_type_rule_one_does_not():
+    """``curated`` separates "this object" from "objects of this type".
+
+    The badge reads the same either way, so nothing on screen distinguishes them
+    — but the integration goal in ``readiness.ts`` acts on one and not the
+    other, and it is right to. The curated table is the only thing in this app
+    that can tell M31 from M33 (same type, same readiness bucket, opposite ends
+    of hard-for-a-Seestar); the "star clusters and star fields are uniformly
+    easy" type rule restates the bucket, so acting on it would halve a goal for
+    a fact the Cluster goal has already priced in.
+    """
+    m31 = target_difficulty("M31", "Galaxy")
+    assert m31 is not None and m31.level == "easy"
+    assert m31.curated is True
+
+    m33 = target_difficulty("M 33", "Galaxy")
+    assert m33 is not None and m33.level == "challenging"
+    assert m33.curated is True
+
+    # The type rule: an object that is *not* in the table, reaching "easy"
+    # purely from its type.
+    from seestack.target_difficulty import _CURATED
+
+    cluster = target_difficulty("NGC 6633", "Open Cluster")
+    assert "NGC6633" not in _CURATED, "pick an un-curated cluster for this case"
+    assert cluster is not None and cluster.level == "easy"
+    assert cluster.curated is False
+
+    # And an object with neither is still silent, as it always was.
+    assert target_difficulty("NGC 9999", "Galaxy") is None
+
+
+def test_every_curated_object_is_marked_curated():
+    """The flag is derived, not hand-maintained — so it cannot drift out of step
+    with the table it describes as the table grows."""
+    for object_id, level in _iter_curated_levels():
+        hint = target_difficulty(object_id, "Galaxy")
+        assert hint is not None, object_id
+        assert hint.level == level, object_id
+        assert hint.curated is True, object_id
