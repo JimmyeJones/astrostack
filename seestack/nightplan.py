@@ -1242,6 +1242,15 @@ class LibraryTarget:
     # identified — never a guessed direction. Purely annotation: it never affects
     # scoring or ranking.
     recentre_nudge: RecentreNudge | None = None
+    # This target's vetted "how hard is it for a Seestar?" verdict, when the
+    # bundled catalog has one. A catalog row has carried this since the badge
+    # shipped; an already-shot row did not, so the *same object* lost its verdict
+    # the moment the owner started shooting it — and, more than cosmetically, the
+    # readiness hint on that row then judged it against the plain per-type goal
+    # while every other screen judged it against the sharpened one. ``None`` for
+    # an un-vetted object and on an older backend. Purely annotation: it never
+    # affects scoring or ranking.
+    difficulty: DifficultyHint | None = None
 
 
 def plan_tonight(observer: Observer, when_utc: datetime, *,
@@ -1346,6 +1355,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 recent_pace_s=t.recent_pace_s,
                 field_fulls=t.field_fulls,
                 recentre_nudge=t.recentre_nudge,
+                difficulty=t.difficulty,
             ))
         else:
             obj: CatalogObject = m["obj"]

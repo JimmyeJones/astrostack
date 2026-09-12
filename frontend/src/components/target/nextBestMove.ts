@@ -28,7 +28,7 @@ import { THIN_STACK_MAX_FRAMES } from "./thinStack";
 import { fieldsOfSkyLabel, perPixel, spansMoreThanOneField } from "./perPixel";
 import { formatIntegration } from "../../format";
 import { settingsLink } from "../../settingsSections";
-import { goalHoursForType } from "../../readiness";
+import { goalHoursForType, type GoalDifficulty } from "../../readiness";
 import { objectTypeBucket } from "../../tonight";
 import type { SoftStars } from "./softStars";
 
@@ -74,12 +74,22 @@ export const DEEP_INTEGRATION_S = 3 * 60 * 60; // 3 hours
 export const SHORT_INTEGRATION_FRACTION = 0.25;
 export const DEEP_INTEGRATION_FRACTION = 0.75;
 
-/** The two per-pixel bars (seconds) this ladder judges `type` against. */
-export function integrationBars(type: string | null | undefined): {
+/** The two per-pixel bars (seconds) this ladder judges `type` against.
+ *
+ * `difficulty` is the target's vetted "how hard for a Seestar?" verdict, passed
+ * straight through to `goalHoursForType`: the bars are fractions of the goal, so
+ * a goal the badge two inches up the page has sharpened has to carry them with
+ * it — otherwise this ladder disagrees with the readiness card again, in the
+ * other direction from the one v0.429.2 closed. Omit it and the bars are exactly
+ * the per-type ones. */
+export function integrationBars(
+  type: string | null | undefined,
+  difficulty?: GoalDifficulty,
+): {
   shortS: number;
   deepS: number;
 } {
-  const goalS = goalHoursForType(type) * 3600;
+  const goalS = goalHoursForType(type, difficulty) * 3600;
   return {
     shortS: goalS * SHORT_INTEGRATION_FRACTION,
     deepS: goalS * DEEP_INTEGRATION_FRACTION,
@@ -118,6 +128,11 @@ export interface NextBestMoveInput {
    * kind of object. Omit / null / unrecognised → the `Other` bucket, which is
    * today's 1 h / 3 h ladder exactly. */
   objectType?: string | null;
+  /** The target's vetted difficulty verdict, when the caller has one — the same
+   * `DifficultyHint` the badge on this page renders. It sharpens the per-type
+   * goal the two rungs are fractions of (see `integrationBars`). Omit / null /
+   * an un-curated verdict → today's per-type ladder, unchanged. */
+  difficulty?: GoalDifficulty;
 }
 
 function finite(v: number | null | undefined): number | null {
@@ -155,7 +170,7 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
     integrationS == null ? null : perPixel(integrationS, input.fieldFulls);
   // "How much is enough here?" is the readiness card's question, so take its
   // answer rather than a second one — see `integrationBars` above.
-  const bars = integrationBars(input.objectType);
+  const bars = integrationBars(input.objectType, input.difficulty);
 
   // 1. Can't-locate-subs. The unsolved subs never reached the stacker, so
   //    getting them to plate-solve adds real frames — the biggest lever when a
