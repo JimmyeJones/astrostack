@@ -2101,6 +2101,33 @@ problems. Dogfood it every big-picture run and fix root causes.
 [`SHIPPED.md`](SHIPPED.md) — the engine render and the endpoint flag already existed; only the download was
 missing. Don't re-file it.)*
 
+- **🌟 NEW BEGINNER FEATURE (Scout 2026-09-12) — draw the full Moon *to scale* on the shareable picture, not
+  only in words.** *(Pillar: understand + enjoy/share — PRIORITY 3; size S; **grep before building, and check
+  the reachability note**.)* The scale bar already carries a full-Moon comparison **as a sentence** —
+  `seestack/scalebar.py::_moon_comparison` → *"the whole frame is about 2.5 full Moons wide"*, surfaced as
+  `moon_comparison` on the run's scale-bar payload (`webapp/routers/stack.py` ~1964) and baked onto the share
+  JPEG (v0.284.0). What is missing is the thing every beginner instantly reads: **a faint disc the true angular
+  size of the full Moon**, drawn in a corner of the picture, the way "Moon for scale" comparisons circulate
+  online. It answers "how big is this bit of sky, really?" at a glance, and it is the classic beginner way to
+  make a nebula's size land — far more legible than "2.5 full Moons wide".
+  **Why it's small and safe:** the two numbers it needs already exist and agree by construction — the Moon's mean
+  diameter (`scalebar._MOON_ARCSEC`, ~31′) and the run's own local pixel scale (the same one the scale bar's
+  `bar_arcsec`/`fraction` come from), so the disc's diameter in preview pixels is one division off machinery the
+  scale bar already computes. No new WCS, no network, no dependency. Draw it beside the existing scale bar
+  overlay so the two size cues live together and can't disagree.
+  **Beginner bar ✔:** sane default (**off** — an optional toggle next to the scale-bar / caption-bar controls,
+  exactly like "Add caption bar (target, exposure, date)" on the editor's Export panel), one plain-language line
+  (*"a faint circle the size of the full Moon, so you can see how big your target really is"*). Not pro tooling.
+  **Shape:** it is the visual twin of an existing text feature, so mirror that feature's plumbing rather than
+  inventing a new one — add it to the same overlay the in-app scale bar draws (frontend, over the preview) **and**
+  the same bake path the share JPEG's scale bar / rose already use (`seestack` render side), so screen and file
+  agree; a test pinning the drawn disc diameter against `_MOON_ARCSEC / local_scale` is the whole correctness
+  story. **Care / reachability:** on the owner's S30 (2.1° field) the full Moon (~0.5°) is ~¼ of the frame width —
+  comfortably drawable; on a heavy crop or a tight single object the disc could exceed the frame, so it must
+  self-hide (or clamp + label) when the Moon would be larger than the visible field, the same way
+  `preview_scale_bar` already re-chooses its rung for the visible field. Keep it a *complement* to the sentence,
+  never a replacement — the words stay for screen-readers and copy-paste captions.
+
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
   *(Pillar: trust + understand — PRIORITY 3; both small, both purely additive on machinery that now exists.)*
@@ -2258,24 +2285,9 @@ missing. Don't re-file it.)*
   keep unpacking inline below a size threshold or return an empty-but-valid summary plus the job id. Worth doing
   only once someone actually uploads a big archive; a few hundred MB unpacks in seconds today.
 
-- ~~**NEW IDEA (Builder 2026-07-25, follow-on to the v0.207.0 `integrationTrend` verdict) — when a target reads
-  "sky-limited / plateaued", nudge the "What should I shoot next?" surface toward a fresh target.**~~ —
-  **✅ SHIPPED v0.425.0** (Builder 2026-09-11), and it *names* the target rather than pointing at the surface:
-  `IntegrationTrendBadge` asks the planner for its own best pick and prints it with the observability line the
-  Dashboard card prints. Full entry in [`SHIPPED.md`](SHIPPED.md).
-  *(Original spec: **Why:** the most useful thing to *do* with a "more subs won't
-  help this one much" verdict is move on — but nothing connects that verdict to the existing
-  `SuggestTargetsCard` / "Try something new tonight" surface. **The feature:** when `integrationTrend(runs).level`
-  is `"plateaued"` for a target the beginner is viewing, add one soft line to (or highlight) the what-to-shoot-next
-  suggestion ("You've got this one about as clean as your sky allows — a fresh target would pay off more tonight").
-  Purely additive copy tying two shipped surfaces together; self-hides otherwise. Validate the plateau threshold
-  reads sensibly on a real multi-night target before making the nudge loud. (S, autonomy — PRIORITY 2–3.))*
-  **Note (Builder 2026-07-25, `v8z2rz`): partly delivered by v0.209.0's `IntegrationTrendBadge`** — the plateau
-  sentence it renders on the Target page already says "*A darker sky or a brighter target will do more than extra time
-  on this one*", so the core "move on" nudge is now shown where a beginner decides. What remains here is only the
-  *cross-page* tie-in: highlighting the Dashboard `SuggestTargetsCard` when a viewed target is plateaued — which needs
-  per-target plateau computation on the Dashboard (extra run fetches), not "purely additive copy". Lower value now that
-  the on-page nudge exists; keep the real-data threshold-validation caveat before making anything loud.
+- ~~**NEW IDEA (Builder 2026-07-25) — plateaued target nudges "shoot something fresh".**~~ **✅ SHIPPED
+  v0.425.0** — full body cut to the Shipped one-liner below (three-file rule); `IntegrationTrendBadge` now
+  names the planner's best fresh pick under the plateau verdict.
 
 - ~~**Data-driven target difficulty** (optional `mag`/surface-brightness in the catalog instead of the curated
   table).~~ **⚪ CLOSED — measured at zero, do not build** (Builder 2026-09-07; full write-up moved to
