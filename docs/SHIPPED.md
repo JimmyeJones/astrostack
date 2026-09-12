@@ -1,5 +1,41 @@
 # Shipped — the record
 
+## v0.436.1 — 2026-09-12 — a dogfood pass gets an observing site, and the "plan a night" half of the app is finally in front of a browser
+
+*(Builder, branch `agent/run-2026-09-12` — 🟠 INFRA. The `LEAD` filed with v0.435.0 earlier the same day,
+built as the entry's own shape (a). Tooling + AGENTS.md §7 only: nothing shipped changes, and the samples'
+generated pixels stay bit-identical.)*
+
+**The hole.** `tests/synth.write_seestar_fits` writes no `SITELAT`/`SITELONG` unless asked, and
+`webapp/sample_data` never asks. So with both samples loaded and stacked, `_resolve_observer` answered
+`"none"` — and **Tonight, the Sky Map's placement, the life list's "Up tonight" chip, the wishlist's "the
+Tonight page will tell you when", `/api/plan/closing`, `/api/plan/week` and `/api/life-list/nearly-there`
+were all in their empty state.** Every "dogfood CLEAN" ever recorded was therefore a statement about the
+half of the app that does not need a site, and v0.426.0, v0.430.0 and v0.433.0 all shipped into the other
+half inside one week.
+
+**Why not the obvious fix.** Writing a site into the sample's headers was rejected for the reason the lead
+gives: a location in a frame header is not decoration — the planner *plans from it* — so a sample claiming
+to have been shot from one place would silently tell an owner somewhere else which targets are up, computed
+for the wrong hemisphere, with only `location_source: "fits"` anywhere on the wire to say so.
+
+**What shipped instead.** `scripts/agent-dogfood.sh` step 3c `PUT`s `site_lat`/`site_lon` into its **own
+scratch install's Settings** — which is exactly what a real owner's install supplies — after the samples
+load and before anything is probed. `DOGFOOD_SITE="lat,lon"` overrides it (default `40.0,-2.0`: a round
+mid-northern latitude, obviously synthetic, in the band most Seestar owners are in, so the planner's answers
+are representative rather than polar). `--no-site` skips it. `--empty` never sets one, because a first-run
+app has no site and those empty screens are what that pass exists to measure.
+
+**It says whether it took.** The step prints `location_source` and the row count from
+`/api/plan/tonight` — a pass that silently failed to set the site would otherwise look exactly like the
+coverage hole it closes. Printed, never asserted: this script is a finder.
+
+**It paid for itself on its first run.** `/tonight` measured **10,430 px tall on a phone** — 3.4× the next
+tallest page (3,475 px) and 3.5× the "worst page" number the standing IA priority quotes — and the
+CLIPPED-LABEL probe (itself only four days old) reported **145 clipped score badges** on it, the exact
+v0.434.1 failure on the one table that fix could not have seen. Both are fixed in this run: v0.436.2 and
+v0.437.0.
+
 ## v0.436.0 — 2026-09-12 — one bar, counted per pixel: the print nudge stops recommending the re-stack the Stack form withdraws
 
 *(Builder, branch `agent/run-2026-09-12` — 🟠 BUG + PRIORITY 2 (autonomy). Taken from the `LEAD` the
