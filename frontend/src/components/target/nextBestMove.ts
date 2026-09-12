@@ -28,6 +28,8 @@ import { THIN_STACK_MAX_FRAMES } from "./thinStack";
 import { fieldsOfSkyLabel, perPixel, spansMoreThanOneField } from "./perPixel";
 import { formatIntegration } from "../../format";
 import { settingsLink } from "../../settingsSections";
+import { goalHoursForType } from "../../readiness";
+import { objectTypeBucket } from "../../tonight";
 import type { SoftStars } from "./softStars";
 
 // A plate-solve shortfall is worth flagging as the top lever only when it's both
@@ -39,8 +41,7 @@ export const LOCATE_MIN_UNSOLVED = 3;
 export const LOCATE_MIN_FRACTION = 0.25;
 
 // Below ~1 hour a deep-sky target has barely started building signal-to-noise;
-// galaxies and nebulae reward multiple hours. Universal to the OSC deep-sky
-// workflow, so it needs no per-camera calibration.
+// galaxies and nebulae reward multiple hours.
 //
 // Both of these bars are **per-pixel** quantities — "how much light has landed
 // where I am looking?" — so on a mosaic they are compared against the run's
@@ -53,6 +54,37 @@ export const SHORT_INTEGRATION_S = 60 * 60; // 1 hour
 // At/above this the stack is genuinely deep; with a healthy frame count there's
 // nothing to nudge, so stay silent rather than nag a good result.
 export const DEEP_INTEGRATION_S = 3 * 60 * 60; // 3 hours
+
+// …and those two numbers are not independent constants: they are the readiness
+// card's own ladder boundaries, evaluated at its default goal. `readiness.ts`
+// calls a target "a good start" below **0.25** of its goal and "nearly there"
+// at **0.75**, and the goal for an unclassified/nebula target is **4 h** — so
+// 0.25 x 4 h = 1 h is exactly `SHORT_INTEGRATION_S` and 0.75 x 4 h = 3 h is
+// exactly `DEEP_INTEGRATION_S`. The ladder was written for that one bucket and
+// then applied to every object, which is how the same page came to say two
+// things about one target: a star cluster (goal 1.5 h) at 50 min was "nearly
+// there" on the readiness card and "add more time — galaxies and nebulae reward
+// hours, so another clear night or two" here, and a galaxy (goal 6 h) at 1.2 h
+// was "a good start" there and "a solid result — plenty of subs went in" here.
+//
+// So express the bars where they came from: the same fractions of the same
+// per-type goal `readiness.ts` and `mosaicEffort.ts` already judge against.
+// Omitting the type yields the `Other` bucket's 4 h, i.e. 1 h / 3 h — today's
+// numbers, bit for bit, for every caller that has no catalogue match.
+export const SHORT_INTEGRATION_FRACTION = 0.25;
+export const DEEP_INTEGRATION_FRACTION = 0.75;
+
+/** The two per-pixel bars (seconds) this ladder judges `type` against. */
+export function integrationBars(type: string | null | undefined): {
+  shortS: number;
+  deepS: number;
+} {
+  const goalS = goalHoursForType(type) * 3600;
+  return {
+    shortS: goalS * SHORT_INTEGRATION_FRACTION,
+    deepS: goalS * DEEP_INTEGRATION_FRACTION,
+  };
+}
 
 export type NextBestMoveKind = "locate" | "thin" | "soft" | "integration" | "good";
 
@@ -80,6 +112,12 @@ export interface NextBestMoveInput {
    * (`StackRun.field_fulls`). Omit / null / ≤1 on a single field and on any
    * caller without the figure — the ladder is then exactly what it was. */
   fieldFulls?: number | null;
+  /** The catalogue object type from the identify card ("Open Cluster",
+   * "Galaxy", …), so the two time rungs are judged against the same per-type
+   * goal the readiness card beside them uses, and the advice names the right
+   * kind of object. Omit / null / unrecognised → the `Other` bucket, which is
+   * today's 1 h / 3 h ladder exactly. */
+  objectType?: string | null;
 }
 
 function finite(v: number | null | undefined): number | null {
@@ -96,7 +134,9 @@ function finite(v: number | null | undefined): number | null {
  *                      the ladder is complete).
  *   3. `soft`        — a healthy stack whose stars came out softer than usual for
  *                      this target (relative to its own history) → check focus.
- *   4. `integration` — a healthy stack but under ~1 hour *per pixel*.
+ *   4. `integration` — a healthy stack but under a quarter of this object
+ *                      type's integration goal, *per pixel* (~1 h for a
+ *                      nebula or an unrecognised target; see `integrationBars`).
  *   5. `good`        — decent result; encourage + name the one lever (time) that
  *                      still helps. Silent once the stack is genuinely deep.
  */
@@ -113,6 +153,9 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
   const depth = mosaic ? Math.round(perPixel(nUsed, input.fieldFulls)) : nUsed;
   const perPixelS =
     integrationS == null ? null : perPixel(integrationS, input.fieldFulls);
+  // "How much is enough here?" is the readiness card's question, so take its
+  // answer rather than a second one — see `integrationBars` above.
+  const bars = integrationBars(input.objectType);
 
   // 1. Can't-locate-subs. The unsolved subs never reached the stacker, so
   //    getting them to plate-solve adds real frames — the biggest lever when a
@@ -180,24 +223,39 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
   // 3. Short-integration. A healthy frame count but not much light where the
   //    beginner is looking; more hours is the lever that pulls out faint detail
   //    on deep-sky targets.
-  if (perPixelS < SHORT_INTEGRATION_S) {
+  if (perPixelS < bars.shortS) {
     const mins = Math.round(perPixelS / 60);
     const soFar = mins > 0 ? `${mins} min so far` : "only a few minutes so far";
+    // A cluster is the one bucket where "galaxies and nebulae reward hours" is
+    // simply not a fact about the thing on screen: `target_difficulty` calls
+    // clusters "uniformly easy — bright point sources that need no integration
+    // to look good", and their goal is the shortest the app has. Asking for
+    // "another clear night or two" there contradicts the badge two inches up
+    // the page saying it looks good in well under an hour, so say the true
+    // thing and name the smaller lever it actually needs.
+    const cluster = objectTypeBucket(input.objectType) === "Cluster";
     return {
       kind: "integration",
       phrase: mosaic
         ? `Add more time — your ${formatIntegration(integrationS)} is spread across ` +
           `${fieldsOfSkyLabel(input.fieldFulls)}, so each part of this picture ` +
-          `has ${soFar}. Galaxies and nebulae reward hours, so more passes over ` +
-          `the same mosaic would pull out much more faint detail.`
-        : `Add more time — ${soFar}. Galaxies and nebulae reward hours, so ` +
-          `another clear night or two on this target would pull out much more ` +
-          `faint detail.`,
+          `has ${soFar}. ` +
+          (cluster
+            ? `Clusters come up quickly, so even another pass or two over the ` +
+              `same mosaic would clean up the background.`
+            : `Galaxies and nebulae reward hours, so more passes over ` +
+              `the same mosaic would pull out much more faint detail.`)
+        : `Add more time — ${soFar}. ` +
+          (cluster
+            ? `Clusters come up quickly, so even the rest of one clear night on ` +
+              `this target would clean up the background nicely.`
+            : `Galaxies and nebulae reward hours, so another clear night or two ` +
+              `on this target would pull out much more faint detail.`),
     };
   }
 
   // Genuinely deep and healthy → nothing worth nudging; stay silent.
-  if (perPixelS >= DEEP_INTEGRATION_S) return null;
+  if (perPixelS >= bars.deepS) return null;
 
   // 4. All good (decent depth, but more time always still helps).
   return {
