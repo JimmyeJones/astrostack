@@ -1,5 +1,99 @@
 # Shipped — the record
 
+## v0.434.2 — 2026-09-12 — the bilateral noise-reduction preview leaves more grain than the export, and now says so
+
+*(Builder, branch `claude/sweet-babbage-5x5by0` — 🟠 BUG (PRIORITY 1, the editor's preview↔export parity),
+Builder-found by measurement rather than taken from the backlog. Engine + webapp + frontend; additive only,
+so no config, schema, on-disk, default or existing-response change, and **not one rendered pixel moves** on
+either side.)*
+
+**How it was found.** The backlog's ready work is dry, so this run swept the one thing AGENTS.md §1 names as
+the open frontier — *scale-dependent preview↔export parity on a mosaic-size canvas* — over the editor ops
+that are on the one-click Auto path. `detail.chroma_denoise` came back clean (preview within 1–3 % of its
+export at every proxy step, both strengths). `detail.denoise` did not.
+
+**What is wrong.** The live preview runs on a proxy that is a **stride** of the master, not an average
+(`seestack/edit/proxy.py::build_proxy` takes every Nth pixel), so the proxy carries the full-resolution grain
+at its full amplitude. The bilateral method's `sigma_spatial` is a full-resolution pixel measure and
+`_denoise` correctly shrinks it by `proxy_scale`, which keeps the preview smoothing the same *physical* patch
+of sky — and that is exactly the problem: a matched patch on a strided proxy holds far fewer samples to
+average. The export's 2.0 px sigma gathers ~25 pixels; a step-4 proxy's 0.5 px sigma gathers about 1.5. So
+the preview leaves grain the export will not.
+
+**Measured, against the noiseless truth rather than against "how much did it change".** A change-based metric
+cannot answer this — a total-variation result is a staircase whose adjacent-pixel differences read as almost
+no grain however wrong it is, and the first attempt at this measurement reported the divergence with the sign
+reversed for exactly that reason. The honest question is how much grain is **left**, which only a synthetic
+scene can answer, so the fixture carries the clean and the noisy field both. Grain left in the preview ÷
+grain left in the export, sky pixels only, on the proxy grid the user is looking at (1000×1500 field; held to
+±0.05 across two noise levels and two star densities):
+
+|strength|step 2|step 3|step 4|step 5|step 6|
+|---|---|---|---|---|---|
+|0.35|0.99|0.98|1.01|1.01|1.01|
+|0.45|1.01|1.03|1.10|1.10|1.10|
+|0.55|1.03|1.10|1.23|1.22|1.23|
+|0.65|1.05|1.19|1.38|1.38|1.40|
+|0.75|1.09|1.29|1.57|1.58|1.60|
+|0.85|1.13|1.42|1.80|1.81|1.84|
+|0.95|1.18|1.56|2.04|2.06|2.10|
+
+At the top of the slider on a mosaic proxy the preview shows **about twice** the grain the saved picture will
+have. **The direction is the dangerous one**, which is what makes it worth a sentence rather than a note in a
+file: someone who cannot see the smoothing the export will apply raises the strength until the *preview*
+looks clean, and saves a picture smoothed roughly twice as hard as the one they judged — stars softened,
+faint structure gone. And the op's own copy invites exactly that trip: *"TV and bilateral are alternatives
+worth trying on heavier noise."*
+
+**Wavelet (the default) and TV are clean, and stay unflagged.** Both set their threshold from the grain they
+are handed rather than from a fixed neighbourhood, so decimation does not move their result: measured within
+3 % at every proxy step and every strength. Flagging them would have been a nag about nothing, and a test
+pins that they are not.
+
+**The fix is an advisory, because there is no arithmetic that closes it.** You can match the physical patch
+or you can match the noise reduction; you cannot match both on a strided proxy, and matching the *result*
+would mean smoothing `proxy_scale`× more scene than the export does, which misrepresents the detail loss
+instead. That is the same limit `sharpen_understates_on_proxy` and `deconv_understates_on_proxy` already
+record, and this follows their shape exactly: a pure predicate in the engine, a boolean on the histogram
+response, a caption in the editor.
+
+**The rule, and why it is a ratio.** The shortfall is set by two terms together — the colour latitude
+`strength` buys the filter, and the samples the scaled window can reach — and neither separates the grid on
+its own (strength 0.55 is honest at step 2 and 23 % out at step 4; step 4 is honest at strength 0.35). Every
+cell above at or over 1.10 carries `strength / scaled_sigma` ≥ **0.83**; every cell below 1.10 carries
+≤ **0.75**. The two sets do not overlap, so `_BILATERAL_ADVISORY_RATIO = 0.8` sits in the gap, measured
+rather than picked. `bilateral_sigma_spatial(proxy_scale)` is now one named function that the render and the
+rule both call, so they cannot disagree about what was asked for, and `_BILATERAL_SIGMA_SPATIAL_PX = 2.0` /
+`_BILATERAL_PROXY_FLOOR_PX = 0.5` replace the two literals that used to sit inline in the render.
+
+**Nothing about any picture changed.** `max(0.5, ctx.scaled_px(2.0))` and
+`bilateral_sigma_spatial(ctx.proxy_scale)` are the same expression, and a test pins the value at
+proxy_scale 1, 0.5, 2, 4 and 6 — in particular **2.0 on the export**, where a moved constant would silently
+re-render every saved picture.
+
+**Upgrade-safe (§9):** one additive boolean on an existing response. An older frontend ignores it; an older
+backend omitting it reads as "nothing to say", which is what the caption helper returns for `{}` and is
+pinned as such. No config, schema, on-disk, default or API-shape change, and no endpoint added or removed.
+
+**Tests (+12), each verified red by a scratch revert of the layer it covers.**
+`tests/test_edit_proxy_parity.py` gains the clean/noisy fixture and five cases: the measured shortfall at
+(0.9, step 4) and (0.7, step 3) — worded so that if a future change ever *does* close the gap the failure
+tells the next agent to retire the advisory rather than to loosen the bound — wavelet and TV agreeing within
+10 % at steps 2/4/6 and never being flagged, the render's sigma pinned at five scales, and the sweep's other
+clean result pinned rather than merely recorded: **`detail.chroma_denoise`**, the op behind the owner's worst
+reported mosaic result (v0.225.0), previews what it exports within 10 % at steps 2/4/6 and had no parity
+guard at all. Both grain comparisons first assert the export **really smooths** (the gentlest case still
+removes over half), because an op that did nothing would make every ratio read 1.00 for the wrong reason —
+the §8 "a fixture that cannot exhibit its bug" trap, in the shape it takes for a parity test.
+`tests/test_edit_engine.py::test_denoise_understates_on_proxy_rule` walks the rule's boundary with the
+measurement beside each assertion, including the degenerate inputs. `tests/webapp/test_editor.py` pins the
+histogram flag across six recipes (**fails before with `KeyError`**), including the undecimated run where the
+preview *is* the export. `denoisePreview.test.ts` pins the wording — the direction, the "don't chase it with
+the slider", and the method that has no gap — and `Editor.test.tsx` pins that the caption actually **reaches
+the page**, both ways, which none of the four sibling advisories has ever had.
+
+---
+
 ## v0.433.0 — 2026-09-12 — "Up tonight" on the life list: which of the 110 can I actually shoot this evening?
 
 *(Builder, branch `claude/sweet-babbage-ogwqzh` — a 🌟 NEW BEGINNER FEATURE (PRIORITY 2–3, the "plan"

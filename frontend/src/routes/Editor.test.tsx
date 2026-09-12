@@ -886,6 +886,39 @@ describe("EditorView", () => {
     expect(await screen.findByLabelText("Select Crop")).toBeInTheDocument();
   });
 
+  it("captions the bilateral denoise preview shortfall, and only when it is real", async () => {
+    // The four sibling proxy advisories (deconv, star reduce, sharpen, hot
+    // pixels) are each pinned only at the helper, so nothing has ever checked
+    // that one of them reaches the page. This one does both.
+    mockEditorQueries();
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], denoise_preview_understates: true });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+    expect(await screen.findByText(/previews weaker than it exports/)).toBeInTheDocument();
+  });
+
+  it("says nothing about the denoise preview when it matches the export", async () => {
+    mockEditorQueries();
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], denoise_preview_understates: false });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+    // Wait on the recipe-dependent text (the same anchor the other tests use),
+    // so the panel the caption would sit in has really rendered, then assert the
+    // caption is not in it.
+    expect(await screen.findByText("Stretch")).toBeInTheDocument();
+    expect(screen.queryByText(/previews weaker than it exports/)).toBeNull();
+  });
+
   it("offers a Coverage overlay on a mosaic and toggles it", async () => {
     mockEditorQueries();
     // is_mosaic:true → the coverage overlay button is offered.

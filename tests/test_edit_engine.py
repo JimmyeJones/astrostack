@@ -1066,6 +1066,38 @@ def test_sharpen_understates_on_proxy_rule():
     assert sharpen_understates_on_proxy(1.5, float("inf")) is False
 
 
+def test_denoise_understates_on_proxy_rule():
+    """The rule is the ratio of the two terms that set the shortfall — the colour
+    latitude ``strength`` buys and the samples the scaled window can reach — and
+    the measured grid it was cut from is in ``_BILATERAL_ADVISORY_RATIO``. Every
+    case there at or above a tenth more grain than the export scores 0.83 or more;
+    every case below scores 0.75 or less."""
+    from seestack.edit.ops.detail import denoise_understates_on_proxy
+
+    # The export renders the sigma as given, so it is never understating.
+    assert denoise_understates_on_proxy("bilateral", 0.9, 1.0) is False
+    assert denoise_understates_on_proxy("bilateral", 0.5, 0.5) is False
+    # The two methods that match their export at every step are never flagged,
+    # however hard they are pushed (measured within 3 %).
+    assert denoise_understates_on_proxy("wavelet", 0.95, 6.0) is False
+    assert denoise_understates_on_proxy("tv", 0.95, 6.0) is False
+    # Bilateral on a mosaic-sized proxy: 0.9/0.5 = 1.8 (measured ~1.9x the
+    # export's grain), 0.7/0.667 = 1.05 at step 3 (measured 1.24x).
+    assert denoise_understates_on_proxy("bilateral", 0.9, 4.0) is True
+    assert denoise_understates_on_proxy("bilateral", 0.7, 3.0) is True
+    # Gentle smoothing previews honestly even on a heavy proxy
+    # (0.35/0.5 = 0.7 — measured 1.01x, i.e. no difference at all).
+    assert denoise_understates_on_proxy("bilateral", 0.35, 6.0) is False
+    # ...and a mild 2x proxy stays honest until the strength is pushed
+    # (0.75/1.0 measured 1.09x; 0.85/1.0 measured 1.13x).
+    assert denoise_understates_on_proxy("bilateral", 0.75, 2.0) is False
+    assert denoise_understates_on_proxy("bilateral", 0.85, 2.0) is True
+    # Degenerate inputs are safe (no false alarms).
+    assert denoise_understates_on_proxy("bilateral", 0.0, 4.0) is False
+    assert denoise_understates_on_proxy("bilateral", float("nan"), 4.0) is False
+    assert denoise_understates_on_proxy("bilateral", 0.9, float("inf")) is False
+
+
 def test_sharpen_understates_flag_matches_the_weak_preview():
     """The sharpen live preview genuinely understates the full-res export once the
     proxy-scaled radius goes sub-pixel, and ``sharpen_understates_on_proxy`` must
