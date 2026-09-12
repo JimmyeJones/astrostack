@@ -29,6 +29,7 @@ export function NextBestMoveBadge(
     nUnsolved,
     runs,
     fieldFulls,
+    objectType,
   }: {
     name: string;
     nFramesUsed: number | null | undefined;
@@ -43,6 +44,10 @@ export function NextBestMoveBadge(
      * of one part of a mosaic rather than of the whole raster. Optional — a
      * single field, and any caller without it, read exactly as before. */
     fieldFulls?: number | null;
+    /** The catalogue object type (from the identify card), so the time rungs
+     * are judged against the same per-type goal the readiness card next to
+     * this one uses. Optional — omitted reads exactly as before. */
+    objectType?: string | null;
   },
 ) {
   const tip = useMemo(
@@ -53,8 +58,9 @@ export function NextBestMoveBadge(
         nUnsolved,
         softStars: softerThanUsual(runs),
         fieldFulls,
+        objectType,
       }),
-    [nFramesUsed, integrationS, nUnsolved, runs, fieldFulls],
+    [nFramesUsed, integrationS, nUnsolved, runs, fieldFulls, objectType],
   );
   if (!tip) return null;
 

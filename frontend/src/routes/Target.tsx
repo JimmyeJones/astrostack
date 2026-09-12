@@ -538,8 +538,9 @@ export function TargetView() {
         nUnsolved: unsolvedCount,
         softStars: softerThanUsual(runs.data),
         fieldFulls: latestRun?.field_fulls,
+        objectType: identity.data?.type,
       })?.kind ?? null,
-    [latestRun, unsolvedCount, runs.data],
+    [latestRun, unsolvedCount, runs.data, identity.data],
   );
   // When walk-away Auto-stack is on, it now holds a target back rather than
   // publishing a 1-2 frame single-frame-speckle "master" (see auto_stack_min_frames
@@ -1174,6 +1175,7 @@ export function TargetView() {
               nUnsolved={unsolvedCount}
               runs={runs.data}
               fieldFulls={latestRun.field_fulls}
+              objectType={identity.data?.type}
             />
           ) : null },
           /* "About as clean as your sky allows": when this target's measured noise
