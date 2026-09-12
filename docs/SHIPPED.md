@@ -1,5 +1,89 @@
 # Shipped — the record
 
+## v0.432.0 — 2026-09-12 — the full Moon, drawn to scale on your picture
+
+*(Builder, branch `claude/sweet-babbage-3xr6h8` — the Scout's 2026-09-12 "🌟 NEW BEGINNER FEATURE" entry,
+PRIORITY 3 (understand + enjoy/share). Engine + webapp + frontend; additive and **off by default**, so no
+config, schema, on-disk, API-shape or default change and every existing download is byte-for-byte what it
+was.)*
+
+**The gap.** The scale bar has carried a full-Moon comparison **as a sentence** since v0.284.0 —
+`scalebar._moon_comparison` → *"the whole frame is about 2.5 full Moons wide"*, on the run's payload and
+baked onto the share JPEG. That is a fact a beginner has to do arithmetic on, against something they can
+only picture. What was missing is the thing every beginner instantly reads: **a faint disc the true angular
+size of the full Moon**, drawn on the picture, the way "Moon for scale" comparisons circulate online.
+
+**The whole correctness story is one division, and it is deliberately not stored.**
+`ScaleBar.moon_fraction` is a **property derived from `fraction`**, not a fifth field beside it:
+`fraction · MOON_DIAMETER_ARCSEC / arcsec`. Both numbers are "an angular length as a share of this
+picture's width", and `fraction` is already re-based at every site where the picture is not the whole canvas
+— the auto-edit border crop, and `_bar_on_turned_canvas` for a North-up save that grew the frame. A stored
+second field would have had to be re-based at each of those and would have gone stale the first time a new
+one was added; riding on `fraction` makes that impossible by construction, and is why this shipped without
+touching either re-basing path. It also means the API payload's shape is unchanged — `asdict` serialises
+fields, not properties — so the disc needed no new response field at all.
+
+**It self-hides rather than clamping.** `MOON_DISC_MAX_SHORT_FRACTION = 0.5`: past half the picture's short
+side the Moon is not a *mark* on the picture, it is most of the picture, and a circle that big reads as
+damage. A field that tight is exactly where the bar's own sentence already says the honest thing in words
+("about 11% the width of the full Moon"), so the words carry it and the disc stands aside. On the owner's
+S30 (2.1° field) the Moon is ~24 % of the frame width — comfortably drawable, which is the case this was
+built for.
+
+**Where it goes, and why the two surfaces differ.** Baked (`skymarks.draw_sky_marks`): directly **under the
+scale bar**, top-left, because the two answer the same question and a reader should meet them together —
+and because the bottom edge is the caption zone the nameplate and keepsake own. On screen
+(`AnnotatedImage`): **bottom-right**, the one corner the bar (bottom-left) and the rose (top-right) both
+leave free, with its label right-aligned over the circle so a small disc cannot push its chip off the edge.
+An **outline, never a fill**, in both — the picture underneath is the point.
+
+**One toggle, nested, not a twentieth menu item.** The owner's standing complaint is that there is too much
+on screen at once, and *consolidation is preferred over a new card* (AGENTS.md §1). So "Moon for scale"
+appears in History's "About this stack" menu **only while Scale & compass is on**, and **only on a field the
+disc actually fits** (`moonDiscFits`) — the app never offers a mark it would then decline to draw. It
+reaches the baked download through the same per-card route the North-up and nameplate toggles already take
+(a new `moon` prop on the shared `SavePictureMenu`), so *what you see is what you save* and the Save/share
+menu gains no item. The Target hero passes nothing and its picture is unchanged.
+
+**Plain-language line (the beginner bar):** *"A faint circle the size of the full Moon, so you can see how
+big your target really is."*
+
+**`moon` without `scale` is deliberately a no-op** on `GET …/jpeg`, rather than a second code path that
+could disagree with the bar about pixel scale — the disc is measured off that very bar. The marked download
+names itself `_scale_moon.jpg` so saving it can't silently overwrite the plain `_scale.jpg`.
+
+**Screen and file cannot drift.** `tests/test_moon_disc_mirror.py` pins the two hand-mirrored constants in
+`frontend/src/moonDisc.ts` against `seestack.scalebar.MOON_DIAMETER_ARCSEC` and
+`seestack.skymarks.MOON_DISC_MAX_SHORT_FRACTION` — the same arrangement as `test_fullres_cap_mirror.py`,
+and verified to go red when either is nudged. The formula needs no guard: it is derived from `fraction` on
+both sides.
+
+**The fixture was the risk, and it is the thing worth carrying forward** (AGENTS.md §8: a regression test
+whose fixture cannot exhibit its subject is green for the wrong reason). The 64 px synthetic in
+`test_stack_render.py` has a 3.6″/px WCS, so the full Moon is **~8× its frame width** — every webapp test
+written on it would have passed by drawing nothing. `tests/webapp/test_share_moon_disc.py` therefore builds
+its own 256 px run with a WCS spanning four Moons, and leads with
+`test_the_fixture_really_can_show_a_disc`, which fails if that ever stops being true. The size assertion was
+checked for sensitivity by perturbing the drawn diameter by 20 % in a scratch edit and watching it go red.
+
+**Tests (+36).** Python: 5 in `test_scalebar.py` (the true share of the frame; agreement with the sentence
+it illustrates, across four fields; that it rides on `fraction` through a re-base; honesty above 1 on a
+tight field; 0 on a degenerate bar), 9 in `test_skymarks.py` (off unless asked; the box is exactly square at
+the diameter asked for and the drawing reaches all four of its extremes; an outline not a fill; under the
+bar, not over it; **no disc at all past the ceiling**, checked either side of it; a moon-only `SkyMarks` is
+still something to draw; the declared zone covers the disc, and a *small* disc's wider label too; no zone
+for a disc that isn't drawn; the label's glyphs exist in the bundled face; readable on white), 8 in
+`tests/webapp/test_share_moon_disc.py` (the fixture guard; the disc is added; **its drawn width matches the
+scale bar the same endpoint reports**; a tight field draws nothing; `moon` alone is a no-op; existing URLs
+byte-for-byte unchanged; composes with North-up and the keepsake; a WCS-less run has no disc), and 2 in
+`test_moon_disc_mirror.py`. Frontend: 13 in `moonDisc.test.ts`, 2 in `AnnotatedImage.test.tsx`, 2 in
+`SavePictureMenu.test.tsx`, 3 in `History.test.tsx`.
+
+**Code identifiers:** `ScaleBar.moon_fraction`, `skymarks.MOON_DISC_MAX_SHORT_FRACTION`,
+`skymarks.MOON_DISC_LABEL`, `skymarks._moon_disc_box`, `SkyMarks.moon_px`/`has_moon`,
+`_sky_marks_for_run(moon=)`, `download_stack_run(moon=)`, `moonDisc.ts` (`moonDiscFraction`,
+`moonDiscFits`, `moonDiscLayout`), `AnnotatedImage(showMoon=)`, `SavePictureMenu(moon=)`.
+
 ## v0.431.1 — 2026-09-12 — the one hand-mirrored engine constant that had no drift guard
 
 *(Builder, branch `claude/sweet-babbage-e9r1m0` — infra/trust. Test + one named constant in place of a

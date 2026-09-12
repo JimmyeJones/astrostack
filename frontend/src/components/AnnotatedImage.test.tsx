@@ -579,3 +579,36 @@ describe("turnedPreviewView", () => {
       .toBeNull();
   });
 });
+
+describe("AnnotatedImage — the Moon-for-scale disc", () => {
+  const bar: ScaleBar = {
+    arcsec: 1800, label: "30′", fraction: 0.25 * (1800 / 1860),
+    frame_arcmin: 124,
+    moon_comparison: "the whole frame is about 4.0 full Moons wide",
+  };
+
+  function renderDisc(showMoon: boolean) {
+    return render(
+      <MantineProvider>
+        <AnnotatedImage
+          src="/preview.png" alt="M31" imgWidth={1000} imgHeight={600}
+          objects={[]} show={false} height={180}
+          scaleBar={bar} showMoon={showMoon}
+        />
+      </MantineProvider>,
+    );
+  }
+
+  it("draws no disc until it is asked for", () => {
+    renderDisc(false);
+    expect(screen.queryByTestId("moon-disc")).toBeNull();
+    expect(screen.getByAltText("M31")).toBeInTheDocument();
+  });
+
+  it("does not throw when asked for one (box measured to 0 in jsdom)", () => {
+    // Same jsdom limitation as the rose and the bar: clientWidth is 0, so
+    // nothing is placed — the geometry is covered by moonDiscLayout's own tests.
+    renderDisc(true);
+    expect(screen.getByAltText("M31")).toBeInTheDocument();
+  });
+});

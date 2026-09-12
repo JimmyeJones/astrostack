@@ -1589,7 +1589,8 @@ def _unrotated_preview_width(png_data: bytes, fits_path: str | None,
 
 def _sky_marks_for_run(fits_path: str | None, preview_width: int,
                        north_up_deg: float = 0.0,
-                       crop: PreviewCrop | str | None = None):  # noqa: ANN202
+                       crop: PreviewCrop | str | None = None,
+                       moon: bool = False):  # noqa: ANN202
     """The scale bar + North/East rose to bake onto a run's shared picture.
 
     Reads the run's own master-FITS WCS, turns its pixel scale into a round bar
@@ -1607,6 +1608,14 @@ def _sky_marks_for_run(fits_path: str | None, preview_width: int,
     divide by the crop's width fraction. :data:`~seestack.previewcrop.UNKNOWN`
     means the geometry can't be reconciled, so no bar is drawn at all rather than
     a wrong one. (The rose is unaffected: a crop moves no pixel's orientation.)
+
+    ``moon`` adds the "Moon for scale" disc — a faint circle the true angular
+    size of the full Moon. It rides on the very bar measured above
+    (:attr:`~seestack.scalebar.ScaleBar.moon_fraction` is derived from that
+    bar's ``fraction``), so it follows the crop and the turn without a second
+    piece of arithmetic, and a run with no usable bar simply has no disc either.
+    Off by default, so every existing caller's picture is byte-for-byte what it
+    was.
 
     Always returns a :class:`~seestack.skymarks.SkyMarks` — an empty one (a
     clean no-op when drawn) for a run with no FITS, no WCS or an unusable scale,
@@ -1638,6 +1647,8 @@ def _sky_marks_for_run(fits_path: str | None, preview_width: int,
         # bundled face and would bake a hollow box into the picture (v0.282.1).
         bar_label=bar.ascii_label if bar is not None else "",
         directions=directions,
+        moon_px=((bar.moon_fraction * preview_width)
+                 if (moon and bar is not None) else None),
     )
 
 
@@ -4415,7 +4426,7 @@ def download_wallpaper(safe: str, run_id: int, request: Request,
 def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
                        north_up: bool = False, nameplate: bool = False,
                        keepsake: bool = False, scale: bool = False,
-                       label_objects: bool = False) -> Response:
+                       label_objects: bool = False, moon: bool = False) -> Response:
     # "jpeg" is a share-friendly transcode of the stored preview PNG (no separate
     # file on disk), served at the same resolution; the rest map to stored paths.
     if kind not in _KIND_FIELDS and kind != "jpeg":
@@ -4532,11 +4543,18 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # solved WCS. They layer under the caption variants above (the caption
         # zone is the bottom edge), and a run with no usable WCS draws nothing,
         # so the plain download stays byte-for-byte unchanged.
+        # moon adds the third, optional mark: a faint circle the true angular
+        # size of the full Moon, so "how big is this really?" is something the
+        # picture *shows* rather than something its caption asserts. It is an
+        # addition to the scale marks, not an alternative — it is measured off
+        # the same bar — so `moon` without `scale` is deliberately a no-op
+        # rather than a second code path that could disagree about pixel scale.
         marks = None
         if scale:
             marks = _sky_marks_for_run(run.fits_path, preview_width,
                                        applied_north_up,
-                                       parse_preview_crop(run.preview_crop_json))
+                                       parse_preview_crop(run.preview_crop_json),
+                                       moon=moon)
         # label_objects bakes the named catalog objects in the field onto the
         # shared picture — the same pins and names the Target page draws on
         # screen, which otherwise vanish the moment the file leaves the app. The
@@ -4558,7 +4576,8 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # can't have one silently overwrite the other in the downloads folder.
         suffix = ("_keepsake" if keepsake
                   else ("_labelled" if label_objects
-                        else ("_scale" if scale else "")))
+                        else ("_scale_moon" if scale and moon
+                              else ("_scale" if scale else ""))))
         filename = f"{run.output_basename}{suffix}.jpg"
         return Response(
             content=data, media_type="image/jpeg",

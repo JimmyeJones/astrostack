@@ -70,6 +70,7 @@ export function SavePictureMenu({
   identity,
   northUp = false,
   nameplate = false,
+  moon = false,
   canNorthUp = false,
   onToPhone,
   size,
@@ -96,6 +97,11 @@ export function SavePictureMenu({
   northUp?: boolean;
   /** Bake the acquisition-data caption over the plain JPEG. */
   nameplate?: boolean;
+  /** Add the "Moon for scale" disc to the marks baked by "With scale &
+   *  compass" — a per-card view toggle, like `northUp`/`nameplate`, so the file
+   *  carries what the screen is showing. A surface without the toggle passes
+   *  nothing and its download is unchanged. */
+  moon?: boolean;
   /** Offer the wallpaper "North up" switch — only when the run has a real field
    *  rotation to correct. */
   canNorthUp?: boolean;
@@ -251,10 +257,13 @@ export function SavePictureMenu({
         {run.has_preview ? (
           <Menu.Item leftSection={<IconPhotoDown size={16} />}
             component="a"
-            href={api.stackArtifactUrl(safe, run.id, "jpeg", northUp, false, false, true)}>
+            href={api.stackArtifactUrl(
+              safe, run.id, "jpeg", northUp, false, false, true, false, moon)}>
             With scale &amp; compass
             <span style={MENU_HINT}>
-              How big it is and which way is North, printed on the picture
+              {moon
+                ? "How big it is, which way is North, and the full Moon for scale — printed on the picture"
+                : "How big it is and which way is North, printed on the picture"}
             </span>
           </Menu.Item>
         ) : null}

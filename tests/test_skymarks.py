@@ -314,3 +314,185 @@ def test_a_mark_that_is_not_drawn_claims_no_zone():
     assert len(mark_zones(640, 480, SkyMarks(
         directions=SkyDirections(north_deg=90.0, east_deg=180.0)))) == 1
     assert mark_zones(0, 0, SkyMarks(bar_px=100.0, bar_label="15'")) == ()
+
+
+# --------------------------------------------------------------------------
+# "Moon for scale" — the disc that shows what the sentence says
+# --------------------------------------------------------------------------
+
+def _inked(src, out):
+    """The (ys, xs) of every pixel the drawing changed."""
+    diff = np.abs(np.asarray(out, dtype=np.int16)
+                  - np.asarray(src, dtype=np.int16)).sum(axis=2)
+    return np.nonzero(diff)
+
+
+def test_no_moon_disc_unless_it_is_asked_for():
+    """It is off by default, so every picture the app already bakes is
+    byte-for-byte what it was."""
+    src = _picture(640, 480)
+    plain = draw_sky_marks(src, SkyMarks(bar_px=150.0, bar_label="15'"))
+    assert not SkyMarks(bar_px=150.0, bar_label="15'").has_moon
+    with_moon = draw_sky_marks(
+        src, SkyMarks(bar_px=150.0, bar_label="15'", moon_px=120.0))
+    assert not np.array_equal(np.asarray(plain), np.asarray(with_moon))
+    # …and the bar is still drawn exactly where it was; the disc only adds.
+    assert np.asarray(with_moon).sum() > np.asarray(plain).sum()
+
+
+def test_the_moon_disc_is_drawn_at_the_moons_true_diameter():
+    """The whole correctness story: the circle's width on the picture is the
+    diameter it was handed, which is ``MOON_DIAMETER_ARCSEC / local_scale``
+    expressed in these pixels."""
+    src = _picture(600, 600)
+    from seestack.skymarks import _moon_disc_box
+
+    box = _moon_disc_box(600, 600, SkyMarks(moon_px=200.0))
+    assert box is not None
+    x0, y0, x1, y1 = box
+    # Exactly as wide as the diameter asked for, and square — a circle, not an
+    # ellipse that would misstate the scale on one axis.
+    assert abs((x1 - x0) - 200.0) < 1e-9
+    assert abs((y1 - y0) - 200.0) < 1e-9
+
+    out = draw_sky_marks(src, SkyMarks(moon_px=200.0))
+    ys, xs = _inked(src, out)
+    assert xs.size
+    # And the drawing really reaches all four extremes of that box, so the
+    # circle on the picture is the circle the box describes.
+    arr = np.asarray(out).sum(axis=2)
+    mx, my = int((x0 + x1) / 2), int((y0 + y1) / 2)
+    assert arr[int(y0):int(y0) + 5, mx].sum() > 0      # top of the circle
+    assert arr[int(y1) - 4:int(y1) + 1, mx].sum() > 0  # bottom
+    assert arr[my, int(x0):int(x0) + 5].sum() > 0      # left
+    assert arr[my, int(x1) - 4:int(x1) + 1].sum() > 0  # right
+
+
+def test_the_moon_disc_is_an_outline_not_a_fill():
+    """The picture underneath is the point — a filled disc would hide the very
+    thing being measured."""
+    src = _picture(600, 600)
+    marks = SkyMarks(moon_px=200.0)
+    out = draw_sky_marks(src, marks)
+    ys, xs = _inked(src, out)
+    cx, cy = (xs.min() + xs.max()) / 2.0, (ys.min() + ys.max()) / 2.0
+    arr = np.asarray(out)
+    # A generous patch around the centre is untouched black sky.
+    patch = arr[int(cy) - 40:int(cy) + 40, int(cx) - 40:int(cx) + 40]
+    assert patch.sum() == 0
+
+
+def test_the_moon_disc_sits_under_the_scale_bar_not_over_it():
+    """The two answer the same question, so a reader meets them together — and
+    the disc must not bury the bar it is measured from."""
+    src = _picture(600, 600)
+    bar = SkyMarks(bar_px=150.0, bar_label="15'")
+    bar_only = draw_sky_marks(src, bar)
+    bar_ys, _ = _inked(src, bar_only)
+    # The pixels the disc *adds* to that same picture — so this compares the two
+    # marks as they are actually composed, not as two separate drawings.
+    both = draw_sky_marks(src, SkyMarks(bar_px=150.0, bar_label="15'",
+                                        moon_px=180.0))
+    added_ys, added_xs = _inked(bar_only, both)
+    assert added_ys.size
+    # Wholly below the bar and its label…
+    assert added_ys.min() > bar_ys.max()
+    # …and in the left half, clear of the top-right rose.
+    assert added_xs.max() < 300
+
+
+def test_a_moon_bigger_than_the_field_draws_no_disc_at_all():
+    """Past half the short side the Moon is not a mark on the picture, it *is*
+    the picture. The bar's own sentence already says the honest thing in words
+    on a field that tight, so the disc stands aside rather than clamping to a
+    size that would lie about the scale."""
+    src = _picture(400, 400)
+    from seestack.skymarks import MOON_DISC_MAX_SHORT_FRACTION
+
+    fits = 400 * MOON_DISC_MAX_SHORT_FRACTION
+    drawn = draw_sky_marks(src, SkyMarks(moon_px=fits - 4))
+    assert np.asarray(drawn).sum() > 0
+    for too_big in (fits + 4, 700.0, 4000.0):
+        out = draw_sky_marks(src, SkyMarks(moon_px=too_big))
+        assert np.array_equal(np.asarray(out), np.asarray(src)), (
+            f"a {too_big}px Moon should not have been drawn on a 400px picture")
+
+
+def test_a_moon_only_marks_object_is_still_something_to_draw():
+    """``__bool__`` gates every caller, so a run asked for the disc and nothing
+    else must not read as "no marks"."""
+    assert SkyMarks(moon_px=50.0)
+    assert not SkyMarks()
+
+
+def test_the_moon_discs_zone_is_declared_so_object_names_route_around_it():
+    """Same contract as the bar and the rose: ``mark_zones`` must not
+    under-claim, or a catalog name lands under the circle."""
+    from seestack.skymarks import mark_zones
+
+    src = _picture(640, 480)
+    marks = SkyMarks(bar_px=150.0, bar_label="15'", moon_px=140.0,
+                     directions=SkyDirections(north_deg=104.0, east_deg=194.0))
+    out = draw_sky_marks(src, marks)
+    ys, xs = _inked(src, out)
+    assert ys.size
+    zones = mark_zones(640, 480, marks)
+    assert len(zones) == 3  # bar, rose, disc
+    inside = np.zeros(ys.shape, dtype=bool)
+    for x0, y0, x1, y1 in zones:
+        inside |= (xs >= x0) & (xs <= x1) & (ys >= y0) & (ys <= y1)
+    assert inside.all(), (
+        f"{int((~inside).sum())} inked pixels fell outside the declared zones")
+
+
+def test_a_moon_that_is_not_drawn_claims_no_zone():
+    """The size test lives in one place, so a disc the drawing declines must not
+    leave a hole in the layout the names are routed around."""
+    from seestack.skymarks import mark_zones
+
+    bar = SkyMarks(bar_px=100.0, bar_label="15'")
+    assert len(mark_zones(400, 400, bar)) == 1
+    assert len(mark_zones(400, 400, SkyMarks(bar_px=100.0, bar_label="15'",
+                                             moon_px=120.0))) == 2
+    # Too big to draw → no zone either.
+    assert len(mark_zones(400, 400, SkyMarks(bar_px=100.0, bar_label="15'",
+                                             moon_px=900.0))) == 1
+
+
+def test_the_moon_label_is_drawable_with_the_bundled_font():
+    """Same ``.notdef``-box rule the bar's label is held to (v0.282.1)."""
+    from seestack.skymarks import MOON_DISC_LABEL
+
+    font = ImageFont.load_default(size=28)
+    notdef = np.asarray(font.getmask(chr(0xE000), mode="L"))
+    assert notdef.size
+    for ch in MOON_DISC_LABEL:
+        mask = np.asarray(font.getmask(ch, mode="L"))
+        assert mask.shape != notdef.shape or not np.array_equal(mask, notdef), (
+            f"{ch!r} in {MOON_DISC_LABEL!r} has no glyph in the bundled face")
+
+
+def test_the_moon_disc_is_readable_on_a_white_background():
+    src = _picture(600, 600, level=255)
+    out = np.asarray(draw_sky_marks(src, SkyMarks(moon_px=200.0)))
+    assert (out == np.array(MARK_RGB, dtype=np.uint8)).all(axis=2).any()
+    assert (out == np.array(HALO_RGB, dtype=np.uint8)).all(axis=2).any()
+
+
+def test_a_small_discs_zone_still_covers_its_wider_label():
+    """The label is centred on the circle and is wider than a small disc, so a
+    zone measured on the circle alone would leave the words uncovered — and a
+    catalog name would be routed straight into them."""
+    from seestack.skymarks import mark_zones
+
+    src = _picture(640, 480)
+    marks = SkyMarks(moon_px=24.0)
+    out = draw_sky_marks(src, marks)
+    ys, xs = _inked(src, out)
+    assert ys.size
+    zones = mark_zones(640, 480, marks)
+    assert len(zones) == 1
+    x0, y0, x1, y1 = zones[0]
+    inside = (xs >= x0) & (xs <= x1) & (ys >= y0) & (ys <= y1)
+    assert inside.all(), (
+        f"{int((~inside).sum())} inked pixels fell outside the declared zone")
