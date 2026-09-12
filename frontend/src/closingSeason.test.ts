@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  CLOSING_WHY, closingHeadline, closingTargetLine, lastNightLabel, weeksLeftPhrase,
+  CLOSING_WHY, closingHeadline, closingTargetLine, closingUrgentSentence,
+  lastNightLabel, urgentlyClosing, weeksLeftPhrase,
 } from "./closingSeason";
 import type { ClosingTarget, SeasonClosing } from "./api/client";
 
@@ -84,5 +85,39 @@ describe("closingHeadline", () => {
   it("explains the consequence in seasons, not in degrees", () => {
     expect(CLOSING_WHY).toContain("next year");
     expect(CLOSING_WHY).not.toContain("30°");
+  });
+});
+
+describe("closingUrgentSentence / urgentlyClosing", () => {
+  it("keeps only the targets whose season ends within the urgent window", () => {
+    const rows = [row({ safe: "a", weeks_left: 0 }), row({ safe: "b", weeks_left: 1 }),
+                  row({ safe: "c", weeks_left: 4 })];
+    expect(urgentlyClosing(plan(rows)).map((t) => t.safe)).toEqual(["a", "b"]);
+    expect(urgentlyClosing(plan([row({ weeks_left: 2 })]))).toEqual([]);
+  });
+
+  it("says nothing at all unless something is genuinely about to go", () => {
+    // The Dashboard slot is shown to somebody who came to look at their
+    // pictures; spending it on something a month away is how a self-hiding note
+    // becomes a banner.
+    expect(closingUrgentSentence(plan([row({ weeks_left: 3 })]))).toBeNull();
+    expect(closingUrgentSentence(plan([]))).toBeNull();
+    expect(closingUrgentSentence(null)).toBeNull();
+  });
+
+  it("names the target, and counts the others in the same week", () => {
+    expect(closingUrgentSentence(plan([row({ weeks_left: 0 })])))
+      .toBe("This is your last week for M 42 — after that it's gone until next year.");
+    expect(closingUrgentSentence(plan([row({ weeks_left: 1 })])))
+      .toContain("M 42 has about a week of good nights left");
+    const two = closingUrgentSentence(plan([
+      row({ safe: "a", weeks_left: 0 }), row({ safe: "b", name: "M 31", weeks_left: 1 }),
+    ]));
+    expect(two).toContain("1 other target of yours is in the same week");
+    const three = closingUrgentSentence(plan([
+      row({ safe: "a", weeks_left: 0 }), row({ safe: "b", weeks_left: 1 }),
+      row({ safe: "c", weeks_left: 1 }),
+    ]));
+    expect(three).toContain("2 other targets of yours are in the same week");
   });
 });
