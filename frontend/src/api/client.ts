@@ -148,6 +148,12 @@ export interface WeekNight {
   // null when nothing of yours clears the altitude floor for long enough —
   // an honest "skip this one", not a promoted target that never rises.
   best: WeekTargetPick | null;
+  // True when the night had already started when the plan was made, so
+  // `dark_minutes` is the darkness *left* rather than the length of the night —
+  // the planner clips an ongoing window to "now" so it never promises time that
+  // has gone. Optional: an older backend omits it, and "how long is this night"
+  // is the right reading of every un-flagged row.
+  dark_in_progress?: boolean;
 }
 
 /** A target's single best night in the range — "M 31: Thursday". */

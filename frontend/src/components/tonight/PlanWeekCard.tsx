@@ -6,8 +6,8 @@ import { Link } from "react-router-dom";
 
 import { api } from "../../api/client";
 import {
-  otherTargetNights, targetNightPhrase, weekEmptyReason, weekHeadline,
-  weekMoonNote, weekNightLabel,
+  otherTargetNights, targetNightPhrase, weekDarkPhrase, weekEmptyReason,
+  weekHeadline, weekMoonNote, weekNightLabel,
 } from "../../planweek";
 import { formatClock, formatMinutes } from "../../tonight";
 
@@ -80,7 +80,7 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
                   <Table.Td>
                     <Text fw={600} size="sm">{weekNightLabel(n.date, now)}</Text>
                     <Text size="xs" c="dimmed">
-                      {formatMinutes(n.dark_minutes)} dark
+                      {weekDarkPhrase(n)}
                     </Text>
                   </Table.Td>
                   <Table.Td>

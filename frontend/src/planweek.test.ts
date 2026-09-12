@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { PlanWeek, TargetBestNight, WeekNight } from "./api/client";
 import {
-  bestNightOfWeek, otherTargetNights, targetNightPhrase, weekEmptyReason,
-  weekHeadline, weekMoonNote, weekNightLabel, weekNightLabelInline,
+  bestNightOfWeek, otherTargetNights, targetNightPhrase, weekDarkPhrase,
+  weekEmptyReason, weekHeadline, weekMoonNote, weekNightLabel,
+  weekNightLabelInline,
 } from "./planweek";
 
 // A Wednesday evening, so the weekday labels below are unambiguous.
@@ -223,5 +224,32 @@ describe("weekMoonNote", () => {
     }))).toBeNull();
     expect(weekMoonNote(night({ date: "2026-09-05", moon_illumination: 0.9 })))
       .toBeNull();
+  });
+});
+
+describe("weekDarkPhrase", () => {
+  it("says how long a whole night's darkness is", () => {
+    expect(weekDarkPhrase(night({ date: "2026-09-05", dark_minutes: 498 })))
+      .toBe("8.3 h dark");
+  });
+
+  it("says what is *left* of a night already under way", () => {
+    // The planner clips an ongoing window to "now", so this row's number is a
+    // different quantity from the rest of the column — and from the header on
+    // the same page, which quotes the whole night. Calling both "dark" had one
+    // page saying one night is 8.3 h and 5.9 h long at once.
+    expect(weekDarkPhrase(night({
+      date: "2026-09-05", dark_minutes: 354, dark_in_progress: true,
+    }))).toBe("5.9 h left");
+  });
+
+  it("reads an older backend's silence as a whole night", () => {
+    // No flag is the answer for every night that has not started, which is all
+    // of them on a backend that predates the field.
+    expect(weekDarkPhrase(night({ date: "2026-09-05", dark_minutes: 498 })))
+      .toBe("8.3 h dark");
+    expect(weekDarkPhrase(night({
+      date: "2026-09-05", dark_minutes: 498, dark_in_progress: false,
+    }))).toBe("8.3 h dark");
   });
 });

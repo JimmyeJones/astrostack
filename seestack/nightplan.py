@@ -227,6 +227,15 @@ class DarkWindow:
     # The Sun-altitude threshold (deg) that actually defined this window — −18 in
     # the normal case, a shallower fallback for short summer nights.
     sun_alt_threshold_deg: float
+    # True when this window was **clipped to "now"** because the darkness had
+    # already begun (:func:`upcoming_dark_windows`), so ``duration_minutes`` is
+    # the darkness *left* rather than the length of the night. Nothing else sets
+    # it, and every other producer leaves it False — which is what every reader
+    # got before the flag existed. It matters because a surface that prints the
+    # duration is otherwise quoting two different quantities under one word: the
+    # Tonight page's header says "8.3 h of darkness" (the whole night) while the
+    # week table's first row said "5.9 h dark" (what is left of it).
+    in_progress: bool = False
 
     @property
     def duration_minutes(self) -> float:
@@ -1450,7 +1459,8 @@ def upcoming_dark_windows(
             continue
         if window.start < start_utc:
             window = DarkWindow(start=start_utc, end=window.end,
-                                sun_alt_threshold_deg=window.sun_alt_threshold_deg)
+                                sun_alt_threshold_deg=window.sun_alt_threshold_deg,
+                                in_progress=True)
             if window.duration_minutes <= 0:
                 continue
         out.append((evening.date().isoformat(), window))
@@ -1550,6 +1560,14 @@ class WeekNight:
     #: The best-placed target, or ``None`` when nothing clears the floor for long
     #: enough (a night worth telling the user to skip).
     best: WeekTargetPick | None
+    #: True when this night's darkness had already started when the plan was made,
+    #: so ``dark_minutes`` is what is **left** of it rather than how long the night
+    #: is (:attr:`DarkWindow.in_progress`). Only ever the first night, and only
+    #: when the user is inside it. The UI needs this because the same page's
+    #: header quotes the *whole* night's darkness: without it, "8.3 h of darkness"
+    #: and "5.9 h dark" describe one night in one word and disagree. Defaults to
+    #: False, which is what every reader assumed before the field existed.
+    dark_in_progress: bool = False
 
 
 @dataclass
@@ -1687,6 +1705,7 @@ def plan_week(
             moon_illumination=round(illum, 3),
             n_usable=len(usable),
             best=pick,
+            dark_in_progress=window.in_progress,
         ))
 
     plan.targets = sorted(
