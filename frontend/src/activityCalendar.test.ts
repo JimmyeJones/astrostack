@@ -4,7 +4,9 @@ import {
   buildCalendarGrid,
   calendarHeadline,
   exposureLevel,
+  nightDates,
   nightLabel,
+  stepNight,
 } from "./activityCalendar";
 
 function cal(over: Partial<ActivityCalendar>): ActivityCalendar {
@@ -106,5 +108,55 @@ describe("nightLabel", () => {
       (s) => `${(s / 3600).toFixed(1)} h`,
     );
     expect(label).toBe("12 Jul 2026 · 2.3 h across M31, M42");
+  });
+});
+
+describe("nightDates", () => {
+  it("lists only the nights that were imaged, oldest first", () => {
+    const weeks = buildCalendarGrid(cal({
+      start_date: "2026-07-01",
+      end_date: "2026-07-14",
+      nights: [
+        { date: "2026-07-09", exposure_s: 600, n_frames: 5, targets: [] },
+        { date: "2026-07-02", exposure_s: 3600, n_frames: 10, targets: ["M31"] },
+      ],
+    }));
+
+    // Chronological, not the order the API happened to send them in — the arrow
+    // keys walk this list, so "earlier" has to mean earlier.
+    expect(nightDates(weeks)).toEqual(["2026-07-02", "2026-07-09"]);
+  });
+
+  it("is empty on a window with nothing imaged in it", () => {
+    expect(nightDates(buildCalendarGrid(cal({})))).toEqual([]);
+  });
+});
+
+describe("stepNight", () => {
+  const dates = ["2026-07-02", "2026-07-09", "2026-07-20"];
+
+  it("walks one night at a time in both directions", () => {
+    expect(stepNight(dates, "2026-07-02", 1)).toBe("2026-07-09");
+    expect(stepNight(dates, "2026-07-09", -1)).toBe("2026-07-02");
+  });
+
+  it("stops at either end rather than wrapping", () => {
+    // Wrapping would make a held arrow key cycle for ever, and the page never
+    // gets the key back to scroll with.
+    expect(stepNight(dates, "2026-07-20", 1)).toBeNull();
+    expect(stepNight(dates, "2026-07-02", -1)).toBeNull();
+  });
+
+  it("lands on the most recent night in EITHER direction with nothing to step from", () => {
+    // Not "that direction's far end": the card's focus starts on the most recent
+    // night, so answering one ArrowLeft with the oldest would jump a year of
+    // grid rather than move a night.
+    expect(stepNight(dates, null, 1)).toBe("2026-07-20");
+    expect(stepNight(dates, null, -1)).toBe("2026-07-20");
+  });
+
+  it("declines rather than guessing on an empty or unknown date", () => {
+    expect(stepNight([], null, 1)).toBeNull();
+    expect(stepNight(dates, "2026-01-01", 1)).toBeNull();
   });
 });

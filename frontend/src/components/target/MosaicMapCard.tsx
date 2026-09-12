@@ -1,7 +1,9 @@
-import { Box, Group, Paper, Stack, Text, ThemeIcon, Tooltip } from "@mantine/core";
+import { Box, Group, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconGridDots } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
+import { useRef, useState } from "react";
 import { api } from "../../api/client";
+import { HintAnchor } from "../HintAnchor";
 import { panelGrid, panelShade, panelTooltip } from "./mosaicMap";
 
 /**
@@ -30,10 +32,35 @@ export function MosaicMapCard({ safe }: { safe: string }) {
     enabled: !!safe,
     retry: false,
   });
+  // Which cell holds the grid's single tab stop. `HintAnchor` would otherwise
+  // make **every** panel one, and a mosaic is not a row of chips: this owner
+  // shoots wide ones, and `mosaicmap.MAX_GRID_SIDE` allows 24 a side — so the
+  // chip precedent's "one tab stop per anchor" would put dozens of them on the
+  // busiest page in the app. One stop, and the arrow keys walk the rest; the
+  // hint follows focus because `HintAnchor` already opens on it.
+  const [focused, setFocused] = useState<string | null>(null);
+  const cellRefs = useRef(new Map<string, HTMLDivElement>());
 
   const map = q.data;
   if (!map || !map.panels.length || map.rows < 1 || map.cols < 1) return null;
   const grid = panelGrid(map);
+  // Panel keys in reading order, so "next" means the next panel a reader would
+  // look at rather than the next cell in a raster that may be full of holes.
+  const keys = grid.flatMap((row, r) =>
+    row.flatMap((p, c) => (p ? [`${r}-${c}`] : [])));
+  const roving = (focused && keys.includes(focused)) ? focused : keys[0] ?? null;
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1
+      : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1
+        : 0;
+    if (!step || roving === null) return;
+    const next = keys[keys.indexOf(roving) + step];
+    if (next === undefined) return;   // at an end: let the page have the key back
+    e.preventDefault();
+    setFocused(next);
+    cellRefs.current.get(next)?.focus();
+  };
 
   return (
     <Paper withBorder p="sm" radius="md" mt="xs">
@@ -49,6 +76,7 @@ export function MosaicMapCard({ safe }: { safe: string }) {
               rather than stretching into a banner on a phone. */}
           <Box
             data-testid="mosaic-panel-grid"
+            onKeyDown={onKeyDown}
             style={{
               display: "grid",
               gridTemplateColumns: `repeat(${map.cols}, minmax(0, 1fr))`,
@@ -79,9 +107,22 @@ export function MosaicMapCard({ safe }: { safe: string }) {
                   && map.thin.row === row && map.thin.col === col;
                 const tip = panelTooltip(panel, map);
                 return (
-                  <Tooltip key={`${row}-${col}`} label={tip} withArrow openDelay={200}>
+                  // A `HintAnchor`, not a plain `Tooltip`: a panel cell is a
+                  // coloured `Box`, not a control, and its whole meaning — how
+                  // deep this corner is — lives in the tooltip. Mantine's
+                  // `Tooltip` opens on `mouseenter` and nothing else, so on the
+                  // phone the owner reads this app on the map was a grid of
+                  // squares with no way to ask about any of them. The owner is a
+                  // heavy mosaic user; this is the card that answers "which
+                  // corner is behind?".
+                  <HintAnchor key={`${row}-${col}`} label={tip} withArrow>
                     <Box
                       aria-label={tip}
+                      ref={(el: HTMLDivElement | null) => {
+                        if (el) cellRefs.current.set(`${row}-${col}`, el);
+                        else cellRefs.current.delete(`${row}-${col}`);
+                      }}
+                      tabIndex={`${row}-${col}` === roving ? 0 : -1}
                       style={{
                         height: 26,
                         borderRadius: 4,
@@ -101,7 +142,7 @@ export function MosaicMapCard({ safe }: { safe: string }) {
                     >
                       {isThin ? "thin" : ""}
                     </Box>
-                  </Tooltip>
+                  </HintAnchor>
                 );
               }),
             )}
