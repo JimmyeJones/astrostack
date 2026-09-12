@@ -45,8 +45,8 @@ from webapp import deps
 from webapp.goals import read_goal_s
 from webapp.ics import IcsEvent, to_ics
 from webapp.registry_cache import cached_for_registry, registry_signature
-from webapp.site_location import detect_site_from_library as _detect_site_from_library
-from webapp.site_location import resolve_night_key
+from webapp.site_location import SiteProbe, resolve_night_key
+from webapp.site_location import probe_site_from_library as _probe_site_from_library
 
 log = logging.getLogger(__name__)
 
@@ -82,33 +82,55 @@ def _detect_site_from_fits(request: Request) -> tuple[float, float] | None:
     Opens the library and delegates to the shared, bounded header probe
     (:func:`webapp.site_location.detect_site_from_library`).
     """
+    return _probe_site_from_fits(request).site
+
+
+def _probe_site_from_fits(request: Request) -> SiteProbe:
+    """The same probe, carrying *why* it found nothing (see :class:`SiteProbe`)."""
     lib = deps.open_library(request)
     try:
-        return _detect_site_from_library(lib)
+        return _probe_site_from_library(lib)
     finally:
         lib.close()
 
 
-def _resolve_observer(request: Request, settings) -> tuple[Observer | None, str]:  # noqa: ANN001
-    """Resolve the observer location and how it was found.
+def _resolve_observer_detail(
+    request: Request, settings,  # noqa: ANN001
+) -> tuple[Observer | None, str, str | None]:
+    """Resolve the observer location, how it was found, and why it wasn't.
 
     Explicit Settings location wins; otherwise sniff a solved frame's FITS header
-    (the common Seestar case). Returns ``(observer, source)`` where ``source`` is
-    ``"settings"`` / ``"fits"`` / ``"none"`` (``observer`` is ``None`` only for
-    ``"none"``) — so every planning surface resolves the site the same way and the
-    UI can explain where the location came from.
+    (the common Seestar case). Returns ``(observer, source, reason)`` where
+    ``source`` is ``"settings"`` / ``"fits"`` / ``"none"`` (``observer`` is
+    ``None`` only for ``"none"``) and ``reason`` is the :class:`SiteProbe` reason
+    — ``None`` whenever the location *is* known, because there is then nothing to
+    explain.
+
+    The reason is what stops the site-unknown prompt promising something the
+    user's own library disproves: "solve some subs and it'll just work" is right
+    for ``"no-frames"`` and false for ``"no-site-header"``.
     """
     if settings.site_lat is not None and settings.site_lon is not None:
         return (Observer(lat_deg=float(settings.site_lat),
                          lon_deg=float(settings.site_lon),
                          elevation_m=float(settings.site_elevation_m or 0.0)),
-                "settings")
-    site = _detect_site_from_fits(request)
-    if site is not None:
-        return (Observer(lat_deg=site[0], lon_deg=site[1],
+                "settings", None)
+    probe = _probe_site_from_fits(request)
+    if probe.site is not None:
+        return (Observer(lat_deg=probe.site[0], lon_deg=probe.site[1],
                          elevation_m=float(settings.site_elevation_m or 0.0)),
-                "fits")
-    return None, "none"
+                "fits", None)
+    return None, "none", probe.reason
+
+
+def _resolve_observer(request: Request, settings) -> tuple[Observer | None, str]:  # noqa: ANN001
+    """:func:`_resolve_observer_detail` without the reason — what most callers want.
+
+    Kept as its own name so the fifteen endpoints that only need "where, and how
+    did we know?" read exactly as they did.
+    """
+    observer, source, _ = _resolve_observer_detail(request, settings)
+    return observer, source
 
 
 def usual_night_pace_s(targets: list[LibraryTarget]) -> float | None:
@@ -325,11 +347,15 @@ def get_tonight(
 
     # Resolve the observer: explicit Settings location wins; otherwise sniff a
     # frame header (the common Seestar case). None → the UI prompts for a site.
-    observer, location_source = _resolve_observer(request, settings)
+    observer, location_source, location_reason = _resolve_observer_detail(request, settings)
 
     if observer is None:
         return {
             "location_source": "none",
+            # Why, not just that — so the prompt can stop telling someone whose
+            # subs carry no site header to go and solve more subs. Additive and
+            # optional: an older frontend ignores it and keeps today's sentence.
+            "location_reason": location_reason,
             "observer": None,
             "generated_utc": ref.astimezone(timezone.utc).isoformat(),
             "dark_window": None,
@@ -357,6 +383,10 @@ def get_tonight(
     )
     payload = asdict(plan)
     payload["location_source"] = location_source
+    # Always present, so a reader never has to tell "this build doesn't send it"
+    # from "there is nothing to explain": null is the latter, and the location is
+    # known on every path that reaches here.
+    payload["location_reason"] = location_reason
     # The owner's typical clear-night output, so a row for a target they have
     # *not* started (a mosaic candidate) can still say roughly how many clear
     # nights it would take. Free: the per-target paces it medians were already

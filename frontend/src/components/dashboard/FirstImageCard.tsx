@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import {
   firstImageComplete, firstImageDone, firstImageDoneMessage, firstImageHasPicture,
-  firstImageNextStep, firstImageSteps,
+  firstImageLeadText, firstImageSteps,
 } from "./firstImageSteps";
 
 // Two localStorage flags, both defensively guarded so a disabled/broken store can
@@ -61,7 +61,10 @@ export function FirstImageCard() {
   // progress bar is about *those* steps and must not claim them.
   const complete = firstImageComplete(steps);
   const done = firstImageDone(steps, stats.data);
-  const next = firstImageNextStep(steps);
+  // "Next" is the step *ahead* of them, never one they have already overtaken —
+  // see `firstImageNextStep`, which is what stops the card leading with "Next:
+  // set up plate solving" under five struck-through lines on the sample path.
+  const lead = firstImageLeadText(steps);
   // Whether this install has ever made a picture at all — the *first-picture*
   // steps only, deliberately blind to the two editor steps. Both flags below key
   // off this rather than off `done`, so adding the finishing steps cannot make
@@ -114,11 +117,7 @@ export function FirstImageCard() {
         </Stack>
       ) : (
         <Stack gap="xs">
-          <Text size="sm" c="dimmed">
-            {next
-              ? `Next: ${next.hint}`
-              : "Six steps from a folder of subs to a finished picture."}
-          </Text>
+          <Text size="sm" c="dimmed">{lead}</Text>
           <List spacing={6} size="sm" center>
             {steps.map((s) => (
               <List.Item

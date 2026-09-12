@@ -18,6 +18,74 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `claude/sweet-babbage-kv0v5m`) — the second dry-backlog run in a day, and what a CLEAN dogfood pass still hid
+
+**The run.** Baseline green (**5,897 passed, 2 skipped**, 38 min). Two tasks shipped, **v0.435.0** and
+**v0.435.1**, both found in a browser rather than in the backlog; full entries in
+[`SHIPPED.md`](SHIPPED.md). One lead filed that this run deliberately did not build (see
+[`IMPROVEMENTS.md`](IMPROVEMENTS.md) → "Infra / maintainability", the sample-has-no-site entry).
+
+**The backlog is still dry, independently re-checked.** This run read "Bugs (fix these first)" and the
+priority sections again without consulting the previous run's note first, and reached the same place:
+what is left is gated on data nobody has (real elongated-target subs, a real mosaic's per-panel counts,
+a heavy-nebulosity stack, an owner's yes/no), or carries a measured stand-down, or is a sweep whose
+named starting points are all closed. Two consecutive runs arriving there independently is the signal,
+not the coincidence — AGENTS.md §2's "if the backlog is dry, run the app" is now the normal path rather
+than the exception.
+
+**The dogfood pass was CLEAN, and two real defects were sitting in the screenshots.** `--mosaic
+--editor` reported: mosaic trim **7.9 %** (a bug above ~15 %), all 21 ops added and undone/redone on
+both the field and the mosaic run, nothing overflowing, no console errors; `--empty` likewise. Both
+findings were *sentences*, which is exactly the failure mode the `agent-dogfood.sh` header already warns
+about for the mosaic block ("a CLEAN pass is a statement about console errors — not about pixels and not
+about **sentences**"). **The warning generalises past the mosaic block, and this run is the evidence.**
+Neither of these was in the block the script prints side by side:
+
+- The **Tonight** page, with 27 *plate-solved* subs loaded, telling the reader to go and solve some
+  subs. Visible only by opening `shots/desktop_tonight.png` and reading it against what the Library on
+  the same install says.
+- The **Dashboard**'s "Your first image" card reading "5 of 6 done" over five struck-through lines and
+  leading with **"Next:"** plus step two. Visible only by reading the card's own list against its own
+  lead sentence.
+
+**So the practical instruction for the next run: open the screenshots.** The script's CLEAN line and its
+page-height table are worth what they measure and no more. Both of this run's findings were a claim on
+one part of a screenshot contradicted by another part of the *same* screenshot — no endpoint disagreed
+with another, so nothing an automated probe checks could have caught either. The three shots that paid
+for themselves here were `desktop_.png` (the Dashboard, loaded), `desktop_tonight.png` (loaded) and
+`empty/desktop_tonight.png`; the empty-vs-loaded *pair* is what made the Tonight one obvious, because
+the two say the same sentence in two states where only one of them is true.
+
+**And so was the first shape of the other fix — same lesson, other direction.** Making
+`probe_site_from_library` the primitive and `detect_site_from_library` a wrapper moved a seam that **ten
+call sites across five test modules monkeypatch**. Nine of them still passed, because they were forcing
+the value the real probe returns on a synth library anyway (`None`) — including
+`test_configured_site_lon_wins_and_skips_header_probe`, whose whole job is to *raise* from the probe to
+prove it does not run. Only the tenth, which forces a non-`None` site, went red. **A monkeypatch of a
+function nothing calls is a green test that guards nothing**, and nine of them went that way silently in
+one refactor. The fix keeps `detect_site_from_library` as the walk (it gained an optional `_stats`
+accumulator) and there is now a test pinning that `probe_site_from_library` goes *through* it.
+
+**A third instance of the same shape, and this one only CI could see: a global monkeypatch keyed on "call
+number one".** `test_library_missing_files.py::test_a_broken_project_doesnt_500_the_dashboard` patches
+`Project.open` process-wide and raises on the **first** call, to prove one unreadable project costs its own
+row and not the whole answer. But the app under test runs a job worker and a watcher thread, so any
+background open consumes that failure — both targets are then readable, both outages are reported, and the
+test fails `2 == 1`. It went red once on CI (this run), had never done so on `main`, and passed nine times
+locally including three runs of the whole file alongside the modules this run touched. The fix is to break a
+**named** project rather than an ordinal one, which removes the race instead of hoping the ordering holds and
+says more than the ordinal did (*this* project is the broken one); verified still armed by making the
+endpoint re-raise instead of skipping. **The general rule: a monkeypatch keyed on call order is a race
+whenever the thing patched is reachable from a thread the test did not start.**
+
+**A design note worth carrying: the first repair for the "Next:" bug was wrong, and a test caught it.**
+"The next step is the first unticked one after the last ticked one" is the natural reading and it breaks
+the real first-timer — `checked` ticks from QC, which needs no plate solve, so `[frames ✓, solve ✗,
+checked ✓, …]` is a genuine state in which solving really is next. The existing suite went red on the
+video-still case within a minute of the change. The fix that survives is an explicit `passedWhen` per
+step (which later steps *prove* this one was passed) rather than anything derived from position. When a
+checklist mixes **setup** steps with **outcome** steps, position is not progress.
+
 ## 2026-09-12 (Builder, branch `agent/builder-2026-09-12`) — DOGFOOD PASS, and the probe's own blind spot
 
 **The run.** Baseline green (5,897 passed / 2 skipped). Two tasks shipped: **v0.434.0** (the mosaic panel map
