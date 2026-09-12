@@ -16,6 +16,7 @@ from webapp.field_fulls import (
     drizzle_scale_from_options,
     field_fulls_of_sky,
     native_frame_shape,
+    samples_per_pixel_of_run,
 )
 
 
@@ -95,6 +96,56 @@ class TestFieldFullsOfSky:
             1920, 1080, frame_w=1920, frame_h=1080, drizzle_scale=float("nan"),
         )
         assert n == pytest.approx(1.0, abs=1e-9)
+
+
+class TestSamplesPerPixelOfRun:
+    """The finished-run companion: how many subs landed on *one pixel*.
+
+    Same correction as ``frontend/src/samplesPerPixel.ts`` makes before a stack,
+    applied after one — a run's ``n_frames_used`` is the total that went in, and
+    on a mosaic that flatters the picture by the number of fields it spans.
+    """
+
+    FRAME = {"frame_w": 480, "frame_h": 320}
+
+    def test_a_single_field_run_reports_its_own_frame_count(self):
+        # Canvas is one field, so the total *is* the depth — this is the case
+        # every caller already answered correctly, and it must not move.
+        assert samples_per_pixel_of_run(
+            480, 320, n_frames_used=200, **self.FRAME) == pytest.approx(200.0)
+
+    def test_a_mosaic_reports_the_depth_not_the_total(self):
+        # A 2x2 no-overlap raster: 120 subs in total is ~30 on any one pixel.
+        assert samples_per_pixel_of_run(
+            960, 640, n_frames_used=120, **self.FRAME) == pytest.approx(30.0)
+
+    def test_drizzle_is_divided_out_before_the_canvas_is_counted(self):
+        # A 2x drizzled single field has 4x the pixels of a frame and still
+        # covers one field of sky, so every sub is on every pixel.
+        opts = json.dumps({"drizzle": True, "drizzle_scale": 2.0})
+        assert samples_per_pixel_of_run(
+            960, 640, n_frames_used=200, options_json=opts,
+            **self.FRAME) == pytest.approx(200.0)
+
+    def test_a_cropped_canvas_never_reports_more_subs_than_went_in(self):
+        # field_fulls_of_sky clamps below 1.0 rather than shrinking the goal;
+        # the same clamp is what stops a cropped run claiming extra depth.
+        assert samples_per_pixel_of_run(
+            240, 160, n_frames_used=50, **self.FRAME) == pytest.approx(50.0)
+
+    def test_anything_unknowable_declines_rather_than_guessing(self):
+        # Each caller then keeps its depth-unaware wording, which is exactly the
+        # behaviour it had before this function existed.
+        assert samples_per_pixel_of_run(
+            0, 320, n_frames_used=100, **self.FRAME) is None
+        assert samples_per_pixel_of_run(
+            480, 320, n_frames_used=100, frame_w=None, frame_h=320) is None
+        assert samples_per_pixel_of_run(
+            480, 320, n_frames_used=0, **self.FRAME) is None
+        assert samples_per_pixel_of_run(
+            480, 320, n_frames_used=None, **self.FRAME) is None
+        assert samples_per_pixel_of_run(
+            480, 320, n_frames_used="five", **self.FRAME) is None
 
 
 class TestDrizzleScaleFromOptions:

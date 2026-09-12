@@ -33,6 +33,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from seestack.stack.drizzle_path import DRIZZLE_MIN_SAMPLES_PER_PIXEL
 from seestack.stack.output import pack_unit
 
 # Below this, a print looks visibly soft at arm's length. 300 is the darkroom
@@ -165,7 +166,8 @@ class BiggerPrint:
 
 
 def bigger_print(width_px: int, height_px: int, *,
-                 min_dpi: int = DEFAULT_MIN_DPI) -> BiggerPrint | None:
+                 min_dpi: int = DEFAULT_MIN_DPI,
+                 samples_per_pixel: float | None = None) -> BiggerPrint | None:
     """What it would take to print this picture one size *bigger*, or ``None``.
 
     :func:`print_options` answers "what can I print today?" and hides itself when
@@ -178,6 +180,17 @@ def bigger_print(width_px: int, height_px: int, *,
     print; what adds resolution is drizzle (super-resolution) or shooting the
     object as a mosaic. The sentence says exactly that, and names drizzle only
     while the gap is within :data:`DRIZZLE_MAX_USEFUL_SCALE`.
+
+    ``samples_per_pixel`` — how many subs landed on **one pixel** of this
+    picture — is optional and decides *how* drizzle is named. Without it the
+    sentence keeps its general "pays off when you have plenty of subs" hedge,
+    which is what every caller got before. With it, a picture below
+    :data:`DRIZZLE_MIN_SAMPLES_PER_PIXEL` is told the shortfall and pointed at
+    more subs *first*, instead of at a re-stack the app's own Stack form would
+    then warn against. It is a per-pixel count on purpose: on a mosaic the
+    target's frame total describes the whole raster while drizzle fills one
+    output pixel at a time. Anything non-finite or non-positive reads as
+    "unknown" and keeps the general wording.
 
     Returns ``None`` when the picture already fills the largest size offered
     (nothing left to reach for), when the gap is beyond
@@ -209,12 +222,14 @@ def bigger_print(width_px: int, height_px: int, *,
         return BiggerPrint(
             name=paper.name, scale=scale,
             width_px=max(1, math.ceil(need_w)), height_px=max(1, math.ceil(need_h)),
-            text=_bigger_print_text(paper.name, scale, bool(printable)),
+            text=_bigger_print_text(paper.name, scale, bool(printable),
+                                    samples_per_pixel=samples_per_pixel),
         )
     return None
 
 
-def _bigger_print_text(name: str, scale: float, prints_already: bool) -> str:
+def _bigger_print_text(name: str, scale: float, prints_already: bool, *,
+                       samples_per_pixel: float | None = None) -> str:
     """The nudge, in the app's plain voice — the gap first, then the one lever
     that closes it, then the thing it is *not* (more subs)."""
     gap = f"{scale:g}×"        # "1.5×"
@@ -223,15 +238,56 @@ def _bigger_print_text(name: str, scale: float, prints_already: bool) -> str:
             f"About {gap} more detail would make it printable at {name}, the "
             "smallest size that comes out sharp.")
     if scale <= DRIZZLE_MAX_USEFUL_SCALE:
-        lever = ("More subs won't do it — they make the picture cleaner, not "
-                 "bigger. What adds detail is re-stacking with Drizzle "
-                 "(super-resolution) switched on, which pays off when you have "
-                 "plenty of subs.")
+        depth = _usable_depth(samples_per_pixel)
+        if depth is not None and depth < DRIZZLE_MIN_SAMPLES_PER_PIXEL:
+            # Naming drizzle unconditionally here sends a beginner to re-stack a
+            # picture the Stack form would immediately warn them off ("Consider
+            # turning Drizzle off for this stack"), at this same bar. Say the
+            # order instead: subs first, then the re-stack.
+            lever = (
+                "More subs won't do it on their own — they make the picture "
+                "cleaner, not bigger. What adds detail is re-stacking with "
+                "Drizzle (super-resolution), and Drizzle needs plenty of "
+                "dithered subs on every part of the picture: this one has "
+                f"about {_depth_phrase(depth)}, against the "
+                f"~{DRIZZLE_MIN_SAMPLES_PER_PIXEL} it wants before it pays off. "
+                "So keep shooting this target first, then re-stack with Drizzle "
+                "switched on."
+            )
+        else:
+            lever = ("More subs won't do it — they make the picture cleaner, "
+                     "not bigger. What adds detail is re-stacking with Drizzle "
+                     "(super-resolution) switched on, which pays off when you "
+                     "have plenty of subs.")
     else:
         lever = ("That's more than super-resolution alone adds, so this one "
                  "wants a mosaic — the same object shot as several overlapping "
                  "panels. More subs make the picture cleaner, not bigger.")
     return f"{lead} {lever}"
+
+
+def _usable_depth(samples_per_pixel: float | None) -> float | None:
+    """``samples_per_pixel`` as a number worth quoting, or ``None``.
+
+    A missing, non-numeric, non-finite or non-positive depth is "we don't know",
+    never "zero subs" — the caller then keeps the general wording rather than
+    telling a beginner their picture is empty."""
+    if samples_per_pixel is None:
+        return None
+    try:
+        val = float(samples_per_pixel)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(val) or val <= 0:
+        return None
+    return val
+
+
+def _depth_phrase(depth: float) -> str:
+    """"6 subs" / "1 sub" — rounded, and never rounded *down* to nothing (a
+    fractional depth is a thin mosaic panel, not an empty picture)."""
+    n = max(1, int(round(depth)))
+    return f"{n} sub" + ("" if n == 1 else "s")
 
 
 def render_print(rgb: np.ndarray, option: PrintOption):

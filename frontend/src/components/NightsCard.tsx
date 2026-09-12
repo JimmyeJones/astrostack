@@ -17,6 +17,7 @@ import { useState } from "react";
 import { api, type NightSummary } from "../api/client";
 import { formatIntegration, formatNightDate } from "../format";
 import { earlyStopClause } from "./LastNightCard";
+import { NO_SHRINK, NO_WRAP } from "../badgeFit";
 import { HintAnchor } from "./HintAnchor";
 
 // `formatNightDate` moved to `format.ts` (so the night-recency helpers there can
@@ -128,33 +129,10 @@ export function verdictBadge(verdict: string): { color: string; label: string } 
   }
 }
 
-/**
- * Stop a `Badge` in this table shrinking below its own word.
- *
- * A Mantine `Badge` is `overflow: hidden; text-overflow: ellipsis`, so inside a
- * table cell it contributes **no** min-content width: the column can be squeezed
- * to nothing and the word silently becomes "SH…" — and because the clipping is
- * *inside* the badge, scrolling the table never reveals it. Measured in a real
- * browser at 420 px on the mosaic sample: the verdict `sharp` rendered 29 px wide
- * against the 36 px its text needs, on the one column that exists to carry a
- * word, under copy that tells the reader to act on it ("Spotted a soft or hazy
- * night? Set it aside").
- *
- * `max-content` makes the badge ask for its own text, so the **table** grows and
- * the scroll container scrolls — the honest failure for a table too wide for a
- * phone, and the only one a gesture can undo. Content-independent: it follows
- * whatever the label says rather than a width picked against today's three words.
- */
-const NO_SHRINK = { minWidth: "max-content" } as const;
-
-/** …and the night's own date is one line, not three.
- *
- *  Same squeeze, other half: at 420 px the first column wrapped "16 Nov 2024"
- *  over three lines and the rows stood 70 px tall against 31 px on a desktop.
- *  Measured together with the badge fix: 70 px → 31 px a row, which on a target
- *  shot across many nights is the standing "the pages are extremely busy"
- *  priority paid back rather than spent. */
-const NO_WRAP = { whiteSpace: "nowrap" } as const;
+// The two shapes that stop this table clipping itself on a phone. Extracted to
+// `../badgeFit` in v0.436.2, when the Tonight planner's score column turned out
+// to have the identical badge-shrink bug (145 clipped scores at 420 px) — the
+// reasoning and the measurements from both instances live there now.
 
 function NightRow({
   n,

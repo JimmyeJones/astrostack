@@ -1,5 +1,163 @@
 # Shipped — the record
 
+## v0.437.0 — 2026-09-12 — the Tonight page stops being twelve screens of scrolling
+
+*(Builder, branch `agent/run-2026-09-12` — 🎨 the standing information-architecture priority, **one slice**,
+taken because a measurement asked for it. Frontend-only.)*
+
+**AGENTS.md's rule for this priority is "measure first, because the last two measurements both said not to".**
+This one said to, emphatically. With an observing site finally set on the scratch install (v0.436.1), the
+first browser measurement of `/tonight` with rows in it came back at **10,430 px on a 420 px phone** —
+3.4× the next tallest page in the app (3,475 px) and 3.5× the 3,014 px "worst page" number the banner
+quotes. The desktop was 7,245 px.
+
+**Almost all of it was one table.** "Start something new tonight" renders every well-placed catalog object
+— 75 on the sample night, out of 157 planned — eagerly, at ~90 px a row on a phone. And it is a *ranked*
+table: everything past the top of it is, by construction, the worse-placed part of tonight's sky, scrolled
+through to reach the page's own footer.
+
+**The fix is the one the life list already got.** `LifeList.TODO_PREVIEW` fixed the identical shape on
+2026-08-13 (14,584 px, the worst page in the app at the time). `FRESH_PREVIEW = 12` draws the top of the
+ranking, then *"Show all 75 well-placed targets"*, with "Show fewer" to fold it back. Same number, same
+idiom, same wording, so the two pages behave the same way.
+
+**Nothing is removed** — the owner's one hard constraint. The remainder is one tap away; the type filter
+(All / Galaxy / Nebula / Cluster) still narrows the whole list, not the preview; the link's count says how
+many are waiting; and the existing "N more targets aren't up tonight — lower the minimum altitude" note
+below it is untouched.
+
+**Why it hid.** The bundled samples carry no site, so `_resolve_observer` answered "none" and this table
+rendered empty on every dogfood pass ever taken. v0.436.1 closed that hole; this is the first of two things
+it found.
+
+**Measured, same data, before → after:** phone **10,430 px → 3,578 px**, desktop **7,245 px → 2,346 px**,
+and the pass now reports "nothing overflowing, no console errors". Tonight is no longer the outlier — 3,578
+px against the mosaic Target page's 3,475 px.
+
+**Upgrade-safe:** no endpoint, config, schema, on-disk, API-shape or default change. Nothing is fetched
+differently and nothing is dropped; this changes only what is drawn.
+
+**Tests +2:** the fold at twelve with the count in the link, one tap listing all thirty, folding back, and
+a ranking that already fits being offered no disclosure at all. The first is red on a scratch revert.
+
+## v0.436.1 — 2026-09-12 — a dogfood pass gets an observing site, and the "plan a night" half of the app is finally in front of a browser
+
+*(Builder, branch `agent/run-2026-09-12` — 🟠 INFRA. The `LEAD` filed with v0.435.0 earlier the same day,
+built as the entry's own shape (a). Tooling + AGENTS.md §7 only: nothing shipped changes, and the samples'
+generated pixels stay bit-identical.)*
+
+**The hole.** `tests/synth.write_seestar_fits` writes no `SITELAT`/`SITELONG` unless asked, and
+`webapp/sample_data` never asks. So with both samples loaded and stacked, `_resolve_observer` answered
+`"none"` — and **Tonight, the Sky Map's placement, the life list's "Up tonight" chip, the wishlist's "the
+Tonight page will tell you when", `/api/plan/closing`, `/api/plan/week` and `/api/life-list/nearly-there`
+were all in their empty state.** Every "dogfood CLEAN" ever recorded was therefore a statement about the
+half of the app that does not need a site, and v0.426.0, v0.430.0 and v0.433.0 all shipped into the other
+half inside one week.
+
+**Why not the obvious fix.** Writing a site into the sample's headers was rejected for the reason the lead
+gives: a location in a frame header is not decoration — the planner *plans from it* — so a sample claiming
+to have been shot from one place would silently tell an owner somewhere else which targets are up, computed
+for the wrong hemisphere, with only `location_source: "fits"` anywhere on the wire to say so.
+
+**What shipped instead.** `scripts/agent-dogfood.sh` step 3c `PUT`s `site_lat`/`site_lon` into its **own
+scratch install's Settings** — which is exactly what a real owner's install supplies — after the samples
+load and before anything is probed. `DOGFOOD_SITE="lat,lon"` overrides it (default `40.0,-2.0`: a round
+mid-northern latitude, obviously synthetic, in the band most Seestar owners are in, so the planner's answers
+are representative rather than polar). `--no-site` skips it. `--empty` never sets one, because a first-run
+app has no site and those empty screens are what that pass exists to measure.
+
+**It says whether it took.** The step prints `location_source` and the row count from
+`/api/plan/tonight` — a pass that silently failed to set the site would otherwise look exactly like the
+coverage hole it closes. Printed, never asserted: this script is a finder.
+
+**It paid for itself on its first run.** `/tonight` measured **10,430 px tall on a phone** — 3.4× the next
+tallest page (3,475 px) and 3.5× the "worst page" number the standing IA priority quotes — and the
+CLIPPED-LABEL probe (itself only four days old) reported **145 clipped score badges** on it, the exact
+v0.434.1 failure on the one table that fix could not have seen. Both are fixed in this run: v0.436.2 and
+v0.437.0.
+
+## v0.436.0 — 2026-09-12 — one bar, counted per pixel: the print nudge stops recommending the re-stack the Stack form withdraws
+
+*(Builder, branch `agent/run-2026-09-12` — 🟠 BUG + PRIORITY 2 (autonomy). Taken from the `LEAD` the
+2026-09-12 dogfood run filed and sized as a "name the number we already have" copy improvement; it is that,
+plus a real contradiction the lead did not know was there. Engine + webapp + frontend, additive only.)*
+
+**The two sentences.** `printexport._bigger_print_text` — the editor's "print it bigger" nudge — closed with
+*"More subs won't do it… What adds detail is re-stacking with Drizzle (super-resolution) switched on, which
+pays off when you have plenty of subs."* on **every** picture, because `bigger_print` is handed a paper size
+and a scale and nothing at all about the run behind them. On the bundled 2×2 mosaic sample — 21 subs, about
+6 on each part of the picture — the app's **own** Stack form answers that exact re-stack with *"Drizzle is
+on, but you only have about 6 subs on each patch of sky… Consider turning Drizzle off for this stack."* One
+screen named the lever the other withdraws, and a beginner who followed it would spend a night re-stacking
+into a canvas that comes back noisier and gappier than the one they had.
+
+**And the Stack form's own print panel had the same disagreement inside one screen — this is the bug half.**
+That panel withholds its "Raising Drizzle to ×1.4 would print it at A3" half below the drizzle bar, and its
+comment said so in as many words: *"at the **same** bar `drizzleTooFewHint` warns at (read from the one
+constant), so this panel can never recommend the thing it would then warn against."* It read
+`est.n_frames` — the **target's total** — while the caution two elements below reads `perPixelSamples`. On a
+single field those are the same number, which is why it read as true and why every test passed. On a mosaic
+they are not: v0.420.0 settled that every drizzle/κ-σ/min-max sentence is about a *pixel*, and a raster's
+total clears 100 hundreds of subs before any pixel does. On the owner's shooting shape that is not an edge
+case, it is the normal one — so the panel recommended raising Drizzle directly above a caution telling him
+to turn Drizzle off.
+
+**One bar, in one place.** `seestack.stack.drizzle_path.DRIZZLE_MIN_SAMPLES_PER_PIXEL` (100) is now the
+authority — it lives beside the algorithm whose docstring the number comes from ("typically 200+"; 100 is
+the *warn* bar, set well below so an ordinary deep stack is never nagged). The frontend mirrors it once, in
+`samplesPerPixel.ts` beside the helper that computes the denominator, because the bar is meaningless without
+it; `tests/test_drizzle_bar_mirror.py` is the drift guard, the same shape as the other nine mirror tests. The
+constant that used to be declared inline in `Stack.tsx` is gone, so the two hints on that form cannot drift
+apart again.
+
+**Both surfaces now count per pixel.**
+- *Stack form:* `printBigger` gates on `perPixelSamples >= DRIZZLE_MIN_SAMPLES_PER_PIXEL` — literally the
+  variable `drizzleTooFewHint` uses, so the comment's claim is now enforced by shared code rather than
+  asserted. (It also waits for `frames`, like the caution does, rather than showing and then withdrawing.)
+- *Editor nudge:* new `webapp.field_fulls.samples_per_pixel_of_run` — the run's own canvas divided by its
+  native frame area with any recorded drizzle scale divided out, i.e. the **same** `field_fulls_of_sky` four
+  other surfaces already use, so this cannot become a second definition of "depth". Cost: the run row the
+  endpoint already reads, plus `native_frame_shape`'s one `LIMIT 1`. **No FITS read** — `print-sizes`
+  promises in its docstring to cost nothing, and a coverage-map read would have broken that promise for a
+  number the canvas already answers.
+
+**What it says below the bar.** *"About 1.3× more detail would print this at A3. More subs won't do it on
+their own — they make the picture cleaner, not bigger. What adds detail is re-stacking with Drizzle
+(super-resolution), and Drizzle needs plenty of dithered subs on every part of the picture: this one has
+about 6 subs, against the ~100 it wants before it pays off. So keep shooting this target first, then
+re-stack with Drizzle switched on."* The lever is still named — the picture genuinely needs pixels, not
+exposure — but the two steps are now in an order that works.
+
+**What it says everywhere else is byte-for-byte what it always said.** Above the bar, and whenever the depth
+is unknowable (no canvas dimensions, a project with no measured frame shape, a malformed count), the general
+clause is unchanged — pinned by a test that compares the two strings rather than describing them.
+`bigger_print`'s new `samples_per_pixel` is keyword-only and defaults to `None`; `stacker._print_plan` passes
+nothing, so the pre-run estimate is untouched, and the mosaic branch (past `DRIZZLE_MAX_USEFUL_SCALE`, where
+the answer is a mosaic rather than drizzle) ignores the depth entirely.
+
+**A fractional depth never rounds down to nothing.** A thin mosaic panel can average below one sub per pixel,
+and *"about 0 subs"* of a picture the reader is looking at reads as a bug, so `_depth_phrase` floors at 1.
+
+**Upgrade-safe (§9):** no config key, no schema change, no on-disk change, no response-shape change (the
+`print-sizes` body is the same four keys — only the sentence inside `bigger.text` differs), no default
+flipped. An older run with no recorded frame shape gets exactly its old wording.
+
+**Tests (+14 Python, +2 vitest).** `tests/test_printexport.py` +5 (the thin case; a deep one asserted
+*equal to* the depth-free text; unknown/nonsense depths — `None`, `0`, `-3`, NaN, inf, a string — all reading
+as unknown; the fractional floor; and the mosaic branch untouched at three depths). `tests/test_field_fulls.py`
++5 over `samples_per_pixel_of_run` (single field, 2×2 raster, drizzle divided out, a cropped canvas clamped,
+and everything unknowable declining). `tests/webapp/test_editor.py` +3 end-to-end through the endpoint,
+including a drizzled/un-drizzled **pair** chosen to straddle the bar (586 subs on a 2000×1500 canvas over
+480×320 subs: ~30 a pixel counted naively, ~120 counted with the ×2 drizzle divided out) so the division is
+doing work rather than the bar being loose. Plus the mirror test, and two `Stack.test.tsx` cases (a deep
+mosaic still offered the nudge; a thin one — 400 frames, `panel_depth` 25 — no longer offered it or its
+button).
+
+**Three of them fail before, verified by scratch reverts, and the fixtures were part of the bug.**
+`mockPrintForm` handed the form **two** frames beside a 250-frame estimate, which the old target-total gate
+happily read as 250 — so no existing test could have caught this. It now builds the frames list from the
+estimate it is paired with, which is what makes the new mosaic case meaningful.
+
 ## v0.435.3 — 2026-09-12 — the bilateral noise-reduction preview leaves more grain than the export, and now says so
 
 *(Builder, branch `claude/sweet-babbage-5x5by0` — 🟠 BUG (PRIORITY 1, the editor's preview↔export parity),

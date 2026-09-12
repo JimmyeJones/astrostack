@@ -266,6 +266,85 @@ describe("TonightView", () => {
     expect(screen.getByText("Needs mosaic")).toBeInTheDocument();
   });
 
+  it("draws the top of the catalog ranking and puts the rest one tap away, "
+    + "removing nothing", async () => {
+      // Measured in a real browser at 420 px (2026-09-12, the first dogfood pass
+      // with an observing site): /tonight was 10,430 px tall — 3.4x the next
+      // page in the app — and almost all of it was this one table drawing every
+      // well-placed catalog object. The tail of a *ranked* list is by definition
+      // the worse-placed half of the sky, so it is the right thing to fold; the
+      // life list had the identical shape and fix (TODO_PREVIEW).
+      const many = Array.from({ length: 30 }, (_, i) =>
+        target({ id: `NGC ${1000 + i}`, name: `Object ${i}`, score: 90 - i }));
+      vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({ targets: many }));
+      renderTonight();
+      await waitFor(() =>
+        expect(screen.getByText(/NGC 1000/)).toBeInTheDocument());
+
+      // Twelve drawn, the thirteenth folded — and the link says how many.
+      expect(screen.getByText(/NGC 1011/)).toBeInTheDocument();
+      expect(screen.queryByText(/NGC 1012/)).toBeNull();
+      const showAll = screen.getByText("Show all 30 well-placed targets");
+
+      // Nothing is removed: one tap lists every one of them.
+      fireEvent.click(showAll);
+      await waitFor(() =>
+        expect(screen.getByText(/NGC 1029/)).toBeInTheDocument());
+      expect(screen.queryByText(/Show all 30/)).toBeNull();
+
+      // …and it folds back.
+      fireEvent.click(screen.getByText("Show fewer"));
+      await waitFor(() => expect(screen.queryByText(/NGC 1029/)).toBeNull());
+    });
+
+  it("does not offer a disclosure when the whole ranking already fits", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: Array.from({ length: 12 }, (_, i) =>
+        target({ id: `NGC ${2000 + i}`, name: `Object ${i}`, score: 90 - i })),
+    }));
+    renderTonight();
+    await waitFor(() => expect(screen.getByText(/NGC 2011/)).toBeInTheDocument());
+    expect(screen.queryByText(/Show all/)).toBeNull();
+    expect(screen.queryByText("Show fewer")).toBeNull();
+  });
+
+  it("never lets a row's badges shrink below their own text — this table is six "
+    + "columns wide and read on a phone", async () => {
+      // Measured in a real browser at 420 px with an observing site set
+      // (2026-09-12, the first dogfood pass that ever had one): the score
+      // column squeezed to a 15 px box against the 20 px "92" needs, and the
+      // CLIPPED-LABEL probe reported **145** of them on one page. A Mantine
+      // Badge is overflow:hidden + text-overflow:ellipsis, so the clipping
+      // happens *inside* the badge and scrolling the table cannot reveal it —
+      // the same mechanism v0.434.1 fixed on the Nights card, on the one table
+      // no pass had ever seen with rows in it.
+      //
+      // jsdom does no layout, so this pins the production value on every badge
+      // the row draws rather than the pixels; the browser is the measurement,
+      // and this is what stops a silent revert.
+      vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+        targets: [target({
+          id: "M31", name: "Andromeda Galaxy", score: 100,
+          already_targeted: true, total_exposure_s: 600,
+          difficulty: { level: "easy", label: "Easy", text: "A bright, forgiving target." },
+          framing: { level: "mosaic", text: "is bigger than the Seestar's single frame." },
+        })],
+      }));
+      renderTonight();
+      await waitFor(() =>
+        expect(screen.getByText(/Andromeda Galaxy/)).toBeInTheDocument());
+
+      // The score is the whole content of the last column, and a three-digit
+      // one is the worst case the page can produce.
+      expect(screen.getByText("100").closest(".mantine-Badge-root"))
+        .toHaveStyle({ minWidth: "max-content" });
+      // …and the advisory badges sharing the squeezed row are held to it too.
+      expect(screen.getByText("Needs mosaic").closest(".mantine-Badge-root"))
+        .toHaveStyle({ minWidth: "max-content" });
+      expect(screen.getByText("Easy").closest(".mantine-Badge-root"))
+        .toHaveStyle({ minWidth: "max-content" });
+    });
+
   it("answers a tap on a planning badge — this page is read outdoors, on a phone",
     async () => {
       // Every badge in this table explains itself in a tooltip and nowhere else,

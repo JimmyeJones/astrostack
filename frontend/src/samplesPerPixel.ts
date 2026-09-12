@@ -26,6 +26,20 @@
  * chosen from another is exactly the drift these fixes keep undoing.
  */
 
+/** Below this many samples **on one pixel**, drizzle is the wrong advice — it
+ * spreads each sub across a finer grid and needs enough dither-phased samples
+ * to fill it, so this thin it comes back slower, noisier and gappier than the
+ * ordinary weighted-mean path.
+ *
+ * Hand-mirrored from `seestack.stack.drizzle_path.DRIZZLE_MIN_SAMPLES_PER_PIXEL`
+ * (a TS module cannot import a Python constant — the `fullres.ts` arrangement),
+ * and guarded against drift by `tests/test_drizzle_bar_mirror.py`. It lives
+ * here, beside `samplesPerPixel`, because the bar is meaningless without the
+ * denominator: every surface that quotes it must compare it against a *pixel's*
+ * count, never a mosaic's frame total.
+ */
+export const DRIZZLE_MIN_SAMPLES_PER_PIXEL = 100;
+
 /** The honest sample count for one pixel: the mosaic's panel depth where there
  * is one, the target's frame count otherwise.
  *

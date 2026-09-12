@@ -37,7 +37,9 @@ import { memoryFixAction } from "../stackMemoryFix";
 import { printBiggerAction } from "../stackPrintBigger";
 import { stackTimeLine } from "../stackTimeEstimate";
 import { minMaxIgnoresWeightingHint as minMaxIgnoresWeighting } from "../weightingHint";
-import { samplesPerPixel, samplesPerPixelPhrase } from "../samplesPerPixel";
+import {
+  DRIZZLE_MIN_SAMPLES_PER_PIXEL, samplesPerPixel, samplesPerPixelPhrase,
+} from "../samplesPerPixel";
 import { JobError } from "./Jobs";
 
 // Linear-interpolated percentile of an unsorted numeric sample (p in [0, 100]).
@@ -875,10 +877,9 @@ export function StackView() {
   // the raster, so this caution used to stay silent on exactly the canvas where
   // drizzle hurts most — while the nudge on the other side already declined to
   // recommend drizzle there. The nudge is fenced and the caution was not.
-  const DRIZZLE_TOO_FEW_FRAMES = 100;
   const drizzleTooFewHint =
     !frames.isLoading && !!values.drizzle && perPixelSamples > 0
-    && perPixelSamples < DRIZZLE_TOO_FEW_FRAMES
+    && perPixelSamples < DRIZZLE_MIN_SAMPLES_PER_PIXEL
       ? `Drizzle is on, but you only have ${perPixelPhrase}. Drizzle spreads each sub across a finer output grid, so it needs lots of dithered frames on every pixel (typically 200+) to fill it — with this few it's slower and can leave a noisier, gappier result${drizzleScale > 1 ? ` (more so at ${drizzleScale % 1 === 0 ? drizzleScale.toFixed(0) : drizzleScale}× scale)` : ""}, while the ordinary stack path gives faster, equally clean results on Seestar data. Consider turning Drizzle off for this stack.`
       : null;
 
@@ -919,11 +920,17 @@ export function StackView() {
   // fits-the-budget branch below, so it structurally cannot talk over the
   // over-budget verdict. The "raise Drizzle" half is withheld on a stack with
   // too few frames for super-resolution to pay off, at the *same* bar
-  // `drizzleTooFewHint` warns at (read from the one constant), so this panel can
-  // never recommend the thing it would then warn against.
+  // `drizzleTooFewHint` warns at — and, since v0.436.0, in the same *unit*. It
+  // used to read `est.n_frames`, the target's total, while the caution it
+  // claimed to agree with reads `perPixelSamples`: identical on a single field
+  // and wrong on every mosaic, where the total clears the bar long before any
+  // pixel does. On the owner's raster that is the normal shape, not an edge
+  // case — so the panel recommended raising Drizzle on exactly the picture the
+  // caution below it was telling him to turn Drizzle off for.
   const printPlan = est?.print_plan ?? null;
   const printBigger =
-    printPlan?.bigger_text && est && est.n_frames >= DRIZZLE_TOO_FEW_FRAMES
+    printPlan?.bigger_text && est && !frames.isLoading
+    && perPixelSamples >= DRIZZLE_MIN_SAMPLES_PER_PIXEL
       ? printPlan.bigger_text
       : null;
   // …and the button that actually sets it. The scale the sentence names is
