@@ -203,7 +203,13 @@ def draw_nameplate(img, fields: NameplateFields):
     and shrinks to fit so a long caption never overflows a narrow share."""
     from PIL import Image, ImageDraw
 
-    text = nameplate_line(fields)
+    from seestack.render.glyphs import safe_for_default_font
+
+    # The caption carries the *target's own name*, which is whatever the owner
+    # called the folder — and the bundled face draws an accent or a dash as a
+    # hollow box. Sanitise before measuring, so the shrink-to-fit loop and the
+    # bar it sizes both see the string that is actually drawn.
+    text = safe_for_default_font(nameplate_line(fields))
     if not text:
         return img.convert("RGB") if img.mode != "RGB" else img
 

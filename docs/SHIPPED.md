@@ -1,5 +1,81 @@
 # Shipped — the record
 
+## v0.429.0 — 2026-09-12 — a target named `ω Cen – Gómez` stops printing a row of boxes on every picture you share
+
+*(Builder, branch `claude/sweet-babbage-8i7zw0` — 🟡 friendliness / trust, PRIORITY 3. The 2026-08-26 idea
+"one shared guard that burned-in text stays inside Pillow's built-in font's glyph coverage", plus one
+currently-shipping instance of the bug it predicted. Engine-only: no config, schema, on-disk, API-shape or
+default change, and every string that was already drawable renders byte-for-byte as before.)*
+
+**The measurement first, because it is wider than the entry assumed.** Nine modules draw text onto pixels
+(`nameplate`, `keepsake`, `montage`, `beforeafter`, `recap`, `lifelistcard`, `objectlabels`, `skymarks`,
+`render/deepening`) and all nine use Pillow's bundled scalable face — an **Aileron subset that is barely
+wider than ASCII**. Probed character by character against its own `.notdef` box: `—`, `–`, `×`, `→`, `≈`,
+`√`, a **no-break space**, all of Greek, and **every accented Latin letter** (`é ö ñ Å ø ß æ`) have no glyph
+and draw as a hollow rectangle. (`·`, `°`, `…`, `±` and the curly quotes *are* in the face, which is why the
+app's house separator has always been safe.)
+
+**Why that is a live defect and not a hypothetical.** A target is named by its folder, so the name on the
+nameplate, the keepsake mount, the montage tile, the recap poster and the reel's corner label is whatever
+the owner typed — `Sh2-155 – Cave Nebula`, `Gómez's Hamburger`, `ω Centauri`. `tests/test_drawn_text_glyphs.py`
+has guarded **our** copy since v0.282.1 and says so in its own docstring: *"this pins our wording, not the
+user's data… and no test can stop that."* A test can't. A transliteration can.
+
+**The net.** New `seestack/render/glyphs.py::safe_for_default_font(text)` — pure, idempotent, and a no-op on
+ASCII (checked first, so the common path never touches Pillow). Per character: **draw it if the face can**
+(measured against the real face via `font.getmask`, memoised, so the module stays right if Pillow ever
+widens what it bundles — not a hard-coded table of what is missing), then an explicit transliteration table
+for what this app actually produces (`— – × → ≈ ′ ″` and the non-`U+0020` spaces, plus Greek, because
+astronomy names stars with it: `ω Centauri` → `omega Centauri`), then an NFKD accent fold
+(`Gómez` → `Gomez`, `straße` → `strasse`), and **then it gives up and keeps the character**. That last step
+is the entry's own care note honoured: a Cyrillic or CJK name comes back byte-for-byte, boxes and all,
+because a box is bad and silently deleting somebody's target name is worse. The one exception is zero-width
+formatting (a soft hyphen, a ZWJ), which was never meant to be seen.
+
+**Wired into all nine renderers, before anything is measured.** Each shrink-to-fit loop and each `textbbox`
+now sizes the string that is actually drawn — sanitising after the measurement would give a chip the wrong
+width. Three of them are choke points that cover more than themselves: `render/deepening._draw_corner_label`
+carries the montage's tile captions and the before/after pair's cell labels, `recap.draw_poster` is the
+shared poster renderer behind the recap and the year recap, and `skymarks._text` covers the scale bar and
+the compass rose.
+
+**And one instance that was shipping today.** `lifelistcard.grid_subtitle(n, n)` returns *"The whole list —
+every one of them."* — an em dash, drawn, on the poster a beginner sees **the moment they complete the
+Messier list**. It slipped past the existing guard for a structural reason worth recording: that guard walks
+a hand-written list of caption builders, and the life-list poster's was never added to it. The copy now
+reads *"The whole list: every one of them."*, and `_life_list_headings` and `_object_label_texts` (the whole
+bundled catalog, measured rather than sampled) join the sweep.
+
+**Tests (+38 in `tests/test_glyph_safety.py`, +2 builders on the existing sweep; 5,796 → 5,836).** Three separate claims:
+the net's own behaviour (including that it never makes a string *less* drawable, that a no-break space —
+the case `tests/glyphs.py` is blind to, because it skips `str.isspace()` — becomes a real space, and that an
+untransliterable script survives intact); **twelve renderer pins** that render the hostile string and the
+pre-sanitised string and compare the **pixels**, all twelve verified red by a scratch revert that neutralises
+the production call sites while leaving the real sanitiser bound in the test; and a drift guard that walks
+`seestack/` for modules containing `ImageDraw` *and* a `.text(` call and fails on any that does not reach
+the net — proven armed by mutation against a synthetic tenth renderer, and proven to have walked the tree
+(it asserts it found at least the nine that exist). `test_the_hostile_fixture_really_is_hostile` stops the
+twelve pins going vacuous if a future Pillow widens the bundled face. The em-dash regression was verified
+red by restoring the old copy.
+
+  *(Original entry, for the record:)*
+
+  - **NEW IDEA (Builder 2026-08-26, found the hard way while rendering the first montage) — one shared guard
+    that burned-in text stays inside Pillow's built-in font's glyph coverage.** *(Pillar: friendliness / trust —
+    PRIORITY 3. Size: S.)* Every server-rendered shareable — the recap poster, the deepening reel's frame
+    labels, the nameplate, and now the montage — draws text with `ImageFont.load_default`, which has **no glyph
+    for an em dash** (and none for a great many other characters we write freely in prose). It renders as a tofu
+    box, on an image the user is about to post, and no test catches it: the string is correct, the *pixels* are
+    wrong. The montage's title hit this on its first render and now avoids `—` by hand, with a local test —
+    but `recap.py`'s lines, `deepening_frame_label`, and the nameplate all build strings from user data
+    (target names!) with no such guard, and a target the owner named with a typographic dash would print a box
+    today. **Shape:** a tiny `seestack/render/glyphs.py` with `safe_for_default_font(text) -> str` that
+    transliterates the handful of characters this app actually produces (— – ‘ ’ “ ” … ×) to ASCII-safe
+    equivalents, called at the one place each renderer draws text; plus a shared test that asserts every
+    rendered-string helper's output survives it unchanged. **Care:** transliterate, never strip — a target
+    named in a non-Latin script must still draw *something*, and dropping characters silently would be worse
+    than a box. Small, additive, no behaviour change on any string that is already safe.
+
 ## v0.428.2 — 2026-09-11 — "goal ~14.5 h (3.63-field mosaic)", two inches under "about 4 fields of sky"
 
 *(Builder, branch `claude/sweet-babbage-s75e9l` — 🟡 friendliness, PRIORITY 3. Found by opening a dogfood
