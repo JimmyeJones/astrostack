@@ -266,6 +266,48 @@ describe("TonightView", () => {
     expect(screen.getByText("Needs mosaic")).toBeInTheDocument();
   });
 
+  it("draws the top of the catalog ranking and puts the rest one tap away, "
+    + "removing nothing", async () => {
+      // Measured in a real browser at 420 px (2026-09-12, the first dogfood pass
+      // with an observing site): /tonight was 10,430 px tall — 3.4x the next
+      // page in the app — and almost all of it was this one table drawing every
+      // well-placed catalog object. The tail of a *ranked* list is by definition
+      // the worse-placed half of the sky, so it is the right thing to fold; the
+      // life list had the identical shape and fix (TODO_PREVIEW).
+      const many = Array.from({ length: 30 }, (_, i) =>
+        target({ id: `NGC ${1000 + i}`, name: `Object ${i}`, score: 90 - i }));
+      vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({ targets: many }));
+      renderTonight();
+      await waitFor(() =>
+        expect(screen.getByText(/NGC 1000/)).toBeInTheDocument());
+
+      // Twelve drawn, the thirteenth folded — and the link says how many.
+      expect(screen.getByText(/NGC 1011/)).toBeInTheDocument();
+      expect(screen.queryByText(/NGC 1012/)).toBeNull();
+      const showAll = screen.getByText("Show all 30 well-placed targets");
+
+      // Nothing is removed: one tap lists every one of them.
+      fireEvent.click(showAll);
+      await waitFor(() =>
+        expect(screen.getByText(/NGC 1029/)).toBeInTheDocument());
+      expect(screen.queryByText(/Show all 30/)).toBeNull();
+
+      // …and it folds back.
+      fireEvent.click(screen.getByText("Show fewer"));
+      await waitFor(() => expect(screen.queryByText(/NGC 1029/)).toBeNull());
+    });
+
+  it("does not offer a disclosure when the whole ranking already fits", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: Array.from({ length: 12 }, (_, i) =>
+        target({ id: `NGC ${2000 + i}`, name: `Object ${i}`, score: 90 - i })),
+    }));
+    renderTonight();
+    await waitFor(() => expect(screen.getByText(/NGC 2011/)).toBeInTheDocument());
+    expect(screen.queryByText(/Show all/)).toBeNull();
+    expect(screen.queryByText("Show fewer")).toBeNull();
+  });
+
   it("never lets a row's badges shrink below their own text — this table is six "
     + "columns wide and read on a phone", async () => {
       // Measured in a real browser at 420 px with an observing site set

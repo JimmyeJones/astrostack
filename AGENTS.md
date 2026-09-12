@@ -166,10 +166,18 @@ banner still quoted the 2026-08-08 pre-fix measurements ("~15 consecutive alert/
 stacked analysis cards, before the frames table starts at line ~1339 of 1481", "the sidebar is 15 flat
 links") long after slices (a)–(e) shipped 08-13→16.** Today `routes/Target.tsx` carries **one**
 `NoticeBoard` and the nav is **18 links in 5 groups** (`frontend/src/nav.ts`), and the running-app probe
-re-measured at v0.338.1 puts the tallest page — still the Target page — at **3,014 px on a phone**, down
+re-measured at v0.338.1 puts the tallest page — then the Target page — at **3,014 px on a phone**, down
 from 14,584 px on the worst page before the slices. **So do NOT open a speculative IA slice**: two dogfood
 passes four days and ~80 versions apart agree that nothing is stacked badly and the worst page moved 21 px
-(see `docs/PROCESS-NOTES.md`, search **"DOGFOOD BASELINE"** for the measurements — moved there 2026-09-08). What is still live is the
+(see `docs/PROCESS-NOTES.md`, search **"DOGFOOD BASELINE"** for the measurements — moved there 2026-09-08).
+**⚠ One page was outside that agreement and nobody could see it — re-measure before believing any figure
+here** *(added 2026-09-12)*. Every one of those passes measured an app with **no observing site**, so
+`/tonight` rendered empty. The first pass that had one (v0.436.1) measured it at **10,430 px** — 3.4× the
+next page. It got its slice as **v0.437.0** (10,430 → **3,578 px** phone, 7,245 → **2,346 px** desktop),
+and the current standings are `/tonight` 3,578 px, the mosaic Target page 3,475 px, `/` 3,095 px,
+`/life-list` 3,094 px. The lesson is the banner's own rule sharpened: *measure first* means measure the
+page **with the data that makes it long**, because a screen in its empty state is not evidence about
+anything. What is still live is the
 *standing rule* below — when you add a feature, put it inside the existing grouping rather than appending
 one more always-on banner — plus the two named leftovers, the header row and the ten-item share menu.
 **The hard constraint is the owner's own: NOTHING MAY BE
