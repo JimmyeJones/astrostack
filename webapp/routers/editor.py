@@ -2210,20 +2210,38 @@ def print_sizes(safe: str, run_id: int, request: Request) -> dict:
     never as more exposure, because more subs make a picture cleaner rather than
     bigger. It is the one thing a picture too small to print at all can still be
     told, and that case is exactly where the size menu hides itself.
+
+    That nudge names **Drizzle**, so it is handed this run's own per-pixel depth
+    (:func:`webapp.field_fulls.samples_per_pixel_of_run` — the run's canvas and
+    one ``LIMIT 1`` frame row, no FITS read, so the endpoint stays as cheap as
+    it promises). Without it the sentence recommended a re-stack the Stack form
+    would then warn against on the very same picture, which on a mosaic is the
+    common case rather than the edge one.
     """
     from seestack.printexport import bigger_print, print_advice, print_options
+    from webapp.field_fulls import native_frame_shape, samples_per_pixel_of_run
 
     lib, proj = deps.open_target_project(request, safe)
     try:
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        frame_shape = native_frame_shape(proj) if run is not None else None
     finally:
         proj.close()
         lib.close()
     if run is None:
         raise HTTPException(status_code=404, detail="No such run")
     canvas_w, canvas_h = int(run.canvas_w or 0), int(run.canvas_h or 0)
+    frame_w, frame_h = frame_shape if frame_shape is not None else (None, None)
     options = print_options(canvas_w, canvas_h)
-    bigger = bigger_print(canvas_w, canvas_h)
+    bigger = bigger_print(
+        canvas_w, canvas_h,
+        samples_per_pixel=samples_per_pixel_of_run(
+            canvas_w, canvas_h,
+            n_frames_used=run.n_frames_used,
+            frame_w=frame_w, frame_h=frame_h,
+            options_json=run.options_json,
+        ),
+    )
     return {
         "sizes": [{"name": o.name, "dpi": o.dpi, "label": o.label,
                    "width_in": o.width_in, "height_in": o.height_in}

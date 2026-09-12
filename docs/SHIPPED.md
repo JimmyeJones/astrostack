@@ -1,5 +1,87 @@
 # Shipped — the record
 
+## v0.436.0 — 2026-09-12 — one bar, counted per pixel: the print nudge stops recommending the re-stack the Stack form withdraws
+
+*(Builder, branch `agent/run-2026-09-12` — 🟠 BUG + PRIORITY 2 (autonomy). Taken from the `LEAD` the
+2026-09-12 dogfood run filed and sized as a "name the number we already have" copy improvement; it is that,
+plus a real contradiction the lead did not know was there. Engine + webapp + frontend, additive only.)*
+
+**The two sentences.** `printexport._bigger_print_text` — the editor's "print it bigger" nudge — closed with
+*"More subs won't do it… What adds detail is re-stacking with Drizzle (super-resolution) switched on, which
+pays off when you have plenty of subs."* on **every** picture, because `bigger_print` is handed a paper size
+and a scale and nothing at all about the run behind them. On the bundled 2×2 mosaic sample — 21 subs, about
+6 on each part of the picture — the app's **own** Stack form answers that exact re-stack with *"Drizzle is
+on, but you only have about 6 subs on each patch of sky… Consider turning Drizzle off for this stack."* One
+screen named the lever the other withdraws, and a beginner who followed it would spend a night re-stacking
+into a canvas that comes back noisier and gappier than the one they had.
+
+**And the Stack form's own print panel had the same disagreement inside one screen — this is the bug half.**
+That panel withholds its "Raising Drizzle to ×1.4 would print it at A3" half below the drizzle bar, and its
+comment said so in as many words: *"at the **same** bar `drizzleTooFewHint` warns at (read from the one
+constant), so this panel can never recommend the thing it would then warn against."* It read
+`est.n_frames` — the **target's total** — while the caution two elements below reads `perPixelSamples`. On a
+single field those are the same number, which is why it read as true and why every test passed. On a mosaic
+they are not: v0.420.0 settled that every drizzle/κ-σ/min-max sentence is about a *pixel*, and a raster's
+total clears 100 hundreds of subs before any pixel does. On the owner's shooting shape that is not an edge
+case, it is the normal one — so the panel recommended raising Drizzle directly above a caution telling him
+to turn Drizzle off.
+
+**One bar, in one place.** `seestack.stack.drizzle_path.DRIZZLE_MIN_SAMPLES_PER_PIXEL` (100) is now the
+authority — it lives beside the algorithm whose docstring the number comes from ("typically 200+"; 100 is
+the *warn* bar, set well below so an ordinary deep stack is never nagged). The frontend mirrors it once, in
+`samplesPerPixel.ts` beside the helper that computes the denominator, because the bar is meaningless without
+it; `tests/test_drizzle_bar_mirror.py` is the drift guard, the same shape as the other nine mirror tests. The
+constant that used to be declared inline in `Stack.tsx` is gone, so the two hints on that form cannot drift
+apart again.
+
+**Both surfaces now count per pixel.**
+- *Stack form:* `printBigger` gates on `perPixelSamples >= DRIZZLE_MIN_SAMPLES_PER_PIXEL` — literally the
+  variable `drizzleTooFewHint` uses, so the comment's claim is now enforced by shared code rather than
+  asserted. (It also waits for `frames`, like the caution does, rather than showing and then withdrawing.)
+- *Editor nudge:* new `webapp.field_fulls.samples_per_pixel_of_run` — the run's own canvas divided by its
+  native frame area with any recorded drizzle scale divided out, i.e. the **same** `field_fulls_of_sky` four
+  other surfaces already use, so this cannot become a second definition of "depth". Cost: the run row the
+  endpoint already reads, plus `native_frame_shape`'s one `LIMIT 1`. **No FITS read** — `print-sizes`
+  promises in its docstring to cost nothing, and a coverage-map read would have broken that promise for a
+  number the canvas already answers.
+
+**What it says below the bar.** *"About 1.3× more detail would print this at A3. More subs won't do it on
+their own — they make the picture cleaner, not bigger. What adds detail is re-stacking with Drizzle
+(super-resolution), and Drizzle needs plenty of dithered subs on every part of the picture: this one has
+about 6 subs, against the ~100 it wants before it pays off. So keep shooting this target first, then
+re-stack with Drizzle switched on."* The lever is still named — the picture genuinely needs pixels, not
+exposure — but the two steps are now in an order that works.
+
+**What it says everywhere else is byte-for-byte what it always said.** Above the bar, and whenever the depth
+is unknowable (no canvas dimensions, a project with no measured frame shape, a malformed count), the general
+clause is unchanged — pinned by a test that compares the two strings rather than describing them.
+`bigger_print`'s new `samples_per_pixel` is keyword-only and defaults to `None`; `stacker._print_plan` passes
+nothing, so the pre-run estimate is untouched, and the mosaic branch (past `DRIZZLE_MAX_USEFUL_SCALE`, where
+the answer is a mosaic rather than drizzle) ignores the depth entirely.
+
+**A fractional depth never rounds down to nothing.** A thin mosaic panel can average below one sub per pixel,
+and *"about 0 subs"* of a picture the reader is looking at reads as a bug, so `_depth_phrase` floors at 1.
+
+**Upgrade-safe (§9):** no config key, no schema change, no on-disk change, no response-shape change (the
+`print-sizes` body is the same four keys — only the sentence inside `bigger.text` differs), no default
+flipped. An older run with no recorded frame shape gets exactly its old wording.
+
+**Tests (+14 Python, +2 vitest).** `tests/test_printexport.py` +5 (the thin case; a deep one asserted
+*equal to* the depth-free text; unknown/nonsense depths — `None`, `0`, `-3`, NaN, inf, a string — all reading
+as unknown; the fractional floor; and the mosaic branch untouched at three depths). `tests/test_field_fulls.py`
++5 over `samples_per_pixel_of_run` (single field, 2×2 raster, drizzle divided out, a cropped canvas clamped,
+and everything unknowable declining). `tests/webapp/test_editor.py` +3 end-to-end through the endpoint,
+including a drizzled/un-drizzled **pair** chosen to straddle the bar (586 subs on a 2000×1500 canvas over
+480×320 subs: ~30 a pixel counted naively, ~120 counted with the ×2 drizzle divided out) so the division is
+doing work rather than the bar being loose. Plus the mirror test, and two `Stack.test.tsx` cases (a deep
+mosaic still offered the nudge; a thin one — 400 frames, `panel_depth` 25 — no longer offered it or its
+button).
+
+**Three of them fail before, verified by scratch reverts, and the fixtures were part of the bug.**
+`mockPrintForm` handed the form **two** frames beside a 250-frame estimate, which the old target-total gate
+happily read as 250 — so no existing test could have caught this. It now builds the frames list from the
+estimate it is paired with, which is what makes the new mosaic case meaningful.
+
 ## v0.435.3 — 2026-09-12 — the bilateral noise-reduction preview leaves more grain than the export, and now says so
 
 *(Builder, branch `claude/sweet-babbage-5x5by0` — 🟠 BUG (PRIORITY 1, the editor's preview↔export parity),
