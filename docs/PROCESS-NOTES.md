@@ -18,6 +18,108 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Scout, branch `claude/admiring-brahmagupta-smudjs`) — webapp-routers sweep (rotation slot #4) CLEAN; mosaic+editor+empty dogfood CLEAN and coherent; one new beginner feature filed
+
+**The run.** No bug filed — everything traced or reproduced clean — and no code
+shipped. One new beginner feature added to "Features that serve real workflows"
+(a *visual "Moon for scale" disc* on the shareable picture). This block is the
+deliverable: an area swept and a full dogfood recorded, so the next run doesn't
+re-walk them. Baseline before any read: **5,856 passed / 2 skipped** (31m18s).
+
+### Why these, not the stacking engine
+
+The stored Scout prompt still says "lead your rotation with the stacking engine",
+but AGENTS.md §1 marks `seestack/stack/*` and `seestack/calibrate/*` **closed**
+(twenty clean sweeps; do not re-sweep until a new bug is found there), and §2's
+rotation is the authority the Scout actually reads at runtime. Rotation slot #3
+(filesystem side effects of ASTAP/ffmpeg) plus the editor A2 parity class were
+swept clean on 2026-09-11; the untouched slot was **#4, the webapp routers**. So
+that is what I swept, exercised on **owner-shaped (mosaic) data** via the dogfood
+pass so it counts as a sweep and not just a read (§1).
+
+### The router sweep — CLEAN
+
+A broad adversarial read of the ten most computational routers (`frames`,
+`stack`, `targets`, `stats`, `plan`, `gallery`, `video`, `calibration`, `sky`,
+`lifelist`), plus my own line-by-line of the four §10/§9-critical ones the scan
+skipped (`storage`, `upload`, `settings`, `overtrim`). Findings:
+
+- **`incoming/` read-only (§10) holds everywhere.** Every `unlink`/`replace`/
+  `rmtree`/`open('w')` in scope resolves into the library `targets/` tree, the
+  cache, the pictures-archive, or scratch — never `incoming/`. `storage.py`
+  counts incoming bytes from the `frames` rows, never by walking the folder;
+  `upload.py` streams to a unique `.part` sidecar, confines every member under
+  `incoming/` (zip members too — capped count, uncompressed free-space check,
+  per-member size cap that makes the check binding), and is `copy`-not-move.
+- **Server-side path resolution holds.** `calibration`/`video` re-derive folders
+  from sanitised ids (`[^A-Za-z0-9._-]+` → `_`), so a crafted `folder_id`/
+  `capture_id` collapses harmlessly; `trigger_stack` pops raw `dark_path`/
+  `flat_path` and resolves master *ids*.
+- **Per-panel-vs-whole-target and NaN=no-coverage are correct end-to-end.**
+  `rejection_reach` sizes off `est.panel_depth`; `noise_yardstick_frames` uses
+  `crop_depth if is_mosaic else n_frames` and *withholds* (returns `None`) on an
+  unknown mosaic depth rather than falling back to the whole-target count.
+  `_measure_crop_depth` takes the **median** of `crop[isfinite & >0]` — gaps
+  excluded, never zeroed; the only `nan_to_num` is on the final 8-bit display PNG,
+  the correct place to blacken gaps.
+- **`settings.py`** strips auth/host/calibration keys in and out and validates
+  `default_stack_options` with a 422; **`overtrim.py`** reuses `crop_health_for_run`
+  so the Dashboard and editor can never name different pictures.
+
+The **one** item flagged (`sky.py:112-113`, the preview TAN-WCS `CD` matrix) I
+verified myself and it is **not a bug**: the determinant is `-scale²` (correct
+sky handedness / RA-left flip) and the off-diagonals match a *flip-then-rotate*
+convention `[[-scale,0],[0,scale]]·R(ρ)`; only the rotation *sign* is convention-
+dependent, which the docstring already labels "best-effort starting point", and
+it only orients a preview overlay — it never becomes a numeric value in a
+response. Recorded so it isn't re-chased.
+
+### The dogfood — mosaic + editor + empty, all CLEAN, read as pixels *and* sentences
+
+`agent-dogfood.sh --mosaic --editor` then `--empty`, exit 0 both. Mosaic trim
+Auto would apply: **7.9 %** (well under the 15 % bug bar). All 21 editor ops
+re-rendered the live preview with no console error, on the single field *and* on
+the mosaic run; nothing overflowed at 1440 px or 420 px.
+
+Per AGENTS.md, a CLEAN pass is about console errors, not pixels or sentences — so
+I read the "what the app SAYS about this mosaic" block as one paragraph and
+opened the actual screenshots. **They cohere.** The three claims that were the
+site of the last three findings now agree: the panel-map line ("top-right ~30 s
+behind ~1 min/panel"), `grain_uneven` ("~23 % has 3 subs vs 6, ~1.4× grainier"
+— and √(6/3)=1.41, correct) and `seams_flat` ("the sky matches across the joins,
+so where it looks grainier that is depth, not a step in the sky") tell one story
+in one voice, all closing on the same "~30 s behind, evens out as you keep
+shooting". The mosaic Target page's "1 min per panel", "≈55 % of Orion / a 3×3
+covers it", and the Nights table are mutually consistent. The mosaic **editor**
+explains its Auto steps tuned to the data, trims 8 %, and offers a *Hold back
+highlights (0.05)* actionable — priority 1 is genuinely hardened. The **empty**
+first-run Dashboard is excellent: an ASTAP-not-found banner with "Fix in
+Settings", a 6-step "Your first image" checklist with per-step links, and a "Try
+it with a sample image" button.
+
+### The feature, and the honesty note that goes with it
+
+As the last two Scout runs found, **idea supply is not the constraint** (§4 R3):
+I grepped a dozen beginner ideas and every one already exists — goal-reached
+("Plenty — try something new", + v0.425.0 naming the next target), framing-fit /
+mosaic-panel planner (`FramingHintOut`/`MosaicPlanOut`, from the owner's own S30
+field), the overnight digest (`webapp/overnight.py`), the deepening reel
+(`DeepeningReelCard`), best-night, activity calendar, before/after Compare+Split
+in the editor. The one gap that survived: the scale-bar carries a full-Moon
+comparison *in words* ("about 2.5 full Moons wide", `seestack/scalebar.py`) but
+never draws the Moon *to scale*. So I filed exactly that — a visual "Moon for
+scale" disc — and nothing else, rather than pad the list with near-duplicates
+that cost a Builder an investigation each.
+
+### One curation
+
+Cut the fully-shipped, struck-through "plateaued → name a fresh target" spec
+(v0.425.0) out of the Ideas list — it already has its one-line ✅ under Shipped —
+to keep the working list from carrying a shipped item's full body (§2, three-file
+rule), offsetting the one idea added.
+
+---
+
 ## 2026-09-12 (Builder, branch `claude/sweet-babbage-uawq1j`) — one bug in the guard *after* the one that was already fixed, and a feature the app could not see because every planner here is short-horizon
 
 **The run.** Three independently-green commits: **v0.429.4** (the readability
