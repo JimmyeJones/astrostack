@@ -18,6 +18,76 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `claude/sweet-babbage-3xr6h8`) — one feature, and the fixture that would have shipped it untested
+
+**The run.** One task, merged as PR #851: **v0.432.0** — "Moon for scale", the full Moon drawn at its
+true angular size on the picture (`ScaleBar.moon_fraction`, `skymarks._moon_disc_box`,
+`frontend/src/moonDisc.ts`). Full entry in [`SHIPPED.md`](SHIPPED.md). It came from the top of "Features
+that serve real workflows", filed by the Scout the same morning.
+
+**Why only one.** I read "Bugs (fix these first)" end to end before picking, and then again before
+deciding whether to take a second task. Every entry in it is one of three things: **closed** (the fixture
+batch, the pack/round sweeps, the defensive-guard batch — all struck), **gated** on something no agent can
+supply from the repo (a real solved frame with a known field rotation for the sky-atlas CROTA2 sign; a
+cloudy night's subs for the ASTAP ladder budget; "only if the owner reports the grid persists"), or
+**measured and stood down with the numbers recorded** (the D1 weighted-coverage residual, the
+blob-count caption). That is the eleventh consecutive run in that state. The one A-MINOR item I did chase
+down — `merge.MergeResult.n_skipped_missing_file` mislabelling *added* frames — turns out to be surfaced
+**only in `seestack/gui/main_window.py`**, the deprioritised desktop GUI, so it is web-invisible and
+correctly rated cosmetic. Nothing else was worth a slot, and §2 says stop rather than manufacture work.
+
+**The thing worth carrying forward: the fixture nearly made the tests meaningless, in the exact shape
+AGENTS.md §8 warns about.** The obvious place to test a baked share mark is
+`tests/webapp/test_stack_render.py`, which already has a `_make_run_with_fits` + `_add_rotated_wcs` pair
+and eight tests using them for `scale=true`. Its synthetic is **64 px at 3.6″/px** — a 230″ field — so the
+full Moon is **~8× the frame width** and the disc self-hides on every single one of those runs. Tests
+written there would have been green, every one of them, while drawing **nothing**. This is not a
+hypothetical: the disc's self-hiding rule is a *feature*, so there is no crash, no warning, and no
+red — the suite would simply have agreed that a picture with no disc on it has no disc on it.
+
+`tests/webapp/test_share_moon_disc.py` therefore builds its own 256 px run with a WCS spanning four
+Moons, and its **first** test is `test_the_fixture_really_can_show_a_disc`, which asserts the fixture's
+measured `moon_fraction` is inside the drawable range and fails the moment that stops being true. **The
+generalisable rule: when a feature's correct behaviour includes "draw nothing", a test that asserts
+absence and a test on a fixture that can only ever produce absence are indistinguishable — so the fixture
+needs its own assertion, before the feature's.**
+
+**And the sensitivity check is cheap enough that there is no excuse for skipping it.** §8 asks for a
+revert-the-fix-and-watch-it-fail pass before claiming a fix is pinned. Applied here to a *feature*: I
+multiplied the drawn diameter by 0.8 in a scratch edit, watched
+`test_the_disc_is_the_moons_true_size_on_the_shared_pixels` go red, and restored. Separately, nudging
+`MOON_DIAMETER_ARCSEC` from 31′ to 24′ turned `test_moon_disc_mirror.py` red while the pixel test stayed
+green — which is *correct* and worth understanding: the pixel test compares the drawn circle against the
+**bar the same endpoint reports**, so it is deliberately blind to the shared constant, and the mirror test
+is the thing that owns it. Two tests, two different failure modes, neither redundant.
+
+**A design note that generalises past this feature.** `moon_fraction` is a **property derived from
+`fraction`**, not a field stored beside it. The repo's own history is full of entries about a second copy
+of a number going stale — that is what `test_fullres_cap_mirror.py`, `test_pace_constants_mirror.py` and
+now `test_moon_disc_mirror.py` all exist to catch across the Python/TypeScript boundary. Inside one
+language there is a better answer than a guard: **don't make the second copy**. `fraction` is already
+re-based at the crop site and at `_bar_on_turned_canvas`; deriving from it meant the disc followed both
+without either path being touched, and it meant the API payload's shape did not change at all, because
+`asdict` serialises fields and not properties. When a new number is a fixed multiple of one the app
+already carries, the cheapest correct move is to compute it.
+
+**Collision.** Another Builder merged v0.431.0–v0.431.1 (PRs #849/#850) inside this run's window. No topic
+overlap — theirs was `readiness.goalDifficultyFactor` and a weighting-hint mirror — but the version line
+and both doc files conflicted, exactly as §11 predicts. Resolved as §11 says: take `main`'s version and
+bump again (0.431.1 → **0.432.0**, never two changes sharing a number), and keep both sides of every
+`IMPROVEMENTS.md`/`SHIPPED.md` conflict as a union. Full suite re-run after the merge, not just after the
+work: **5888 passed / 2 skipped**, `tsc` clean, vitest **3827 passed**, `vite build` OK.
+
+**Verified by looking at it, which no test in this suite can do.** The feature adds *pixels to a picture*,
+so after merging I rendered a synthetic Seestar-shaped frame at the owner's S30 scale (2.1° across 900 px)
+through `draw_sky_marks` and read the PNG back as an image. The disc lands at 221 px = **24.6 %** of the
+frame against a bar that says `30'` and a sentence that says "about 4.1 full Moons wide" — 1/4.1 = 0.244,
+so the circle and the sentence agree — sits clear of both the bar above it and the rose opposite, and
+reads as an outline over the sky rather than a smudge. Recommended for any future visual mark: the pixel
+assertions tell you the geometry is right; only the image tells you it is *legible*.
+
+---
+
 ## 2026-09-12 (Builder, branch `claude/sweet-babbage-e9r1m0`) — the finding method asked of a *number and the sentence beside it*, and a clean dogfood that still handed over the bug
 
 **The run.** Two independently-green commits, merged as PR #849: **v0.431.0**
