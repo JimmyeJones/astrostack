@@ -18,6 +18,73 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `claude/sweet-babbage-8i7zw0`) — a dogfood pass that was CLEAN and still handed over the bug
+
+**The run.** Two tasks, three independently-green commits — **v0.429.0**
+(`render/glyphs.safe_for_default_font`: a target named with an accent, a dash or
+a `×` stops printing hollow boxes on every picture you share) and **v0.429.1**
+(the tenth `HintAnchor` slice). Full entries in [`SHIPPED.md`](SHIPPED.md).
+
+### The baseline was run, not inferred
+
+`source scripts/agent-setup.sh` came up clean first time; the full suite was
+**5,796 passed, 2 skipped in 37:06** before anything was changed, and **5,837
+passed** after. Two runs of 37 minutes each is most of what this run spent
+waiting, and it is the honest price of "each commit independently green" at this
+suite size.
+
+### QA sweep record — `agent-dogfood.sh --mosaic --editor`, then `--empty`: CLEAN, twice
+
+Recorded because a clean sweep is a record and not a bug (the three-file rule).
+Nothing overflowed, no console error on any page at 1440 px or 420 px, the
+editor drove all **21** ops on both the field sample *and* the mosaic with the
+preview re-rendering each time plus undo/redo, and Auto's mosaic trim came out
+at **7.9 %** (well under the ~15 % that would be D1-shaped). The mosaic
+sentences were read together as §7 asks and they now agree with each other: the
+panel map's *"a little behind at the top-right: about 30 s there against 1 min
+on a typical panel"*, the health panel's *"about 23 % of the picture has 3 subs
+on it where most of it has 6, so that part looks about 1.4× grainier"*, and
+*"the panels evened out — where the picture looks grainier that is a difference
+in depth, not a step in the sky"* are three statements of one fact rather than
+the contradiction the 2026-09-09 note found.
+
+Page heights, for the record (phone / desktop): mosaic Target **3,447 / 2,124**,
+mosaic editor **3,270 / 2,202**, field Target 3,078 / 2,057, life list 3,094 /
+—, Dashboard 2,432 / —. First-run (`--empty`): life list **2,779 / 1,224**,
+Dashboard 1,402 / 1,028.
+
+### …and the finding was not in any of that
+
+**The bug this run shipped was found in a screenshot's page title, not in an
+error.** The editor's phone shot of the mosaic sample reads *"Editor — Sample:
+M42 mosaic (2×2)"*, and that `×` is U+00D7 — which Pillow's bundled face has no
+glyph for. So the nameplate, the keepsake and the montage tile of **the one
+target every new install is invited to load from the Dashboard** each baked a
+hollow box into the middle of its own name, and had done since the sample
+shipped. `webapp/sample_data.SAMPLE_MOSAIC_TARGET_NAME` is where the app typed
+it itself.
+
+The transferable part is that the thing that made it visible was **reading a
+rendered page as prose** rather than looking for something broken. Every layer
+that could have caught it was working as designed: the string is correct, the
+test comparing the string passes, the browser renders the `×` perfectly, and
+`tests/test_drawn_text_glyphs.py` — the guard for exactly this — says in its own
+docstring that it pins *our wording, not the user's data*, and a target name is
+the user's data even when the user is us. §7's advice about that block ("could a
+beginner hold all of these at once?") generalises: **ask of a screenshot not
+"did anything error?" but "what would a stranger see here?"**
+
+### An honest note on what a "CLEAN" pass proved this time
+
+It proved there were no console errors and no overflow, which is what it says.
+It did not look at a single pixel of drawn text — nine modules burn captions
+into images and the probe never opens one. Anyone extending
+`scripts/agent-dogfood.sh` could usefully have it render one nameplate and one
+keepsake of the sample target and put them in `$SHOTS`; until then, the pins in
+`tests/test_glyph_safety.py` are the only thing looking at those pixels.
+
+---
+
 ## 2026-09-11 (Builder, branch `claude/sweet-babbage-s75e9l`) — three bugs, none of them in the backlog, all three found by asking "does the app say this twice?"
 
 **The run.** Three tasks, three independently-green commits — **v0.428.0**

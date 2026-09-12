@@ -13,10 +13,12 @@ prettier dash, an arrow, or a typographic prime fails here rather than shipping
 a box into a picture the owner posts.
 
 Scope, stated honestly: this pins **our wording**, not the user's data. A target
-named from a FITS ``OBJECT`` card can contain anything, and no test can stop
-that — the drawing modules are deliberately forgiving about it (a missing glyph
-is still only a cosmetic box). What it *can* guarantee is that no fixed string
-we compose ever contributes one.
+named from a FITS ``OBJECT`` card can contain anything, and no *test* can stop
+that. What closes that half is a transliteration rather than an assertion —
+:func:`seestack.render.glyphs.safe_for_default_font`, which every drawing
+module now runs its text through, pinned in :mod:`tests.test_glyph_safety`.
+The two are complementary and both worth keeping: the net makes a hostile name
+survivable, and this file keeps our own copy from needing it.
 """
 
 from __future__ import annotations
@@ -116,6 +118,38 @@ def _before_after_captions() -> list[str]:
     return out
 
 
+def _life_list_headings() -> list[str]:
+    """The life-list poster's own heading and subtitle, across the three shapes
+    the subtitle takes.
+
+    Added after the completed-list one — *"The whole list — every one of
+    them."* — was found baking a hollow box into the poster a beginner sees the
+    moment they finish the Messier list, precisely because this builder was the
+    one missing from the sweep below.
+    """
+    from seestack.lifelistcard import grid_subtitle, grid_title
+
+    return [
+        grid_title(0, 110), grid_title(42, 110), grid_title(110, 110),
+        grid_subtitle(0, 110), grid_subtitle(42, 110), grid_subtitle(110, 110),
+    ]
+
+
+def _object_label_texts() -> list[str]:
+    """Every name the *bundled* catalogs can put on a share export.
+
+    Measured against the real data rather than a sample: the object labels are
+    drawn from the shipped Messier and popular-deep-sky files, so if a curation
+    pass ever adds a ``Gómez`` or an ``ω``, this is where it surfaces.
+    """
+    from seestack.nightplan import load_catalog
+    from seestack.objectlabels import label_text
+
+    texts = [label_text(o.id, o.name) for o in load_catalog()]
+    assert texts, "the bundled catalog came back empty"
+    return [t for t in texts if t]
+
+
 def _sky_mark_labels() -> list[str]:
     """The scale bar's drawn label across the whole ladder, plus the rose letters.
 
@@ -138,7 +172,8 @@ def _sky_mark_labels() -> list[str]:
 
 @pytest.mark.parametrize("builder", [
     _nameplate_captions, _montage_captions, _recap_captions, _reel_captions,
-    _before_after_captions, _sky_mark_labels,
+    _before_after_captions, _life_list_headings, _object_label_texts,
+    _sky_mark_labels,
 ], ids=lambda f: f.__name__.strip("_"))
 def test_every_drawn_caption_is_drawable(builder):
     produced = builder()

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   Anchor, Badge, Button, Card, Center, Group, Image, Loader, Progress, SegmentedControl,
-  SimpleGrid, Stack, Text, Title, Tooltip,
+  SimpleGrid, Stack, Text, Title,
 } from "@mantine/core";
 import {
   IconChecklist, IconCircleCheck, IconDownload, IconStarFilled,
@@ -9,6 +9,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type LifeListItem, type WishlistItem } from "../api/client";
+import { HintAnchor } from "../components/HintAnchor";
 import { QueryError } from "../components/QueryError";
 import { WishlistStar } from "../components/WishlistStar";
 
@@ -92,7 +93,7 @@ function TileBody({ item, title }: { item: LifeListItem; title: string }) {
 
   // A captured object leads to its own target page — the whole point of lighting
   // it up is that the picture is one click away. An uncaptured one has nowhere
-  // to go yet, so it stays a plain tile with its blurb on hover.
+  // to go yet, so it stays a plain tile carrying its blurb.
   if (item.captured && item.safe_name) {
     return (
       <Link to={`/targets/${item.safe_name}`} style={{ textDecoration: "none", color: "inherit" }}>
@@ -100,8 +101,13 @@ function TileBody({ item, title }: { item: LifeListItem; title: string }) {
       </Link>
     );
   }
+  // `HintAnchor`, not a plain `Tooltip`: an uncaptured tile has no behaviour of
+  // its own, so on a phone a tap did nothing and the blurb — the one sentence
+  // that answers "what even is this, and do I want it?" — was not written
+  // anywhere. That is the whole "still to shoot" half of this page, which is
+  // where a beginner decides what to point at next.
   return item.blurb
-    ? <Tooltip label={item.blurb} multiline w={300} openDelay={300}>{body}</Tooltip>
+    ? <HintAnchor label={item.blurb} multiline w={300} openDelay={300}>{body}</HintAnchor>
     : body;
 }
 
