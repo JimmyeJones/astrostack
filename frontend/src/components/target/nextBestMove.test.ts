@@ -222,6 +222,80 @@ describe("nextBestMove", () => {
       expect(tip?.phrase.toLowerCase()).not.toContain("night or two");
     });
 
+    it("never asks a night or two of a target it calls easy", () => {
+      // Photographed on the bundled M42 sample by the dogfood pass: the
+      // coaching card said "Galaxies and nebulae reward hours, so another clear
+      // night or two on this target", the object card below it said "It usually
+      // looks good in well under an hour", and the readiness card between them
+      // quoted a goal of ~2 h. Those are the *same* words the cluster case above
+      // was fixed for — `target_difficulty`'s `easy` verdict — and every
+      // curated-easy nebula and galaxy prints them, not only clusters.
+      //
+      // Fails before: the phrase asked for "another clear night or two".
+      const easy = { level: "easy", curated: true };
+      const tip = nextBestMove({
+        nFramesUsed: 6, integrationS: 60, objectType: "Nebula", difficulty: easy,
+      });
+      expect(tip?.kind).toBe("integration");
+      expect(tip?.phrase.toLowerCase()).not.toContain("night or two");
+      expect(tip?.phrase.toLowerCase()).not.toContain("galaxies and nebulae");
+      expect(tip?.phrase).toContain("This one comes up quickly for a Seestar");
+      // An easy *galaxy* (M31, goal 3 h) reads the same way — the contradiction
+      // is the badge's, not the bucket's.
+      const m31 = nextBestMove({
+        nFramesUsed: 60, integrationS: 20 * 60, objectType: "Galaxy",
+        difficulty: easy,
+      });
+      expect(m31?.kind).toBe("integration");
+      expect(m31?.phrase.toLowerCase()).not.toContain("night or two");
+    });
+
+    it("still rewards hours on a target its own badge calls challenging", () => {
+      // The other side, and the reason this is keyed on the verdict rather than
+      // flattened: M33's badge says it "rewards a darker sky and several hours",
+      // so "another clear night or two" is the true sentence there and must not
+      // move. Same for a moderate verdict and for no verdict at all.
+      for (const difficulty of [
+        { level: "challenging", curated: true },
+        { level: "moderate", curated: true },
+        // An *un-curated* easy — the type rule's "every cluster is easy" —
+        // reaches this branch through `cluster`, not through the verdict, so a
+        // non-cluster carrying it changes nothing (`goalDifficultyFactor`
+        // ignores it, exactly as the goal does).
+        { level: "easy", curated: false },
+        null,
+        undefined,
+      ]) {
+        const tip = nextBestMove({
+          nFramesUsed: 60, integrationS: 20 * 60, objectType: "Galaxy",
+          difficulty,
+        });
+        expect(tip?.kind).toBe("integration");
+        expect(tip?.phrase.toLowerCase()).toContain("galaxies and nebulae");
+        expect(tip?.phrase.toLowerCase()).toContain("night or two");
+      }
+    });
+
+    it("leaves the cluster sentences byte-for-byte what v0.429.2 shipped", () => {
+      // The widening must not reword the case that was already right.
+      const tip = nextBestMove({
+        nFramesUsed: 20, integrationS: 10 * 60, objectType: "Open Cluster",
+      });
+      expect(tip?.phrase).toBe(
+        "Add more time — 10 min so far. Clusters come up quickly, so even the " +
+          "rest of one clear night on this target would clean up the background " +
+          "nicely.",
+      );
+      const mosaic = nextBestMove({
+        nFramesUsed: 20, integrationS: 40 * 60, objectType: "Open Cluster",
+        fieldFulls: 4,
+      });
+      expect(mosaic?.phrase).toContain(
+        "Clusters come up quickly, so even another pass or two over the same " +
+          "mosaic would clean up the background.",
+      );
+    });
+
     it("stops nagging a cluster that the readiness card calls nearly there", () => {
       // 50 min on an open cluster: goal 1.5 h → ratio 0.56, i.e. "solid" on the
       // readiness card. Fails before: the ladder said "add more time — another
