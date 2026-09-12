@@ -1,7 +1,8 @@
-import { Box, Group, Paper, Stack, Text, ThemeIcon, Tooltip } from "@mantine/core";
+import { Box, Group, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconGridDots } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
+import { HintAnchor } from "../HintAnchor";
 import { panelGrid, panelShade, panelTooltip } from "./mosaicMap";
 
 /**
@@ -79,7 +80,15 @@ export function MosaicMapCard({ safe }: { safe: string }) {
                   && map.thin.row === row && map.thin.col === col;
                 const tip = panelTooltip(panel, map);
                 return (
-                  <Tooltip key={`${row}-${col}`} label={tip} withArrow openDelay={200}>
+                  // A `HintAnchor`, not a plain `Tooltip`: a panel cell is a
+                  // coloured `Box`, not a control, and its whole meaning — how
+                  // deep this corner is — lives in the tooltip. Mantine's
+                  // `Tooltip` opens on `mouseenter` and nothing else, so on the
+                  // phone the owner reads this app on the map was a grid of
+                  // squares with no way to ask about any of them. The owner is a
+                  // heavy mosaic user; this is the card that answers "which
+                  // corner is behind?".
+                  <HintAnchor key={`${row}-${col}`} label={tip} withArrow>
                     <Box
                       aria-label={tip}
                       style={{
@@ -101,7 +110,7 @@ export function MosaicMapCard({ safe }: { safe: string }) {
                     >
                       {isThin ? "thin" : ""}
                     </Box>
-                  </Tooltip>
+                  </HintAnchor>
                 );
               }),
             )}

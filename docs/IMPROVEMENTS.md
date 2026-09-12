@@ -1603,9 +1603,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   of the six (`Zoom in`, `Zoom out`, `Reset`, and the three downloads) carries a tooltip that is word-for-word
   its own `aria-label`, so there is no sentence being withheld — only an icon whose name a sighted phone user
   cannot read, which a `HintIcon` beside each would answer by putting six more elements in a toolbar, against
-  the standing IA priority. And **`MosaicMapCard` does not exist** — the name has been on this list since the
+  the standing IA priority. And ~~**`MosaicMapCard` does not exist** — the name has been on this list since the
   seventh slice and there is no such component (the mosaic surfaces are `MosaicThinHoldNote` and the panel map,
-  neither of which has a `Tooltip`).
+  neither of which has a `Tooltip`).~~ — **THIS HALF IS WRONG; corrected the same day by the eleventh slice
+  below.** `frontend/src/components/target/MosaicMapCard.tsx` has existed since 2026-09-09 (PR #804), it *is*
+  the panel map, and every one of its cells was wrapped in a plain `Tooltip`. Don't re-derive a component's
+  absence from recall — `git log --diff-filter=A -- <path>` settles it in a second.
   **No page got taller, measured rather than argued** (`agent-dogfood.sh --empty`, before and after):
   `/life-list` is **2,779 px on a phone and 1,224 px on desktop, identical to the digit** — `HintAnchor` clones
   its child instead of wrapping it, so there is no new element to take up room. Hover is byte-for-byte what it
@@ -1614,6 +1617,38 @@ problems. Dogfood it every big-picture run and fix root causes.
   **Still open:** the interactive half of the class generally — a `Tooltip` on a control, which stays a
   judgement per site.
 
+  **▶ ELEVENTH SLICE SHIPPED — v0.434.0, the app's two *maps*; and the tenth slice's closing claim was wrong**
+  (Builder 2026-09-12, branch `agent/builder-2026-09-12`). Every slice so far has been about a **chip** — one
+  anchor carrying one sentence. The two surfaces left are **grids**, where *every cell* carries its own number
+  and the picture is useless without them, and neither was ever a one-line swap; that is why ten sweeps went
+  past them.
+  **`MosaicMapCard` does exist, and did when the tenth slice said it did not** —
+  `frontend/src/components/target/MosaicMapCard.tsx`, added 2026-09-09 (PR #804), i.e. *before* the eighth
+  slice that was meant to drain the list it had been sitting on since the seventh. So the card the owner —
+  **a heavy mosaic user** — reaches to ask "which corner is behind?" answered on hover and nowhere else, and
+  the record said it had been checked. It is a bounded grid (a Seestar mosaic is a handful of panels), so it
+  takes `HintAnchor` exactly as the chips did: one line, `panelTooltip`'s sentence unchanged.
+  **The Dashboard's imaging calendar was on no list at all**, and it is the harder half: up to ~370 cells, of
+  which every imaged night carried its date, hours and targets on an 11 px square, on hover only.
+  `HintAnchor` is the **wrong** tool there — it makes its child a tab stop, and one per night would put a
+  hundred of them on the Dashboard ahead of the rest of the page. So the grid gets the pattern that scales: a
+  **roving `tabIndex`** (exactly one night in the tab order — the picked one, else the most recent), arrow
+  keys walking the nights through the new pure `activityCalendar.nightDates` / `stepNight`, and the answer in
+  a **read-out that shares the legend's own row** rather than a tooltip over a square a finger cannot hit.
+  Stops at either end rather than wrapping, so a held key gives the page back its scroll. The `Tooltip` is
+  kept untouched for a mouse; the container's `role="grid"` — which it never earned, having no rows or cells —
+  becomes `role="group"`.
+  **No page gets taller:** the read-out occupies the slot "Less … More" already sat in, and before a night is
+  picked it holds the prompt that makes the grid look answerable at all (`CALENDAR_PROMPT`).
+  Frontend-only; no endpoint, config, schema, on-disk, API-shape or default change.
+  **Tests +9** — 6 pure (`nightDates` chronological and imaged-only; `stepNight` both directions, both ends,
+  the no-selection start, and an unknown date) and 3 on the cards, **the two behavioural ones verified red** by
+  restoring the plain `Tooltip` in a scratch copy.
+  **The class is now clean, enumerated rather than claimed:** a scan of every non-test `.tsx` for a `Tooltip`
+  whose first child is a non-control leaves five sites, each checked — the calendar cell (its own tap handler,
+  above), `Gallery`/`BestPictures`' `<Image>` and `History`'s link-`Text` (the tap opens the thing the tooltip
+  describes, so it already does the right thing), the frames-table column headings (the tap *sorts*;
+  `FrameColumnGuide` has held those sentences since v0.270.0), and the written-down `Rejected — …` exemption.
 
 - **IMPROVEMENT IDEA (Scout 2026-07-23) — surface calibration-master mismatches (and a *never-applied* wrong-shaped
   bias) at *bind time* in the calibration UI, not only buried in the stack log.** *(Friendliness + trust; size S–M;
@@ -2925,6 +2960,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.434.0** — 🟡 FRIENDLINESS (PRIORITY 3), the **eleventh slice** of "a Tooltip is invisible on the device the owner actually reads this app on", and it corrects the tenth's own closing claim: **the app's two maps — the mosaic panel grid and the imaging calendar — answer a tap.** Every earlier slice converted a *chip*; these two are *grids*, where every cell carries its own number and the picture says nothing without them. `MosaicMapCard` **does exist** and did on the day the tenth slice recorded that it did not (`frontend/src/components/target/MosaicMapCard.tsx`, PR #804, 2026-09-09) — so the card the owner, a heavy mosaic user, reaches to ask "which corner is behind?" answered on hover only, while the record said it had been checked; it is a bounded grid, so it takes `HintAnchor` as the chips did. The Dashboard's **imaging calendar** was on no list at all and is the harder half: ~370 cells, each imaged night's date/hours/targets on an 11 px square, hover-only. `HintAnchor` is the wrong tool there (a tab stop per night would put a hundred on the Dashboard), so the grid gets a **roving `tabIndex`** — exactly one night reachable, arrow keys walking the rest through new pure `activityCalendar.nightDates`/`stepNight`, stopping at either end rather than wrapping — and the answer in a **read-out sharing the legend's own row**, so no page gets taller; `role="grid"`, which it never earned, becomes `role="group"`. Hover is byte-for-byte what it was. Frontend-only: no endpoint, config, schema, on-disk, API-shape or default change. Tests +9, the two behavioural ones verified red by restoring the plain `Tooltip`. The class is now clean by enumeration: a scan of every non-test `.tsx` leaves five non-control anchors, each checked and each correct.
 - **v0.433.0** — 🌟 NEW BEGINNER FEATURE (PRIORITY 2–3, the "plan" pillar), Builder-found by dogfooding the **first-run** app (`agent-dogfood.sh --empty`) rather than from the backlog: **"Up tonight" on the life list — which of the 110 can I actually shoot this evening?** The page's own headline says *"pick one and point the scope at it tonight"* and then draws M1…M12, an order chosen in the 1770s: **eight of those twelve are summer objects** (M4/M6/M7 in Sco, M8 in Sgr, M9/M10/M12 in Oph, M11 in Sct), so a northern owner opening it on a January evening is shown a screenful of sky they cannot touch. Measured on that night from London, **95 of the 157 bundled objects are shootable and 62 are not**, and nothing on the screen said which. New read-only `GET /api/life-list/tonight` asks `nightplan.well_placed_tonight` — the *same* dark-window/altitude/Moon blend behind the Tonight page, the wishlist nudge and the nearly-there card, so a life-list tile and a Tonight row can never disagree about one object on one night — and returns **ids only** (`{ids, location_source, min_altitude_deg}`), best-first, because the page already holds every name, blurb and thumbnail and a second copy could only drift. Its own route because it is an ephemeris pass (**0.31 s warm over the whole catalog, measured**) where `GET /api/life-list` is a registry walk. **One more chip in the `SegmentedControl` that was already there** — not a card, not a banner — and absent unless the sky can answer (no location, polar summer, nothing clearing the floor, or a backend without the route, whose failure is swallowed to `null` rather than becoming the page's error card), so a fresh install sees exactly today's three. In that one view the pure exported `applyFilter` replaces catalog order with the planner's ranking, and *only* there; `effectiveFilter` falls back to "All" if the answer goes away while it is selected; and the empty-half copy gained a season case, because *"You've got every one of these"* would have been a lie. Additive and read-only: no config, schema, on-disk, default or existing-response change, no project DB read and nothing written (pinned). Tests +9 Python / +10 frontend; **three Python tests verified red by mutation** (hard-coding the floor, sorting the ids) and the ordering claim red on both sides by dropping the sort. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.432.0** — **the full Moon, drawn to scale on your picture** (PRIORITY 3, beginner feature): the scale bar's own sentence (*"about 2.5 full Moons wide"*) as a faint disc at the Moon's true angular size, on screen (`AnnotatedImage`, bottom-right) and baked into the shared JPEG (`skymarks._moon_disc_box`, under the bar). `ScaleBar.moon_fraction` is **derived from** the bar's `fraction`, so it follows the auto-edit crop and a North-up save's re-basing for free and needed no new response field. Self-hides past `MOON_DISC_MAX_SHORT_FRACTION` (half the short side) rather than clamping — the sentence already answers a field that tight. Off by default; nested under History's "Scale & compass" and offered only where it fits, so the Save/share menu gains no item and the Target hero is unchanged. `tests/test_moon_disc_mirror.py` pins screen against file. Tests +36. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.431.1** — infra/trust: **the ninth hand-mirrored engine constant gets the drift guard the other eight have.** `weightingHint.ts`'s `WEIGHTING_MIN_MAX_MIN_FRAMES = 3` is the engine's `weights_applied` gate, quoted verbatim in the caution the Stack form and the Settings defaults both show, and nothing pinned it — a stale copy would tell a beginner their quality weighting is ignored on a stack where it is honoured, or stay silent on one where it is not. `tests/test_weighting_hint_mirror.py` pins the literal to `stacker.MIN_MAX_MIN_FRAMES` **and** pins that constant to `combine_method`'s own behaviour across the boundary (drizzle included), rather than to another copy of itself; both halves verified red by scratch edits. `combine_method` also stops spelling its gate `n >= 3` twenty lines above the constant that names it — the sigma-clip floor beside it deliberately stays a literal, since `DRIZZLE_REJECT_MIN_FRAMES` is a different claim that shares the number. Tests +2; no behaviour change. Full entry in [`SHIPPED.md`](SHIPPED.md).
