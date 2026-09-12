@@ -94,6 +94,25 @@ describe("PlanWeekCard", () => {
     expect(screen.queryByText(/M 31 — Saturday/)).not.toBeInTheDocument();
   });
 
+  it("says what is left of a night in progress, not how long the night is",
+    async () => {
+      // Tonight's row is clipped to "now" by the planner, so its number is the
+      // darkness *left* — while the header on this same page quotes the whole
+      // night. One word for both had the page contradict itself.
+      vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+        nights: [
+          night("2026-09-02", { dark_minutes: 354, dark_in_progress: true }),
+          night("2026-09-03"),
+        ],
+      }));
+      renderCard();
+
+      await waitFor(() =>
+        expect(screen.getByTestId("plan-week")).toBeInTheDocument());
+      expect(screen.getByText("5.9 h left")).toBeInTheDocument();
+      expect(screen.getByText("8.0 h dark")).toBeInTheDocument();
+    });
+
   it("explains an empty week instead of showing a blank table", async () => {
     vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
       location_source: "none", observer: null,

@@ -1494,6 +1494,46 @@ def test_upcoming_dark_windows_clips_a_night_already_under_way():
     assert clipped.duration_minutes < full.duration_minutes
 
 
+def test_a_clipped_window_says_so_rather_than_passing_as_a_whole_night():
+    """The clip is right and the *word* for it was wrong: a window cut down to
+    "now" holds the darkness **left**, not the length of the night, and the
+    Tonight page prints the whole night's figure ("8.3 h of darkness") a few
+    inches above the week table's. Un-flagged, one page called one night both
+    8.3 h and 5.9 h long."""
+    # Before dusk — note JAN_EVENING (20:00 UTC) is already *inside* a January
+    # London night, so it is not the "nothing has gone yet" case.
+    before_dusk = datetime(2026, 1, 15, 15, 0, tzinfo=timezone.utc)
+    whole = np_plan.upcoming_dark_windows(LONDON, before_dusk, 1)[0][1]
+    assert whole.in_progress is False       # asked before dusk: nothing is gone
+    late = datetime(2026, 1, 15, 23, 30, tzinfo=timezone.utc)
+    clipped = np_plan.upcoming_dark_windows(LONDON, late, 1)[0][1]
+    assert clipped.in_progress is True
+    assert clipped.duration_minutes < whole.duration_minutes
+    # …and only the ongoing one. Every whole night after it is a whole night.
+    rest = np_plan.upcoming_dark_windows(LONDON, late, 3)[1:]
+    assert rest and all(w.in_progress is False for _lbl, w in rest)
+
+
+def test_plan_week_marks_the_night_already_under_way():
+    """The flag has to reach the card that prints the number, not stop at the
+    window: the week table's first row is the one that disagrees with the
+    header."""
+    orion = _lib("m42", "M 42", 83.8, -5.4, hours=1.0)
+    late = datetime(2026, 1, 15, 23, 30, tzinfo=timezone.utc)
+    mid_night = np_plan.plan_week(LONDON, [orion], start_utc=late, nights=3)
+    assert mid_night.nights[0].dark_in_progress is True
+    assert all(n.dark_in_progress is False for n in mid_night.nights[1:])
+    # Asked before the darkness starts, nothing is in progress — the wording the
+    # card has always used stays right for every row.
+    before_dusk = datetime(2026, 1, 15, 15, 0, tzinfo=timezone.utc)
+    evening = np_plan.plan_week(LONDON, [orion], start_utc=before_dusk, nights=3)
+    assert all(n.dark_in_progress is False for n in evening.nights)
+    # The flag is about the *clock*, not about the plan: the night is still the
+    # 15th's and still carries its pick.
+    assert mid_night.nights[0].date == "2026-01-15"
+    assert mid_night.nights[0].dark_minutes < evening.nights[0].dark_minutes
+
+
 def test_upcoming_dark_windows_pre_dawn_still_offers_tonight():
     """In the small hours the user is *inside* the night that began yesterday
     evening, so that ongoing window is offered rather than skipped."""
