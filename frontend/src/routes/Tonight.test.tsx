@@ -91,6 +91,41 @@ describe("TonightView", () => {
     expect(screen.queryByText(/SITELAT|SITELONG/)).toBeNull();
   });
 
+  it("tells a library whose subs carry no location that more subs won't help", async () => {
+    // Reproduced in a browser on the bundled sample (2026-09-12): 27 *solved*
+    // subs on screen and the page still said "once you've solved some subs it'll
+    // just work". The backend now says which case it is; this pins that the page
+    // uses it, and still keeps the words header-free.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      location_source: "none", location_reason: "no-site-header",
+      observer: null, dark_window: null, moon_illumination: null,
+    }));
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight([]));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Your subs don't say where you were")).toBeInTheDocument());
+    expect(screen.queryByText(/once you've solved some subs it'll just work/)).toBeNull();
+    expect(screen.getByText(/won't help/)).toBeInTheDocument();
+    expect(screen.queryByText(/SITELAT|SITELONG/)).toBeNull();
+    // Settings is still one click away — it is the fix in this case.
+    expect(screen.getByRole("link", { name: /Settings/i }))
+      .toHaveAttribute("href", "/settings/observing-site");
+  });
+
+  it("points at the storage, not at Settings, when the frames can't be read", async () => {
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      location_source: "none", location_reason: "unreadable",
+      observer: null, dark_window: null, moon_illumination: null,
+    }));
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(bestTonight([]));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText("Couldn't read your frames")).toBeInTheDocument());
+    // No Settings link in the alert: a typed-in location would light the planner
+    // up over a library that is still unreachable.
+    expect(screen.queryByRole("link", { name: /Observing site/i })).toBeNull();
+  });
+
   it("still ranks your own targets by depth when no location is known", async () => {
     // The Dashboard's "Worth more time" card answers this case and links here
     // with "See the whole night" — so this page must not be the emptier of the two.

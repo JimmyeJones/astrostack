@@ -140,17 +140,27 @@ def test_a_broken_project_doesnt_500_the_dashboard(client, built_library, data_r
     calls: list[Path] = []
 
     def flaky_open(path):  # noqa: ANN001 — mirrors the classmethod's signature
+        # Break one *named* project rather than "whichever open happens to be
+        # first". `Project.open` is patched process-wide and the app under test
+        # runs a job worker and a watcher thread, so a call-ordinal rule let a
+        # background open consume the failure — both targets were then readable,
+        # both outages were reported, and the test failed with `2 == 1`. Seen
+        # once on CI (2026-09-12) and never locally, which is what a timing race
+        # looks like. Matching the path removes it instead of hoping the
+        # ordering holds, and says more than the ordinal did: *this* project is
+        # the broken one.
         calls.append(Path(path))
-        if len(calls) == 1:
+        if Path(path).name == "M_42":
             raise OSError("database is locked")
         return real_open(path)
 
     monkeypatch.setattr(project_mod.Project, "open", staticmethod(flaky_open))
     resp = client.get("/api/library/missing-files")
     assert resp.status_code == 200
-    # The first target opened raised and is simply absent; the second is still
-    # read, and its outage still reported.
-    assert len(calls) >= 2
+    # The broken target raised and is simply absent; the other is still read,
+    # and its outage still reported.
+    assert any(p.name == "M_42" for p in calls), "the broken project was never opened"
+    assert any(p.name == "NGC_7000" for p in calls), "the healthy project was skipped"
     body = resp.json()
     assert body["n_missing"] == 1
     assert body["n_targets_missing"] == 1

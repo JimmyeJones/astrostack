@@ -19,6 +19,7 @@ import { formatIntegration } from "../format";
 import { withMosaicEffort } from "../mosaicEffort";
 import { readinessRowBadge } from "../readiness";
 import { settingsLink } from "../settingsSections";
+import { siteUnknownCopy } from "../siteUnknown";
 import {
   difficultyRowBadge, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge, minAltOptions,
   recentreNudgeRowBadge,
@@ -312,16 +313,23 @@ export function TonightView() {
   );
 
   if (data.location_source === "none") {
+    // Worded from *why* the site is unknown, not just that it is: telling
+    // someone whose subs carry no SITELAT to "solve some subs and it'll just
+    // work" is a promise their own Library disproves. `siteUnknownCopy` falls
+    // back to exactly today's sentence for an older backend.
+    const copy = siteUnknownCopy(data.location_reason);
     return (
       <Stack gap="lg">
         {header}
-        <Alert color="blue" icon={<IconTelescope size={18} />} title="Set your observing location">
+        <Alert color="blue" icon={<IconTelescope size={18} />} title={copy.title}>
           <Text size="sm">
-            The planner needs to know where you're observing from. It reads your
-            location automatically from a plate-solved Seestar frame — so once
-            you've solved some subs it'll just work.
-            You can also set it manually under{" "}
-            <Anchor component={Link} to={settingsLink("observing-site")}>Settings → Observing site</Anchor>.
+            {copy.body}
+            {copy.settingsLead ? (
+              <>
+                {" "}{copy.settingsLead}{" "}
+                <Anchor component={Link} to={settingsLink("observing-site")}>Settings → Observing site</Anchor>.
+              </>
+            ) : null}
           </Text>
         </Alert>
         <WorthMoreTimeList />
