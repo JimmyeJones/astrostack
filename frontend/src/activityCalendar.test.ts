@@ -147,9 +147,12 @@ describe("stepNight", () => {
     expect(stepNight(dates, "2026-07-02", -1)).toBeNull();
   });
 
-  it("starts at the most recent night when nothing is picked yet", () => {
+  it("lands on the most recent night in EITHER direction with nothing to step from", () => {
+    // Not "that direction's far end": the card's focus starts on the most recent
+    // night, so answering one ArrowLeft with the oldest would jump a year of
+    // grid rather than move a night.
     expect(stepNight(dates, null, 1)).toBe("2026-07-20");
-    expect(stepNight(dates, null, -1)).toBe("2026-07-02");
+    expect(stepNight(dates, null, -1)).toBe("2026-07-20");
   });
 
   it("declines rather than guessing on an empty or unknown date", () => {

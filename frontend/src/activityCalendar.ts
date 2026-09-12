@@ -143,15 +143,19 @@ export function nightDates(weeks: DayCell[][]): string[] {
 /**
  * The date the arrow keys move to from `from`, or `null` at either end.
  *
- * `step` is +1 for "later" (ArrowRight/ArrowDown) and −1 for "earlier". With no
- * night selected yet, a first press lands on the most recent night — the one a
- * beginner is most likely to be asking about — rather than a year ago.
+ * `step` is +1 for "later" (ArrowRight/ArrowDown) and −1 for "earlier".
+ *
+ * With nothing to step from, **either** direction lands on the most recent
+ * night rather than on that direction's far end. The card always passes the
+ * cell that actually holds the tab stop, so this branch is the defensive one —
+ * but "earliest" would be wrong even there: the key was pressed on a cell, and
+ * answering it by jumping a year across the grid is not a step.
  */
 export function stepNight(
   dates: string[], from: string | null, step: 1 | -1,
 ): string | null {
   if (dates.length === 0) return null;
-  if (from === null) return step === 1 ? dates[dates.length - 1] : dates[0];
+  if (from === null) return dates[dates.length - 1];
   const at = dates.indexOf(from);
   if (at < 0) return null;
   const next = at + step;

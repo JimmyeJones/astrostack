@@ -113,6 +113,34 @@ describe("MosaicMapCard", () => {
         .toBeGreaterThan(0));
   });
 
+  it("puts ONE panel in the tab order, and the arrow keys walk the rest", async () => {
+    // `HintAnchor` gives its child `tabIndex=0`, which is right for a chip and
+    // wrong for a grid: this owner shoots wide mosaics and the engine allows 24
+    // panels a side, so one stop per cell would put dozens on the busiest page
+    // in the app. Fail-before: every cell was a tab stop.
+    vi.spyOn(client.api, "mosaicMap").mockResolvedValue(map());
+    renderCard();
+    await screen.findByText("Your mosaic, panel by panel");
+
+    const cells = screen.getAllByLabelText("20 min over 120 subs");
+    expect(cells.length).toBe(4);
+    expect(cells.map((c) => c.getAttribute("tabindex")))
+      .toEqual(["0", "-1", "-1", "-1"]);
+
+    fireEvent.keyDown(cells[0], { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(screen.getAllByLabelText("20 min over 120 subs")
+        .map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "0", "-1", "-1"]));
+
+    // …and it stops at the last panel rather than wrapping back to the first.
+    for (const key of ["ArrowRight", "ArrowRight", "ArrowRight"]) {
+      fireEvent.keyDown(screen.getAllByLabelText("20 min over 120 subs")[0], { key });
+    }
+    await waitFor(() =>
+      expect(screen.getAllByLabelText("20 min over 120 subs")
+        .map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "-1", "-1", "0"]));
+  });
+
   it("renders nothing at all when the target isn't a mosaic", async () => {
     vi.spyOn(client.api, "mosaicMap").mockResolvedValue(null);
     renderCard();

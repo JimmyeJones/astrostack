@@ -147,6 +147,42 @@ describe("NightsCard", () => {
     expect(screen.getByText("sharpest")).toBeInTheDocument();
   });
 
+  it("never lets a verdict be squeezed into 'SH…', and keeps a night on one line", async () => {
+    // **jsdom cannot show this bug** — it does no layout, so the measurement is a
+    // browser one and is recorded rather than asserted here: at 420 px on the
+    // mosaic sample the verdict `sharp` rendered **29 px wide against the 36 px
+    // its text needs**, ellipsised *inside* the badge, so scrolling the table
+    // never revealed it; and the first column wrapped "16 Nov 2024" over three
+    // lines, standing the rows at **70 px** against 31 px on a desktop. After:
+    // nothing clipped, rows 31 px, the page 3,447 → 3,396 px, the table scrolling
+    // at 497 px inside its 420 px container with the body still not scrolling
+    // sideways. What this test *can* do — and what stops a silent revert — is
+    // pin the two production values on every badge the table draws.
+    vi.spyOn(client.api, "targetNights").mockResolvedValue([
+      night({
+        start_utc: "2026-07-08T22:00:00+00:00", verdict: "soft", median_fwhm_px: 4.0,
+        typical_fwhm_px: 2.4, is_best: false,
+        moon: {
+          level: "poor", illumination: 0.96, moon_altitude_deg: 40,
+          separation_deg: 21, text: "A bright 96%-lit Moon was close by.",
+        },
+      }),
+      night({ start_utc: "2026-07-01T22:00:00+00:00", verdict: "sharp", is_best: true }),
+    ]);
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Nights")).toBeInTheDocument());
+
+    // Every badge in the table asks for its own word — the verdicts, the
+    // "sharpest" marker and the "bright Moon" one alike.
+    for (const word of ["soft", "sharp", "sharpest", "bright Moon"]) {
+      expect(screen.getByText(word).closest(".mantine-Badge-root"))
+        .toHaveStyle({ minWidth: "max-content" });
+    }
+    // …and the night's own cell does not wrap its date onto three lines.
+    const cell = screen.getByText("8 Jul 2026").closest("td");
+    expect(cell).toHaveStyle({ whiteSpace: "nowrap" });
+  });
+
   it("labels the badge with what it was measured against", async () => {
     vi.spyOn(client.api, "targetNights").mockResolvedValue([
       night({
