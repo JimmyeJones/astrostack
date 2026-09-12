@@ -1161,6 +1161,46 @@ def test_best_tonight_never_says_you_have_zero_minutes():
     assert "0 min" not in fresh.picks[0].reason
 
 
+def test_the_worth_more_time_list_is_ordered_by_the_number_it_prints():
+    """Both cards that render these picks head them "ranked by how much another
+    hour on each would improve it", and every row prints that percentage — so
+    the percentages must descend down the list.
+
+    They did not. ``_depth_component`` saturates at ``_WORTHWHILE_NOISE_GAIN``
+    (15 %), which every target under ~2.6 h clears, so on the no-location path
+    every pick scored exactly 100.0 and the ``-hours_captured`` tiebreak became
+    the entire ranking — deepest first, i.e. the target that gains *least* on
+    top. Reproduced on the bundled sample library, which listed "another hour
+    would cut its noise about 77 %" above "about 87 %".
+    """
+    # Three targets, all under the saturation point, deepest first in the input
+    # so a stable sort cannot accidentally produce the right answer.
+    targets = [
+        _lib("deep", "Deep", 83.8, -5.4, hours=2.0),
+        _lib("mid", "Mid", 10.7, 41.3, hours=0.5),
+        _lib("shallow", "Shallow", 202.5, 47.2, hours=1 / 60.0),
+    ]
+    picks = np_plan.rank_targets_now(None, JAN_EVENING, targets, limit=10).picks
+    assert [p.safe for p in picks] == ["shallow", "mid", "deep"]
+    # The tiebreak is the whole ranking here, so say so explicitly: they really
+    # do all score the same, and the order is carried by the gain alone.
+    assert len({p.score for p in picks}) == 1, [p.score for p in picks]
+    gains = [p.noise_gain for p in picks]
+    assert gains == sorted(gains, reverse=True), gains
+
+    # …and the ordering is a property, not three hand-picked hours: over a
+    # spread that crosses the saturation point in both directions, the
+    # percentage the card prints never goes back up as the reader goes down.
+    spread = [
+        _lib(f"t{i}", f"T{i}", 83.8, -5.4, hours=h)
+        for i, h in enumerate([0.0, 0.01, 0.25, 1.0, 2.6, 4.0, 12.0, 40.0])
+    ]
+    gains = [p.noise_gain
+             for p in np_plan.rank_targets_now(
+                 None, JAN_EVENING, spread, limit=10).picks]
+    assert gains == sorted(gains, reverse=True), gains
+
+
 def test_a_depth_only_pick_does_not_repeat_the_name_it_is_rendered_under():
     """Both cards that show these picks — the Dashboard's "Worth more time" and
     the Tonight page's list — print the target's name and then this sentence

@@ -2200,7 +2200,21 @@ def _depth_only_picks(targets: list[LibraryTarget], limit: int) -> list[TonightP
             # printed a long catalogue name twice one line apart.
             reason=_depth_sentence(hours, None, gain),
         ))
-    picks.sort(key=lambda p: (-p.score, -p.hours_captured))
+    # Break the tie on the *unsaturated* gain, so the order agrees with the
+    # sentence both cards print above it ("ranked by how much another hour on
+    # each would improve it") and with the percentage each row prints.
+    #
+    # This is not a nicety: ``_depth_component`` saturates at
+    # ``_WORTHWHILE_NOISE_GAIN`` (15 %), which every target under ~2.6 h of
+    # integration clears — i.e. most of a beginner's library — so on this path
+    # *every* pick scores exactly 100.0 and the tiebreak is the whole ranking.
+    # Sorting it by ``-hours_captured`` put the deepest target on top, which is
+    # the target that gains least: the sample library listed "another hour would
+    # cut its noise about 77 %" above "about 87 %". The saturation exists to stop
+    # an empty target dominating a *well-placed* one on the ``sky x depth`` path
+    # above, where the sky term still separates them; here there is no sky term,
+    # so the honest order is the one the number names.
+    picks.sort(key=lambda p: (-p.score, -p.noise_gain, p.hours_captured, p.safe))
     return picks[:max(0, int(limit))]
 
 
