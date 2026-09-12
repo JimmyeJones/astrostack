@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
   nextBestMove,
+  integrationBars,
   LOCATE_MIN_UNSOLVED,
   SHORT_INTEGRATION_S,
   DEEP_INTEGRATION_S,
+  type NextBestMoveKind,
 } from "./nextBestMove";
+import { integrationReadiness, type ReadinessLevel } from "../../readiness";
 
 const HOUR = 60 * 60;
 
@@ -186,6 +189,100 @@ describe("nextBestMove", () => {
           expect(nextBestMove({ ...input, fieldFulls: ff })).toEqual(plain);
         }
       }
+    });
+  });
+
+  // The two time rungs are the readiness card's own ladder boundaries (0.25 and
+  // 0.75 of the goal) read at its default 4 h goal — which is why they were
+  // right for a nebula and wrong for everything else. These pin the two
+  // surfaces to one answer, so neither can drift away from the other again.
+  describe("how much is enough is asked of the object, not of a nebula", () => {
+    it("keeps today's 1 h / 3 h bars for a target with no catalogue match", () => {
+      expect(integrationBars(undefined)).toEqual({
+        shortS: SHORT_INTEGRATION_S, deepS: DEEP_INTEGRATION_S,
+      });
+      for (const t of [null, "", "Nebula", "Emission Nebula", "Supernova Remnant"]) {
+        expect(integrationBars(t)).toEqual({
+          shortS: SHORT_INTEGRATION_S, deepS: DEEP_INTEGRATION_S,
+        });
+      }
+    });
+
+    it("never tells a star cluster it is a galaxy or a nebula", () => {
+      // Fails before: the phrase asserted "Galaxies and nebulae reward hours"
+      // about every object, including the one bucket the app's own
+      // target_difficulty calls uniformly easy.
+      const tip = nextBestMove({
+        nFramesUsed: 20, integrationS: 10 * 60, objectType: "Open Cluster",
+      });
+      expect(tip?.kind).toBe("integration");
+      expect(tip?.phrase.toLowerCase()).not.toContain("galaxies and nebulae");
+      expect(tip?.phrase.toLowerCase()).toContain("clusters come up quickly");
+      // …and it asks for the rest of a night, not "another clear night or two".
+      expect(tip?.phrase.toLowerCase()).not.toContain("night or two");
+    });
+
+    it("stops nagging a cluster that the readiness card calls nearly there", () => {
+      // 50 min on an open cluster: goal 1.5 h → ratio 0.56, i.e. "solid" on the
+      // readiness card. Fails before: the ladder said "add more time — another
+      // clear night or two", two inches under a badge reading "usually looks
+      // good in well under an hour".
+      const tip = nextBestMove({
+        nFramesUsed: 60, integrationS: 50 * 60, objectType: "Open Cluster",
+      });
+      expect(tip?.kind).toBe("good");
+    });
+
+    it("stops calling a galaxy at 1.2 h a finished job", () => {
+      // Goal 6 h → ratio 0.2, "a good start" on the readiness card. Fails
+      // before: the ladder's universal 1 h bar called it "a solid result —
+      // plenty of subs went in".
+      const tip = nextBestMove({
+        nFramesUsed: 150, integrationS: 1.2 * HOUR, objectType: "Galaxy",
+      });
+      expect(tip?.kind).toBe("integration");
+      expect(tip?.phrase.toLowerCase()).toContain("galaxies and nebulae");
+    });
+
+    it("agrees with the readiness card on every bucket, at every depth", () => {
+      // The property the three cases above are instances of, stated once: the
+      // rung the coaching line picks and the verdict the card prints are the
+      // same judgement, so a beginner can hold both at the same time.
+      const expected: Record<ReadinessLevel, NextBestMoveKind | null> = {
+        starting: "integration",  // under 0.25 of the goal
+        solid: "good",            // 0.25 – 0.75
+        close: null,              // 0.75 – 1: deep enough to stop nudging
+        plenty: null,
+      };
+      for (const type of ["Galaxy", "Emission Nebula", "Open Cluster", "Quasar", null]) {
+        for (const hours of [0.1, 0.3, 0.6, 1.2, 2, 3.5, 5, 8]) {
+          const seconds = hours * HOUR;
+          const card = integrationReadiness(seconds, type);
+          const tip = nextBestMove({
+            // A healthy frame count and no other lever, so the time rungs are
+            // the only ones that can fire.
+            nFramesUsed: 200, integrationS: seconds, objectType: type,
+          });
+          expect(
+            [type, hours, tip?.kind ?? null],
+          ).toEqual([type, hours, expected[card!.level]]);
+        }
+      }
+    });
+
+    it("asks the same question of one panel of a mosaic", () => {
+      // The card scales the goal by field-fulls; this ladder divides the light
+      // by them instead. Same ratio, so the agreement above must survive it.
+      const seconds = 4 * HOUR;
+      const fieldFulls = 4;
+      const card = integrationReadiness(seconds, "Galaxy", null, fieldFulls);
+      expect(card?.level).toBe("starting");
+      expect(
+        nextBestMove({
+          nFramesUsed: 400, integrationS: seconds, fieldFulls,
+          objectType: "Galaxy",
+        })?.kind,
+      ).toBe("integration");
     });
   });
 });
