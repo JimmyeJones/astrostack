@@ -536,6 +536,13 @@ export interface DifficultyHint {
   // One-word badge text, e.g. "Easy".
   label: string;
   text: string;
+  // True when the verdict is the hand-curated per-object one rather than the
+  // "star clusters and star fields are uniformly easy" type rule — i.e. when it
+  // knows something about *this* object that its type does not. The badge reads
+  // the same either way; the integration goal only moves on the curated kind
+  // (see `goalDifficultyFactor` in `readiness.ts`). Optional: an older backend
+  // omits it, which reads as the type rule and leaves the goal untouched.
+  curated?: boolean;
 }
 
 export interface ObjectInfo {
@@ -1030,6 +1037,12 @@ export interface TargetProgress {
   // no stacked picture yet, or on an older backend — the card then falls back
   // to the un-scaled goal (today's behaviour).
   field_fulls?: number | null;
+  // This target's vetted "how hard is it for a Seestar?" verdict, when the
+  // bundled catalog has one. An input to the goal, not decoration: the per-type
+  // goal cannot tell a bright compact galaxy from a large faint one, and the
+  // curated half of this verdict is what can. null/absent for an un-vetted
+  // object and on an older backend — the goal is then the plain per-type one.
+  difficulty?: DifficultyHint | null;
 }
 
 export interface NightActivity {

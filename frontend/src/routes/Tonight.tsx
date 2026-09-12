@@ -54,6 +54,9 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
         t.goal_s == null ? null : t.goal_s / 3600,
         t.recent_pace_s,
         t.field_fulls,
+        // …and about the same goal, which the vetted difficulty verdict
+        // sharpens on the objects the catalog has been curated for.
+        t.difficulty,
       )
     : null;
   // Pre-capture "will it fit?" nudge for a catalog candidate that's bigger than
@@ -63,7 +66,8 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
   // this owner's own measured pace — the question a beginner actually asks next.
   // Silent for an owner with no pace history yet, and on an older backend.
   const framingBadge = withMosaicEffort(
-    framingRowBadge(t.framing, t.mosaic), t.mosaic, t.type, usualPaceS);
+    framingRowBadge(t.framing, t.mosaic), t.mosaic, t.type, usualPaceS,
+    t.difficulty);
   // "How hard for a Seestar?" so a beginner sees difficulty while choosing, not
   // only after shooting. Catalog rows only; library/un-vetted rows carry none.
   const difficultyBadge = difficultyRowBadge(t.difficulty);

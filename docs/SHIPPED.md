@@ -1,5 +1,128 @@
 # Shipped — the record
 
+## v0.431.1 — 2026-09-12 — the one hand-mirrored engine constant that had no drift guard
+
+*(Builder, branch `claude/sweet-babbage-e9r1m0` — infra/trust. Test + one named constant in place of a
+literal; no behaviour change anywhere, and none possible: the constant it substitutes is 3.)*
+
+**The gap, stated as the repo already states it eight times over.** This project has repeatedly found the
+same failure: a Python number the frontend cannot import, mirrored by hand into a sentence a beginner
+reads, drifting with nothing failing. There are eight `tests/test_*_mirror.py` guards for exactly that —
+`fullres`, `pace`, `reject_pct`, `min_max_floor`, `factor_label`, `noise_low_lead`, `auto_summary`,
+`upload_destination`. `frontend/src/weightingHint.ts` is a ninth mirror with no guard:
+`WEIGHTING_MIN_MAX_MIN_FRAMES = 3` is the engine's own `weights_applied` gate, quoted verbatim in the
+caution the Stack form and the Settings defaults both show — *"on any stack of 3 or more subs, min/max
+rejection and quality weighting don't combine"*.
+
+A stale copy fails nothing and gets it wrong in both directions: telling a user their quality weighting
+is being ignored on a stack where it is honoured, or staying silent on one where it is not — which is
+the case the caution exists for.
+
+**Guarded in both directions, because the constant alone is half the claim.**
+`tests/test_weighting_hint_mirror.py` checks the TS literal against
+`seestack.stack.stacker.MIN_MAX_MIN_FRAMES`, and then checks *that* constant against the **dispatcher's
+own behaviour** rather than another copy of itself: `weights_applied` is
+`not _min_max_reject_runs(eff, n)`, i.e. `combine_method(...) == "min-max-reject"`, so walking
+`combine_method` across the boundary asks the same question the provenance flag answers. Drizzle is
+walked too, since the caution stands down there at every count. Both halves verified red by scratch
+edits — a mirrored 4, and a dispatcher moved by one.
+
+**And the literal is gone from the switch itself.** `combine_method` spelled its gate `n >= 3` while
+`MIN_MAX_MIN_FRAMES = 3` sat twenty lines below it and four other sentences quoted that constant as the
+count this branch switches at. It now names the constant, so the two cannot be edited apart at all. The
+sigma-clip floor beside it stays spelled out on purpose: the nearby `DRIZZLE_REJECT_MIN_FRAMES` is the
+*drizzle* pass's own floor — a different claim that happens to share the number 4 — and folding them
+would be the conflation this file's own comments warn about.
+
+**Tests +2. No config, schema, on-disk, API or default change.**
+
+## v0.431.0 — 2026-09-12 — "is it enough yet?" stops quoting M31 and M33 the same number
+
+*(Builder, branch `claude/sweet-babbage-e9r1m0` — PRIORITY 2–3 (autonomy + friendliness). Additive
+throughout: two additive response fields with conservative defaults, no config, schema, on-disk,
+API-shape or existing-default change; every surface with no verdict is bit-for-bit what it was.)*
+
+**The finding, and where it came from.** Not from the backlog — "Bugs (fix these first)" is dry of
+anything ungated for the tenth consecutive run, and the dogfood pass (`--mosaic --editor`, plus
+`--empty`) came back CLEAN on both samples. It came from the method the 09-11/09-12 runs wrote up:
+*does the app state one fact in two places, and do the two agree?* — asked here of a **number** and the
+**sentence next to it**, on the Target page the dogfood pass had just photographed.
+
+`readiness.ts` says so itself, in its own comment: *"The coarse buckets can't tell a bright emission
+nebula from a faint one, so Nebula sits at a middle-ground 4 h."* That is a stated limitation, not a
+design. And `seestack/target_difficulty.py` — 157 of 157 bundled objects covered, a badge on the same
+page since it shipped — exists for exactly that gap: *"a bright compact galaxy (M31) and a large faint
+one (M33) share a type and dwarf each other in size, yet sit at opposite ends of hard-for-a-Seestar."*
+
+So the page said both of these about M31, in the same units, about the same question:
+
+- **"Bright and rewarding — a great target to start with. It usually looks good in well under an hour."**
+- **"3.0 h of ~6 h — a solid start."**
+
+…and said the *second* of them about M33 too, whose own badge reads *"it rewards a darker sky and
+several hours"*. One of the app's two answers had the information and the other did not.
+
+**The fix: the goal keeps the type table and gains the axis the table admits it is missing.**
+`GOAL_DIFFICULTY_FACTOR` — easy ×0.5, moderate ×1, challenging ×1.5 — applied to the per-type goal.
+M31 (easy galaxy) 6 h → **3 h**; M33 (challenging galaxy) 6 h → **9 h**; M42 (easy nebula) 4 h → **2 h**;
+the California Nebula (challenging) → **6 h**, which is the "several hours" its own badge promises.
+
+**Deliberately gentler than the badge's sentences imply** (they read as roughly 1 : 2.5 : 5 around the
+middle): the object type still carries most of the signal, a goal is a suggestion and never a gate, and
+half a step is enough to stop the page contradicting itself. The spread is bounded by numbers already
+shipped — the lowest a curated verdict reaches is 2 h (easy nebula) and 3 h (easy galaxy), both still
+above the 1.5 h Cluster goal, so the type rule's own claim that clusters are the quickest thing a
+Seestar shoots survives. Pinned by a test rather than left in prose.
+
+**The discriminator is `curated`, and it is the half worth carrying forward.** `target_difficulty`
+reaches "easy" two ways: the hand-curated per-object table, and the rule that *star clusters and star
+fields are uniformly easy*. The badge reads the same either way; the goal must not. The type rule
+restates the bucket — every cluster is easy, so acting on it would halve a goal for a fact the 1.5 h
+Cluster bucket has already priced in. `DifficultyHint.curated` (derived, never hand-maintained, so it
+cannot drift as the table grows) says which kind a verdict is, and `goalDifficultyFactor` returns 1 for
+everything else: the type rule, an unknown level, no verdict, and an older backend that sends no
+`curated` field. A **user-set** goal is untouched, exactly as `fieldFulls` leaves it alone, and the
+mosaic scaling composes on top (4 h nebula, easy, four panels → 2 × 4 = 8 h).
+
+**One goal, on every surface that quotes one — which was most of the work.** A sharpened goal on the
+Target page and a coarse one on the Dashboard would be the same bug with the seam moved, so the verdict
+is threaded to every consumer of `goalHoursForType` / `integrationReadiness`:
+
+- **Target page** — the readiness card, and `nextBestMove`'s two rungs, which are fractions of that same
+  goal (v0.429.2 fixed them once along the *type* axis; leaving them behind here would have re-opened it
+  along the difficulty one). A property test walks three levels × three types × seven depths and requires
+  the rung the coaching line picks and the verdict the card prints to be the same judgement.
+- **Dashboard "Target progress"** — `/api/library-progress` rows gain `difficulty`, asserted against
+  `identify_object`'s own answer rather than a copy of it.
+- **"Point here tonight"** — the same rows already supply the goal map; a second map off the same cached
+  response supplies the verdict, so a target the Target page calls finished is not offered as one to
+  continue. No extra request.
+- **Tonight table** — and this turned up a second, smaller instance of the same shape: a *catalog* row has
+  carried its difficulty since the badge shipped, an *already-targeted* row never did, so the same object
+  lost its verdict the moment the owner started shooting it. `LibraryTarget.difficulty` closes that; the
+  row's readiness badge now judges by the sharpened goal, and the badge a beginner saw before shooting M33
+  is still there afterwards.
+- **Mosaic effort** (`panels × goal`, on catalog rows, which already carried the verdict).
+
+**Upgrade-safe (§9).** `DifficultyHintOut.curated` defaults False and `TargetProgressOut.difficulty`
+defaults None — an older frontend ignores both; an older backend omitting them reads as "type rule" /
+"no verdict", which leaves the goal exactly where it is today. No endpoint removed, no response shape
+changed, no config, no DB, no on-disk path, no existing default flipped. The goal has never gated
+anything and still does not.
+
+**Tests (+8 Python, +9 vitest).** Python: the `curated` flag both ways plus a derived-not-maintained
+sweep over the whole table; `/api/library-progress` serving the verdict; the Tonight library row carrying
+it and agreeing with the progress row. **All four verified red by reverting the production change in a
+scratch copy**, per AGENTS.md §8. Vitest: the M31/M33 goals and — separately — the *verdicts* moving in
+both directions (3.2 h easy → "plenty" where the coarse goal said "solid"; 2 h challenging → "starting"
+where it said "solid"); moderate unchanged; the cluster type rule ignored; every shape of absent verdict
+unchanged; a user-set goal untouched; composition with `fieldFulls`; clusters still the quickest bucket;
+`integrationBars` moving with the goal and only with it; the library-progress and continue-tonight
+wiring; and one on the Target page itself — *"goal ~3 h"* and *"3.0 h — plenty for a clean image"* on a
+3 h M31 — **verified red** by reverting the one line that passes the verdict in. The existing 3,793
+frontend tests pass untouched, which is the "omit it and nothing changes" property demonstrated rather
+than asserted.
+
 ## v0.430.1 — 2026-09-12 — the last week of a season reaches the screen you were already looking at
 
 *(Builder, branch `claude/sweet-babbage-uawq1j` — the surfacing half of v0.430.0, PRIORITY 2–3. Frontend

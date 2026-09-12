@@ -166,3 +166,30 @@ def test_progress_pace_agrees_with_the_targets_nights_card(client, built_library
     server_pace = {r["safe"]: r["recent_pace_s"]
                    for r in client.get("/api/library-progress").json()}["M_42"]
     assert server_pace == median(client_side)
+
+
+def test_progress_carries_the_vetted_difficulty_verdict(client, built_library):
+    """The row carries the same "how hard for a Seestar?" verdict the Target
+    page shows — because the goal the card judges against is derived from it.
+
+    The per-object-type goal cannot tell a bright compact galaxy from a large
+    faint one (``readiness.ts`` says so in its own comment); the curated half of
+    this verdict is the only thing that can. A row that omitted it would have the
+    Dashboard quoting one goal for a target and the Target page quoting another.
+    """
+    from seestack.objectinfo import identify_object
+
+    by_safe = {row["safe"]: row for row in client.get("/api/library-progress").json()}
+
+    for safe, name in (("M_42", "M 42"), ("NGC_7000", "NGC 7000")):
+        row = by_safe[safe]
+        expected = identify_object(name).difficulty
+        assert expected is not None, name
+        # Asserted against the engine's own answer rather than a copy of it, so
+        # a re-curated object can't leave this test asserting a stale level.
+        assert row["difficulty"] == {
+            "level": expected.level, "label": expected.label,
+            "text": expected.text, "curated": expected.curated,
+        }
+        # Both are hand-curated nebulae, so the goal really does move on them.
+        assert row["difficulty"]["curated"] is True

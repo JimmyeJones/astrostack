@@ -161,6 +161,25 @@ describe("pickContinueTonight", () => {
     expect(pickContinueTonight(p, undefined, 2, ["a"])).toBeNull();
   });
 
+  it("calls a target done when its vetted difficulty says it is", () => {
+    // An easy galaxy at 4 h is past its 3 h goal — "plenty", nothing left to
+    // gain, so this card must not recommend continuing it. Fails before: the
+    // picker judged it against the coarse 6 h bucket and offered it anyway,
+    // one screen away from a Target page calling the same picture finished.
+    const p = plan([
+      target({ name: "A", target_safe: "a", total_exposure_s: 4 * 3600 }),
+    ]);
+    const easy = { level: "easy", label: "Easy", text: "", curated: true } as const;
+    expect(pickContinueTonight(p, undefined, 2, null, { a: easy })).toBeNull();
+    // …and without the verdict it is still the pick it always was.
+    expect(pickContinueTonight(p, undefined, 2, null)!.pick.target.target_safe)
+      .toBe("a");
+    // A verdict from the cluster type rule changes nothing either.
+    expect(pickContinueTonight(p, undefined, 2, null,
+                               { a: { ...easy, curated: false } })!
+      .pick.target.target_safe).toBe("a");
+  });
+
   it("is unchanged when nothing has been recommended yet", () => {
     // The older-backend / still-loading path: no exclusions must reproduce the
     // pre-existing pick exactly, for undefined, null and an empty list alike.

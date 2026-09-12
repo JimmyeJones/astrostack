@@ -27,13 +27,68 @@ const GOAL_HOURS: Record<TypeBucket, number> = {
   Other: 4,
 };
 
+/** A target's vetted "how hard is this for a Seestar?" verdict, as much of it as
+ * the goal needs: the level, and whether it came from the hand-curated table.
+ * Structurally compatible with the `DifficultyHint` the API already carries on
+ * every identified object, so callers pass that through unchanged. */
+export type GoalDifficulty =
+  { level?: string | null; curated?: boolean | null } | null | undefined;
+
+// How the curated difficulty verdict moves the per-type goal.
+//
+// The table above is coarse on purpose, and says so: it "can't tell a bright
+// emission nebula from a faint one". `seestack/target_difficulty.py` is the half
+// that can — it exists precisely because "a bright compact galaxy (M31) and a
+// large faint one (M33) share a type and dwarf each other in size, yet sit at
+// opposite ends of hard-for-a-Seestar" — and the Target page has been printing
+// its verdict beside this goal all along. Without this factor the two sentences
+// on one page disagree in the same units about the same question: the badge says
+// M33 "rewards a darker sky and several hours" and M31 "usually looks good in
+// well under an hour", while the goal quotes them both the same 6 h.
+//
+// Deliberately *gentler* than the badge's own sentences imply (they read as
+// roughly 1 : 2.5 : 5 around the middle): the object type still carries most of
+// the signal, a goal is a suggestion and never a gate, and half a step is enough
+// to stop the page contradicting itself. The spread is bounded on both sides by
+// numbers this app already ships — the lowest a curated verdict can reach is
+// 2 h (an easy nebula) and 3 h (an easy galaxy), both still above the 1.5 h
+// Cluster goal, so the type rule's own claim that clusters are the quickest
+// thing a Seestar shoots survives the adjustment.
+const GOAL_DIFFICULTY_FACTOR: Record<string, number> = {
+  easy: 0.5,
+  moderate: 1,
+  challenging: 1.5,
+};
+
+/** The factor `difficulty` applies to a per-type goal — 1 (change nothing)
+ * unless the verdict is **curated**, i.e. it knows something about *this object*
+ * that its type does not.
+ *
+ * The "star clusters and star fields are uniformly easy" type rule is excluded
+ * on purpose: every cluster is easy, so "easy" there restates the bucket, and
+ * acting on it would halve the cluster goal for a fact already priced in. Same
+ * answer for no verdict at all, an unknown level, and an older backend that
+ * sends no `curated` field — all of which leave the goal exactly where it is
+ * today. */
+export function goalDifficultyFactor(difficulty: GoalDifficulty): number {
+  if (!difficulty || difficulty.curated !== true) return 1;
+  return GOAL_DIFFICULTY_FACTOR[String(difficulty.level ?? "")] ?? 1;
+}
+
 // The suggested per-field integration goal for an object type, in hours — the
 // same number `integrationReadiness` judges against, exposed so a surface that
 // has no *accumulated* integration to judge (a target the owner has not started)
 // can still say what one field of it would take. Kept here, beside the table, so
 // there is one definition of "how long is enough for a clean image".
-export function goalHoursForType(type: string | null | undefined): number {
-  return GOAL_HOURS[objectTypeBucket(type)];
+//
+// `difficulty` is the target's vetted verdict when the caller has one; omitting
+// it reproduces the pre-difficulty answer exactly, which is what a surface with
+// no identified object should say.
+export function goalHoursForType(
+  type: string | null | undefined,
+  difficulty?: GoalDifficulty,
+): number {
+  return GOAL_HOURS[objectTypeBucket(type)] * goalDifficultyFactor(difficulty);
 }
 
 export type ReadinessLevel = "starting" | "solid" | "close" | "plenty";
@@ -97,6 +152,13 @@ export function fmtGoal(h: number): string {
 // field, and on an older backend that hasn't started sending it — the verdict
 // then matches its pre-scaling behaviour exactly.
 //
+// ``difficulty`` is the target's vetted "how hard is this for a Seestar?"
+// verdict, which sharpens the per-type goal on the objects the catalog has
+// actually been curated for (see ``goalDifficultyFactor``). Omit it — or pass a
+// target with no vetted verdict, or a verdict from the cluster type rule — and
+// the goal is exactly the per-type one it has always been. A **user-set** goal
+// is never touched by it, for the same reason ``fieldFulls`` leaves it alone.
+//
 // Returns null when there's no integration yet — nothing useful to say — so
 // the caller can simply render nothing.
 export function integrationReadiness(
@@ -104,6 +166,7 @@ export function integrationReadiness(
   type: string | null | undefined,
   goalHoursOverride?: number | null,
   fieldFulls?: number | null,
+  difficulty?: GoalDifficulty,
 ): IntegrationReadiness | null {
   if (!Number.isFinite(exposureSeconds) || exposureSeconds <= 0) return null;
   const bucket = objectTypeBucket(type);
@@ -111,7 +174,9 @@ export function integrationReadiness(
     typeof goalHoursOverride === "number" &&
     Number.isFinite(goalHoursOverride) &&
     goalHoursOverride > 0;
-  const baseGoalHours = customGoal ? goalHoursOverride! : GOAL_HOURS[bucket];
+  const baseGoalHours = customGoal
+    ? goalHoursOverride!
+    : GOAL_HOURS[bucket] * goalDifficultyFactor(difficulty);
   // A canvas < one native frame or a missing/garbled figure both fall back to
   // 1.0 — a lower scale would lower the goal, and a beginner nudge that
   // *lowers* what "plenty" means from a canvas artefact would call a
@@ -213,9 +278,10 @@ export function readinessRowHint(
   type: string | null | undefined,
   goalHoursOverride?: number | null,
   fieldFulls?: number | null,
+  difficulty?: GoalDifficulty,
 ): { label: string; color: string } | null {
   const r = integrationReadiness(
-    exposureSeconds, type, goalHoursOverride, fieldFulls);
+    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty);
   if (!r) return null;
   if (r.level === "plenty") return { label: "Plenty — try something new", color: "green" };
   if (r.level === "close") return { label: "Nearly there", color: "teal" };
@@ -249,9 +315,10 @@ export function readinessRowBadge(
   goalHoursOverride?: number | null,
   paceSeconds?: number | null,
   fieldFulls?: number | null,
+  difficulty?: GoalDifficulty,
 ): { label: string; color: string; tooltip: string } | null {
   const r = integrationReadiness(
-    exposureSeconds, type, goalHoursOverride, fieldFulls);
+    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty);
   if (r && r.level !== "plenty") {
     const est = clearNightsFromPace((r.goalHours - r.hours) * 3600, paceSeconds);
     if (est && est.nights !== null && est.nights <= FINISH_FIRST_MAX_NIGHTS) {
@@ -263,7 +330,7 @@ export function readinessRowBadge(
     }
   }
   const hint = readinessRowHint(
-    exposureSeconds, type, goalHoursOverride, fieldFulls);
+    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty);
   // `readinessRowHint` only returns a hint when the readiness itself exists, so
   // `r` is non-null here; the guard keeps the types honest rather than asserting.
   return hint && r ? { ...hint, tooltip: r.verdict } : null;
