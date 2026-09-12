@@ -1,5 +1,47 @@
 # Shipped — the record
 
+## v0.437.1 — 2026-09-12 — the Tonight page stops saying one night is 8.3 h and 5.9 h long at the same time
+
+*(Builder, branch `claude/sweet-babbage-14nsyo` — 🟡 BUG (friendliness + trust, PRIORITY 3), Builder-found by
+dogfooding the running app in a browser rather than taken from the backlog, and verified red by scratch
+reverts on both sides. Engine + frontend; one additive, defaulted field, so no config, schema, on-disk,
+default or existing-response change, and no number moves.)*
+
+**What the screenshot showed.** On the Tonight page at 420 px, the Dark-window card reads *"07:55 PM –
+04:11 AM · 8.3 h of darkness"*. Four inches below, the first row of "Plan my week" reads *"Tonight · **5.9 h
+dark**"*, in a column whose other six rows say 8.3–8.6 h. Both numbers are correct and they are not the same
+quantity: `upcoming_dark_windows` **clips a night already under way to "now"**, on purpose, so the planner
+never offers darkness that has already gone — the pass ran at 22:20 local, and 22:20 → 04:11 is 5.9 h. The
+header quotes the *whole* night, because `plan_tonight` calls `_find_dark_window` directly and never clips.
+So one page answered "how much darkness is there tonight?" twice, in the same unit, with numbers 2.4 h apart,
+and the only clue was that tonight's row looked shorter than every night after it.
+
+**Why the word matters more than the number.** The clip is right and should stay. What was wrong is that
+*"5.9 h dark"* is the same phrase the column uses for a whole night, so a beginner reads the first row as
+"tonight is a shorter night" rather than "tonight is already half gone". The app had already settled the
+vocabulary for this exact quantity elsewhere: the Dashboard's "Point here tonight" card says **"About 2 h of
+dark sky left tonight"** from `dark_minutes_left`. The week table now uses the same word.
+
+**The fix.** `DarkWindow` gains `in_progress: bool = False`, set **only** by the clip in
+`upcoming_dark_windows` — every other producer leaves it False, which is what every existing reader already
+assumed. `WeekNight` carries it through as `dark_in_progress` (default False, so `asdict` adds one optional
+field to `GET /api/plan/week` and nothing else changes), and the new pure `planweek.weekDarkPhrase` renders
+*"5.9 h left"* for that night and *"8.3 h dark"* for every other — an older backend's silence reading as a
+whole night, which is right for every night that has not started.
+
+**Scope checked, not assumed.** `next_observing_windows` walks the same clipped windows but prints *times*
+(`dark_start`/`dark_end`), where a clipped start is simply honest, so it needs nothing; `best_months` builds
+its own unclipped windows; and `PlanWeekCard` is the only surface in the app that prints the week's
+`dark_minutes`.
+
+**Tests (+5: 2 Python, 3 vitest).** `test_nightplan.py` — a window clipped to "now" reports `in_progress`
+while a pre-dusk one does not *and* no later night does (the existing clipping test's own "full" window is
+taken at 20:00 UTC in January London, which is already inside the night, so the new test anchors at 15:00);
+and the flag survives the trip into `plan_week`'s first night only, with the date and the pick unchanged.
+`planweek.test.ts` — the whole-night phrase, the in-progress phrase, and an older backend's missing field.
+`PlanWeekCard.test.tsx` — the rendered row says "5.9 h left" while the next row says "8.0 h dark". The two
+behavioural ones were verified red by reverting the production change.
+
 ## v0.437.0 — 2026-09-12 — the Tonight page stops being twelve screens of scrolling
 
 *(Builder, branch `agent/run-2026-09-12` — 🎨 the standing information-architecture priority, **one slice**,
