@@ -616,6 +616,82 @@ describe("HistoryView", () => {
     // covered by compassLayout's pure unit tests instead.)
   });
 
+  it("offers the Moon disc only once the scale marks are on", async () => {
+    // It is the bar's own sentence drawn instead of written, measured off that
+    // very bar — so it is nested under Scale & compass rather than standing as a
+    // fourth always-on toggle on a menu the owner already calls too busy.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600, objects: [],
+      scale_bar: {
+        arcsec: 1800, label: "30\u2032", fraction: 0.18, frame_arcmin: 166.6,
+        moon_comparison: "the whole frame is about 5.4 full Moons wide",
+      },
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    expect(screen.queryByRole("menuitem", { name: /^Moon for scale/ })).toBeNull();
+    fireEvent.click(await menuItem("Scale"));
+
+    openAbout();
+    const moon = await menuItem("Moon for scale");
+    expect(moon).toHaveTextContent(/how big your target really is/);
+  });
+
+  it("does not offer the disc on a field the Moon would swamp", async () => {
+    // A tight single object or a heavy crop wants a circle wider than the
+    // picture. The app never offers a mark it would then decline to draw — the
+    // bar's sentence already says the honest thing in words on a field that tight.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600, objects: [],
+      scale_bar: {
+        arcsec: 30, label: "30\u2033", fraction: 0.15, frame_arcmin: 3.3,
+        moon_comparison: "the whole frame is about 11% the width of the full Moon",
+      },
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Scale"));
+    openAbout();
+    await menuItem("Scale");  // the menu really is open
+    expect(screen.queryByRole("menuitem", { name: /^Moon for scale/ })).toBeNull();
+  });
+
+  it("saves the picture with the disc it is showing", async () => {
+    // What you see is what you save: the toggle reaches the baked download the
+    // same way the North-up and nameplate toggles already do.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({ has_preview: true })]);
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1000, height: 600, objects: [],
+      scale_bar: {
+        arcsec: 1800, label: "30\u2032", fraction: 0.18, frame_arcmin: 166.6,
+        moon_comparison: "the whole frame is about 5.4 full Moons wide",
+      },
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openSaveShare();
+    expect((await menuItem("With scale & compass")).getAttribute("href"))
+      .not.toContain("moon=true");
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+
+    openAbout();
+    fireEvent.click(await menuItem("Scale"));
+    openAbout();
+    fireEvent.click(await menuItem("Moon for scale"));
+
+    openSaveShare();
+    await waitFor(async () =>
+      expect((await menuItem("With scale & compass")).getAttribute("href"))
+        .toContain("moon=true"));
+  });
+
   it("copies a ready-to-post caption built from identity, run facts and scale", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       // The date in the caption is the run's *capture* window, and the stack
