@@ -63,6 +63,30 @@ describe("FirstImageCard", () => {
     expect(screen.getAllByRole("link")).toHaveLength(3);
   });
 
+  it("stops telling someone with a finished picture to go back to step two", async () => {
+    // The state photographed on 2026-09-12 by dogfooding the bundled sample —
+    // the app's own first-run path, which ships pre-solved and which the
+    // Dashboard offers a "Stack it" button for. Five struck-through lines, a
+    // saved picture in the Gallery, and the card led with **"Next: Plate solving
+    // (ASTAP) is how AstroStack recognises the patch of sky in each sub…"**.
+    localStorage.setItem("astrostack.dashboard.firstImageStarted", "1");
+    mount(sys({ found: false }), stats({
+      n_frames: 6, n_frames_accepted: 6, n_stack_runs: 1,
+      n_edited_runs: 1, n_finished_pictures: 1,
+    }));
+
+    await screen.findByTestId("first-image-card");
+    expect(screen.getByText("5 of 6 done")).toBeInTheDocument();
+    expect(screen.queryByText(/^Next:/)).toBeNull();
+    expect(screen.getByText(/been all the way through/)).toBeInTheDocument();
+    // Nothing is hidden: the setup step is still listed, still unticked, and
+    // still the one line on the card carrying a link.
+    expect(screen.getByText("Set up plate solving (ASTAP)")).toBeInTheDocument();
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Check the setup" }))
+      .toHaveAttribute("href", "/settings/plate-solving");
+  });
+
   it("stays off an established install that never saw a step open", async () => {
     // The owner upgrading a box with 300 stacks must not be congratulated on
     // their "first" picture: nothing was ever pending, so nothing shows.

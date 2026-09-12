@@ -36,6 +36,24 @@ export interface FirstImageStep {
   /** Link text for `href`. */
   action: string;
   done: boolean;
+  /**
+   * The keys whose completion *proves* this step was passed, whether or not it
+   * ticked itself.
+   *
+   * The ticks are not monotonic, because `solve` measures **setup** (is ASTAP
+   * installed?) while the rest measure **outcomes** (do you have frames, a
+   * stack, an edit?). The bundled sample ships pre-solved, so someone who
+   * presses "Stack it" on it finishes the whole journey with the setup step
+   * still open — and a "what next?" that just took the first unticked step then
+   * told them to go back and do step two (photographed 2026-09-12).
+   *
+   * Position alone can't decide this: `checked` is done by QC, which needs no
+   * plate solve at all, so a *real* first-timer with no ASTAP sits at
+   * `[frames ✓, solve ✗, checked ✓, …]` and solving genuinely is their next
+   * step. Only `stack` and what follows it prove the solve happened. Hence a
+   * named list per step rather than "anything later".
+   */
+  passedWhen?: string[];
 }
 
 /**
@@ -71,6 +89,8 @@ export function firstImageSteps(
       href: "/library",
       action: "Open Library",
       done: (stats?.n_frames ?? 0) > 0,
+      // Grading, stacking or editing anything at all means the frames arrived.
+      passedWhen: ["checked", "stack", "edit", "export"],
     },
     {
       key: "solve",
@@ -87,6 +107,10 @@ export function firstImageSteps(
       href: settingsLink("plate-solving"),
       action: "Check the setup",
       done: solveReady,
+      // `stack` and no earlier: `run_stack` combines only *solved* frames, so a
+      // stack run proves solving happened — while `checked` proves nothing,
+      // because QC measures and grades a sub without any plate solution.
+      passedWhen: ["stack", "edit", "export"],
     },
     {
       key: "checked",
@@ -96,6 +120,8 @@ export function firstImageSteps(
       href: "/library",
       action: "Pick a target",
       done: (stats?.n_frames_accepted ?? 0) > 0,
+      // A stack is built from accepted frames, so one existing means grading ran.
+      passedWhen: ["stack", "edit", "export"],
     },
     {
       key: "stack",
@@ -105,6 +131,8 @@ export function firstImageSteps(
       href: "/library",
       action: "Pick a target",
       done: (stats?.n_stack_runs ?? 0) > 0,
+      // An edit or a finished picture is an edit *of a stack*.
+      passedWhen: ["edit", "export"],
     },
     {
       key: "edit",
@@ -209,8 +237,72 @@ export function firstImageDoneMessage(steps: FirstImageStep[]): string {
     + "you're ready for one.";
 }
 
-/** The step the user should do next (the first unticked one), or null when the
- *  journey is complete — so the card can lead with one thing rather than four. */
+/**
+ * The step the user should do next — the first unticked step **they have not
+ * already gone past** — or null when there is nothing ahead of them.
+ *
+ * "The first unticked step" is not the same thing, and the difference is
+ * user-visible: the ticks are not monotonic. `solve` is a *setup* step (is ASTAP
+ * installed?) while the four around it are *outcome* steps (do you have frames,
+ * a stack, an edit?), so the bundled sample — which ships pre-solved — ticks
+ * every outcome and leaves the setup open. The card then read "5 of 6 done" with
+ * five struck-through lines and led with **"Next: Plate solving (ASTAP) is how
+ * AstroStack recognises the patch of sky in each sub…"**, i.e. it told someone
+ * holding a finished, saved picture that the next thing to do was step two.
+ * (Photographed 2026-09-12 by dogfooding the sample, which is the app's own
+ * first-run path — the Dashboard offers a "Stack it" button for it.)
+ *
+ * So "next" means *ahead*: the first unticked step that no completed step
+ * proves they already walked past (`passedWhen`). A step they have demonstrably
+ * overtaken is still shown in the list, still unticked and still carrying its
+ * link — nothing is hidden, it just stops being announced as what to do next.
+ * Null means "nothing ahead", which the card words for itself; the setup banner
+ * that owns that fact (`astapReadiness`) says it on the same screen either way.
+ */
 export function firstImageNextStep(steps: FirstImageStep[]): FirstImageStep | null {
-  return steps.find((s) => !s.done) ?? null;
+  const done = new Set(steps.filter((s) => s.done).map((s) => s.key));
+  return steps.find((s) => !s.done && !_passed(s, done)) ?? null;
+}
+
+/** Whether a later step being done proves this one was walked past. */
+function _passed(step: FirstImageStep, done: Set<string>): boolean {
+  return (step.passedWhen ?? []).some((k) => done.has(k));
+}
+
+/**
+ * The unticked steps the user has already overtaken — a later step is done.
+ *
+ * Not "next", but not nothing either: on the sample path ASTAP genuinely isn't
+ * set up and their *own* subs will need it, so the card names them rather than
+ * falling silent once {@link firstImageNextStep} returns null.
+ */
+export function firstImageSkippedSteps(steps: FirstImageStep[]): FirstImageStep[] {
+  const done = new Set(steps.filter((s) => s.done).map((s) => s.key));
+  return steps.filter((s) => !s.done && _passed(s, done));
+}
+
+/**
+ * The card's one lead sentence: what to do next, or — when they have overtaken
+ * everything that is left — what is still open and why it will matter.
+ *
+ * Kept here rather than in the card so the wording is unit-tested next to the
+ * tick logic that chooses it.
+ */
+export function firstImageLeadText(steps: FirstImageStep[]): string {
+  const next = firstImageNextStep(steps);
+  if (next) return `Next: ${next.hint}`;
+  const skipped = firstImageSkippedSteps(steps);
+  if (skipped.length === 1) {
+    // Says both halves: you really did get through it, *and* the open step is
+    // not optional once you point the scope at your own sky. The sample is what
+    // let them skip it, and the sample is the only thing that can be stacked
+    // without it.
+    return "You've been all the way through. One step below is still open, and "
+      + `you'll need it for your own subs — ${skipped[0].hint}`;
+  }
+  if (skipped.length > 1) {
+    return "You've been all the way through. The steps below that aren't ticked "
+      + "are still open, and you'll need them for your own subs.";
+  }
+  return "Six steps from a folder of subs to a finished picture.";
 }

@@ -62,6 +62,47 @@ verified red by bypassing it.
 scratch reverts — three by collapsing the classifier back to one answer, one by bypassing the seam; the
 rendered Tonight cases assert the old promise is *absent*.
 
+## v0.435.1 — 2026-09-12 — "Next:" stops pointing at a step you already went past
+
+*(Builder, same branch — 🟡 FRIENDLINESS, PRIORITY 3. Found in the same dogfood pass.)*
+
+**What was wrong.** The Dashboard's "Your first image" card read **"5 of 6 done"** over five
+struck-through lines — frames, graded, stacked, finished, saved — and led with:
+
+> *"**Next:** Plate solving (ASTAP) is how AstroStack recognises the patch of sky in each sub, so it can
+> line them all up. Set it up once and forget it."*
+
+i.e. it told someone holding a finished, saved picture that the next thing to do was step two. Reachable
+on the app's own first-run path: the bundled sample ships pre-solved and the Dashboard offers a "Stack
+it" button for it, so a beginner can walk the whole journey without ASTAP — and also on any install
+whose ASTAP path breaks after it solved frames.
+
+**Why.** `firstImageNextStep` returned the first unticked step, and the ticks are **not monotonic**:
+`solve` measures *setup* (is ASTAP installed?) while the steps around it measure *outcomes*. An earlier
+run had already fixed the label/tick disagreement here (v0.3xx, "Set up plate solving (ASTAP)"); the
+lead line was the same bug one surface along.
+
+**The fix, and why position alone could not do it.** The first attempt — "the first unticked step after
+the last ticked one" — is wrong, and a test caught it: `checked` ticks from QC, which grades a sub with
+no plate solution at all, so a *real* first-timer with no ASTAP sits at `[frames ✓, solve ✗, checked ✓,
+…]` and solving genuinely **is** their next step. Only `stack` and beyond prove a solve happened. So each
+step now declares `passedWhen` — the keys whose completion *proves* it was walked past — and "next" is
+the first unticked step nothing proves they overtook. `firstImageSkippedSteps` names the rest, and
+`firstImageLeadText` words both cases: `Next: …` when something is ahead, and *"You've been all the way
+through. One step below is still open, and you'll need it for your own subs — …"* when nothing is.
+
+**Nothing is hidden** (the owner's standing rule): the skipped step stays in the list, unticked, with its
+link, and the ASTAP readiness banner that owns that fact is on the same screen either way.
+
+**Frontend-only**; no endpoint, config, schema, on-disk, API-shape or default change.
+
+**Tests +9** (8 unit, 1 rendered). Four verified red by a scratch revert that disables `passedWhen`,
+including the rendered card case. One existing assertion was **rewritten, not weakened**: it pinned
+`firstImageNextStep` → `"solve"` on exactly the state the dogfood pass photographed as wrong; it now pins
+the corrected answer plus the skipped step, and the test's real subject (the step's *label*) is untouched.
+
+
+
 ## v0.433.0 — 2026-09-12 — "Up tonight" on the life list: which of the 110 can I actually shoot this evening?
 
 *(Builder, branch `claude/sweet-babbage-ogwqzh` — a 🌟 NEW BEGINNER FEATURE (PRIORITY 2–3, the "plan"
