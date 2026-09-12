@@ -222,9 +222,15 @@ def _line(draw, xy0, xy1, width: int) -> None:  # noqa: ANN001
 
 
 def _text(draw, xy, text: str, font, anchor: str) -> None:  # noqa: ANN001
-    """Mark text with the same dark halo, via Pillow's stroke."""
-    draw.text(xy, text, font=font, fill=MARK_RGB, anchor=anchor,
-              stroke_width=2, stroke_fill=HALO_RGB)
+    """Mark text with the same dark halo, via Pillow's stroke.
+
+    Sanitised on the way in: ``ScaleBar.ascii_label`` already keeps the primes
+    off this face by hand, but the compass letters and any future mark text go
+    through the shared net so a missing glyph can't bake a box into a share."""
+    from seestack.render.glyphs import safe_for_default_font
+
+    draw.text(xy, safe_for_default_font(text), font=font, fill=MARK_RGB,
+              anchor=anchor, stroke_width=2, stroke_fill=HALO_RGB)
 
 
 def mark_zones(width: int, height: int, marks: SkyMarks):  # noqa: ANN201
