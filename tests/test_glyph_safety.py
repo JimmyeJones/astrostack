@@ -253,6 +253,29 @@ def test_a_renderer_draws_the_sanitised_text_not_the_raw(render):
     )
 
 
+def test_the_apps_own_sample_target_is_an_instance_of_this_bug():
+    """Measured, not imagined: the bundled mosaic demo is called
+    ``Sample: M42 mosaic (2×2)``.
+
+    That ``×`` is U+00D7, which this face has no glyph for — so before the net,
+    every nameplate, keepsake and montage tile of the sample target baked a
+    hollow box into the middle of its own name, on the one target every new
+    install is invited to load from the Dashboard. It is the clearest proof
+    that "a target name can contain anything" is not a hypothetical: here the
+    *app* typed it.
+    """
+    from seestack.nameplate import NameplateFields, nameplate_line
+    from webapp.sample_data import SAMPLE_MOSAIC_TARGET_NAME
+
+    assert missing_glyphs(SAMPLE_MOSAIC_TARGET_NAME) == ["×"]
+    line = nameplate_line(NameplateFields(
+        target=SAMPLE_MOSAIC_TARGET_NAME, integration_s=240, n_frames=21,
+        sub_exposure_s=10))
+    assert missing_glyphs(safe_for_default_font(line)) == []
+    assert _nameplate(line).tobytes() == _nameplate(
+        safe_for_default_font(line)).tobytes()
+
+
 def test_the_hostile_fixture_really_is_hostile():
     """The pair test above is vacuous if ``HOSTILE`` is already drawable, and a
     future Pillow widening its bundled face would do exactly that silently."""

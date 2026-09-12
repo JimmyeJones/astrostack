@@ -39,14 +39,20 @@ carries the montage's tile captions and the before/after pair's cell labels, `re
 shared poster renderer behind the recap and the year recap, and `skymarks._text` covers the scale bar and
 the compass rose.
 
-**And one instance that was shipping today.** `lifelistcard.grid_subtitle(n, n)` returns *"The whole list —
+**And the app's own sample is an instance — found by dogfooding, not by imagining a hostile user.**
+`webapp/sample_data.SAMPLE_MOSAIC_TARGET_NAME` is `"Sample: M42 mosaic (2×2)"`, and that `×` is U+00D7.
+So on the one target every new install is invited to load from the Dashboard, the nameplate, the keepsake
+and the montage tile all baked a hollow box into the middle of the name — *the app typed it itself*,
+which is the shortest possible answer to "is a hostile target name really reachable?". Pinned as such.
+
+**And one more instance that was shipping today.** `lifelistcard.grid_subtitle(n, n)` returns *"The whole list —
 every one of them."* — an em dash, drawn, on the poster a beginner sees **the moment they complete the
 Messier list**. It slipped past the existing guard for a structural reason worth recording: that guard walks
 a hand-written list of caption builders, and the life-list poster's was never added to it. The copy now
 reads *"The whole list: every one of them."*, and `_life_list_headings` and `_object_label_texts` (the whole
 bundled catalog, measured rather than sampled) join the sweep.
 
-**Tests (+38 in `tests/test_glyph_safety.py`, +2 builders on the existing sweep; 5,796 → 5,836).** Three separate claims:
+**Tests (+39 in `tests/test_glyph_safety.py`, +2 builders on the existing sweep; 5,796 → 5,837).** Three separate claims:
 the net's own behaviour (including that it never makes a string *less* drawable, that a no-break space —
 the case `tests/glyphs.py` is blind to, because it skips `str.isspace()` — becomes a real space, and that an
 untransliterable script survives intact); **twelve renderer pins** that render the hostile string and the
