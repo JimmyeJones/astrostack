@@ -18,6 +18,57 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `claude/sweet-babbage-14nsyo`) — DOGFOOD PASS `--mosaic --editor`: CLEAN by every automated measure, and the finding was in a screenshot
+
+**The pass.** `scripts/agent-dogfood.sh --mosaic --editor` on `9150de20`, i.e.
+including v0.436.1's own change to this tooling (the scratch install now has an
+observing site, so the Tonight page finally answers with rows instead of "no
+location"). Results:
+
+- **Probe: CLEAN.** Nothing overflowing, no console errors, at 1440 px and
+  420 px, on the field sample *and* the mosaic. Tallest phone page
+  `/tonight` **3,578 px**, then the mosaic Target page 3,475 px and the mosaic
+  editor 3,303 px.
+- **Editor drive: CLEAN, on both samples.** All 21 ops added one at a time, each
+  re-rendering the live preview with no console error and no failed request,
+  then undo and redo — on the **mosaic** run as well as the field one.
+- **Mosaic trim 7.9 %** of the canvas (the §1 bug line is ~15 %), and the block
+  of sentences the app says about that mosaic is coherent: the panel map's
+  "about 30 s there against 1 min on a typical panel", the health panel's "about
+  23 % of the picture has 3 subs where most has 6 … about 1.4× grainier", and
+  the seam verdict's "the sky matches across the joins, so where the picture
+  looks grainier that is a difference in depth, not a step in the sky" all
+  answer the same question with the same numbers. The two fixes that landed
+  earlier today (v0.435.4, v0.434.1) are visible here as *nothing to say*.
+
+**The finding was not in any of that.** It came from opening
+`shots/phone_tonight.png` and reading it as the owner would. The Dark-window
+card says *"07:55 PM – 04:11 AM · 8.3 h of darkness"*; four inches below, "Plan
+my week"'s first row says *"Tonight · 5.9 h dark"*, in a column whose other rows
+say 8.3–8.6 h. Both correct, different quantities — the week planner clips a
+night already under way to "now", by design — and one word for both. Shipped as
+**v0.437.1**; full entry in [`SHIPPED.md`](SHIPPED.md).
+
+**Method note worth keeping.** The probe's "CLEAN" is a statement about console
+errors and overflow, and §7 already says to read the mosaic block as one
+paragraph. This run adds the next step out: **read the rendered page, not only
+the app's text about the picture**. The two disagreeing numbers here are on one
+screen, ~800 px apart, in different cards — nothing that reads either card alone
+can see it, including the mosaic-sentence block, which covers the Target page
+rather than Tonight. Screenshots are already written to `$SHOTS`; looking at two
+or three of them costs a minute.
+
+**Also checked and *not* filed, so nobody re-picks it:** on the phone Target
+page, the "Is it enough yet?" card's *goal* (~2 h for M42) sits beside the
+difficulty badge's *"usually looks good in well under an hour"*. That gap is
+**deliberate and carries numbers** — `readiness.ts`'s `GOAL_DIFFICULTY_FACTOR`
+comment says it is "deliberately *gentler* than the badge's own sentences imply
+(they read as roughly 1 : 2.5 : 5)" and bounds the spread on both sides — so it
+is a stand-down to respect (§1), not a fourth instance of the family v0.429.2 /
+v0.431.0 / v0.435.5 closed.
+
+---
+
 ## 2026-09-12 (Builder, branch `claude/sweet-babbage-14nsyo`) — COLLISION #14: a *freshly filed lead* is the most contended item in the backlog, and the fetch that would have caught it is the one nobody runs
 
 **What happened.** This run started at `4321d9e9`, read the backlog, and took the
