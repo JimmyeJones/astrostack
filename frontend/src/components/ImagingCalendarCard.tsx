@@ -129,7 +129,10 @@ export function ImagingCalendarCard() {
       : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1
         : null;
     if (step === null) return;
-    const next = stepNight(dates, picked, step as 1 | -1);
+    // Step from where the *focus* is, not from what has been picked: before the
+    // first pick those differ, and stepping from `null` would answer one key
+    // press by jumping across a year of grid instead of moving one night.
+    const next = stepNight(dates, picked ?? rovingDate, step as 1 | -1);
     if (next === null) return;   // at an end: let the page have the key back
     e.preventDefault();
     setPicked(next);

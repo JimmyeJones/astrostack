@@ -11,13 +11,17 @@ function cal(over: Partial<ActivityCalendar> = {}): ActivityCalendar {
     start_date: "2026-07-01",
     end_date: "2026-07-24",
     months: 12,
+    // Three nights, not two: with two, "the night before the most recent" and
+    // "the oldest night" are the same cell, and an arrow-key test cannot tell a
+    // one-night step from a jump to the far end of the grid.
     nights: [
+      { date: "2026-07-03", exposure_s: 1800, n_frames: 15, targets: ["M13"] },
       { date: "2026-07-10", exposure_s: 3600, n_frames: 30, targets: ["M31"] },
       { date: "2026-07-20", exposure_s: 600, n_frames: 5, targets: ["M42"] },
     ],
-    n_nights: 2,
-    total_exposure_s: 4200,
-    nights_this_month: 2,
+    n_nights: 3,
+    total_exposure_s: 6000,
+    nights_this_month: 3,
     best_streak_nights: 1,
     ...over,
   };
@@ -41,7 +45,7 @@ describe("ImagingCalendarCard", () => {
     renderCard();
     await waitFor(() =>
       expect(screen.getByText("Your imaging calendar")).toBeInTheDocument());
-    expect(screen.getByText(/imaged 2 nights this month/)).toBeInTheDocument();
+    expect(screen.getByText(/imaged 3 nights this month/)).toBeInTheDocument();
     expect(screen.getByLabelText("Imaging activity by night")).toBeInTheDocument();
   });
 
@@ -77,7 +81,9 @@ describe("ImagingCalendarCard", () => {
     const recent = screen.getByRole("button", { name: /20 Jul 2026/ });
     expect(recent).toHaveAttribute("tabindex", "0");
 
-    // ArrowLeft steps to the earlier night, and the read-out follows.
+    // ArrowLeft steps ONE night back from where the focus is — 10 Jul, not the
+    // oldest night in the grid. Stepping from "nothing is picked" instead of
+    // from the focused cell would answer this press by jumping to 3 Jul.
     fireEvent.keyDown(recent, { key: "ArrowLeft" });
     expect(await screen.findByText(/10 Jul 2026 · 1\.0 h across M31/))
       .toBeInTheDocument();
@@ -87,7 +93,11 @@ describe("ImagingCalendarCard", () => {
     // …and it stops at the oldest night rather than wrapping round the year.
     fireEvent.keyDown(screen.getByRole("button", { name: /10 Jul 2026/ }),
       { key: "ArrowLeft" });
-    expect(screen.getByText(/10 Jul 2026 · 1\.0 h across M31/)).toBeInTheDocument();
+    expect(await screen.findByText(/3 Jul 2026 · .* across M13/))
+      .toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("button", { name: /3 Jul 2026/ }),
+      { key: "ArrowLeft" });
+    expect(screen.getByText(/3 Jul 2026 · .* across M13/)).toBeInTheDocument();
   });
 
   it("renders nothing on a library with no imaged nights", async () => {
