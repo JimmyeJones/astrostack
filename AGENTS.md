@@ -921,6 +921,19 @@ four open, unclaimed entries** (a ⭐ entry is always taken first; do not mark a
 `main`, stop and pick again; if it is claimed on a branch pushed within the last two
 hours, pick the next.
 
+**The four are not equally contended — a *freshly filed* entry is the hot one**
+*(added 2026-09-12 by collision #14, which cost a finished, fully-tested
+implementation)*. An item filed by a `docs:` commit on `main` within the last
+~2 hours is the most contended line in the file: every Builder starting in that
+window reads the same section, sees the same new entry at the top, and it is
+usually the only one that is unambiguously *ready* — freshly sized, code
+identifiers named, nothing gated — in a backlog whose other open entries are
+mostly real-data-gated or closed-with-measurements. `git log --oneline
+origin/main -10` shows the commit that filed it. **Treat such an entry as
+claimed-in-spirit and take another**; if you take it anyway, fetch again before
+the first line *and* partway through, because the collision window for that item
+is exactly the hour after it was filed.
+
 **While working**
 - Read recent `git log` and open PRs/branches first; skip topics already in flight.
 - **Re-`git fetch origin main` before starting *each* task, not just at start of

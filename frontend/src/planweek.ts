@@ -5,6 +5,7 @@
 // night") are testable without a DOM, exactly as `tonight.ts` is.
 
 import type { PlanWeek, TargetBestNight, WeekNight } from "./api/client";
+import { formatMinutes } from "./tonight";
 
 // A night's own local date, as the backend labels it: the calendar date of the
 // *evening* the darkness belongs to. Parsed at local noon so a timezone offset
@@ -139,4 +140,25 @@ export function weekMoonNote(night: WeekNight): string | null {
   if (night.moon_illumination < 0.4) return null;
   const pct = Math.round(night.moon_illumination * 100);
   return up >= 0.9 ? `Moon ${pct}%, up all night` : `Moon ${pct}%, up part of the night`;
+}
+
+/**
+ * How long that night's darkness is — *or*, for a night already under way, how
+ * much of it is left. "8.3 h dark" / "5.9 h left".
+ *
+ * The planner clips an ongoing window to "now" so it never offers darkness that
+ * has already gone (`upcoming_dark_windows`), which makes the first row's number
+ * a different quantity from every other row's — and from the Tonight page's own
+ * header, which quotes the *whole* night ("8.3 h of darkness") a few inches
+ * above. Printing both as "N dark" left one page saying a night is 8.3 h and
+ * 5.9 h long at the same time. "left" is the word the Dashboard's "About 2 h of
+ * dark sky left tonight" already uses for exactly this number, so the app keeps
+ * one vocabulary rather than inventing a second.
+ *
+ * An older backend sends no flag, and "how long is this night" is the right
+ * reading of every un-flagged row — so the wording is unchanged there.
+ */
+export function weekDarkPhrase(night: WeekNight): string {
+  const span = formatMinutes(night.dark_minutes);
+  return night.dark_in_progress === true ? `${span} left` : `${span} dark`;
 }
