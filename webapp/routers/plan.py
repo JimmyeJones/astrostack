@@ -256,6 +256,11 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
             recent_pace_s=pace_s,
             field_fulls=field_fulls,
             recentre_nudge=nudge,
+            # The same verdict a *catalog* row of this object already carries.
+            # `identify_object` above computed it either way; only the library
+            # branch was dropping it, which is why M 33 read "Challenging" until
+            # the owner shot it and then read as nothing at all.
+            difficulty=info.difficulty if info is not None else None,
         ))
     return out
 

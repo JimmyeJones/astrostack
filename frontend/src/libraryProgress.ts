@@ -60,6 +60,10 @@ export function rankLibraryProgress(rows: TargetProgress[]): RankedProgress[] {
       row.object_type,
       row.goal_s == null ? null : row.goal_s / 3600,
       row.field_fulls,
+      // The same vetted verdict the Target page judges this target by, so the
+      // Dashboard's "how much longer?" and that page's "is it enough yet?" are
+      // two renderings of one number rather than two answers.
+      row.difficulty,
     );
     // integrationReadiness only returns null at zero integration, which the
     // backend already excludes — but guard defensively so a stray row is

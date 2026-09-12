@@ -444,7 +444,8 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
         blurb=info.blurb,
         difficulty=(DifficultyHintOut(level=info.difficulty.level,
                                       label=info.difficulty.label,
-                                      text=info.difficulty.text)
+                                      text=info.difficulty.text,
+                                      curated=info.difficulty.curated)
                     if info.difficulty is not None else None),
         background_mode_hint=(
             BackgroundModeHintOut(mode=info.background_mode_hint.mode,

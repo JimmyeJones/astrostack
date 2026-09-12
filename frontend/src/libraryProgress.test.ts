@@ -18,6 +18,7 @@ function row(over: Partial<TargetProgress> & { safe: string }): TargetProgress {
     goal_s: over.goal_s ?? null,
     recent_pace_s: over.recent_pace_s ?? null,
     field_fulls: over.field_fulls ?? null,
+    difficulty: over.difficulty ?? null,
   };
 }
 
@@ -25,6 +26,31 @@ describe("rankLibraryProgress", () => {
   it("drops targets with no integration", () => {
     const ranked = rankLibraryProgress([row({ safe: "A", total_exposure_s: 0 })]);
     expect(ranked).toHaveLength(0);
+  });
+
+  it("judges a row by the goal its vetted difficulty gives it", () => {
+    // Two galaxies, the same 3.2 h, the same 6 h per-type bucket — and the
+    // catalog knows one is a bright Andromeda and the other a Triangulum. Fails
+    // before: the card had the verdict on the row and threw it away, so it said
+    // "solid" about both while the Target page said "plenty" about one.
+    const [m31, m33] = rankLibraryProgress([
+      row({ safe: "M31", object_type: "galaxy", total_exposure_s: 3.2 * 3600,
+            difficulty: { level: "easy", label: "Easy", text: "", curated: true } }),
+      row({ safe: "M33", object_type: "galaxy", total_exposure_s: 3.2 * 3600,
+            difficulty: { level: "challenging", label: "Challenging", text: "",
+                          curated: true } }),
+    ]).sort((a, b) => a.row.safe.localeCompare(b.row.safe));
+    expect(m31.readiness.goalHours).toBe(3);
+    expect(m31.readiness.level).toBe("plenty");
+    expect(m33.readiness.goalHours).toBe(9);
+    expect(m33.readiness.level).toBe("solid");
+  });
+
+  it("leaves a row with no vetted verdict exactly as it was", () => {
+    const plain = rankLibraryProgress([
+      row({ safe: "A", object_type: "galaxy", total_exposure_s: 3.2 * 3600 }),
+    ])[0];
+    expect(plain.readiness.goalHours).toBe(6);
   });
 
   it("puts in-progress targets before ones with plenty, nearest-to-goal first", () => {

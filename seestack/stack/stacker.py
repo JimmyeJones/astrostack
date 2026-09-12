@@ -871,7 +871,15 @@ def combine_method(options: "StackOptions", n: int) -> str:
     mistake this project keeps finding."""
     if options.drizzle:
         return "drizzle"
-    if options.min_max_reject and n >= 3:
+    # ``MIN_MAX_MIN_FRAMES`` rather than the literal 3: this branch *is* the
+    # definition of "min/max runs", and the constant below is what four other
+    # sentences — the rejection-reach verdict, the stack-health note, the Jobs
+    # card and the Stack form's weighting caution — quote as the count it
+    # switches at. Naming it here means they cannot drift from the switch by a
+    # literal edit. (The sigma-clip floor below stays spelled out: the nearby
+    # ``DRIZZLE_REJECT_MIN_FRAMES`` is the *drizzle* pass's own floor, a
+    # different claim that happens to share the number.)
+    if options.min_max_reject and n >= MIN_MAX_MIN_FRAMES:
         return "min-max-reject"
     if options.sigma_clip and n >= 4:
         return "sigma-clip"
