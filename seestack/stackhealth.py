@@ -916,7 +916,12 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
         # printed opposite instructions about the same panel, the map's
         # "it's only a few minutes' difference at this stage, so it evens out on
         # its own as you keep shooting" directly above this note's "another
-        # night on that panel is what evens it out".
+        # night on that panel is what evens it out". *(The map's half of that
+        # quote is history: the same fixed phrase then turned out to describe a
+        # 30-second gap as "a few minutes", and ``_verdict_text`` now names the
+        # shortfall in the clause below's exact words. The two sentences on that
+        # page agree on the prescription because of this block, and on the size
+        # of the gap because of that one.)*
         #
         # So convert the shortfall to *time* and read it against the map's own
         # :data:`~seestack.mosaicmap.THIN_MIN_SHORTFALL_S` rather than inventing

@@ -205,6 +205,13 @@ def test_a_panel_only_minutes_behind_is_not_sent_out_for_another_night():
     cannot answer it — 3 subs against 6 reads 1.4× grainier whether that is
     half a minute or three hours behind.
 
+    *(The map no longer says the words quoted above: that same fixed phrase was
+    then found describing a 30-second gap as "a few minutes", and it now names
+    the shortfall in this note's exact closing clause — see
+    ``tests/test_mosaic_map.py::test_the_gap_the_card_names_is_the_one_it_just_printed``.
+    So the two sentences agree about the size of the gap as well as about what to
+    do; grep ``_verdict_text`` rather than the old string.)*
+
     Nothing is removed: the picture really is 1.4× grainier over a quarter of
     itself and the note still says so. Only the prescription follows the same
     threshold the map uses — the shape v0.406.2 gave the map's own ``behind``

@@ -327,12 +327,34 @@ def _verdict_text(panels: list[MosaicPanel], rows: int, cols: int,
         )
     if behind is not None:
         where = panel_position_words(behind.row, behind.col, rows, cols)
+        # Name the shortfall rather than characterising it. This branch fires for
+        # any gap below :data:`THIN_MIN_SHORTFALL_S`, i.e. anywhere in (0, 5 min],
+        # and "a few minutes' difference" — what it used to say — is only true at
+        # the very top of that range. On the bundled 2×2 sample the gap is **30
+        # seconds**, and the sentence read "about 30 s there against 1 min on a
+        # typical panel. It's only a few minutes' difference" — two figures of its
+        # own, then a third that contradicts their subtraction. Worse, the stack-
+        # health note directly beneath it on the same page has said "it's only
+        # about 30 s behind" since the fix that split these two prescriptions
+        # apart, so one picture carried two answers to "how far behind is it?".
+        # Same closing clause as that note now, from the same ``format_duration``,
+        # so the app keeps one vocabulary for how long an integration is.
+        gap_s = max(median_s - behind.exposure_s, 0.0)
+        # Provably positive here (``behind`` requires exposure < THIN_FRACTION ×
+        # a positive median), so this only guards the absurd printout a sub-second
+        # gap would give: "about 0 s behind".
+        behind_by = format_duration(gap_s) if gap_s >= 1.0 else ""
+        closing = (
+            f"It's only about {behind_by} behind, so it evens out on its own "
+            f"as you keep shooting."
+            if behind_by else
+            "It's barely behind at all, so it evens out on its own as you keep "
+            "shooting."
+        )
         return (
             f"Your {shape} mosaic is a little behind at the {where}: about "
             f"{format_duration(behind.exposure_s)} there against "
-            f"{format_duration(median_s)} on a typical panel. It's only a few "
-            f"minutes' difference at this stage, so it evens out on its own as "
-            f"you keep shooting."
+            f"{format_duration(median_s)} on a typical panel. {closing}"
         )
     return (
         f"All {len(panels)} panels of your {shape} mosaic have had a similar "
