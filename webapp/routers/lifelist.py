@@ -8,6 +8,10 @@ header.
 ``GET /api/life-list/grid.jpg`` renders that same list as one shareable poster —
 the squares you have filled with your own pictures, the rest still to shoot.
 
+``GET /api/life-list/tonight`` answers the other half of the page's own headline
+("pick one and point the scope at it tonight") — which of those catalog objects
+are actually above the horizon long enough this evening, best-first.
+
 Everything about it is read-only and offline: the catalog ships with the app,
 and the match reads only the target registry — no project DB is opened and no
 network is touched, so it is cheap enough to answer on every page load.
@@ -308,6 +312,83 @@ def get_life_list_counts(request: Request) -> LifeListCounts:
         lib.close()
     entries = catalog_capture_status(load_catalog(), targets)
     return LifeListCounts(**life_list_summary(entries))
+
+
+class LifeListTonightOut(BaseModel):
+    """Which of the bundled catalog's objects are genuinely shootable tonight.
+
+    Ids only, deliberately: the page already holds every object's name, blurb and
+    thumbnail from ``GET /api/life-list``, so repeating them here would be a
+    second description of the same rows that could drift from the first. This
+    answers exactly one question about each of them.
+
+    ``ids`` is **best-first**, in the planner's own ranking, because in this view
+    catalog order says nothing — "which of these should I point at tonight?" is
+    the whole question, and the answer has an order.
+
+    Empty — so the filter simply isn't offered — when no observing location is
+    known, when the Sun never sets, or when nothing clears the altitude floor
+    for long enough. ``location_source`` says which, so the UI can explain
+    instead of silently showing nothing.
+    """
+
+    ids: list[str]
+    #: How the observing site was resolved: "settings" / "fits" / "none".
+    location_source: str = "none"
+    #: The altitude floor the answer was measured against, so the page can say
+    #: what "up" meant rather than implying a rule of its own.
+    min_altitude_deg: int = 0
+
+
+@router.get("/api/life-list/tonight", response_model=LifeListTonightOut)
+def get_life_list_tonight(
+    request: Request,
+    when: str | None = Query(default=None,
+                             description="ISO-8601 UTC reference; defaults to now"),
+    min_alt: int | None = Query(default=None, ge=0, le=80),
+) -> LifeListTonightOut:
+    """"Of the 110 still ahead of me, which can I actually shoot tonight?"
+
+    The life list's own headline invites a beginner to *"pick one and point the
+    scope at it tonight"*, and then shows them the catalog in Messier order —
+    where the first dozen tiles are M1…M12, a set chosen in the 1770s and with no
+    relationship at all to what is above the horizon this evening. Half of them
+    are routinely below it, and a beginner has no way to tell which. This is the
+    missing half of that sentence.
+
+    It adds **no new scoring and no new data**: the objects are the ones already
+    bundled, and "is it up?" is the same dark-window / altitude / Moon blend
+    (:func:`seestack.nightplan.well_placed_tonight`) that the Tonight page, the
+    wishlist nudge and the nearly-there card all use — so a life-list tile and a
+    Tonight row can never disagree about the same object. Read-only and offline.
+
+    Its own route rather than a field on ``GET /api/life-list`` because this one
+    costs an astropy pass over the whole catalog while that one is a registry
+    walk: the page that only wants the tiles should not pay for the ephemeris,
+    and a client too old to ask simply never does.
+    """
+    from seestack.nightplan import HorizonProfile, well_placed_tonight
+    from webapp.routers.plan import _resolve_observer
+
+    start = _reference_time(when)
+    settings = deps.get_settings(request)
+    observer, location_source = _resolve_observer(request, settings)
+    min_altitude = min_alt if min_alt is not None else int(settings.min_target_altitude_deg)
+    if observer is None:
+        return LifeListTonightOut(ids=[], location_source=location_source,
+                                  min_altitude_deg=min_altitude)
+
+    placed = well_placed_tonight(
+        observer, start, load_catalog(),
+        min_altitude_deg=float(min_altitude),
+        limit=None,  # the filter needs all of them, not a shortlist
+        horizon=HorizonProfile.from_pairs(settings.horizon_profile),
+    )  # best-first
+    return LifeListTonightOut(
+        ids=[p.id for p in placed],
+        location_source=location_source,
+        min_altitude_deg=min_altitude,
+    )
 
 
 @router.get("/api/life-list", response_model=LifeListResponse)

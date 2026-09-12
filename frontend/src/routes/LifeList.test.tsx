@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LifeListView } from "./LifeList";
+import { applyFilter, LifeListView } from "./LifeList";
 import * as client from "../api/client";
 import type { LifeList, LifeListItem } from "../api/client";
 
@@ -280,6 +280,113 @@ describe("LifeListView", () => {
     expect(screen.getByText(/All 110 squares as one picture/)).toBeInTheDocument();
   });
 
+  // "Up tonight" — the other half of this page's own headline. The list invites
+  // a beginner to "pick one and point the scope at it tonight" and then shows
+  // them M1…M12, an order chosen in the 1770s with no relationship to what is
+  // above the horizon this evening.
+  const upTonight = (ids: string[], over: Partial<client.LifeListTonight> = {}) => ({
+    ids, location_source: "settings", min_altitude_deg: 30, ...over,
+  });
+
+  it("offers no 'Up tonight' chip when the sky can't answer", async () => {
+    // No observing location set, an older backend (the route 404s), or a night
+    // on which nothing clears the floor: the page is exactly the page it was,
+    // minus one chip — never an error and never an empty view.
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list());
+    vi.spyOn(client.api, "lifeListTonight")
+      .mockResolvedValue(upTonight([], { location_source: "none" }));
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("M42 · Orion Nebula")).toBeInTheDocument());
+    expect(screen.queryByText("Up tonight")).not.toBeInTheDocument();
+  });
+
+  it("keeps the page whole when the tonight route isn't there at all", async () => {
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list());
+    vi.spyOn(client.api, "lifeListTonight").mockRejectedValue(new Error("404"));
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("M42 · Orion Nebula")).toBeInTheDocument());
+    expect(screen.queryByText("Up tonight")).not.toBeInTheDocument();
+    // A filter that can't be offered must not become the page's error card.
+    expect(screen.queryByText("404")).not.toBeInTheDocument();
+  });
+
+  it("narrows the list to what is actually shootable tonight", async () => {
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list());
+    vi.spyOn(client.api, "lifeListTonight").mockResolvedValue(upTonight(["M42"]));
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Up tonight")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Up tonight"));
+
+    expect(screen.getByText("M42 · Orion Nebula")).toBeInTheDocument();
+    // M31 is captured and NGC 7000 is not — neither is up, so neither shows.
+    expect(screen.queryByText("M31 · Andromeda Galaxy")).not.toBeInTheDocument();
+    expect(screen.queryByText("NGC 7000 · North America Nebula")).not.toBeInTheDocument();
+    // The count and the altitude floor both come off the answer, not the
+    // browser — and one object is "One object … climbs", not "1 objects".
+    expect(screen.getByText(/One object on this list climbs above 30°/))
+      .toBeInTheDocument();
+  });
+
+  it("orders tonight's view by the planner's answer, not by catalog number", async () => {
+    // This is the one view where catalog order says nothing: "which of these
+    // should I point at this evening?" has a best answer, and the server ranks
+    // it. M42 is second in the catalog half below and first in the sky.
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list({
+      messier: [
+        obj({ catalog_id: "M1", name: "Crab Nebula" }),
+        obj({ catalog_id: "M42", name: "Orion Nebula" }),
+        obj({ catalog_id: "M45", name: "Pleiades" }),
+      ],
+      other: [],
+      counts: { messier_captured: 0, messier_total: 110, other_captured: 0, other_total: 47 },
+    }));
+    vi.spyOn(client.api, "lifeListTonight")
+      .mockResolvedValue(upTonight(["M45", "M42", "M1"]));
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Up tonight")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Up tonight"));
+
+    const titles = screen.getAllByText(/^M\d+ · /).map((e) => e.textContent);
+    expect(titles).toEqual(["M45 · Pleiades", "M42 · Orion Nebula", "M1 · Crab Nebula"]);
+    // ...and the plural branch of the same sentence.
+    expect(screen.getByText(/3 objects on this list climb above 30°/))
+      .toBeInTheDocument();
+  });
+
+  it("never shortens tonight's list either — the sky already narrowed it", async () => {
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list({
+      messier: many(30, false), other: [],
+      counts: { messier_captured: 0, messier_total: 30, other_captured: 0, other_total: 0 },
+    }));
+    vi.spyOn(client.api, "lifeListTonight").mockResolvedValue(
+      upTonight(Array.from({ length: 30 }, (_, i) => `M${i + 1}`)));
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Up tonight")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Up tonight"));
+
+    expect(screen.getByText("M30 · Object 30")).toBeInTheDocument();
+    expect(screen.queryByText(/Show all 30/)).not.toBeInTheDocument();
+  });
+
+  it("says why a half is empty tonight instead of claiming you've got them all", async () => {
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list());
+    // Only a Messier object is up, so the "Also worth getting" half has none —
+    // and its usual empty line ("You've got every one of these") would be a lie.
+    vi.spyOn(client.api, "lifeListTonight").mockResolvedValue(upTonight(["M42"]));
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Up tonight")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Up tonight"));
+
+    expect(screen.getByText(/they're a different season's sky/)).toBeInTheDocument();
+    expect(screen.queryByText(/You've got every one of these/)).not.toBeInTheDocument();
+  });
+
   it("hides the share offer on a fresh install", async () => {
     // A grid of grey squares is a picture of Messier's catalogue, not of your
     // sky — and the endpoint 404s there, so the button must not be offered.
@@ -295,5 +402,39 @@ describe("LifeListView", () => {
     await waitFor(() => expect(screen.getByText(/All 110 Messier objects are still ahead/))
       .toBeInTheDocument());
     expect(screen.queryByRole("link", { name: /Share my grid/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("applyFilter", () => {
+  const items = [
+    obj({ catalog_id: "M1", captured: false }),
+    obj({ catalog_id: "M31", captured: true }),
+    obj({ catalog_id: "M42", captured: false }),
+  ];
+  const ids = (xs: typeof items) => xs.map((i) => i.catalog_id);
+
+  it("leaves catalog order alone for every view except tonight's", () => {
+    expect(ids(applyFilter(items, "all", null))).toEqual(["M1", "M31", "M42"]);
+    expect(ids(applyFilter(items, "captured", null))).toEqual(["M31"]);
+    expect(ids(applyFilter(items, "todo", null))).toEqual(["M1", "M42"]);
+    // A rank map must not reorder a view that isn't tonight's.
+    const rank = new Map([["M42", 0], ["M1", 1], ["M31", 2]]);
+    expect(ids(applyFilter(items, "all", rank))).toEqual(["M1", "M31", "M42"]);
+  });
+
+  it("keeps only what is ranked, in the planner's order", () => {
+    const rank = new Map([["M42", 0], ["M1", 1]]);
+    expect(ids(applyFilter(items, "tonight", rank))).toEqual(["M42", "M1"]);
+  });
+
+  it("keeps a captured object that is up — the filter is about sky, not collection", () => {
+    expect(ids(applyFilter(items, "tonight", new Map([["M31", 0]])))).toEqual(["M31"]);
+  });
+
+  it("shows nothing rather than everything when there is no answer to filter by", () => {
+    // `effectiveFilter` in the view should never let this happen; if it ever
+    // did, an unfiltered, unordered "tonight" list would be a claim about the
+    // sky that nothing measured.
+    expect(applyFilter(items, "tonight", null)).toEqual([]);
   });
 });

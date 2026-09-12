@@ -18,6 +18,66 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `claude/sweet-babbage-ogwqzh`) — the backlog was dry, so the browser found the task
+
+**The run.** Baseline green (5,888 Python tests). One task shipped: **v0.433.0** — "Up tonight" on the life
+list, a new beginner feature. Full entry in [`SHIPPED.md`](SHIPPED.md).
+
+**How it was picked, because the backlog did not supply it.** I read "Bugs (fix these first)" and the four
+priority sections of [`IMPROVEMENTS.md`](IMPROVEMENTS.md) end to end first. A script over the file — every
+top-level `- **` bullet in the Ideas region, minus any carrying a closure marker — leaves **13** entries with
+no stand-down on them, and of those, one is gated on real elongated-target data, one on a real mosaic's
+per-panel counts, one on real nebula data, one on "only if someone actually uploads a big archive", one on
+"only if the owner wants true per-frame bounding", two are perf watch-items explicitly marked *do not build
+on spec*, and the rest are sweeps whose named starting points have all already been closed. **"Features that
+serve real workflows" has no un-gated open entry at all**: the Moon-disc one shipped an hour earlier, the
+"N spots" half is measured and stood down, the constellation-lines half is gated on a dataset the app does
+not bundle (checked — `seestack/data/` holds `messier.json` and `deepsky_popular.json` and nothing else), and
+the crop one is a deliberate decline. So this run did what AGENTS.md §2 says to do at that point rather than
+manufacture work: it ran the app.
+
+**The dogfood pass (`--mosaic --editor`, then `--empty`): CLEAN on every measure it takes.** Mosaic trim
+7.9 % (a bug above ~15 %), 21 ops added and undone/redone on both the field and the mosaic run with no
+console error and no failed request, nothing overflowing at 420 px, tallest page 3,447 px (the mosaic Target
+page). The mosaic's own sentences were read together as §7 asks, and they hold: the panel map's *"a little
+behind at the top-right: about 30 s there against 1 min on a typical panel"*, the health panel's *"about 23 %
+of the picture has 3 subs where most of it has 6, so that part looks about 1.4× grainier… only about 30 s
+behind"*, and the History chip's `PANELS EVEN` (whose tooltip, since v0.406.1, says in the grain-uneven case
+that the evenness is of the **sky** and the grain is **depth**) all describe the same 6/6/6/3 canvas
+consistently.
+
+**The finding was not in any of that — it was in what the empty app *says* next to what it *shows*.** The
+life list's headline on a fresh install reads *"All 110 Messier objects are still ahead of you — pick one and
+point the scope at it tonight"*, and immediately below it the page draws M1…M12. Eight of those twelve are
+summer objects. Nothing on the screen distinguished the shootable from the unshootable, although the app has
+computed exactly that for the wishlist and the nearly-there card since v0.375.0. **This is the "CLEAN is a
+statement about console errors, not about sentences" lesson in its most literal form**: the probe was clean,
+the page was clean, and the defect was the *relationship* between one sentence and the twelve tiles under it.
+
+**A measured caution on a filed idea — do not build the wall-clock guard as specified** (the 2026-08-15 entry
+under "Infra / maintainability", *"a guard that no test may read the real clock"*). I sized it against the
+tree rather than from the entry's description and the numbers say it would over-fire badly, which is the
+failure mode its own Care note names. Today **12 Python test files and 3 frontend ones** read the real clock,
+and narrowing to the entry's actual bug class — a literal date *and* a clock read in the same file — still
+leaves **6 Python + 2 frontend**. The entry's claim that "the frontend has one such file" was true in August
+and is not now. And every one I inspected is safe: `tests/webapp/test_plan.py` has both, and all six of its
+clock reads are `now ± timedelta`, which is exactly the right way to write those tests; its date *literals*
+(`_date(2026, 7, 15)`, `"2026-13-40"`) never meet the clock. The `time.time()` cases are job-wait deadlines,
+i.e. durations, which cannot be date bombs at all. So the guard as filed would demand **eight to fifteen
+annotations on correct tests** to catch a class that today has zero instances. The precise rule — *a literal
+date compared against a value derived from the real clock* — is not greppable, which is why the entry reached
+for the loose one. **Leave it filed, but do not build the loose version**; if it is ever worth doing, it
+wants a mechanism (running a suite at a faked future date), not a grep.
+
+**Tooling note: `pytest-xdist` is not a dependency and should not become one, but it is worth installing into
+the venv for iteration.** The full suite is ~14 min at `-n 4` against roughly 2½ h serial. One test is
+load-sensitive and will fail spuriously there —
+`tests/webapp/test_skipped_folders.py::test_a_folder_that_has_left_incoming_is_forgotten` waits 60 s for a
+scan job and times out under 4-way contention (it passes serially, and the whole file passes in 93 s alone).
+`-n 3` leaves enough headroom. Do **not** read that failure as a red baseline.
+
+---
+
 ## 2026-09-12 (Builder, branch `claude/sweet-babbage-3xr6h8`) — one feature, and the fixture that would have shipped it untested
 
 **The run.** One task, merged as PR #851: **v0.432.0** — "Moon for scale", the full Moon drawn at its
