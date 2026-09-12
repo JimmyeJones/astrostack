@@ -270,6 +270,53 @@ describe("nextBestMove", () => {
       }
     });
 
+    it("follows the goal when the vetted difficulty sharpens it", () => {
+      // The same agreement property, asked across the *other* axis the goal
+      // moves on. A curated verdict changes what "enough" means, and a ladder
+      // that kept the per-type bars would contradict the card again — this time
+      // on M31 and M33 rather than on a star cluster.
+      const expected: Record<ReadinessLevel, NextBestMoveKind | null> = {
+        starting: "integration",
+        solid: "good",
+        close: null,
+        plenty: null,
+      };
+      for (const level of ["easy", "moderate", "challenging"]) {
+        const difficulty = { level, curated: true };
+        for (const type of ["Galaxy", "Emission Nebula", "Quasar"]) {
+          for (const hours of [0.3, 1.2, 2, 3.5, 5, 8, 12]) {
+            const seconds = hours * HOUR;
+            const card = integrationReadiness(seconds, type, null, null, difficulty);
+            const tip = nextBestMove({
+              nFramesUsed: 200, integrationS: seconds, objectType: type,
+              difficulty,
+            });
+            expect(
+              [level, type, hours, tip?.kind ?? null],
+            ).toEqual([level, type, hours, expected[card!.level]]);
+          }
+        }
+      }
+    });
+
+    it("moves the bars with the curated verdict, and only with it", () => {
+      // Fails before: `integrationBars` took the per-type goal whatever the
+      // catalog knew about the object, so an easy galaxy's rungs sat at a
+      // challenging one's.
+      const easy = integrationBars("Galaxy", { level: "easy", curated: true });
+      const hard = integrationBars("Galaxy", { level: "challenging", curated: true });
+      expect(easy.shortS).toBeCloseTo(0.25 * 3 * HOUR, 6);
+      expect(hard.shortS).toBeCloseTo(0.25 * 9 * HOUR, 6);
+      // The cluster type rule restates the bucket, so it moves nothing…
+      expect(integrationBars("Open Cluster", { level: "easy", curated: false }))
+        .toEqual(integrationBars("Open Cluster"));
+      // …and so does every shape of "no verdict".
+      for (const d of [null, undefined, { level: "easy" }]) {
+        expect(integrationBars("Galaxy", d as never))
+          .toEqual(integrationBars("Galaxy"));
+      }
+    });
+
     it("asks the same question of one panel of a mosaic", () => {
       // The card scales the goal by field-fulls; this ladder divides the light
       // by them instead. Same ratio, so the agreement above must survive it.

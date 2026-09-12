@@ -32,7 +32,8 @@ function SuggestionRow(
   // those panels would take at this owner's own measured pace — silent for a
   // first-timer with no pace yet, and on an older backend.
   const framingBadge = withMosaicEffort(
-    framingRowBadge(s.framing, s.mosaic), s.mosaic, s.type, usualPaceS);
+    framingRowBadge(s.framing, s.mosaic), s.mosaic, s.type, usualPaceS,
+    s.difficulty);
   const difficultyBadge = difficultyRowBadge(s.difficulty);
   return (
     <Paper withBorder p="sm" radius="sm" bg="var(--mantine-color-body)">

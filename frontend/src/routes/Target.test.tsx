@@ -596,6 +596,41 @@ describe("TargetView readiness card", () => {
     ).toBeInTheDocument();
   });
 
+  it("quotes the goal the object's own difficulty earns it, not its type's", async () => {
+    // The same 3 h on the same galaxy as the case above — but this time the
+    // identify card carries the vetted verdict it really has. M31 is curated
+    // "easy", so its goal is 3 h and 3 h of it is finished.
+    //
+    // Fails before: the page printed "Bright and rewarding — it usually looks
+    // good in well under an hour" as a badge and "3.0 h of ~6 h — a solid
+    // start" two cards up, two sentences in the same units disagreeing about
+    // one question, with the answer sitting in the app's own catalog.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 3 * 3600 }),
+    );
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+      difficulty: {
+        level: "easy", label: "Easy",
+        text: "Bright and rewarding — a great target to start with.",
+        curated: true,
+      },
+    });
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByText("Is it enough yet?")).toBeInTheDocument());
+    expect(screen.getByText(/goal ~3 h/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/3\.0 h — plenty for a clean image/),
+    ).toBeInTheDocument();
+  });
+
   it("rounds a mosaic's per-panel-scaled goal in the chip (no raw 14.526171875 h)", async () => {
     // A nebula (4 h/field default) shot as a 3.63-field mosaic scales the goal to
     // 4 × 3.63… = 14.526171875 h. The verdict already rounds via fmtGoal; the

@@ -183,11 +183,23 @@ class DifficultyHint:
     ``level`` is a stable machine token the UI can style on ("easy" | "moderate" |
     "challenging"); ``label`` is the one-word badge text ("Easy"…); ``text`` is the
     ready-to-render beginner sentence (self-contained — it names no object).
+
+    ``curated`` says **where the verdict came from**: ``True`` for the hand-curated
+    per-object table, ``False`` for the "star clusters and star fields are easy"
+    type rule. The badge reads the same either way, but the two carry different
+    amounts of information, and a caller that wants to *act* on the verdict has to
+    know which it holds. The type rule says nothing a per-type answer does not
+    already know (every cluster is easy, so "easy" adds nothing to "cluster");
+    the curated table is the opposite — it is the only place in this app that can
+    tell M31 from M33, which share a type and a bucket and sit at opposite ends of
+    hard-for-a-Seestar. So the integration goal in ``readiness.ts`` moves on a
+    curated verdict and stands still on a type-rule one.
     """
 
     level: str
     label: str
     text: str
+    curated: bool = False
 
 
 def _norm_id(object_id: str) -> str:
@@ -211,10 +223,12 @@ def target_difficulty(
     so an un-vetted object never gets a guessed verdict.
     """
     level = _CURATED.get(_norm_id(object_id))
+    curated = level is not None
     if level is None:
         t = (object_type or "").strip().lower()
         if t in _EASY_TYPES:
             level = "easy"
     if level is None:
         return None
-    return DifficultyHint(level=level, label=_LABELS[level], text=_SENTENCES[level])
+    return DifficultyHint(level=level, label=_LABELS[level], text=_SENTENCES[level],
+                          curated=curated)

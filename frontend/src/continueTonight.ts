@@ -16,7 +16,7 @@
 // minutes reaches your goal" becomes a concrete, satisfying nudge rather than a
 // wall of catalog rows.
 
-import type { NightPlan, PlannedTarget } from "./api/client";
+import type { DifficultyHint, NightPlan, PlannedTarget } from "./api/client";
 import { integrationReadiness, type IntegrationReadiness } from "./readiness";
 
 export interface TonightPick {
@@ -39,6 +39,14 @@ export interface ContinueTonightPlan {
 // by `/api/library-progress` (`goal_s`). Optional — when a target has no custom
 // goal the per-type default (Galaxy 6 h, Nebula 4 h, …) is used instead.
 export type GoalSecondsBySafe = Record<string, number | null | undefined>;
+
+/** Vetted difficulty verdicts keyed by target `safe` name, from the same
+ * `/api/library-progress` rows the goals come from. Optional — a target with no
+ * vetted verdict, an older backend, or an omitted map all leave each pick judged
+ * against the plain per-type goal, exactly as before. It is threaded here rather
+ * than left out because this card decides which targets are *done* ("plenty"),
+ * and a target the Target page calls done has to be done here too. */
+export type DifficultyBySafe = Record<string, DifficultyHint | null | undefined>;
 
 /**
  * Choose the single owned target to continue tonight (plus a couple of
@@ -71,6 +79,7 @@ export function pickContinueTonight(
   goalSecondsBySafe?: GoalSecondsBySafe,
   maxRunnersUp = 2,
   alreadyRecommended?: Iterable<string> | null,
+  difficultyBySafe?: DifficultyBySafe,
 ): ContinueTonightPlan | null {
   const targets = plan?.targets;
   if (!targets || targets.length === 0) return null;
@@ -99,7 +108,8 @@ export function pickContinueTonight(
         ? goalSec / 3600
         : null;
     const readiness = integrationReadiness(
-      t.total_exposure_s ?? 0, t.type, goalHours, t.field_fulls);
+      t.total_exposure_s ?? 0, t.type, goalHours, t.field_fulls,
+      t.target_safe ? difficultyBySafe?.[t.target_safe] : null);
     return { target: t, readiness };
   });
 

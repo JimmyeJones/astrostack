@@ -3,6 +3,7 @@ import { Alert, Anchor, Text } from "@mantine/core";
 import { Link } from "react-router-dom";
 import { IconBulb } from "@tabler/icons-react";
 import { nextBestMove } from "./nextBestMove";
+import type { GoalDifficulty } from "../../readiness";
 import { softerThanUsual } from "./softStars";
 
 /**
@@ -30,6 +31,7 @@ export function NextBestMoveBadge(
     runs,
     fieldFulls,
     objectType,
+    difficulty,
   }: {
     name: string;
     nFramesUsed: number | null | undefined;
@@ -48,6 +50,10 @@ export function NextBestMoveBadge(
      * are judged against the same per-type goal the readiness card next to
      * this one uses. Optional — omitted reads exactly as before. */
     objectType?: string | null;
+    /** The target's vetted difficulty verdict (from the identify card), which
+     * sharpens that same per-type goal. Optional — omitted reads exactly as
+     * before. */
+    difficulty?: GoalDifficulty;
   },
 ) {
   const tip = useMemo(
@@ -59,8 +65,10 @@ export function NextBestMoveBadge(
         softStars: softerThanUsual(runs),
         fieldFulls,
         objectType,
+        difficulty,
       }),
-    [nFramesUsed, integrationS, nUnsolved, runs, fieldFulls, objectType],
+    [nFramesUsed, integrationS, nUnsolved, runs, fieldFulls, objectType,
+     difficulty],
   );
   if (!tip) return null;
 

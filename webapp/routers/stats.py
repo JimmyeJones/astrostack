@@ -21,6 +21,7 @@ from webapp import deps, video
 from webapp.capture_nights import capture_night_count, capture_night_range
 from webapp.goals import read_goal_s
 from webapp.registry_cache import cached_for_registry, registry_signature
+from webapp.schemas import DifficultyHintOut
 from webapp.site_location import resolve_night_key, resolve_site_lon
 
 router = APIRouter(tags=["stats"])
@@ -274,6 +275,16 @@ class TargetProgressOut(BaseModel):
     # an older backend — the frontend then falls back to 1.0 (today's
     # behaviour). See :mod:`webapp.field_fulls`.
     field_fulls: float | None = None
+    # This target's "how hard is it for a Seestar?" verdict, when the bundled
+    # catalog has a vetted one. Carried for the same reason ``object_type`` is:
+    # it is an input to the goal. The per-type goal cannot tell a bright compact
+    # galaxy from a large faint one (``readiness.ts`` says so in its own
+    # comment), and the curated half of this verdict is the only thing in the app
+    # that can — so a row that omits it is judged against the plain per-type goal,
+    # exactly as every row was before this field existed. Additive and optional:
+    # an older frontend ignores it; an older backend omitting it reads as "no
+    # vetted verdict", which is today's behaviour.
+    difficulty: DifficultyHintOut | None = None
 
 
 def _collect_progress(lib, targets, night_of=None) -> list[TargetProgressOut]:  # noqa: ANN001
@@ -324,8 +335,24 @@ def _collect_progress(lib, targets, night_of=None) -> list[TargetProgressOut]:  
             goal_s=goal_s,
             recent_pace_s=pace_s,
             field_fulls=field_fulls,
+            difficulty=_difficulty_out(info),
         ))
     return rows
+
+
+def _difficulty_out(info) -> DifficultyHintOut | None:  # noqa: ANN001 — ObjectInfo | None
+    """``info``'s vetted difficulty verdict as the wire shape, or ``None``.
+
+    Mirrors the one in :mod:`webapp.routers.targets` field for field — the Target
+    page's readiness card and the Dashboard's progress card judge the *same*
+    targets against the *same* goal, so a row that described the verdict
+    differently would be two answers to one question.
+    """
+    d = getattr(info, "difficulty", None) if info is not None else None
+    if d is None:
+        return None
+    return DifficultyHintOut(level=d.level, label=d.label, text=d.text,
+                             curated=d.curated)
 
 
 @router.get("/api/library-progress", response_model=list[TargetProgressOut])
