@@ -18,6 +18,86 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `claude/sweet-babbage-e9r1m0`) — the finding method asked of a *number and the sentence beside it*, and a clean dogfood that still handed over the bug
+
+**The run.** Two independently-green commits, merged as PR #849: **v0.431.0**
+(`readiness.goalDifficultyFactor` + `DifficultyHint.curated` — the integration
+goal stops quoting M31 and M33 the same 6 h) and **v0.431.1**
+(`tests/test_weighting_hint_mirror.py` + `combine_method` naming
+`MIN_MAX_MIN_FRAMES`). Full entries in [`SHIPPED.md`](SHIPPED.md). Backlog:
+"Bugs (fix these first)" was dry of anything ungated for the tenth consecutive
+run and there is no `READY` entry left, so neither task came from it.
+
+### The dogfood pass was CLEAN, again, and again that was not the answer
+
+`agent-dogfood.sh --mosaic --editor` then `--empty`: both exit 0, 7.9 % Auto
+trim on the mosaic (the ~15 % bar), all 21 editor ops re-rendering on *both*
+samples, undo/redo fine, nothing overflowing, no console errors. The mosaic
+narrative block cohered too — panel map, `grain_uneven`, `seams_flat` all agree
+at √(6/3) = 1.41. That is now two consecutive runs recording a clean sweep of
+the same ground (the Scout's #848 said the same thing four hours earlier).
+
+The bug was on a page that pass had just photographed, and the screenshot is
+where it was found — not by asking "did anything error?" but by reading the
+Target page as a beginner and asking whether the sentences could be held at
+once. **Treat a clean dogfood as a finished checklist and a fresh set of
+screenshots, not as a verdict.**
+
+### The finding method, extended again: a number and the sentence beside it
+
+09-11 asked *"does the app state one fact in two places, and do the two
+agree?"* of prose. 09-12 asked it of **constants and orderings**. This run
+asked it across the seam between the two — a rendered **number** against the
+**English sentence next to it** — which is where it had been hiding in plain
+sight:
+
+- the badge: *"Bright and rewarding … it usually looks good in well under an hour"*
+- the card two inches up: *"3.0 h of ~6 h — a solid start"*
+
+Both about M31, both in hours, both answering "how much does this need?".
+
+**The tell that makes this reusable: a comment that apologises.** `readiness.ts`
+did not hide the gap — it says *"The coarse buckets can't tell a bright emission
+nebula from a faint one, so Nebula sits at a middle-ground 4 h."* And
+`target_difficulty.py`'s docstring says it exists for exactly that case, naming
+the same two objects. **A module that documents its own blind spot, next to a
+module whose docstring says it fills one, is a bug you can find by reading two
+docstrings.** Worth grepping for deliberately: "can't tell", "coarse",
+"middle-ground", "rough", "approximation".
+
+### Two design calls worth carrying forward
+
+1. **A verdict is not automatically actionable — ask where it came from.**
+   `target_difficulty` reaches "easy" two ways: a hand-curated per-object table,
+   and the rule that clusters are uniformly easy. The badge reads the same
+   either way, and the naive fix would have acted on both — halving the Cluster
+   goal for a fact the 1.5 h Cluster bucket had already priced in. The new
+   `curated` flag is derived, never hand-maintained, so it cannot drift as the
+   table grows. **When a value reaches one place by several routes, the routes
+   may not carry the same information.**
+2. **Threading the input everywhere was most of the work, and it found the
+   second bug.** A sharpened goal on the Target page and a coarse one on the
+   Dashboard is the same bug with the seam moved, so every consumer of
+   `goalHoursForType`/`integrationReadiness` had to take it. Walking that list
+   is what surfaced `nightplan.LibraryTarget` carrying no difficulty at all — a
+   *catalog* row has shown the verdict since the badge shipped, an
+   already-targeted row never did, so the object got harder to read about the
+   moment the owner started shooting it.
+
+### Two process notes
+
+- **The vite-build/pytest collision in AGENTS.md §7 is real and I walked into
+  it**: `npx vite build` ran while the full suite was in flight. It happened to
+  land outside the `tests/webapp` window (5860 passed, zero errors), but that
+  was luck. The rule stands, and the safe ordering is: pytest in the
+  background, frontend `tsc`/`vitest` alongside it (neither touches
+  `webapp/static`), and **`vite build` only once pytest has exited.**
+- **Fail-before was verified by scratch revert seven times**, per §8 — the
+  `curated` flag, both endpoint fields, the one line passing the verdict into
+  the readiness card, and both halves of the new drift guard. The readiness-card
+  one mattered most: the logic tests would all have stayed green with the wiring
+  removed.
+
 ## 2026-09-12 (Scout, branch `claude/admiring-brahmagupta-smudjs`) — webapp-routers sweep (rotation slot #4) CLEAN; mosaic+editor+empty dogfood CLEAN and coherent; one new beginner feature filed
 
 **The run.** No bug filed — everything traced or reproduced clean — and no code
