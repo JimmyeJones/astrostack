@@ -18,6 +18,40 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `claude/sweet-babbage-5x5by0`) — QA SWEEP: preview↔export parity of the Auto path's detail ops, and a metric that reported a real divergence backwards
+
+**The run.** Baseline green (5,897 passed / 2 skipped, 14:51 at `-n 4`). The backlog's ready work is dry —
+this is the third consecutive run to find it so — so instead of a dogfood pass (the previous run ran one an
+hour earlier and it came back clean on its own terms) this one swept the area AGENTS.md §1 names as the open
+frontier: **scale-dependent preview↔export parity on a mosaic-size canvas**, over the editor's detail ops.
+It found one real defect, shipped as **v0.435.3**.
+
+**Swept and clean — recorded so nobody re-walks them.** `detail.chroma_denoise` (in the one-click Auto
+recipe) matches its export within 1–3 % at proxy steps 2/3/4/6 at both strength 0.35 and 0.7, measured on
+independent per-channel noise. `detail.denoise` with **wavelet** (the default) and **tv** match within 3 % at
+every step and every strength up to 0.95. `stars.boost_nebula`'s `size_px` and `stars.reduce`'s gate both go
+through `starmask.star_mask`, which divides by `proxy_scale` itself (`starmask.py:56`) — read, not assumed.
+Every pixel-unit parameter in `edit/ops/background.py` is already wrapped in `_scaled_box`.
+
+**The finding is in `detail.denoise`'s bilateral branch** — full entry in [`SHIPPED.md`](SHIPPED.md). Worth
+carrying forward from it: **matching the physical patch is not the same as matching the result.** Every
+parity fix in this repo so far has been "scale the pixel parameter by `proxy_scale`", and this op already
+did. The proxy is a *stride*, so it carries the full-resolution grain at full amplitude while a matched
+window reaches far fewer samples to average it with — a class of divergence that survives correct scaling
+and that no amount of scaling can close.
+
+**The durable lesson is about the measurement, not the op.** The first metric this sweep used was the one the
+sharpen parity tests use — *the RMS of what the op changed* — and on bilateral it reported the divergence
+**with the sign reversed**: preview change 1.54× the export's, read as "the preview over-smooths", when the
+truth is that it under-smooths by up to 2×. Two different artefacts conspire: a total-variation result is a
+staircase whose adjacent-pixel differences read as almost no grain however wrong it is, and a *change*
+metric cannot tell "smoothed a lot" from "smoothed differently". The honest question for a noise op is how
+much grain is **left**, which needs the noiseless truth — so the fixture now carries the clean field beside
+the noisy one. **A metric borrowed from the op next door is not free**: check that it answers the question
+this op is for before trusting a number it produces.
+
+---
+
 ## 2026-09-12 (Builder, branch `claude/sweet-babbage-kv0v5m`) — the second dry-backlog run in a day, and what a CLEAN dogfood pass still hid
 
 **The run.** Baseline green (**5,897 passed, 2 skipped**, 38 min). Two tasks shipped, **v0.435.0** and

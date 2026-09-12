@@ -39,6 +39,7 @@ import { applyDataDrivenDefaults, countDataDrivenDefaults, type OpSuggestion }
 import { deconvUnderstatesCaption } from "../components/editor/deconvPreview";
 import { starReduceDiffersCaption } from "../components/editor/starReducePreview";
 import { sharpenUnderstatesCaption } from "../components/editor/sharpenPreview";
+import { denoiseUnderstatesCaption } from "../components/editor/denoisePreview";
 import { hotPixelsSkippedCaption } from "../components/editor/hotPixelsPreview";
 import { FullSizeCheck } from "../components/editor/FullSizeCheck";
 import { canNeutraliseSkyCast, neutraliseBackgroundOps, skyCastCaption }
@@ -2128,6 +2129,18 @@ export function EditorView() {
                 <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
                   style={{ flexShrink: 0, marginTop: 2 }} />
                 <Text size="xs" c="dimmed">{sharpenUnderstatesCaption(hist.data)}</Text>
+              </Group>
+            ) : null}
+            {/* Noise reduction's bilateral method smooths the right *patch* on
+                the proxy but reaches far fewer samples inside it, so the preview
+                keeps visibly more grain than the export will. Say so, or the user
+                pushes the strength up until the preview looks clean and saves a
+                picture smoothed twice as hard. Advisory only. */}
+            {denoiseUnderstatesCaption(hist.data) ? (
+              <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+                <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="dimmed">{denoiseUnderstatesCaption(hist.data)}</Text>
               </Group>
             ) : null}
             {/* Hot-pixel removal can't run on a strided proxy without mistaking

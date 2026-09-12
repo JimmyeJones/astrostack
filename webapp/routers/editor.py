@@ -28,6 +28,7 @@ from seestack.edit.histogram import (
 )
 from seestack.edit.ops.detail import (
     deconv_understates_on_proxy,
+    denoise_understates_on_proxy,
     hot_pixels_skipped_on_proxy,
     sharpen_understates_on_proxy,
 )
@@ -1879,6 +1880,23 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
             op.enabled and op.id == "detail.sharpen"
             and sharpen_understates_on_proxy(
                 float(op.params.get("radius", 2.0)), float(scale))
+            for op in rec.ops
+        )
+        # Noise reduction's *bilateral* method leaves visibly more grain in the
+        # preview than in the export: the proxy carries the full-res grain at full
+        # amplitude (a stride is not an average) while the physically-matched
+        # window reaches far fewer samples to average it with. Measured at up to
+        # 2x the export's remaining grain at the strengths and mosaic proxy steps
+        # this owner reaches. The danger is the direction — someone who cannot see
+        # the smoothing pushes the strength up and over-smooths what they save —
+        # so say it rather than let the two diverge silently. Wavelet (the
+        # default) and TV agree with their export to within 3 % and are never
+        # flagged. Only enabled denoise ops count.
+        hist["denoise_preview_understates"] = any(
+            op.enabled and op.id == "detail.denoise"
+            and denoise_understates_on_proxy(
+                str(op.params.get("method", "wavelet")),
+                float(op.params.get("strength", 0.5)), float(scale))
             for op in rec.ops
         )
         # Hot-pixel removal is skipped entirely on a decimated preview proxy: a

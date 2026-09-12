@@ -350,3 +350,189 @@ def test_the_star_reduce_flag_is_quiet_on_the_export_and_with_the_op_off():
     assert star_reduce_differs_on_proxy(0.0, 4.0) is False
     assert star_reduce_differs_on_proxy(float("nan"), 4.0) is False
     assert star_reduce_differs_on_proxy(2.0, float("inf")) is False
+
+
+# --------------------------------------------------------------------------- #
+# detail.denoise — the op whose *result* the proxy can't keep, even though its
+# footprint is scaled correctly
+# --------------------------------------------------------------------------- #
+
+def _synth_noisy_field(h: int = 1000, w: int = 1500, n_stars: int = 60,
+                       seed: int = 11, noise: float = 0.0030):
+    """``(clean, noisy, sky_mask)`` — the same field with and without grain.
+
+    Denoise parity cannot be judged by how much an op *changed*, the way sharpen
+    parity is: a filter that smooths a little and one that smooths a lot both
+    "change" the picture, and a total-variation result is a staircase whose
+    adjacent-pixel differences read as almost no grain at all however wrong it
+    is. The honest question is how much grain is **left** against the noiseless
+    truth — which a synthetic scene can answer exactly and a real stack cannot,
+    which is why this fixture carries both halves.
+    """
+    rng = np.random.default_rng(seed)
+    sky = 0.05
+    rad = 6
+    yy, xx = np.mgrid[-rad:rad + 1, -rad:rad + 1]
+    kern = np.exp(-(xx ** 2 + yy ** 2) / (2 * _STAR_SIGMA_PX ** 2)).astype(np.float32)
+    stars = np.zeros((h, w), dtype=np.float32)
+    ys = rng.integers(rad + 2, h - rad - 2, n_stars)
+    xs = rng.integers(rad + 2, w - rad - 2, n_stars)
+    amps = 10 ** rng.uniform(-1.4, -0.2, n_stars).astype(np.float32)
+    for y, x, a in zip(ys, xs, amps, strict=True):
+        stars[y - rad:y + rad + 1, x - rad:x + rad + 1] += a * kern
+
+    clean = np.empty((h, w, 3), dtype=np.float32)
+    noisy = np.empty((h, w, 3), dtype=np.float32)
+    grey = rng.normal(0.0, noise, size=(h, w)).astype(np.float32)
+    for c in range(3):
+        clean[..., c] = sky + stars
+        noisy[..., c] = sky + stars + grey
+    return (np.ascontiguousarray(clean), np.ascontiguousarray(noisy),
+            np.ascontiguousarray(stars < 1e-4))
+
+
+@pytest.fixture(scope="module")
+def _noisy_field():
+    return _synth_noisy_field()
+
+
+def _grain_left(img: np.ndarray, truth: np.ndarray, sky: np.ndarray) -> float:
+    """RMS of what is still wrong in the sky, against the noiseless truth."""
+    return float(np.sqrt(np.nanmean(
+        np.asarray(img - truth, dtype=np.float64)[sky] ** 2)))
+
+
+def _denoise_grain_ratio(_noisy_field, method: str, strength: float,
+                         step: int) -> float:
+    """Grain the preview leaves ÷ grain the export leaves, on the proxy grid."""
+    clean, noisy, sky = _noisy_field
+    params = {"method": method, "strength": strength}
+    proxy = np.ascontiguousarray(noisy[::step, ::step])
+    truth = np.ascontiguousarray(clean[::step, ::step])
+    sky_seen = np.ascontiguousarray(sky[::step, ::step])
+
+    previewed = _apply("detail.denoise", proxy, float(step), params)
+    exported = _apply("detail.denoise", noisy, 1.0, params)
+    export_seen = np.ascontiguousarray(exported[::step, ::step])
+
+    seen = _grain_left(export_seen, truth, sky_seen)
+    # The trap this file exists to avoid (AGENTS.md §8): an op that did nothing
+    # would leave both sides at the untouched proxy and every ratio below would
+    # read 1.00 for the wrong reason. Prove the export really smooths first —
+    # measured, the gentlest case here still removes over half the grain.
+    assert seen < 0.7 * _grain_left(proxy, truth, sky_seen), (
+        f"{method} at strength {strength} barely moved the grain, so this "
+        "fixture cannot show a preview/export divergence at all")
+    return _grain_left(previewed, truth, sky_seen) / seen
+
+
+@pytest.mark.parametrize("strength,step,least", [(0.9, 4, 1.5), (0.7, 3, 1.15)])
+def test_the_bilateral_denoise_preview_leaves_more_grain_than_the_export(
+        _noisy_field, strength, step, least):
+    """Bilateral noise reduction scales its spatial sigma by ``proxy_scale``, so
+    the preview smooths the same *physical* patch of sky as the export — and still
+    leaves visibly more grain, because a stride is not an average: the proxy
+    carries the full-resolution grain at full amplitude while the matched window
+    reaches a handful of samples instead of ~25.
+
+    Measured (see ``_BILATERAL_ADVISORY_RATIO``): strength 0.9 on a step-4 proxy
+    leaves **1.9-2.2x** the grain the export will, and 0.7 on step 3 leaves
+    **1.24-1.29x**. The danger is the direction — someone who cannot see the
+    smoothing pushes the strength up and over-smooths the picture they save — so
+    the advisory has to fire on exactly these cases.
+    """
+    from seestack.edit.ops.detail import denoise_understates_on_proxy
+
+    ratio = _denoise_grain_ratio(_noisy_field, "bilateral", strength, step)
+    assert ratio >= least, (
+        f"bilateral at strength {strength} on proxy step {step} now leaves "
+        f"{ratio:.2f}x the export's grain — if the preview has genuinely caught "
+        "up, retire the advisory rather than leaving it lying")
+    assert denoise_understates_on_proxy("bilateral", strength, float(step)) is True
+
+
+@pytest.mark.parametrize("method", ["wavelet", "tv"])
+def test_the_other_denoise_methods_preview_what_they_export(_noisy_field, method):
+    """Wavelet (the default) and total-variation set their threshold from the
+    grain they are handed rather than from a fixed neighbourhood, so decimation
+    does not move their result — measured within 3 % at every proxy step. They
+    must never be flagged, or the advisory becomes a nag about nothing."""
+    from seestack.edit.ops.detail import denoise_understates_on_proxy
+
+    for step in (2, 4, 6):
+        ratio = _denoise_grain_ratio(_noisy_field, method, 0.9, step)
+        assert 0.9 <= ratio <= 1.1, (
+            f"{method} at proxy step {step} now leaves {ratio:.2f}x the export's "
+            "grain, so it needs an advisory of its own")
+        assert denoise_understates_on_proxy(method, 0.9, float(step)) is False
+
+
+def test_the_denoise_render_asks_for_the_same_sigma_it_always_has(_noisy_field):
+    """The advisory changed nothing about the picture. ``bilateral_sigma_spatial``
+    is the value the render passes to ``denoise_bilateral``, and it is still
+    ``max(0.5, 2.0 / proxy_scale)`` — in particular 2.0 on the export, where a
+    moved constant would silently re-render every saved picture."""
+    from seestack.edit.ops.detail import bilateral_sigma_spatial
+
+    assert bilateral_sigma_spatial(1.0) == 2.0
+    assert bilateral_sigma_spatial(0.5) == 2.0        # never widened below 1x
+    assert bilateral_sigma_spatial(2.0) == 1.0
+    assert bilateral_sigma_spatial(4.0) == 0.5
+    assert bilateral_sigma_spatial(6.0) == 0.5        # the floor, not 0.33
+
+
+def test_the_colour_blotch_smoothing_previews_what_it_exports(_noisy_field):
+    """``detail.chroma_denoise`` is in the one-click Auto recipe, and it is the op
+    behind the owner's worst reported mosaic result — v0.225.0, where a misread
+    noise measurement fired it at its full ceiling across a deep mosaic. Its radius
+    is a full-res pixel measure scaled by ``proxy_scale``, so it belongs in this
+    file; measured, it agrees with its export to within a few percent at every
+    proxy step, and nothing pinned that.
+
+    Measured on *independent per-channel* noise, because that is the only kind
+    this op is for: a fixture whose three channels share one noise field has no
+    colour blotches to smooth and would pass with the op doing nothing at all.
+    """
+    from seestack.edit.ops.detail import denoise_understates_on_proxy
+
+    clean, noisy, sky = _noisy_field
+    rng = np.random.default_rng(29)
+    # Re-noise per channel: same scene, but the grain now differs between R, G, B.
+    chroma_noisy = clean.copy()
+    for c in range(3):
+        chroma_noisy[..., c] += rng.normal(
+            0.0, 0.0030, size=clean.shape[:2]).astype(np.float32)
+
+    def colour_error(img, truth, mask):
+        """RMS of what is wrong in the *colour* (channel-difference) part only."""
+        dev = (img - img.mean(axis=-1, keepdims=True)) - (
+            truth - truth.mean(axis=-1, keepdims=True))
+        return float(np.sqrt(np.nanmean(np.asarray(dev, dtype=np.float64)[mask] ** 2)))
+
+    for strength in (0.35, 0.7):
+        params = {"strength": strength}
+        exported = _apply("detail.chroma_denoise", chroma_noisy, 1.0, params)
+        for step in (2, 4, 6):
+            proxy = np.ascontiguousarray(chroma_noisy[::step, ::step])
+            truth = np.ascontiguousarray(clean[::step, ::step])
+            sky_seen = np.ascontiguousarray(sky[::step, ::step])
+            previewed = _apply("detail.chroma_denoise", proxy, float(step), params)
+            export_seen = np.ascontiguousarray(exported[::step, ::step])
+
+            raw = colour_error(proxy, truth, sky_seen)
+            seen = colour_error(export_seen, truth, sky_seen)
+            # The trap this file exists to avoid (AGENTS.md §8): if the op did
+            # nothing, both sides would be the untouched proxy and the ratio
+            # below would be 1.00 for the wrong reason. Prove it is working
+            # first — at the gentler strength it still removes a third.
+            assert seen < 0.7 * raw, (
+                f"chroma_denoise at strength {strength} barely moved the colour "
+                f"grain ({seen / raw:.2f}x), so this fixture cannot show a "
+                "preview/export divergence at all")
+            ratio = colour_error(previewed, truth, sky_seen) / seen
+            assert 0.9 <= ratio <= 1.1, (
+                f"chroma_denoise at strength {strength} on proxy step {step} now "
+                f"leaves {ratio:.2f}x the export's colour grain — the preview and "
+                "the saved picture have stopped agreeing")
+    # ...and it is not the op the denoise advisory is about, at any scale.
+    assert denoise_understates_on_proxy("chroma", 0.9, 6.0) is False
