@@ -8,7 +8,8 @@ import {
   JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
   bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobHeaderNote,
   jobKindLabel,
-  calibrationMismatchNote, heldForSubsLine, missingSubsNote, readErrorsNote,
+  calibrationMismatchNote, heldForFilesLine, heldForSubsLine, missingSubsNote,
+  readErrorsNote,
   storageTroubleAlert,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
   rescueUnsolvedNote,
@@ -494,6 +495,31 @@ describe("pipelineSummary", () => {
     })).toContain("only 2 subs on it");
   });
 
+  it("words a missing-files hold about the panels when the mosaic is the reason", () => {
+    // The readable count can clear every floor in the chain while those subs lie
+    // one deep across the panels — so on a mosaic the count is not the story.
+    expect(heldForFilesLine({
+      target: "M 42", offered: 787, readable: 271, unreadable: 516,
+    })).toBe(": 516 of 787 subs couldn't be read (271 still readable).");
+    expect(heldForFilesLine({
+      target: "M 31", offered: 48, readable: 12, unreadable: 36,
+      panelDepth: 1, panels: 12,
+    })).toBe(
+      ": 36 of 48 subs couldn't be read (12 still readable), and those are "
+      + "spread over 12 panels — a typical part of the picture would have only "
+      + "1 sub on it.",
+    );
+    // Plural, and a panel count it can't trust degrades to the bare word.
+    expect(heldForFilesLine({
+      target: "M 31", offered: 48, readable: 12, unreadable: 36,
+      panelDepth: 2, panels: 0,
+    })).toContain("spread over panels");
+    expect(heldForFilesLine({
+      target: "M 31", offered: 48, readable: 12, unreadable: 36,
+      panelDepth: 2, panels: 4,
+    })).toContain("only 2 subs on it");
+  });
+
   it("tolerates a bare/empty summary and malformed held entries", () => {
     expect(pipelineSummary({}).line).toBe("No new frames.");
     const { held } = pipelineSummary({ auto_stack_held_thin: [null, "junk", { target: "X" }] });
@@ -513,7 +539,8 @@ describe("pipelineSummary", () => {
     });
     expect(line).toBe("No new frames · held 1 — some subs aren't on disk.");
     expect(heldFiles).toEqual([
-      { target: "M 42", offered: 787, readable: 271, unreadable: 516 },
+      { target: "M 42", offered: 787, readable: 271, unreadable: 516,
+        panelDepth: 0, panels: 0 },
     ]);
   });
 
@@ -522,7 +549,8 @@ describe("pipelineSummary", () => {
       auto_stack_held_unreadable: [null, "junk", { target: "X" }],
     });
     expect(heldFiles).toEqual([
-      { target: "X", offered: 0, readable: 0, unreadable: 0 },
+      { target: "X", offered: 0, readable: 0, unreadable: 0,
+        panelDepth: 0, panels: 0 },
     ]);
   });
 

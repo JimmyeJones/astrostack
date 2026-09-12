@@ -94,3 +94,38 @@ def test_hold_tolerates_a_malformed_entry(client, solved_library):
     must render nothing rather than 500 the Target page."""
     _finished_scan(client, {"auto_stack_held_unreadable": [None, "junk", {}]})
     assert client.get("/api/targets/M_42/autostack-hold").json() is None
+
+
+def test_the_mosaic_depth_travels_and_an_older_scans_record_reads_as_unknown(
+    client, solved_library,
+):
+    """The hold has two shapes, and the Target page needs to tell them apart.
+
+    A mosaic is held because the subs that can still be *read* lie one deep
+    across its panels — a fact the offered/readable/unreadable triple cannot
+    express, and one that makes "thinner than the picture you already have"
+    the wrong sentence (there may be no picture yet). The depth rides on the
+    same record; a scan recorded before it was measured reports ``0``, which
+    the note reads as "say nothing extra" rather than as "not a mosaic".
+    """
+    _finished_scan(client, {
+        "auto_stack_held_unreadable": [
+            {"target": "M_42", "offered": 48, "readable": 12, "unreadable": 36,
+             "prior_best": None, "panel_depth": 1, "panels": 12,
+             "reason": "too few of its readable subs land on each panel of the "
+                       "mosaic right now"},
+        ],
+    })
+    b = client.get("/api/targets/M_42/autostack-hold").json()
+    assert b["panel_depth"] == 1
+    assert b["panels"] == 12
+    assert "panel" in b["reason"]
+
+    _finished_scan(client, {
+        "auto_stack_held_unreadable": [
+            {"target": "M_42", "offered": 10, "readable": 4, "unreadable": 6},
+        ],
+    }, when="2026-08-26T03:00:00Z")
+    old = client.get("/api/targets/M_42/autostack-hold").json()
+    assert old["panel_depth"] == 0
+    assert old["panels"] == 0

@@ -18,6 +18,60 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `claude/sweet-babbage-uawq1j`) — one bug in the guard *after* the one that was already fixed, and a feature the app could not see because every planner here is short-horizon
+
+**The run.** Three independently-green commits: **v0.429.4** (the readability
+hold judging a mosaic's readable subs per panel rather than counting them),
+**v0.430.0** ("Shoot these before they're gone" — `nightplan.season_closing` +
+`GET /api/plan/closing` + the Tonight card) and **v0.430.1** (its Dashboard
+note). Full entries in [`SHIPPED.md`](SHIPPED.md). "Bugs (fix these first)" was
+again dry of anything ungated, so neither the bug nor the feature came from it.
+
+**Where the bug came from, because the method is the reusable part.** Not from a
+sweep of a subsystem but from reading a *chain* of guards in order and asking
+which question each one asks. `webapp/pipeline.py`'s auto-stack pass runs four
+holds back to back; v0.415.0 had corrected the second one (the minimum-frames
+floor) to ask its question of a **pixel** rather than of a count, and the third
+(`_auto_stack_readability_hold`) still asked the same question the old way —
+`readable < min_frames`. A correction applied to one link of a chain and not to
+the next is a shape worth looking for deliberately: **when a fix changes what a
+number *means*, every later consumer of a number of that kind is a candidate**,
+and the later ones are harder to see precisely because the entry that fixed the
+first one reads as closed.
+
+**And the fixture that made it reproducible was the smaller half of the work.**
+The webapp fixture gives three subs per target, which looks far too few to build
+"a mosaic whose whole-target depth clears the floor while its readable subs do
+not". It is not: two subs on one panel and one on a second has a frame-weighted
+typical depth of 2, and taking one file of the deep panel off-line leaves one
+sub on each panel. A floor of 2 then separates the two questions exactly. Worth
+remembering the next time a case looks like it needs a bigger fixture — the
+question is usually whether the fixture can *exhibit* the distinction, not
+whether it is realistic in size.
+
+**On the feature, the one design decision worth carrying forward.** The first
+implementation sampled its future nights through `upcoming_dark_windows`, which
+is what every other planner in `nightplan.py` uses — and it was wrong here, in a
+way that only showed up because a debug print listed the dark windows: that
+helper *clips the first window to "now"*, which is right for tonight and wrong
+for a night eight weeks away. It was clipping **every** sampled night to the
+same clock time, so M 31 read as losing its evening hours and the countdown came
+out weeks short. The rule: a helper's "first" special case becomes a systematic
+bias the moment you call it in a loop. `best_months` had already met this and
+anchors at local solar noon instead; that is the precedent the fix took, and
+`test_the_answer_does_not_depend_on_the_time_of_day_it_is_asked` is what pins it
+(the same scan at 21:00 and at 03:00 must be byte-identical).
+
+**Two honest limits of this run.** (1) The new Tonight card and Dashboard note
+are verified in jsdom and by `npx vite build`, **not in a running browser**: the
+card is self-hiding and the bundled sample target sits in Orion, which in
+September is not usable in the evening at all, so no combination of the dogfood
+script's own data makes it speak. Someone re-checking it in January (or with a
+site in the southern hemisphere) would get a real-browser look for free. (2) The
+baseline suite at the start of this run was started with `-q -q`, which
+**suppresses the "N passed" summary line** — exit 0 was the only evidence, which
+is exactly the shape AGENTS.md §7 warns about. Use a single `-q`.
+
 ## 2026-09-12 (Builder, branch `claude/sweet-babbage-1uozcm`) — two bugs, both from the same question asked of *numbers* rather than of sentences
 
 **The run.** Two tasks, two independently-green commits — **v0.429.2**

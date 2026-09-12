@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from seestack.io.library import Library
-from seestack.io.project import count_unreadable_frames
+from seestack.io.project import count_unreadable_frames, readable_frame_path
 from seestack.io.scanner import ScanResult, run_qc_and_solve, scan_and_organize
 from seestack.render.thumbnail import invalidate_frame_thumbs
 from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
@@ -2595,10 +2595,30 @@ def _auto_stack_readability_hold(
     storage problem. It also never holds a target's *first* stack for lack of a
     better predecessor — there is no good picture to protect there, the loss may
     be permanent, and refusing to stack at all would be the bigger harm.
+
+    **The floor is asked of a pixel, not of a count** — the same correction
+    :func:`_auto_stack_panel_depth` makes to the guard two steps upstream. That
+    one measures the depth of the frames the *database* lists, which is the right
+    question right up until some of their files are away: a 2x2 mosaic whose
+    panels are each three subs deep clears it, and if two thirds of those files
+    are off-line the picture that actually gets combined is one sub deep on every
+    panel. So the readable subs' own typical panel depth is what this compares,
+    falling back to the plain readable count on a single field (where the two are
+    the same number by construction) and on the documented ``min_frames <= 1``
+    opt-out. The depth can never exceed the count, so this only ever holds a
+    target back that today's rule already wanted to publish — never the reverse.
     """
     proj = lib.open_target(safe)
     try:
-        unreadable = _solved_accepted_unreadable(proj)
+        unreadable = 0
+        readable_radecs: list[tuple[float | None, float | None]] = []
+        for f in proj.iter_frames(accepted_only=True):
+            if not f.wcs_json:
+                continue
+            if readable_frame_path(f) is None:
+                unreadable += 1
+            else:
+                readable_radecs.append((f.ra_center_deg, f.dec_center_deg))
         if unreadable <= 0:
             return None
         readable = max(0, offered - unreadable)
@@ -2606,16 +2626,31 @@ def _auto_stack_readability_hold(
             (r.n_frames_used for r in proj.iter_stack_runs()), default=None)
     finally:
         proj.close()
+    depth: dict[str, int] | None = None
+    if min_frames > 1:
+        from seestack.stack.stacker import panel_frame_counts, typical_panel_depth
+
+        counts = panel_frame_counts(readable_radecs)
+        readable_depth = typical_panel_depth(counts)
+        if readable_depth is not None and readable_depth < min_frames:
+            depth = {"depth": int(readable_depth), "panels": len(counts)}
     if readable < min_frames:
         reason = "too few of its subs are readable right now"
+    elif depth is not None:
+        reason = ("too few of its readable subs land on each panel of the "
+                  "mosaic right now")
     elif prior_max is not None and readable < prior_max:
         reason = "that would be a thinner stack than this target already has"
     else:
         return None
-    return {
+    out: dict[str, Any] = {
         "target": safe, "offered": offered, "readable": readable,
         "unreadable": unreadable, "prior_best": prior_max, "reason": reason,
     }
+    if depth is not None:
+        out["panel_depth"] = depth["depth"]
+        out["panels"] = depth["panels"]
+    return out
 
 
 # How long a target must go without a new sub before the hands-off chain will

@@ -1020,6 +1020,146 @@ def test_auto_stack_still_fires_when_every_sub_is_readable(solved_library, monke
         lib.close()
 
 
+def _two_panels(proj, ids: list[int], step_deg: float = 0.5) -> None:
+    """Put every sub but the last on one panel and the last on a second.
+
+    A deliberately *lopsided* mosaic: the target's typical panel depth is the
+    deep panel's, so the whole-target depth guard upstream is satisfied, while
+    losing a single file from that panel leaves one sub on each panel — which is
+    the state this fixture exists to build.
+    """
+    for k, fid in enumerate(ids):
+        proj.update_frame(
+            fid, ra_center_deg=83.6 + (step_deg if k == len(ids) - 1 else 0.0),
+            dec_center_deg=-5.4)
+
+
+def test_a_mosaic_held_because_its_readable_subs_are_one_deep_per_panel(
+    solved_library, monkeypatch,
+):
+    """The readability floor must judge a *pixel* too, not a frame count.
+
+    ``_auto_stack_panel_depth`` corrects the minimum-frames floor for a mosaic —
+    but it measures the subs the **database** lists, which is the right question
+    only while their files are there. With some of them off-line the picture that
+    actually gets combined is made of the readable ones, and on a mosaic those
+    can clear every count in the chain while lying one deep on each panel.
+
+    Fail-before: the target auto-stacked with two readable subs on two different
+    panels — a picture that is single-frame colour speckle everywhere, published
+    (and auto-edited) as the target's newest, which is the exact harm the whole
+    hold family exists to prevent. After: held, with the depth reported beside
+    the count that waved it through, and no attempt marker — so the next scan
+    stacks it the moment the files come back.
+    """
+    calls = _patch_run_stack(monkeypatch)
+    # Floor of 2: the readable count (2) clears it, so only the depth can hold.
+    settings = _settings(solved_library).model_copy(
+        update={"auto_stack_min_frames": 2})
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            assert len(ids) >= 3
+            _two_panels(proj, ids)      # 2 subs on one panel, 1 on the other
+            _unread(proj, ids[:1])      # one of the deep panel's two is away
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe not in summary["auto_stacked"], (
+            "a mosaic one readable sub deep per panel must not be published")
+        assert summary["auto_stacked"], "the healthy targets must still stack"
+        held = summary.get("auto_stack_held_unreadable") or []
+        entry = next((h for h in held if h["target"] == safe), None)
+        assert entry is not None, "the hold should be reported, not silent"
+        # The count that used to wave it through is still reported honestly,
+        # beside the depth that actually describes the picture.
+        assert entry["readable"] >= settings.auto_stack_min_frames
+        assert entry["unreadable"] == 1
+        assert entry["prior_best"] is None, "no earlier picture is being protected"
+        assert entry["panel_depth"] == 1
+        assert entry["panels"] == 2
+        assert "panel" in (entry["reason"] or "")
+
+        proj = lib.open_target(safe)
+        try:
+            assert proj.get_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY) is None
+            _reread(proj, ids)          # the share comes back
+        finally:
+            proj.close()
+        calls.clear()
+        summary2 = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe in summary2["auto_stacked"], (
+            "with every file back the mosaic's panels are deep enough again")
+        assert not summary2.get("auto_stack_held_unreadable")
+    finally:
+        lib.close()
+
+
+def test_the_readability_floor_is_unchanged_on_a_single_field(
+    solved_library, monkeypatch,
+):
+    """The no-regression half: on a single field the depth *is* the count, so the
+    new question can never hold a target the old one would have let through."""
+    calls = _patch_run_stack(monkeypatch)
+    settings = _settings(solved_library).model_copy(
+        update={"auto_stack_min_frames": 2})
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            _unread(proj, _solved_ids(proj)[:1])   # one away, two readable
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe in summary["auto_stacked"]
+        assert calls, "a single field with two readable subs still stacks"
+        assert not summary.get("auto_stack_held_unreadable")
+    finally:
+        lib.close()
+
+
+def test_the_readability_floors_depth_question_honours_the_floor_of_one(
+    solved_library, monkeypatch,
+):
+    """``auto_stack_min_frames = 1`` is the documented opt-out back to stacking
+    from the first frame, and the depth question must not re-arm it — the same
+    rule ``_auto_stack_panel_depth`` already follows."""
+    calls = _patch_run_stack(monkeypatch)
+    settings = _settings(solved_library).model_copy(
+        update={"auto_stack_min_frames": 1})
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            _two_panels(proj, ids)
+            _unread(proj, ids[:1])
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe in summary["auto_stacked"], "floor=1 must still stack"
+        assert calls
+        assert not summary.get("auto_stack_held_unreadable")
+    finally:
+        lib.close()
+
+
 def test_auto_stack_holds_a_first_stack_only_when_below_the_floor(
     solved_library, monkeypatch,
 ):

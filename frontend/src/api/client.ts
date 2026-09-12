@@ -174,6 +174,38 @@ export interface PlanWeek {
   n_targets_with_position: number;
 }
 
+/** One of your own targets whose observing season ends soon — a row of
+ * `GET /api/plan/closing`. */
+export interface ClosingTarget {
+  safe: string;
+  name: string;
+  /** Usable dark minutes on the first night of the scan — how good it is now. */
+  minutes_now: number;
+  /** Whole weeks until the last sampled night it is still usable on; 0 means
+   * this is the last week of its season. */
+  weeks_left: number;
+  /** Local calendar date (YYYY-MM-DD) of that last usable sampled night. The
+   * scan samples weekly, so the true last night is within a week *after* this
+   * one — the number is deliberately the conservative end of that range. */
+  last_night: string;
+  total_exposure_s: number;
+  /** Fractional noise cut one more hour would buy — the same measure "Worth
+   * more time" is ranked by. */
+  noise_gain: number;
+}
+
+/** `GET /api/plan/closing` — "shoot these before they're gone". An empty
+ * `targets` is the ordinary answer (nothing is leaving) and is also what a
+ * site-less install gets, so the card self-hides either way. */
+export interface SeasonClosing {
+  location_source: "settings" | "fits" | "none";
+  observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
+  generated_utc: string;
+  min_altitude_deg: number;
+  horizon_weeks: number;
+  targets: ClosingTarget[];
+}
+
 export interface NightPlan {
   location_source: "settings" | "fits" | "none";
   observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
@@ -584,6 +616,12 @@ export interface AutoStackHold {
   readable: number;
   unreadable: number;
   reason?: string | null;
+  /** The **mosaic** case: the subs that can still be read are spread over the
+   * panels, so the picture they would make is this many subs deep at a typical
+   * pixel. 0 on a single field, on the other reasons, and against a backend that
+   * predates the measurement. */
+  panel_depth?: number;
+  panels?: number;
   when_utc?: string | null;
 }
 
@@ -3633,6 +3671,17 @@ export const api = {
     if (opts?.minAlt != null) qs.set("min_alt", String(opts.minAlt));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return req<PlanWeek>(`/api/plan/week${suffix}`);
+  },
+  // "Shoot these before they're gone": which of your own targets stop being
+  // shootable within the season ahead. The library-wide half of
+  // `/best-months/{safe}` — read-only, offline, and an empty `targets` means the
+  // card says nothing.
+  getSeasonClosing: (opts?: { weeks?: number; minAlt?: number }) => {
+    const qs = new URLSearchParams();
+    if (opts?.weeks != null) qs.set("weeks", String(opts.weeks));
+    if (opts?.minAlt != null) qs.set("min_alt", String(opts.minAlt));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return req<SeasonClosing>(`/api/plan/closing${suffix}`);
   },
   // Download URL for the planned week as a .ics calendar file — one event per
   // night that has a pick, so "Saturday is your M 31 night" survives closing the

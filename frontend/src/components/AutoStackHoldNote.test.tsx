@@ -3,7 +3,9 @@ import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AutoStackHoldNote } from "./AutoStackHoldNote";
+import {
+  AutoStackHoldNote, holdReasonSentence, setAsideOutcomeSentence,
+} from "./AutoStackHoldNote";
 import * as client from "../api/client";
 
 function renderNote() {
@@ -104,5 +106,66 @@ describe("AutoStackHoldNote — \"those subs are gone\"", () => {
     await waitFor(() =>
       expect(screen.getByText(/every sub is readable again/)).toBeInTheDocument());
     expect(screen.queryByTestId("undo-missing-aside")).toBeNull();
+  });
+});
+
+describe("AutoStackHoldNote — the mosaic reason", () => {
+  // The readability hold has two shapes and, until the depth was measured, one
+  // sentence. "Thinner than the one you already have" is a claim about a picture
+  // that may not exist — a first stack of a mosaic is held because the subs that
+  // can still be read lie one deep across its panels, which is a different fact
+  // and a different thing to do about it.
+  it("names the panels and the depth instead of a picture that may not exist",
+    async () => {
+      vi.spyOn(client.api, "autoStackHold").mockResolvedValue({
+        offered: 48, readable: 12, unreadable: 36,
+        reason: "too few of its readable subs land on each panel of the mosaic right now",
+        panel_depth: 1, panels: 12,
+        when_utc: "2026-09-12T02:00:00Z",
+      });
+      renderNote();
+      await screen.findByTestId("autostack-hold-note");
+      expect(screen.getByText(
+        /spread across this mosaic's 12 panels/)).toBeInTheDocument();
+      expect(screen.getByText(/only 1 sub deep at a typical pixel/))
+        .toBeInTheDocument();
+      expect(screen.queryByText(/thinner, noisier picture/)).toBeNull();
+      // …and the set-aside offer stops promising that stacking simply carries on.
+      expect(screen.getByText(
+        /a mosaic this thin waits until its panels have more subs/,
+      )).toBeInTheDocument();
+    });
+
+  it("keeps the original wording for every other hold, and for an older backend",
+    async () => {
+      vi.spyOn(client.api, "autoStackHold").mockResolvedValue({
+        offered: 787, readable: 271, unreadable: 516,
+        reason: "that would be a thinner stack than this target already has",
+        when_utc: "2026-08-26T02:00:00Z",
+      });
+      renderNote();
+      await screen.findByTestId("autostack-hold-note");
+      expect(screen.getByText(/thinner, noisier picture/)).toBeInTheDocument();
+      expect(screen.queryByText(/mosaic/)).toBeNull();
+    });
+});
+
+describe("holdReasonSentence / setAsideOutcomeSentence", () => {
+  const base = { offered: 10, readable: 4, unreadable: 6 };
+
+  it("pluralises the depth and needs more than one panel to claim a mosaic", () => {
+    expect(holdReasonSentence({ ...base, panel_depth: 2, panels: 4 }))
+      .toContain("only 2 subs deep");
+    // One "panel" is not a mosaic — a single field must never reach this branch.
+    expect(holdReasonSentence({ ...base, panel_depth: 1, panels: 1 }))
+      .toContain("thinner, noisier picture");
+    expect(holdReasonSentence({ ...base, panel_depth: 0, panels: 0 }))
+      .toContain("thinner, noisier picture");
+  });
+
+  it("names the subs that survive, in both shapes", () => {
+    expect(setAsideOutcomeSentence(base)).toContain("carries on with the 4");
+    expect(setAsideOutcomeSentence({ ...base, panel_depth: 1, panels: 3 }))
+      .toContain("carries on with the 4");
   });
 });
