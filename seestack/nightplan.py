@@ -1685,6 +1685,171 @@ def plan_week(
     return plan
 
 
+# ---- "Shoot these before they're gone" --------------------------------------
+#
+# :func:`best_months` answers the seasonal question for **one** target, on the
+# Target page, for someone who went looking. Nobody goes looking: a target's
+# season closes quietly, and the owner (many targets, many nights — AGENTS.md §1)
+# finds out next spring that the autumn object he had three hours on is gone for
+# eight months. This is the library-wide half — which of the things you have
+# already started are about to leave the sky — and it is the one planning answer
+# that is worth *interrupting* someone with, because it expires.
+
+#: How far ahead :func:`season_closing` looks, and so how far ahead it is willing
+#: to call a season "closing". Two months is the horizon on which the answer is
+#: still something to *do* — "your last good nights for this are in about five
+#: weeks" is a plan; "in about eleven weeks" is trivia, and a card full of trivia
+#: is how a self-hiding card becomes another always-on banner (AGENTS.md §1, the
+#: standing information-architecture priority). One number rather than a scan
+#: horizon plus a display threshold, so there is nothing for two surfaces to
+#: disagree about.
+SEASON_HORIZON_WEEKS = 8
+
+#: Days between the nights the scan samples. A target rises about four minutes
+#: earlier each night, so a week is the smallest step over which its placement
+#: visibly moves — and it is what keeps the whole scan to
+#: ``SEASON_HORIZON_WEEKS + 1`` dark-window searches rather than eighty-five.
+SEASON_STEP_DAYS = 7
+
+
+@dataclass(frozen=True)
+class ClosingTarget:
+    """One of your own targets whose observing season ends inside the horizon."""
+
+    safe: str
+    name: str
+    #: Usable dark minutes on the first night of the scan — how good it is *now*.
+    minutes_now: float
+    #: Whole weeks until the last sampled night it is still usable on. ``0`` means
+    #: this is the last week of its season.
+    weeks_left: int
+    #: Local calendar date (``"2026-11-15"``) of that last usable sampled night.
+    #: The scan samples weekly, so the true last night is within a week *after*
+    #: this one — the number is deliberately the conservative end of that range.
+    last_night: str
+    #: What the owner already has on it, so the UI can say whether this is a
+    #: barely-started target or a finished one.
+    total_exposure_s: float
+    #: Fractional noise cut one more hour would buy (:func:`noise_gain_from_more_time`)
+    #: — the same measure "Worth more time" is ranked by, so the two agree.
+    noise_gain: float
+
+
+def season_closing(
+    observer: Observer,
+    library_targets: list[LibraryTarget],
+    *,
+    start_utc: datetime,
+    horizon_weeks: int = SEASON_HORIZON_WEEKS,
+    min_altitude_deg: float = 30.0,
+    horizon: HorizonProfile | None = None,
+    min_usable_minutes: float = 45.0,
+    max_targets: int = WEEK_MAX_TARGETS,
+) -> list[ClosingTarget]:
+    """Which of *your own* targets stop being shootable within the season ahead.
+
+    Samples one night a week from ``start_utc`` out to ``horizon_weeks``, finds
+    each of those nights' dark window once (:func:`_find_dark_window` at local
+    solar noon, the whole-night anchoring :func:`best_months` uses) and asks the
+    whole library at once how long each target clears the altitude floor within
+    it (:func:`_observability_batch` — one vectorised batch per sampled night, so
+    the cost scales with the horizon, not with the library).
+
+    A target is **closing** when it is usable on the first sampled night and
+    *not* usable on the last one it could be — its last usable sample is not the
+    final sample. Taking the **last** usable sample rather than the first
+    unusable one is what makes the answer robust: a target that dips below the
+    floor for a week in the middle and comes back is not leaving, and this
+    cannot report it as though it were.
+
+    Returned soonest-first, tie-broken by what another hour would buy
+    (:func:`noise_gain_from_more_time`) so the least-finished of two targets
+    leaving in the same week is named first, then by ``safe`` for determinism.
+
+    **Silent rather than wrong**, in three cases that are all about the *sky*
+    rather than about any target: no positioned targets; fewer than two sampled
+    nights with any darkness (nothing to compare); and — the one worth stating —
+    a final sample with **no darkness at all**. At high latitude the summer takes
+    the nights away, not the targets, and a scan that ran into that would report
+    the owner's entire library as leaving the sky at once. That is the nights, so
+    it says nothing.
+
+    Deterministic, offline and read-only, like the rest of the planner.
+    """
+    positioned = sorted(
+        (t for t in library_targets if t.ra_deg is not None and t.dec_deg is not None),
+        key=lambda t: (-(t.total_exposure_s or 0.0), -(t.frames_accepted or 0), t.safe),
+    )
+    considered = positioned[:max(0, max_targets)]
+    weeks = max(1, int(horizon_weeks))
+    if not considered:
+        return []
+
+    ras = [float(t.ra_deg) for t in considered]
+    decs = [float(t.dec_deg) for t in considered]
+    # Per sampled night: which week it is, its label, whether each considered
+    # target is usable, and for how long. The *week* is carried rather than
+    # inferred from the position in this list, because a night with no darkness
+    # is absent from it — so an index would quietly mean something else the
+    # moment one sample is skipped.
+    samples: list[tuple[int, str, list[bool], list[float]]] = []
+    final_sample_is_dark = False
+    day = start_utc.astimezone(timezone.utc).date()
+    for step in range(weeks + 1):
+        # Anchor at local solar noon on the sampled date, so ``_find_dark_window``
+        # (which takes the darkness *following* its reference) lands on that
+        # night — the same anchoring :func:`best_months` uses, and deliberately
+        # **not** ``upcoming_dark_windows``, whose clipping of the first window to
+        # "now" is right for tonight and wrong here: it would compare a whole
+        # night eight weeks out against whatever is left of this one, so opening
+        # the app at 3 a.m. would report the entire library as leaving the sky.
+        sampled = day + timedelta(days=step * SEASON_STEP_DAYS)
+        anchor = datetime(sampled.year, sampled.month, sampled.day, 12, 0, 0,
+                          tzinfo=timezone.utc) - timedelta(
+            hours=observer.lon_deg / 15.0)
+        window = _find_dark_window(observer, anchor)
+        if window is None:
+            continue                    # no darkness that night — nothing to say
+        label = sampled.isoformat()
+        illum = moon_illumination(window.start + (window.end - window.start) / 2)
+        obs = _observability_batch(ras, decs, observer, window, min_altitude_deg,
+                                   illum, horizon=horizon)
+        samples.append((
+            step,
+            label,
+            [o.minutes_above_min_alt >= min_usable_minutes for o in obs],
+            [float(o.minutes_above_min_alt) for o in obs],
+        ))
+        final_sample_is_dark = step == weeks
+    # Both ends of the scan have to be real nights for the comparison to mean
+    # anything: the first is what "usable now" is read from, the last is what
+    # "still up at the end of the season" is read from.
+    if len(samples) < 2 or not final_sample_is_dark or samples[0][0] != 0:
+        return []
+
+    out: list[ClosingTarget] = []
+    last_index = len(samples) - 1
+    for i, t in enumerate(considered):
+        if not samples[0][2][i]:
+            continue                    # not usable now — this isn't about it
+        last_usable = max((k for k in range(len(samples)) if samples[k][2][i]),
+                          default=None)
+        if last_usable is None or last_usable >= last_index:
+            continue                    # still up at the end of the horizon
+        exposure = float(t.total_exposure_s or 0.0)
+        out.append(ClosingTarget(
+            safe=t.safe,
+            name=t.name,
+            minutes_now=round(samples[0][3][i], 1),
+            weeks_left=samples[last_usable][0],
+            last_night=samples[last_usable][1],
+            total_exposure_s=exposure,
+            noise_gain=round(noise_gain_from_more_time(exposure), 3),
+        ))
+    out.sort(key=lambda c: (c.weeks_left, -c.noise_gain, c.safe))
+    return out
+
+
 @dataclass
 class SuggestedTarget:
     """A not-yet-captured showpiece that's well-placed tonight (for the API/UI).

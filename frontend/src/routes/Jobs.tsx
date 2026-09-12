@@ -739,6 +739,32 @@ export function heldForSubsLine(h: HeldForSubs): string {
  * (`auto_stack_held_unreadable`). */
 export interface HeldForFiles {
   target: string; offered: number; readable: number; unreadable: number;
+  /** On a **mosaic**, how deep the subs that can still be *read* leave a typical
+   * pixel. The count can look healthy while those readable subs are spread one
+   * deep over the panels, which is the same substitution `panelDepth` above
+   * corrects for the thin hold. Absent (0) on a single field, on the other hold
+   * reasons, and on a scan recorded before the depth was measured. */
+  panelDepth?: number;
+  /** How many panels those readable subs are spread over (0 when not a mosaic). */
+  panels?: number;
+}
+
+/** The per-target sentence under "some of your subs aren't on disk right now".
+ *
+ * The plain case is a count — how many of the target's subs went missing. On a
+ * mosaic the count is not the story: the ones still readable can clear every
+ * floor and still leave the picture one sub deep on each panel, and the owner
+ * (a heavy mosaic user) is owed the number that describes the picture. Pure. */
+export function heldForFilesLine(h: HeldForFiles): string {
+  const head = `: ${h.unreadable} of ${h.offered} subs couldn't be read `
+    + `(${h.readable} still readable)`;
+  if (h.panelDepth && h.panelDepth > 0) {
+    const panels = h.panels && h.panels > 1 ? `${h.panels} panels` : "panels";
+    return `${head}, and those are spread over ${panels} — a typical part of the `
+      + `picture would have only ${h.panelDepth} sub`
+      + `${h.panelDepth === 1 ? "" : "s"} on it.`;
+  }
+  return `${head}.`;
 }
 
 /** One target the walk-away auto-stack is holding back because subs are **still
@@ -791,6 +817,8 @@ export function pipelineSummary(r: Record<string, unknown>): {
           offered: Number(o.offered ?? 0) || 0,
           readable: Number(o.readable ?? 0) || 0,
           unreadable: Number(o.unreadable ?? 0) || 0,
+          panelDepth: Number(o.panel_depth ?? 0) || 0,
+          panels: Number(o.panels ?? 0) || 0,
         }))
     : [];
   const heldSettling: HeldSettling[] = Array.isArray(r.auto_stack_held_settling)
@@ -1056,8 +1084,7 @@ function JobResultActions({ job }: { job: Job }) {
                   {h.target ? (
                     <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
                   ) : "This target"}
-                  {`: ${h.unreadable} of ${h.offered} subs couldn't be read `}
-                  {`(${h.readable} still readable).`}
+                  {heldForFilesLine(h)}
                 </Text>
               ))}
             </Stack>

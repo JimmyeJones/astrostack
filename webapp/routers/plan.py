@@ -24,6 +24,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from seestack.nightplan import (
+    SEASON_HORIZON_WEEKS,
     WEEK_NIGHTS,
     HorizonProfile,
     LibraryTarget,
@@ -37,6 +38,7 @@ from seestack.nightplan import (
     plan_tonight,
     plan_week,
     rank_targets_now,
+    season_closing,
     suggest_targets,
 )
 from webapp import deps
@@ -807,6 +809,90 @@ def get_plan_week_ics(
         media_type="text/calendar",
         headers={"Content-Disposition": 'attachment; filename="astrostack-week.ics"'},
     )
+
+
+#: How long a computed "closing" answer may be served from cache, and the bucket
+#: its "now" is rounded to. The scan samples one night a *week*, so its answer
+#: moves by the day at most — a day-bucketed signature can never serve something
+#: staler than the numbers it reports, and the TTL is the backstop for a library
+#: that changes under it (the signature carries the targets, so a new target
+#: rebuilds immediately either way).
+_CLOSING_CACHE_TTL_S = 900.0
+
+
+@router.get("/closing")
+def get_season_closing(
+    request: Request,
+    when: str | None = Query(default=None,
+                             description="ISO-8601 UTC reference to plan from; defaults to now"),
+    min_alt: int | None = Query(default=None, ge=0, le=80),
+    weeks: int = Query(default=SEASON_HORIZON_WEEKS, ge=1, le=16,
+                       description="How many weeks ahead to look"),
+) -> dict[str, Any]:
+    """"Shoot these before they're gone" — your own targets whose season is ending.
+
+    ``/best-months/{safe}`` already answers the seasonal question for **one**
+    target, on the Target page, for somebody who went looking. Nobody goes
+    looking: a season closes quietly, and an owner with many targets across many
+    nights finds out months later that the autumn object he had three hours on is
+    gone until next year. This is the library-wide half — and the one planning
+    answer worth interrupting someone with, because it expires.
+
+    Library targets only (this is "finish what I've got"), capped at
+    :data:`~seestack.nightplan.WEEK_MAX_TARGETS` exactly like ``/week``, soonest
+    first. Read-only and offline. An empty ``targets`` list is the ordinary
+    answer — nothing is leaving — and is also what a site-less install gets, so
+    the card self-hides rather than guessing.
+    """
+    settings = deps.get_settings(request)
+
+    start = datetime.now(timezone.utc)
+    if when:
+        try:
+            start = datetime.fromisoformat(when)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Bad 'when' timestamp") from exc
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+    observer, location_source = _resolve_observer(request, settings)
+    min_altitude = min_alt if min_alt is not None else int(settings.min_target_altitude_deg)
+    payload: dict[str, Any] = {
+        "location_source": location_source,
+        "observer": asdict(observer) if observer is not None else None,
+        "min_altitude_deg": min_altitude,
+        "horizon_weeks": int(weeks),
+        "generated_utc": start.astimezone(timezone.utc).isoformat(),
+        "targets": [],
+    }
+    if observer is None:
+        return payload
+
+    targets = _library_targets(request)
+    horizon = HorizonProfile.from_pairs(settings.horizon_profile)
+    sig = (
+        start.astimezone(timezone.utc).date().isoformat(), int(weeks), min_altitude,
+        observer.lat_deg, observer.lon_deg, observer.elevation_m,
+        tuple(tuple(p) for p in (settings.horizon_profile or [])),
+        # Depth is in the signature for the same reason it is in the week plan's:
+        # the ``WEEK_MAX_TARGETS`` cap selects *by* it, so a night's capture can
+        # change which targets get scanned without adding or moving one.
+        tuple((t.safe, t.ra_deg, t.dec_deg, t.total_exposure_s, t.frames_accepted)
+              for t in targets),
+    )
+    closing = cached_for_registry(
+        request.app, "plan_closing", sig,
+        lambda: season_closing(
+            observer, targets,
+            start_utc=start,
+            horizon_weeks=int(weeks),
+            min_altitude_deg=float(min_altitude),
+            horizon=horizon,
+        ),
+        ttl_s=_CLOSING_CACHE_TTL_S,
+    )
+    payload["targets"] = [asdict(c) for c in closing]
+    return payload
 
 
 @router.get("/best-months/{safe}")

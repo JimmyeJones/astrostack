@@ -1,5 +1,143 @@
 # Shipped — the record
 
+## v0.430.1 — 2026-09-12 — the last week of a season reaches the screen you were already looking at
+
+*(Builder, branch `claude/sweet-babbage-uawq1j` — the surfacing half of v0.430.0, PRIORITY 2–3. Frontend
+only: no endpoint, engine, config, schema, on-disk, API-shape or default change.)*
+
+**Why the card alone was not enough.** v0.430.0's whole premise is that *nobody goes looking* — a season
+closes quietly and the owner finds out next year. Putting the answer on the Tonight page answers it for
+somebody who already decided to plan, which is the same person `best_months` already served. The case that
+cannot wait for that decision is the narrow one: **a target whose season ends this week**. Spend the next
+clear night elsewhere and it is gone for a year.
+
+**So the narrow case, and only it, joins the Dashboard's notice board.** `ClosingSeasonNote` is one line and
+a link — a pointer, not the answer, with the detail left on the planner — ranked `advisory` (nothing is
+broken; it is an offer with a deadline), and self-hiding on an older backend, on a failed fetch, and most of
+the year. It goes *inside* the existing `NoticeBoard` rather than becoming one more always-on banner, which
+is the standing information-architecture rule (AGENTS.md §1).
+
+**One constant decides "urgent", for both surfaces.** `CLOSING_URGENT_WEEKS = 1` now drives the Tonight
+card's "Last chance" badge *and* what the Dashboard note will speak about, so the two can never disagree
+about which targets are the urgent ones — the drift that the "two surfaces answering one question in two
+roundings" family of bugs is made of. The Tonight card still lists the whole season; the Dashboard sees only
+the last week of it.
+
+**Tests (+6 vitest):** `urgentlyClosing` keeping only the rows at or under the bar; the sentence naming the
+target, the "last week" and "about a week" phrasings, and the singular/plural of the others in the same week
+("1 other target … is", "2 other targets … are"); and the note rendering nothing for a season five weeks
+out, for an empty answer, and for a backend that 404s.
+
+## v0.430.0 — 2026-09-12 — "Shoot these before they're gone": the targets whose season is ending, before it ends
+
+*(Builder, branch `claude/sweet-babbage-uawq1j` — 🌟 NEW BEGINNER FEATURE, PRIORITY 2–3 (autonomy +
+friendliness, the "plan" pillar). Offline and read-only throughout: no new dependency, no network, no config,
+schema, on-disk, API-shape or default change. One new GET endpoint and one self-hiding card.)*
+
+**The gap.** `best_months` (v0.174.0) answers the seasonal question — *when can I actually get this?* — for
+**one** target, on the Target page, for somebody who went looking. Nobody goes looking. A season closes
+quietly: the object is a little lower each week, then one evening it is below the floor before the sky is
+dark, and an owner with many targets across many nights (AGENTS.md §1) finds out months later that the autumn
+target he had three hours on is gone until next year. Every other planning surface in the app is
+short-horizon — `/tonight` is one night, `/week` is seven, `/next-session/{safe}` walks fourteen for one
+target — so none of them can see a season end.
+
+**The feature.** `GET /api/plan/closing` → the library targets whose observing season ends inside the next
+eight weeks, soonest first, and a self-hiding **"Shoot these before they're gone"** card on the Tonight page
+above "Plan my week" (above it deliberately: a week's best night comes round again next week, a season does
+not). Each row names the target, how long is left, *what you already have on it* — which is what turns a
+countdown into a decision, since a target already ten hours deep can be let go and a barely-started one
+cannot — and the last night worth shooting it. A week or less earns a "Last chance" badge.
+
+**How it measures it** (`seestack/nightplan.py::season_closing`). One night a week from now to the horizon:
+each night's dark window found once with `_find_dark_window` at local solar noon, then **one vectorised
+`_observability_batch` over the whole library** — so the cost scales with the horizon, not with the library,
+the same shape `plan_week` uses. A target is closing when it is usable on the first sampled night and its
+**last** usable sample is not the final one. Reading the *last* usable sample rather than the first unusable
+one is what makes it robust: a target that dips below the floor for one week in the middle and comes back is
+not leaving, and this cannot report it as though it were.
+
+**Three deliberate silences, all of them about the sky rather than about any target.** (1) A target that is
+not usable *tonight* is not "leaving" — it has not arrived. (2) The whole-night anchoring is
+`best_months`', **not** `upcoming_dark_windows`': the latter clips the first window to "now", which is right
+for tonight and wrong here — it would compare a whole night eight weeks out against whatever is left of this
+one, so opening the app at 3 a.m. would report the entire library as leaving. A test pins that the answer at
+21:00 and at 03:00 is identical. (3) If the last sampled night has **no darkness at all** — polar summer —
+every target would read as going at once. That is the nights, not the targets, so it says nothing.
+
+**Eight weeks is one number, not a scan horizon plus a display threshold.** Two months is the range on which
+the answer is still something to *do*; "in about eleven weeks" is trivia, and a card full of trivia is how a
+self-hiding card becomes another always-on banner. One constant, so there is nothing for two surfaces to
+disagree about. Measured over a year of fortnightly checks against a nine-target London library, it speaks on
+about three quarters of the dates and its countdown falls correctly as each season runs out (M 31 seven weeks
+→ one, then M 42, then M 45; silence through the spring, when nothing of that library leaves).
+
+**Ranking.** Soonest first, tie-broken by `noise_gain_from_more_time` — the same measure "Worth more time"
+is ranked by, so two targets going the same week are ordered by which of them the extra night would actually
+help, and the app speaks in one voice rather than inventing a second definition of "worth it".
+
+**Cached** behind the shared registry-signature cache, bucketed by **date** (the scan samples weekly, so its
+answer cannot move faster than that) with the targets in the signature, so a new target rebuilds immediately.
+Measured ~1.5–2.5 s uncached for the whole library, flat in its size.
+
+**Tests (+10 engine, +4 API, +12 vitest).** The engine: a winter target named and a circumpolar one not; the
+countdown shrinking four weeks later onto the *same* last night; the 21:00-vs-03:00 identity; the dip-and-
+return case; polar summer; unpositioned and empty libraries; the least-finished of two tie-broken first; and
+determinism. The API: the rows and their ordering, an empty answer under an unreachable altitude floor, the
+site-less self-hide, and the bounds on `when`/`weeks`. The frontend: the wording helpers (including "you
+haven't kept any of it yet" and the never-negative countdown) and the card rendering, badging only a last
+week, and rendering **nothing** both when nothing is leaving and against a backend that 404s.
+
+## v0.429.4 — 2026-09-12 — a mosaic whose readable subs lie one deep per panel stops being published as a picture
+
+*(Builder, branch `claude/sweet-babbage-uawq1j` — 🟠 BUG, PRIORITY 2/4 (autonomy + image quality), on the
+on-by-default walk-away path. Verified by reproduction and pinned by a scratch revert of the production fix.
+Additive: two defaulted response fields, no config, schema, on-disk or API-shape change, and a target with
+every sub readable — every healthy install — is byte-for-byte unaffected.)*
+
+**The bug.** `_auto_stack_panel_depth` (v0.415.0) corrected the walk-away minimum-frames floor for a mosaic:
+a 3x3 mosaic one pass in has nine subs and a picture one sub deep *everywhere*, so the floor has to be asked
+of a pixel, not of a count. It measures the frames the **database** lists — which is the right question right
+up until some of their files are away. The next guard in the chain,
+`_auto_stack_readability_hold`, is the one place that asks whether those files are actually on disk, and it
+asked the floor of a **count** again: `readable < min_frames`. So on a mosaic the two guards between them
+covered neither case: the depth guard measured subs that could not be read, and the readability guard
+measured a number that does not describe a pixel.
+
+**Reproduced** (`tests/webapp/test_auto_stack_pipeline.py::test_a_mosaic_held_because_its_readable_subs_are_one_deep_per_panel`,
+red against a scratch revert of the fix): a target with two subs on one panel and one on a second, floor 2.
+The whole-target depth is 2, so the depth guard passes. Take one file of the deep panel off-line and the subs
+that remain are **one on each panel** — a picture that is single-frame colour speckle at every pixel — and
+the readability guard waved it through because 2 readable ≥ a floor of 2, and there was no earlier run whose
+`n_frames_used` could catch it either. The scan published it, and with `auto_edit_on_autostack` on the
+auto-edit adopts it as the target's newest picture: the exact harm the whole hold family exists to prevent,
+arriving through the one door left open for the owner's own shooting style (AGENTS.md §1, heavy mosaic user).
+
+**The fix is the same correction, one guard later.** The hold now walks the target's solved+accepted frames
+once — the same `stat()` per frame it already paid for to count the unreadable ones — keeping the *readable*
+subs' pointings as it goes, and compares `typical_panel_depth(panel_frame_counts(...))` of that subset against
+the floor. Monotone by construction: a panel's count can never exceed the total, so the new question can only
+ever hold a target today's rule wanted to publish, never release one it wanted to hold. A single field is
+byte-for-byte unchanged (`typical_panel_depth` returns `None` there — the depth *is* the count), and
+`min_frames <= 1`, the documented opt-out back to stacking from the first frame, is honoured exactly as
+`_auto_stack_panel_depth` honours it.
+
+**And it says the right thing, which is a different sentence.** The existing hold's one explanation is
+*"stacking without them would have made a thinner, noisier picture than the one you already have"* — a claim
+about a picture that, in this case, may not exist (the reproduction's target had no prior run at all). The
+hold record now carries `panel_depth`/`panels` beside the counts, `AutoStackHoldOut` carries them on
+(defaulting to `0` = "unknown, say nothing extra", so a scan recorded by an older build reads exactly as it
+does today), and two surfaces use them: the Jobs page's per-target line (`heldForFilesLine`, modelled on the
+`heldForSubsLine` the thin hold already has) and the Target page's `AutoStackHoldNote`, whose middle sentence
+is now `holdReasonSentence`. The set-aside offer's promise is corrected in the same place
+(`setAsideOutcomeSentence`): setting genuinely-deleted subs aside does let stacking carry on — but a mosaic
+still one sub deep is then held by the *thin* guard instead, and the button must not imply otherwise.
+
+**Tests (+3 Python pipeline, +1 API, +4 vitest).** The mosaic hold (fail-before), the single-field
+no-regression case, the `min_frames = 1` opt-out, the depth travelling over the wire beside an older record
+reading as `0`, and the two wording helpers including the "one panel is not a mosaic" case. Two existing
+`Jobs.test.tsx` expectations gained the two new keys; nothing was loosened or removed.
+
 ## v0.429.0 — 2026-09-12 — a target named `ω Cen – Gómez` stops printing a row of boxes on every picture you share
 
 *(Builder, branch `claude/sweet-babbage-8i7zw0` — 🟡 friendliness / trust, PRIORITY 3. The 2026-08-26 idea

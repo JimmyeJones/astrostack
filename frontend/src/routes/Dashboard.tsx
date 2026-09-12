@@ -37,6 +37,7 @@ import { SuggestTargetsCard } from "../components/SuggestTargetsCard";
 import { VideoCapturesCard } from "../components/VideoCapturesCard";
 import { BestPicturesStrip } from "../components/BestPicturesStrip";
 import { ImagingLogButton } from "../components/ImagingLogButton";
+import { ClosingSeasonNote } from "../components/ClosingSeasonNote";
 import { NoticeBoard, NOTICE_PRIORITY } from "../components/NoticeBoard";
 import { lifeListLine } from "../components/lifeListLine";
 import { describeSkyCoverage } from "../components/skyCoverage";
@@ -277,6 +278,14 @@ export function Dashboard() {
           // is the "which ones?" the owner had no surface for after upgrading.
           { key: "over-trimmed", priority: NOTICE_PRIORITY.warning,
             node: <OverTrimmedNote /> },
+          // An offer with a deadline, which is why it is here at all rather than
+          // only on the planner: a target whose season ends this week is gone
+          // for a year if the next clear night goes elsewhere. Ranked with the
+          // other offers — nothing is broken — and deliberately narrow: only the
+          // last week or so speaks here (`CLOSING_URGENT_WEEKS`), the rest of
+          // the season stays on Tonight's own card. Self-hiding most of the year.
+          { key: "closing-season", priority: NOTICE_PRIORITY.advisory,
+            node: <ClosingSeasonNote /> },
         ]}
       />
 
