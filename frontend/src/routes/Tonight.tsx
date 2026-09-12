@@ -230,10 +230,27 @@ function TargetTable(
   );
 }
 
+// How many of the catalog's well-placed targets "Start something new" draws
+// before the rest go behind a count.
+//
+// Rendered eagerly this was, by a distance, the tallest page in the app: 10,430
+// px on a 420 px phone — 3.4x the next page and about twelve screens of
+// scrolling — and all of it one ranked table whose tail is by definition the
+// *worse*-placed half of the sky. Exactly the shape, and exactly the number,
+// that `LifeList.TODO_PREVIEW` already fixed on the life list (14,584 px), and
+// it survived here only because no dogfood pass had an observing site, so this
+// table had never been drawn with rows in it (see v0.436.1).
+//
+// Nothing is removed — the owner's one hard constraint: the remainder is one
+// tap away, the type filter still narrows the whole list, and the count in the
+// link says how many are waiting.
+const FRESH_PREVIEW = 12;
+
 export function TonightView() {
   const [minAlt, setMinAlt] = useState<string>("");
   const [date, setDate] = useState<string>("");
   const [typeFilter, setTypeFilter] = useState<string>("All");
+  const [freshExpanded, setFreshExpanded] = useState(false);
   const now = useMemo(() => new Date(), []);
   const bounds = useMemo(() => planDateBounds(now), [now]);
   const nightLabel = planNightLabel(date, now);
@@ -377,6 +394,9 @@ export function TonightView() {
   // filter to an empty table while the control read "All".
   const effectiveTypeFilter = typeOptions.includes(typeFilter) ? typeFilter : "All";
   const freshShown = filterByTypeBucket(freshUp, effectiveTypeFilter);
+  // …and only the top of that ranking is drawn until asked. See FRESH_PREVIEW.
+  const freshCollapsible = !freshExpanded && freshShown.length > FRESH_PREVIEW;
+  const freshRows = freshCollapsible ? freshShown.slice(0, FRESH_PREVIEW) : freshShown;
   const alreadyNote = alreadyUp.length > 0 ? notUpTonightNote(alreadyNotUp.length, whenWord) : null;
   const freshNote = freshUp.length > 0 ? notUpTonightNote(freshNotUp.length, whenWord) : null;
 
@@ -494,11 +514,23 @@ export function TonightView() {
           haven't shot yet, ranked by how well placed they are.
         </Text>
         <TargetTable
-          targets={freshShown}
+          targets={freshRows}
           usualPaceS={data?.usual_pace_s}
           empty={freshShown.length === 0 && freshUp.length > 0
             ? "No targets of that type clear your minimum altitude — try another type or lower the floor."
             : `Nothing in the catalog clears your minimum altitude ${whenWord} — try lowering it above.`} />
+        {freshCollapsible ? (
+          <Anchor component="button" type="button" size="sm" mt="xs"
+                  onClick={() => setFreshExpanded(true)}>
+            Show all {freshShown.length} well-placed targets
+          </Anchor>
+        ) : null}
+        {freshExpanded && freshShown.length > FRESH_PREVIEW ? (
+          <Anchor component="button" type="button" size="sm" mt="xs"
+                  onClick={() => setFreshExpanded(false)}>
+            Show fewer
+          </Anchor>
+        ) : null}
         {freshNote ? <Text size="xs" c="dimmed" mt="xs">{freshNote}</Text> : null}
       </Paper>
     </Stack>

@@ -1,5 +1,45 @@
 # Shipped — the record
 
+## v0.437.0 — 2026-09-12 — the Tonight page stops being twelve screens of scrolling
+
+*(Builder, branch `agent/run-2026-09-12` — 🎨 the standing information-architecture priority, **one slice**,
+taken because a measurement asked for it. Frontend-only.)*
+
+**AGENTS.md's rule for this priority is "measure first, because the last two measurements both said not to".**
+This one said to, emphatically. With an observing site finally set on the scratch install (v0.436.1), the
+first browser measurement of `/tonight` with rows in it came back at **10,430 px on a 420 px phone** —
+3.4× the next tallest page in the app (3,475 px) and 3.5× the 3,014 px "worst page" number the banner
+quotes. The desktop was 7,245 px.
+
+**Almost all of it was one table.** "Start something new tonight" renders every well-placed catalog object
+— 75 on the sample night, out of 157 planned — eagerly, at ~90 px a row on a phone. And it is a *ranked*
+table: everything past the top of it is, by construction, the worse-placed part of tonight's sky, scrolled
+through to reach the page's own footer.
+
+**The fix is the one the life list already got.** `LifeList.TODO_PREVIEW` fixed the identical shape on
+2026-08-13 (14,584 px, the worst page in the app at the time). `FRESH_PREVIEW = 12` draws the top of the
+ranking, then *"Show all 75 well-placed targets"*, with "Show fewer" to fold it back. Same number, same
+idiom, same wording, so the two pages behave the same way.
+
+**Nothing is removed** — the owner's one hard constraint. The remainder is one tap away; the type filter
+(All / Galaxy / Nebula / Cluster) still narrows the whole list, not the preview; the link's count says how
+many are waiting; and the existing "N more targets aren't up tonight — lower the minimum altitude" note
+below it is untouched.
+
+**Why it hid.** The bundled samples carry no site, so `_resolve_observer` answered "none" and this table
+rendered empty on every dogfood pass ever taken. v0.436.1 closed that hole; this is the first of two things
+it found.
+
+**Measured, same data, before → after:** phone **10,430 px → 3,578 px**, desktop **7,245 px → 2,346 px**,
+and the pass now reports "nothing overflowing, no console errors". Tonight is no longer the outlier — 3,578
+px against the mosaic Target page's 3,475 px.
+
+**Upgrade-safe:** no endpoint, config, schema, on-disk, API-shape or default change. Nothing is fetched
+differently and nothing is dropped; this changes only what is drawn.
+
+**Tests +2:** the fold at twelve with the count in the link, one tap listing all thirty, folding back, and
+a ranking that already fits being offered no disclosure at all. The first is red on a scratch revert.
+
 ## v0.436.1 — 2026-09-12 — a dogfood pass gets an observing site, and the "plan a night" half of the app is finally in front of a browser
 
 *(Builder, branch `agent/run-2026-09-12` — 🟠 INFRA. The `LEAD` filed with v0.435.0 earlier the same day,
