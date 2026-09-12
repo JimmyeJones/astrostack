@@ -28,7 +28,11 @@ import { THIN_STACK_MAX_FRAMES } from "./thinStack";
 import { fieldsOfSkyLabel, perPixel, spansMoreThanOneField } from "./perPixel";
 import { formatIntegration } from "../../format";
 import { settingsLink } from "../../settingsSections";
-import { goalHoursForType, type GoalDifficulty } from "../../readiness";
+import {
+  goalDifficultyFactor,
+  goalHoursForType,
+  type GoalDifficulty,
+} from "../../readiness";
 import { objectTypeBucket } from "../../tonight";
 import type { SoftStars } from "./softStars";
 
@@ -248,21 +252,46 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
     // "another clear night or two" there contradicts the badge two inches up
     // the page saying it looks good in well under an hour, so say the true
     // thing and name the smaller lever it actually needs.
+    //
+    // …and a cluster is only *one* of the things that earn that badge. The words
+    // quoted above are `target_difficulty`'s **easy** verdict, which every
+    // curated-easy nebula and galaxy prints too — M42, M31, the Blue Snowball,
+    // the Cat's Eye — and this branch never asked. Photographed on the bundled
+    // M42 sample: the coaching card read "Galaxies and nebulae reward hours, so
+    // another clear night or two on this target" with "It usually looks good in
+    // well under an hour" in the object card below it, and the readiness card
+    // between them quoting a goal of ~2 h — a night or two being several times
+    // the whole goal.
+    //
+    // So ask the question once, from the two classifications that already
+    // exist rather than from a new threshold: the type rule (clusters are
+    // uniformly easy) and the curated verdict. `goalDifficultyFactor` is the
+    // very function the goal these bars are fractions of is scaled by, so this
+    // rung and that goal cannot come to different opinions about one object; it
+    // returns 1 for an un-curated verdict, an unknown level, and an older
+    // backend, all of which leave this phrase exactly as it was.
     const cluster = objectTypeBucket(input.objectType) === "Cluster";
+    const curatedEasy = goalDifficultyFactor(input.difficulty) < 1;
+    // Spelled as one subject so the Cluster sentences stay byte-for-byte what
+    // they have said since v0.429.2 — only the set of targets that get them
+    // grows.
+    const quickly = cluster
+      ? "Clusters come up quickly"
+      : "This one comes up quickly for a Seestar";
     return {
       kind: "integration",
       phrase: mosaic
         ? `Add more time — your ${formatIntegration(integrationS)} is spread across ` +
           `${fieldsOfSkyLabel(input.fieldFulls)}, so each part of this picture ` +
           `has ${soFar}. ` +
-          (cluster
-            ? `Clusters come up quickly, so even another pass or two over the ` +
+          (cluster || curatedEasy
+            ? `${quickly}, so even another pass or two over the ` +
               `same mosaic would clean up the background.`
             : `Galaxies and nebulae reward hours, so more passes over ` +
               `the same mosaic would pull out much more faint detail.`)
         : `Add more time — ${soFar}. ` +
-          (cluster
-            ? `Clusters come up quickly, so even the rest of one clear night on ` +
+          (cluster || curatedEasy
+            ? `${quickly}, so even the rest of one clear night on ` +
               `this target would clean up the background nicely.`
             : `Galaxies and nebulae reward hours, so another clear night or two ` +
               `on this target would pull out much more faint detail.`),
