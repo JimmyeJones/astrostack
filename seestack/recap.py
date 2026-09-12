@@ -263,8 +263,22 @@ def draw_poster(*, title: str, stats, lines=(), hero=None,  # noqa: ANN001
     backdrop, darkened so the text stays readable; without one the poster falls
     back to a plain deep-space background, so a library with no stack yet still
     renders rather than failing.
+
+    Every string is put through
+    :func:`seestack.render.glyphs.safe_for_default_font` first: the title and
+    the "also shot" line are built from **target names**, which are whatever
+    the owner called their folders, and the bundled face draws an accent, a
+    dash or a ``×`` as a hollow box. Doing it here — before ``_fit_font``
+    measures anything — covers both callers of this renderer.
     """
     from PIL import Image, ImageDraw
+
+    from seestack.render.glyphs import safe_for_default_font
+
+    title = safe_for_default_font(title)
+    stats = [(safe_for_default_font(value), safe_for_default_font(label))
+             for value, label in stats]
+    lines = [safe_for_default_font(line) for line in lines]
 
     canvas = (_cover_crop(hero, size) if hero is not None
               else Image.new("RGB", (size, size), (10, 12, 20)))

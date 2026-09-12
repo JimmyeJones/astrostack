@@ -243,6 +243,8 @@ def draw_object_labels(img, labels: ObjectLabels, *, avoid=()):  # noqa: ANN001,
     """
     from PIL import ImageDraw
 
+    from seestack.render.glyphs import safe_for_default_font
+
     picture = img.convert("RGB") if img.mode != "RGB" else img
     if not labels:
         return picture
@@ -271,7 +273,11 @@ def draw_object_labels(img, labels: ObjectLabels, *, avoid=()):  # noqa: ANN001,
             # The dot itself would sit in (or past) the picture's own margin;
             # a name pinned there reads as pointing off the edge.
             continue
-        box = draw.textbbox((0, 0), lab.text, font=font, stroke_width=2)
+        # Catalog names carry accents and Greek ("omega Cen", "Gomez's
+        # Hamburger"), and the bundled face draws those as hollow boxes — so
+        # the chip is sized and inked from the sanitised text, never the raw.
+        text = safe_for_default_font(lab.text)
+        box = draw.textbbox((0, 0), text, font=font, stroke_width=2)
         tw = float(box[2] - box[0])
         th = float(box[3] - box[1])
         step = dot_r + gap
@@ -296,7 +302,7 @@ def draw_object_labels(img, labels: ObjectLabels, *, avoid=()):  # noqa: ANN001,
                      outline=HALO_RGB, width=2)
         draw.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r],
                      outline=MARK_RGB, width=max(1, dot_r // 2))
-        draw.text((tx, ty), lab.text, font=font, fill=MARK_RGB, anchor=anchor,
+        draw.text((tx, ty), text, font=font, fill=MARK_RGB, anchor=anchor,
                   stroke_width=2, stroke_fill=HALO_RGB)
         # Reserve the chip *and* the dot, so the next label can't be laid over
         # either of them.

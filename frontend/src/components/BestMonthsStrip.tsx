@@ -1,7 +1,8 @@
-import { Box, Group, Paper, Stack, Text, ThemeIcon, Tooltip } from "@mantine/core";
+import { Box, Group, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconCalendarMonth } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { HintAnchor } from "./HintAnchor";
 import { bestMonthsVerdict, monthLabel } from "./bestMonths";
 
 const MONTH_INITIALS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
@@ -53,7 +54,12 @@ export function BestMonthsStrip({ safe }: { safe: string }) {
                   ? `${monthLabel(m.month)}: up ~${usableH.toFixed(1)} h in the dark, peaks ${Math.round(m.max_transit_alt_deg)}°`
                   : `${monthLabel(m.month)}: doesn't clear the floor (peaks ${Math.round(m.max_transit_alt_deg)}°)`;
               return (
-                <Tooltip key={m.month} label={tip} withArrow openDelay={200}>
+                // `HintAnchor`, not a plain `Tooltip`: a heat cell has no
+                // behaviour of its own, so on a phone a tap did nothing and the
+                // month's own numbers — how long it is up in the dark, and how
+                // high it climbs — were written nowhere. The verdict above says
+                // *which* months; only these say how good each one is.
+                <HintAnchor key={m.month} label={tip} withArrow openDelay={200}>
                   <Box
                     aria-label={tip}
                     style={{
@@ -76,7 +82,7 @@ export function BestMonthsStrip({ safe }: { safe: string }) {
                   >
                     {MONTH_INITIALS[i]}
                   </Box>
-                </Tooltip>
+                </HintAnchor>
               );
             })}
           </Group>

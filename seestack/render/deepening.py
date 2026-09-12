@@ -149,10 +149,19 @@ def _draw_corner_label(img, text: str):
     white text — so it never competes with the picture. An empty ``text`` is a
     clean no-op (the image is returned unchanged), so a label-less frame is
     byte-for-byte what the reel produced before. The font scales with the frame
-    width and shrinks so a long label never runs past ~60% of the frame."""
+    width and shrinks so a long label never runs past ~60% of the frame.
+
+    Also shared by the montage's tile captions and the before/after pair's cell
+    labels, both of which carry a **target name** — so the text goes through
+    :func:`seestack.render.glyphs.safe_for_default_font` before it is measured
+    or drawn."""
     if not text:
         return img
     from PIL import Image, ImageDraw
+
+    from seestack.render.glyphs import safe_for_default_font
+
+    text = safe_for_default_font(text)
 
     base = img.convert("RGBA")
     width, height = base.size
