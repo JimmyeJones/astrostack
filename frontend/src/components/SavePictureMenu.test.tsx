@@ -197,4 +197,32 @@ describe("SavePictureMenu", () => {
     expect(caption).toContain("Orion Nebula");
     expect(caption).toContain("240");
   });
+
+  it("carries the Moon disc into the marked download when the card asks for it", async () => {
+    // The disc is a per-card *view* toggle, like North-up and the nameplate: the
+    // file carries what the screen is showing, rather than the menu growing a
+    // twentieth item. `moon` is the sixth positional boolean, which is exactly
+    // the transposition this assertion exists to catch.
+    renderMenu({ moon: true });
+    open();
+    expect((await item("With scale & compass")).getAttribute("href"))
+      .toBe(api.stackArtifactUrl(
+        "M_42", 9, "jpeg", false, false, false, true, false, true));
+    // …and the hint says so, so the item isn't silently two different downloads.
+    expect((await item("With scale & compass")).textContent)
+      .toContain("full Moon for scale");
+  });
+
+  it("leaves the marked download unchanged for a surface without the toggle", async () => {
+    // The Target hero passes no `moon`, so its picture is byte-for-byte the one
+    // it always served.
+    renderMenu();
+    open();
+    const href = (await item("With scale & compass")).getAttribute("href");
+    expect(href).toBe(
+      api.stackArtifactUrl("M_42", 9, "jpeg", false, false, false, true));
+    expect(href).not.toContain("moon=");
+    expect((await item("With scale & compass")).textContent)
+      .not.toContain("full Moon for scale");
+  });
 });

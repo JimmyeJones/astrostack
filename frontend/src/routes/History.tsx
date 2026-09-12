@@ -5,7 +5,7 @@ import {
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustments, IconCheck, IconChevronDown, IconCopy, IconDeviceFloppy, IconGitCompare, IconInfoCircle, IconPencil, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
+import { IconAdjustments, IconCheck, IconChevronDown, IconCopy, IconDeviceFloppy, IconGitCompare, IconInfoCircle, IconMoon, IconPencil, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackPanelGainSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting, type StackDrizzleDegraded } from "../api/client";
@@ -39,6 +39,7 @@ import { ScanToPhoneModal } from "../components/ScanToPhoneButton";
 import { SampleTourNote } from "../components/SampleTourNote";
 import { sharePictureText } from "../share";
 import { removedOverlayCaption } from "../removed";
+import { moonDiscFits } from "../moonDisc";
 import { Sparkline } from "../components/Sparkline";
 import { MENU_HINT, SavePictureMenu } from "../components/SavePictureMenu";
 import { sameTargetCompareHref } from "../compareWithLast";
@@ -879,6 +880,13 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   // on has_fits).
   const [identify, setIdentify] = useState(false);
   const [scale, setScale] = useState(false);
+  // "Moon for scale" — the bar's own sentence ("about 2.5 full Moons wide") drawn
+  // as a faint circle beside the object, which is how a beginner actually reads
+  // angular size. It is measured off the same bar, so it is an *addition* to
+  // Scale & compass rather than a fourth independent mark: the toggle only
+  // appears while that one is on, and it reaches the baked download through the
+  // same per-card route the North-up / nameplate toggles already take.
+  const [moon, setMoon] = useState(false);
   // "See what stacking removed" — tint the pixels outlier rejection dropped, so
   // the satellite trails and cosmic rays the stack quietly cleaned out stop being
   // an abstract percentage. Whether a run *has* such a map rides on the listing
@@ -1127,6 +1135,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             directions={turnedView ? turnedView.directions
               : (annotations.data?.directions ?? null)}
             showCompass={scale && !cantPlaceMarks}
+            // …and so does the Moon disc, which is measured off that very bar.
+            showMoon={scale && moon && !cantPlaceMarks}
             // The server sizes the tint to the *stored* preview — including any
             // North-up turn a past save baked into it, and now the one this
             // request asks for on the way out — so it lands true on those bytes
@@ -1409,6 +1419,11 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             identity={identity}
             northUp={applyNorthUp}
             nameplate={nameplate}
+            // What you see is what you save: the disc reaches "With scale &
+            // compass" through the same per-card route the North-up and
+            // nameplate toggles already take, rather than as a twentieth item
+            // on a menu the owner already calls too busy.
+            moon={scale && moon}
             onToPhone={() => setToPhone(true)}
             size="xs"
             iconSize={14}
@@ -1455,6 +1470,27 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                   >
                     Scale &amp; compass
                     <span style={MENU_HINT}>How big this is in the sky, and which way is North</span>
+                  </Menu.Item>
+                )}
+                {/* Nested under Scale & compass rather than standing beside it:
+                    it is the same answer drawn instead of written, it is
+                    measured off that very bar, and the owner's standing
+                    complaint is that there is too much on screen at once. So it
+                    appears only once the marks are on — and only on a field the
+                    disc actually fits, so the app never offers a mark it would
+                    then decline to draw. */}
+                {run.has_fits && scale && moonDiscFits(
+                  view.scaleBar, view.width, view.height) && (
+                  <Menu.Item
+                    leftSection={<IconMoon size={16} />}
+                    rightSection={moon ? <IconCheck size={14} /> : null}
+                    onClick={() => setMoon((v) => !v)}
+                  >
+                    Moon for scale
+                    <span style={MENU_HINT}>
+                      A faint circle the size of the full Moon, so you can see how big
+                      your target really is
+                    </span>
                   </Menu.Item>
                 )}
                 {hasRejectionMap && (
