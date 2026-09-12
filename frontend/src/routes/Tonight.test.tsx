@@ -266,6 +266,43 @@ describe("TonightView", () => {
     expect(screen.getByText("Needs mosaic")).toBeInTheDocument();
   });
 
+  it("never lets a row's badges shrink below their own text — this table is six "
+    + "columns wide and read on a phone", async () => {
+      // Measured in a real browser at 420 px with an observing site set
+      // (2026-09-12, the first dogfood pass that ever had one): the score
+      // column squeezed to a 15 px box against the 20 px "92" needs, and the
+      // CLIPPED-LABEL probe reported **145** of them on one page. A Mantine
+      // Badge is overflow:hidden + text-overflow:ellipsis, so the clipping
+      // happens *inside* the badge and scrolling the table cannot reveal it —
+      // the same mechanism v0.434.1 fixed on the Nights card, on the one table
+      // no pass had ever seen with rows in it.
+      //
+      // jsdom does no layout, so this pins the production value on every badge
+      // the row draws rather than the pixels; the browser is the measurement,
+      // and this is what stops a silent revert.
+      vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+        targets: [target({
+          id: "M31", name: "Andromeda Galaxy", score: 100,
+          already_targeted: true, total_exposure_s: 600,
+          difficulty: { level: "easy", label: "Easy", text: "A bright, forgiving target." },
+          framing: { level: "mosaic", text: "is bigger than the Seestar's single frame." },
+        })],
+      }));
+      renderTonight();
+      await waitFor(() =>
+        expect(screen.getByText(/Andromeda Galaxy/)).toBeInTheDocument());
+
+      // The score is the whole content of the last column, and a three-digit
+      // one is the worst case the page can produce.
+      expect(screen.getByText("100").closest(".mantine-Badge-root"))
+        .toHaveStyle({ minWidth: "max-content" });
+      // …and the advisory badges sharing the squeezed row are held to it too.
+      expect(screen.getByText("Needs mosaic").closest(".mantine-Badge-root"))
+        .toHaveStyle({ minWidth: "max-content" });
+      expect(screen.getByText("Easy").closest(".mantine-Badge-root"))
+        .toHaveStyle({ minWidth: "max-content" });
+    });
+
   it("answers a tap on a planning badge — this page is read outdoors, on a phone",
     async () => {
       // Every badge in this table explains itself in a tooltip and nowhere else,
