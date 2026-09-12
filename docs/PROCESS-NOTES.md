@@ -18,6 +18,52 @@ is a queue.
 
 ---
 
+## 2026-09-12 (Builder, branch `claude/sweet-babbage-iddonp`) — DOGFOOD PASS: `--mosaic --editor` plus `--empty`, and two sentences that were only wrong next to another sentence
+
+**The run.** Baseline green (5,915 passed / 2 skipped, 31:05 headless with Qt). The backlog's ready work is
+dry for a fourth consecutive run — every open entry under "Bugs (fix these first)" is gated on data no agent
+has, or is a stand-down that carries its own numbers — and the "Features that serve real workflows" list is
+dry in the same way (its open items are one *declined* crop tool, one "worth doing only once someone uploads
+a big archive", one constellation-line dataset the app does not bundle, and two entries already marked
+moot). So this run did §2's big-picture pass instead of picking from the list, and shipped both of what it
+found: **v0.435.4** and **v0.435.5**.
+
+**Both findings were in the gap between two of the app's own claims, not in either one.** That is now the
+fourth and fifth consecutive finding of that shape, and the §7 instruction to read the mosaic block *as one
+paragraph* is what produced them — neither sentence is wrong on its own, and each had survived every
+code-level audit and every CLEAN dogfood pass because "did anything error?" cannot see them.
+
+- **v0.435.4** — the panel-map card called a 30-second shortfall *"a few minutes' difference"* while the
+  stack-health note printed beneath it on the same page called the same gap *"about 30 s behind"*. The tell
+  was in the source, not the screen: `stackhealth`'s comment **quotes the map's clause** as the sentence it
+  stopped agreeing with. That earlier fix made the two agree about *what to do* and left them disagreeing
+  about *how far behind the panel was*.
+- **v0.435.5** — *"another clear night or two"* printed two inches above *"It usually looks good in well
+  under an hour"*, with *"goal ~2 h"* between them. Also a half-closed fix: v0.429.2 keyed on the **Cluster
+  type bucket**, but the badge it quoted in its own comment is `target_difficulty`'s **easy verdict**, which
+  every curated-easy nebula and galaxy prints too. **Carry this forward: when a fix keys on one of the
+  things that produce a sentence, check whether anything else produces the same sentence.** Both of this
+  run's findings are that pattern, and the second is a re-break of the first's own fix one bucket over.
+
+**Clean, and recorded so nobody re-walks it.** `--mosaic --editor`: the mosaic sample stacked, Auto's trim
+**7.9 %** of the canvas (well under the ~15 % bug bar), nothing overflowing and no console errors at 1440 px
+or 420 px on either sample, and the editor drive added **all 21 ops** one at a time — on the field run *and*
+on the mosaic run — each re-rendering the live preview with no console error and no failed request, then
+undo/redo clean. `--empty` (first-run, no data at all): clean, nothing overflowing, no console errors; the
+tallest first-run page is `/glossary` at 2,803 px on a phone. The `min-max at 3 subs` praise and the
+seam/grain pair on the mosaic block were read against v0.422.1's shipped rule and **hold** (median depth 6,
+so the guarantee is true where it is claimed).
+
+**One thing deliberately NOT filed, so it is declined once rather than re-litigated.** On the first-run
+Dashboard the "Your first image" card offers a live action link on all six steps, including the four
+("Pick a target" ×2, "Open a picture", "Open your edit") that an install with zero frames cannot act on;
+they land on `/library` and `/gallery`, which both carry correct empty states pointing back to the first
+step, and the card's own "Next:" line already names step 1. Hiding those links would be a **design
+opinion** against the owner's standing "nothing may be removed" rule, not a bug — a Builder files verified
+bugs and unfinished leads (§4), and this is neither.
+
+---
+
 ## 2026-09-12 (Builder, branch `claude/sweet-babbage-5x5by0`) — QA SWEEP: preview↔export parity of the Auto path's detail ops, and a metric that reported a real divergence backwards
 
 **The run.** Baseline green (5,897 passed / 2 skipped, 14:51 at `-n 4`). The backlog's ready work is dry —
