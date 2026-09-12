@@ -1,5 +1,41 @@
 # Shipped — the record
 
+## v0.431.1 — 2026-09-12 — the one hand-mirrored engine constant that had no drift guard
+
+*(Builder, branch `claude/sweet-babbage-e9r1m0` — infra/trust. Test + one named constant in place of a
+literal; no behaviour change anywhere, and none possible: the constant it substitutes is 3.)*
+
+**The gap, stated as the repo already states it eight times over.** This project has repeatedly found the
+same failure: a Python number the frontend cannot import, mirrored by hand into a sentence a beginner
+reads, drifting with nothing failing. There are eight `tests/test_*_mirror.py` guards for exactly that —
+`fullres`, `pace`, `reject_pct`, `min_max_floor`, `factor_label`, `noise_low_lead`, `auto_summary`,
+`upload_destination`. `frontend/src/weightingHint.ts` is a ninth mirror with no guard:
+`WEIGHTING_MIN_MAX_MIN_FRAMES = 3` is the engine's own `weights_applied` gate, quoted verbatim in the
+caution the Stack form and the Settings defaults both show — *"on any stack of 3 or more subs, min/max
+rejection and quality weighting don't combine"*.
+
+A stale copy fails nothing and gets it wrong in both directions: telling a user their quality weighting
+is being ignored on a stack where it is honoured, or staying silent on one where it is not — which is
+the case the caution exists for.
+
+**Guarded in both directions, because the constant alone is half the claim.**
+`tests/test_weighting_hint_mirror.py` checks the TS literal against
+`seestack.stack.stacker.MIN_MAX_MIN_FRAMES`, and then checks *that* constant against the **dispatcher's
+own behaviour** rather than another copy of itself: `weights_applied` is
+`not _min_max_reject_runs(eff, n)`, i.e. `combine_method(...) == "min-max-reject"`, so walking
+`combine_method` across the boundary asks the same question the provenance flag answers. Drizzle is
+walked too, since the caution stands down there at every count. Both halves verified red by scratch
+edits — a mirrored 4, and a dispatcher moved by one.
+
+**And the literal is gone from the switch itself.** `combine_method` spelled its gate `n >= 3` while
+`MIN_MAX_MIN_FRAMES = 3` sat twenty lines below it and four other sentences quoted that constant as the
+count this branch switches at. It now names the constant, so the two cannot be edited apart at all. The
+sigma-clip floor beside it stays spelled out on purpose: the nearby `DRIZZLE_REJECT_MIN_FRAMES` is the
+*drizzle* pass's own floor — a different claim that happens to share the number 4 — and folding them
+would be the conflation this file's own comments warn about.
+
+**Tests +2. No config, schema, on-disk, API or default change.**
+
 ## v0.431.0 — 2026-09-12 — "is it enough yet?" stops quoting M31 and M33 the same number
 
 *(Builder, branch `claude/sweet-babbage-e9r1m0` — PRIORITY 2–3 (autonomy + friendliness). Additive
