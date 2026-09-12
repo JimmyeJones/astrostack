@@ -2627,6 +2627,12 @@ export interface Histogram {
   // identity and the live preview shows only a fraction of the local contrast the
   // full-res export adds (see sharpenUnderstatesCaption). Absent on an older backend.
   sharpen_preview_understates?: boolean;
+  // True when an enabled Noise-reduction op is set to **bilateral** on a proxy
+  // decimated enough that its physically-matched window reaches far fewer samples
+  // than the export's — so the preview leaves visibly more grain than the saved
+  // picture will (measured up to 2x). Wavelet and TV match their export and are
+  // never flagged (see denoiseUnderstatesCaption). Absent on an older backend.
+  denoise_preview_understates?: boolean;
   // True when an enabled Hot-pixel removal op is *skipped* on the decimated
   // preview: striding turns a real star into a lone isolated pixel, which is the
   // signature the op treats as a defect, so previewing it erased stars the export
