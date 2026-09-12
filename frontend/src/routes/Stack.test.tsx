@@ -1569,10 +1569,19 @@ describe("StackView", () => {
     };
   }
 
+  /** The print panel with an estimate *and* a frames list that agrees with it.
+   *
+   * The frames matter now: the "raise Drizzle" half is withheld below the
+   * drizzle bar, and since v0.436.0 that bar is read per **pixel** — the same
+   * `perPixelSamples` the caution under it uses — rather than off the
+   * estimate's target-wide `n_frames`. These fixtures used to hand the form two
+   * frames and a 250-frame estimate, which the old gate happily read as 250.
+   */
   function mockPrintForm(est: client.StackEstimate) {
     mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ sigma_clip: true });
-    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: est.n_frames }, (_, i) => mkFrame(i + 1)));
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
     vi.spyOn(client.api, "stackEstimate").mockResolvedValue(est);
   }
@@ -1629,6 +1638,35 @@ describe("StackView", () => {
       expect(screen.getByText(/print sharply up to A4/)).toBeInTheDocument());
     expect(screen.queryByText(/Raising Drizzle/)).not.toBeInTheDocument();
   });
+
+  it("withholds the bigger-print nudge on a mosaic whose pixels are thin, "
+    + "even though its target total clears the bar", async () => {
+      // The panel's own comment promised it could "never recommend the thing it
+      // would then warn against" — but it read `est.n_frames`, the target's
+      // total, while `drizzleTooFewHint` reads the per-pixel depth. Identical on
+      // a single field; on the owner's raster the total clears 100 long before
+      // any pixel does, so the panel said "raise Drizzle" directly above a
+      // caution saying to turn Drizzle off.
+      const est = printEstimate(false, 400);
+      mockPrintForm({ ...est, is_mosaic: true, panel_depth: 25 });
+      renderStack();
+      await waitFor(() =>
+        expect(screen.getByText(/print sharply up to A4/)).toBeInTheDocument());
+      expect(screen.queryByText(/Raising Drizzle/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /prints at A3/ }))
+        .not.toBeInTheDocument();
+    });
+
+  it("still offers the bigger print on a mosaic that is genuinely deep enough",
+    async () => {
+      // The correction must gate on the depth, not simply silence every mosaic.
+      const est = printEstimate(false, 400);
+      mockPrintForm({ ...est, is_mosaic: true, panel_depth: 120 });
+      renderStack();
+      await waitFor(() =>
+        expect(screen.getByText(/Raising Drizzle to ×1.4 would print it at A3/))
+          .toBeInTheDocument());
+    });
 
   it("says nothing about printing when the run is over budget", async () => {
     // The over-budget alert replaces the sizing line entirely — a print nudge

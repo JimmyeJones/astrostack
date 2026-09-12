@@ -47,6 +47,22 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
+# Below this many samples **on one output pixel**, recommending drizzle is bad
+# advice: spreading each sub across a finer grid needs enough dither-phased
+# samples to fill it, and with fewer the result is slower and can come back
+# noisier and gappier than the ordinary weighted-mean path (see the module
+# docstring's "typically 200+" recommendation — this is the *warn* bar, set
+# well below it so an ordinary deep stack is never nagged).
+#
+# It is a per-**pixel** count, not a target's frame total: on a mosaic the subs
+# are spread across the raster, so a 3x3 raster 225 subs deep in total has only
+# ~25 on any pixel. Every surface that quotes this bar must feed it the depth,
+# not the total — the Stack form's `drizzleTooFewHint`/print panel do it through
+# `samplesPerPixel`, and :func:`seestack.printexport.bigger_print` takes it as
+# `samples_per_pixel`. Mirrored by hand in `frontend/src/samplesPerPixel.ts`
+# (beside that helper); `tests/test_drizzle_bar_mirror.py` guards the copy.
+DRIZZLE_MIN_SAMPLES_PER_PIXEL = 100
+
 # Outlier rejection is only trusted where enough frames overlap: with fewer
 # effective contributions the sample σ is meaningless. (Below ~11 frames a
 # non-iterated κ=3 clip can't fire anyway — the largest possible z-score of a
