@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BestMonthsStrip } from "./BestMonthsStrip";
 import type { BestMonths, MonthObservability } from "../api/client";
@@ -51,6 +51,18 @@ describe("BestMonthsStrip", () => {
     // One heat cell per month, each with an accessible label.
     expect(screen.getByLabelText(/Dec: up ~5\.3 h in the dark/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Jun: doesn't clear the floor/)).toBeInTheDocument();
+  });
+
+  it("gives up a month's own numbers to a tap, not only to a hover", async () => {
+    // The strip is read on a phone, standing outside, deciding what to point at
+    // — and a heat cell has nothing to click, so before `HintAnchor` the only
+    // gesture available did nothing and December's hours were written nowhere.
+    vi.spyOn(client.api, "bestMonths").mockResolvedValue(payload());
+    renderStrip();
+    const dec = await screen.findByLabelText(/Dec: up ~5\.3 h in the dark/);
+    expect(screen.queryByText(/Dec: up ~5\.3 h in the dark/)).toBeNull();
+    fireEvent.click(dec);
+    expect(await screen.findByText(/Dec: up ~5\.3 h in the dark/)).toBeInTheDocument();
   });
 
   it("self-hides when the planner returns no months (no location/position)", async () => {
