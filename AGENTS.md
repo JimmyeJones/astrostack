@@ -645,6 +645,19 @@ the repo.
 > is `source`d, and its `set -e` did not stop the failed install; it now verifies
 > the toolchain imports before saying it is ready, v0.378.1.)*
 
+> **A normal pass now gives the scratch install an observing site** *(added
+> 2026-09-12 with v0.436.1)*. Before that it had none — the bundled samples'
+> FITS deliberately carry no `SITELAT`/`SITELONG`, so `_resolve_observer`
+> answered `"none"` and **Tonight, the Sky Map's placement, the life list's "Up
+> tonight" chip, the wishlist prompt, `/api/plan/closing`, `/api/plan/week` and
+> `/api/life-list/nearly-there` were all in their empty state on every pass ever
+> run**, while three features shipped into that half in one week. The site goes
+> into the scratch install's **Settings**, never into the sample's headers (a
+> demo that claimed a location would have the planner plan a real owner's night
+> from it); `DOGFOOD_SITE="lat,lon"` moves it, `--no-site` skips it, and
+> `--empty` never sets one. The pass prints `location_source` and the row count
+> so a silent failure can't pass for the old empty state.
+>
 > Tip: **`scripts/agent-dogfood.sh` boots a real app with real data** for the §2
 > big-picture pass — scratch data root, the bundled sample loaded and stacked,
 > then Playwright full-page screenshots at 1440 px **and** 420 px plus an

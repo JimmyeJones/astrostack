@@ -19,6 +19,23 @@
 #   scripts/agent-dogfood.sh --empty         # probe a FIRST-RUN app: no data at all
 #   scripts/agent-dogfood.sh --editor        # ALSO drive the editor (adds every op)
 #   scripts/agent-dogfood.sh --mosaic        # ALSO load/stack/probe a 2x2 MOSAIC sample
+#   scripts/agent-dogfood.sh --no-site       # leave the scratch install with no observing site
+#
+# --no-site turns OFF something a normal pass now does by default. Every pass
+# before 2026-09-12 left the scratch install with no site at all: the bundled
+# samples' FITS carry no SITELAT/SITELONG (deliberately — a demo that claimed a
+# location would silently plan a real owner's night from it), and no site means
+# `_resolve_observer` answers "none", which means **Tonight, the Sky Map's
+# placement, the life list's "Up tonight" chip, the wishlist's "the Tonight page
+# will tell you when", /api/plan/closing, /api/plan/week and
+# /api/life-list/nearly-there are ALL in their empty state**. So every "dogfood
+# CLEAN" ever recorded was a statement about the half of the app that does not
+# need a site, while v0.426.0, v0.430.0 and v0.433.0 all shipped into the half
+# that does. The fix stays out of the shipped data: the script PUTs a site into
+# its own scratch install's Settings, which is exactly what a real owner's
+# install supplies, and nothing about the sample changes. Override the location
+# with DOGFOOD_SITE="lat,lon"; --empty never sets one (a first-run app has no
+# site, and that empty state is what that pass exists to measure).
 #
 # --editor exists because the page probe only ever *photographs* the editor, in
 # the one state it opens in. Priority 1 is the editor and the owner's complaints
@@ -69,6 +86,13 @@ REPO="$PWD"
 
 DOGFOOD_DIR="${DOGFOOD_DIR:-${TMPDIR:-/tmp}/astrostack-dogfood}"
 DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0; DO_EDITOR=0; DO_MOSAIC=0
+DO_SITE=1
+# Where the scratch install pretends to observe from. A round mid-northern
+# latitude: obviously synthetic, and the band most Seestar owners are in, so the
+# planner's answers are representative rather than polar or equatorial. It is
+# the SCRATCH install's setting, never the sample's data — nothing shipped
+# claims to have been shot here.
+DOGFOOD_SITE="${DOGFOOD_SITE:-40.0,-2.0}"
 for arg in "$@"; do
   case "$arg" in
     --serve) DO_SERVE=1 ;;
@@ -78,7 +102,8 @@ for arg in "$@"; do
     --empty) DO_EMPTY=1 ;;
     --editor) DO_EDITOR=1 ;;
     --mosaic) DO_MOSAIC=1 ;;
-    -h|--help) sed -n '1,62p' "$0"; exit 0 ;;
+    --no-site) DO_SITE=0 ;;
+    -h|--help) sed -n '1,80p' "$0"; exit 0 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
@@ -93,6 +118,9 @@ if [ "$DO_EMPTY" = 1 ]; then
   SERVER_LOG="$DOGFOOD_DIR/server-empty.log"
   rm -rf "$DOGFOOD_DIR/empty"
   DO_STACK=0
+  # A first-run app has no observing site, and the screens that say so are
+  # exactly what this pass exists to photograph.
+  DO_SITE=0
 else
   DEFAULT_PORT=8811
   DATA="$DOGFOOD_DIR/data"
@@ -189,6 +217,37 @@ stack_target() {  # $1 = safe name, $2 = what to call it in the log
     sleep 2
   done
 }
+
+# 3c. An observing site, in the SCRATCH install's Settings — see --no-site in the
+#     header. Without it the whole "plan a night" half of the app is in its empty
+#     state, so no dogfood pass had ever seen those screens with data. It goes in
+#     Settings rather than into the sample's FITS on purpose: a header location is
+#     something the planner *plans from*, so a sample claiming a site would tell a
+#     real owner elsewhere in the world which targets are up, computed for the
+#     wrong hemisphere. The sample's generated pixels stay bit-identical.
+if [ "$DO_SITE" = 1 ]; then
+  SITE_LAT="${DOGFOOD_SITE%%,*}"
+  SITE_LON="${DOGFOOD_SITE##*,}"
+  echo "-- setting the scratch install's observing site to ${SITE_LAT}, ${SITE_LON}"
+  echo "   (Settings only — nothing about the sample data changes; --no-site skips)"
+  curl -sf -X PUT "$BASE/api/settings" -H 'Content-Type: application/json' \
+       -d "{\"site_lat\": ${SITE_LAT}, \"site_lon\": ${SITE_LON}}" >/dev/null \
+    || echo "warn: could not set the site — the plan pages will stay in their empty state"
+  # …and say whether it actually took, plus what the planner now has to show. A
+  # pass that silently failed here would look exactly like the coverage hole it
+  # is meant to close. Printed, never asserted — a finder, like everything else
+  # this script prints.
+  curl -sf "$BASE/api/plan/tonight" \
+    | python -c '
+import json, sys
+d = json.load(sys.stdin) or {}
+src = d.get("location_source")
+rows = d.get("targets") or []
+print("   [tonight] location_source=%s, %d row(s) to show" % (src, len(rows)))
+if src != "settings":
+    print("   [tonight] the site did NOT take — the plan half is still empty")
+' 2>/dev/null || echo "   [tonight] could not read /api/plan/tonight"
+fi
 
 run_id_of() {  # newest stack run id for a target, or empty
   [ -n "$1" ] || return 0
