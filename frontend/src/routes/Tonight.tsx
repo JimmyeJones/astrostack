@@ -11,6 +11,7 @@ import { HintAnchor } from "../components/HintAnchor";
 import { NearlyThereCard } from "../components/NearlyThereCard";
 import { WishlistStar } from "../components/WishlistStar";
 import { WishlistTonightCard } from "../components/WishlistTonightCard";
+import { ClosingSeasonCard } from "../components/tonight/ClosingSeasonCard";
 import { PlanWeekCard } from "../components/tonight/PlanWeekCard";
 import { QueryError } from "../components/QueryError";
 import { WorthMoreTimeList } from "../components/tonight/WorthMoreTimeList";
@@ -429,6 +430,12 @@ export function TonightView() {
           sees it, and it sits above the tables because it's the one line that
           turns "what's up?" into "point here". */}
       <NearlyThereCard />
+
+      {/* "Shoot these before they're gone." Above the week plan because it is
+          the one answer here that *expires*: a season that closes is gone for a
+          year, where a week's best night comes round again next week. Silent
+          unless something of the owner's is genuinely on its way out. */}
+      <ClosingSeasonCard minAlt={minAlt ? Number(minAlt) : undefined} />
 
       {/* "Which night should I go out, and what at?" — the cross-target,
           multi-night view the tables below can't give (they are one night, all

@@ -1341,3 +1341,60 @@ def test_plan_week_ics_rejects_bad_input_like_its_json_twin(client, solved_libra
                       params={"nights": 99}).status_code == 422
     assert client.get("/api/plan/week/calendar.ics",
                       params={"when": "not-a-time"}).status_code == 422
+
+
+# --- "Shoot these before they're gone" ----------------------------------------
+
+
+def test_closing_names_the_library_targets_whose_season_is_ending(
+        client, solved_library):
+    # The library-wide half of /best-months/{safe}: nobody opens every target's
+    # seasonal strip, so the season closes quietly. Both fixture targets sit at
+    # Orion's position, which really is on its way out of the evening sky by late
+    # January from London.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/closing", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["location_source"] == "settings"
+    assert body["horizon_weeks"] >= 1
+    rows = body["targets"]
+    assert rows, "Orion in late January should be reported as leaving"
+    row = rows[0]
+    assert row["safe"] in ("M_42", "NGC_7000")
+    assert row["minutes_now"] > 45.0
+    assert 0 <= row["weeks_left"] < body["horizon_weeks"]
+    assert row["last_night"].startswith("2026-")
+    assert 0.0 <= row["noise_gain"] <= 1.0
+    # Soonest first, and every row is a target the user actually has.
+    assert [x["weeks_left"] for x in rows] == sorted(x["weeks_left"] for x in rows)
+
+
+def test_closing_is_silent_in_a_season_when_nothing_is_leaving(
+        client, solved_library):
+    # An altitude floor nothing can clear means nothing is usable tonight, so
+    # nothing is "leaving" — an empty list and a clean 200, never a guess.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    r = client.get("/api/plan/closing",
+                   params={"when": JAN_EVENING, "min_alt": 80})
+    assert r.status_code == 200
+    assert r.json()["targets"] == []
+
+
+def test_closing_without_location_self_hides(client, solved_library):
+    r = client.get("/api/plan/closing", params={"when": JAN_EVENING})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["location_source"] == "none"
+    assert body["observer"] is None
+    assert body["targets"] == []
+
+
+def test_closing_rejects_bad_when_and_bounds_the_horizon(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    assert client.get("/api/plan/closing",
+                      params={"when": "not-a-date"}).status_code == 422
+    assert client.get("/api/plan/closing",
+                      params={"when": JAN_EVENING, "weeks": 0}).status_code == 422
+    assert client.get("/api/plan/closing",
+                      params={"when": JAN_EVENING, "weeks": 99}).status_code == 422

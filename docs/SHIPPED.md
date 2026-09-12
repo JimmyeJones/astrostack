@@ -1,5 +1,65 @@
 # Shipped — the record
 
+## v0.430.0 — 2026-09-12 — "Shoot these before they're gone": the targets whose season is ending, before it ends
+
+*(Builder, branch `claude/sweet-babbage-uawq1j` — 🌟 NEW BEGINNER FEATURE, PRIORITY 2–3 (autonomy +
+friendliness, the "plan" pillar). Offline and read-only throughout: no new dependency, no network, no config,
+schema, on-disk, API-shape or default change. One new GET endpoint and one self-hiding card.)*
+
+**The gap.** `best_months` (v0.174.0) answers the seasonal question — *when can I actually get this?* — for
+**one** target, on the Target page, for somebody who went looking. Nobody goes looking. A season closes
+quietly: the object is a little lower each week, then one evening it is below the floor before the sky is
+dark, and an owner with many targets across many nights (AGENTS.md §1) finds out months later that the autumn
+target he had three hours on is gone until next year. Every other planning surface in the app is
+short-horizon — `/tonight` is one night, `/week` is seven, `/next-session/{safe}` walks fourteen for one
+target — so none of them can see a season end.
+
+**The feature.** `GET /api/plan/closing` → the library targets whose observing season ends inside the next
+eight weeks, soonest first, and a self-hiding **"Shoot these before they're gone"** card on the Tonight page
+above "Plan my week" (above it deliberately: a week's best night comes round again next week, a season does
+not). Each row names the target, how long is left, *what you already have on it* — which is what turns a
+countdown into a decision, since a target already ten hours deep can be let go and a barely-started one
+cannot — and the last night worth shooting it. A week or less earns a "Last chance" badge.
+
+**How it measures it** (`seestack/nightplan.py::season_closing`). One night a week from now to the horizon:
+each night's dark window found once with `_find_dark_window` at local solar noon, then **one vectorised
+`_observability_batch` over the whole library** — so the cost scales with the horizon, not with the library,
+the same shape `plan_week` uses. A target is closing when it is usable on the first sampled night and its
+**last** usable sample is not the final one. Reading the *last* usable sample rather than the first unusable
+one is what makes it robust: a target that dips below the floor for one week in the middle and comes back is
+not leaving, and this cannot report it as though it were.
+
+**Three deliberate silences, all of them about the sky rather than about any target.** (1) A target that is
+not usable *tonight* is not "leaving" — it has not arrived. (2) The whole-night anchoring is
+`best_months`', **not** `upcoming_dark_windows`': the latter clips the first window to "now", which is right
+for tonight and wrong here — it would compare a whole night eight weeks out against whatever is left of this
+one, so opening the app at 3 a.m. would report the entire library as leaving. A test pins that the answer at
+21:00 and at 03:00 is identical. (3) If the last sampled night has **no darkness at all** — polar summer —
+every target would read as going at once. That is the nights, not the targets, so it says nothing.
+
+**Eight weeks is one number, not a scan horizon plus a display threshold.** Two months is the range on which
+the answer is still something to *do*; "in about eleven weeks" is trivia, and a card full of trivia is how a
+self-hiding card becomes another always-on banner. One constant, so there is nothing for two surfaces to
+disagree about. Measured over a year of fortnightly checks against a nine-target London library, it speaks on
+about three quarters of the dates and its countdown falls correctly as each season runs out (M 31 seven weeks
+→ one, then M 42, then M 45; silence through the spring, when nothing of that library leaves).
+
+**Ranking.** Soonest first, tie-broken by `noise_gain_from_more_time` — the same measure "Worth more time"
+is ranked by, so two targets going the same week are ordered by which of them the extra night would actually
+help, and the app speaks in one voice rather than inventing a second definition of "worth it".
+
+**Cached** behind the shared registry-signature cache, bucketed by **date** (the scan samples weekly, so its
+answer cannot move faster than that) with the targets in the signature, so a new target rebuilds immediately.
+Measured ~1.5–2.5 s uncached for the whole library, flat in its size.
+
+**Tests (+10 engine, +4 API, +12 vitest).** The engine: a winter target named and a circumpolar one not; the
+countdown shrinking four weeks later onto the *same* last night; the 21:00-vs-03:00 identity; the dip-and-
+return case; polar summer; unpositioned and empty libraries; the least-finished of two tie-broken first; and
+determinism. The API: the rows and their ordering, an empty answer under an unreachable altitude floor, the
+site-less self-hide, and the bounds on `when`/`weeks`. The frontend: the wording helpers (including "you
+haven't kept any of it yet" and the never-negative countdown) and the card rendering, badging only a last
+week, and rendering **nothing** both when nothing is leaving and against a backend that 404s.
+
 ## v0.429.4 — 2026-09-12 — a mosaic whose readable subs lie one deep per panel stops being published as a picture
 
 *(Builder, branch `claude/sweet-babbage-uawq1j` — 🟠 BUG, PRIORITY 2/4 (autonomy + image quality), on the
