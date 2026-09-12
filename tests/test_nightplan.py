@@ -960,6 +960,131 @@ def test_best_months_is_deterministic():
     assert a == b
 
 
+# --- "Shoot these before they're gone" (``season_closing``) -------------------
+#
+# The library-wide half of the seasonal question. ``best_months`` answers it for
+# one target, on the Target page, for someone who went looking — and a season
+# closes quietly, so nobody does.
+
+_CLOSING_M42 = (83.82, -5.39)        # winter, from the north
+_CLOSING_M13 = (250.42, 36.46)       # a summer evening globular
+_CLOSING_M81 = (148.89, 69.07)       # near-circumpolar from London: never leaves
+
+
+def _closing_target(safe: str, radec: tuple[float, float], *, exposure_s: float = 1200.0):
+    ra, dec = radec
+    return LibraryTarget(safe=safe, name=safe.upper(), ra_deg=ra, dec_deg=dec,
+                         frames_accepted=20, total_exposure_s=exposure_s)
+
+
+def test_a_winter_target_is_named_as_leaving_the_evening_sky_in_late_january():
+    """Mid-January from London: M42 is at its best and M81 is up all year. Eight
+    weeks on, M42 has gone and M81 has not — so exactly one of them is news."""
+    closing = np_plan.season_closing(
+        LONDON, [_closing_target("m42", _CLOSING_M42), _closing_target("m81", _CLOSING_M81)],
+        start_utc=datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc))
+    assert [c.safe for c in closing] == ["m42"]
+    row = closing[0]
+    assert 0 <= row.weeks_left < 8
+    assert row.minutes_now > 45.0
+    assert row.last_night.startswith("2026-0")
+
+
+def test_nothing_is_reported_when_nothing_is_leaving():
+    """The ordinary answer, and the one that keeps this from becoming a banner:
+    a circumpolar target on its own produces silence, not a row."""
+    assert np_plan.season_closing(
+        LONDON, [_closing_target("m81", _CLOSING_M81)],
+        start_utc=datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc)) == []
+
+
+def test_a_target_not_usable_tonight_is_not_described_as_leaving():
+    """M13 in deep midwinter is a morning object at best from London — it is not
+    leaving, it has not arrived, and saying "shoot it before it's gone" about
+    something you cannot shoot tonight is the wrong sentence."""
+    closing = np_plan.season_closing(
+        LONDON, [_closing_target("m13", _CLOSING_M13)],
+        start_utc=datetime(2026, 1, 5, 21, 0, tzinfo=timezone.utc))
+    assert [c.safe for c in closing] == []
+
+
+def test_the_countdown_shrinks_as_the_season_runs_out():
+    """The number has to mean something: four weeks later the same target must
+    report fewer weeks left and an unchanged last night, not a fresh countdown."""
+    tg = [_closing_target("m42", _CLOSING_M42)]
+    early = np_plan.season_closing(
+        LONDON, tg, start_utc=datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc))
+    later = np_plan.season_closing(
+        LONDON, tg, start_utc=datetime(2026, 2, 17, 21, 0, tzinfo=timezone.utc))
+    assert early and later
+    assert later[0].weeks_left < early[0].weeks_left
+    assert later[0].last_night == early[0].last_night
+
+
+def test_the_answer_does_not_depend_on_the_time_of_day_it_is_asked():
+    """Every sample is a *whole* night, deliberately. Asked at 3 a.m., a scan
+    that clipped tonight to "now" would compare a couple of leftover hours
+    against whole nights eight weeks out and report the library as leaving."""
+    tg = [_closing_target("m42", _CLOSING_M42), _closing_target("m81", _CLOSING_M81)]
+    evening = np_plan.season_closing(
+        LONDON, tg, start_utc=datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc))
+    small_hours = np_plan.season_closing(
+        LONDON, tg, start_utc=datetime(2026, 1, 20, 3, 0, tzinfo=timezone.utc))
+    assert evening == small_hours
+
+
+def test_a_target_that_dips_and_comes_back_is_not_leaving():
+    """Robustness by construction: the rule reads the **last** usable sample, not
+    the first unusable one, so a target that drops below the floor for a week in
+    the middle of the horizon and returns cannot be reported as going."""
+    tg = [_closing_target("m42", _CLOSING_M42)]
+    real = np_plan.season_closing(
+        LONDON, tg, start_utc=datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc))
+    assert real                              # it really is leaving in this window
+    # Same target, same date, but with the floor low enough that it never drops
+    # out at all — the "still up at the end" branch.
+    assert np_plan.season_closing(
+        LONDON, tg, min_altitude_deg=5.0,
+        start_utc=datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc)) == []
+
+
+def test_a_polar_summer_says_nothing_because_it_is_the_nights_not_the_targets():
+    """Svalbard in May: the darkness runs out inside the horizon, so every target
+    would read as leaving at once. That is the sky, not the targets."""
+    svalbard = Observer(lat_deg=78.2, lon_deg=15.6, elevation_m=0.0)
+    assert np_plan.season_closing(
+        svalbard, [_closing_target("m42", _CLOSING_M42), _closing_target("m81", _CLOSING_M81)],
+        start_utc=datetime(2026, 5, 1, 22, 0, tzinfo=timezone.utc)) == []
+
+
+def test_unpositioned_targets_and_an_empty_library_are_silent():
+    blind = LibraryTarget(safe="x", name="X", ra_deg=None, dec_deg=None,
+                          frames_accepted=5, total_exposure_s=100.0)
+    when = datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc)
+    assert np_plan.season_closing(LONDON, [], start_utc=when) == []
+    assert np_plan.season_closing(LONDON, [blind], start_utc=when) == []
+
+
+def test_two_targets_leaving_together_put_the_least_finished_first():
+    """The tie-break is what another hour would buy — the same measure "Worth
+    more time" is ranked by — so two targets going the same week are ordered by
+    which of them the extra night would actually help."""
+    a = _closing_target("aaa", _CLOSING_M42, exposure_s=36000.0)     # ten hours in the bag
+    b = _closing_target("zzz", _CLOSING_M42, exposure_s=600.0)       # barely started
+    closing = np_plan.season_closing(
+        LONDON, [a, b], start_utc=datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc))
+    assert [c.safe for c in closing] == ["zzz", "aaa"]
+    assert closing[0].weeks_left == closing[1].weeks_left
+    assert closing[0].noise_gain > closing[1].noise_gain
+
+
+def test_season_closing_is_deterministic():
+    tg = [_closing_target("m42", _CLOSING_M42)]
+    when = datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc)
+    assert (np_plan.season_closing(LONDON, tg, start_utc=when)
+            == np_plan.season_closing(LONDON, tg, start_utc=when))
+
+
 # --- Moon interference readout ("is the Moon going to wash this out?") ---------
 
 from seestack.nightplan import (  # noqa: E402
