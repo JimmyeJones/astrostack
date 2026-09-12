@@ -2180,6 +2180,23 @@ export interface LifeList {
   counts: LifeListCounts;
 }
 
+/** Which catalog objects are genuinely shootable tonight (`GET
+ *  /api/life-list/tonight`) — ids only, because the page already holds every
+ *  object's name, blurb and thumbnail and a second copy could only drift from
+ *  the first.
+ *
+ *  `ids` is **best-first** in the planner's own ranking, so the order is worth
+ *  keeping: in this view catalog order says nothing. Empty when no observing
+ *  location is known, when the Sun never sets, or when nothing clears the floor
+ *  — `location_source` says which. */
+export interface LifeListTonight {
+  ids: string[];
+  /** "settings" | "fits" | "none". */
+  location_source: string;
+  /** The altitude floor the answer was measured against. */
+  min_altitude_deg: number;
+}
+
 /** One entry of the app's glossary — a heading, the prose under it, and a
  *  stable anchor so `/glossary#fwhm` lands on it. `body` is markdown (a couple
  *  of entries need a bullet list), rendered by `glossaryMarkdown.tsx`. The
@@ -3725,6 +3742,11 @@ export const api = {
   // `getLifeList` carries, without the ~160 catalog rows and the per-target
   // preview stat that decides their thumbnail URLs.
   lifeListCounts: () => req<LifeListCounts>("/api/life-list/counts"),
+  // Which of those catalog objects are above the horizon long enough tonight —
+  // the other half of the page's own "pick one and point the scope at it
+  // tonight". Its own route because it costs an ephemeris pass over the whole
+  // catalog where `getLifeList` is a registry walk.
+  lifeListTonight: () => req<LifeListTonight>("/api/life-list/tonight"),
   nearlyThere: () => req<NearlyThere | null>("/api/life-list/nearly-there"),
   // Download URL for tonight's window on the object that would finish a
   // constellation, as a .ics calendar file. No id in the URL on purpose — the

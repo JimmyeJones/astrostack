@@ -1,5 +1,82 @@
 # Shipped — the record
 
+## v0.433.0 — 2026-09-12 — "Up tonight" on the life list: which of the 110 can I actually shoot this evening?
+
+*(Builder, branch `claude/sweet-babbage-ogwqzh` — a 🌟 NEW BEGINNER FEATURE (PRIORITY 2–3, the "plan"
+pillar), Builder-found by dogfooding the first-run app rather than taken from the backlog. Webapp +
+frontend; additive and read-only, so no config, schema, on-disk, API-shape or default change, and the
+page's default view is byte-for-byte the one it had.)*
+
+**The gap, seen in a browser.** `scripts/agent-dogfood.sh --empty` photographs the screens a beginner meets
+*first*. On the life list, the page's own headline reads **"All 110 Messier objects are still ahead of you —
+pick one and point the scope at it tonight."** Directly under it the page draws twelve tiles: **M1, M2, M3,
+M4, M5, M6, M7, M8, M9, M10, M11, M12** — the first dozen of a catalogue Charles Messier ordered in the
+1770s, which has no relationship at all to what is above the horizon this evening. **Eight of those twelve
+are summer objects** — M4/M6/M7 in Scorpius, M8 in Sagittarius, M9/M10/M12 in Ophiuchus, M11 in Scutum — so
+a northern owner opening the page on a January evening is being shown a screenful of sky they cannot touch;
+and M1, the one it leads with, is a small faint supernova remnant that is a poor first target even when it
+is up. So the page asks a beginner to pick one
+and then hands them a list whose ordering principle is *"what a French comet hunter wrote down next"*. On a
+London January evening the right answer is that **95 of the 157 bundled objects are shootable and 62 are
+not**, and nothing on that screen said which was which.
+
+**Everything needed to answer already existed.** `seestack.nightplan.well_placed_tonight` is the shared
+dark-window / altitude / Moon blend behind the Tonight page, the wishlist nudge (`GET
+/api/wishlist/tonight`) and the nearly-there card (`GET /api/life-list/nearly-there`). This feature adds
+**no scoring, no data and no settings** — it asks that same function about the objects the life list is
+already showing, so a life-list tile and a Tonight row can never disagree about the same object on the same
+night. A test asserts that agreement against the function itself rather than against a copy of its answer.
+
+**`GET /api/life-list/tonight` returns ids and nothing else.** The page already holds every object's name,
+blurb, capture state and thumbnail from `GET /api/life-list`; a second description of the same rows could
+only drift from the first. The response is `{ids, location_source, min_altitude_deg}` — the ids **best-first
+in the planner's own ranking**, plus the two facts the sentence beside the tiles needs so the browser never
+has to work a number out for itself.
+
+**Its own route, deliberately.** `GET /api/life-list` is a registry walk; this is an ephemeris pass over the
+whole 157-object catalog (**0.31 s warm, measured**). The page that only wants the tiles should not pay for
+the sky, and a client too old to ask simply never does — the same reasoning that gave `/api/life-list/counts`
+its own route.
+
+**In this one view, catalog order is replaced by the planner's — and only here.** M1…M110 is the right order
+for counting a collection and the wrong one for *"which of these should I point at this evening?"*, which is
+a question with a best answer. `applyFilter` is a pure exported function so that claim is testable without a
+DOM, and a test pins that a rank map handed to any *other* view leaves its order untouched.
+
+**Nothing was added to the page's furniture.** One more chip in the `SegmentedControl` that was already
+there — not a card, not a banner (the standing "extremely busy" priority, AGENTS.md §1). And the chip is
+**absent** unless the sky can actually answer: no observing location set, the Sun never setting, nothing
+clearing the floor, or a backend without the route (the query's failure is swallowed to `null`, never
+surfaced as the page's error card). A fresh install sees exactly today's three chips.
+
+**Two edges handled rather than assumed.** `effectiveFilter` falls back to "All" if the answer goes away
+while "Up tonight" is selected (a refetch after midnight, a cleared location), so the page can never sit on
+a filter whose chip is gone showing nothing with no way back. And the empty-half copy gained a tonight case:
+the existing line — *"You've got every one of these. Nothing left on this list!"* — would have been a
+straightforward lie about a half that is empty because of the season.
+
+**Verified in a real browser, not only in jsdom.** The app booted on the dogfood data root with a London
+site set, at 1440 px and at 420 px: the chip renders, no console error, no horizontal overflow, and the
+endpoint answers **57 of 157** for that evening — with M4/M6/M7/M8/M9/M10/M11/M12, the summer half of the
+first twelve tiles, correctly absent and Cassiopeia/Cygnus/Andromeda present. **The default view's height is
+unchanged to the pixel** (1,495 px desktop / 3,094 px phone, the same 3,094 px the last three
+`agent-dogfood.sh --empty` baselines recorded) — a segment added to an existing `SegmentedControl` costs no
+row, and the explanatory line only exists while the filter is on. The tonight view itself is taller because
+it lists all 57 without collapsing, which is the page's existing rule that *the list the user explicitly
+asked for is never shortened* (`Still to shoot` on a full library is far longer).
+
+**Upgrade-safe (§9):** one additive read-only GET; no config, schema, on-disk, default or existing-response
+change. Reads no project DB and writes nothing, pinned by a test.
+
+**Tests: +9 Python (`tests/webapp/test_life_list_tonight.py`), +6 rendered and +4 pure frontend.** The
+Python set is armed by mutation, not trusted: hard-coding the altitude floor and sorting the ids turn
+**three** of them red (the planner-agreement one, the monotonic `min_alt` one, and the "the settings floor is
+honoured, not just reported" one). The frontend ordering claim is armed the same way — dropping the sort
+turns the rendered ordering test *and* the `applyFilter` unit test red. The season assertion is a real one
+(M42 up in January and not in July from London; M57 the other way round), and the `min_alt` test asserts a
+**monotonic property** rather than a fixed count, so it cannot go red when astropy's ephemeris moves a
+decimal.
+
 ## v0.432.0 — 2026-09-12 — the full Moon, drawn to scale on your picture
 
 *(Builder, branch `claude/sweet-babbage-3xr6h8` — the Scout's 2026-09-12 "🌟 NEW BEGINNER FEATURE" entry,
