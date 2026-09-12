@@ -49,6 +49,37 @@ def test_tonight_without_location_prompts_for_one(client, solved_library):
     assert body["targets"] == []
 
 
+def test_tonight_says_the_subs_carry_no_site_rather_than_asking_for_more_subs(
+        client, solved_library):
+    """The prompt must not promise something this library already disproves.
+
+    These frames are *solved* and carry no ``SITELAT`` — the bundled sample's
+    exact shape — so "once you've solved some subs it'll just work" is false
+    here. ``location_reason`` is what lets the page say so instead.
+    """
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    assert body["location_source"] == "none"
+    assert body["location_reason"] == "no-site-header"
+
+
+def test_tonight_on_a_library_with_no_frames_still_asks_for_subs(client):
+    # The case where the old sentence was right, kept right: nothing scanned,
+    # so more subs really is the answer.
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    assert body["location_source"] == "none"
+    assert body["location_reason"] == "no-frames"
+
+
+def test_tonight_with_a_known_location_has_nothing_to_explain(client, solved_library):
+    # `location_reason` is always present so a reader never has to tell "this
+    # build doesn't send it" from "there is nothing to explain" — null is the
+    # latter, on every path where the site is known.
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    assert body["location_source"] == "settings"
+    assert body["location_reason"] is None
+
+
 def test_tonight_with_settings_location(client, solved_library):
     client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
     r = client.get("/api/plan/tonight", params={"when": JAN_EVENING})

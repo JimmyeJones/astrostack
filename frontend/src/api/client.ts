@@ -1,6 +1,7 @@
 // Tiny typed fetch wrapper around the AstroStack API.
 
 import type { SkyImage, SkyStar } from "../sky/projection";
+import type { SiteUnknownReason } from "../siteUnknown";
 import type { UniverseData } from "../sky/universe";
 
 /** One target whose most recent stack attempt failed (see webapp/stackfailure.py).
@@ -208,6 +209,10 @@ export interface SeasonClosing {
 
 export interface NightPlan {
   location_source: "settings" | "fits" | "none";
+  /** Why the location isn't known, when it isn't — see `siteUnknown.ts`. Null
+   * when the site *is* known (nothing to explain) and absent on an older
+   * backend, which is why every reader must cope with both. */
+  location_reason?: SiteUnknownReason | null;
   observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
   generated_utc: string;
   dark_window: {

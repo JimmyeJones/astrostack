@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NamedTuple
 
 # Cap how many frames we probe for a site location so a big library with no
 # SITELAT header anywhere can't turn one request into thousands of header reads.
@@ -24,6 +24,39 @@ MAX_SITE_PROBE_FRAMES = 24
 # The detected longitude only changes when the library does, so a short app-level
 # cache keeps a locationless library from being re-probed on every page load.
 SITE_LON_CACHE_TTL_S = 120.0
+
+
+class SiteProbe(NamedTuple):
+    """What the header probe found, and — when it found nothing — *why*.
+
+    "No site" has three genuinely different causes and they want three different
+    sentences. The planner used to collapse all of them into ``None`` and every
+    surface then said the same thing: *"it reads your location automatically from
+    a plate-solved Seestar frame — so once you've solved some subs it'll just
+    work."* That is right for an empty library and **false** for a library whose
+    subs simply don't carry ``SITELAT`` — solving more of them will never help,
+    and a beginner staring at a Library full of "Solved" badges reads the app as
+    broken. (Reproduced 2026-09-12 by dogfooding the bundled sample, which is
+    plate-solved and carries no site header, so the app said exactly that with 27
+    solved subs on screen.)
+
+    ``reason`` is one of:
+
+    ``"found"``
+        A frame carried a usable site; ``site`` is it.
+    ``"no-frames"``
+        Nothing was probed — no targets, or no accepted frame with a path. More
+        subs really would fix it.
+    ``"no-site-header"``
+        Headers were read and none carried a usable ``SITELAT``/``SITELONG``.
+        More subs from the same source will not fix it; only Settings will.
+    ``"unreadable"``
+        Frames exist but not one header could be read (storage offline, files
+        moved). Neither more subs nor Settings is the right advice.
+    """
+
+    site: tuple[float, float] | None
+    reason: str
 
 
 def parse_angle(value: Any) -> float | None:
@@ -67,7 +100,8 @@ def site_from_header(header: dict) -> tuple[float, float] | None:
     return lat, lon
 
 
-def detect_site_from_library(lib, *, max_probes: int = MAX_SITE_PROBE_FRAMES  # noqa: ANN001
+def detect_site_from_library(lib, *, max_probes: int = MAX_SITE_PROBE_FRAMES,  # noqa: ANN001
+                             _stats: dict[str, int] | None = None,
                              ) -> tuple[float, float] | None:
     """Best-effort observer ``(lat, lon)`` from a recent frame's FITS header.
 
@@ -75,9 +109,22 @@ def detect_site_from_library(lib, *, max_probes: int = MAX_SITE_PROBE_FRAMES  # 
     original NAS path, and bails after ``max_probes`` reads. Any read error is
     swallowed — a missing site just means the caller must configure one. Takes an
     already-open ``Library`` so a caller that already holds one doesn't reopen it.
+
+    This is **the** walk: :func:`probe_site_from_library` calls it rather than
+    repeating it, so there is one place that decides where the telescope is and
+    one seam for a caller (or a test) to stand in front of.
+
+    ``_stats``, when given, is filled in with how much the walk touched
+    (``probed`` paths, ``read_ok`` headers actually loaded) — the only thing
+    :func:`_no_site_reason` needs to tell "you have no frames" from "your frames
+    carry no site", without a second pass over the library.
     """
     from seestack.io.fits_loader import load_header
     from seestack.io.project import Project
+
+    def _tick(key: str) -> None:
+        if _stats is not None:
+            _stats[key] = _stats.get(key, 0) + 1
 
     probed = 0
     for entry in lib.list_targets():
@@ -91,10 +138,12 @@ def detect_site_from_library(lib, *, max_probes: int = MAX_SITE_PROBE_FRAMES  # 
                     if not path:
                         continue
                     probed += 1
+                    _tick("probed")
                     try:
                         info = load_header(path)
                     except Exception:  # noqa: BLE001 — unreadable frame, move on
                         continue
+                    _tick("read_ok")
                     site = site_from_header(info.raw_header)
                     if site is not None:
                         return site
@@ -105,6 +154,38 @@ def detect_site_from_library(lib, *, max_probes: int = MAX_SITE_PROBE_FRAMES  # 
             if proj is not None:
                 proj.close()
     return None
+
+
+def probe_site_from_library(lib, *, max_probes: int = MAX_SITE_PROBE_FRAMES  # noqa: ANN001
+                            ) -> SiteProbe:
+    """:func:`detect_site_from_library` with the reason attached — one walk, not two.
+
+    A caller that stands in for ``detect_site_from_library`` (a test, say) leaves
+    ``_stats`` empty, and an empty walk reads as ``"no-frames"``: the reason then
+    describes the stand-in rather than a library, which is the honest answer when
+    nothing walked one.
+    """
+    stats: dict[str, int] = {}
+    site = detect_site_from_library(lib, max_probes=max_probes, _stats=stats)
+    if site is not None:
+        return SiteProbe(site, "found")
+    return SiteProbe(None, _no_site_reason(stats.get("probed", 0),
+                                           stats.get("read_ok", 0)))
+
+
+def _no_site_reason(probed: int, read_ok: int) -> str:
+    """Classify an unsuccessful probe from what it managed to touch.
+
+    Deliberately conservative about ``"unreadable"``: it is claimed only when
+    *every* probed path failed to load, because a library where one frame is
+    missing and the rest simply lack the header is a header problem, not a
+    storage one.
+    """
+    if probed == 0:
+        return "no-frames"
+    if read_ok == 0:
+        return "unreadable"
+    return "no-site-header"
 
 
 def resolve_site_lon(request: Any, lib: Any, configured_lon: float | None) -> float | None:
@@ -155,29 +236,44 @@ def resolve_night_key(
     return night_key
 
 
-def detect_site_cached(request: Any, lib: Any) -> tuple[float, float] | None:
-    """``(lat, lon)`` sniffed from the library's FITS headers, memoised on the app.
+def probe_site_cached(request: Any, lib: Any) -> SiteProbe:
+    """:func:`probe_site_from_library`, memoised on the app.
 
     The header probe walks real files, so it is far too expensive to redo on every
     request that wants to know where the telescope is. Cached for
     :data:`SITE_LON_CACHE_TTL_S`, keyed on the target set so a scan invalidates it.
-    ``None`` means "no frame carries a site" — every caller must have a
+    A ``None`` site means "no frame carries a site" — every caller must have a
     site-unknown behaviour, never a failure.
+
+    A library that can't even be listed is reported as ``"unreadable"``: that is
+    the one shape where neither "shoot more subs" nor "fill in Settings" is the
+    honest next step.
     """
     try:
         targets = lib.list_targets()
     except Exception:  # noqa: BLE001 — a broken library just means "unknown site"
-        return None
+        return SiteProbe(None, "unreadable")
     tsig = tuple(sorted((t.safe_name, t.last_activity_utc or "") for t in targets))
     cache = getattr(request.app.state, "activity_lon_cache", None)
     now = time.monotonic()
-    if cache and cache["sig"] == tsig and (now - cache["at"]) < SITE_LON_CACHE_TTL_S:
-        return cache.get("site")
-    site = detect_site_from_library(lib)
+    if (cache and cache["sig"] == tsig and (now - cache["at"]) < SITE_LON_CACHE_TTL_S
+            and cache.get("reason")):
+        return SiteProbe(cache.get("site"), cache["reason"])
+    probe = probe_site_from_library(lib)
     # ``lon`` is kept beside ``site`` because it is what the night-bucketing
-    # callers read; both are written together so the two can never diverge.
+    # callers read; all three are written together so they cannot diverge.
     request.app.state.activity_lon_cache = {
-        "sig": tsig, "at": now, "lon": site[1] if site is not None else None,
-        "site": site,
+        "sig": tsig, "at": now,
+        "lon": probe.site[1] if probe.site is not None else None,
+        "site": probe.site, "reason": probe.reason,
     }
-    return site
+    return probe
+
+
+def detect_site_cached(request: Any, lib: Any) -> tuple[float, float] | None:
+    """``(lat, lon)`` sniffed from the library's FITS headers, memoised on the app.
+
+    The site alone — :func:`probe_site_cached` is the same answer with the reason
+    attached, off the same cache entry.
+    """
+    return probe_site_cached(request, lib).site
