@@ -17,6 +17,7 @@ import { QueryError } from "../components/QueryError";
 import { WorthMoreTimeList } from "../components/tonight/WorthMoreTimeList";
 import { formatIntegration } from "../format";
 import { withMosaicEffort } from "../mosaicEffort";
+import { NO_SHRINK } from "../badgeFit";
 import { readinessRowBadge } from "../readiness";
 import { settingsLink } from "../settingsSections";
 import { siteUnknownCopy } from "../siteUnknown";
@@ -32,7 +33,12 @@ import {
 function ScoreBadge({ score }: { score: number }) {
   return (
     <HintAnchor label="Higher = better placed tonight (altitude, time up, Moon clear)">
-      <Badge color={scoreColor(score)} variant="light" size="lg">
+      {/* `NO_SHRINK` because this is the last column of a six-column table and
+          the one whose whole content is the number: at 420 px the cell squeezed
+          to 15 px against the 20 px "92" needs, and a three-digit 100 fared
+          worse. See ../badgeFit — the same mechanism as the v0.434.1 Nights
+          card, on the table no dogfood pass had ever seen with rows in it. */}
+      <Badge color={scoreColor(score)} variant="light" size="lg" style={NO_SHRINK}>
         {Math.round(score)}
       </Badge>
     </HintAnchor>
@@ -103,7 +109,7 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
         </Text>
         {readyHint ? (
           <HintAnchor label={readyHint.tooltip} multiline w={260} withArrow>
-            <Badge mt={4} size="xs" variant="light" color={readyHint.color}>
+            <Badge mt={4} size="xs" variant="light" color={readyHint.color} style={NO_SHRINK}>
               {readyHint.label}
             </Badge>
           </HintAnchor>
@@ -111,7 +117,7 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
         {difficultyBadge ? (
           <HintAnchor label={difficultyBadge.tooltip} multiline w={240} withArrow>
             <Badge mt={4} ml={readyHint ? 4 : 0} size="xs" variant="light"
-              color={difficultyBadge.color}>
+              color={difficultyBadge.color} style={NO_SHRINK}>
               {difficultyBadge.label}
             </Badge>
           </HintAnchor>
@@ -119,7 +125,7 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
         {framingBadge ? (
           <HintAnchor label={framingBadge.tooltip} multiline w={240} withArrow>
             <Badge mt={4} ml={(readyHint || difficultyBadge) ? 4 : 0} size="xs" variant="light"
-              color={framingBadge.color}>
+              color={framingBadge.color} style={NO_SHRINK}>
               {framingBadge.label}
             </Badge>
           </HintAnchor>
@@ -127,7 +133,7 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
         {nudgeBadge ? (
           <HintAnchor label={nudgeBadge.tooltip} multiline w={260} withArrow>
             <Badge mt={4} ml={(readyHint || difficultyBadge || framingBadge) ? 4 : 0}
-              size="xs" variant="light" color={nudgeBadge.color}>
+              size="xs" variant="light" color={nudgeBadge.color} style={NO_SHRINK}>
               {nudgeBadge.label}
             </Badge>
           </HintAnchor>
