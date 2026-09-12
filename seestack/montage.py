@@ -173,7 +173,12 @@ def build_montage(
     if title:
         draw = ImageDraw.Draw(canvas)
         from seestack.recap import _fit_font
+        from seestack.render.glyphs import safe_for_default_font
 
+        # ``montage_title`` keeps itself inside the bundled face by hand (see
+        # its ``·``), but a caller may pass its own strip — so the net runs
+        # here too, before the fit measures anything.
+        title = safe_for_default_font(title)
         font = _fit_font(draw, title, round(title_h * 0.46), width - pad * 2)
         draw.text((pad, round(title_h * 0.28)), title, font=font, fill=_TITLE_FG)
 

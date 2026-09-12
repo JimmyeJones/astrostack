@@ -77,7 +77,7 @@ def test_the_title_says_how_far_along_you_are():
 def test_the_subtitle_changes_with_how_far_along_you_are():
     assert grid_subtitle(0, 110) == "All still to shoot."
     assert grid_subtitle(42, 110) == "The dim squares are the 68 still to shoot."
-    assert grid_subtitle(110, 110) == "The whole list — every one of them."
+    assert grid_subtitle(110, 110) == "The whole list: every one of them."
     assert grid_subtitle(0, 0) == ""
 
 

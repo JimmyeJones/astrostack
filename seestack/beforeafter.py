@@ -196,7 +196,11 @@ def build_before_after(
 
     if caption:
         from seestack.recap import _fit_font
+        from seestack.render.glyphs import safe_for_default_font
 
+        # The caption names the target; the two cell labels go through the
+        # same net inside ``_draw_corner_label``.
+        caption = safe_for_default_font(caption)
         font = _fit_font(draw, caption, round(caption_h * 0.52), width - pad * 2)
         draw.text((width / 2, pad + cell_h + round(caption_h * 0.30)), caption,
                   font=font, fill=_CAPTION_FG, anchor="ma")

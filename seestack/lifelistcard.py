@@ -119,7 +119,10 @@ def grid_subtitle(captured: int, total: int) -> str:
     if total <= 0:
         return ""
     if left == 0:
-        return "The whole list — every one of them."
+        # A colon, not the em dash this sentence wants: the poster is drawn
+        # with Pillow's bundled face, which has no ``—`` glyph and baked a
+        # hollow box into the one card that says "you finished the list".
+        return "The whole list: every one of them."
     if captured == 0:
         return "All still to shoot."
     return f"The dim squares are the {left} still to shoot."
@@ -131,10 +134,11 @@ def _tile_placeholder(size: int, cell: GridCell):
     from PIL import Image, ImageDraw
 
     from seestack.recap import _fit_font
+    from seestack.render.glyphs import safe_for_default_font
 
     bg, fg = (_LIT_TILE, _LIT_FG) if cell.captured else (_TODO_TILE, _TODO_FG)
     img = Image.new("RGB", (size, size), bg)
-    text = (cell.label or "").strip()
+    text = safe_for_default_font((cell.label or "").strip())
     if not text:
         return img
     draw = ImageDraw.Draw(img)
@@ -161,8 +165,9 @@ def _draw_tile_label(img, text: str, size: int):
     from PIL import Image, ImageDraw
 
     from seestack.recap import _fit_font
+    from seestack.render.glyphs import safe_for_default_font
 
-    text = (text or "").strip()
+    text = safe_for_default_font((text or "").strip())
     if not text:
         return img
     base = img.convert("RGBA")
@@ -247,9 +252,15 @@ def build_life_list_grid(
 
     if title:
         from seestack.recap import _fit_font
+        from seestack.render.glyphs import safe_for_default_font
 
         draw = ImageDraw.Draw(canvas)
         inner = width - pad * 2
+        # The heading counts the owner's own list; the subtitle used to write
+        # an em dash, which this face has no glyph for and drew as a hollow
+        # box (fixed in ``grid_subtitle``, netted here).
+        title = safe_for_default_font(title)
+        subtitle = safe_for_default_font(subtitle)
         font = _fit_font(draw, title, round(width * 0.032), inner)
         draw.text((pad, pad), title, font=font, fill=_TITLE_FG)
         if subtitle:

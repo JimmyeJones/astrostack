@@ -114,7 +114,13 @@ def draw_keepsake(img, fields: NameplateFields):
     """
     from PIL import Image, ImageDraw
 
-    title, details = keepsake_caption(fields)
+    from seestack.render.glyphs import safe_for_default_font
+
+    # The title is the target's own name — see ``draw_nameplate`` for why the
+    # bundled face needs it sanitised before the shrink-to-fit measurement.
+    raw_title, raw_details = keepsake_caption(fields)
+    title = safe_for_default_font(raw_title)
+    details = safe_for_default_font(raw_details)
     if not title and not details:
         return img.convert("RGB") if img.mode != "RGB" else img
 

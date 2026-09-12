@@ -96,6 +96,21 @@ describe("LifeListView", () => {
     expect(screen.getByText("Galaxy in And")).toBeInTheDocument();
   });
 
+  it("gives up a still-to-shoot object's blurb to a tap, not only to a hover", async () => {
+    // The "still to shoot" half of this page is where a beginner decides what
+    // to point at next, and the blurb is the only sentence saying what the
+    // object *is*. An uncaptured tile has nothing to click, so before
+    // `HintAnchor` a tap did nothing and — on the device this app is mostly
+    // read on — the sentence was not written anywhere.
+    vi.spyOn(client.api, "getLifeList").mockResolvedValue(list());
+    renderList();
+    const tile = await screen.findByText("M42 · Orion Nebula");
+    expect(screen.queryByText("The closest big star factory to us.")).toBeNull();
+    fireEvent.click(tile);
+    expect(await screen.findByText("The closest big star factory to us."))
+      .toBeInTheDocument();
+  });
+
   it("links a captured object straight to its target", async () => {
     vi.spyOn(client.api, "getLifeList").mockResolvedValue(list());
     renderList();
