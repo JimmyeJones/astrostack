@@ -129,6 +129,18 @@ class GalleryItem(BaseModel):
     # the frame shape can't be read — every one of which reads as "no scaling",
     # i.e. exactly today's behaviour.
     field_fulls: float | None = None
+    # Was this stacked onto a union-of-footprints **mosaic** canvas? The run's own
+    # recorded flag (`is_mosaic=bool(is_mosaic_canvas)` in `run_stack`), `None` on
+    # a run stacked before the column existed and on an editor export, whose
+    # canvas is a re-render rather than a combine.
+    #
+    # The card needs it because two stacking passes are *turned on by the canvas*
+    # rather than by the user — `run_stack` runs the final gradient removal and
+    # the photometric normalization on any mosaic whether or not the option is
+    # ticked — and the stored options, which the card's settings list is a
+    # verbatim dump of, keep saying "Off". Additive with a `None` default, which
+    # reads as "don't claim anything", i.e. exactly today's behaviour.
+    is_mosaic: bool | None = None
 
 
 class VideoStillItem(BaseModel):
@@ -322,6 +334,7 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         seam_verdict=seam_verdict(run.seam_residual),
         grain_verdict=grain_verdict(run.grain_ratio),
         field_fulls=stacking_field_fulls(run, by_id or {}, native_shape),
+        is_mosaic=run.is_mosaic,
         # Three extra keyed reads on the project DB the caller already has open —
         # the same near-free lookups the run listing does, which is what made
         # this affordable library-wide.

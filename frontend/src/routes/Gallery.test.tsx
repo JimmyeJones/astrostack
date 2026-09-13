@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   GalleryView, sortGallery, filterGallery, filterByCalibration, filterByMethod, isCalibrated,
-  filterVideoStills, mergeGalleryEntries, videoStillCaption,
+  filterVideoStills, mergeGalleryEntries, settingRows, videoStillCaption,
 } from "./Gallery";
 import { sharpenNote } from "../components/videoFraming";
 import * as client from "../api/client";
@@ -1172,5 +1172,74 @@ describe("Gallery card — the quality-weighting chip", () => {
     expect(await screen.findByText("Weighting unused")).toBeInTheDocument();
     expect(screen.getByText("BG flatten")).toBeInTheDocument();
     expect(screen.getByText("Gradient removal")).toBeInTheDocument();
+  });
+});
+
+describe("Gallery card — the settings list vs what the stack did", () => {
+  // The card's own label map, in schema order.
+  const LABELS = new Map([
+    ["photometric_normalize", "Photometric normalization"],
+    ["final_gradient_removal", "Final gradient removal"],
+    ["quality_weighted", "Quality weighting"],
+    ["sigma_clip", "Sigma clip"],
+  ]);
+  const valueOf = (rows: { label: string; value: string }[], label: string) =>
+    rows.find((r) => r.label === label)?.value;
+
+  it("stops printing 'Off' against the two passes a mosaic canvas ran anyway", () => {
+    const rows = settingRows({
+      ...item(1), n_frames_used: 21, is_mosaic: true,
+      options: {
+        photometric_normalize: false, final_gradient_removal: false, sigma_clip: true,
+      },
+    }, LABELS);
+
+    expect(valueOf(rows, "Photometric normalization")).toBe("On — automatic");
+    expect(valueOf(rows, "Final gradient removal")).toBe("On — automatic");
+    // …and only those two: the ordinary key still reads exactly as stored.
+    expect(valueOf(rows, "Sigma clip")).toBe("On");
+    // The sentence rides with the value, so the row can explain itself.
+    expect(rows.find((r) => r.label === "Final gradient removal")?.title)
+      .toMatch(/mosaic canvas turns it on itself/);
+  });
+
+  it("keeps the stored 'Off' on a single field", () => {
+    const rows = settingRows({
+      ...item(1), n_frames_used: 6, is_mosaic: false,
+      options: { photometric_normalize: false, final_gradient_removal: false },
+    }, LABELS);
+
+    expect(valueOf(rows, "Photometric normalization")).toBe("Off");
+    expect(valueOf(rows, "Final gradient removal")).toBe("Off");
+    expect(rows.every((r) => r.title === undefined)).toBe(true);
+  });
+
+  it("keeps it on a run whose canvas the backend never recorded", () => {
+    const rows = settingRows({
+      ...item(1), n_frames_used: 21,
+      options: { photometric_normalize: false, final_gradient_removal: false },
+    }, LABELS);
+
+    expect(valueOf(rows, "Photometric normalization")).toBe("Off");
+    expect(valueOf(rows, "Final gradient removal")).toBe("Off");
+  });
+
+  it("marks the weighting the min/max combine threw away", () => {
+    const rows = settingRows({
+      ...item(1), n_frames_used: 6,
+      options: { quality_weighted: true, min_max_reject: true },
+    }, LABELS);
+
+    expect(valueOf(rows, "Quality weighting")).toBe("On — not used");
+  });
+
+  it("still lists only the keys the run actually stored, in schema order", () => {
+    const rows = settingRows({
+      ...item(1), is_mosaic: true,
+      options: { sigma_clip: true, final_gradient_removal: false },
+    }, LABELS);
+
+    expect(rows.map((r) => r.label))
+      .toEqual(["Final gradient removal", "Sigma clip"]);
   });
 });

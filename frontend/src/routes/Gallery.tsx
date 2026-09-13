@@ -47,6 +47,7 @@ import { HintAnchor } from "../components/HintAnchor";
 import {
   WEIGHTING_UNUSED_LABEL, minMaxIgnoresWeighting, weightingUnusedNote,
 } from "../weightingHint";
+import { settingOverride } from "../stackSettings";
 
 export type GallerySort = "newest" | "cleanest";
 export type CalFilter = "all" | "calibrated" | "uncalibrated";
@@ -371,6 +372,37 @@ function highlightBadges(opts: Record<string, unknown>, nFramesUsed: number | nu
   return badges;
 }
 
+/** The card's "Stacking settings" list: every labelled option the run stored, in
+ * schema order.
+ *
+ * A verbatim dump of what the run *stored*, which is the whole truth for almost
+ * every key — but `run_stack` overrides three of them from things the options
+ * cannot see (the canvas, and the combine), and the dump then prints "Off"
+ * against a pass that ran. `settingOverride` owns that list; it stands down to
+ * the stored value wherever it isn't certain, so an ordinary run's rows are
+ * byte-for-byte what they always were.
+ *
+ * Exported and pure because Mantine's `Spoiler` never opens under jsdom (every
+ * element measures 0 px, so it decides there is nothing to hide and renders no
+ * control) — the rows can only be tested here. */
+export function settingRows(item: GalleryItem, labels: Map<string, string>) {
+  const ctx = {
+    options: item.options,
+    isMosaic: item.is_mosaic ?? null,
+    nFramesUsed: item.n_frames_used ?? null,
+  };
+  return [...labels.entries()]
+    .filter(([key]) => item.options[key] !== undefined)
+    .map(([key, label]) => {
+      const override = settingOverride(key, ctx);
+      return {
+        label,
+        value: override ? override.value : fmt(item.options[key]),
+        title: override?.title,
+      };
+    });
+}
+
 function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
   item: GalleryItem;
   labels: Map<string, string>;
@@ -380,13 +412,13 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
 }) {
   const badges = highlightBadges(item.options, item.n_frames_used ?? null);
   // Full settings list (only keys we have a label for, in schema order).
-  const rows = useMemo(
-    () =>
-      [...labels.entries()]
-        .filter(([key]) => item.options[key] !== undefined)
-        .map(([key, label]) => ({ label, value: fmt(item.options[key]) })),
-    [item.options, labels],
-  );
+  //
+  // A verbatim dump of what the run *stored*, which is the whole truth for
+  // almost every key — but `run_stack` overrides three of them from things the
+  // options cannot see (the canvas, and the combine), and the dump then prints
+  // "Off" against a pass that ran. `settingOverride` is where that list lives;
+  // it stands down to the stored value wherever it isn't certain.
+  const rows = useMemo(() => settingRows(item, labels), [item, labels]);
 
   return (
     <Card withBorder padding="md" radius="md"
@@ -509,7 +541,13 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
             {rows.map((r) => (
               <Group key={r.label} justify="space-between" gap="xs" wrap="nowrap">
                 <Text size="xs" c="dimmed" truncate>{r.label}</Text>
-                <Text size="xs" style={{ flexShrink: 0 }}>{r.value}</Text>
+                {r.title ? (
+                  <HintAnchor label={r.title} multiline w={280}>
+                    <Text size="xs" c="yellow.5" style={{ flexShrink: 0 }}>{r.value}</Text>
+                  </HintAnchor>
+                ) : (
+                  <Text size="xs" style={{ flexShrink: 0 }}>{r.value}</Text>
+                )}
               </Group>
             ))}
           </Stack>
