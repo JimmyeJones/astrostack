@@ -13,7 +13,11 @@ import json
 
 from seestack.io.library import Library
 from seestack.io.project import StackRunRow
-from webapp.run_options import parse_run_options, run_has_reusable_options
+from webapp.run_options import (
+    derived_from_run_id,
+    parse_run_options,
+    run_has_reusable_options,
+)
 
 
 def _register_run(data_root, safe: str, options_json: str) -> int:
@@ -55,6 +59,30 @@ def test_run_has_reusable_options_covers_the_three_no_cases():
     assert run_has_reusable_options("") is False
     assert run_has_reusable_options(None) is False
     assert run_has_reusable_options("not json at all") is False
+
+
+def test_derived_from_run_id_reads_only_a_usable_run_id():
+    """Same rule as ``History.tsx``'s ``derivedFromNote``, spelled once here so
+    the two cannot drift: anything that is not a finite number, and a row
+    pointing at itself, is no answer."""
+    assert derived_from_run_id(json.dumps(
+        {"editor_recipe": {"ops": []}, "derived_from": 7})) == 7
+    # A float id (JSON has one number type) truncates rather than being refused.
+    assert derived_from_run_id(json.dumps({"derived_from": 7.0})) == 7
+    # An ordinary stack, a channel combine, and a run from before the field
+    # existed are all stacks in their own right.
+    assert derived_from_run_id(json.dumps({"sigma_clip": True})) is None
+    assert derived_from_run_id(json.dumps({"channel_combine": {"mode": "RGB"}})) is None
+    assert derived_from_run_id("{}") is None
+    assert derived_from_run_id(None) is None
+    assert derived_from_run_id("{not json") is None
+    # Whatever else found its way into the JSON is not a run id.
+    assert derived_from_run_id(json.dumps({"derived_from": "3"})) is None
+    assert derived_from_run_id(json.dumps({"derived_from": None})) is None
+    assert derived_from_run_id(json.dumps({"derived_from": True})) is None
+    assert derived_from_run_id(json.dumps({"derived_from": [3]})) is None
+    assert derived_from_run_id('{"derived_from": NaN}') is None
+    assert derived_from_run_id('{"derived_from": Infinity}') is None
 
 
 def test_all_three_surfaces_agree_on_every_run(client, solved_library):

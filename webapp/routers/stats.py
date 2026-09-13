@@ -1710,11 +1710,21 @@ def _collect_imaging_log(lib, targets, lon_deg: float | None = None) -> list:
     window into observing nights the same way every other night surface does; a
     ``None`` falls back to UTC noon-to-noon exactly as `capture_night_range`
     documents.
+
+    **One row per stack, not per ``stack_runs`` row.** An editor export records a
+    run of its own, on the same nights, the same target and the same subs as the
+    stack it was rendered from — so a user who finished one picture got that
+    night twice in a log whose whole subject is nights, and the duplicate *led*,
+    because it was stacked later. A derived row is therefore skipped while the
+    run it came from is still in this project; when that source has been pruned
+    from History the export is the only surviving record of the night, so it
+    stays. See :func:`webapp.run_options.derived_from_run_id`.
     """
     from statistics import median
 
     from seestack.imaging_log import ImagingLogRow
     from seestack.io.project import Project
+    from webapp.run_options import derived_from_run_id
 
     rows: list[ImagingLogRow] = []
     for t in targets:
@@ -1729,7 +1739,16 @@ def _collect_imaging_log(lib, targets, lon_deg: float | None = None) -> list:
                 if f.fwhm_px is not None and f.fwhm_px > 0
             ]
             median_fwhm = float(median(fwhms)) if fwhms else None
-            for run in proj.iter_stack_runs():
+            runs = list(proj.iter_stack_runs())
+            present = {r.id for r in runs}
+            for run in runs:
+                # A re-render of a stack this file already describes is not a
+                # night of its own — see the docstring. Held back only while its
+                # source row is still here to carry the night.
+                source_id = derived_from_run_id(run.options_json)
+                if (source_id is not None and source_id != run.id
+                        and source_id in present):
+                    continue
                 # Prefer *this stack's own* measured sharpness (per-run, schema
                 # ≥ 14) so the log reflects each night's result; fall back to the
                 # target-wide frame median for older runs that predate the column.
