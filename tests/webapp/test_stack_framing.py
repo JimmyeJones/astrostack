@@ -7,6 +7,8 @@ size, so it answers what actually happened rather than what was intended.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -20,7 +22,9 @@ M42_RA, M42_DEC, M42_SIZE_ARCMIN = 83.822, -5.391, 85.0
 
 def _add_run(data_root, safe: str, *, ra: float, dec: float, w: int, h: int,
              arcsec_per_px: float, with_wcs: bool = True,
-             is_mosaic: bool | None = None) -> int:
+             is_mosaic: bool | None = None,
+             timestamp: str = "2026-05-01T00:00:00Z",
+             derived_from: int | None = None) -> int:
     """Register a stack run backed by a real 3-channel master FITS whose header
     carries a TAN WCS centred on (ra, dec) — exactly as the stacker merges the
     canvas WCS into ``master.fits`` — so the endpoint reads the field geometry
@@ -28,7 +32,8 @@ def _add_run(data_root, safe: str, *, ra: float, dec: float, w: int, h: int,
     lib = Library.open_or_create(data_root / "library")
     try:
         tdir = lib.target_dir(lib.find_target(safe))
-        fits_path = tdir / f"framing_{ra}_{dec}_{w}x{h}_{is_mosaic}.fits"
+        fits_path = (
+            tdir / f"framing_{ra}_{dec}_{w}x{h}_{is_mosaic}_{timestamp}.fits")
         hdu = fits.PrimaryHDU(data=np.zeros((3, h, w), dtype=np.float32))
         if with_wcs:
             hdr = hdu.header
@@ -46,12 +51,18 @@ def _add_run(data_root, safe: str, *, ra: float, dec: float, w: int, h: int,
 
         proj = lib.open_target(safe)
         try:
+            options = ({"editor_recipe": {"ops": []},
+                        "derived_from": derived_from}
+                       if derived_from is not None else {})
             run_id = proj.add_stack_run(StackRunRow(
-                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                id=None, timestamp_utc=timestamp,
                 output_basename="master", fits_path=str(fits_path), tiff_path=None,
                 preview_path=None, n_frames_used=3,
-                canvas_h=h, canvas_w=w, coverage_min=1, coverage_max=3,
-                options_json="{}", is_mosaic=is_mosaic,
+                canvas_h=h, canvas_w=w, coverage_min=1,
+                coverage_max=1 if derived_from is not None else 3,
+                options_json=json.dumps(options),
+                # An export leaves this NULL by design — see webapp.derived_light.
+                is_mosaic=None if derived_from is not None else is_mosaic,
             ))
         finally:
             proj.close()
@@ -347,3 +358,124 @@ def test_the_mosaic_verdict_changes_only_the_words_not_the_measurements(
     for key in ("level", "coverage", "off_centre", "object_name", "size_arcmin"):
         assert a[key] == b[key], key
     assert a["text"] != b["text"]
+
+
+# --- The run that pointed, not the run that was cropped ----------------------
+#
+# `_edit_export_wcs_text` carries a stack's solution through the recipe's crop
+# and resize, so an editor export's WCS is *correct* for the canvas it
+# describes — and that canvas is one somebody cropped. Every verdict here is an
+# offset from the middle of the picture, and its lever is a capture action, so a
+# crop that recentres the object silences a real mis-pointing and a crop towards
+# an edge invents one. See `webapp.framing_advice.capture_framing_run`.
+
+def _off_centre_stack(data_root, safe: str) -> int:
+    """The same 0.7°-north pointing the off-centre test above uses: the whole
+    nebula is in frame but well down the picture."""
+    return _add_run(data_root, safe, ra=M42_RA, dec=M42_DEC + 0.7,
+                    w=6000, h=4500, arcsec_per_px=3.0,
+                    timestamp="2026-05-01T00:00:00Z")
+
+
+def _recentred_export(data_root, safe: str, source_id: int) -> int:
+    """The picture that stack becomes in the editor: cropped so the object sits
+    in the middle, with the WCS the crop implies. Newest, as an export is."""
+    return _add_run(data_root, safe, ra=M42_RA, dec=M42_DEC,
+                    w=4000, h=3000, arcsec_per_px=3.0,
+                    timestamp="2026-09-13T10:00:00Z", derived_from=source_id)
+
+
+def test_a_recentring_crop_does_not_silence_a_real_mis_pointing(client,
+                                                                solved_library):
+    """The verdict asked of the export is read off the stack underneath it.
+
+    Before this, cropping the nebula into the middle made the picture look
+    perfectly framed — so the one sentence that would have fixed *next* night
+    ("nudge your Seestar south") disappeared the moment the owner finished the
+    picture."""
+    safe = _m42(client)
+    src = _off_centre_stack(solved_library, safe)
+    edit = _recentred_export(solved_library, safe, src)
+
+    body = client.get(f"/api/targets/{safe}/stack-runs/{edit}/framing").json()
+    assert body is not None
+    assert body["level"] == "off_centre"
+    assert body["recentre"] is not None
+    # ...and it is the same answer the stack itself gives: one picture, one verdict.
+    source_body = client.get(
+        f"/api/targets/{safe}/stack-runs/{src}/framing").json()
+    assert body["level"] == source_body["level"]
+    assert body["off_centre"] == pytest.approx(source_body["off_centre"])
+
+
+def test_an_export_whose_stack_is_gone_says_nothing_rather_than_guessing(
+    client, solved_library,
+):
+    """Its source was pruned from History, so nothing here knows where the scope
+    pointed. Silence costs a beginner nothing; a nudge pointing the wrong way
+    costs them the night."""
+    safe = _m42(client)
+    edit = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC,
+                    w=4000, h=3000, arcsec_per_px=3.0,
+                    timestamp="2026-09-13T10:00:00Z", derived_from=999999)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{edit}/framing")
+    assert r.status_code == 200  # the run exists
+    assert r.json() is None      # ...but it cannot answer this question
+
+
+def test_a_plain_stack_is_read_exactly_as_before(client, solved_library):
+    """The resolution is a no-op on every run that actually stacked, which is
+    every run on a library nobody has edited."""
+    safe = _m42(client)
+    run_id = _off_centre_stack(solved_library, safe)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "off_centre"
+
+
+def _nudge(data_root, safe: str):
+    """`newest_picture_nudge` as the night planner calls it — on the real
+    project, with the real catalog match."""
+    from seestack.objectinfo import identify_object
+    from webapp.framing_advice import newest_picture_nudge
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        entry = lib.find_target(safe)
+        info = identify_object(entry.name, entry.ra_deg, entry.dec_deg)
+        proj = lib.open_target(safe)
+        try:
+            return newest_picture_nudge(proj, info)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_the_planner_still_nudges_after_the_picture_has_been_cropped(
+    client, solved_library,
+):
+    """The surface with teeth: this row is read *while someone is pointing the
+    scope*. A crop is the ordinary way a picture is finished, and it was turning
+    the advice off."""
+    safe = _m42(client)
+    src = _off_centre_stack(solved_library, safe)
+    before = _nudge(solved_library, safe)
+    assert before is not None
+    assert before.degrees > 0.0
+
+    _recentred_export(solved_library, safe, src)
+    after = _nudge(solved_library, safe)
+    assert after is not None
+    assert after.direction == before.direction
+    assert after.degrees == pytest.approx(before.degrees)
+
+
+def test_the_planner_says_nothing_when_only_a_re_render_survives(
+    client, solved_library,
+):
+    safe = _m42(client)
+    _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC + 0.7,
+             w=6000, h=4500, arcsec_per_px=3.0,
+             timestamp="2026-09-13T10:00:00Z", derived_from=999999)
+    assert _nudge(solved_library, safe) is None

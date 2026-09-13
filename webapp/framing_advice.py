@@ -15,12 +15,50 @@ in one voice:
 The verdict itself is pure geometry in :mod:`seestack.framing`; what lives here
 is the read that feeds it — the run's own solved output WCS, the catalog object's
 position and size — so neither surface grows its own idea of "which way".
+
+**Which run's WCS, though, is not "whichever row you have".** See
+:func:`capture_framing_run`: an editor export's canvas has been *cropped*, and
+its stored solution follows the crop exactly, so the offset it measures is a
+fact about the edit and not about where the scope pointed.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+
+from webapp.derived_light import root_stack
+from webapp.run_options import derived_from_run_id
+
+
+def capture_framing_run(run, by_id: dict[Any, Any]):  # noqa: ANN001, ANN201
+    """The run whose master says how the sky was **pointed at** for ``run``'s
+    light — ``run`` itself for a stack, the stack underneath for a re-render,
+    and ``None`` when a re-render's stack can no longer be reached.
+
+    An editor export is not a second copy of its stack's geometry.
+    ``pipeline._edit_export_wcs_text`` deliberately carries the solution through
+    the recipe's crop and resize (``geometry_pixel_steps``), so the export's WCS
+    is *correct* for the canvas it describes — and that canvas is one somebody
+    cropped. Every question this module asks is about the offset between the
+    object and the **middle of the picture**, so a crop moves the answer: crop
+    the object into the centre and a real mis-pointing goes quiet, crop it
+    towards an edge and a correctly-pointed scope is told to move. The night
+    planner shows the nudge *while someone is pointing the scope*, which is the
+    one place that is not merely wrong but actionable.
+
+    ``is_mosaic`` travels with it for the same reason: an export's column is
+    NULL by design (``webapp.derived_light``), so a mosaic's finished picture was
+    getting the single-frame wording the verdict reserves for one frame.
+
+    Returning ``None`` rather than falling back to the export is deliberate and
+    is the safe direction here: the planner's quiet state is a row with no nudge
+    on it, and "no advice" costs a beginner nothing, where advice pointing the
+    wrong way costs them the night.
+    """
+    if derived_from_run_id(getattr(run, "options_json", None)) is None:
+        return run
+    return root_stack(run, by_id)
 
 
 def framing_payload(
@@ -150,6 +188,10 @@ def newest_picture_nudge(proj, info):  # noqa: ANN001, ANN201
     the target has no stacked picture with a readable master, the object isn't
     confidently identified, or its framing needs no correction.
 
+    Each row is resolved through :func:`capture_framing_run` first, because the
+    newest run is very often an editor export and an export's canvas has been
+    cropped — see that function.
+
     Reads a FITS header, so a caller on the request path should keep it behind a
     cache or a threadpool.
     """
@@ -163,13 +205,18 @@ def newest_picture_nudge(proj, info):  # noqa: ANN001, ANN201
         return None
     # `iter_stack_runs` is newest-first; take the first run that still has a
     # master on disk, so a purged/moved newest run falls back rather than
-    # silencing the target entirely.
+    # silencing the target entirely. Each is read through the run that actually
+    # *pointed* — an export's cropped canvas answers about the crop.
+    by_id = {r.id: r for r in runs}
     for run in runs:
-        if not run.fits_path or not Path(run.fits_path).exists():
+        pointed = capture_framing_run(run, by_id)
+        if pointed is None:
+            continue
+        if not pointed.fits_path or not Path(pointed.fits_path).exists():
             continue
         try:
-            payload = framing_payload(run.fits_path, info,
-                                      is_mosaic=getattr(run, "is_mosaic", None))
+            payload = framing_payload(pointed.fits_path, info,
+                                      is_mosaic=getattr(pointed, "is_mosaic", None))
         except Exception:  # noqa: BLE001 — an unreadable master is "no advice"
             return None
         if payload is None:
