@@ -12,11 +12,13 @@ import json
 
 import pytest
 
+from seestack.io.project import FrameRow, Project, StackRunRow
 from webapp.field_fulls import (
     drizzle_scale_from_options,
     field_fulls_of_sky,
     native_frame_shape,
     samples_per_pixel_of_run,
+    target_field_fulls,
 )
 
 
@@ -223,3 +225,121 @@ class TestNativeFrameShape:
         assert native_frame_shape(self._proj(self._Row(width_px=0, height_px=1080))) is None
         assert native_frame_shape(self._proj(self._Row(width_px=1920, height_px=None))) is None
         assert native_frame_shape(self._proj(self._Row())) is None
+
+
+class TestTargetFieldFulls:
+    """The target-level read behind the three readiness surfaces — and the one
+    thing it must not take its canvas from.
+
+    A re-render records the canvas it *wrote*, so a crop shrinks it — and the
+    editor seeds Auto (with its border trim) on first open, so a cropped export
+    is the ordinary shape of a finished picture, not an unusual one. It is also
+    the newest row. Reading the scale off it moves every goal on this target
+    toward "plenty", which is the failure this module exists to prevent.
+    """
+
+    # A 2x2 mosaic of 480x320 subs: canvas is four field-fulls of sky.
+    FRAME_W, FRAME_H = 480, 320
+    CANVAS_W, CANVAS_H = 960, 640
+
+    def _project(self, tmp_path) -> Project:
+        proj = Project.create(tmp_path / "target", "M 42")
+        proj.add_frame(FrameRow(
+            source_path="sub0001.fits", width_px=self.FRAME_W,
+            height_px=self.FRAME_H,
+        ))
+        return proj
+
+    def _add_run(self, proj, *, timestamp: str, canvas_w: int, canvas_h: int,
+                 derived_from: int | None = None) -> int:
+        options: dict = ({"editor_recipe": {"ops": []},
+                          "derived_from": derived_from}
+                         if derived_from is not None else {"sigma_clip": True})
+        return proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc=timestamp, output_basename=f"run_{timestamp}",
+            fits_path=None, tiff_path=None, preview_path=None,
+            n_frames_used=180, canvas_h=canvas_h, canvas_w=canvas_w,
+            coverage_min=1, coverage_max=1 if derived_from is not None else 180,
+            options_json=json.dumps(options),
+        ))
+
+    def test_a_plain_mosaic_stack_gives_its_canvas(self, tmp_path):
+        proj = self._project(tmp_path)
+        try:
+            self._add_run(proj, timestamp="2026-05-02T00:00:00Z",
+                          canvas_w=self.CANVAS_W, canvas_h=self.CANVAS_H)
+            assert target_field_fulls(proj) == pytest.approx(4.0)
+        finally:
+            proj.close()
+
+    def test_a_cropped_export_does_not_shrink_the_target_s_goal(self, tmp_path):
+        """The bug: Auto's border trim keeps ~92 % of a mosaic canvas, and the
+        export is the newest row — so the target's scale, and with it the goal
+        behind "Is it enough yet?", fell by the crop factor."""
+        proj = self._project(tmp_path)
+        try:
+            src = self._add_run(proj, timestamp="2026-05-02T00:00:00Z",
+                                canvas_w=self.CANVAS_W, canvas_h=self.CANVAS_H)
+            # An Auto-trimmed re-render of that stack, written later.
+            self._add_run(proj, timestamp="2026-09-13T10:00:00Z",
+                          canvas_w=920, canvas_h=614, derived_from=src)
+            assert target_field_fulls(proj) == pytest.approx(4.0)
+        finally:
+            proj.close()
+
+    def test_a_hard_crop_cannot_hand_a_mosaic_the_single_field_goal(self, tmp_path):
+        """The severe end of the same edit. A crop past one native frame's area
+        lands on ``field_fulls_of_sky``'s ``max(1.0, …)`` clamp, so the scale
+        would collapse to 1.0 — a four-panel mosaic told it needs a quarter of
+        the light it does."""
+        proj = self._project(tmp_path)
+        try:
+            src = self._add_run(proj, timestamp="2026-05-02T00:00:00Z",
+                                canvas_w=self.CANVAS_W, canvas_h=self.CANVAS_H)
+            self._add_run(proj, timestamp="2026-09-13T10:00:00Z",
+                          canvas_w=300, canvas_h=200, derived_from=src)
+            assert target_field_fulls(proj) == pytest.approx(4.0)
+        finally:
+            proj.close()
+
+    def test_the_newest_stack_still_wins_over_an_older_one(self, tmp_path):
+        """The scan skips re-renders; it does not otherwise change the order. A
+        mosaic's canvas grows as its panels are shot, and the newest *stack* is
+        still the one that describes the sky it now spans."""
+        proj = self._project(tmp_path)
+        try:
+            self._add_run(proj, timestamp="2026-05-02T00:00:00Z",
+                          canvas_w=self.FRAME_W, canvas_h=self.FRAME_H)
+            self._add_run(proj, timestamp="2026-06-02T00:00:00Z",
+                          canvas_w=self.CANVAS_W, canvas_h=self.CANVAS_H)
+            assert target_field_fulls(proj) == pytest.approx(4.0)
+        finally:
+            proj.close()
+
+    def test_a_target_whose_only_picture_is_an_export_keeps_its_old_answer(
+        self, tmp_path,
+    ):
+        """Its source was pruned from History, so there is nothing else to read.
+        Falling back to the newest row of any kind is what this always did —
+        better a scale off a re-render than no scale at all."""
+        proj = self._project(tmp_path)
+        try:
+            self._add_run(proj, timestamp="2026-09-13T10:00:00Z",
+                          canvas_w=self.CANVAS_W, canvas_h=self.CANVAS_H,
+                          derived_from=9999)
+            assert target_field_fulls(proj) == pytest.approx(4.0)
+        finally:
+            proj.close()
+
+    def test_a_target_with_no_stack_yet_declines(self, tmp_path):
+        proj = self._project(tmp_path)
+        try:
+            assert target_field_fulls(proj) is None
+        finally:
+            proj.close()
+
+    def test_a_project_with_no_connection_declines(self):
+        class Bare:
+            pass
+
+        assert target_field_fulls(Bare()) is None
