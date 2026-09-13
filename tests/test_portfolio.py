@@ -182,3 +182,128 @@ def test_entries_built_without_the_new_field_are_unpinned_and_rank_by_score():
     ranked = rank_portfolio(old_style)
     assert [r.key for r in ranked] == ["deep", "shallow"]
     assert all(not r.pinned for r in ranked)
+
+
+# ---------------------------------------------------------------------------
+# Per-pixel reading — a mosaic's totals are the target's, not the picture's
+#
+# The wall ranks *pictures*, and three of its four axes (integration, frame
+# count, peak coverage) are facts about the **target**: a mosaic spreads its subs
+# across the raster. The fourth, σ, is measured on the pixels themselves, so
+# before `field_fulls` reached this scorer the blend's two halves disagreed about
+# the same picture — a raster nine subs deep in total scored as "nine frames"
+# here while the Gallery card of the same run called it one sub deep everywhere.
+# Measured on the bundled 2x2 mosaic sample (webapp/sample_data): 21 subs over
+# 3.63 field-fulls is 5.8 a pixel, its 210 s of integration is 58 s a pixel, and
+# its `coverage_max` is **21** — every sub the target has, at the one corner
+# where four panels meet, while half the picture sits at 6.
+# ---------------------------------------------------------------------------
+
+
+def test_a_single_field_is_byte_for_byte_what_it_always_was():
+    """The scale only ever divides by more than one field, so a single field —
+    `None`, absent, 1.0, and the clamped sub-1.0 case alike — must score exactly
+    as it did before the field existed."""
+    def scores(**extra):
+        return [
+            r.score for r in rank_portfolio([
+                PortfolioEntry(key="a", n_frames_used=500, total_exposure_s=15000,
+                               noise_sigma=0.01, coverage_max=500, **extra),
+                PortfolioEntry(key="b", n_frames_used=20, total_exposure_s=600,
+                               noise_sigma=0.09, coverage_max=20, **extra),
+            ])
+        ]
+
+    baseline = scores()
+    assert scores(field_fulls=1.0) == baseline
+    assert scores(field_fulls=None) == baseline
+    # A canvas measuring *under* one frame would otherwise inflate the depth —
+    # the direction that hides the bug — so it clamps rather than being honoured.
+    assert scores(field_fulls=0.25) == baseline
+
+
+def test_a_mosaic_is_ranked_on_what_one_patch_of_sky_got():
+    """The bug, at the wall's own scale: two pictures with identical totals and
+    identical grain, one of them a 2x2 raster. Before, they tied on every axis
+    and the mosaic could take the lead on a tie-break; now the single field —
+    which really is four times as deep everywhere — wins."""
+    field = PortfolioEntry(key="field", n_frames_used=400, total_exposure_s=12000,
+                           noise_sigma=0.02, coverage_max=400)
+    mosaic = PortfolioEntry(key="mosaic", n_frames_used=400, total_exposure_s=12000,
+                            noise_sigma=0.02, coverage_max=400, field_fulls=4.0)
+    ranked = rank_portfolio([mosaic, field])
+    assert [r.key for r in ranked] == ["field", "mosaic"]
+    by_key = {r.key: r.score for r in ranked}
+    assert by_key["field"] > by_key["mosaic"]
+    # …and by the amount the axes are worth: the three data axes fall to a
+    # quarter, only σ is untouched (it was measured on the pixels all along).
+    expected = (
+        PORTFOLIO_WEIGHTS["exposure"] * 0.25
+        + PORTFOLIO_WEIGHTS["frames"] * 0.25
+        + PORTFOLIO_WEIGHTS["coverage"] * 0.25
+        + PORTFOLIO_WEIGHTS["noise"] * 1.0
+    ) / sum(PORTFOLIO_WEIGHTS.values())
+    assert by_key["mosaic"] == expected
+
+
+def test_a_thin_raster_no_longer_outranks_a_genuinely_deep_picture():
+    """The shape a beginner actually hits, and the one the wall exists to get
+    right: a 3x3 raster nine subs deep *everywhere* against a modest but real
+    single-field stack. The raster's 90 frames and 45 min are the target's; no
+    pixel of it saw more than ten subs."""
+    raster = PortfolioEntry(key="raster", n_frames_used=90, total_exposure_s=2700,
+                            noise_sigma=0.06, coverage_max=90, field_fulls=9.0)
+    honest = PortfolioEntry(key="honest", n_frames_used=40, total_exposure_s=1200,
+                            noise_sigma=0.04, coverage_max=40)
+    assert _keys([raster, honest]) == ["honest", "raster"]
+
+
+def test_the_peak_coverage_yardstick_is_capped_at_what_a_pixel_got():
+    """`coverage_max` is the deepest *single* pixel — on the bundled 2x2 sample
+    that is the corner where all four panels meet, carrying every sub the target
+    has. Left alone it would both flatter the mosaic and normalise every other
+    entry against a depth no picture is at."""
+    from seestack.portfolio import _entry_coverage
+
+    sample_like = PortfolioEntry(key="sample", n_frames_used=21,
+                                 total_exposure_s=210, noise_sigma=0.00063,
+                                 coverage_max=21, field_fulls=3.63)
+    # Capped to the depth a typical pixel got, which is the measured median
+    # depth (6.0) to within the scale's own precision.
+    assert 5.5 < _entry_coverage(sample_like) < 6.0
+    # A single field keeps its peak untouched — there the two *are* one number.
+    plain = PortfolioEntry(key="plain", n_frames_used=21, coverage_max=21)
+    assert _entry_coverage(plain) == 21.0
+    # The cap can only ever lower a figure: a heavily dithered stack whose peak
+    # is already below the mean depth keeps its own, smaller peak.
+    dithered = PortfolioEntry(key="dithered", n_frames_used=100, coverage_max=60)
+    assert _entry_coverage(dithered) == 60.0
+
+
+def test_per_pixel_total_refuses_every_scale_that_would_inflate_depth():
+    from seestack.portfolio import per_pixel_total
+
+    assert per_pixel_total(400.0, 4.0) == 100.0
+    assert per_pixel_total(400.0, None) == 400.0
+    assert per_pixel_total(400.0, 1.0) == 400.0
+    assert per_pixel_total(400.0, 0.5) == 400.0
+    assert per_pixel_total(400.0, float("nan")) == 400.0
+    assert per_pixel_total(400.0, float("inf")) == 400.0
+
+
+def test_two_equally_deep_pictures_rank_equally_however_the_sky_was_tiled():
+    """The positive half of the same claim, and the one that also pins the
+    tie-breaks: a 2x2 mosaic shot four times as long as a single field has the
+    *same* picture depth, so it must score the same rather than four times
+    better. Before, its raw totals took every data axis outright."""
+    field = PortfolioEntry(key="aaa-field", n_frames_used=100,
+                           total_exposure_s=3000, noise_sigma=0.04,
+                           coverage_max=100)
+    mosaic = PortfolioEntry(key="zzz-mosaic", n_frames_used=400,
+                            total_exposure_s=12000, noise_sigma=0.04,
+                            coverage_max=400, field_fulls=4.0)
+    ranked = rank_portfolio([mosaic, field])
+    assert ranked[0].score == ranked[1].score == 1.0
+    # Every tie-break (integration, then frames) is now tied too, so the order
+    # falls all the way through to the key — which is what "equal" means here.
+    assert [r.key for r in ranked] == ["aaa-field", "zzz-mosaic"]

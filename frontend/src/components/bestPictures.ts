@@ -9,24 +9,51 @@
 
 import type { BestPicture } from "../api/client";
 import { formatIntegration } from "../format";
+import { perPixel, spansMoreThanOneField } from "./target/perPixel";
 
 /** The "why it's good" caption clauses for one picture, most-meaningful first:
- *  - integration time ("3.4 h") when the run recorded it, and
- *  - frame count ("500 frames").
- * Returns an empty array only for a run carrying neither (very old data); the
- * caller then just shows the picture with no subtitle. */
+ *  - integration time ("3.4 h") when the run recorded it,
+ *  - frame count ("500 frames"), and
+ *  - on a canvas spanning more than one field of sky, what one patch of it
+ *    actually got ("about 51 min on each patch of sky").
+ *
+ * Returns an empty array only for a run carrying neither of the first two (very
+ * old data); the caller then just shows the picture with no subtitle.
+ *
+ * **Why the third clause exists.** The first two are the *target's* totals, and
+ * a mosaic spreads its subs across the raster: "3.4 h · 500 frames" on a 3×3 is
+ * about 23 min and 55 subs anywhere you look. Read as a reason this picture is
+ * one of someone's best, that overstates it by the number of field-fulls the
+ * canvas spans — which is exactly the substitution `perPixel` exists to undo on
+ * the Target page, and which the wall's own ranking now scores per pixel too
+ * (`seestack.portfolio`). Every fact the old caption carried survives; the
+ * clause only says which number is which. A single field, and an older backend
+ * that sends no `field_fulls`, keep today's wording byte for byte. */
 export function bestPictureClauses(pic: BestPicture): string[] {
   const clauses: string[] = [];
-  if (
+  const hasExposure =
     pic.total_exposure_s != null &&
     Number.isFinite(pic.total_exposure_s) &&
-    pic.total_exposure_s > 0
-  ) {
-    clauses.push(formatIntegration(pic.total_exposure_s));
+    pic.total_exposure_s > 0;
+  if (hasExposure) {
+    clauses.push(formatIntegration(pic.total_exposure_s as number));
   }
-  if (Number.isFinite(pic.n_frames_used) && pic.n_frames_used > 0) {
+  const hasFrames = Number.isFinite(pic.n_frames_used) && pic.n_frames_used > 0;
+  if (hasFrames) {
     const n = pic.n_frames_used;
     clauses.push(`${n} ${n === 1 ? "frame" : "frames"}`);
+  }
+  if (clauses.length > 0 && spansMoreThanOneField(pic.field_fulls)) {
+    // Time when the run recorded it — the app's leading currency, and the one
+    // the wall weights highest — else the depth in subs, so a run with no
+    // integration time still gets scoped rather than left as a bare total.
+    clauses.push(
+      hasExposure
+        ? `about ${formatIntegration(perPixel(pic.total_exposure_s as number, pic.field_fulls))}`
+          + " on each patch of sky"
+        : `about ${Math.max(1, Math.round(perPixel(pic.n_frames_used, pic.field_fulls)))}`
+          + " subs on each patch of sky",
+    );
   }
   return clauses;
 }

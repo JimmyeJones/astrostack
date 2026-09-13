@@ -446,6 +446,17 @@ class BestPicture(BaseModel):
     # as they did before.
     object_type: str = ""
     blurb: str = ""
+    # How many single-frame field-fulls of sky *this picture's* canvas covers
+    # (see :mod:`webapp.field_fulls`) — the same per-run figure
+    # :class:`GalleryItem` above and ``StackRunOut`` already carry, from the same
+    # helper. It is what lets the wall's ranking and its "why it's one of your
+    # best" caption speak about the picture rather than about the target: a
+    # mosaic's ``total_exposure_s`` and ``n_frames_used`` are spread across the
+    # raster, so on a 3×3 they overstate what any pixel got by about nine times.
+    # Additive and `None` on a single field, on an older backend, and whenever
+    # the frame shape can't be read — every one of which reads as "no scaling",
+    # i.e. exactly today's behaviour.
+    field_fulls: float | None = None
 
 
 class BestPicturesResponse(BaseModel):
@@ -497,7 +508,14 @@ def get_best_pictures(
     already uses, so the picture someone chose to represent a target represents it
     on this wall too instead of being silently replaced by the newest stack. A
     pinned entry is also floated above the ranked tail, so the automatic ranking
-    can never drop the one picture they said was their favourite."""
+    can never drop the one picture they said was their favourite.
+
+    Each entry carries its run's ``field_fulls`` (:mod:`webapp.field_fulls`), so
+    the ranker reads this picture's integration, frame count and coverage **per
+    pixel** rather than as the target's totals — a mosaic spreads its subs across
+    the raster, and this wall ranks the picture, not the target. Same helper and
+    the same one LIMIT-1 frame-shape read per target the Gallery listing already
+    pays for."""
     from seestack.io.project import Project
     from seestack.nightplan import load_catalog
     from seestack.objectinfo import identify_object
@@ -538,6 +556,16 @@ def get_best_pictures(
                 if pick is None:
                     continue
                 key = f"{t.safe_name}:{pick.id}"
+                # One LIMIT-1 read on the project this loop already has open —
+                # the same pair the Gallery listing pays for once per target.
+                native_shape = native_frame_shape(proj)
+                field_fulls = (
+                    field_fulls_of_sky(
+                        pick.canvas_w, pick.canvas_h,
+                        frame_w=native_shape[0], frame_h=native_shape[1],
+                        drizzle_scale=drizzle_scale_from_options(pick.options_json),
+                    ) if native_shape is not None else None
+                )
                 info = identify_object(t.name, t.ra_deg, t.dec_deg, catalog=catalog)
                 night_start, night_end = capture_night_range(
                     pick.capture_start_utc, pick.capture_end_utc, lon)
@@ -567,6 +595,7 @@ def get_best_pictures(
                     pinned=pinned,
                     object_type=info.type if info is not None else "",
                     blurb=info.blurb if info is not None else "",
+                    field_fulls=field_fulls,
                 )
                 entries.append(PortfolioEntry(
                     key=key,
@@ -574,6 +603,7 @@ def get_best_pictures(
                     total_exposure_s=pick.total_exposure_s,
                     noise_sigma=pick.noise_sigma,
                     coverage_max=pick.coverage_max,
+                    field_fulls=field_fulls,
                     pinned=pinned,
                 ))
             finally:
