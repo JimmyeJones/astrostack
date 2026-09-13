@@ -18,6 +18,79 @@ is a queue.
 
 ---
 
+## 2026-09-13 (Scout, branch `claude/admiring-brahmagupta-tag567`) — the newest on-by-default mosaic code swept clean (read *and* run), the browser confirmed the recent per-panel messaging fixes hold, and why no beginner feature was filed
+
+**Baseline.** Full suite green before anything: `5933 passed, 2 skipped` in 30m41s
+(`QT_QPA_PLATFORM=offscreen python -m pytest -q`).
+
+**The prompt-vs-manual tension, resolved.** The scheduled Scout prompt says to
+*"lead your rotation with the stacking engine — seestack/stack/* and
+seestack/calibrate/*."* AGENTS.md §2 and the IMPROVEMENTS "Current focus" banner
+say the opposite in as many words: the single-field engine core has passed
+**twenty clean sweeps** and is **closed until a new bug is found there — do not
+re-sweep it**; the open frontier is the mosaic/Auto path. Rather than re-sweep the
+closed single-field stacker/rejection or ignore the prompt, I audited the part of
+the stacking engine that the twenty sweeps genuinely do *not* cover: the
+**newest, on-by-default mosaic code** (`overlapgain.py`, added v0.387.0 *after*
+those sweeps and applied to every mosaic canvas via `panel_gain_match=True`) plus
+the coverage/NaN semantics on the mosaic path.
+
+**Read adversarially, and held:**
+- `overlapgain.py` — the block-mean coarse map (`_block_reduce_into`, incl. the
+  NaN-pad reshape and the clamp when a block runs off the canvas), the per-panel
+  robust sky/σ, the correlation guard that refuses a mis-solved overlap, the
+  per-pair median ratio, the least-squares per-panel log-scale (`_solve_once`),
+  the drop-a-pair-**while-a-loop-survives** refit (`_solve_log_scales`), and
+  `_normalise`'s centre-only-the-measured-panels fix.
+- `accumulator.py` — WeightedSum / MinMaxReject / Welford NaN & coverage
+  semantics, the any-channel frame count, the windowed in-place adds.
+- `calibrate/apply.py` — `_effective_dark` exposure-scaling with the bias- and
+  dark-no-data restores, and `apply_raw`'s never-alias / never-mutate-the-shared-
+  master contract on every path (incl. the empty-bundle copy).
+- `mosaic.py` canvas union + the two outlier passes; `drizzle_path.py`
+  coverage / frame_coverage / clip-reference / result; `coverage_leveling.py`
+  `measure_seam_residual` (per-level SE slack + per-level yardstick) and
+  `measure_coverage_grain` (compare each substantial level **below the mode**).
+
+**And *run*, not just read** — a direct math probe of `overlapgain` on six
+degenerate inputs (`scratchpad/probe_overlapgain.py`, not committed): a 0.6× hazy
+panel recovered as **0.600**; two unrelated (mis-solved) star fields correctly
+dropped to `None` by the correlation guard; a **negative** (over-subtracted) sky
+still recovered 0.600; a 4-panel loop with one hazy panel solved to
+**1.667/1/1/1**; a 3-node/2-pair tree fit; and an **unpaired** panel among
+measured ones correctly pinned at **1.0**. All correct. **No engine bug found** —
+consistent with the closed state; nothing filed to "Bugs".
+
+**Dogfood (`agent-dogfood.sh --mosaic --editor`), green.** Page heights healthy
+(tallest phone `/tonight` 3617px, nothing over ~3.6k; desktop max ~2.7k),
+"nothing overflowing, no console errors"; the editor drove all 21 ops with the
+live preview re-rendering on each. The `--mosaic` messaging block — the exact
+place the last three findings hid (§7) — now reads **consistent** held together:
+the panel map (`thin=False`, "about 30 s behind at the top-right"),
+`grain_uneven` ("~23% has 3 subs where most has 6 → ~1.4× grainier … but it's
+only ~30 s behind, so it evens out as you keep shooting") and `seams_flat` ("the
+sky matches across the joins, so where it looks grainier that's a difference in
+depth, not a step in the sky") agree with each other and with the arithmetic
+(3×10s vs 6×10s; √(6/3)≈1.4). The v0.406–v0.437.x per-panel-vs-whole-canvas
+fixes hold on the sample.
+
+**No beginner feature filed as a duplicate — a diligent search, recorded so the
+next run doesn't repeat it.** The prompt asks for a new beginner feature each run;
+§4 says file only non-duplicates that serve §1. Every obvious candidate is already
+built: Moon-phase/interference planning (`moon_shoot_tonight`, the Tonight Moon
+card, per-night Moon verdicts); plain-language compare verdicts + "Compare with my
+last one" (v0.360.0); object annotation / labels / blurb (v0.141.0, v0.407.0); the
+"will it fit / do I need a mosaic?" framing advisor drawn to scale (v0.130.0,
+v0.401.0); the beginner Glossary; per-night "what happened overnight"
+(`overnight.py`, session recap); and an individual best/sharpest-sub preview
+(`frames.frame_preview`). One genuinely-novel gap survived and is filed under
+"Features that serve real workflows": a **"first-ever vs latest"** milestone
+comparison — distinct from both the onboarding checklist (v0.219.0/v0.362.0) and
+"Compare with my last one" (v0.360.0). Idea supply is not the constraint (§4), so
+that is the only idea added.
+
+---
+
 ## 2026-09-13 (Builder, branch `claude/sweet-babbage-qw8ee1`) — a module's own "here is where we already fixed this" list is a to-do list for the places it does not name
 
 **The method, which is the previous run's one step further on.** That run's note
