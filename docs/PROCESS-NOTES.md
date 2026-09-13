@@ -18,6 +18,92 @@ is a queue.
 
 ---
 
+## 2026-09-13 (Builder, branch `claude/sweet-babbage-8fmx59`) — one fix, and a QA record that says why there was only one
+
+**Baseline.** `main` at `ed201856` green before anything changed: Python **5,943 passed,
+2 skipped** (30 m 26 s), `npx tsc --noEmit` clean, `npx vitest run` **3,924 passed** in
+273 files.
+
+**Shipped: v0.438.2** — `grainProjection`'s lower fence. Full entry in
+[`SHIPPED.md`](SHIPPED.md); the short version is that a stack measuring σ 0.0202 against a
+clean bar of 0.0200 was told *"About 1× the light in total — roughly 1 min more — would
+bring it down to a clean-looking result"*: a multiple that rounds to the light already
+there, and an extra-hours figure that is `fmtHours`'s own `Math.max(1, …)` floor applied to
+zero. Reachable for σ ∈ (0.0200, 0.0205) — the sliver immediately above the bar that the
+module's own provenance note says the owner's real deep stacks (0.015–0.020) land on.
+
+**The transferable rule, and it already existed one module away.**
+`readiness.noiseReductionHint` computes the same kind of figure and carries the rule in as
+many words — *"Past ~40 h a single extra hour rounds below 1 % — say nothing rather than
+print 'about 0 %'"*, enforced by `if (cutPct <= 0) return null`. So the house rule is
+**round first, then decide whether there is anything left to say**, and `grainProjection`
+rounded first and said it anyway. **The generalisation worth carrying: a number that has
+been rounded for display must not then be handed back to the arithmetic that decides
+whether to print a plan.** Swept for it afterwards and found no second instance — every
+other percentage the app prints is gated above its own rounding (`_GRAIN_MIN_SHARE` 0.10,
+`_COVERAGE_THIN_SHARE` 0.05, `_UNCOVERED_SHARE` 0.12, `integrationTrend`'s "slowing" band
+which cannot print below 10 %, `perPixel.fieldsOfSkyLabel`'s documented floor of 2, and
+`format.formatMoreThan`'s floor, whose callers only fire well above it).
+
+**Why the level moves and not just the copy.** `nextBestMove` has read this module's
+`level` as `grainLevel` since v0.438.1. Fixing only the sentence would have left a σ-0.0202
+target being told *"even the rest of one clear night would clean up the background nicely"*
+one inch above a card that had just declined to ask for any more light — v0.438.1's exact
+pair, arriving through a rounding edge instead of through a widened branch.
+
+### QA records (clean — recorded here, not in the priority sections)
+
+**Dogfood, `--mosaic` (field sample + generated 2×2, both stacked through the real
+pipeline).** CLEAN. Auto's border trim on the mosaic canvas: **7.9 %** of the canvas (§1's
+bug bar is ~15 %). Nothing overflowing, no console errors on either target. Tallest page
+`/tonight` at **3,617 px** phone / 2,346 px desktop; the mosaic Target page 3,550 px —
+in line with the v0.437.0 standings, so no IA slice is indicated. The server-side and
+frontend prescriptive blocks agree with each other on both targets: the panel map's "about
+30 s there against 1 min on a typical panel", the health note's "23 % of the picture has 3
+subs where most of it has 6 … only about 30 s behind", `nextBestMove`'s "across most of it
+the background already looks clean", and the readiness card's scoped clean verdict all tell
+one story about one picture. **That is the v0.437.3–v0.438.1 family reading clean on the
+sample for the first time**, which is why this run had to go looking for its bug rather than
+reading it off the log.
+
+**Editor drive, `--editor`, both targets.** The single field: **21/21 ops added, every one
+re-rendered the live preview, undo and redo both applied, drive clean.** The mosaic run —
+the one §1 actually judges on, and the one the 2026-09-13 record had to correct itself about because its drive was **timeout-truncated at 17/21** — went the whole way this time: **21/21 ops, every preview re-rendered, undo and redo both applied, drive clean.** So the mosaic editor drive has now been run to completion once, with no console error and no failed request on any op, including the four that had never been reached on a mosaic canvas before (Crop, Rotate, Resize, Star reduction — plus Boost nebula).
+
+**Backlog state, as found.** "Bugs (fix these first)" holds no open, un-gated, non-cosmetic
+entry: the fourth audit's two fixture bugs closed in v0.417.1/v0.418.2, the D1 weighted-map
+residual is measured and argued **not worth building**, the ASTAP ladder budget is a
+declined blind-threshold flip, the watcher clock skew and the mosaic outlier reconcile are
+"file only, don't build", and the rest of the minor list is traced-unreachable or
+web-invisible. The Ideas sections are the same shape — every open entry is gated on real
+data the repo does not have, on a product call, or carries its own stand-down with numbers.
+**Three items were re-checked in the code this run and are already shipped or already
+closed**, so nobody spends a slot on them: the `photometric_normalize` Stack-form nudge
+(`Stack.tsx:810`/`1371`), the mosaic "point here right now" aim clause
+(`mosaicmap.aim_hint` → `useMosaicAim`), and the dark/light exposure-mismatch helper
+(`CalibrationMasters.calibration_warnings`, all three slices).
+
+**One nit traced and deliberately declined** (so it is not re-picked as a finding):
+`grainProjection.fmtHours` documents itself as *"the same idiom `integrationTrend`
+prints"* and is not — at 10 h and above it rounds to a whole hour ("12 h") where
+`integrationTrend` keeps a decimal ("12.3 h"), so two cards on one page can print one
+target's integration two ways. Real, but cosmetic, and the divergence is arguably the
+better reading on each side (a projection to one decimal at 60 h is spurious; a measured
+trend at 12.3 h is not). Left alone rather than churned; fold the comment or the format
+into whichever is right if a future run is already in these files.
+
+**Ended the run at one shipped task on purpose.** AGENTS.md §2 is explicit that a short run
+leaving `main` green beats a marginal second item, and the two candidates that were weighed
+and dropped were both low value: the `MergeResult.n_skipped_missing_file` mislabel (the one
+string a user actually sees, in the historical desktop GUI, already says the right thing —
+"frames lacked a cached copy" — so only an internal field name is wrong), and
+`grainProjection`'s choice of "deepest run" by target total rather than per-pixel depth,
+which was chased to a concrete scenario and **is not a bug**: by-total is what implements
+the docstring's own "not a later shallow re-stack of a subset", and on a growing mosaic it
+picks the current, widest picture, which is the one the reader is looking at.
+
+---
+
 ## 2026-09-13 (Builder, branch `claude/sweet-babbage-lbjt6j`) — build the detector, then run it: the tooling lead paid for itself inside one hour
 
 **The run, in order.** Baseline suite green on `5e837afc` (**5,933 passed, 2
