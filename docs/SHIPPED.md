@@ -1,5 +1,63 @@
 # Shipped — the record
 
+## v0.437.3 — 2026-09-13 — "the background already looks clean" stops landing above "grain only comes down with more light"
+
+*(Builder, branch `claude/sweet-babbage-q84vzj` — 🟠 BUG (trust + friendliness, PRIORITY 3, in the PRIORITY 1/4
+mosaic frontier AGENTS.md §1 calls the open one). Builder-found by reading the `--mosaic` dogfood pass's
+screenshots side by side rather than taken from the backlog, and verified red by a scratch revert. Frontend-only,
+copy only: no endpoint, config, schema, on-disk, API-shape or default change, no threshold moves, and no number
+changes.)*
+
+**What the two screenshots showed, on one page.** On the bundled 2×2 mosaic's Target page, the *"Is it enough
+yet?"* card read:
+
+> Measured on your own picture: the background already looks clean at 4 min (grain 0.001). **More time from here
+> mostly buys fainter detail rather than a visibly cleaner picture** — doubling your 4 min would take the grain
+> down about 29 % more.
+
+and the *"How's my stack?"* panel, further down the same page, read:
+
+> Part of this mosaic is thinner than the rest — about 23 % of the picture has 3 subs on it where most of it has
+> 6, so that part looks about 1.4× grainier. **Processing can't fix that — grain only comes down with more
+> light** — but it's only about 30 s behind, so it evens out on its own as you keep shooting.
+
+One says more light buys no visible cleanliness; the other says only more light will clean a quarter of the
+picture. Both are true of the region each measured, and a beginner cannot hold them at once — the third finding
+in a row (v0.435.4, v0.435.5, v0.437.1) that was in the *gap between* two of the app's own claims rather than in
+either one, and the reason AGENTS.md §7 says to read that block as one paragraph.
+
+**The mechanism is the v0.436.0 one in a different currency.** `noise_sigma` is a single robust estimate over
+the **whole finished canvas** (`seestack/stack/stacker._compute_noise_sigma` → `edit.noise.estimate_noise_sigma`
+on `result_image`). On a single field that is the whole story; on a mosaic with unevenly deep panels it is
+dominated by the part that got the most subs. So a whole-canvas number was being used to make a claim about
+every part of the picture — exactly the "a threshold taken from a whole-target number that is really per-panel"
+shape §1 names as the open frontier.
+
+**The datum was already on the wire — nothing new is computed or served.** `grain_verdict` (the backend's own
+`seestack.stackhealth.grain_verdict`, the same one the History/Gallery `PanelSeamsBadge` reads) has been on every
+`StackRun` row since the column existed, and the Target page already fetches those rows. `grainProjection`'s
+`RunLike` gains one optional field and reads it **off the run it took σ from** — deepest, not newest — so the two
+halves of the sentence can never describe two different pictures.
+
+**Only the clean branch moves, and only its scope.** The verdict stays `"clean"`: the number is honest for most
+of the canvas, and demoting it would be a second opinion where what was missing was one sentence's scope. Every
+fact the old sentence carried is still there (nothing removed — the owner's one hard constraint); it now reads
+*"across most of it the background already looks clean at 4 min (grain 0.001). Part of this one is thinner than
+the rest, though, and only more light evens that part out. Elsewhere, more time mostly buys fainter detail…"* —
+the health note's own prescription, so the two agree. The `some` and `grainy` branches are untouched and pinned
+as such: they already prescribe more light, so they never contradicted the note.
+
+**Degrades to today's wording in every direction.** A single field, an evenly covered mosaic, a run from a
+backend that sends no verdict, and a verdict string this build doesn't know all keep the plain sentence
+byte-for-byte.
+
+**Tests (+6, three red before — each verified by a scratch revert that deletes the new branch).**
+`grainProjection.test.ts` (+5): the uneven mosaic gets the scope *and* keeps every old fact; the plain wording is
+byte-for-byte identical across all four not-uneven cases; the verdict is read off the deepest run and not off a
+shallower one, both ways round; and the `some`/`grainy` sentences are unchanged with the verdict set.
+`Target.test.tsx` (+1) pins the **wiring** rather than the helper — the verdict has to survive the run row →
+`cardGrainProjection` → the rendered card.
+
 ## v0.437.2 — 2026-09-13 — the Tonight planner names a target you already shoot the way the rest of the app does
 
 *(Builder, branch `claude/sweet-babbage-q84vzj` — the `LEAD` the previous run filed and sized at S, taken as

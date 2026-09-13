@@ -669,6 +669,40 @@ describe("TargetView readiness card", () => {
       .toBeInTheDocument();
   });
 
+  it("says which part of an unevenly deep mosaic it measured clean, so the card and the health note agree", async () => {
+    // The same 3 h / σ 0.016 stack as the test below, but on a mosaic the
+    // backend has marked `grain_verdict: "uneven"` — i.e. a substantial part of
+    // the canvas was shot with fewer subs and measures grainier for it. σ is
+    // one estimate over the *whole* canvas, so it is dominated by the deep
+    // part; left unqualified, "more time mostly buys fainter detail rather than
+    // a visibly cleaner picture" lands a few centimetres above the health
+    // panel's "grain only comes down with more light" about that same region.
+    // This pins the wiring, not just the helper: the verdict has to survive the
+    // run row → `cardGrainProjection` → the rendered card.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 3 * 3600 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({
+        total_exposure_s: 3 * 3600, noise_sigma: 0.016, reusable: true,
+        grain_verdict: "uneven",
+      }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("grain-projection")).toBeInTheDocument());
+    const text = screen.getByTestId("grain-projection").textContent ?? "";
+    // The measurement and its verdict are unchanged — nothing removed.
+    expect(text).toMatch(/looks clean at 3\.0 h \(grain 0\.016\)/);
+    expect(text).toMatch(/fainter detail/);
+    // …and the scope plus the health note's own prescription are now there.
+    expect(text).toMatch(/across most of it/);
+    expect(text).toMatch(/only more light evens that part out/);
+  });
+
   it("answers 'is more time worth it?' from the measured stack, replacing the √N line", async () => {
     // 3 h on a galaxy still reads "a solid start — keep going" against the 6 h
     // type goal, but the picture itself measured σ 0.016 — inside the band the
