@@ -499,6 +499,50 @@ describe("EditorView", () => {
     expect(exportShare.mock.calls[0][3]).toBe(true);
   });
 
+  it("threads the same caption-bar toggle into the print file, and says so", async () => {
+    // The toggle drives three exports, not one: the share JPEG, "Share to app",
+    // and the **print file** — the one export that becomes a physical object
+    // someone paid a lab for. Its description used to name only "the shared
+    // picture", so a user who wanted a clean print had no way to know the
+    // caption bar was going onto it too.
+    mockEditorQueries();
+    vi.spyOn(client.api, "printSizes").mockResolvedValue({
+      sizes: [
+        { name: "A4", dpi: 240, label: "A4 · 240 DPI", width_in: 11.69, height_in: 8.27 },
+      ],
+      advice: "Best print size for this picture: up to A4 at 240 DPI.",
+    });
+    const exportPrint = vi.spyOn(client.api, "exportPrint")
+      .mockResolvedValue({ job_id: "print1" });
+    vi.spyOn(client.api, "getJob").mockResolvedValue({
+      id: "print1", kind: "editor_print", target: "M_42", state: "done",
+      phase: "", done: 1, total: 1, detail: "", created_utc: null,
+      started_utc: null, finished_utc: null, error: null,
+      result: { size_name: "A4", dpi: 240 },
+    });
+
+    renderEditor();
+
+    // The scope is stated on the control itself — both what it reaches and what
+    // it doesn't, because the checkbox sits directly under the PNG button.
+    const box = await screen.findByLabelText("Add caption bar (target, exposure, date)");
+    const said = (document.body.textContent ?? "").replace(/\s+/g, " ");
+    expect(said).toMatch(/onto the share image and the print file/);
+    expect(said).toMatch(/full-res PNG above never gets one/);
+
+    // Off by default, on when ticked — pinning the coupling the copy describes,
+    // so decoupling them would make that sentence false and this test red.
+    fireEvent.click(await screen.findByText("Download print file"));
+    await waitFor(() => expect(exportPrint).toHaveBeenCalled());
+    expect(exportPrint.mock.calls[0][4]).toBe(false);
+
+    exportPrint.mockClear();
+    fireEvent.click(box);
+    fireEvent.click(screen.getByText("Download print file"));
+    await waitFor(() => expect(exportPrint).toHaveBeenCalled());
+    expect(exportPrint.mock.calls[0][4]).toBe(true);
+  });
+
   it("shares the finished picture to another app via the OS share sheet", async () => {
     const nav = navigator as unknown as Record<string, unknown>;
     nav.canShare = () => true;
