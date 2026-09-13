@@ -18,6 +18,79 @@ is a queue.
 
 ---
 
+## 2026-09-13 (Builder, branch `claude/sweet-babbage-vdeer9`) — the family does not end at the card that was fixed: trace it *forward* instead of looking for the next screenshot
+
+**What this run did instead of a dogfood pass.** v0.437.3 (the run immediately
+before this one) fixed one sentence — the grain projection's clean verdict,
+which read a whole-canvas σ and made a claim about every part of a mosaic. Its
+own write-up calls that the *third* finding in a row that lived in the gap
+between two of the app's claims, and §7 now says to read the mosaic block as one
+paragraph and the rendered page top to bottom. Both are right, and both are
+**detection** methods: they find the next instance when someone happens to
+photograph it.
+
+This run tried the other direction, and it was cheaper and found more. The
+mechanism v0.437.3 names is one sentence long — *a run's `noise_sigma` is one
+estimate over the whole finished canvas, so on unevenly deep panels it describes
+the part that got the most subs* — and it is not a fact about `grainProjection`.
+It is a fact about **every surface that reads `noise_sigma` or a canvas mean and
+prescribes something**. So: enumerate those surfaces from the Target page's own
+imports and ask the same question of each.
+
+Six answer "should I keep shooting this?" on that page. Four were already right,
+and their being right is the useful half of the record:
+
+- `thinStackWarning` — corrected 2026-09-11 to a **depth**, not a count.
+- `nextBestMove`'s `thin` and `integration` rungs — per-pixel since `perPixel.ts`,
+  and the mosaic `integration` phrase already says *"more passes over the same
+  mosaic"*.
+- `noiseReductionHint` — the √N *marginal* figure is genuinely scale-free
+  (`√(T/(T+1))` is the same whether or not you divide both by the panel count),
+  so it needs no correction. Worth writing down, because it *looks* like an
+  instance and is not.
+- `integrationReadiness` — its goal is scaled by `fieldFulls`, and its "plenty for
+  a clean image" verdict is immediately qualified by the v0.437.3 grain sentence
+  **in the same card, directly below**. Checked and left alone deliberately: the
+  pair reads coherently top to bottom, and changing it would be churn.
+
+Two were wrong, and shipped as **v0.437.4** and **v0.437.5**:
+
+1. `nextBestMove`'s `good` rung — *"plenty of subs went in"*, unscoped, on a card
+   whose entire job is naming one lever.
+2. `integrationTrend`'s `plateaued` verdict — and this one is **not merely
+   unscoped, it is the opposite**: *"more subs won't help it much"* against the
+   health note's *"grain only comes down with more light"*, and the card then
+   names a different target to point at. Its *time* axis had been made per-pixel
+   when `perPixelSeconds` landed; its **σ axis had never been asked about**, which
+   is exactly the kind of half-fix a forward trace finds and a screenshot does
+   not.
+
+**The lesson worth keeping.** When a fix's write-up states a mechanism in one
+sentence, that sentence is a **query**, and running it over the tree is a task in
+its own right — usually a cheaper one than the pass that found the first
+instance. Two of the six surfaces here were already right *for reasons someone
+had written down*; one was right by accident of the maths; one was right because a
+neighbouring card qualified it. Only a trace distinguishes those four cases from
+the two real ones, and the distinction is the whole value: it is what stops the
+next run "fixing" `noiseReductionHint` or `integrationReadiness`.
+
+**What made #2 the more serious of the two, and worth recording as a pattern:**
+it is the one case where nothing else on the page counterbalanced it.
+`cardGrainProjection` stands down on a plateau *by design*, and `nextBestMove` is
+silent once the mean depth clears its deep bar — which a plateau needs. So two
+deliberate silences, each individually correct, left one wrong sentence as the
+only thing said. **When auditing a family like this, check what the page says
+when the other cards are quiet**, not only what it says when they are all up.
+
+**Baseline.** Full suite green before any change (5,933 passed, 2 skipped,
+26 m 26 s); `npx tsc --noEmit`, `npx vitest run` (3,901 tests) and `npx vite build`
+all clean from `frontend/`. No dogfood pass this run — both findings are
+frontend-pure and are pinned by scratch-revert-verified unit tests, and the pass
+would have had to be serialised against a 26-minute suite for a case neither
+sample can reach (see the v0.437.4 entry on reachability).
+
+---
+
 ## 2026-09-13 (Builder, branch `claude/sweet-babbage-q84vzj`) — DOGFOOD PASS `--mosaic --editor`: CLEAN again, and the finding was one card ABOVE the block the script prints
 
 **The pass.** `scripts/agent-dogfood.sh --mosaic --editor` on `0f74899c` (+ this

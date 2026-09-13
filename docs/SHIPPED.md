@@ -1,5 +1,79 @@
 # Shipped — the record
 
+## v0.437.5 — 2026-09-13 — "more subs won't help it much" stops being the last word on a mosaic with an under-shot panel
+
+*(Builder, branch `claude/sweet-babbage-vdeer9` — 🟠 BUG (autonomy + image quality, PRIORITY 2/4, in the
+PRIORITY 1/4 mosaic frontier AGENTS.md §1 calls the open one). Builder-found by tracing the v0.437.3 family
+forward through every *other* surface on the Target page that answers "should I keep shooting this?", and
+verified red by scratch reverts on both halves. Frontend-only, copy only: no endpoint, config, schema,
+on-disk, API-shape or default change, no threshold moves, and no measured number changes.)*
+
+**The pair, on one page, and this one is the *opposite* rather than merely unscoped.** On an unevenly deep
+mosaic that has gone sky-limited on its deep panels, `IntegrationTrendBadge` reads:
+
+> 📉 **About as clean as your sky allows**
+> Your noise has stopped dropping even as you added time (8.0 h in) — this target looks sky-limited from here,
+> so **more subs won't help it much**. A darker sky or a brighter target will do more than extra time on this
+> one.
+> **Try** M27 · Dumbbell Nebula on your next clear night — …
+
+and the "How's my stack?" panel further down the same page reads:
+
+> Part of this mosaic is thinner than the rest — about 23 % of the picture has 3 subs on it where most of it has
+> 6, so that part looks about 1.4× grainier. That isn't something processing can fix — **grain only comes down
+> with more light** — so another night on that panel is what evens it out.
+
+v0.437.3's pair disagreed about what more light *buys*; this one disagrees about whether to shoot at all, and
+then acts on its answer by naming a different target. For a heavy mosaic user with panels at different depths —
+the owner's own shooting shape (AGENTS.md §1 Owner Facts) — that is the app steering him off a raster that still
+has an under-shot panel in it.
+
+**Why this is the worst place in the app for it: nothing counterbalances it.** `cardGrainProjection`
+*deliberately* goes silent on a plateau (it assumes the ideal σ ∝ 1/√t curve, and a plateaued target is exactly
+where that assumption is wrong), and `nextBestMove` is silent once the mean per-pixel depth clears its deep bar —
+which a plateau needs. So on this picture the plateau sentence and the health note are the only two things said,
+and they are flat opposites.
+
+**Same mechanism, same datum, third currency.** `integrationTrend` fits the falloff exponent from each run's
+`noise_sigma`, which is **one robust estimate over the whole finished canvas**
+(`seestack/stack/stacker._compute_noise_sigma`). On a mosaic with unevenly deep panels that figure is dominated
+by the part that got the most subs — so a plateau read off it is a statement about *that* part, and the fit is
+right while its prescription was wrong. (The fit's *time* axis was already per-pixel, fixed when
+`perPixelSeconds` landed; this is the σ axis, which nothing had asked about.)
+
+**The fix keeps every number and adds the scope and the order.** `integrationTrend`'s `RunLike` gains one
+optional `grain_verdict` and carries it **per point**, so the plateau branch reads the verdict off the *deepest*
+run — the one the sentence is about — exactly as `grainProjection` reads it off the run it took σ from. Only the
+plateau branch consults it; `improving` and `slowing` already prescribe more time, and are pinned byte-for-byte.
+`hoursNow`, `exponent` and `percentCutIfDoubled` are unchanged and pinned equal to the even mosaic's of identical
+depth.
+
+The scoped sentence names the two levers in the order they pay off rather than instead of each other:
+
+> Across the deepest part of this picture your noise has stopped dropping even as you added time (8.0 h in) —
+> that part looks sky-limited, so more subs won't do much for it. One part of this mosaic is thinner than the
+> rest, though, and that part still comes down with more light, so another pass over it is the thing left worth
+> shooting here. After that, a darker sky or a brighter target will do more than extra time on this one.
+
+**The heading and the footnote are two more claims about the same picture, so they move with it.** A new
+`IntegrationTrend.unevenDepth` carries the verdict out to the card, which reads *"📉 Most of this is as clean as
+your sky allows"* and *"**After that,** try M27 …"*. **Nothing is removed** (the owner's one hard constraint): the
+planner's pick, its observability line and the `/tonight` link all stay exactly where they were, and the whole
+even-mosaic and single-field wording is untouched.
+
+**Upgrade-safe (§9):** the field was already on the wire — `grain_verdict` has been on every `StackRun` row since
+the column existed (`webapp/schemas.py`), and the Target and History pages already fetch those rows. A single
+field, an evenly covered mosaic, an older backend, and a measured verdict that is not `"uneven"` (a `flat` or
+`check` *seam* says nothing about depth) all read exactly as they did. History's "Noise trend" card reads the same
+helper and so gets the same scoped sentence about the same picture, which is the point.
+
+**Tests: +6 (4 `integrationTrend.test.ts`, 2 `IntegrationTrendBadge.test.tsx`), three red before** on a scratch
+revert of each half — the scoped sentence, the scoped heading, and the re-ordered footnote. The verdict is also
+pinned as being read off the **deepest** run rather than off any run (an older, shallower uneven run must not
+scope a verdict about a canvas that has since evened out), and `cardGrainProjection` is asserted to still stand
+aside here, so the scoped sentence is genuinely the only counterweight rather than a second opinion beside a
+third.
+
 ## v0.437.4 — 2026-09-13 — "plenty of subs went in" stops landing above "a quarter of the picture has 3 subs"
 
 *(Builder, branch `claude/sweet-babbage-vdeer9` — 🟠 BUG (friendliness + trust, PRIORITY 3, same mosaic frontier).
