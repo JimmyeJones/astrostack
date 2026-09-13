@@ -84,7 +84,7 @@ def stacking_coverage_max(run: Any) -> int:
     return int(getattr(run, "coverage_max", 0) or 0)
 
 
-def _root_stack(run: Any, by_id: dict[Any, Any]) -> Any | None:
+def root_stack(run: Any, by_id: dict[Any, Any]) -> Any | None:
     """The stack at the bottom of this row's derived chain, or ``None``.
 
     An edit of an edit is ordinary (open the finished picture, adjust, save
@@ -93,6 +93,11 @@ def _root_stack(run: Any, by_id: dict[Any, Any]) -> Any | None:
     derived from anything still here. ``seen`` guards a cycle — nothing writes
     one, but a hand-edited ``options_json`` is user data and must not hang a
     page.
+
+    Public because the light facts are not the only thing a re-render cannot
+    answer for itself: :mod:`webapp.framing_advice` needs the same row for the
+    same reason, and two walks of one chain would be two chances to disagree
+    about it.
     """
     seen = {run.id}
     current = run
@@ -120,7 +125,7 @@ def with_inherited_light_facts[R](runs: Sequence[R]) -> list[R]:
     by_id = {r.id: r for r in runs}
     out: list[R] = []
     for run in runs:
-        source = _root_stack(run, by_id)
+        source = root_stack(run, by_id)
         if source is None:
             out.append(run)
             continue
