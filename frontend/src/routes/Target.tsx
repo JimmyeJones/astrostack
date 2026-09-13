@@ -540,6 +540,10 @@ export function TargetView() {
         fieldFulls: latestRun?.field_fulls,
         objectType: identity.data?.type,
         difficulty: identity.data?.difficulty,
+        // Passed only so this stays a faithful mirror of the badge's inputs: the
+        // verdict changes the `good` rung's *wording*, never its kind, so the
+        // plateau badge's deference is unaffected either way.
+        grainVerdict: latestRun?.grain_verdict,
       })?.kind ?? null,
     [latestRun, unsolvedCount, runs.data, identity.data],
   );
@@ -1183,6 +1187,7 @@ export function TargetView() {
               fieldFulls={latestRun.field_fulls}
               objectType={identity.data?.type}
               difficulty={identity.data?.difficulty}
+              grainVerdict={latestRun.grain_verdict}
             />
           ) : null },
           /* "About as clean as your sky allows": when this target's measured noise
