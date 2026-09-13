@@ -10,6 +10,9 @@ function renderBadge(props: {
   integrationS?: number | null;
   nUnsolved?: number | null;
   runs?: { stack_fwhm_px?: number | null }[] | null;
+  fieldFulls?: number | null;
+  objectType?: string | null;
+  grainVerdict?: string | null;
 }) {
   return render(
     <MantineProvider>
@@ -20,6 +23,9 @@ function renderBadge(props: {
           integrationS={props.integrationS ?? null}
           nUnsolved={props.nUnsolved ?? null}
           runs={props.runs ?? null}
+          fieldFulls={props.fieldFulls ?? null}
+          objectType={props.objectType ?? null}
+          grainVerdict={props.grainVerdict ?? null}
         />
       </MemoryRouter>
     </MantineProvider>,
@@ -60,6 +66,18 @@ describe("NextBestMoveBadge", () => {
     expect(screen.queryByText(/refocus/i)).toBeNull();
     // Falls through to the good/encouraging note instead.
     expect(screen.getByText(/Nice work on M31/)).toBeInTheDocument();
+  });
+
+  it("carries the run's uneven-grain verdict into the well-done note", () => {
+    // Fails before: the badge had no way to take the verdict, so its "Nice work"
+    // note said "plenty of subs went in" on the very picture the "How's my
+    // stack?" panel below it calls 1.4x grainier over a quarter of its area.
+    renderBadge({
+      nFramesUsed: 900, integrationS: 18 * 3600, fieldFulls: 9,
+      objectType: "Galaxy", grainVerdict: "uneven",
+    });
+    expect(screen.getByText(/Nice work on M31/)).toBeInTheDocument();
+    expect(screen.getByText(/thinner than the rest/)).toBeInTheDocument();
   });
 
   it("renders nothing for a deep, healthy stack", () => {

@@ -1,5 +1,51 @@
 # Shipped — the record
 
+## v0.437.4 — 2026-09-13 — "plenty of subs went in" stops landing above "a quarter of the picture has 3 subs"
+
+*(Builder, branch `claude/sweet-babbage-vdeer9` — 🟠 BUG (friendliness + trust, PRIORITY 3, same mosaic frontier).
+Builder-found by the same forward trace, verified red by a scratch revert. Frontend-only, copy only: no endpoint,
+config, schema, on-disk, API-shape or default change, and no threshold moves.)*
+
+**The pair.** `nextBestMove`'s well-done rung — the *"💡 Nice work on M31"* card — prints:
+
+> **This is a solid result — plenty of subs went in.** More time is the main thing that'll add depth from here,
+> so keep revisiting it on clear nights.
+
+above the *"How's my stack?"* panel's own note about the same canvas — *"about 23 % of the picture has 3
+subs on it where most of it has 6, so that part looks about 1.4× grainier. That isn't something processing
+can fix — grain only comes down with more light."* Every figure that rung reaches on is a **mean over the whole
+raster** — `perPixel.ts` is explicit that it is one, and that it is the conservative choice for the surfaces that
+*report* depth — so a mosaic comfortably deep on average can still hold a panel that is not, and this is the card
+whose entire job is to name the single highest-leverage next thing.
+
+**Reachable on the owner's data, not on the sample.** It needs the mean per-pixel integration between the
+short and deep bars (for a galaxy, 1.5–4.5 h a panel) with one panel measurably thinner — an ordinary mid-project
+state for a target shot over many nights, and invisible on the 6-frame field sample and on the bundled mosaic
+(4 min a panel, which lands on the `integration` rung, whose "more passes over the same mosaic" was already
+honest).
+
+**The fix.** `NextBestMoveInput` gains one optional `grain_verdict`, read only by that last rung, and the phrase
+keeps the praise and scopes it: *"Across most of it this is a solid result — plenty of subs went in. One part of
+this mosaic is thinner than the rest, though, and only more light evens that part out, so more passes over the
+same mosaic are what'll add depth from here."* The prescription serves **both** endings the health note can print
+(*"another night on that panel"* and *"it evens out on its own as you keep shooting"*), so the two agree whichever
+it says.
+
+**Deliberately not a new rung, and deliberately not spoken on a deep mosaic.** The ladder's contract is *one*
+lever, and the louder ones still win — an uneven mosaic that is also thin, or losing a quarter of its subs to
+plate-solving, gets `thin` / `locate` exactly as before (pinned). And a genuinely deep uneven mosaic stays
+**silent** here, as it did: the health note is the surface that measures it, and repeating it in the coaching card
+would be the duplication the thin-stack suppression exists to avoid. The `kind` stays `"good"`, so
+`IntegrationTrendBadge`'s deference to an add-time nudge (`ADD_TIME_KINDS`) is untouched.
+
+`Target.tsx` passes the verdict to both the badge and the `coachKind` mirror beside it, so the two cannot drift.
+
+**Tests: +7 (6 `nextBestMove.test.ts`, 1 `NextBestMoveBadge.test.tsx`), two red before** on a scratch revert.
+One of the six is a **fixture guard** rather than a claim about the fix — it asserts the ladder really does land
+on `good` for that mosaic shape, so the two behavioural tests cannot pass for the wrong reason (AGENTS.md §8 on
+fixtures that cannot exhibit their bug). Every other shape of verdict — null, absent, `""`, `flat`, `check` — is
+pinned as returning the pre-fix object exactly.
+
 ## v0.437.3 — 2026-09-13 — "the background already looks clean" stops landing above "grain only comes down with more light"
 
 *(Builder, branch `claude/sweet-babbage-q84vzj` — 🟠 BUG (trust + friendliness, PRIORITY 3, in the PRIORITY 1/4
