@@ -1,5 +1,83 @@
 # Shipped — the record
 
+## v0.438.13–v0.438.14 — 2026-09-13 — a cropped picture claimed a depth its pixels never had
+
+*(Builder, branch `claude/sweet-babbage-ls3t8z` — 🟠 BUG (trust, PRIORITY 3, on the PRIORITY 1/4 mosaic
+frontier), the `LEAD` the previous run filed with v0.438.10 and could not finish. Taken as filed, with its
+own first instruction carried out before a line was changed: **measure it**. Both halves verified red by
+scratch reverts. Additive throughout: no config, schema, on-disk, API-shape or default change.)*
+
+**The lead's question, and the measurement that answers it.** Every surface that reports a run's
+integration or frame count *per pixel* divides by `field_fulls` — canvas area ÷ one native frame
+(`webapp/field_fulls.py`). An editor export records the canvas it actually wrote
+(`canvas_h=out.shape[0]`, `_apply_editor_to_run`) while carrying the source stack's `n_frames_used` and
+`total_exposure_s` forward whole, so a crop shrinks the divisor and the quotient rises by exactly the crop
+factor. The lead would not commit to a fix because it could not tell whether that was wrong: trimming a
+**ragged border** genuinely leaves a deeper picture behind, so there the higher number might be closer to
+the truth, while a **content** crop removes no light from the pixels that survive and the inflation is pure.
+
+So: the bundled 2×2 mosaic sample, stacked (21 subs, 907×615 union canvas), and each candidate answer
+compared against the mean of the run's own `_framecov.fits` over the surviving pixels — the directly
+measured "how many subs does a pixel here hold?".
+
+| crop | measured | its own canvas | the stack's canvas |
+|---|---|---|---|
+| none (the whole canvas) | 5.855 | 5.783 (−1.2 %) | 5.783 (−1.2 %) |
+| Auto's border trim (92.6 % kept) | 5.890 | 6.244 (**+6.0 %**) | 5.783 (−1.8 %) |
+| a content crop (25 % kept) | 6.631 | 21.000 (**+217 %**) | 5.783 (−12.8 %) |
+
+The lead's two halves really do behave differently — the border trim is only 6 % out, because the pixels it
+removes really were the shallow ones, where the content crop is **3.2× out**. But they do not need two
+rules, which is the finding: reading the **source stack's** canvas is within 1.8 % on the trim and 12.8 %
+on the content crop, and — the property that decides it — errs *low* in both where the row's own canvas errs
+*high*. That is the same direction `field_fulls_of_sky` already clamps for, and for the same reason: a
+number that overstates a picture's depth tells a beginner to stop shooting.
+
+**Reachable by default, not as an edge case.** The editor seeds Auto on first open (v0.390.0) and Auto trims
+the border, so *every* finished mosaic is cropped. On a single field it cannot fire at all — `canvasFieldFulls`
+and `field_fulls_of_sky` both clamp ≤ 1.0 to "no scaling" — so this is a mosaic-only question, which is the
+frontier AGENTS.md §1 names.
+
+**The rule, and where it lives.** New `webapp/derived_light.stacking_field_fulls(run, by_id, native_shape)`
+and its quotient `stacking_samples_per_pixel`, beside `stacking_coverage_max` — the module whose whole
+subject is which of a re-render's columns are facts about the light and which are facts about the pixels.
+`canvas_w`/`canvas_h` turn out to be a third kind: a **true statement about the export** (they really are its
+pixels, and the surfaces that *describe* the file — the full-res PNG's dimensions, the paper sizes — must
+keep reading them) and the **wrong row to divide by**. The drizzle scale travels with the canvas for the
+same reason: it is the stacking run that drizzled, and an export's options record no scale at all. A row
+that is not a re-render, and one whose source has been pruned from History, both answer from their own
+canvas — which is what they have always done, and for the pruned row is the only thing left to answer with.
+The chain is walked to the *root* by the existing `root_stack`, so an edit of an edit is not measured
+against another crop.
+
+**v0.438.13 — the four surfaces that report a depth.** History's run listing (whose `integrationTrend` fits
+a noise-vs-time falloff across runs, so one stack's light appearing as two different amounts of sky is
+exactly what it must not see), the Gallery card, the Dashboard's recent-stacks strip, and "My best pictures"
+— whose ranking blends integration and frame count per pixel, and whose representative for an edited target
+*is* the export. `webapp/routers/stats.py`'s strip now materialises its per-target run list (the same list
+the Gallery and History listings already build) so the siblings are in hand; nothing else changed shape.
+
+**v0.438.14 — the two surfaces that give an instruction.** The print-sizes endpoint's "bigger" nudge names
+**Drizzle**, and withholds it below `DRIZZLE_MIN_SAMPLES_PER_PIXEL` (100) precisely so it stops recommending
+a re-stack the Stack form then warns against — v0.436.0 fixed that disagreement once already, in the other
+direction. On a cropped export the inflated depth walked straight back through the bar: 2500 subs over a
+2800×2100 mosaic is ~65 a pixel, and the same picture cropped to 2000×1500 read as ~128. The export job's
+refusal names the same figure and is corrected with it. The paper sizes themselves still come off the
+export's own pixels, which really are what would be printed — only the depth moved.
+
+**Upgrade-safe (§9):** read-side only. Nothing is written, no column changes meaning, no response field is
+added or removed, and a library with no measured frame shape still answers `None` — "no scaling", the
+behaviour before any of this existed.
+
+**Tests (+9 Python, all nine red under a scratch revert of the one line that chooses the row):** eight in
+`tests/webapp/test_derived_light.py` — the pure rule (a stack measured against itself; a cropped export
+against its stack; an edit of an edit reaching the root; a pruned source falling back; the drizzle scale
+travelling with the canvas; no frame shape meaning no scaling; `samples_per_pixel` dividing the inherited
+count; and declining rather than guessing) and the four endpoints, including a wall test where a 2×2 mosaic
+and a single field hold the same 180 subs and the same 5 h, so the single field — four times deeper per
+pixel — must lead. One in `tests/webapp/test_editor.py` for the print nudge, which also pins that the paper
+sizes still come off the export's own canvas. Nothing loosened, nothing rewritten.
+
 ## v0.438.7–v0.438.9 — 2026-09-13 — a finished picture forgot how long it had been exposed for
 
 *(Builder, branch `claude/sweet-babbage-qpsqgd` — 🟠 BUG (trust, PRIORITY 1/3), found by reading the

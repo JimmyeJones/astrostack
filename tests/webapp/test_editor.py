@@ -2245,6 +2245,42 @@ def test_print_sizes_divides_out_a_run_s_own_drizzle_before_judging_its_depth(
     assert "about 30 subs" in plain_text, plain_text
 
 
+def test_print_sizes_judges_a_cropped_export_on_the_sky_its_subs_covered(
+        client, solved_library):
+    """A finished picture is a *crop* of the stack it came from — Auto seeds a
+    border trim on first open — and its ``stack_runs`` row records the canvas it
+    wrote while carrying the source's frame count forward whole. Divide one by
+    the other and the picture claims the depth of a raster it never was.
+
+    Here: 2500 subs over a 2800×2100 mosaic is ~65 on a pixel, under the ~100
+    Drizzle wants. Cropped to 2000×1500 its own canvas would say ~128 — over the
+    bar — so the nudge would send a beginner to re-stack with Drizzle on exactly
+    the picture the Stack form then warns them off.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    src = _make_run(solved_library, safe, basename="wide", h=2100, w=2800,
+                    n_frames_used=2500)
+    export = _make_run(
+        solved_library, safe, basename="wide_edit", h=1500, w=2000,
+        n_frames_used=2500,
+        options_json=json.dumps({"editor_recipe": {"ops": []},
+                                 "derived_from": src, "display_space": True}))
+
+    text = client.get(
+        f"/api/targets/{safe}/stack-runs/{export}/editor/print-sizes"
+    ).json()["bigger"]["text"]
+    assert "about 65 subs" in text, text
+    assert "keep shooting this target first" in text
+
+    # …and the paper sizes themselves still come off the *export's* pixels,
+    # which really are what would be printed. Only the depth moved.
+    sizes = client.get(
+        f"/api/targets/{safe}/stack-runs/{export}/editor/print-sizes"
+    ).json()["sizes"]
+    from seestack.printexport import print_options
+    assert [o["name"] for o in sizes] == [o.name for o in print_options(2000, 1500)]
+
+
 def test_print_sizes_keeps_its_general_wording_when_the_depth_is_unknowable(
         client, solved_library, monkeypatch):
     """A library with no measured frame shape (an older project, a broken row)
