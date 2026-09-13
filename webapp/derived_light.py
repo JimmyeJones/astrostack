@@ -31,6 +31,11 @@ row that cannot be resolved is returned exactly as it was.
   picture Auto has already trimmed.
 * ``duration_s`` and the rejection/coverage columns describe what the stacker
   did, which an export did not do.
+
+The coverage columns need one more sentence than that, because a reader can be
+*worse off* than not knowing: ``_apply_editor_to_run`` does not leave them NULL,
+it writes a literal ``coverage_min = coverage_max = 1``. See
+:func:`stacking_coverage_max`.
 """
 
 from __future__ import annotations
@@ -47,6 +52,36 @@ from webapp.run_options import derived_from_run_id
 #: ``webapp.pipeline._apply_editor_to_run`` and this read-time one can be seen to
 #: be the same set.
 INHERITED_LIGHT_FACTS = ("total_exposure_s", "calstat", "transparency_ratio")
+
+
+def stacking_coverage_max(run: Any) -> int:
+    """This row's peak stacking depth, or ``0`` where it never stacked.
+
+    ``coverage_max`` is "how many frames landed on the deepest pixel", and on an
+    ordinary run it is a measurement. On a **re-render** it is not: an editor
+    export combines nothing, so ``_apply_editor_to_run`` writes a literal
+    ``coverage_min = coverage_max = 1`` to describe a single-layer raster.
+
+    That literal is the problem. ``seestack.portfolio`` is built so that a metric
+    an entry does not carry *neither helps nor hurts* — the blend renormalises
+    over whatever is present — but a placeholder ``1`` is present, and it reads
+    as a picture one sub deep at its deepest point. Measured on the wall's own
+    scorer: a finished picture that is the best in the collection on every metric
+    it actually carries scored **0.868 instead of 1.000**, and against a deeper
+    rival 0.578 instead of 0.667 — i.e. the one picture the owner edited, shares
+    and pins was ranked down for having been finished.
+
+    So the honest answer for anything that reads this column as a *depth* is
+    ``0``, the same "unrecorded" every pre-schema run already gives. The stored
+    row is untouched; this is a read-side rule, like the rest of this module.
+
+    Deliberately keyed on the row being a re-render (``derived_from``) rather
+    than on the value ``1``: a genuine one-frame stack also records 1, and there
+    the number is true.
+    """
+    if derived_from_run_id(getattr(run, "options_json", None)) is not None:
+        return 0
+    return int(getattr(run, "coverage_max", 0) or 0)
 
 
 def _root_stack(run: Any, by_id: dict[Any, Any]) -> Any | None:

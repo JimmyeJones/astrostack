@@ -22,7 +22,7 @@ from seestack.stack.output import save_display_jpeg
 from seestack.stackhealth import grain_verdict, seam_verdict
 from webapp import deps, picturesarchive
 from webapp.capture_nights import capture_night_count, capture_night_range
-from webapp.derived_light import with_inherited_light_facts
+from webapp.derived_light import stacking_coverage_max, with_inherited_light_facts
 from webapp.field_fulls import (
     drizzle_scale_from_options,
     field_fulls_of_sky,
@@ -611,7 +611,12 @@ def get_best_pictures(
                     n_frames_used=pick.n_frames_used,
                     total_exposure_s=pick.total_exposure_s,
                     noise_sigma=pick.noise_sigma,
-                    coverage_max=pick.coverage_max,
+                    # A re-render stacked nothing, and its row says so with a
+                    # placeholder 1 rather than a NULL — which the blend would
+                    # read as "one sub deep at the deepest pixel" and rank the
+                    # finished picture down for. See
+                    # :func:`webapp.derived_light.stacking_coverage_max`.
+                    coverage_max=stacking_coverage_max(pick),
                     field_fulls=field_fulls,
                     pinned=pinned,
                 ))
