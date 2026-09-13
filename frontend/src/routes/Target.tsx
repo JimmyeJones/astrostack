@@ -1141,6 +1141,7 @@ export function TargetView() {
               color={thinStack.level === "single" ? "orange" : "yellow"}
               variant="light"
               icon={<IconAlertTriangle size={18} />}
+              data-testid="thin-stack-warning"
               title={thinStack.level === "single"
                 ? "This stack is really just one frame"
                 : "Very few frames were combined"}
@@ -1456,7 +1457,11 @@ export function TargetView() {
         </Grid.Col>
         {readiness ? (
           <Grid.Col span={{ base: 12, md: 5 }}>
-            <Paper withBorder p="sm" radius="md">
+            {/* `data-testid` here is not for the unit tests — it is the handle
+                `scripts/dogfood_probe.mjs` reads this card's sentences through,
+                so a dogfood pass logs what the page *prescribes* instead of
+                leaving it to be found in a screenshot. See `PRESCRIPTIVE` there. */}
+            <Paper withBorder p="sm" radius="md" data-testid="readiness-card">
               <Group gap="sm" wrap="nowrap" align="flex-start">
                 <IconTargetArrow size={22} style={{ flexShrink: 0, marginTop: 2 }}
                   color={`var(--mantine-color-${readinessColor(readiness.level)}-5)`} />

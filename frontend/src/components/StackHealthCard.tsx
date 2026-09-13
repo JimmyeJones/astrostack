@@ -106,7 +106,7 @@ export function StackHealthCard(
   if (!data || data.notes.length === 0) return null;
   const notes = visibleNotes(data.notes);
   return (
-    <Paper withBorder p="sm" radius="md" mt="xs">
+    <Paper withBorder p="sm" radius="md" mt="xs" data-testid="stack-health-card">
       <Group gap="sm" wrap="nowrap" align="flex-start">
         <IconStethoscope size={22} style={{ flexShrink: 0, marginTop: 2 }}
           color="var(--mantine-color-teal-5)" />
