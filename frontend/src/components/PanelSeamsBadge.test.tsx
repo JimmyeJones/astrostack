@@ -3,10 +3,10 @@ import { render, screen } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { PanelSeamsBadge, seamsLabel } from "./PanelSeamsBadge";
 
-function renderBadge(verdict?: string | null) {
+function renderBadge(verdict?: string | null, grain?: string | null) {
   return render(
     <MantineProvider>
-      <PanelSeamsBadge verdict={verdict} />
+      <PanelSeamsBadge verdict={verdict} grain={grain} />
     </MantineProvider>,
   );
 }
@@ -58,7 +58,36 @@ describe("PanelSeamsBadge", () => {
     // Nothing removed: it still says the panels evened out, and stays green.
     expect(help).toContain("evened out");
     expect(seamsLabel("flat", "uneven")?.color).toBe("teal");
-    expect(seamsLabel("flat", "uneven")?.label).toBe("Panels even");
+  });
+
+  it("says which of the two it measured on the chip, not only on hover", () => {
+    // The half the tooltip fix left behind: the *word on the chip* still read
+    // "Panels even" on a mosaic whose health panel calls a quarter of the same
+    // picture 1.4x grainier. A reader who never taps the hint — which is most
+    // of them, and on the Gallery/Compare cards the chip is the only thing on
+    // the row that knows about the panels — was told the panels are even.
+    const v = seamsLabel("flat", "uneven");
+    expect(v?.label).toBe("Sky even, one part thinner");
+    expect(v?.label).not.toBe("Panels even");
+    // Still good news, and still the same measurement: only the wording of what
+    // was measured moved.
+    expect(v?.color).toBe("teal");
+    expect(v?.help).toBe(seamsLabel("flat", "uneven")?.help);
+  });
+
+  it("renders the two-measurement label on the real chip", () => {
+    renderBadge("flat", "uneven");
+    expect(screen.getByText("Sky even, one part thinner")).toBeInTheDocument();
+    expect(screen.queryByText("Panels even")).not.toBeInTheDocument();
+  });
+
+  it("keeps exactly its old label when nothing measured the grain", () => {
+    // An older run, a single field, an even mosaic, an older backend omitting
+    // the field — all of them are today's chip, unchanged.
+    for (const g of [null, undefined, "", "something_else"]) {
+      expect(seamsLabel("flat", g)?.label).toBe("Panels even");
+    }
+    expect(seamsLabel("check", "uneven")?.label).toBe("Panels: check");
   });
 
   it("keeps exactly its old wording when nothing measured the grain", () => {

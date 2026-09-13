@@ -1,5 +1,76 @@
 # Shipped — the record
 
+## v0.438.3 — 2026-09-13 — the panel chip says which of the two things it measured on the chip, not only on hover
+
+*(Builder, branch `claude/sweet-babbage-2zjges` — 🟠 BUG (trust + friendliness, PRIORITY 3, the
+whole-canvas/measured-picture family again, this time on the cards rather than on the Target page). Found by
+`scripts/agent-dogfood.sh --mosaic --editor` on the bundled 2×2 sample and verified red by a scratch revert.
+Frontend-only, one label: no endpoint, config, schema, on-disk, API-shape or default change, no threshold
+moved, no measurement changed.)*
+
+**What the pass showed.** On the mosaic sample's History card, beside `MIN-MAX` and `21 FRAMES`, a green chip
+reading
+
+> `PANELS EVEN`
+
+on the same run whose health panel — printed by the same dogfood pass, four lines above it — says
+
+> *"Part of this mosaic is thinner than the rest — about 23 % of the picture has 3 subs on it where most of it
+> has 6, so that part looks about 1.4× grainier."*
+
+**This is the half v0.406.1 did not reach.** That fix knew about exactly this collision: `seamsLabel` has taken
+a `grain` argument since then, and its docstring says in as many words that "a mosaic can be perfectly flat and
+still show an obvious rectangle, and telling its owner 'you shouldn't see seams between them' while they are
+looking straight at one is the untruth this argument exists to remove". But what it changed was the **help**,
+and the word printed *on* the chip stayed `Panels even`. `HintAnchor` (v0.402.1) does make that sentence
+tappable on a phone, so it is genuinely reachable — it is not the "a tooltip is not written at all on a phone"
+bug. It is the cheaper one next to it: a chip is **read** far more often than it is asked, and the reader who
+does not ask has been told the panels are even.
+
+**Where that costs something.** On the Target page the other half is said three more ways (the health note, the
+panel map, `nextBestMove`/`grainProjection`'s per-panel scoping from v0.437.3–v0.438.1), so the chip is at worst
+redundant. On **Gallery** and **Compare** — the two surfaces where a beginner picks between two pictures, and
+where "Set as cover" and the side-by-side live — this chip is the only thing on the row that knows anything
+about the panels at all, and nothing else there mentions depth. So the misreading is unopposed exactly where a
+decision is being made.
+
+**The fix is the chip's own label, not a second chip.** When `grain === "uneven"` the `flat` verdict now reads
+
+> `SKY EVEN, ONE PART THINNER`
+
+— naming the measurement that was taken (*sky level*, which is what `seam_verdict` is) and the one that was
+not. `Sky even` rather than `Panels even` because the sky level is what this verdict measured; *one part
+thinner* because that is the app's own plain word for the other half (the health note's "Part of this mosaic is
+thinner than the rest"), deliberately not the glossary term *panel depth*, so the chip needs no lookup to be
+read. **Nothing is removed and nothing is added:** the verdict is untouched, the colour stays **teal** (the seam
+measurement really is good news, and a thinner panel is not a fault — it is less time on one panel, which the
+app elsewhere says evens out as you keep shooting), the help text is byte-for-byte v0.406.1's, and no element
+joins the badge row — which is what AGENTS.md §1's standing "prefer a consolidation over a new card" asks for
+on rows a beginner already finds busy.
+
+**Deliberately out of scope, with reasons** (so they are not re-picked as oversights):
+
+* **`check` + uneven grain** keeps `Panels: check` exactly as it is. That chip is already telling the reader to
+  look, and the sky step is the more useful thing to say — pinned by the test that has said so since v0.406.1.
+* **A `None` seam verdict with uneven grain** still renders no chip. `seam_verdict` is `None` for the ambiguous
+  middle band where large-scale structure puts a floor under the figure, and inventing a depth-only chip there
+  is a different item (a new element on the row) with a different justification.
+* **`Compare.tsx`'s comparative sentence** (*"A's mosaic panels evened out, while B's sky still steps where its
+  panels join"*) is left alone: it only fires when the two verdicts *differ*, and its second clause names the
+  sky explicitly, so the axis is not ambiguous there.
+
+**Upgrade-safe (§9):** a run with no grain measurement — every single field, every evenly-covered mosaic, every
+run recorded before `grain_ratio` existed, and any older backend omitting the field — gets byte-for-byte the
+chip it has always had, label included. `grain_verdict` was already being passed at all three call sites
+(`History.tsx`, `Gallery.tsx`, `Compare.tsx`) since v0.406.1; nothing new is fetched.
+
+**Tests (+5, three verified red by a scratch revert of the label line):**
+`PanelSeamsBadge.test.tsx` — the two-measurement label is what `seamsLabel` returns and what the rendered chip
+shows, the colour and help are unchanged by it, and every "no grain measured" spelling (`null`, `undefined`,
+`""`, an unknown word) plus `check` keep today's label exactly. `History.test.tsx` — the real run card shows the
+honest label on a flat-but-unevenly-deep mosaic and the plain one on an evenly deep one. The existing v0.406.1
+assertions on the help text pass unchanged, so the tooltip fix was added to, not traded away.
+
 ## v0.438.2 — 2026-09-13 — the grain projection stops asking for the light the picture already has
 
 *(Builder, branch `claude/sweet-babbage-8fmx59` — 🟠 BUG (trust + friendliness, PRIORITY 3, the same
