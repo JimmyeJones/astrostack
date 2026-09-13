@@ -692,18 +692,14 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
     second cross-target read (see :func:`_run_ids_with_meta_prefix`).
     """
     from seestack.io.project import Project
+    from webapp.derived_light import stacking_field_fulls
+    from webapp.field_fulls import native_frame_shape
     from webapp.pipeline import _stack_options_from_run_json
     from webapp.routers.editor import (
         EXPORTED_RECIPE_META_PREFIX,
         RECIPE_META_PREFIX,
     )
     from webapp.routers.stack import _preview_is_display_space
-
-    from webapp.field_fulls import (
-        drizzle_scale_from_options,
-        field_fulls_of_sky,
-        native_frame_shape,
-    )
 
     recent: list[RecentStack] = []
     n_stack_runs = 0
@@ -719,13 +715,20 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
             # below can be scaled to a per-pixel depth without paying for the
             # lookup once per run (the same split the run listing uses).
             native_shape = native_frame_shape(proj)
+            # Materialised (not streamed) so a re-render's per-pixel divisor can
+            # come off the stack it was rendered from: an editor export's own
+            # canvas is a cropped one, and dividing the light it inherited by it
+            # reads the picture deeper than any pixel of it is. Same list the
+            # Gallery and History listings already build per target.
+            runs = list(proj.iter_stack_runs())
+            by_id = {r.id: r for r in runs}
             # Runs the app already shows edited, collected on the pass that is
             # reading these rows anyway — no second listing. It does parse each
             # run's options: measured at 1.38 ms across 400 runs, against 11.45 ms
             # for the ``iter_stack_runs`` walk being paid on the same target, and
             # behind the 30 s cache below.
             shown_edited: set[int] = set()
-            for run in proj.iter_stack_runs():
+            for run in runs:
                 target_runs += 1
                 if run.id is not None and _preview_is_display_space(run.options_json):
                     shown_edited.add(run.id)
@@ -756,14 +759,7 @@ def _rollup_stacks(lib, targets, lon_deg=None) -> tuple[list[RecentStack], int, 
                     # were hand-mirrored did eventually disagree — v0.338.1).
                     is_genuine=_stack_options_from_run_json(
                         run.options_json) is not None,
-                    field_fulls=(
-                        field_fulls_of_sky(
-                            run.canvas_w, run.canvas_h,
-                            frame_w=native_shape[0], frame_h=native_shape[1],
-                            drizzle_scale=drizzle_scale_from_options(
-                                run.options_json),
-                        ) if native_shape is not None else None
-                    ),
+                    field_fulls=stacking_field_fulls(run, by_id, native_shape),
                 ))
             n_stack_runs += target_runs
             if target_runs:

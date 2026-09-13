@@ -2211,36 +2211,41 @@ def print_sizes(safe: str, run_id: int, request: Request) -> dict:
     bigger. It is the one thing a picture too small to print at all can still be
     told, and that case is exactly where the size menu hides itself.
 
-    That nudge names **Drizzle**, so it is handed this run's own per-pixel depth
-    (:func:`webapp.field_fulls.samples_per_pixel_of_run` — the run's canvas and
-    one ``LIMIT 1`` frame row, no FITS read, so the endpoint stays as cheap as
-    it promises). Without it the sentence recommended a re-stack the Stack form
-    would then warn against on the very same picture, which on a mosaic is the
-    common case rather than the edge one.
+    That nudge names **Drizzle**, so it is handed this picture's per-pixel depth
+    (:func:`webapp.derived_light.stacking_samples_per_pixel` — the row listing
+    and one ``LIMIT 1`` frame row, no FITS read, so the endpoint stays as cheap
+    as it promises). Without it the sentence recommended a re-stack the Stack
+    form would then warn against on the very same picture, which on a mosaic is
+    the common case rather than the edge one. The depth is measured against the
+    canvas the subs were *spread over*, which on a finished export is the stack's
+    and not the crop's — dividing by the crop would read a mosaic as several
+    times deeper than it is, and recommend the drizzle it cannot support.
     """
     from seestack.printexport import bigger_print, print_advice, print_options
-    from webapp.field_fulls import native_frame_shape, samples_per_pixel_of_run
+    from webapp.derived_light import stacking_samples_per_pixel
+    from webapp.field_fulls import native_frame_shape
 
     lib, proj = deps.open_target_project(request, safe)
     try:
-        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
-        frame_shape = native_frame_shape(proj) if run is not None else None
+        # The siblings, not just this row: the picture being sized is very often
+        # a finished export, whose canvas is the *cropped* one. Its pixel count
+        # is the right answer for the paper sizes below (they are about pixels)
+        # and the wrong divisor for its depth, which is the stack's — see
+        # :func:`webapp.derived_light.stacking_field_fulls`.
+        runs = list(proj.iter_stack_runs())
+        frame_shape = native_frame_shape(proj)
     finally:
         proj.close()
         lib.close()
+    run = next((r for r in runs if r.id == run_id), None)
     if run is None:
         raise HTTPException(status_code=404, detail="No such run")
     canvas_w, canvas_h = int(run.canvas_w or 0), int(run.canvas_h or 0)
-    frame_w, frame_h = frame_shape if frame_shape is not None else (None, None)
     options = print_options(canvas_w, canvas_h)
     bigger = bigger_print(
         canvas_w, canvas_h,
-        samples_per_pixel=samples_per_pixel_of_run(
-            canvas_w, canvas_h,
-            n_frames_used=run.n_frames_used,
-            frame_w=frame_w, frame_h=frame_h,
-            options_json=run.options_json,
-        ),
+        samples_per_pixel=stacking_samples_per_pixel(
+            run, {r.id: r for r in runs}, frame_shape),
     )
     return {
         "sizes": [{"name": o.name, "dpi": o.dpi, "label": o.label,

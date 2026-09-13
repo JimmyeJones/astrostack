@@ -36,14 +36,23 @@ The coverage columns need one more sentence than that, because a reader can be
 *worse off* than not knowing: ``_apply_editor_to_run`` does not leave them NULL,
 it writes a literal ``coverage_min = coverage_max = 1``. See
 :func:`stacking_coverage_max`.
+
+``canvas_w``/``canvas_h`` are a third kind again. They are a true statement about
+the export — those really are its pixels, and the surfaces that *describe* the
+file (the full-res PNG's dimensions, the print sizes) must keep reading them —
+but they are the wrong row to *divide* a per-pixel figure by, because a crop
+shrinks them while the light stays what it was. See
+:func:`stacking_field_fulls`.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
+from webapp.field_fulls import drizzle_scale_from_options, field_fulls_of_sky
 from webapp.run_options import derived_from_run_id
 
 #: The columns a re-render inherits from the stack it was rendered from, because
@@ -82,6 +91,100 @@ def stacking_coverage_max(run: Any) -> int:
     if derived_from_run_id(getattr(run, "options_json", None)) is not None:
         return 0
     return int(getattr(run, "coverage_max", 0) or 0)
+
+
+def stacking_field_fulls(
+    run: Any,
+    by_id: dict[Any, Any],
+    native_shape: tuple[float, float] | None,
+) -> float | None:
+    """How many field-fulls of sky this row's **light** was spread over.
+
+    :func:`webapp.field_fulls.field_fulls_of_sky` is the divisor that turns a
+    run's totals into per-pixel figures — integration, frame count, the wall's
+    ranking — and it is canvas area ÷ one native frame. On a stack that is the
+    right question asked of the right row. On a **re-render** it is the right
+    question asked of the wrong one: an editor export records the canvas it
+    actually wrote (``canvas_h=out.shape[0]``, ``_apply_editor_to_run``), and a
+    crop makes that smaller while carrying the source's ``n_frames_used`` and
+    ``total_exposure_s`` forward whole. The divisor falls, the quotient rises,
+    and the picture claims a depth its pixels never had.
+
+    Not a rare edit, either: the editor seeds Auto on first open (v0.390.0) and
+    Auto trims the border, so every finished mosaic is cropped by default.
+
+    **Measured on the bundled 2×2 mosaic sample** (21 subs, 907×615 canvas),
+    against the mean of the frame-coverage map over the surviving pixels — the
+    directly measured answer to "how many subs does a pixel here hold?":
+
+    ==========================  ========  ==========  ===========
+    crop                        measured  own canvas  this rule
+    ==========================  ========  ==========  ===========
+    none (the whole canvas)        5.855       5.783       5.783
+    Auto's border trim (92.6 %)    5.890       6.244       5.783
+    a content crop (25 %)          6.631      21.000       5.783
+    ==========================  ========  ==========  ===========
+
+    So the two halves the lead separated do behave differently — trimming a
+    ragged border is only +6.0 % out, because the pixels it removes really were
+    the shallow ones, while cropping to the subject is **3.2× out**, because the
+    pixels it removes were as deep as the ones that stayed. But they do not need
+    two rules: reading the source stack's canvas is within 1.8 % on the trim and
+    12.8 % on the content crop, and — the property that decides it — it errs
+    *low* in both, where the row's own canvas errs high. This is the same
+    direction :func:`field_fulls_of_sky` already clamps for: a number that
+    overstates a picture's depth tells a beginner to stop shooting.
+
+    A row that is not a re-render, and one whose source has been pruned from
+    History, both answer from their own canvas — which is what they have always
+    done, and for the pruned row is the only thing left to answer with. The
+    drizzle scale travels with the canvas for the same reason: it is the
+    stacking run that drizzled, and an export's options record no scale at all.
+
+    ``native_shape`` is the target's native sub shape (one ``LIMIT 1`` read per
+    target, which every caller already makes); ``None`` there — or any missing
+    dimension — answers ``None``, i.e. "no scaling", exactly as before.
+    """
+    if native_shape is None:
+        return None
+    measured = root_stack(run, by_id) or run
+    return field_fulls_of_sky(
+        getattr(measured, "canvas_w", None),
+        getattr(measured, "canvas_h", None),
+        frame_w=native_shape[0],
+        frame_h=native_shape[1],
+        drizzle_scale=drizzle_scale_from_options(
+            getattr(measured, "options_json", None)),
+    )
+
+
+def stacking_samples_per_pixel(
+    run: Any,
+    by_id: dict[Any, Any],
+    native_shape: tuple[float, float] | None,
+) -> float | None:
+    """How many subs landed on **one pixel** of this row's picture.
+
+    :func:`webapp.field_fulls.samples_per_pixel_of_run` with the denominator
+    :func:`stacking_field_fulls` corrects — the numerator needs no correction,
+    because ``_apply_editor_to_run`` already carries the source's
+    ``n_frames_used`` forward (an export combines nothing of its own).
+
+    ``None`` whenever the answer would be a guess, so every caller keeps its
+    depth-unaware behaviour.
+    """
+    fulls = stacking_field_fulls(run, by_id, native_shape)
+    if fulls is None or fulls <= 0:
+        return None
+    n_used = getattr(run, "n_frames_used", None)
+    try:
+        used = float(n_used)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    depth = used / fulls
+    if not math.isfinite(depth) or depth <= 0:
+        return None
+    return depth
 
 
 def root_stack(run: Any, by_id: dict[Any, Any]) -> Any | None:

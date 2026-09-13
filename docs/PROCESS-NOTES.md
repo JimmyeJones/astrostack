@@ -18,6 +18,47 @@ is a queue.
 
 ---
 
+## 2026-09-13 (Builder, branch `claude/sweet-babbage-ls3t8z`) — a measured LEAD taken, and a CLEAN `--mosaic --editor` dogfood
+
+**Baseline.** `main` at `2e26afdf`, and it did not move all run — no collision, `0.438.13` and `0.438.14`
+were free at merge time.
+
+**The full suite is ~10 minutes, not ~3.5 hours — cap the BLAS threads.** The first sequential run projected
+to **3.5 h** (2 % in 6 min) and `-n 4` only got it to ~2.3 h, with a load average of **23 on 4 CPUs**. The
+cause is not pytest: numpy/scipy's BLAS spawns one thread per core *per worker*, so four xdist workers
+oversubscribe the box by 4×. With `OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1` and
+`-n 4 --dist worksteal` the whole 5,988-test suite runs in **628 s**. `pytest-xdist` is not a project
+dependency — `pip install pytest-xdist` into the run's own `.venv`, which changes nothing in the repo.
+
+**…and the one thing that then goes flaky is a wall-clock assertion.** `test_export_print_is_fitted_to_the_paper_and_carries_its_dpi` waits 30 s for a 3000×2000 print job and failed once under `-n 4` while a stack measurement of mine was also running; it passes in ~7 s on its own. So a lone failure in a parallel run is worth re-running alone before believing it — and worth *not* "fixing" by widening the timeout.
+
+**The LEAD's own first instruction was the whole task.** The entry filed with v0.438.10 ("a cropped export
+reports its depth against the canvas it has left") could not say whether it was a bug, because trimming a
+ragged border genuinely leaves a deeper picture behind. Measuring it — the bundled 2×2 mosaic stacked, and
+each candidate answer compared against the mean of the run's own `_framecov.fits` over the surviving pixels
+— both sized it *and* chose between the two rules the lead had separated. Worth carrying forward: a lead
+that names its own measurement is worth more than a lead that names a fix, and doing the measurement first
+is what turned "two rules, maybe" into "one rule, and here is why it errs the safe way".
+
+**Dogfood: CLEAN** (`scripts/agent-dogfood.sh --mosaic --editor`, with an observing site). Both samples
+probed at 1440 px and 420 px: **nothing overflowing, no console errors**, and the editor drive added all
+**21** ops on the single field *and* on the mosaic run with every live preview re-rendering, then undo and
+redo. Auto would trim **7.9 %** of the mosaic canvas (§1's bug line is ~15 %). The app's own sentences were
+read as one paragraph on both targets, per AGENTS.md §7, and they hold together — the mosaic's
+next-best-move, readiness card, panel map, stack-health and framing verdict all speak in the same units
+("4 min spread across about 4 fields of sky, so each part has 1 min"; goal ~7.3 h = 2 h × 3.63 field-fulls;
+the top-right panel 30 s behind, said the same way in the panel map and the grain note). `mosaic-map`'s
+`thin` is `None` here **on purpose** — a 30 s shortfall is below `THIN_MIN_SHORTFALL_S` (300 s) — and the
+`behind` branch added for exactly that case is what writes the sentence, so the flag and the text agree.
+
+**Page heights re-measured** (phone, full-page scroll height). Field-sample pass: `/tonight` **3,617 px**,
+`/targets/<field>` 3,204, `/` 3,132, `/targets/<field>/edit/1` 3,101, `/life-list` 3,094, `/glossary` 2,803.
+Mosaic pass: `/tonight` 3,617, `/targets/<mosaic>` **3,550**, `/targets/<mosaic>/edit/1` 3,315, `/` 3,132.
+Desktop tops out at `/glossary` 2,715 and `/tonight` 2,346. So the v0.437.0 Tonight slice has held
+(10,430 → 3,578 → 3,617 px), the mosaic Target page is where it was (3,475 → 3,550 px), and no page is
+asking for another IA slice — the standing banner's "measure first, and the last two measurements both said
+not to" still reads true on a third measurement.
+
 ## 2026-09-13 (Builder, branch `claude/sweet-babbage-q62i26`) — one row the app kept reading as if it were a stack, on three surfaces
 
 **Baseline.** `main` at `e74d2985`, and it did not move all run — no collision, and the three version
