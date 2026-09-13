@@ -1,5 +1,127 @@
 # Shipped — the record
 
+## v0.437.7 — 2026-09-13 — the thin-stack cue reaches the two pages where a beginner actually chooses between stacks
+
+*(Builder, branch `claude/sweet-babbage-qw8ee1` — 🟠 BUG (trust + friendliness, PRIORITY 3, same mosaic
+frontier as v0.437.6 and found by the same trace, one card over). Frontend-only: no endpoint, config, schema,
+on-disk, API-shape or default change, no threshold moved, and not one new sentence of copy.)*
+
+**A mosaic's frame count is not a depth**, and `thinStackWarning` was corrected for that on 2026-09-11: nine
+subs over a 3×3 raster is one sub everywhere, and it renders as exactly the per-pixel speckle a beginner calls
+gibberish while the count-based warning stayed silent because 9 > 4. `FrameCountBadge` carries the corrected
+answer onto the Gallery grid, reading each run's own `field_fulls`.
+
+**Two pages never got it, and both are where a decision is made.**
+
+- **History's run card.** Its badge row is badge-for-badge the Gallery card's — `RejectionBadge`,
+  `HazyNightBadge`, `PanelSeamsBadge`, `CalibrationBadge`, `UnexportedEditBadge`, then the count — and the
+  last one was a plain `<Badge variant="light">{run.n_frames_used} frames</Badge>`. So the two pages answered
+  *"is this picture thin?"* differently about the very same run, and History is the page where **"Set as
+  cover"** lives.
+- **Compare's side-by-side card.** The page's whole job is *"which of these is better?"*, and a picture that
+  is one sub deep everywhere is the loudest answer there is.
+
+**Both already receive the figure**, which is what makes this a drop-in rather than a second opinion:
+`StackRun.field_fulls` (already on the wire for the integration trend) and `GalleryItem.field_fulls` (already
+on the wire for the Gallery badge). The shared component goes in at both sites and the message stays
+`thinStackWarning`'s, so the three pages cannot phrase one picture three ways.
+
+It also closes the plainer gap the count-only badge left: a **one-frame single field** used to read
+*"1 frames"* on both pages with nothing beside it, while the Gallery tile of the same run showed the warning.
+
+**Nothing removed, nothing hidden.** A healthy run renders the identical `variant="light"` badge with the
+identical text; in the thin case the count stays visible with the cue riding it.
+
+**Tests (+5 vitest; three red before on a scratch revert that put the plain badges back).** History: the
+mosaic one sub deep everywhere, a healthy single field staying silent, and the one-frame single field the
+plain badge never flagged. Compare: exactly one of two sides flagged (both counts still shown), and silence
+when both sides are healthy. **Honest about their limit:** jsdom does no layout, so they pin the *cue*, not
+the badge row's width — the row is the Gallery card's own, and neither bundled sample stacks thin enough to
+put the warning in front of the dogfood probe.
+
+## v0.437.6 — 2026-09-13 — "My best pictures" stops ranking and captioning a mosaic as if every sub had landed on every pixel
+
+*(Builder, branch `claude/sweet-babbage-qw8ee1` — 🟠 BUG (trust + friendliness, PRIORITY 3, inside the
+PRIORITY 1/4 mosaic frontier AGENTS.md §1 calls the open one). Builder-found by running
+`frontend/src/samplesPerPixel.ts`'s **own list of already-corrected surfaces** over the tree — it names
+`auto_reject`, `rejection_reach`, `auto_stack_min_frames`, `perPixel.ts` and the Stack form, and the one
+surface in the app that *ranks pictures against each other* was not on it. One additive response field; no
+config, schema, on-disk, API-shape or default change, and no threshold moved.)*
+
+**The wall's own score disagreed with itself about the same picture.** `rank_portfolio`
+(`seestack/portfolio.py`) blends four signals, and **three of them — integration time (0.40), frame count
+(0.25) and peak coverage (0.10), i.e. 0.75 of the weight — are facts about the *target***, not about the
+picture on the wall. A mosaic spreads its subs across the raster. The fourth, background-noise σ (0.25), is
+measured on the finished pixels and therefore reads the per-pixel truth. So a thinly-shot raster came out
+credited for depth on three axes and penalised for the very same thinness on the fourth — and the "why it's
+one of your best" caption under it repeated the totals verbatim: *"3.4 h · 500 frames"*, which on a 3×3 is
+about 23 min and 55 subs anywhere you look.
+
+Worse, the disagreement was already visible **one card away**: `GalleryItem` in the *same router file*
+(`webapp/routers/gallery.py`) has carried `field_fulls` since 2026-09-11 precisely so its "N frames" badge can
+turn orange on a raster that is one sub deep everywhere (`FrameCountBadge`, v0.419.1's lesson). The Best-
+pictures wall, built forty lines below it from the same run rows, never asked.
+
+**Measured on the bundled 2×2 mosaic sample, which is in this repo** (`webapp/sample_data`, 4 panels at
+6/6/6/3 subs, stacked through `run_stack`):
+
+| | the wall read | the picture actually has |
+|---|---|---|
+| integration | **210 s** | 58 s a pixel (`field_fulls` 3.63) |
+| frames | **21** | 5.8 a pixel — and the measured `coverage_median_depth` is **6.0**, an independent corroboration of the scale to within 4 % |
+| peak coverage | **21** — *every sub the target has*, at the single corner where all four panels overlap | half the picture sits at 6 |
+
+That last row is the sharpest: left alone, `coverage_max` does not merely flatter the mosaic, it becomes
+`max_coverage` — **the yardstick every other entry in the collection is normalised against** — at a depth no
+picture is at.
+
+**The fix is the scale the app already uses, not a new one.** `PortfolioEntry` gains one optional
+`field_fulls`, and the three data axes are read through a new pure `portfolio.per_pixel_total(total,
+field_fulls)` — the Python twin of `frontend/src/components/target/perPixel.perPixel`, with the identical
+clamp (`None` / non-finite / ≤ 1.0 → no scaling, because a scale under one would *inflate* the apparent depth,
+which is the direction that hides the bug). The yardsticks (`max_exposure`, `max_frames`, `max_coverage`) and
+both tie-breaks come off the same per-pixel readings, so the correction cannot be undone one line later by the
+sort.
+
+`coverage_max` is the one axis that is *already* a per-pixel count rather than a total, so it is not divided —
+it is **capped** at what a typical pixel got (`min(peak, frames-per-pixel)`). On a single field the two are
+one number already, so the cap restores the identity a mosaic breaks instead of inventing a rule for it, and
+it can only ever lower a figure, never raise one — a heavily dithered stack whose peak is below the mean depth
+keeps its own, smaller peak.
+
+**The caption gains a clause, and loses nothing.** `bestPictureClauses` still prints both totals, then adds
+*"· about 51 min on each patch of sky"* on a canvas spanning more than one field (falling back to *"about 125
+subs on each patch of sky"* for a run that recorded no integration time). Same move as v0.437.3: every fact
+the old sentence carried survives, and the clause only says which number is which. Both readers — the wall and
+the Dashboard strip — already render the line `truncate` with the full text in `title`, so nothing grew.
+
+**Byte-for-byte unchanged wherever the scale is 1**: a single field, a run whose native frame shape can't be
+read, and an older backend that sends no `field_fulls` — each pinned by a test that compares the whole score
+list against the un-scaled one, the sub-1.0 clamp included.
+
+**Upgrade-safe (§9):** one additive, defaulted response field on `BestPicture` and one optional dataclass
+field; the frame-shape read is the same `native_frame_shape(proj)` LIMIT-1 query the Gallery listing already
+pays for, on a project this loop already has open — no FITS read, no new endpoint, no schema or on-disk
+change. An older frontend ignores the field; an older backend omitting it reads as "no scaling", which is
+exactly today's wording and today's ranking.
+
+**Tests (+10; eight red before, each verified by a scratch revert).** Python `tests/test_portfolio.py` +6: the
+single field byte-for-byte across `None`/absent/1.0/0.25; a mosaic ranked on what one patch got, asserted
+against the weights rather than a copied number; the 3×3-raster-vs-honest-stack ordering; the coverage cap in
+all three directions (mosaic capped to the sample's measured median depth, single field untouched, dithered
+peak kept); `per_pixel_total`'s six clamp cases; and the positive half — two equally deep pictures scoring
+*equally* however the sky was tiled, which is also what pins both tie-breaks. `tests/webapp/test_gallery_best.py`
++2 through the real endpoint (the field served as 1.0 / 4.0 against the fixture's own 480×320 subs, and the
+raster ranked below the deep single field). `bestPictures.test.ts` +5, including the two degraded shapes and
+the four no-scaling cases.
+
+**Left open, deliberately, and filed:** the wall has no thin-stack *cue* the way the Gallery card does — the
+caption's new clause says the depth but nothing turns orange. And `coverage_median_depth` is the directly
+*measured* depth where `field_fulls` is a canvas-area mean; they agree to 4 % on the sample, but the column is
+lazily backfilled and `None` on most legacy runs, so mixing it into a set-relative normalisation would have
+scored healed and un-healed runs in two different currencies. One scale, always available, was the right
+trade here.
+
 ## v0.437.5 — 2026-09-13 — "more subs won't help it much" stops being the last word on a mosaic with an under-shot panel
 
 *(Builder, branch `claude/sweet-babbage-vdeer9` — 🟠 BUG (autonomy + image quality, PRIORITY 2/4, in the

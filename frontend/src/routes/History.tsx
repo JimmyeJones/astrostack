@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  ActionIcon, Alert, Badge, Button, Card, Center, Group, Loader, Menu, SegmentedControl,
+  ActionIcon, Alert, Button, Card, Center, Group, Loader, Menu, SegmentedControl,
   SimpleGrid, Slider, Stack, Switch, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
@@ -23,6 +23,7 @@ import { autoSkyCastCaption } from "../components/editor/skyCast";
 import { autoColorCalCaption } from "../components/editor/colorCal";
 import { RejectionBadge } from "../components/RejectionBadge";
 import { FocusChip } from "../components/target/FocusChip";
+import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import { FramingVerdictNote } from "../components/target/FramingVerdictNote";
 import { focusChips, type FocusVerdict } from "../components/target/focusChips";
 import { integrationTrend } from "../components/target/integrationTrend";
@@ -1239,7 +1240,16 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               one-click finish lives on the hero; here it's just a truthful label
               next to the picture it applies to. */}
           <UnexportedEditBadge show={run.unexported_edit} />
-          <Badge variant="light">{run.n_frames_used} frames</Badge>
+          {/* The same badge the Gallery card of this very run shows, given the
+              same run's own `field_fulls` — this row is otherwise badge-for-badge
+              identical to that one, and a plain count here meant the two pages
+              answered "is this picture thin?" differently about one picture.
+              History is where "Set as cover" lives, so it is the worse of the two
+              places to be silent about it. */}
+          <FrameCountBadge
+            nFramesUsed={run.n_frames_used}
+            fieldFulls={run.field_fulls}
+          />
         </Group>
       </Group>
       <Text size="xs" c="dimmed">
