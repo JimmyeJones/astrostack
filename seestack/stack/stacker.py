@@ -2917,9 +2917,23 @@ def run_stack(
     # sample count that actually lands on a pixel — the frame count on a single
     # field, the thinnest substantial panel's depth on a mosaic (a 2x2 mosaic three
     # subs deep is a 3-sample problem wearing a 12-frame label; see
-    # :func:`auto_reject_depth`). The original ``options`` (with the user's choice
-    # intact) is what gets persisted in the run record; ``eff`` drives the method
-    # dispatch, the memory guard, and the STACKER provenance card so all three agree.
+    # :func:`auto_reject_depth`). ``eff`` drives the method dispatch, the memory
+    # guard, and the STACKER provenance card so all three agree — **and it is
+    # ``eff``, not ``options``, that gets persisted as the run's ``options_json``**
+    # (see the ``asdict(eff)`` at the ``add_stack_run`` call). ``auto_reject``
+    # itself stays True in the record, so "auto picked it" and "this is what ran"
+    # are both readable; only the *resolved* keys are overwritten.
+    #
+    # That distinction is load-bearing for every listing in the app. A Gallery /
+    # History / Compare chip reads a run's stored options and says what the
+    # picture was made with, so it is only honest because the stored options are
+    # the ones that ran: below `drizzle_reject`'s own ``n >= 4`` floor, or when
+    # :func:`_afford_drizzle_reject` declines the second pass on an unattended run
+    # that is over budget, the record says ``drizzle_reject: false`` and the chip
+    # withdraws the promise by itself. The two tests named at the foot of
+    # ``tests/test_drizzle_reject.py`` pin exactly that, because the comment that
+    # used to stand here said the opposite ("the original options … is what gets
+    # persisted") and sent a 2026-09-13 run off to fix a bug that does not exist.
     eff = _resolve_auto_reject(
         options, n, depth=auto_reject_depth(_frame_radecs(frames)))
     # …and the drizzle half of the same question, which can only be answered here:
