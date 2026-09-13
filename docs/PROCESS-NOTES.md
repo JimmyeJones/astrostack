@@ -18,6 +18,57 @@ is a queue.
 
 ---
 
+## 2026-09-13 (Builder, branch `claude/sweet-babbage-q62i26`) — one row the app kept reading as if it were a stack, on three surfaces
+
+**Baseline.** `main` at `e74d2985`, and it did not move all run — no collision, and the three version
+numbers were free. *(The first full-suite run died at session teardown with `OSError: [Errno 28] No space
+left on device` — the container's writable allowance, filled by accumulated `/tmp/pytest-of-root` trees from
+one long run. It printed **no summary line**, which AGENTS.md §7 already says is not a result; the useful
+half is that this failure mode looks nothing like a test failure and everything like a crash in pytest's own
+`cacheprovider`. `rm -rf /tmp/pytest-of-root` frees it, and `-p no:cacheprovider` keeps a long run from
+needing the last few kilobytes at the worst moment.)*
+
+**Shipped: v0.438.10, v0.438.11 and v0.438.12** — three bugs, one cause, found by asking the *same question*
+three times rather than by reading three areas.
+
+**The question, which is the transferable part.** v0.438.7–v0.438.9 established that an editor export is a
+`stack_runs` row that did not stack, and healed the three columns it leaves NULL. The generalisation is
+sharper than "heal more columns", and it is what this run walked: **wherever the app reads a run row as a
+measurement, ask what that row means for a row that never stacked.** There are three answers, not one, and
+only the first was already known:
+
+1. **NULL** — the column is absent, and a blend that renormalises over what is present is unharmed. This is
+   the case v0.438.7–v0.438.9 closed.
+2. **A placeholder** — `_apply_editor_to_run` writes a literal `coverage_min = coverage_max = 1`. That is
+   *worse than NULL*, because it is present and reads as a real, terrible measurement: the "My best
+   pictures" blend ranked a finished picture 0.868 where 1.000 was right (v0.438.10).
+3. **An honest measurement of the wrong thing** — the hardest, because nothing about the value looks
+   suspect. An export's `canvas_w/h` is exactly the canvas it wrote, and its WCS is exactly right for that
+   canvas, because `_edit_export_wcs_text` carries the solution through the crop on purpose. Both are
+   truthful *about the edit* and silent about the light: the readiness goal was being scaled by a cropped
+   canvas (v0.438.11) and the framing nudge measured off one (v0.438.12).
+
+**Why the third kind is where the damage was.** A crop is not an unusual edit — the editor seeds Auto on
+first open (v0.390.0) and Auto trims the border — so every one of these fires on the ordinary way a picture
+gets finished, and all three grow with how much the owner uses the editor. The framing one is the only bug
+in the batch whose output a person *acts on*: the planner's row is read while standing outside pointing the
+scope, and a crop that recentres the object silences a real mis-pointing while a crop toward an edge invents
+one.
+
+**What was already right, recorded so nobody re-walks it.** Seven other "newest run" reads in
+`routers/targets.py` filter on `_stack_options_from_run_json(...) is not None`, which rejects
+`editor_recipe` and `channel_combine` outright — so `cleanest_shot`, `grainier_newest`,
+`restored_since_stack` and their neighbours were never exposed. The gap was in the three reads that took the
+newest row *unfiltered*. `stackhealth`'s coverage notes are also safe, but by luck rather than by rule: they
+gate on `coverage_max >= _COVERAGE_MIN_PEAK`, and the placeholder 1 fails that gate, so they stay silent.
+
+**A lead filed rather than built.** A cropped export's `field_fulls` is computed from the canvas it has left,
+which inflates its apparent per-pixel depth. Half of that is arguably already right — trimming a *ragged
+border* does leave a genuinely deeper picture — so it wants a measurement before a fix, and the entry says
+which one. Filed under "Autonomy & friendliness".
+
+---
+
 ## 2026-09-13 (Builder, branch `claude/sweet-babbage-qpsqgd`) — the sweep's last unswept download, and the axis it failed on was not one of the four
 
 **Baseline.** `main` at `cf52fca0` green before anything changed (Python **5,946 passed, 2 skipped**), and
