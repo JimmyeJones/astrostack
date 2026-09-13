@@ -2169,6 +2169,24 @@ missing. Don't re-file it.)*
 [`SHIPPED.md`](SHIPPED.md) — `ScaleBar.moon_fraction` + `skymarks._moon_disc_box` + `frontend/src/moonDisc.ts`,
 off by default. Don't re-file it.)*
 
+- **NEW IDEA (Scout 2026-09-13, from the dogfood pass — grep-checked against both the onboarding checklist and
+  "Compare with my last one") — "How far you've come": auto-pair a target's *first-ever* picture with its
+  *latest* on the Target page.** *(Pillar: enjoy + understand — PRIORITY 3; size S; frontend-only, reuses
+  `/compare`.)* `/compare` is already a full bookmarkable A/B route with per-side provenance and plain-language
+  verdicts on noise, panel flatness and night count, and v0.360.0 put a Target-page entry point on it — but that
+  one auto-picks *"my last one"* (the immediately previous run). The comparison that actually motivates a
+  beginner is a different pair: their **first-ever** run of this object against their **latest/best**, which turns
+  Compare from "did the last two nights help?" into "look how much better you've got at this." **Slice:** a pure
+  `pickFirstVsNow(runs)` returning the *oldest* genuine run paired with the newest — reusing the exact
+  `is_genuine` / has-a-picture / not-an-editor-export filters `pickCompareWithLast` already applies, and
+  `undefined` when there is only one run or the two would be identical (a target shot once shows nothing). One
+  more link in the same **Story** tab that already holds `CompareWithLastCard` and the deepening reel — **not** a
+  new always-on card, per the standing IA rule — delegating to the shared `sameTargetCompareHref` so the two
+  entry points can't drift about where the link goes. Silent on a single-run target and against an older backend.
+  **Beginner bar ✔** (one tap; the plain-language verdicts already live on the far side; answers "am I getting
+  better?"). **Distinct from what exists:** the "Your first image" checklist (v0.219.0/v0.362.0) is *onboarding*,
+  not a comparison; "Compare with my last one" (v0.360.0) is the *adjacent* run, never the first.
+
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
   *(Pillar: trust + understand — PRIORITY 3; both small, both purely additive on machinery that now exists.)*
