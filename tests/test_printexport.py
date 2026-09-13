@@ -23,6 +23,7 @@ from seestack.printexport import (
     bigger_print,
     print_advice,
     print_options,
+    print_refusal,
     render_print,
 )
 
@@ -304,3 +305,79 @@ def test_render_paints_uncovered_pixels_black_not_grey():
     arr = np.asarray(render_print(rgb, option).convert("L"), dtype=np.uint8)
     assert arr.min() == 0
     assert arr.max() == 255
+
+
+# ---- the refusal ------------------------------------------------------------
+# `print_advice` is what the *offer* says before anything is rendered;
+# `print_refusal` is what the user is told after they pressed the button and the
+# rendered pixels turned out to be too few. They share their opening sentence on
+# purpose — the export job used to write its own, and what it wrote was that
+# "another night or two of subs will get it there", the one lever that provably
+# cannot work.
+
+def _promises_more_exposure(text: str) -> bool:
+    """Does this sentence tell the reader that *shooting more* fixes a print?
+
+    Deliberately crude and deliberately not a full-text match: the failure this
+    guards is a rewrite, so it looks for the claim rather than for one wording.
+    The honest copy may still *mention* subs — every version of it does, to say
+    they are not the answer — so a mention only counts when nothing denies it.
+    """
+    low = text.lower()
+    mentions = any(w in low for w in ("sub", "exposure", "night"))
+    denies = any(w in low for w in (
+        "not more exposure", "won't do it", "cleaner, not bigger"))
+    return mentions and not denies
+
+
+def test_the_refusal_never_promises_that_more_subs_will_get_it_there():
+    """The regression this function exists for. A print needs *pixels*; another
+    night of the same pointing adds none."""
+    for text in (
+        print_refusal(300, 200),
+        print_refusal(300, 200, source_w=300, source_h=200),
+        print_refusal(480, 320, source_w=1200, source_h=800),
+        print_refusal(800, 500, samples_per_pixel=2.0),
+    ):
+        assert "doesn't have enough detail" in text
+        assert not _promises_more_exposure(text), text
+
+
+def test_a_crop_that_shrank_a_printable_stack_is_named_as_the_cause():
+    """The ordinary way a perfectly printable stack renders to an unprintable
+    picture — and the only cause the user can undo on the spot, so it is the one
+    the sentence names instead of sending them off to re-stack with Drizzle."""
+    text = print_refusal(480, 320, source_w=1200, source_h=800)
+    assert "480×320" in text                  # what they are actually exporting
+    assert "1200×800" in text                 # …out of what
+    assert "crop or resize" in text
+    # …and what the *whole* stack still prints — its own best size, not a guess.
+    assert print_options(1200, 800)[0].name in text
+    assert "Drizzle" not in text              # they already have the pixels
+
+
+def test_an_uncropped_picture_that_is_simply_too_small_gets_the_real_lever():
+    """No source canvas to blame (or one just as small), so the honest answer is
+    `bigger_print`'s: drizzle or a mosaic, never more exposure."""
+    text = print_refusal(800, 530, source_w=800, source_h=530)
+    assert "Drizzle" in text or "mosaic" in text
+    assert not _promises_more_exposure(text)
+    # …and the same picture with no source known at all says the same thing.
+    assert print_refusal(800, 530) == text
+
+
+def test_a_picture_far_too_small_for_any_print_says_only_what_it_knows():
+    """Past `BIGGER_PRINT_MAX_SCALE` there is no reachable goal to name, so the
+    refusal is the opening sentence alone rather than an unreachable target."""
+    text = print_refusal(120, 80)
+    assert text == print_advice([])
+    assert not _promises_more_exposure(text)
+
+
+def test_a_thin_stack_is_pointed_at_subs_before_a_drizzle_re_stack():
+    """The depth-aware half of `bigger_print` survives the refusal wrapper: a
+    picture with too few subs per pixel is told the order (subs, *then* the
+    re-stack) rather than sent to a re-stack the Stack form would warn against."""
+    text = print_refusal(800, 530, samples_per_pixel=1.0)
+    assert "keep shooting this target first" in text
+    assert not _promises_more_exposure(text)

@@ -2908,10 +2908,18 @@ export function EditorView() {
                 Renders your edits at native resolution and downloads the PNG — this
                 can be slow on a large or mosaic picture.
               </Text>
+              {/* One switch, three destinations — so it has to name all three.
+                  It said "the shared picture", and it has always also been passed
+                  to the *print* export (`exportPrint`, which bakes the same
+                  footer at the paper's own resolution). A print is the one export
+                  that becomes a physical object someone paid a lab for, and it
+                  sits directly under the full-res PNG button, which never gets a
+                  nameplate at all — so both halves of the scope are worth saying. */}
               <Checkbox mt="sm" size="xs" checked={nameplate}
                 onChange={(e) => setNameplate(e.currentTarget.checked)}
                 label="Add caption bar (target, exposure, date)"
-                description="Bakes a tidy nameplate onto the shared picture — no typing." />
+                description="Bakes a tidy nameplate onto the share image and the print
+                  file — no typing. The full-res PNG above never gets one." />
               <Button mt="xs" fullWidth variant="light" leftSection={<IconPhotoDown size={16} />}
                 loading={downloadShare.isPending} onClick={() => downloadShare.mutate()}>
                 Download share image (JPEG)

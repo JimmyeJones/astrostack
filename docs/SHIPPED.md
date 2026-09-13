@@ -1,5 +1,114 @@
 # Shipped — the record
 
+## v0.438.6 — 2026-09-13 — one switch, three exports: the caption bar named only the one it wasn't about to ruin
+
+*(Builder, branch `claude/sweet-babbage-puvgip` — 🟡 BUG (trust + friendliness, PRIORITY 3), found in the same
+pass as v0.438.5 by reading the editor export panel's controls against what each one actually calls; verified
+red by reverting the copy. Frontend copy only — one `description` string and a comment. No endpoint, config,
+schema, on-disk, API-shape or default change, and no behaviour change of any kind.)*
+
+**The control, as it was.** The export panel's
+
+> ☐ **Add caption bar (target, exposure, date)**
+> *Bakes a tidy nameplate onto the shared picture — no typing.*
+
+**It is not one export, it is three.** The single `nameplate` state in `frontend/src/routes/Editor.tsx` is
+passed to `api.exportShare` for **Download share image (JPEG)**, to `api.exportShare` again for **Share to
+app** — and to `api.exportPrint` for **Download print file**. The backend has always meant it to:
+`submit_editor_print`'s own docstring says *"When `nameplate` is set, the same acquisition footer the share
+export bakes on is drawn onto the print, at the print's own resolution."* So the file is right and the
+sentence was wrong, which is the half this sweep fixes in place.
+
+**Why it matters more here than on a JPEG.** A share image is a post; a print is a physical object someone
+has paid a lab to make, and there is no undo on a print with an unwanted black caption bar across the bottom.
+A user who wanted a captioned post *and* a clean print could always have both — tick, download the share,
+untick, download the print — but nothing on screen told them there was anything to untick.
+
+**And the checkbox sits directly under the button it does *not* reach.** The panel order is **Download
+full-res PNG**, its hint, then this checkbox, then the share button. `downloadPng` never passes `nameplate`,
+so the PNG never gets a footer — which a control placed immediately beneath it ought to say out loud rather
+than leave to the reader.
+
+So the description now names both halves of its scope:
+
+> *Bakes a tidy nameplate onto the share image and the print file — no typing. The full-res PNG above never
+> gets one.*
+
+**Tests (+1, red before).** `Editor.test.tsx`'s new case is deliberately not a string assertion: it mounts the
+panel with a printable size, asserts the description names the print file **and** the full-res PNG exclusion,
+then clicks **Download print file** twice — unticked and ticked — and pins `exportPrint`'s `nameplate`
+argument at `false` then `true`. So the sentence is checked against the wiring it describes, and decoupling
+the toggle from the print export would make the copy false and this test red in the same move. It sits beside
+the existing "threads the caption-bar toggle into the share render" case, which had pinned exactly one of the
+three destinations.
+
+## v0.438.5 — 2026-09-13 — the print refusal stops telling a beginner to shoot more subs for pixels
+
+*(Builder, branch `claude/sweet-babbage-puvgip` — 🟠 BUG (trust + friendliness, PRIORITY 3), the "copy of a
+download control vs what its handler actually does" sweep on one of the four surfaces that entry lists as
+**untouched on any axis** — the print export. Found by reading `webapp.pipeline.submit_editor_print`'s refusal
+against `seestack.printexport.print_advice`'s own documented rule; verified red by a scratch revert of the
+production change. Additive: one new pure engine function, one error message, no endpoint, config, schema,
+on-disk, API-shape or default change, and no threshold moved.)*
+
+**The sentence, as it was.** Press **Download print file** on a picture whose rendered pixels turn out to be
+too few, and the job failed with a red toast reading:
+
+> *"This picture doesn't have enough detail for a sharp print yet — another night or two of subs will get it
+> there."*
+
+**That is the one lever that cannot work, and the module it sits next to says so in as many words.**
+`print_advice`'s docstring: *"The too-small line deliberately does **not** promise that more subs fix it — they
+don't. What a print needs is *pixels*, and another night of the same pointing adds none (it makes the picture
+cleaner, not bigger)."* `bigger_print` repeats it in every branch of its own copy (*"More subs won't do it —
+they make the picture cleaner, not bigger"*), `tests/test_printexport.py` pins it twice, and
+`test_a_picture_too_small_to_print_well_offers_nothing` even records the history: *"It used to promise 'another
+night or two of subs will get it there', which is false."* The engine's copy was corrected; the **export job
+had written its own**, and that copy was never corrected with it. So the app told a beginner the opposite of
+its own rule, at the one moment they had asked it a direct question.
+
+**And the branch is the designed landing place for a crop, not an edge case.** `print-sizes` is costed off the
+run's stored canvas and says so out loud — *"A recipe that crops makes this a little optimistic — the export
+itself re-checks against the real rendered pixels and refuses with a clear message rather than printing
+something soft"*. So the ordinary way to reach this refusal is to crop in the editor and then press the button
+the panel is still offering: the picture's pixels were never the problem, the recipe was, and the answer the
+user got was to go and shoot another night.
+
+**The fix is a shared refusal, not a second opinion** — the shape this project keeps converging on. New pure
+`seestack.printexport.print_refusal(width_px, height_px, *, source_w, source_h, min_dpi, samples_per_pixel)`
+opens with `print_advice([])` verbatim, so the offer and the refusal cannot drift into two claims about one
+picture again, and then names the one lever that is actually reachable:
+
+- **A crop or resize that shrank a printable stack** — the case above, and the only cause the user can undo on
+  the spot — is named as itself: *"What you're exporting is 480×320 px — the crop or resize in your recipe cut
+  it down from this stack's 1200×800. Take that out and it prints at up to 7×5 in."* It deliberately does
+  **not** mention Drizzle here: the pixels already exist.
+- **Anything else** falls through to `bigger_print`'s existing nudge (drizzle while the gap is within
+  `DRIZZLE_MAX_USEFUL_SCALE`, a mosaic beyond it, never more exposure), including its depth-aware half — the
+  job hands it the run's own per-pixel depth through `webapp.field_fulls.samples_per_pixel_of_run`, exactly as
+  the `print-sizes` endpoint already does, so a thin mosaic is told *"keep shooting this target first, then
+  re-stack with Drizzle"* instead of being sent to a re-stack the Stack form would warn against.
+- **A picture with no reachable goal at all** (past `BIGGER_PRINT_MAX_SCALE`) gets the opening sentence alone,
+  rather than an unreachable target.
+
+The depth read costs the same one `LIMIT 1` frame row the endpoint pays for, on the project the job already
+has open, and only on the refusal path — a successful print reads nothing extra.
+
+**Upgrade-safe (§9):** one new additive engine function and one changed error string. No config, schema,
+on-disk, API-shape or default change; the `size_name` refusal path (which already delegated to
+`print_advice`) and every successful render are byte-for-byte unchanged.
+
+**Tests (+6, one red before).** The regression is on the **pipeline**, not on the string:
+`tests/webapp/test_editor.py::test_a_crop_that_makes_a_print_impossible_says_so_without_promising_more_subs`
+renders a real 1200×800 run through a real crop recipe, asserts the job errors with a message that never says
+"night", names both sizes and the recipe, and quotes the size the *whole* canvas still prints at — then checks
+`print-sizes` on the same run still offers it, which is what makes the refusal's advice checkable rather than a
+guess. It fails before against the old sentence. Five more in `tests/test_printexport.py` cover
+`print_refusal` itself, with a `_promises_more_exposure` helper that looks for the *claim* rather than one
+wording (a mention of subs counts only when nothing denies it), so a future rewrite cannot reinstate the
+untruth in different words. One stale mock corrected in `frontend/src/routes/Editor.test.tsx`, which had been
+carrying the retired sentence as if the endpoint still sent it.
+
 ## v0.438.4 — 2026-09-13 — the combine-method chip stops promising protection the pass only has at depth
 
 *(Builder, branch `claude/sweet-babbage-2zjges` — 🟠 BUG (trust, PRIORITY 3–4, the v0.422.1 rejection-floor
