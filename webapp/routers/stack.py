@@ -21,6 +21,7 @@ from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
 from seestack.stackhealth import grain_verdict, seam_verdict
 from webapp import deps, estimate_cache, pipeline
 from webapp.capture_nights import capture_night_count, capture_night_range
+from webapp.derived_light import with_inherited_light_facts
 from webapp.field_fulls import (
     drizzle_scale_from_options,
     field_fulls_of_sky,
@@ -836,7 +837,12 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
 
     lib, proj = deps.open_target_project(request, safe)
     try:
-        runs = list(proj.iter_stack_runs())
+        # An editor export written before v0.438.7 recorded no integration time
+        # and no calibration of its own, although it is a re-render of a stack
+        # that has both — so the finished picture's card said nothing about the
+        # light it is made of. Answered here from the sibling row the listing
+        # already holds; never a write, and never an overwrite.
+        runs = with_inherited_light_facts(list(proj.iter_stack_runs()))
         # The pinned "cover" run (library-level), so the History card can mark it.
         entry = lib.find_target(safe)
         cover_id = entry.cover_stack_run_id if entry is not None else None

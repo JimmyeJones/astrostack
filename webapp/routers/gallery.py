@@ -22,6 +22,7 @@ from seestack.stack.output import save_display_jpeg
 from seestack.stackhealth import grain_verdict, seam_verdict
 from webapp import deps, picturesarchive
 from webapp.capture_nights import capture_night_count, capture_night_range
+from webapp.derived_light import with_inherited_light_facts
 from webapp.field_fulls import (
     drizzle_scale_from_options,
     field_fulls_of_sky,
@@ -226,7 +227,11 @@ def get_gallery(request: Request) -> GalleryResponse:
             proj = None
             try:
                 proj = Project.open(lib.target_dir(t))
-                runs = list(proj.iter_stack_runs())
+                # A re-render answers about the light of the stack it came
+                # from, which the exports already on disk never recorded —
+                # see :mod:`webapp.derived_light`.
+                runs = with_inherited_light_facts(
+                    list(proj.iter_stack_runs()))
                 # One LIMIT-1 read for the target's native sub shape, so every
                 # run below can be scaled to a per-pixel depth without paying
                 # for it once per run (the same split the run listing uses).
@@ -542,7 +547,11 @@ def get_best_pictures(
             proj = None
             try:
                 proj = Project.open(lib.target_dir(t))
-                runs = list(proj.iter_stack_runs())
+                # Same heal as the Gallery listing: the wall ranks on
+                # integration, and an export written before v0.438.7
+                # carried none — see :mod:`webapp.derived_light`.
+                runs = with_inherited_light_facts(
+                    list(proj.iter_stack_runs()))
             except Exception:  # noqa: BLE001 — one broken project must not 500 the wall
                 # Same guard the gallery/stats/storage cross-target reads use: a
                 # corrupt or newer-schema (rolled-back) project DB is skipped, not
