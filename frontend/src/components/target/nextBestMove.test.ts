@@ -110,6 +110,80 @@ describe("nextBestMove", () => {
     expect(tip?.phrase.toLowerCase()).toContain("solid result");
   });
 
+  describe("the well-done note on an unevenly deep mosaic", () => {
+    // Every figure the `good` rung reaches on is a mean over the whole raster,
+    // so a mosaic that is comfortably deep on average can still hold a panel
+    // that is not — and the "How's my stack?" panel further down the same page
+    // says so with the depths it measured off the coverage map. "Plenty of subs
+    // went in" printed above "about 23 % of the picture has 3 subs where most
+    // has 6 … grain only comes down with more light" is the same whole-canvas
+    // substitution v0.437.3 closed for the grain projection.
+    //
+    // The shape of a real one: a 3x3 raster, eight panels deep and one thin, at
+    // a mean per-pixel depth and per-pixel integration that clear both the thin
+    // bar and the short-integration bar. `grain_verdict` is the run's own — the
+    // very value the health note reads.
+    const evenMosaic = {
+      nFramesUsed: 900,
+      integrationS: 9 * 2 * HOUR, // 2 h per pixel over 9 fields
+      fieldFulls: 9,
+      objectType: "Galaxy",
+    };
+
+    it("is reached at all on a mosaic this shape", () => {
+      // Guards the fixture rather than the fix: if the ladder ever stopped
+      // landing on `good` here, the two tests below would pass for the wrong
+      // reason (see AGENTS.md §8 on fixtures that cannot exhibit their bug).
+      expect(nextBestMove(evenMosaic)?.kind).toBe("good");
+    });
+
+    it("scopes its praise and names the thin part", () => {
+      // Fails before: the phrase was the unscoped "This is a solid result —
+      // plenty of subs went in. More time is the main thing…", which says
+      // nothing about the part of the canvas the health note is about.
+      const tip = nextBestMove({ ...evenMosaic, grainVerdict: "uneven" });
+      expect(tip?.kind).toBe("good");
+      expect(tip?.phrase).toContain("Across most of it");
+      expect(tip?.phrase).toContain("thinner than the rest");
+      // The prescription has to serve both endings the health note can print
+      // ("another night on that panel" / "it evens out as you keep shooting").
+      expect(tip?.phrase).toContain("more passes over the same mosaic");
+      // …and it must not claim the whole picture is done.
+      expect(tip?.phrase).not.toContain("This is a solid result");
+    });
+
+    it("leaves every other verdict exactly as it was", () => {
+      // Null, absent, a single field's None, and an older backend that sends
+      // nothing all keep today's wording byte for byte — as does a *measured*
+      // verdict that is not "uneven".
+      const base = nextBestMove(evenMosaic);
+      for (const v of [null, undefined, "", "flat", "check"]) {
+        expect(nextBestMove({ ...evenMosaic, grainVerdict: v })).toEqual(base);
+      }
+    });
+
+    it("never displaces a louder lever", () => {
+      // The verdict only reaches the last rung, so an uneven mosaic that is also
+      // thin, or losing its subs to plate-solving, still gets the bigger lever.
+      expect(
+        nextBestMove({ ...evenMosaic, nFramesUsed: 18, grainVerdict: "uneven" })
+          ?.kind,
+      ).toBe("thin");
+      expect(
+        nextBestMove({ ...evenMosaic, nUnsolved: 600, grainVerdict: "uneven" })
+          ?.kind,
+      ).toBe("locate");
+      // …and a genuinely deep uneven mosaic stays silent, as it did before: the
+      // health note is the surface that measures it, and repeating it here would
+      // be the duplication the thin-stack suppression exists to avoid.
+      expect(
+        nextBestMove({
+          ...evenMosaic, integrationS: 9 * 6 * HOUR, grainVerdict: "uneven",
+        }),
+      ).toBeNull();
+    });
+  });
+
   it("stays silent once a stack is genuinely deep and healthy", () => {
     expect(nextBestMove({ nFramesUsed: 300, integrationS: DEEP_INTEGRATION_S })).toBeNull();
     expect(nextBestMove({ nFramesUsed: 300, integrationS: 5 * HOUR })).toBeNull();

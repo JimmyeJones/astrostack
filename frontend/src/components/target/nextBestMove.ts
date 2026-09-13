@@ -137,6 +137,14 @@ export interface NextBestMoveInput {
    * goal the two rungs are fractions of (see `integrationBars`). Omit / null /
    * an un-curated verdict → today's per-type ladder, unchanged. */
   difficulty?: GoalDifficulty;
+  /** `"uneven"` when a substantial part of this run's canvas was shot with fewer
+   * subs than the rest and measures grainier for it — the backend's own
+   * `seestack.stackhealth.grain_verdict`, already served on every run row. It is
+   * `null` by construction on a single field and on an evenly covered mosaic (a
+   * single field has no coverage levels to compare), and on an older backend —
+   * all of which keep every phrase below byte-for-byte what it was. Read only by
+   * the `good` rung; see the comment there for why. */
+  grainVerdict?: string | null;
 }
 
 function finite(v: number | null | undefined): number | null {
@@ -157,7 +165,10 @@ function finite(v: number | null | undefined): number | null {
  *                      type's integration goal, *per pixel* (~1 h for a
  *                      nebula or an unrecognised target; see `integrationBars`).
  *   5. `good`        — decent result; encourage + name the one lever (time) that
- *                      still helps. Silent once the stack is genuinely deep.
+ *                      still helps. Silent once the stack is genuinely deep. On
+ *                      a mosaic the run's own `grain_verdict` says whether that
+ *                      praise is true of the whole canvas or only of most of it,
+ *                      and the phrase says which (see the rung).
  */
 export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
   const nUsed = finite(input.nFramesUsed);
@@ -302,6 +313,38 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
   if (perPixelS >= bars.deepS) return null;
 
   // 4. All good (decent depth, but more time always still helps).
+  //
+  // …except that "plenty of subs went in" is a claim about the *canvas*, and on
+  // a mosaic whose panels are unevenly deep the canvas is not one number. Every
+  // figure this rung reached here on is a mean over the whole raster
+  // (`perPixel` is explicit that it is), so a raster that is comfortably deep on
+  // average can hold a panel that is not — and the "How's my stack?" panel a
+  // little further down the same page says exactly that, with the depths it
+  // measured off the coverage map: *"about 23 % of the picture has 3 subs on it
+  // where most of it has 6, so that part looks about 1.4× grainier. That isn't
+  // something processing can fix — grain only comes down with more light."*
+  // "Plenty of subs went in" directly above that is the same substitution
+  // v0.437.3 closed for the grain projection, and this is the other card that
+  // makes it: both are true of the region each measured, and a beginner cannot
+  // hold them at once.
+  //
+  // So the praise keeps its scope and the lever names *where*. `grain_verdict`
+  // is the health note's own verdict, read off the same run, so the two cannot
+  // come to different opinions about one picture — and it is null on a single
+  // field and on an even mosaic, which is why nothing else here has to change.
+  // The prescription matches both endings that note can print ("another night
+  // on that panel", and "it evens out on its own as you keep shooting"): more
+  // passes over the same mosaic is what serves either.
+  if (input.grainVerdict === "uneven") {
+    return {
+      kind: "good",
+      phrase:
+        `Across most of it this is a solid result — plenty of subs went in. ` +
+        `One part of this mosaic is thinner than the rest, though, and only ` +
+        `more light evens that part out, so more passes over the same mosaic ` +
+        `are what'll add depth from here.`,
+    };
+  }
   return {
     kind: "good",
     phrase:
