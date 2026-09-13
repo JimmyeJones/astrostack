@@ -132,6 +132,60 @@ describe("ObjectInfoCard", () => {
       ).toBeInTheDocument());
   });
 
+  it("says what that mosaic costs, under the panel count", async () => {
+    // "About a 3×2 mosaic (6 panels)" answers the shape and stops at the part
+    // that decides it. The planner's framing badge prices this same `MosaicPlan`
+    // in the owner's clear nights; this card has no pace, so it says the same
+    // claim in the hours the readiness card on the page already quotes.
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+      size_arcmin: 178,
+      framing: { level: "mosaic", text: "is bigger than the Seestar's single frame — shoot it in mosaic mode to capture all of it." },
+      mosaic: { cols: 3, rows: 2, panels: 6, text: "About a 3×2 mosaic (6 panels) covers all of it." },
+    });
+    renderCard();
+    // 6 panels × the 6 h a galaxy's field is worth.
+    await waitFor(() =>
+      expect(screen.getByTestId("object-mosaic-cost")).toHaveTextContent(
+        "Giving all 6 panels the depth you'd give one field (~6 h each) is "
+        + "about 36 h of shooting."));
+  });
+
+  it("prices nothing where the catalogue offers no grid", async () => {
+    // An object that fits one frame has no mosaic to cost, so the card reads
+    // exactly as it did before rather than showing an empty line.
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M13", name: "Hercules Cluster", type: "globular cluster",
+      constellation: "Hercules", constellation_abbr: "Her",
+      ra_deg: 250, dec_deg: 36, matched_by: "name", size_arcmin: 20,
+      framing: { level: "fits", text: "fits comfortably in a single Seestar frame." },
+    });
+    renderCard("M_13");
+    await waitFor(() =>
+      expect(screen.getByText("Hercules Cluster")).toBeInTheDocument());
+    expect(screen.queryByTestId("object-mosaic-cost")).not.toBeInTheDocument();
+  });
+
+  it("withholds the price with the framing line the page already measured", async () => {
+    // The price is a clause on that sentence, so it steps aside with it —
+    // otherwise a page showing the *measured* verdict would carry the catalogue's
+    // costing under it with no sentence left to explain what it is costing.
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M31", name: "Andromeda Galaxy", type: "galaxy",
+      constellation: "Andromeda", constellation_abbr: "And",
+      ra_deg: 10, dec_deg: 41, matched_by: "name",
+      size_arcmin: 178,
+      framing: { level: "mosaic", text: "is bigger than the Seestar's single frame — shoot it in mosaic mode to capture all of it." },
+      mosaic: { cols: 3, rows: 2, panels: 6, text: "About a 3×2 mosaic (6 panels) covers all of it." },
+    });
+    renderCard("M_31", true);
+    await waitFor(() =>
+      expect(screen.getByText("Andromeda Galaxy")).toBeInTheDocument());
+    expect(screen.queryByTestId("object-mosaic-cost")).not.toBeInTheDocument();
+  });
+
   it("drops only the framing line when the page already measured it", async () => {
     // A page showing FramingVerdictNote for a finished picture already says
     // "…is bigger than one frame" — and says it about the picture that exists,

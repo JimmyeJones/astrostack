@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MosaicPlan } from "./api/client";
-import { mosaicEffortText, withMosaicEffort } from "./mosaicEffort";
+import { mosaicDepthHours, mosaicDepthText, mosaicEffortText, withMosaicEffort } from "./mosaicEffort";
+import { goalHoursForType } from "./readiness";
 
 const H = 3600;
 
@@ -60,6 +61,75 @@ describe("mosaicEffortText", () => {
     expect(mosaicEffortText(undefined, "Galaxy", 3 * H)).toBeNull();
     // A degenerate one-panel "mosaic" is not a project worth pricing.
     expect(mosaicEffortText(plan(1, 1), "Galaxy", 3 * H)).toBeNull();
+  });
+});
+
+describe("mosaicDepthText", () => {
+  it("prices the grid in hours for a surface with no pace to spend", () => {
+    // 9 panels x 4 h (Nebula) = 36 h. This is the sentence the Target page's
+    // measured framing verdict adds under "About a 3x3 mosaic (9 panels)".
+    const text = mosaicDepthText(plan(3, 3), "Emission nebula");
+    expect(text).toBe(
+      "Giving all 9 panels the depth you'd give one field (~4 h each) "
+      + "is about 36 h of shooting.");
+  });
+
+  it("says the same claim as the planner's clear-nights sentence", () => {
+    // The two run on one surface each and must not read as two opinions: the
+    // shared clause is what makes the hours version recognisable as the same
+    // answer the badge gives in nights.
+    const clause = "giving all 6 panels the depth you'd give one field";
+    expect(mosaicEffortText(plan(3, 2), "Galaxy", 3 * H)).toContain(clause);
+    expect(mosaicDepthText(plan(3, 2), "Galaxy")?.toLowerCase()).toContain(clause);
+  });
+
+  it("quotes the per-field goal the readiness card is already showing", () => {
+    // Not a second definition of "enough for a clean image": the per-field
+    // figure in the sentence is `goalHoursForType`, which on a single field is
+    // exactly `integrationReadiness`'s own `baseGoalHours`. A curated "easy"
+    // verdict moves both together.
+    expect(goalHoursForType("Emission nebula")).toBe(4);
+    expect(mosaicDepthText(plan(3, 3), "Emission nebula")).toContain("(~4 h each)");
+    const easy = { level: "easy", curated: true };
+    expect(goalHoursForType("Emission nebula", easy)).toBe(2);
+    const text = mosaicDepthText(plan(3, 3), "Emission nebula", easy);
+    expect(text).toContain("(~2 h each)");
+    expect(text).toContain("about 18 h of shooting");
+  });
+
+  it("prints a fractional goal to one decimal rather than raw", () => {
+    // 2 panels x 1.5 h (Cluster) = 3 h; the per-field figure is the fraction.
+    expect(mosaicDepthText(plan(2, 1), "Open cluster"))
+      .toBe("Giving all 2 panels the depth you'd give one field (~1.5 h each) "
+        + "is about 3 h of shooting.");
+  });
+
+  it("falls back to the mid-range goal for an unrecognised type", () => {
+    expect(mosaicDepthText(plan(3, 2), "")).toContain("about 24 h of shooting");
+    expect(mosaicDepthText(plan(3, 2), null)).toContain("about 24 h of shooting");
+  });
+
+  it("says nothing when there is no grid to price", () => {
+    expect(mosaicDepthText(null, "Galaxy")).toBeNull();
+    expect(mosaicDepthText(undefined, "Galaxy")).toBeNull();
+    // A degenerate one-panel "mosaic" is not a project worth pricing — the same
+    // silence `mosaicEffortText` has always kept.
+    expect(mosaicDepthText(plan(1, 1), "Galaxy")).toBeNull();
+    expect(mosaicDepthText({ ...plan(3, 2), panels: Number.NaN }, "Galaxy")).toBeNull();
+  });
+});
+
+describe("mosaicDepthHours", () => {
+  it("is the arithmetic both sentences share", () => {
+    expect(mosaicDepthHours(plan(3, 2), "Galaxy")).toEqual(
+      { panels: 6, perFieldHours: 6, totalHours: 36 });
+  });
+
+  it("multiplies by panels, never by the mosaic's field-fulls of sky", () => {
+    // Overlap does not make the job cheaper — the overlapped strips simply end
+    // up deeper — so a 3x2 is six times one field however the panels are laid.
+    const d = mosaicDepthHours(plan(3, 2), "Emission nebula");
+    expect(d?.totalHours).toBe(6 * 4);
   });
 });
 
