@@ -27,7 +27,7 @@ import {
   moonCueForTarget, moonPhaseLabel, moonShootColor, moonShootLabel,
   moonShootWindowNote, moonWindowNote, notUpTonightNote,
   partitionByUpTonight, planDateBounds, planNightLabel, scoreColor, splitTargets,
-  typeFilterOptions, usableWindowNote,
+  targetRowLabel, typeFilterOptions, usableWindowNote,
 } from "../tonight";
 
 function ScoreBadge({ score }: { score: number }) {
@@ -46,7 +46,7 @@ function ScoreBadge({ score }: { score: number }) {
 }
 
 function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | null }) {
-  const label = t.name && t.name !== t.id ? `${t.id} — ${t.name}` : t.id;
+  const label = targetRowLabel(t);
   // For a target already in the library: how many more clear nights would
   // finish it at the owner's own recent pace on it ("~1 more night"), or — when
   // there's no pace to go on — the plain readiness nudge toward starting
