@@ -70,6 +70,42 @@ function menuItem(name: string) {
 }
 
 describe("HistoryView", () => {
+  // This card's badge row is badge-for-badge the Gallery card's, and the Gallery
+  // one has carried the thin-stack cue since 2026-09-11 — so until now the two
+  // pages answered "is this picture thin?" differently about the very same run.
+  // History is where "Set as cover" lives, which makes it the worse place to be
+  // silent. `StackRun.field_fulls` was already on the wire for the trend fit.
+  it("flags a mosaic that is one sub deep everywhere, like the Gallery tile does", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ n_frames_used: 9, field_fulls: 9 }),
+    ]);
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("9 frames")).toBeInTheDocument());
+    // The count itself is never hidden — only scoped by the cue riding it.
+    expect(document.querySelector(".tabler-icon-alert-triangle")).not.toBeNull();
+  });
+
+  it("says nothing about depth on a healthy single-field run", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ n_frames_used: 42 }),
+    ]);
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("42 frames")).toBeInTheDocument());
+    expect(document.querySelector(".tabler-icon-alert-triangle")).toBeNull();
+  });
+
+  it("still flags a one-frame single field, which the plain badge never did", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ n_frames_used: 1 }),
+    ]);
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("1 frames")).toBeInTheDocument());
+    expect(document.querySelector(".tabler-icon-alert-triangle")).not.toBeNull();
+  });
+
   it("does not delete a stack when the confirmation is declined", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     const del = vi.spyOn(client.api, "deleteStackRun").mockResolvedValue(undefined as never);
