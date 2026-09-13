@@ -23,6 +23,16 @@
  * σ ∝ 1/√t, so reaching a target σ takes `(σ_now/σ_target)²` times the light.
  * Doubling total time cuts grain ~29 %; quadrupling it halves the grain.
  *
+ * ## What σ is measured over, and why the clean verdict asks
+ * `noise_sigma` is one robust estimate over the **whole finished canvas**
+ * (`seestack/stack/stacker._compute_noise_sigma`). On a single field that is the
+ * whole story. On a mosaic whose panels are unevenly deep it is dominated by the
+ * part that got the most subs — so the picture can measure clean while a
+ * quarter of it is visibly grainier, which is precisely what the "How's my
+ * stack?" panel on the same page says when `grain_verdict` is `"uneven"`. The
+ * clean branch therefore reads that verdict off the same run it took σ from and
+ * says the scope out loud. Nothing else consults it, and no threshold moves.
+ *
  * ## Reconciling with the goal verdict rather than contradicting it
  * Low grain is *not* the same claim as "you have enough integration": more time
  * also pulls out fainter detail, which is what the per-type goal is really
@@ -108,6 +118,13 @@ interface RunLike {
    * mosaic widening) is visible in the type rather than surviving on structural
    * typing alone. */
   field_fulls?: number | null;
+  /** `"uneven"` when a substantial part of this canvas was shot with fewer subs
+   * than the rest and measures grainier for it — the backend's own
+   * `seestack.stackhealth.grain_verdict`, already carried on every run row.
+   * `null`/absent on a single field, an evenly covered mosaic, and an older
+   * backend, all of which read as "nothing measured" and keep the plain
+   * wording. See the clean branch for why this is read at all. */
+  grain_verdict?: string | null;
 }
 
 function measured(v: number | null | undefined): v is number {
@@ -140,7 +157,7 @@ export function grainProjection(
   runs: RunLike[] | null | undefined,
 ): GrainProjection | null {
   if (!runs) return null;
-  let best: { t: number; sigma: number } | null = null;
+  let best: { t: number; sigma: number; uneven: boolean } | null = null;
   for (const r of runs) {
     // An editor-export / combine run (`reusable === false`) is excluded; a run
     // from a backend too old to report the flag is treated as genuine, which is
@@ -148,7 +165,16 @@ export function grainProjection(
     if (r.reusable === false) continue;
     if (!measured(r.total_exposure_s) || !measured(r.noise_sigma)) continue;
     const t = r.total_exposure_s as number;
-    if (best === null || t > best.t) best = { t, sigma: r.noise_sigma as number };
+    // The verdict travels with the run it was measured on, not with the target:
+    // the projection reads the *deepest* run's σ, so it must read that same
+    // run's evenness or the two halves of one sentence describe two pictures.
+    if (best === null || t > best.t) {
+      best = {
+        t,
+        sigma: r.noise_sigma as number,
+        uneven: r.grain_verdict === "uneven",
+      };
+    }
   }
   if (best === null) return null;
 
@@ -171,7 +197,32 @@ export function grainProjection(
   const now = fmtHours(hours);
   const grain = sigma.toFixed(3);
   let sentence: string;
-  if (level === "clean") {
+  if (level === "clean" && best.uneven) {
+    // σ is measured over the *whole* canvas (`stacker._compute_noise_sigma`
+    // runs the estimator on the finished image), so on a mosaic whose panels
+    // are unevenly deep it is dominated by the part that got the most subs.
+    // Said plainly, "more time mostly buys fainter detail rather than a visibly
+    // cleaner picture" is then the exact opposite of what the "How's my stack?"
+    // panel a few centimetres below says about the same picture — *"about 23 %
+    // of the picture has 3 subs on it where most of it has 6, so that part
+    // looks about 1.4× grainier. Processing can't fix that — grain only comes
+    // down with more light."* Both are true of the region each measured, and a
+    // beginner cannot hold them at once.
+    //
+    // So the clean verdict keeps its measurement and every fact it carried, and
+    // states the scope it was measured over. The prescription then agrees with
+    // the health note and with the panel map instead of contradicting them. No
+    // threshold moves and the *level* is still "clean": the number is honest
+    // for most of the canvas, and demoting it would be a second opinion where
+    // what was missing is one sentence's scope.
+    sentence =
+      `Measured on your own picture: across most of it the background already ` +
+      `looks clean at ${now} (grain ${grain}). Part of this one is thinner ` +
+      `than the rest, though, and only more light evens that part out. ` +
+      `Elsewhere, more time mostly buys fainter detail rather than a visibly ` +
+      `cleaner picture — doubling your ${now} would take the grain down about ` +
+      `29 % more.`;
+  } else if (level === "clean") {
     // Deliberately not "you're done": see "Reconciling with the goal verdict".
     sentence =
       `Measured on your own picture: the background already looks clean at ` +

@@ -18,6 +18,54 @@ is a queue.
 
 ---
 
+## 2026-09-13 (Builder, branch `claude/sweet-babbage-q84vzj`) — DOGFOOD PASS `--mosaic --editor`: CLEAN again, and the finding was one card ABOVE the block the script prints
+
+**The pass.** `scripts/agent-dogfood.sh --mosaic --editor` on `0f74899c` (+ this
+run's v0.437.2). Baseline suite first, serialised as AGENTS.md §7 requires:
+**5,933 passed, 2 skipped** in 38 m 25 s.
+
+- **Probe: CLEAN.** Nothing overflowing, no console errors, at 1440 px and
+  420 px, on the field sample *and* the mosaic. Tallest phone page `/tonight`
+  **3,706 px** — up from the 3,578 px of 09-12, but **not comparable**: the
+  planner's ranking is time-dependent, so a pass run at a different hour draws a
+  different number of catalog rows. Treat that figure as a fresh baseline, not a
+  regression.
+- **Editor drive: CLEAN, on both samples.** All 21 ops added one at a time, each
+  re-rendering the live preview with no console error and no failed request,
+  then undo and redo — on the **mosaic** run as well as the field one.
+- **Mosaic trim 7.9 %** of the canvas (the §1 bug line is ~15 %), unchanged.
+- **v0.437.2 verified in the browser**, which is what the lead it fixed was
+  filed from: `$SHOTS/phone_tonight.png` now shows the library table's four
+  columns with *"Time up"* and its values readable, where the 09-12 shot had the
+  header rendering "T" over "u" one character per line.
+
+**The finding, and the lesson worth keeping.** The three sentences the script
+prints about the mosaic are coherent — the 09-12 note is right about that, and
+they still are. **The contradiction was with a fourth sentence, on the same
+page, that the script does not print**: the *"Is it enough yet?"* card's grain
+projection said *"more time from here mostly buys fainter detail rather than a
+visibly cleaner picture"* directly above the health panel's *"about 23 % of the
+picture has 3 subs … about 1.4× grainier. Processing can't fix that — grain only
+comes down with more light."* Fixed as **v0.437.3**.
+
+So the §7 instruction to read that block "as one paragraph" is right and was not
+enough here: the paragraph the *reader* gets is the whole Target page, not the
+subset the script happens to collect. It was found by cropping
+`$SHOTS/mosaic/phone_targets_Sample_M42_mosaic_2_2.png` and reading the page
+top to bottom — worth doing on every pass, because the block the script prints
+is a convenience, not the boundary of the claim.
+
+**LEAD, not built this run (tooling, size S):** the script's "what the app SAYS
+about this mosaic" block collects `mosaicmap` and `stackhealth` only. Adding the
+readiness card's three sentences (`integrationReadiness`, `cardGrainProjection`,
+`nextBestMove`) to it would have put this contradiction in the log rather than
+in a screenshot, and those are the surfaces that have produced four of the last
+five findings. They are frontend-only, so the script would have to read them
+from the rendered page rather than from Python — which is the reason it is a
+lead rather than a line.
+
+---
+
 ## 2026-09-12 (Builder, branch `claude/sweet-babbage-14nsyo`) — DOGFOOD PASS `--mosaic --editor`: CLEAN by every automated measure, and the finding was in a screenshot
 
 **The pass.** `scripts/agent-dogfood.sh --mosaic --editor` on `9150de20`, i.e.

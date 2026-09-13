@@ -71,6 +71,78 @@ describe("grainProjection", () => {
     expect(p?.sentence).toContain("0.016");
   });
 
+  // The bug: σ is one estimate over the whole canvas, so an unevenly deep
+  // mosaic can measure clean while a quarter of it is visibly grainier — and
+  // the plain clean sentence then tells the reader more light buys no visible
+  // cleanliness, a few centimetres under the health panel's "grain only comes
+  // down with more light" about that same quarter.
+  it("states the scope on an unevenly deep mosaic, so it stops contradicting the health note", () => {
+    const p = grainProjection([
+      { total_exposure_s: 3 * HOUR, noise_sigma: 0.016, grain_verdict: "uneven" },
+    ]);
+    // The verdict itself does not move: the number is honest for most of it.
+    expect(p?.level).toBe("clean");
+    expect(p?.moreLightFactor).toBeNull();
+    // It still says what it measured, and still keeps every fact it carried.
+    expect(p?.sentence).toContain("already");
+    expect(p?.sentence).toContain("looks clean");
+    expect(p?.sentence).toContain("3.0 h");
+    expect(p?.sentence).toContain("0.016");
+    expect(p?.sentence).toContain("fainter detail");
+    expect(p?.sentence).toContain("29 % more");
+    // …and now carries the scope plus the health note's own prescription.
+    expect(p?.sentence).toContain("across most of it");
+    expect(p?.sentence).toContain("thinner than the rest");
+    expect(p?.sentence).toContain("only more light evens that part out");
+  });
+
+  it("keeps the plain clean wording byte-for-byte whenever nothing says uneven", () => {
+    const plain = grainProjection([run(3 * HOUR, 0.016)])?.sentence;
+    // An evenly covered mosaic and a single field both send null…
+    expect(grainProjection([
+      { total_exposure_s: 3 * HOUR, noise_sigma: 0.016, grain_verdict: null },
+    ])?.sentence).toBe(plain);
+    // …an older backend sends nothing at all…
+    expect(grainProjection([
+      { total_exposure_s: 3 * HOUR, noise_sigma: 0.016 },
+    ])?.sentence).toBe(plain);
+    // …and a verdict this build doesn't know is not read as "uneven".
+    expect(grainProjection([
+      { total_exposure_s: 3 * HOUR, noise_sigma: 0.016, grain_verdict: "flat" },
+    ])?.sentence).toBe(plain);
+    expect(plain).not.toContain("across most of it");
+  });
+
+  it("reads the evenness of the run it took σ from, not of some other run", () => {
+    // The projection uses the *deepest* run; a shallower uneven one must not
+    // put its verdict on the deep run's sentence, or the two halves of one
+    // sentence describe two different pictures.
+    const p = grainProjection([
+      { total_exposure_s: 0.5 * HOUR, noise_sigma: 0.016, grain_verdict: "uneven" },
+      { total_exposure_s: 4 * HOUR, noise_sigma: 0.016, grain_verdict: null },
+    ]);
+    expect(p?.hours).toBeCloseTo(4, 6);
+    expect(p?.sentence).not.toContain("across most of it");
+    // …and the other way round.
+    const q = grainProjection([
+      { total_exposure_s: 0.5 * HOUR, noise_sigma: 0.016, grain_verdict: null },
+      { total_exposure_s: 4 * HOUR, noise_sigma: 0.016, grain_verdict: "uneven" },
+    ]);
+    expect(q?.sentence).toContain("across most of it");
+  });
+
+  it("leaves the grainy and middling wordings alone — they never contradicted the note", () => {
+    // Both already prescribe more light, which is what the health note says.
+    const some = grainProjection([
+      { total_exposure_s: HOUR, noise_sigma: 0.04, grain_verdict: "uneven" },
+    ]);
+    expect(some?.sentence).toBe(grainProjection([run(HOUR, 0.04)])?.sentence);
+    const grainy = grainProjection([
+      { total_exposure_s: HOUR, noise_sigma: GRAINY_SIGMA, grain_verdict: "uneven" },
+    ]);
+    expect(grainy?.sentence).toBe(grainProjection([run(HOUR, GRAINY_SIGMA)])?.sentence);
+  });
+
   it("quotes the honest 4×-light figure for a middling stack", () => {
     // σ = 0.04 is double the clean bar → (0.04/0.02)² = 4× the light, so 3×
     // more than the 1 h already there.
