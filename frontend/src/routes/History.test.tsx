@@ -2085,6 +2085,27 @@ describe("HistoryView panel-seam chip", () => {
     expect(screen.getByText("Panels: check")).toBeInTheDocument();
   });
 
+  it("names both measurements on a flat mosaic that is unevenly deep", async () => {
+    // The card a beginner meets when choosing between two stacks: a green
+    // "Panels even" beside a picture whose thin quarter is visibly grainier is
+    // the untruth. The chip keeps its verdict and its colour and says which of
+    // the two things it measured, in the label rather than only on hover.
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ seam_verdict: "flat", grain_verdict: "uneven" })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    expect(screen.getByText("Sky even")).toBeInTheDocument();
+    expect(screen.queryByText("Panels even")).not.toBeInTheDocument();
+  });
+
+  it("keeps the plain chip on a flat mosaic whose depth is even", async () => {
+    vi.spyOn(client.api, "listStackRuns")
+      .mockResolvedValue([mkRun({ seam_verdict: "flat" })]);
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    expect(screen.getByText("Panels even")).toBeInTheDocument();
+  });
+
   it("shows no seam chip at all on an ordinary single-field stack", async () => {
     // Every non-mosaic run and every run made before the measurement existed
     // serves no verdict, so the card must look exactly as it always did.
