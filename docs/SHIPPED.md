@@ -1,5 +1,103 @@
 # Shipped — the record
 
+## v0.438.7–v0.438.9 — 2026-09-13 — a finished picture forgot how long it had been exposed for
+
+*(Builder, branch `claude/sweet-babbage-qpsqgd` — 🟠 BUG (trust, PRIORITY 1/3), found by reading the
+**imaging log** against what it serves, which is the one download the shipped copy sweep still listed as
+"untouched on any axis". Reproduced end-to-end through the real export job before a line was written, and
+each of the three fixes verified red by reverting the production change. Additive throughout: no config,
+schema, on-disk, API-shape or default change, and no new endpoint.)*
+
+**What the download actually handed over.** One stack, one night, then the ordinary thing a user of this app
+does — open the picture in the editor and save it. The CSV, verbatim from the repro:
+
+```
+Shot,Target,Subs used,Integration,Typical star size (px),Calibration,Mosaic,Noise (lower is cleaner),App version,Stacked
+2024-11-15,M_42,180,,,none,,,0.438.6,2026-09-13
+2024-11-15,M_42,180,1.5 h,2.2,dark+flat,yes,0.0040,,2026-05-02
+```
+
+The night is in there twice, and the **first** row — the one a beginner reads, leading the file because the
+log's within-a-night tie-break is the processing stamp and an edit is stacked later — describes their
+deepest night as uncalibrated, with no integration time, no measured star size and no noise.
+
+**The root cause is not in the log.** `webapp.pipeline._apply_editor_to_run` records an export as a
+`stack_runs` row of its own and has always carried the source run's *capture window* forward, with a comment
+explaining exactly why (an export is "the same light"). It carried nothing else: `total_exposure_s`,
+`calstat` and `transparency_ratio` were left at their `None` defaults on every editor export the app has ever
+written. So the picture the owner actually shares and pins as a cover was the one row in the library that
+could not say how long it had been exposed for or what had calibrated it.
+
+**Where that showed, beyond the log.** The History and Target run listings (`StackRunOut.total_exposure_s`,
+`.calstat`) and the Gallery card served `null`. And **"My best pictures"** takes a target's representative as
+*the newest run with a preview* — which, after an edit, is the export — then ranks it with
+`seestack.portfolio.rank_portfolio`, whose `_score` renormalises over the metrics an entry carries. An entry
+with no integration and no σ is not penalised, it is simply judged on two of four, and its integration
+tie-break reads as `-1.0`. A five-hour finished picture could therefore sit below a ten-minute one.
+
+**v0.438.7 — the export carries the facts about the light.** `total_exposure_s`, `calstat` and
+`transparency_ratio` now come off the source run at write time, beside the capture window that already did.
+The *other* half of that change is the list of what it deliberately still does not carry, written into the
+code at the point of writing, because the line between the two is the whole rule:
+
+* `noise_sigma`, `stack_fwhm_px`, `seam_residual`, `grain_ratio` are measurements of the **combined image**.
+  A denoise or a sharpen moves them, so inheriting one would present a measurement of a different picture as
+  this one's.
+* `is_mosaic` is read **behaviourally**, not merely shown: `webapp.routers.editor._run_is_mosaic` trusts the
+  stamped flag and only falls back to the coverage map's distribution while it is NULL — and an export's
+  coverage is uniform. Stamping it would make re-opening the edit apply a mosaic **border trim** to a picture
+  Auto has already trimmed. This one was caught before shipping and is pinned as behaviour
+  (`test_a_re_edit_of_an_export_is_not_treated_as_a_mosaic` asserts `_run_is_mosaic` still answers `False`),
+  not as a column.
+* `duration_s` and the rejection/coverage columns describe what the stacker did; `duration_s`'s own docstring
+  already named an editor export as a row that must not carry one.
+
+**v0.438.8 — the imaging log is one row per *stack*, not per `stack_runs` row.** A re-render of a stack the
+file already describes is not a night's work of its own. `_collect_imaging_log` skips a derived row **while
+the run it came from is still in the same project**; when that source has been pruned from History the export
+is the only surviving record of the night, so it stays (with its blanks) rather than the night vanishing. The
+"is this a re-render, and of what?" test is new `webapp.run_options.derived_from_run_id`, deliberately spelled
+in the module that already owns "what does `options_json` say" and matching `History.tsx`'s `derivedFromNote`
+rule clause for clause — not a finite number is no answer, and a row pointing at itself is nonsense — so the
+two cannot drift.
+
+**v0.438.9 — the exports already on disk.** No fix at write time reaches a picture a live install finished
+last year, and nobody re-exports three years of edits to heal a column. New `webapp/derived_light.py` is the
+read-side twin of `seestack.coverage_backfill`: `with_inherited_light_facts` fills a derived row's *missing*
+light facts from the sibling row the listing already holds. It is cheaper than the coverage heal it copies —
+nothing is read from disk and nothing is written — and total: rows come back in order, an ordinary stack is
+returned **identically** (the same object), a value the row already carries is never overwritten, and a
+pruned source leaves the row exactly as it was. It resolves an **edit of an edit** down to the stack
+underneath (a one-hop lookup would find another empty export) with a `seen` guard, because `options_json` is
+user-adjacent data and a hand-made cycle must not hang a page. Wired at the three listing sites that show a
+finished picture: the run listing (`stack.py`), the Gallery listing and the wall (`gallery.py`).
+
+**Upgrade-safe (§9).** Nothing is migrated, nothing is written, no default moves, no response field changes
+shape — three fields that served `null` now serve a number on exactly the rows where a sibling row can
+answer. An older frontend is unaffected; a rollback returns the blanks.
+
+**Tests (+20, every one of them red before its own fix.)**
+`tests/webapp/test_editor_export_carries_the_light.py` (4) drives the **real export job** and reads the row
+back: the three fields carried, the two measurements *not* carried, `_run_is_mosaic` still `False` on the
+export, and the run listing serving the integration. `tests/webapp/test_imaging_log.py` (+3): one night logged
+once with the source's integration and calibration on it; an export whose stack was pruned still logging its
+night; an edited row with no recorded source kept rather than guessed away.
+`tests/webapp/test_run_options.py` (+1) over `derived_from_run_id`, including `NaN`, `Infinity`, `true` (a
+`bool` is an `int` in Python) and a string id. `tests/webapp/test_derived_light.py` (10): the resolver, the
+identity property on a plain library, the chain, the cycle, a drift guard that reads
+`_apply_editor_to_run`'s own source and fails if the write-time set stops matching `INHERITED_LIGHT_FACTS` —
+and the three surfaces, the wall's asserting that the five-hour finished picture now outranks the ten-minute
+one, which it did not while its integration read as unknown.
+
+**The transferable rule.** Last run's was *"how many call sites does this piece of state have, and does the
+sentence name all of them?"*. This one is its sibling one layer down: **when one row is derived from another,
+every column is a separate decision, and the default — inherit nothing — is wrong for exactly the columns
+that describe the input rather than the output.** The capture window had already been argued through, in a
+comment, and the argument was never applied to the column next to it. The grep that finds the rest of a
+family like this is not the field name; it is the constructor call that writes the derived row.
+
+---
+
 ## v0.438.6 — 2026-09-13 — one switch, three exports: the caption bar named only the one it wasn't about to ruin
 
 *(Builder, branch `claude/sweet-babbage-puvgip` — 🟡 BUG (trust + friendliness, PRIORITY 3), found in the same

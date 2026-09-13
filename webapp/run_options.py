@@ -18,6 +18,7 @@ and the verdict live here, and the three sites call them.
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 
@@ -55,3 +56,30 @@ def run_has_reusable_options(options_json: str | None) -> bool:
     if not options:
         return False
     return "editor_recipe" not in options and "channel_combine" not in options
+
+
+def derived_from_run_id(options_json: str | None) -> int | None:
+    """The stack run this row was **rendered from**, or ``None`` for a stack.
+
+    An editor export writes ``derived_from`` into its options
+    (``webapp.pipeline._apply_editor_to_run``): the picture is a re-render of
+    pixels another run already combined, on the same light, over the same nights.
+    Anything that asks *"is this row a second copy of a stack I have already
+    described?"* asks this.
+
+    The rule is the one ``frontend/src/routes/History.tsx``'s ``derivedFromNote``
+    has applied since the two rows first appeared on that page side by side, and
+    it is spelled the same way here so the two cannot drift: ``options`` is
+    whatever JSON the run stored, so a value that is not a finite number is no
+    answer, and a row pointing at *itself* is nonsense rather than a loop. An
+    ordinary stack, a channel combine, and every run recorded before the field
+    existed all read as ``None`` — i.e. "a stack in its own right", which is what
+    they are.
+    """
+    raw = parse_run_options(options_json).get("derived_from")
+    # `bool` is an `int` in Python; `True` is not a run id.
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    if not math.isfinite(raw):
+        return None
+    return int(raw)

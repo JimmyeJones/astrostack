@@ -18,6 +18,65 @@ is a queue.
 
 ---
 
+## 2026-09-13 (Builder, branch `claude/sweet-babbage-qpsqgd`) — the sweep's last unswept download, and the axis it failed on was not one of the four
+
+**Baseline.** `main` at `cf52fca0` green before anything changed (Python **5,946 passed, 2 skipped**), and
+`main` did not move all run — no collision, and the three version numbers were free.
+
+**Shipped: v0.438.7, v0.438.8 and v0.438.9.** Full entry in [`SHIPPED.md`](SHIPPED.md). All three came out of
+one read: the **imaging log**, which `IMPROVEMENTS.md` still listed as the only download control the copy
+sweep had never opened.
+
+**How the run picked its work.** "Bugs (fix these first)" still holds no open, un-gated, non-cosmetic entry,
+and "Features that serve real workflows" is down to entries already shipped or measured-and-closed. So the
+item came from the sweep's own named leftover rather than from the list — which is now the normal shape of a
+Builder run here, and is why that leftover being *named* mattered.
+
+**What the sweep was looking for, and what it found instead.** The sweep's four axes are size, colour space,
+geometry and (added last run) the lever. The imaging log fails on none of them. It fails on **how many rows a
+thing is**: on any library where a picture has been finished in the editor, one night is logged twice, and
+the duplicate leads the file. That is worth recording because the axis list is how the next run decides what
+to read for, and a fifth entry on it — *does this file say a thing once?* — is not derivable from the first
+four.
+
+**The bug was upstream of the surface that showed it, which is the reusable half.**
+`_apply_editor_to_run` carries the source run's capture window onto the export and **nothing else**, so every
+editor export the app has ever written has `total_exposure_s`, `calstat` and `transparency_ratio` NULL. The
+log was merely where that became legible; the same NULLs were already making the Gallery and History cards of
+a *finished* picture say nothing about its integration, and making "My best pictures" rank it over two of its
+four metrics (`_score` renormalises over what an entry carries, so a missing figure is a quietly lower
+placing, never a visible gap). **Reading a download's copy against its bytes found a defect that was not in
+the download.**
+
+**The transferable rule.** Last run's was *"how many call sites does this piece of state have, and does the
+sentence name all of them?"*. This one is its sibling one layer down: **when one row is derived from another,
+every column is a separate decision, and the default — inherit nothing — is wrong for exactly the columns
+that describe the input rather than the output.** The capture window had already been argued through, in a
+comment, at the very line where the rest were being dropped; the argument was simply never applied to the
+column next to it. The grep that finds the rest of a family like this is not the field name — it is the
+constructor call that writes the derived row.
+
+**The one field that had to be refused, and why it nearly wasn't.** `is_mosaic` looks exactly like the three
+that were carried: it is a fact about the canvas, not about the pixels, and a crop does not turn a mosaic
+into a single field. It is still wrong to carry, because it is read **behaviourally**:
+`webapp.routers.editor._run_is_mosaic` trusts the stamped flag and falls back to the coverage map only while
+it is NULL — and an export's coverage is uniform, so today the fallback correctly answers "no". Stamping
+`True` would make re-opening the edit apply a mosaic **border trim** to a picture Auto has already trimmed —
+a D1-shaped regression, shipped under the banner of a trust fix. It is pinned as behaviour
+(`_run_is_mosaic` still answering `False` on a real export), not as a column, because a column assertion
+would not have said why.
+
+**Three fixes for one bug, deliberately.** The write-time fix (v0.438.7) is the root cause but reaches only
+pictures not yet made; the log fix (v0.438.8) is needed even with it, because two identical rows for one
+night is still wrong; and the read-side heal (v0.438.9) is the only one that does anything at all for the
+library the owner already has. A single "fix the export" commit would have left a live install exactly as
+broken as it was.
+
+**All three verified by reverting the production change** rather than by reading: 2 red, then 1 red, then 3
+red, each against the test that claims it.
+
+---
+
 ## 2026-09-13 (Builder, branch `claude/sweet-babbage-puvgip`) — the print controls: two sentences that described a different export from the one they were wired to
 
 **Baseline.** `main` at `cfe8bab7` green before anything changed: Python **5,946 passed,
