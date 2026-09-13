@@ -104,6 +104,93 @@ picks the current, widest picture, which is the one the reader is looking at.
 
 ---
 
+## 2026-09-13 (Builder, branch `claude/sweet-babbage-2zjges`) — the badge row was the blind spot, and the browser is the only thing that can see a badge row
+
+**Baseline.** Full suite green on `ed201856` before anything changed (100 %, exit 0,
+no F/E; ~50 min). `main` then moved to `06904283` mid-run (a parallel Builder's
+v0.438.2 + its notes) and the branch was re-cut from it before the first line of
+code — no collision: that run was in `grainProjection`, this one in the chips.
+
+**The dogfood pass, and the one thing it had never been asked.**
+`scripts/agent-dogfood.sh --mosaic --editor` came back CLEAN by every automated
+measure for the seventh consecutive time: Auto's mosaic trim **7.9 %** (bug bar
+~15 %), nothing overflowing, no console errors, page heights in line with the
+v0.437.0 standings (tallest phone `/tonight` 3,617 px; mosaic Target page 3,550 px),
+the v0.437.3–v0.438.2 prescriptive family agreeing with itself on both samples, and
+**both** editor drives completing 21/21 ops plus undo/redo — the mosaic one for the
+second time ever, independently of the `…-8fmx59` run that also finished one this
+hour. `--empty` was clean too. A run could honestly have stopped there.
+
+**What was actually wrong was in the screenshots, on a surface no probe reads.**
+`dogfood_probe.mjs` prints the Target page's *prescriptive* sentences (v0.437.8) and
+the shell prints the server-side notes — both by design, because that is where four
+of the last five findings were. Neither looks at **badge rows**. On the History card
+for the same mosaic the pass had just declared clean:
+
+> `MIN-MAX` · `PANELS EVEN` · `21 FRAMES`
+
+…on the run whose health note, four lines up in the same log, says *"about 23 % of
+the picture has 3 subs on it where most of it has 6, so that part looks about 1.4×
+grainier."* v0.406.1 had already found that collision and fixed the chip's **help**;
+the word on the chip stayed. Shipped as **v0.438.3**.
+
+**The transferable rule: a fix that lands on the explanation has not necessarily
+landed on the label.** v0.406.1, v0.402.1 and v0.374.11 are all "the words existed
+and were unreachable"; this is the neighbouring failure, where the words are
+reachable and the *summary above them* still says the old thing. When an entry
+records "the chip now says which of the two it measured", check whether that is true
+of the chip or of its tooltip. Same query found **v0.438.4** an hour later, one
+component along: `RejectionBadge`'s three tooltips promise outlier protection with
+no mention of the per-pixel depth every pass needs, which v0.422.1 fixed on all
+three *verdict* surfaces and could not fix here — a list chip has stored options and
+nothing else.
+
+**And the design call in v0.438.4 is worth keeping, because the obvious fix was the
+wrong one.** The tempting move was to estimate the depth from
+`n_frames_used / field_fulls`, the way `rejectionNote` and `thinStackWarning` do.
+That would have been worse than silence: those two *report*, where this would
+*judge*, and `perPixel` is a canvas **mean** while the engine's own `REJREACH`
+verdict is measured on the **peak** pixel — so the chip and the "About this stack"
+panel one click away on the same card could have disagreed about one run. A chip in
+a list should state the method's **rule**, which is true of every run and can never
+contradict a verdict; only a surface holding the run's own measurement should state
+an outcome.
+
+**The cost of not opening a browser, priced exactly.** v0.438.3's first label said
+both halves outright — `Sky even, one part thinner` — and every test passed. In the
+running app the History row came back as `MIN-… | SKY EVEN, ONE PART TH… | 21 FRA…`:
+both badge rows are `<Group wrap="nowrap">` sharing a row with the run's name, so a
+longer label does not wrap, it squeezes its neighbours into ellipses. It cost two
+facts to add one, on the row v0.437.7 had just finished making honest. **jsdom does
+no layout, so no unit test in this repo could ever have caught it** — the label is
+now `Sky even` (shorter than the `Panels even` it replaces) and a `seamsLabel` test
+pins the *budget* rather than the appearance, which is the only part jsdom can hold.
+Generalised: **a badge label in a `wrap="nowrap"` row has a hard width budget, and
+the only instrument that can read it is a browser.** Verifying in the app is cheap
+here — the scratch data root from the dogfood pass is still on disk, so it is
+`python -m webapp.main` on a spare port plus one Playwright page, about two minutes,
+no re-stack.
+
+**Two backlog items re-checked and left alone**, with reasons, so they are not
+re-picked as oversights: the drizzle-reject memory skip (`_afford_drizzle_reject`,
+"1.75× of its canvas memory back") is gated on a coverage plane that does not exist
+where the pass is priced, and its failure mode is a silently un-clipped satellite —
+the entry's own "do it only with a before/after on a real mosaic" stands; and the
+per-pixel mosaic rejection dispatch is an L inside the memory-bounded hot path.
+Also checked and found already safe while reading the Stack page's "Drop 3 outlier
+frames" against a 3-sub panel: `grade_frames`' per-panel rail caps each group at
+`max(1, int(n_panel × max_reject_fraction))`, so a 3-sub panel can lose at most one
+sub and a mosaic panel can never be emptied by one click.
+
+**Verification.** Full Python suite green before and after; `npx tsc --noEmit`,
+`npx vitest run` (3,943 passed) and `npx vite build` all clean from `frontend/`.
+Eleven of the new tests were verified red by scratch reverts (three for v0.438.3's
+label, five for v0.438.4's copy, three for the κ mirror's formula), and the mirror's
+floor guard was verified red by drifting the TS literal. `agent-dogfood.sh` was run
+**before** pytest, per §7.
+
+---
+
 ## 2026-09-13 (Builder, branch `claude/sweet-babbage-lbjt6j`) — build the detector, then run it: the tooling lead paid for itself inside one hour
 
 **The run, in order.** Baseline suite green on `5e837afc` (**5,933 passed, 2
