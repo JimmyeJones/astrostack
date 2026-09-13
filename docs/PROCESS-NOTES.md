@@ -18,6 +18,84 @@ is a queue.
 
 ---
 
+## 2026-09-13 (Builder, branch `claude/sweet-babbage-qw8ee1`) — a module's own "here is where we already fixed this" list is a to-do list for the places it does not name
+
+**The method, which is the previous run's one step further on.** That run's note
+says a fix's write-up states a mechanism in one sentence, and that running that
+sentence over the tree is a task in its own right. It ran `noise_sigma`'s
+sentence over the **Target page**. This run ran a different query, and the
+source was better than a write-up: `frontend/src/samplesPerPixel.ts` and
+`components/target/perPixel.ts` both open by **enumerating the surfaces the
+per-pixel correction has already reached** — `auto_reject`, `rejection_reach`,
+`auto_stack_min_frames`, `perPixel.ts`, the Stack form, the drizzle bar.
+
+Read as a list of what is done, that is reassuring. Read as a **complement**, it
+is a work queue: *which surfaces make a claim from a run's totals and are not on
+this list?* Two answers, both shipped this run, and both on surfaces whose whole
+job is to compare pictures:
+
+1. **v0.437.6 — `seestack/portfolio.py`, the "My best pictures" ranking.** Three
+   of its four axes (integration 0.40, frames 0.25, peak coverage 0.10 — 0.75 of
+   the weight) are target totals; the fourth, σ, is measured on the pixels. So
+   the blend's two halves disagreed about one picture, which is the same shape as
+   the three findings before it, expressed as arithmetic rather than as two
+   sentences on a page.
+2. **v0.437.7 — the thin-stack cue on History's run card and Compare's
+   side-by-side.** Both pages already received `field_fulls`; both drew a plain
+   count. History's badge row is otherwise **badge-for-badge** the Gallery card's.
+
+**The tell worth keeping: look for the sibling built from the same data in the
+same file.** `GalleryItem` and `BestPicture` are declared forty lines apart in
+`webapp/routers/gallery.py`, built in the same loop, from the same
+`StackRunRow` — and only one of them had been corrected. That asymmetry is
+visible without running anything, and it is a much cheaper detector than a
+screenshot. Same again one layer up: the History run card and the Gallery card
+draw the *same list of badges* and only one list had the honest one.
+
+**Measured, not reasoned** (`webapp/sample_data` mosaic sample, 4 panels at
+6/6/6/3, stacked through `run_stack`): `field_fulls` **3.63**, so 21 frames is
+**5.8 a pixel** and 210 s is **58 s a pixel** — and the independently measured
+`coverage_median_depth` is **6.0**, which corroborates the canvas-area scale to
+within 4 %. The sharpest number is `coverage_max` = **21**: *every sub the
+target has*, at the single corner where all four panels overlap, on a picture
+half of which sits at 6. Left alone it does not merely flatter that entry — it
+becomes `max_coverage`, the yardstick every other picture in the collection is
+normalised against, at a depth nothing is at.
+
+**What was declined, so it is not re-litigated.** `coverage_median_depth` is the
+*directly measured* depth and looks like the better input. It is not, here:
+`coverage_backfill` fills it lazily, on the request that grades a run, so it is
+`None` on every run nobody has opened — and this ranking is **set-relative**, so
+a healed run and an un-healed one would be normalised against each other in two
+different currencies. One scale that is always computable beat one that is
+better but sometimes absent. Filed as a lead with that reasoning attached.
+
+**Also weighed and not taken:** `seestack/covernudge.py` compares two runs'
+whole-canvas σ and prescribes a cover swap, and its docstring already refuses to
+compare across run *kinds* for exactly the comparability reason — but every
+concrete failure I could construct (a growing mosaic whose new panel raises the
+canvas σ) turned out to be defended by the robustness of both measures: σ is a
+median over adjacent-pixel differences and the panel has to be more than half
+the canvas to move it. Recorded because it *looks* like the next instance and is
+not. `seestack/portfolio.py`'s `frames`/`exposure` axes were the real one.
+
+**Baseline and verification.** Full suite green before any change: **5,933
+passed, 2 skipped** (37 m 50 s); `npx tsc --noEmit` clean, `npx vitest run`
+3,901 passing. After: **5,941 passed, 2 skipped** (37 m 20 s), vitest **3,911**,
+`tsc` clean, `npx vite build` clean — serialised after pytest, per §7. Every one
+of the eleven behavioural tests added was watched go red on a scratch revert of
+the production change (three separate reverts: the scorer, the endpoint
+plumbing, the two badges).
+
+**No dogfood pass this run.** Both findings are reachable only with data neither
+bundled sample has (the wall self-hides below two finished pictures, and neither
+sample stacks thin enough to trip the cue), so a pass would have cost 40 minutes
+serialised against the suite to photograph two screens that cannot show either
+bug. The previous run made the same call for the same reason; two in a row is
+worth noticing, and the next run should probably spend the pass.
+
+---
+
 ## 2026-09-13 (Builder, branch `claude/sweet-babbage-vdeer9`) — the family does not end at the card that was fixed: trace it *forward* instead of looking for the next screenshot
 
 **What this run did instead of a dogfood pass.** v0.437.3 (the run immediately
