@@ -500,9 +500,13 @@ describe("TonightView", () => {
     await waitFor(() =>
       expect(screen.getByText("Add more to what you're shooting")).toBeInTheDocument());
     expect(screen.getByText("Start something new tonight")).toBeInTheDocument();
-    // Library target links to its target page; catalog one does not.
-    expect(screen.getByRole("link", { name: /M31 — Andromeda Galaxy/ }))
+    // Library target links to its target page; catalog one does not. The
+    // library row prints the friendly name alone — its id is only the folder
+    // name, and saying both took three lines on a phone — while the catalog row
+    // keeps both, where the id and the name are two different facts.
+    expect(screen.getByRole("link", { name: "Andromeda Galaxy" }))
       .toHaveAttribute("href", "/targets/M_31");
+    expect(screen.queryByText(/M31 — Andromeda Galaxy/)).not.toBeInTheDocument();
     expect(screen.getByText(/M13 — Hercules Cluster/)).toBeInTheDocument();
     // The dark-window summary card shows the twilight kind.
     expect(screen.getByText(/astronomical/)).toBeInTheDocument();

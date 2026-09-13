@@ -1,5 +1,51 @@
 # Shipped — the record
 
+## v0.437.2 — 2026-09-13 — the Tonight planner names a target you already shoot the way the rest of the app does
+
+*(Builder, branch `claude/sweet-babbage-q84vzj` — the `LEAD` the previous run filed and sized at S, taken as
+filed. Friendliness, PRIORITY 3. Frontend-only, copy only: no endpoint, config, schema, on-disk, API-shape or
+default change, and nothing is removed.)*
+
+**What the screenshot showed.** On `/tonight` at 420 px, the *"Add more to what you're shooting"* table's
+Target column read `Sample_Orion_Nebula_M42 — Sample: Orion Nebula (M42)` — three lines — where the catalog
+table beside it read `M32`. The wide column pushed *"Time up"* out of the `Table.ScrollContainer`: its header
+rendered "T" over "u" over "p" and its values one character per line. It is **not** the v0.436.2 badge bug —
+nothing is ellipsised inside a fixed box, the table really is wider than the phone and a swipe does reveal
+it, which is why the overflow and CLIPPED-LABEL probes both correctly stayed quiet.
+
+**The cause is one fact said twice.** Both tables are the same `TargetRow`, whose label was
+`t.name && t.name !== t.id ? \`${t.id} — ${t.name}\` : t.id`. On a **catalog** row that prints two genuinely
+different facts — the id you look up and the name you recognise (`M31 — Andromeda Galaxy`). On a **library**
+row `nightplan` sets `id=t.safe`, so the id *is* the display name with its punctuation slugified
+(`seestack/io/library.make_safe_name`): the row printed one target's name, then the same name with the
+spaces and colons turned into underscores.
+
+**The fix, and the branch it does not touch.** New pure `tonight.targetRowLabel(t)`: an already-targeted row
+gets the friendly name alone, a catalog row keeps `id — name` byte-for-byte, and anything with no distinct
+name to show (a folder-named target, a catalog object with no proper name like `M106`, a whitespace-only or
+absent name from an older backend) falls back to the id, exactly as before. The friendly name is what the
+**Library tile** (`Library.tsx`) and the **Target page hero** already print for the same object, so the app
+now names one target one way rather than two.
+
+**Nothing is removed (the owner's one hard constraint).** The safe name was never a *fact* this row was
+offering — it stays what it already was here, the destination of the row's own link
+(`/targets/${t.target_safe}`), and it is displayed nowhere else in the app either. The `WishlistStar` reads
+the same label and is catalog-only, so it is unaffected.
+
+**One thing the lead had not checked, and the fix did.** `library.rename_target` deliberately leaves
+`safe_name` alone — *"every lookup in the app resolves a target by its safe name, so a rename can never
+strand a path, a run, or a bookmark"* — so a renamed target's two names really can diverge (`NGC_6888_SUB`
+vs `NGC 6888`). That is the case where the old label was least wrong and the new one is most useful: the
+display name is the half a reader recognises, and the folder name is the half that only matters to the URL.
+
+**Tests (+4 vitest, one red before).** `tonight.test.ts` gains four cases over the helper — the library row
+printing its friendly name alone *and* not containing the folder name (this is the fail-before one), the
+catalog row keeping both halves, all four no-distinct-name fallbacks, and the renamed-target case. The
+existing `Tonight.test.tsx` route assertion that pinned the old `M31 — Andromeda Galaxy` link name is
+updated to the new behaviour and **strengthened**: it now asserts the link is named `Andromeda Galaxy`, still
+points at `/targets/M_31`, and that the old combined label is nowhere on the page — while the catalog row's
+`M13 — Hercules Cluster` assertion beside it is untouched, which is what pins that only one branch moved.
+
 ## v0.437.1 — 2026-09-12 — the Tonight page stops saying one night is 8.3 h and 5.9 h long at the same time
 
 *(Builder, branch `claude/sweet-babbage-14nsyo` — 🟡 BUG (friendliness + trust, PRIORITY 3), Builder-found by

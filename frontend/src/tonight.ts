@@ -370,6 +370,25 @@ export function notUpTonightNote(count: number, whenWord: string): string | null
   return `${count} more ${verb} up ${whenWord} — lower the minimum altitude to include them.`;
 }
 
+// What to print in a planner row's Target column.
+//
+// A *catalog* row genuinely carries two facts — the id you look up and the name
+// you recognise — so it reads "M31 — Andromeda Galaxy". A row for a target you
+// already shoot carries one fact said twice: its `id` is the target's own
+// `safe_name`, i.e. the display name with its punctuation slugified
+// ("Sample_Orion_Nebula_M42" beside "Sample: Orion Nebula (M42)"). Printing both
+// took three lines on a phone and pushed the table's last column off the screen.
+// So an already-targeted row shows the friendly name alone — the same label the
+// Library tile and the Target page hero already use, so the app names one target
+// one way — and the safe name stays what it has always been here: the link's
+// destination. Falls back to the id whenever there is no distinct name to show
+// (a folder-named target, or an older backend that sent none).
+export function targetRowLabel(t: PlannedTarget): string {
+  const name = t.name?.trim();
+  if (!name || name === t.id) return t.id;
+  return t.already_targeted ? name : `${t.id} — ${name}`;
+}
+
 export interface SplitTargets {
   already: PlannedTarget[];
   fresh: PlannedTarget[];
