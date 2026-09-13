@@ -903,3 +903,72 @@ def test_drizzle_rejection_is_blind_to_a_lone_outlier_below_kappa_min_frames():
         else:
             assert got == pytest.approx(100.0, rel=1e-3), (
                 f"{n} subs: the clip should have dropped the block by now")
+
+
+# --- what a run's options_json actually holds ---------------------------------
+#
+# ``run_stack`` persists the **effective** options (``asdict(eff)``), not the ones
+# it was handed — so a listing chip reading a run's stored options is reading what
+# *ran*, not what was asked for. That is the property the Gallery / History /
+# Compare combine-method badge is honest by, and it is not obvious: the drizzle
+# rejection is turned on for the user by the walk-away chain and then dropped
+# again by ``_afford_drizzle_reject`` when an unattended run's second pass is over
+# budget, or by its own ``n >= 4`` floor, with nothing but a log line and a
+# ``DRZREJSK`` header card to say so.
+#
+# It is pinned here because the comment at the top of that resolution block used
+# to claim the opposite ("the original ``options`` … is what gets persisted"),
+# which is how a 2026-09-13 run came to diagnose a chip that promises satellites
+# were removed from a picture nothing was removed from. There is no such bug, and
+# these two tests are what say so — in both directions, so a guard that always
+# answered "declined" could not pass.
+
+
+def test_a_declined_drizzle_rejection_is_recorded_as_declined_in_the_options(tmp_path):
+    """Three subs is below the pass's own ``n >= 4`` floor, so it never runs — and
+    the run's stored options say ``drizzle_reject: false``, which is what every
+    listing chip reads."""
+    import json
+
+    spec = [{"seed": 7, "noise_seed": 300 + i, "n_stars": 6} for i in range(3)]
+    proj = _build_project(tmp_path / "declined", spec)
+    try:
+        res = run_stack(proj, StackOptions(
+            drizzle=True, drizzle_scale=1.0, drizzle_pixfrac=1.0,
+            drizzle_reject=True, background_flatten=False,
+            suppress_hot_pixels=False, max_workers=2, output_name="declined",
+        ))
+        row = [r for r in proj.iter_stack_runs() if r.id == res.run_id][0]
+        assert json.loads(row.options_json)["drizzle_reject"] is False
+        # …and the recorded *result* agrees: no pass ran, so no mode is stored.
+        # ``stackhealth`` gates its "we cleaned the trails out" note on this, so
+        # the chip and the health panel cannot end up saying different things.
+        assert res.rejection_mode is None
+        assert row.rejection_mode is None
+    finally:
+        proj.close()
+
+
+def test_a_drizzle_rejection_that_ran_is_recorded_as_having_run(tmp_path):
+    """The other direction, so the pin above cannot pass by the record simply
+    always saying no: a pass that ran and clipped keeps ``drizzle_reject: true``
+    in the options *and* stores its mode."""
+    import json
+
+    spec = [
+        {"seed": 7, "noise_seed": 400 + i, "n_stars": 10, "streak": (i == 8)}
+        for i in range(16)
+    ]
+    proj = _build_project(tmp_path / "ran", spec)
+    try:
+        res = run_stack(proj, StackOptions(
+            drizzle=True, drizzle_scale=1.0, drizzle_pixfrac=1.0,
+            drizzle_reject=True, background_flatten=False,
+            suppress_hot_pixels=False, max_workers=2, output_name="ran",
+        ))
+        row = [r for r in proj.iter_stack_runs() if r.id == res.run_id][0]
+        assert json.loads(row.options_json)["drizzle_reject"] is True
+        assert res.rejection_mode == "drizzle-reject"
+        assert row.rejection_mode == "drizzle-reject"
+    finally:
+        proj.close()

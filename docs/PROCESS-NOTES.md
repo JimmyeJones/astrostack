@@ -18,6 +18,71 @@ is a queue.
 
 ---
 
+## 2026-09-13 (Builder, branch `claude/sweet-babbage-bwinih`) — two CLEAN dogfood passes, a feature out of one of them, and a comment that cost the run its second task
+
+**Baseline.** `main` at `94aeaba7`, green (6,005 passed / 2 skipped, 670 s with the BLAS cap + `-n 4`). The
+one failure was `test_export_print_is_fitted_to_the_paper_and_carries_its_dpi`, the known parallel
+wall-clock flake already recorded two blocks down — it passes alone in 7.5 s, and per that note it was
+re-run alone rather than "fixed" by widening the timeout. `main` did not move all run; no collision, and
+`0.439.0` / `0.439.1` were free at merge time.
+
+**The freshly-filed listings lead was deliberately NOT taken (§11).** The previous run filed it inside its
+own `v0.438.16` commit ~50 minutes before this one started, naming four unread surfaces (the Library tile,
+the Life list, "My best pictures", Compare's side-by-side). That is precisely the "claimed-in-spirit" shape
+§11 added after collision #14 — the hot line in the file for exactly the hour after it is filed — so this
+run went looking for its own material instead. Worth recording because the temptation is real: it was by
+some distance the most obviously *ready* entry in the backlog, and the rest of the priority sections are
+real-data-gated or closed-with-measurements.
+
+**Dogfood: CLEAN, twice** (`scripts/agent-dogfood.sh --mosaic --editor`, with an observing site, then
+`--empty`). Both samples probed at 1440 px and 420 px: nothing overflowing, no console errors, all **21**
+editor ops re-rendering on both runs, then undo and redo. Auto would trim **7.9 %** of the mosaic canvas
+(§1's bug line is ~15 %). The app's own sentences were read as one paragraph on both targets per AGENTS.md
+§7 and they hold together. Tallest phone page `/tonight` 3,617 px, the mosaic Target page 3,550 px — the
+standings the last three passes recorded, unmoved. **The first-run app matches the 2026-09-07 baseline to
+the pixel** (`/life-list` 2,779 px phone / 1,224 desktop, `/` 1,402 / 1,028, `/library` 1,252), which is now
+the third pass to say so; no IA slice is indicated on any measured page.
+
+**The finding was in the gap between a page and a *different page* — a new shape for that rule.** The
+Target page's framing verdict ends *"About a 3×3 mosaic (9 panels) covers all of it."* and stops, while the
+readiness card two inches above it quotes a goal of ~2 h. Both are true; together they are not a decision,
+because nothing on that screen says whether 9 panels is an evening or a season. The answer already existed
+**on another page**: `mosaicEffortText` has priced exactly that `MosaicPlan` on the Tonight planner's
+framing badge since v0.416.0, because Tonight is handed `usual_pace_s` and the library screens are not.
+Shipped as **v0.439.0**. The transferable half: the "could a beginner hold all of these at once?" question
+AGENTS.md §7 asks of one page is worth asking **across** pages too — a fact the app states for a target you
+have *not* started and withholds from one you have is the same class of gap as two cards disagreeing, and
+it is invisible to any pass that reads one route at a time.
+
+**And then a comment cost the run its second task — which is the note actually worth carrying forward.**
+The second finding looked like a clean repeat of the listings axis: `_afford_drizzle_reject` silently
+declines the drizzle rejection on an unattended run whose second pass is over budget (reproduced: a
+6000×9000 union canvas at drizzle ×1.5 needs ~10.2 GB against the ~9.6 GB default — the owner's own mosaic
+shape on his own walk-away path), so a `RejectionBadge` reading the run's stored options would promise
+*"rejecting satellites, planes and cosmic rays"* over a picture nothing was removed from. The comment at
+the top of `run_stack`'s resolution block says so in as many words: *"The original `options` (with the
+user's choice intact) is what gets persisted in the run record."* It is **false** — `add_stack_run` is
+handed `asdict(eff)` 800 lines below, and that call's own comment says the opposite. The fix was built
+across `webapp/schemas.py`, two routers, `api/client.ts` and `RejectionBadge` before the **premise test**
+came back red. All of it reverted; what shipped as **v0.439.1** is the corrected comment and two tests that
+state the invariant in both directions.
+
+Three things from that:
+
+1. **Write the premise test first, not the fix.** The repo's rule is "revert the fix in a scratch script
+   and watch the test fail" (§8). That catches a fix that does not work; it does not catch a bug that is
+   not there. A test that asserts *the thing you believe is broken* does both, and it is the cheaper order:
+   here it was fifteen lines and it invalidated an hour of work that was otherwise about to merge.
+2. **A comment that contradicts the code is a bug with the same blast radius as the code.** This one sits
+   at the top of the function that decides both rejection questions, and it inverts the single fact every
+   listing chip in the app is honest by. Nothing tests prose, which is why the fix is a *test* of the
+   invariant rather than a better sentence.
+3. **A scratch script that exercises a pure helper proves less than it looks like.** `_afford_drizzle_reject`
+   really does return `False` for the owner's canvas; that was measured correctly and meant nothing,
+   because the question was what `run_stack` then *persists*. When a finding is about what a row says, run
+   the thing that writes the row — the same lesson the `--mosaic` `curl` of `/api/gallery` taught the
+   previous run, arrived at from the other side.
+
 ## 2026-09-13 (Builder, branch `claude/sweet-babbage-vt87e3`) — the listings axis opened, and a CLEAN `--mosaic` dogfood
 
 **Baseline.** `main` at `ec117fbd`, green (6,001 passed / 2 skipped, 563 s with the BLAS cap + `-n 4`).
