@@ -2503,6 +2503,32 @@ uncached path costs every time (a cold one pays both, 1,116 ms), the 129 ms bein
 
 ### Infra / maintainability
 
+- **OWNER-REQUESTED GATE (filed 2026-09-12, measured on the owner's NAS) — there is no read-only credential,
+  so an unprivileged local account cannot read diagnostics at all, and both workarounds are
+  root-equivalent.** *(Pillar: infra / observability in service of the owner's on-NAS Observer agent — size S–M.
+  Confidence: reproduced on the live deploy.)* The owner has stood up a locked-down `astroagent` user on the
+  NAS (uid 3005, no password, no SSH, no sudo, **not** in `docker`, POSIX ACL `user:astroagent:r-x` across all
+  289,853 objects of `$ASTRO`) so an agent can observe the running app against real data. It works — every
+  write and every `docker` call is denied — **except** that `GET /api/logs` returns
+  `{"detail":"Authentication required"}` (HTTP 401) to that account **and to root**, because the owner has a
+  password set and `webapp/main.py::_install_auth_gate` exempts only `/api/health` (`_AUTH_OPEN_PATHS`).
+  **A file-level reader cannot substitute:** `webapp/routers/logs.py` serves
+  `webapp.logbuffer`'s in-memory ring, and nothing writes a log file under `$ASTRO`, so read access to the data
+  root buys nothing here. That leaves exactly two workarounds and **both are wrong**: hand the observer the
+  owner's Basic password — `webapp/auth.py` has **one shared credential and no roles**, so that same secret
+  posts to `/api/stack`, rewrites `/api/settings` and deletes targets — or add the account to `docker`, which
+  is root on the host. This gap is precisely what would later tempt someone into the second one.
+  **Shape:** a *second*, separate credential in settings — a random token, displayed once, stored PBKDF2-hashed
+  and salted exactly as the password already is, compared with `hmac.compare_digest` like
+  `check_basic_auth`. The gate accepts it **only for `GET`**, and only on a read-only allowlist (`/api/health`,
+  `/api/logs`, `/api/stats`, `/api/jobs`, `/api/targets`); any other method carrying it → 403, not 401, so the
+  refusal is unambiguous in a log. **Do NOT** implement this by adding paths to `_AUTH_OPEN_PATHS` — that opens
+  them unauthenticated to the whole LAN, which is a strictly worse trade than the problem it solves.
+  **Upgrade safety (§9):** opt-in and additive. No token in a stored config → byte-identical behaviour; with no
+  password set the app stays wide open exactly as today. **Verify by running it:** with a password set, the
+  token must pass `GET /api/logs`, fail `POST /api/stack` with 403, and the existing Basic password must keep
+  working unchanged on both.
+
 - ~~**LEAD (Builder 2026-09-12, filed with v0.435.0 because it is what that fix could not reach) — the
   bundled sample cannot light up the whole "PLAN A NIGHT" half of the app, so no dogfood pass has ever
   seen those screens with data.**~~ — **✅ SHIPPED v0.436.1** as the entry's own shape (a), and it found
