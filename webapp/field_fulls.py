@@ -176,14 +176,34 @@ def _positive(x: object) -> bool:
 
 
 def target_field_fulls(proj) -> float | None:  # noqa: ANN001 — any open Project
-    """The target's field-fulls figure, from its newest stack run + one native
-    frame. ``None`` when the target has no stack yet, has no native frame
+    """The target's field-fulls figure, from its newest **stack** run + one
+    native frame. ``None`` when the target has no stack yet, has no native frame
     dimensions recorded, or is small enough that the number would read as 1.0
     anyway (a single-field stack contributes no scaling, so callers can treat
     ``None`` and ``1.0`` interchangeably — see :func:`field_fulls_of_sky`).
 
-    Two tiny SQL reads: the newest run's canvas + options (one row), and a
-    single ``LIMIT 1`` frame row for the native shape. Runs on the
+    **The newest run is not necessarily a stack, and a re-render's canvas is not
+    a measurement of the sky the subs covered.** An editor export records the
+    canvas it actually wrote (``canvas_h=out.shape[0]`` in
+    ``webapp.pipeline._apply_editor_to_run``), and a crop makes that smaller —
+    which is not a rare edit but the *default* one, since the editor seeds Auto
+    on first open (v0.390.0) and Auto trims the border. The export is also the
+    newest row, so on every target the owner has finished a picture of, this
+    read was taking the scale off the cropped picture: field-fulls fell by the
+    crop factor, the goal fell with it, and the three surfaces below moved
+    toward "plenty". That is the exact failure this module was written to stop,
+    arriving from the other side — a crop past one native frame's area lands on
+    the ``max(1.0, …)`` clamp and hands a 3×3 mosaic the single-field goal.
+    So the scan skips re-renders and takes the newest row that actually stacked,
+    falling back to the newest row of any kind when a target has nothing else
+    (its source pruned from History), which is what it always did.
+
+    Two tiny SQL reads: the newest stacking run's canvas + options, and a single
+    ``LIMIT 1`` frame row for the native shape. Dropping the ``LIMIT 1`` costs
+    nothing measurable — ``idx_stack_runs_ts`` covers the ordering, so the plan
+    is ``SCAN stack_runs USING INDEX idx_stack_runs_ts`` with **no sort step**,
+    and the cursor is consumed lazily, stopping at the first stacking run (row
+    one on a target nobody has edited, row two on one they have). Runs on the
     already-open project the caller had to open for :func:`read_goal_s` and
     :func:`recent_night_pace_s`, so it costs nothing more than the two reads.
     """
@@ -191,10 +211,11 @@ def target_field_fulls(proj) -> float | None:  # noqa: ANN001 — any open Proje
     if conn is None:
         return None
     try:
-        run_row = conn.execute(
+        cursor = conn.execute(
             "SELECT canvas_w, canvas_h, options_json FROM stack_runs "
-            "ORDER BY timestamp_utc DESC LIMIT 1"
-        ).fetchone()
+            "ORDER BY timestamp_utc DESC"
+        )
+        run_row = _newest_stacking_run(cursor)
     except Exception:  # noqa: BLE001 — a broken DB must not sink a dashboard card
         return None
     if run_row is None:
@@ -214,6 +235,29 @@ def target_field_fulls(proj) -> float | None:  # noqa: ANN001 — any open Proje
         frame_w=frame_w, frame_h=frame_h,
         drizzle_scale=drizzle,
     )
+
+
+def _newest_stacking_run(rows) -> Any | None:  # noqa: ANN001 — a lazy sqlite cursor
+    """The first row of ``rows`` (newest first) that is not a re-render.
+
+    Falls back to the newest row of *any* kind when every one is derived, so a
+    target whose only surviving pictures are exports keeps the answer it has
+    always had rather than losing its scale entirely. Pure and lazy: it consumes
+    the cursor only as far as the first stacking run, which on an ordinary
+    target is the first row.
+    """
+    from webapp.run_options import derived_from_run_id
+
+    first = None
+    for row in rows:
+        if first is None:
+            first = row
+        options_json = (
+            row["options_json"] if "options_json" in row.keys() else None
+        )
+        if derived_from_run_id(options_json) is None:
+            return row
+    return first
 
 
 def native_frame_shape(proj) -> tuple[float, float] | None:  # noqa: ANN001

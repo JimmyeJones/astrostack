@@ -31,6 +31,11 @@ row that cannot be resolved is returned exactly as it was.
   picture Auto has already trimmed.
 * ``duration_s`` and the rejection/coverage columns describe what the stacker
   did, which an export did not do.
+
+The coverage columns need one more sentence than that, because a reader can be
+*worse off* than not knowing: ``_apply_editor_to_run`` does not leave them NULL,
+it writes a literal ``coverage_min = coverage_max = 1``. See
+:func:`stacking_coverage_max`.
 """
 
 from __future__ import annotations
@@ -49,7 +54,37 @@ from webapp.run_options import derived_from_run_id
 INHERITED_LIGHT_FACTS = ("total_exposure_s", "calstat", "transparency_ratio")
 
 
-def _root_stack(run: Any, by_id: dict[Any, Any]) -> Any | None:
+def stacking_coverage_max(run: Any) -> int:
+    """This row's peak stacking depth, or ``0`` where it never stacked.
+
+    ``coverage_max`` is "how many frames landed on the deepest pixel", and on an
+    ordinary run it is a measurement. On a **re-render** it is not: an editor
+    export combines nothing, so ``_apply_editor_to_run`` writes a literal
+    ``coverage_min = coverage_max = 1`` to describe a single-layer raster.
+
+    That literal is the problem. ``seestack.portfolio`` is built so that a metric
+    an entry does not carry *neither helps nor hurts* — the blend renormalises
+    over whatever is present — but a placeholder ``1`` is present, and it reads
+    as a picture one sub deep at its deepest point. Measured on the wall's own
+    scorer: a finished picture that is the best in the collection on every metric
+    it actually carries scored **0.868 instead of 1.000**, and against a deeper
+    rival 0.578 instead of 0.667 — i.e. the one picture the owner edited, shares
+    and pins was ranked down for having been finished.
+
+    So the honest answer for anything that reads this column as a *depth* is
+    ``0``, the same "unrecorded" every pre-schema run already gives. The stored
+    row is untouched; this is a read-side rule, like the rest of this module.
+
+    Deliberately keyed on the row being a re-render (``derived_from``) rather
+    than on the value ``1``: a genuine one-frame stack also records 1, and there
+    the number is true.
+    """
+    if derived_from_run_id(getattr(run, "options_json", None)) is not None:
+        return 0
+    return int(getattr(run, "coverage_max", 0) or 0)
+
+
+def root_stack(run: Any, by_id: dict[Any, Any]) -> Any | None:
     """The stack at the bottom of this row's derived chain, or ``None``.
 
     An edit of an edit is ordinary (open the finished picture, adjust, save
@@ -58,6 +93,11 @@ def _root_stack(run: Any, by_id: dict[Any, Any]) -> Any | None:
     derived from anything still here. ``seen`` guards a cycle — nothing writes
     one, but a hand-edited ``options_json`` is user data and must not hang a
     page.
+
+    Public because the light facts are not the only thing a re-render cannot
+    answer for itself: :mod:`webapp.framing_advice` needs the same row for the
+    same reason, and two walks of one chain would be two chances to disagree
+    about it.
     """
     seen = {run.id}
     current = run
@@ -85,7 +125,7 @@ def with_inherited_light_facts[R](runs: Sequence[R]) -> list[R]:
     by_id = {r.id: r for r in runs}
     out: list[R] = []
     for run in runs:
-        source = _root_stack(run, by_id)
+        source = root_stack(run, by_id)
         if source is None:
             out.append(run)
             continue

@@ -85,6 +85,26 @@ def _run_row(request: Request, safe: str, run_id: int):  # noqa: ANN201
     return run
 
 
+def _run_row_with_siblings(request: Request, safe: str, run_id: int):  # noqa: ANN201
+    """``(run, {id: run})`` for the whole project, or raise 404.
+
+    The same one read as :func:`_run_row` — it already walks every row to find
+    one — kept separate so only the caller that needs a run's *neighbours*
+    carries the dict. ``webapp.framing_advice.capture_framing_run`` needs them:
+    a re-render's own canvas cannot answer where the scope pointed, and the row
+    that can is its source."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        runs = list(proj.iter_stack_runs())
+    finally:
+        proj.close()
+        lib.close()
+    run = next((r for r in runs if r.id == run_id), None)
+    if run is None:
+        raise HTTPException(status_code=404, detail="No such run")
+    return run, {r.id: r for r in runs}
+
+
 def _run_fits_path(request: Request, safe: str, run_id: int) -> tuple[str, str | None]:
     """Return (basename, fits_path) for a run, or raise 404."""
     run = _run_row(request, safe, run_id)
@@ -1732,9 +1752,18 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
     no usable celestial WCS. Read-only; the header read + projection run in a
     threadpool so they never block the job worker."""
     from seestack.objectinfo import identify_object
+    from webapp.framing_advice import capture_framing_run
 
-    run = _run_row(request, safe, run_id)  # raises 404 for an unknown run
-    fits_path = run.fits_path
+    # raises 404 for an unknown run
+    run, by_id = _run_row_with_siblings(request, safe, run_id)
+    # An editor export's WCS follows its crop exactly, so the offset it measures
+    # is about the edit rather than about the pointing — and this verdict's whole
+    # lever ("nudge your Seestar 1.0° south") is a capture action. Read the run
+    # that actually pointed; say nothing when it can no longer be reached.
+    pointed = capture_framing_run(run, by_id)
+    if pointed is None:
+        return None
+    fits_path = pointed.fits_path
     lib = deps.open_library(request)
     try:
         entry = lib.find_target(safe)
@@ -1751,15 +1780,18 @@ async def stack_run_framing(safe: str, run_id: int, request: Request) -> dict[st
     # planner repeats its *nudge* on the row of a target the user already owns —
     # the one moment "nudge a little south" is actionable is while they're
     # pointing the scope, not the morning after. One definition, one voice.
-    # The run's own `is_mosaic` — the stacker's authoritative record of whether it
-    # built a union canvas — only picks the wording: a mosaic owner must not be
-    # told their multi-panel picture is "your frame", nor advised to go and shoot
-    # the mosaic they already shot. `None` (a run from before schema 8) reads as a
+    # The pointing run's own `is_mosaic` — the stacker's authoritative record of
+    # whether it built a union canvas — only picks the wording: a mosaic owner
+    # must not be told their multi-panel picture is "your frame", nor advised to
+    # go and shoot the mosaic they already shot. It is read off `pointed` for the
+    # same reason its WCS is: an export leaves the column NULL by design
+    # (`webapp.derived_light`), so a mosaic's *finished* picture was getting the
+    # single-frame wording. `None` (a run from before schema 8) still reads as a
     # single frame, which is exactly what this endpoint said before.
     from webapp.framing_advice import framing_payload
 
     return await run_in_threadpool(
-        partial(framing_payload, fits_path, info, is_mosaic=run.is_mosaic))
+        partial(framing_payload, fits_path, info, is_mosaic=pointed.is_mosaic))
 
 
 def _object_payload(o: Any, x_px: float | None = None,
