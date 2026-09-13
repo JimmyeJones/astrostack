@@ -1,6 +1,6 @@
 """`GET /api/imaging-log.csv`: the downloadable *Your imaging log* record —
-cross-target aggregation, newest-**night**-first ordering, and the empty-library
-case."""
+cross-target aggregation, newest-**night**-first ordering, one row per stack
+(not per ``stack_runs`` row), and the empty-library case."""
 
 from __future__ import annotations
 
@@ -39,6 +39,53 @@ def _register_run(
         finally:
             proj.close()
         lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def _register_edit_of(
+    data_root, safe: str, source_run_id: int | None, *, basename: str,
+    n_frames: int, timestamp: str,
+    capture_start_utc: str | None = None, capture_end_utc: str | None = None,
+) -> int:
+    """The row an editor export writes: a re-render of ``source_run_id``.
+
+    Shaped exactly as ``webapp.pipeline._apply_editor_to_run`` writes it — the
+    recipe in ``options_json`` beside ``derived_from``, the source run's subs and
+    capture window carried forward, and no measurement of its own pixels. Pass
+    ``source_run_id=None`` for an export whose source has since been pruned.
+    """
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            options: dict = {"editor_recipe": {"ops": []}, "display_space": True}
+            if source_run_id is not None:
+                options["derived_from"] = source_run_id
+            return proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc=timestamp, output_basename=basename,
+                fits_path=None, tiff_path=None, preview_path=None,
+                n_frames_used=n_frames, canvas_h=320, canvas_w=480,
+                coverage_min=1, coverage_max=1,
+                options_json=json.dumps(options), notes="edited",
+                capture_start_utc=capture_start_utc,
+                capture_end_utc=capture_end_utc,
+            ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def _source_run_id(data_root, safe: str, basename: str) -> int:
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            return next(r.id for r in proj.iter_stack_runs()
+                        if r.output_basename == basename)
+        finally:
+            proj.close()
     finally:
         lib.close()
 
@@ -152,6 +199,79 @@ def test_per_run_stack_fwhm_is_reported_over_the_target_median(client, solved_li
     star_size_col = IMAGING_LOG_COLUMNS.index("Typical star size (px)")
     run_row = next(r for r in rows[1:] if r[-1] == "2026-06-10")
     assert run_row[star_size_col] == "1.8"
+
+
+def test_finishing_a_picture_in_the_editor_does_not_log_the_night_twice(
+    client, solved_library,
+):
+    """The regression, and the fixture is the point: one night, stacked once and
+    then finished in the editor — the ordinary shape of using this app.
+
+    Before, the export's own ``stack_runs`` row was logged as a second night's
+    work: same date, same target, same subs. And it *led* the file, because the
+    log's tie-break within a night is the processing stamp and an edit is stacked
+    later — so the first row a beginner read described their deepest night as
+    uncalibrated, with no integration time at all.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_run(solved_library, safe, basename="deepstack", n_frames=180,
+                  exposure_s=5400, timestamp="2026-05-02T00:00:00Z",
+                  calstat="dark+flat", is_mosaic=True,
+                  capture_start_utc="2024-11-15T22:00:00Z",
+                  capture_end_utc="2024-11-15T23:30:00Z")
+    _register_edit_of(solved_library, safe,
+                      _source_run_id(solved_library, safe, "deepstack"),
+                      basename="deepstack_edit", n_frames=180,
+                      timestamp="2026-09-13T10:00:00Z",
+                      capture_start_utc="2024-11-15T22:00:00Z",
+                      capture_end_utc="2024-11-15T23:30:00Z")
+
+    rows = _parse(client.get("/api/imaging-log.csv").text)
+    assert len(rows) == 2, rows  # header + the one night
+    night = rows[1]
+    assert night[0] == "2024-11-15"
+    assert night[2] == "180"
+    assert night[3] == "1.5 h"      # the integration the edit did not carry
+    assert night[5] == "dark+flat"  # ...nor the calibration
+    assert night[-1] == "2026-05-02"
+
+
+def test_an_export_whose_stack_was_pruned_still_logs_its_night(
+    client, solved_library,
+):
+    """The one case a derived row must survive: History's "delete this run" took
+    the stack away and left the finished picture, so the export is now the only
+    record that the night happened. Dropping it would lose the night entirely —
+    which is a worse answer than a row with blanks in it."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_edit_of(solved_library, safe, 4242,  # an id no row here has
+                      basename="orphan_edit", n_frames=64,
+                      timestamp="2026-09-13T10:00:00Z",
+                      capture_start_utc="2024-12-01T21:00:00Z",
+                      capture_end_utc="2024-12-01T23:00:00Z")
+
+    rows = _parse(client.get("/api/imaging-log.csv").text)
+    assert len(rows) == 2, rows
+    assert rows[1][0] == "2024-12-01"
+    assert rows[1][2] == "64"
+
+
+def test_an_export_with_no_recorded_source_is_kept(client, solved_library):
+    """Belt and braces for a library upgraded from before ``derived_from`` was
+    written: an edited row that names no source cannot be matched to one, so it
+    is logged rather than guessed away."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_run(solved_library, safe, basename="plain", n_frames=30,
+                  exposure_s=900, timestamp="2026-05-02T00:00:00Z",
+                  capture_start_utc="2024-11-15T22:00:00Z",
+                  capture_end_utc="2024-11-15T23:00:00Z")
+    _register_edit_of(solved_library, safe, None, basename="legacy_edit",
+                      n_frames=30, timestamp="2026-09-13T10:00:00Z",
+                      capture_start_utc="2024-11-15T22:00:00Z",
+                      capture_end_utc="2024-11-15T23:00:00Z")
+
+    rows = _parse(client.get("/api/imaging-log.csv").text)
+    assert len(rows) == 3, rows
 
 
 def test_a_reprocessed_library_still_comes_out_newest_night_first(
