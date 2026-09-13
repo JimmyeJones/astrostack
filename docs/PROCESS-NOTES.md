@@ -18,6 +18,100 @@ is a queue.
 
 ---
 
+## 2026-09-13 (Builder, branch `claude/sweet-babbage-puvgip`) — the print controls: two sentences that described a different export from the one they were wired to
+
+**Baseline.** `main` at `cfe8bab7` green before anything changed: Python **5,946 passed,
+2 skipped** (24 m 50 s), and `main` did not move all run — no collision, and the two version
+numbers were free.
+
+**Shipped: v0.438.5 and v0.438.6.** Full entries in [`SHIPPED.md`](SHIPPED.md); both came out
+of one pass — reading the **print** surface's copy against what its handlers actually call,
+which is the sweep `IMPROVEMENTS.md` lists as *"untouched on any axis: the montage, the wall,
+the print export and the imaging log"*.
+
+**Where the backlog stood, as found.** "Bugs (fix these first)" still holds no open,
+un-gated, non-cosmetic entry, and this run re-checked three more Ideas entries in the code
+and found them already shipped or already closed — the calibration match-confidence entry
+(shipped v0.321.0), the 3-frame min/max rejection entry (its advisory half shipped v0.323.1,
+its behavioural half deliberately declined), and the `bigger_print` "next size up" family.
+So both items came from a sweep rather than from the list, which is now the normal shape of
+a Builder run here.
+
+**The transferable rule, and it is sharper than "check the copy".** Both bugs are the same
+shape one layer down: **a control or a message that was written next to one destination and
+then wired to more than one.**
+
+- v0.438.5: `print_advice` was corrected long ago to stop promising that more subs unlock a
+  bigger print (a print needs *pixels*), and its docstring, `bigger_print`'s every branch and
+  two tests all say so. But `webapp.pipeline.submit_editor_print` had written **its own**
+  refusal sentence, and that copy was never corrected with it. The fix is not a corrected
+  string: it is `print_refusal()`, which opens with `print_advice([])` **verbatim**, so the
+  offer and the refusal are one sentence and cannot drift apart a third time.
+- v0.438.6: one `nameplate` checkbox in the editor drives **three** exports (share JPEG,
+  "Share to app", and the print file) and its description named one of them. The `History`
+  page's sibling toggle says *"the JPEG you download or share"* and is exactly right, which
+  is what made the editor's wrong — the app already had the honest wording one route away.
+
+So the question worth asking of any control is not "is this sentence true?" but **"how many
+call sites does this one piece of state have, and does the sentence name all of them?"** The
+grep that finds them is the state name, not the copy.
+
+**Why the print surface and not another.** A print is the one export that becomes a physical
+object someone has paid a lab for. Both defects landed there: a refusal telling a beginner to
+go and shoot another night for pixels that another night cannot add, and an unannounced black
+caption bar across the bottom of a wall print. And the refusal branch is not an edge case —
+`print-sizes` is costed off the run's **stored canvas** and says so, while v0.390.0 seeds the
+editor with Auto on first open and Auto's own border trim is a plain `geometry.crop` op, so a
+mosaic user's *default* recipe already carries a crop. The ordinary route to that refusal is
+to open the editor and press the button the panel is still offering.
+
+**Both fixes verified by reverting the production change**, not by reading: the pipeline
+regression (a real 1200×800 run rendered through a real crop recipe) and the editor copy test
+each went red against the old code and green against the new.
+
+**One nit traced and deliberately declined** (so it is not re-picked as a finding): the print
+**offer** is still canvas-costed, so a user who has cropped is shown sizes their edit cannot
+fill. The endpoint's docstring already owns this trade ("a recipe that crops makes this a
+little optimistic"), and after v0.438.5 both refusal paths — a size the picture can't fill,
+and no printable size at all — are honest and name the lever. Re-costing the offer needs the
+recipe at a `GET` keyed on `(safe, run_id)`, i.e. an API shape change plus a refetch on every
+op edit, to save one click against an already-clear message. Not worth it; a hedging sentence
+on the panel was weighed too and rejected against the standing "don't add elements" priority.
+
+### QA records (clean — recorded here, not in the priority sections)
+
+**Dogfood, `--mosaic --editor`.** CLEAN, the eighth consecutive time by every automated
+measure. Auto's border trim on the mosaic canvas **7.9 %** (§1's bug bar is ~15 %); nothing
+overflowing and no console errors on either target; tallest page `/tonight` **3,617 px** phone
+/ 2,346 px desktop, the mosaic Target page **3,550 px** — identical to the 2026-09-13
+standings, so no IA slice is indicated. **Both** editor drives went the whole way: **21/21 ops
+on the single field and 21/21 on the mosaic**, every one re-rendering the live preview, undo
+and redo applied, no failed request.
+
+**The prescriptive block agrees with itself on both samples.** On the mosaic, `nextBestMove`
+("your 4 min is spread across about 4 fields of sky, so each part has 1 min"), the readiness
+card ("4 min of ~7.3 h … across most of it the background already looks clean … part of this
+one is thinner"), the panel map ("about 30 s there against 1 min on a typical panel") and the
+health note ("23 % of the picture has 3 subs where most of it has 6 … about 1.4× grainier")
+tell one story in one currency. The v0.437.3–v0.438.4 family continues to read clean.
+
+**One thing read and judged not-a-finding**, recorded so the next run does not re-open it: on
+both samples the framing verdict ("only about 55 % of it is in this picture — about a 3×3
+mosaic covers all of it") sits beside a next-best-move that says "add more time over the same
+mosaic". Those are *deepen* and *widen*, two different questions, and each names its own
+scope out loud — unlike the real findings in this family, where two cards answered **one**
+question in two currencies. Left alone.
+
+**Also swept and clean this run:** the montage / "My deep-sky wall" JPEG (`seestack/montage.py`
++ `_montage_tiles`) — its title's target count and integration are both taken from the tiles
+actually placed, and its per-tile caption quotes the **target's** total integration, which is
+what the Library tile prints beside the same picture. So it is consistent with the app's voice
+for *target-level* claims, and correcting only the montage to a per-pixel figure would have
+created a new disagreement rather than closing one. **Still untouched on any axis: the imaging
+log** (read this run and nothing wrong found, but not swept against its handlers end to end).
+
+---
+
 ## 2026-09-13 (Builder, branch `claude/sweet-babbage-8fmx59`) — one fix, and a QA record that says why there was only one
 
 **Baseline.** `main` at `ed201856` green before anything changed: Python **5,943 passed,
