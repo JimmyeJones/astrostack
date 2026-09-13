@@ -347,6 +347,36 @@ describe("CompareView", () => {
     expect(screen.getByText(/Drag the divider/)).toBeInTheDocument();
   });
 
+  // The page's whole job is "which of these is better?", and a picture that is
+  // one sub deep everywhere is the loudest answer there is — but the side-by-side
+  // card carried a plain count where the Gallery card these two were picked from
+  // has shown the cue since 2026-09-11. `GalleryItem.field_fulls` was already on
+  // the wire.
+  it("flags the side that is one sub deep everywhere, like the Gallery tile does", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    a.n_frames_used = 9;
+    a.field_fulls = 9;
+    b.n_frames_used = 690;
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("9 frames")).toBeInTheDocument());
+    // Both counts still shown; exactly one of them carries the warning cue.
+    expect(screen.getByText("690 frames")).toBeInTheDocument();
+    expect(document.querySelectorAll(".tabler-icon-alert-triangle")).toHaveLength(1);
+  });
+
+  it("says nothing about depth when both sides are healthy single fields", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    a.n_frames_used = 412;
+    b.n_frames_used = 690;
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("412 frames")).toBeInTheDocument());
+    expect(document.querySelector(".tabler-icon-alert-triangle")).toBeNull();
+  });
+
   it("shows each side's provenance strip in Split mode, so A/B isn't ambiguous", async () => {
     const a = item(3, "M_42", "Orion");
     const b = item(7, "M_42", "OrionV2");

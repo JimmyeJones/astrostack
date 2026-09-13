@@ -1,5 +1,44 @@
 # Shipped — the record
 
+## v0.437.7 — 2026-09-13 — the thin-stack cue reaches the two pages where a beginner actually chooses between stacks
+
+*(Builder, branch `claude/sweet-babbage-qw8ee1` — 🟠 BUG (trust + friendliness, PRIORITY 3, same mosaic
+frontier as v0.437.6 and found by the same trace, one card over). Frontend-only: no endpoint, config, schema,
+on-disk, API-shape or default change, no threshold moved, and not one new sentence of copy.)*
+
+**A mosaic's frame count is not a depth**, and `thinStackWarning` was corrected for that on 2026-09-11: nine
+subs over a 3×3 raster is one sub everywhere, and it renders as exactly the per-pixel speckle a beginner calls
+gibberish while the count-based warning stayed silent because 9 > 4. `FrameCountBadge` carries the corrected
+answer onto the Gallery grid, reading each run's own `field_fulls`.
+
+**Two pages never got it, and both are where a decision is made.**
+
+- **History's run card.** Its badge row is badge-for-badge the Gallery card's — `RejectionBadge`,
+  `HazyNightBadge`, `PanelSeamsBadge`, `CalibrationBadge`, `UnexportedEditBadge`, then the count — and the
+  last one was a plain `<Badge variant="light">{run.n_frames_used} frames</Badge>`. So the two pages answered
+  *"is this picture thin?"* differently about the very same run, and History is the page where **"Set as
+  cover"** lives.
+- **Compare's side-by-side card.** The page's whole job is *"which of these is better?"*, and a picture that
+  is one sub deep everywhere is the loudest answer there is.
+
+**Both already receive the figure**, which is what makes this a drop-in rather than a second opinion:
+`StackRun.field_fulls` (already on the wire for the integration trend) and `GalleryItem.field_fulls` (already
+on the wire for the Gallery badge). The shared component goes in at both sites and the message stays
+`thinStackWarning`'s, so the three pages cannot phrase one picture three ways.
+
+It also closes the plainer gap the count-only badge left: a **one-frame single field** used to read
+*"1 frames"* on both pages with nothing beside it, while the Gallery tile of the same run showed the warning.
+
+**Nothing removed, nothing hidden.** A healthy run renders the identical `variant="light"` badge with the
+identical text; in the thin case the count stays visible with the cue riding it.
+
+**Tests (+5 vitest; three red before on a scratch revert that put the plain badges back).** History: the
+mosaic one sub deep everywhere, a healthy single field staying silent, and the one-frame single field the
+plain badge never flagged. Compare: exactly one of two sides flagged (both counts still shown), and silence
+when both sides are healthy. **Honest about their limit:** jsdom does no layout, so they pin the *cue*, not
+the badge row's width — the row is the Gallery card's own, and neither bundled sample stacks thin enough to
+put the warning in front of the dogfood probe.
+
 ## v0.437.6 — 2026-09-13 — "My best pictures" stops ranking and captioning a mosaic as if every sub had landed on every pixel
 
 *(Builder, branch `claude/sweet-babbage-qw8ee1` — 🟠 BUG (trust + friendliness, PRIORITY 3, inside the

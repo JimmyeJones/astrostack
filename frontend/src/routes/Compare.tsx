@@ -13,6 +13,7 @@ import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
 import { RejectionBadge } from "../components/RejectionBadge";
+import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import { QueryError } from "../components/QueryError";
 import { splitClipLeft, splitFraction, splitLeftPct } from "../components/editor/splitCompare";
 import {
@@ -175,7 +176,14 @@ function CardMeta({ item }: { item: GalleryItem }) {
         <HazyNightBadge ratio={item.transparency_ratio} />
         <PanelSeamsBadge verdict={item.seam_verdict} grain={item.grain_verdict} />
         <CalibrationBadge calstat={item.calstat} />
-        <Badge variant="light">{item.n_frames_used} frames</Badge>
+        {/* Same badge, same figure, as the Gallery card these two were picked
+            from — this page's whole job is "which of these is better?", and a
+            picture that is one sub deep everywhere is the loudest answer there
+            is. `GalleryItem` already carries `field_fulls`. */}
+        <FrameCountBadge
+          nFramesUsed={item.n_frames_used}
+          fieldFulls={item.field_fulls}
+        />
       </Group>
       <Text size="xs" c="dimmed" truncate>
         {item.output_basename} · {item.canvas_w}×{item.canvas_h}
