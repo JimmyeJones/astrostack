@@ -1,8 +1,10 @@
 import { Button, Group, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
-import { IconGitCompare } from "@tabler/icons-react";
+import { IconGitCompare, IconTrendingUp } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import type { StackRun } from "../api/client";
-import { pickCompareWithLast, sameTargetCompareHref } from "../compareWithLast";
+import {
+  pickCompareWithLast, pickFirstVsNow, sameTargetCompareHref,
+} from "../compareWithLast";
 import { pictureDateLabel } from "../format";
 
 /**
@@ -24,6 +26,18 @@ import { pictureDateLabel } from "../format";
  * gains no always-on control — the owner's standing "the pages are extremely
  * busy" priority.
  *
+ * **A second link, for the other question** (`pickFirstVsNow`): *"How far you've
+ * come"* pairs the **first-ever** picture of this object with the latest. "Did
+ * another two nights help?" is an increment and answers itself in small steps;
+ * *"look how much better you've got at this"* is the one a beginner is actually
+ * moved by, and it is invisible from a version list — the first picture is at the
+ * bottom of History. It is a **link in this card**, not a card of its own, and it
+ * appears only when it is a genuinely different pair: with exactly two pictures
+ * the first one *is* the previous one, and two buttons pointing at one URL is
+ * clutter rather than a feature. Both links put "now" on the same side of the
+ * divider (`a` is always the newest run), so the two comparisons read the same
+ * way round.
+ *
  * Renders **nothing** on a target with fewer than two comparable pictures, which
  * is every freshly-stacked target; see `pickCompareWithLast` for what counts.
  */
@@ -32,6 +46,14 @@ export function CompareWithLastCard(
 ) {
   const pair = pickCompareWithLast(runs);
   if (!pair) return null;
+  // "How far you've come" — the same machinery asked the *other* question. It is
+  // offered only when it is genuinely a different pair: on a target with exactly
+  // two pictures the first one **is** the previous one, and two buttons pointing
+  // at one URL is clutter, not a second feature (the owner's standing "the pages
+  // are extremely busy" priority).
+  const firstPair = pickFirstVsNow(runs);
+  const firstVsNow = firstPair && firstPair.first.id !== pair.previous.id
+    ? firstPair : null;
 
   // Date each side the way every other surface does — by when the subs were
   // *shot*, falling back to a labelled processing stamp. On a re-stack of a back
@@ -57,6 +79,13 @@ export function CompareWithLastCard(
             into each.
             {newest && previous ? ` Comparing ${newest} with ${previous}.` : ""}
           </Text>
+          {firstVsNow ? (
+            <Text size="xs" c="dimmed" data-testid="first-vs-now-hint">
+              Or go all the way back: your first picture of this
+              {dateOf(firstVsNow.first) ? ` (${dateOf(firstVsNow.first)})` : ""}
+              {" "}beside where it is now.
+            </Text>
+          ) : null}
           <Group gap="xs">
             <Button
               size="xs" variant="light" color="grape"
@@ -66,6 +95,18 @@ export function CompareWithLastCard(
             >
               Compare with my last one
             </Button>
+            {firstVsNow ? (
+              <Button
+                size="xs" variant="subtle" color="grape"
+                leftSection={<IconTrendingUp size={14} />}
+                component={Link}
+                data-testid="first-vs-now"
+                to={sameTargetCompareHref(
+                  safe, firstVsNow.newest.id, firstVsNow.first.id)}
+              >
+                How far you&apos;ve come
+              </Button>
+            ) : null}
           </Group>
         </Stack>
       </Group>

@@ -25,6 +25,13 @@
 // information-architecture work is scored on exactly that number, and it kept
 // being measured by hand off these screenshots after the fact.
 //
+// And it prints the Target page's PRESCRIPTIVE CLAIMS — every card that tells
+// the owner what to do next — collected off the rendered page into one block,
+// with whether each is inline or folded behind "N more notes". Those cards are
+// computed in the frontend, so no server-side block can print them; four of the
+// last five dogfood findings were two of those sentences disagreeing, and every
+// one had to be found by cropping a screenshot afterwards.
+//
 // It is a FINDER, not a test: what it reports still needs a real regression test
 // in the suite before anything is called fixed.
 import { existsSync } from "node:fs";
@@ -165,12 +172,72 @@ function clippedLabels() {
   return out;
 }
 
+/** Every sentence on the Target page that tells the owner what to DO next,
+ *  collected off one rendered page so they can be read as one paragraph.
+ *
+ *  Why by `data-testid` and not by looking at the API: these are computed in the
+ *  frontend (`readiness.ts`, `nextBestMove.ts`, `integrationTrend.ts`,
+ *  `grainProjection.ts`), so nothing server-side can print them — which is
+ *  exactly why `agent-dogfood.sh`'s "what the app SAYS about this mosaic" block
+ *  has only ever carried the two cards that *are* server-side (the panel map and
+ *  the health notes). Four of the last five dogfood findings were two of these
+ *  sentences disagreeing rather than one of them being wrong, and every one of
+ *  them had to be found by cropping a screenshot afterwards.
+ *
+ *  The `folded` flag is the other half, and it is the reason this reads the DOM
+ *  rather than the props: `NoticeBoard` keeps every note **mounted and hidden
+ *  with CSS**, showing the two highest-priority speakers inline and folding the
+ *  rest behind "N more notes". So "what does the page say?" and "what does the
+ *  reader see without clicking?" are different questions, and the second one is
+ *  the one the 2026-09-13 process note asks ("check what the page says when the
+ *  other cards are quiet"). A zero-height box is folded; anything with a box is
+ *  inline. */
+const PRESCRIPTIVE = [
+  "thin-stack-warning", "next-best-move", "integration-trend",
+  "readiness-card", "mosaic-map-card", "stack-health-card",
+  "over-trimmed-target-note", "rejection-outlook-note", "framing-verdict",
+];
+
+function prescriptiveClaims(ids) {
+  // `innerText` is what a reader gets — but it is empty on a `display: none`
+  // note, which is precisely the folded case worth reporting. So fall back to
+  // walking the leaves, which gives the same words with explicit separators
+  // instead of `textContent`'s run-together mush.
+  function claimText(el) {
+    const visible = el.getBoundingClientRect().height > 0;
+    if (visible) return (el.innerText || "").trim().replace(/\s*\n+\s*/g, " · ");
+    const parts = [];
+    for (const n of el.querySelectorAll("*")) {
+      if (n.children.length) continue;
+      const t = (n.textContent || "").trim();
+      if (t) parts.push(t);
+    }
+    return parts.join(" · ");
+  }
+  const out = [];
+  for (const id of ids) {
+    for (const el of document.querySelectorAll(`[data-testid="${id}"]`)) {
+      const text = claimText(el);
+      if (!text) continue;
+      out.push({
+        id,
+        folded: el.getBoundingClientRect().height === 0,
+        text: text.slice(0, 400),
+      });
+    }
+  }
+  return out;
+}
+
 const browser = await chromium.launch(
   BUNDLED ? { executablePath: BUNDLED } : {},
 );
 let findings = 0;
 /** [width name, route, full-page scroll height] — reported at the end. */
 const heights = [];
+/** What the Target page prescribes, collected once (desktop) and printed at the
+ *  end so the sentences land together rather than scattered through the sweep. */
+let claims = [];
 for (const { name, width, height } of WIDTHS) {
   const ctx = await browser.newContext({ viewport: { width, height } });
   const page = await ctx.newPage();
@@ -236,6 +303,11 @@ for (const { name, width, height } of WIDTHS) {
       findings++;
       console.log(`[${name}] ${route}: CONSOLE ERROR ${e.slice(0, 200)}`);
     }
+    // Collected at the desktop width only: the phone pass would say the same
+    // sentences twice, and the fold is decided by priority rather than by width.
+    if (SAFE && route === `/targets/${SAFE}` && name === "desktop") {
+      claims = await page.evaluate(prescriptiveClaims, PRESCRIPTIVE);
+    }
     // How far the owner has to scroll. Not a finding on its own — a settings
     // page is legitimately long — but the standing information-architecture
     // work (AGENTS.md §1) is scored on exactly this number, and it has twice
@@ -247,6 +319,21 @@ for (const { name, width, height } of WIDTHS) {
   await ctx.close();
 }
 await browser.close();
+
+if (claims.length) {
+  console.log(
+    `\nwhat the Target page SAYS about ${SAFE} — read these as ONE paragraph and`
+    + "\nask whether a beginner could hold all of them at once. Four of the last"
+    + "\nfive findings were two of these disagreeing, not one of them wrong:");
+  for (const c of claims) {
+    const where = c.folded ? 'FOLDED behind "more notes"' : "inline";
+    console.log(`   [${c.id}, ${where}] ${c.text}`);
+  }
+  const inline = claims.filter((c) => !c.folded).length;
+  console.log(
+    `   (${inline} of ${claims.length} are visible without a click — the folded`
+    + " ones are what the page does NOT say to a reader who never expands it)");
+}
 
 // Tallest first, so the worst offender is the first line you read.
 console.log("\npage height (full-page scroll height, tallest first):");

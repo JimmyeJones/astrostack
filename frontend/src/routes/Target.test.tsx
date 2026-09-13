@@ -703,6 +703,49 @@ describe("TargetView readiness card", () => {
     expect(text).toMatch(/only more light evens that part out/);
   });
 
+  it("stops the coaching card promising a cleaner background the card below has measured clean", async () => {
+    // Found by the v0.437.8 dogfood probe's prescriptive-claims block on the
+    // bundled sample, with BOTH cards inline: "💡 To make this even better …
+    // even the rest of one clear night on this target would clean up the
+    // background nicely" one inch above "the background already looks clean at
+    // 1 min (grain 0.001). More time from here mostly buys fainter detail
+    // rather than a visibly cleaner picture." Pins the wiring, not the helper:
+    // the measured level has to survive the run row → `cardGrainProjection` →
+    // `NextBestMoveBadge`.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 10 * 60 }),
+    );
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M45", name: "Pleiades", type: "Open Cluster",
+      constellation: "Taurus", constellation_abbr: "Tau",
+      ra_deg: 56, dec_deg: 24, matched_by: "name",
+    });
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      // 40 subs so the louder thin-stack warning (which suppresses this card)
+      // stays down, and 10 min against a cluster's 1.5 h goal so the ladder
+      // lands on the `integration` rung.
+      mkRun({
+        total_exposure_s: 10 * 60, noise_sigma: 0.016, reusable: true,
+        n_frames_used: 40,
+      }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("next-best-move")).toBeInTheDocument());
+    const tip = screen.getByTestId("next-best-move").textContent ?? "";
+    // The lever is unchanged — it still asks for more time.
+    expect(tip).toMatch(/Add more time/);
+    expect(tip).not.toMatch(/clean up the background/);
+    expect(tip).toMatch(/already looks clean/);
+    // …and it now says what the measured card beside it says.
+    expect(tip).toMatch(/fainter detail/);
+    expect(screen.getByTestId("grain-projection").textContent)
+      .toMatch(/fainter detail/);
+  });
+
   it("answers 'is more time worth it?' from the measured stack, replacing the √N line", async () => {
     // 3 h on a galaxy still reads "a solid start — keep going" against the 6 h
     // type goal, but the picture itself measured σ 0.016 — inside the band the

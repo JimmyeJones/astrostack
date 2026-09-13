@@ -1,5 +1,140 @@
 # Shipped — the record
 
+## v0.438.1 — 2026-09-13 — the coaching card stops promising a cleaner background over a card that has just measured the background clean
+
+*(Builder, branch `claude/sweet-babbage-lbjt6j` — 🟠 BUG (trust + friendliness, PRIORITY 3, the same
+whole-canvas/measured-picture family as v0.437.3–v0.437.5), found by the **v0.437.8 dogfood probe's
+prescriptive-claims block on its very first run** — on the field sample *and* the mosaic, with **both cards
+inline**, not folded. Frontend-only, copy only: no endpoint, config, schema, on-disk, API-shape or default
+change, no threshold moved, no number changed, and the rung that fires is provably unmoved.)*
+
+**The two sentences, one inch apart, both inline, on the bundled M42 sample:**
+
+* `nextBestMove` → *"💡 To make your Sample: Orion Nebula (M42) even better — Add more time — 1 min so far.
+  This one comes up quickly for a Seestar, so even the rest of one clear night on this target **would clean
+  up the background nicely**."*
+* the readiness card's `grainProjection` → *"Measured on your own picture: **the background already looks
+  clean** at 1 min (grain 0.001). More time from here mostly buys **fainter detail rather than a visibly
+  cleaner picture**."*
+
+One is reasoning from integration time alone; the other has measured the actual picture. They are the
+opposite claim about the same background, and the measured one is the better answer — which is exactly what
+`grainProjection`'s own module docstring already says, under the heading *"Reconciling with the goal verdict
+rather than contradicting it"*: its clean verdict *"deliberately says more time now buys **faint detail**
+rather than a visibly cleaner background — true, and it agrees with the 'keep going to pull out fainter
+detail' sitting directly above it"*.
+
+**So the reconciliation was written, and then silently broken by a later widening.** The branch it was
+written against is the galaxy/nebula one, which really does say *"would pull out much more faint detail"*.
+The **easy/cluster** branch of the same rung says *"would clean up the background"* — and that branch was
+introduced by v0.429.2 (clusters) and widened by v0.435.5 (every curated-easy target: M42, M31, the Blue
+Snowball, the Cat's Eye) *after* the reconciliation was written, without asking whether the promise it makes
+is the one the card below had already disproved. A half-fix that a forward trace finds and a screenshot does
+not — the same shape as v0.437.5's σ axis.
+
+**The fix changes the reason, never the lever.** `NextBestMoveInput` gains one optional `grainLevel`, taken
+from `cardGrainProjection(runs)?.level` — the level the card below actually prints, so the two cannot form
+different opinions about one picture — and it is read **only** by the `integration` rung's easy/cluster
+branch. Under a quarter of the goal, more time is still the right advice and still buys real faint detail,
+so `kind` is unchanged; a test drives the whole ladder (`locate`/`thin`/`integration`/`good`/silent) across
+every level and asserts the rung that fires is identical with and without the measurement.
+
+**Scoped the way this family is now always scoped.** σ is one estimate over the whole canvas, so on an
+unevenly deep mosaic "already clean" describes most of it — the thin part really does only come down with
+more light, which is what the health note beside it says. So `grain_verdict === "uneven"` gets its own
+sentence keeping *both* claims in the order they pay off: *"…and across most of it the background already
+looks clean — so another pass or two over the same mosaic evens out the thinner part, and elsewhere pulls
+out fainter detail."* Read off the same field the `good` rung reads, so the ladder holds one notion of
+"is this canvas uneven" rather than two.
+
+**Byte-for-byte where the promise is still true:** `"some"`, `"grainy"`, no measurement, a run with no σ, an
+editor-export-only history and an older backend all keep the v0.435.5 wording exactly; and the
+galaxy/nebula branch is untouched in every case, because it already said faint detail.
+
+**Upgrade-safe (§9):** one optional frontend-only input over a field the page already fetches. Nothing
+served, stored or computed changes.
+
+**Tests (+4):** three in `nextBestMove.test.ts` (the clean case; the uneven-mosaic scoping; and the
+byte-for-byte pin across `some`/`grainy`/`null`/`undefined` plus the galaxy branch) and one in
+`Target.test.tsx` pinning the **wiring** — the measured level surviving the run row →
+`cardGrainProjection` → `NextBestMoveBadge` — plus a fourth asserting the rung never moves. Three verified
+red by a scratch revert (`alreadyClean = false`).
+
+
+## v0.438.0 — 2026-09-13 — "How far you've come": the first picture you ever got of this, beside the one you have now
+
+*(Builder, branch `claude/sweet-babbage-lbjt6j` — ✨ NEW BEGINNER FEATURE (pillar: enjoy + understand,
+PRIORITY 3), the idea the Scout filed the same morning, built at the size and shape it was filed at.
+Frontend-only: no endpoint, config, schema, on-disk, API-shape or default change, and nothing new is
+fetched — it is a second `<Link>` over data the Target page already has.)*
+
+**The question the app could already answer and never offered.** `/compare` has been a full, bookmarkable
+A/B route since ~v0.150 — a drag-the-divider split, per-side provenance, and plain-language verdicts on
+noise, mosaic panel flatness and how many nights went into each side. v0.360.0 put a one-click entry point
+on the Target page, and it auto-picks *"my last one"*: the immediately previous run. That is the right
+pairing for *"did another two nights help?"*, which is an increment, and increments are exactly the thing a
+beginner cannot see themselves improving at. The pairing that shows improvement is the **first ever** run of
+this object against the **latest** — and it is the one pairing that is invisible from every screen, because
+the first picture is at the bottom of History, which is the page a beginner never opens.
+
+**What shipped.** A pure `pickFirstVsNow(runs)` beside `pickCompareWithLast` in
+`frontend/src/compareWithLast.ts`, returning the newest comparable run paired with the **oldest** one — and
+deliberately implemented *through* `pickCompareWithLast`, so the two honesty filters are stated once rather
+than mirrored: both sides must have a picture (a preview-less run has nothing to put beside anything), and
+both must be genuine stacks rather than editor exports (`reusable === false` is the same stack with a recipe
+baked on, and the editor's own before/after already answers that question). `undefined` still counts as
+genuine, so an older backend that never sent the field behaves as it always did.
+
+**Which run is "first" is decided by the list's order, not by a capture date** — `listStackRuns` is
+`ORDER BY timestamp_utc DESC`, so the last survivor is the earliest *stack*. That is the same choice
+`pickCompareWithLast` makes, and it is the right one: a re-stack of a back catalogue is a new run carrying
+old capture nights, and *"the first picture I ever got out of this"* is about when the picture existed. The
+**labels** still come from `pictureDateLabel`, i.e. from when the subs were shot — the rule the 2026-08-30
+date sweep settled ("a run's own timestamp is right for *which run is newest* and wrong as the caption on a
+picture"), so the hint reads *"your first picture of this (14 Sep 2025) beside where it is now"*.
+
+**It is a link in the existing card, not a new card.** The owner's standing "the pages are extremely busy"
+priority, and AGENTS.md §1's "prefer a consolidation over a new card, every time": it joins
+`CompareWithLastCard` inside the Target page's **Story** group, which already self-hides on the same
+condition. And it appears **only when it is a genuinely different pair** — on a target with exactly two
+pictures the first one *is* the previous one, and two buttons pointing at one URL is clutter rather than a
+second feature. That test counts *comparable* runs, so three rows whose oldest has no picture still offer
+one button. Both links put "now" on the same side of the divider (`a` is always the newest run), so the two
+comparisons read the same way round.
+
+**Upgrade-safe (§9):** additive UI over fields (`has_preview`, `reusable`, `capture_night_*`) the page
+already fetches; no config, DB-schema, on-disk, default or API-shape change, and no request added.
+
+**Tests (+9):** 4 in `compareWithLast.test.ts` (the newest pairs with the *first*, not the previous one; the
+two filters apply to the oldest end as well; silence on one comparable run and on every empty/absent input;
+and — pinned deliberately, because it is what lets the card stand down — that the two pickers return the
+*same* pair at exactly two runs) and 5 in `CompareWithLastCard.test.tsx` (the link's exact href and the
+hint; one button only at two pictures; the stand-down counting comparable runs rather than rows; and the
+first picture dated by its capture night rather than its stack stamp). Three were verified red by a scratch
+revert (`usable[usable.length - 1]` → `usable[1]`, i.e. the pairing this feature exists to be *different*
+from).
+
+**The idea as filed, for the record:**
+
+- **NEW IDEA (Scout 2026-09-13, from the dogfood pass — grep-checked against both the onboarding checklist and
+  "Compare with my last one") — "How far you've come": auto-pair a target's *first-ever* picture with its
+  *latest* on the Target page.** *(Pillar: enjoy + understand — PRIORITY 3; size S; frontend-only, reuses
+  `/compare`.)* `/compare` is already a full bookmarkable A/B route with per-side provenance and plain-language
+  verdicts on noise, panel flatness and night count, and v0.360.0 put a Target-page entry point on it — but that
+  one auto-picks *"my last one"* (the immediately previous run). The comparison that actually motivates a
+  beginner is a different pair: their **first-ever** run of this object against their **latest/best**, which turns
+  Compare from "did the last two nights help?" into "look how much better you've got at this." **Slice:** a pure
+  `pickFirstVsNow(runs)` returning the *oldest* genuine run paired with the newest — reusing the exact
+  `is_genuine` / has-a-picture / not-an-editor-export filters `pickCompareWithLast` already applies, and
+  `undefined` when there is only one run or the two would be identical (a target shot once shows nothing). One
+  more link in the same **Story** tab that already holds `CompareWithLastCard` and the deepening reel — **not** a
+  new always-on card, per the standing IA rule — delegating to the shared `sameTargetCompareHref` so the two
+  entry points can't drift about where the link goes. Silent on a single-run target and against an older backend.
+  **Beginner bar ✔** (one tap; the plain-language verdicts already live on the far side; answers "am I getting
+  better?"). **Distinct from what exists:** the "Your first image" checklist (v0.219.0/v0.362.0) is *onboarding*,
+  not a comparison; "Compare with my last one" (v0.360.0) is the *adjacent* run, never the first.
+
+
 ## v0.437.7 — 2026-09-13 — the thin-stack cue reaches the two pages where a beginner actually chooses between stacks
 
 *(Builder, branch `claude/sweet-babbage-qw8ee1` — 🟠 BUG (trust + friendliness, PRIORITY 3, same mosaic

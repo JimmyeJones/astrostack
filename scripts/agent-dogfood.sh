@@ -299,6 +299,10 @@ else:
     #     all of them at once. Printed, never asserted — a finder, as above.
     echo "-- what the app SAYS about this mosaic (read them together — the last"
     echo "   three findings were all two of these disagreeing, not one of them wrong):"
+    echo "   [NB] these two are the SERVER-side half. The Target page's own"
+    echo "   prescriptive cards (readiness goal, grain projection, next best move,"
+    echo "   plateau verdict) are computed in the frontend, so the browser probe"
+    echo "   prints them — look for \"what the Target page SAYS\" further down."
     curl -sf "$BASE/api/targets/$MOSAIC_SAFE/mosaic-map" \
       | python -c '
 import json, sys
