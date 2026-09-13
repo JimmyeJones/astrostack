@@ -290,6 +290,44 @@ def _depth_phrase(depth: float) -> str:
     return f"{n} sub" + ("" if n == 1 else "s")
 
 
+def print_refusal(width_px: int, height_px: int, *,
+                  source_w: int = 0, source_h: int = 0,
+                  min_dpi: int = DEFAULT_MIN_DPI,
+                  samples_per_pixel: float | None = None) -> str:
+    """Why a print was refused, and the one lever that changes it.
+
+    :func:`print_advice` answers "what can I print?" for the **offer**, before
+    anything is rendered; this answers it for the **refusal** — the moment a user
+    has already pressed "Download print file" and the rendered pixels turn out to
+    be too few. The two share their opening sentence on purpose: a refusal that
+    writes its own wording is how this surface came to promise that *"another
+    night or two of subs will get it there"*, which is the one thing that cannot
+    work (subs add signal, not pixels — see :func:`print_advice`).
+
+    ``source_w``/``source_h`` are the stack's **own canvas**, when the caller
+    knows it. A recipe that crops or resizes is the ordinary reason a perfectly
+    printable stack renders to an unprintable picture — it is also the only cause
+    the user can undo on the spot — so when the source would have printed, the
+    sentence names the recipe instead of sending them off to re-stack with
+    Drizzle for pixels they already have.
+
+    Otherwise it falls through to :func:`bigger_print`'s nudge (drizzle, or a
+    mosaic, never more exposure), or to the opening sentence alone when even that
+    has nothing reachable to offer.
+    """
+    lead = print_advice([])
+    source = (print_options(source_w, source_h, min_dpi=min_dpi)
+              if source_w >= 1 and source_h >= 1 else [])
+    if source and (width_px < source_w or height_px < source_h):
+        return (f"{lead} What you're exporting is {width_px}×{height_px} px — the "
+                f"crop or resize in your recipe cut it down from this stack's "
+                f"{source_w}×{source_h}. Take that out and it prints at up to "
+                f"{source[0].name}.")
+    nudge = bigger_print(width_px, height_px, min_dpi=min_dpi,
+                         samples_per_pixel=samples_per_pixel)
+    return f"{lead} {nudge.text}" if nudge is not None else lead
+
+
 def render_print(rgb: np.ndarray, option: PrintOption):
     """Fit an already display-stretched image (0..1, NaN = uncovered) onto
     ``option``'s pixel canvas and return the Pillow image, ready to save with
