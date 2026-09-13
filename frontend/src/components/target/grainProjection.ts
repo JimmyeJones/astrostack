@@ -58,6 +58,13 @@
  * Between the two is the honest middle band ("some grain left"). No threshold
  * here changes any processing — they only choose which sentence is printed.
  *
+ * The middle band has a **lower fence** as well as a lower bar, for the same
+ * reason `MAX_HONEST_EXTRA_HOURS` fences its top: a projection is only worth
+ * printing while it has something to ask for. Just above `CLEAN_SIGMA` the light
+ * multiple rounds to the light already there (1.0×) and the extra hours collapse
+ * to zero, so a picture in that sliver reads as clean rather than being told to
+ * add 1× the light — see the `level` assignment for the measurement.
+ *
  * Fail-safe by construction: returns `null` (say nothing) unless a *genuine*
  * finished stack carries both a positive integration and a finite σ. Never
  * throws, never mutates, and the projection is clamped (see
@@ -180,12 +187,38 @@ export function grainProjection(
 
   const hours = best.t / 3600;
   const sigma = best.sigma;
-  const level: GrainLevel =
-    sigma <= CLEAN_SIGMA ? "clean" : sigma >= GRAINY_SIGMA ? "grainy" : "some";
 
   // σ ∝ 1/√t, so the light needed to fall from σ to CLEAN_SIGMA is (σ/target)².
   // One decimal is as much precision as a projection from one point deserves.
   const factor = Math.round(Math.pow(sigma / CLEAN_SIGMA, 2) * 10) / 10;
+  // …and that same precision is the **lower fence** on what is worth saying —
+  // the exact mirror of `MAX_HONEST_EXTRA_HOURS` above it. A picture a hair over
+  // the bar (σ 0.0202 against a bar of 0.0200) asks for 1.0206× the light, which
+  // *rounds to the light it already has*; the extra hours then collapse to zero
+  // and `fmtHours` floors that to its own minimum. So the middling branch quoted
+  // a no-op multiple and a rounding artefact in one sentence — "there's a little
+  // grain left at 1.0 h (grain 0.020). About 1× the light in total — roughly
+  // 1 min more — would bring it down to a clean-looking result" — where "1×" is
+  // what is already there and "1 min" was never computed from anything. And it
+  // fired in exactly the σ band this module's own provenance note says the
+  // owner's real deep stacks land in (0.015–0.020).
+  //
+  // A projection with nothing left to ask for *is* the clean verdict, so it says
+  // so: that keeps this card and `nextBestMove`'s reading of its `level` saying
+  // one thing about one picture, instead of "already looks clean" beside "would
+  // clean up the background nicely".
+  //
+  // Only reachable just above the bar — `factor <= 1` needs σ < 0.0205 — so no
+  // middling or grainy picture can enter here, and nothing below the bar moves:
+  // σ ≤ CLEAN_SIGMA was always clean and still is (its own factor is ≤ 1 too,
+  // which is why the documented bar is kept first and spelled out).
+  const level: GrainLevel =
+    sigma <= CLEAN_SIGMA || factor <= 1.0
+      ? "clean"
+      : sigma >= GRAINY_SIGMA
+        ? "grainy"
+        : "some";
+
   const extra = hours * (factor - 1);
   const beyondReach = level !== "clean" && extra > MAX_HONEST_EXTRA_HOURS;
   const quotable = level !== "clean" && !beyondReach;

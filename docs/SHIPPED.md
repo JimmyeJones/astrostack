@@ -1,5 +1,82 @@
 # Shipped — the record
 
+## v0.438.2 — 2026-09-13 — the grain projection stops asking for the light the picture already has
+
+*(Builder, branch `claude/sweet-babbage-8fmx59` — 🟠 BUG (trust + friendliness, PRIORITY 3, the same
+measured-picture family as v0.437.3–v0.438.1). Found by reading `grainProjection` against its own
+`MAX_HONEST_EXTRA_HOURS` fence and reproduced in node before a line was written; verified red by a scratch
+revert. Frontend-only, copy + one verdict boundary: no endpoint, config, schema, on-disk, API-shape or
+default change, and nothing below the documented clean bar moves.)*
+
+**The sentence, reproduced:** a stack measuring σ **0.0202** against a clean bar of **0.0200** printed
+
+> *"Measured on your own picture: there's a little grain left at 1.0 h (grain 0.020). About **1× the light in
+> total — roughly 1 min more** — would bring it down to a clean-looking result."*
+
+Both halves of that prescription are artefacts, not projections:
+
+* **"1× the light in total"** is the light already there. The module quotes its multiple at one decimal
+  (`Math.round((σ/CLEAN_SIGMA)² * 10) / 10`, and one decimal is all a projection from a single point
+  deserves) — and `(0.0202/0.02)² = 1.0206` rounds to **1.0**.
+* **"roughly 1 min more"** was never computed from anything. `extra = hours × (factor − 1)` is then exactly
+  **0**, and `fmtHours(0)` returns `Math.max(1, …)` — its own floor, printed as a plan.
+* And the grain it quotes, `sigma.toFixed(3)`, prints as **"0.020"** — which is the clean bar, to the digit.
+  So the card showed a reader the clean number, called it "a little grain left", and asked for no extra light
+  in words that look like a request for some.
+
+**Reachable exactly where the owner's pictures land.** `factor <= 1` needs σ < 0.0205, so the band is
+σ ∈ (0.0200, 0.0205) — a sliver, but this module's own provenance note says the owner's real deep stacks
+(271–787 frames of one target, the 2026-08 walk-away investigation) measured **0.015–0.020**. The artefact
+fires on the *good* pictures, immediately above the bar those very stacks set.
+
+**The fix is the fence this module already has, applied at the other end.**
+`MAX_HONEST_EXTRA_HOURS` exists because a projection is only worth printing while it is a plan someone could
+act on; the same is true from below. A projection whose light multiple rounds to the light already there has
+nothing left to ask for, so it reads as the **clean** verdict — which the module's existing clean copy states
+honestly ("more time from here mostly buys fainter detail rather than a visibly cleaner picture"). One
+condition, in the module's own already-published precision, rather than a new constant to calibrate:
+
+```ts
+const level: GrainLevel =
+  sigma <= CLEAN_SIGMA || factor <= 1.0 ? "clean" : sigma >= GRAINY_SIGMA ? "grainy" : "some";
+```
+
+`moreLightFactor` and `extraHours` then come back `null` through the existing `quotable` gate — the same
+"nothing to quote" contract `beyondReach` already uses at the top of the range — so no surface can print the
+figures the card just declined to stand behind.
+
+**It also keeps two cards saying one thing about one picture, which is why the *level* moves and not just the
+copy.** `nextBestMove` reads this level as `grainLevel` (v0.438.1) to choose its reason for adding time. Left
+at `"some"`, a σ-0.0202 target would have had the coaching card say *"even the rest of one clear night on this
+target would clean up the background nicely"* one inch above a readiness card that had just declined to ask
+for any more light at all — the exact pair v0.438.1 was written to close, arriving through a rounding edge
+instead of through a widened branch.
+
+**The same fence already existed one module away, which is the transferable part.**
+`readiness.noiseReductionHint` computes the very same kind of figure (`1 − √(T/(T+1 h))`, rounded to a whole
+percent) and carries the rule in as many words: *"Past ~40 h a single extra hour rounds below 1 % — say
+nothing rather than print 'about 0 %'"*, enforced by `if (cutPct <= 0) return null`. So the house rule is
+**round first, then decide whether there is anything to say** — and `grainProjection` rounded first and said
+it anyway. Worth checking on the next prescriptive figure written: a number that has been rounded for display
+must not then be handed back to the arithmetic that decides whether to print a plan.
+
+**Nothing else moves.** `factor <= 1` is unreachable from the middling and grainy bands (it needs
+σ < 0.0205); σ ≤ `CLEAN_SIGMA` was already clean and its own factor is ≤ 1 too, so the documented bar is kept
+first and spelled out rather than folded away; `CLEAN_SIGMA`, `GRAINY_SIGMA` and `MAX_HONEST_EXTRA_HOURS` are
+untouched; and no processing anywhere reads any of them. The first σ that asks for real extra light
+(**0.0205** → 1.1×, 6 min) still asks for it, in full.
+
+**Scope survived the reroute**, which was the one thing worth checking: the fence routes these σ into the
+*clean* branch, and that branch is the one carrying the v0.437.3 mosaic scoping — so a hair-over-the-bar
+mosaic with an under-shot panel gets *"across most of it the background already looks clean… Part of this one
+is thinner than the rest"*, not an unscoped whole-canvas claim. Pinned by its own test.
+
+**Tests +3 in `grainProjection.test.ts`,** all three verified red by reverting the `level` line in a scratch
+copy: the reproduced sentence (level `clean`, both figures `null`, and the string carries neither "1× the
+light" nor "1 min more" nor "little grain left"); the fence's exact boundary (0.0204 clean, 0.0205 still
+quoting 1.1×); and the uneven-mosaic scoping above. The existing boundary test
+(`CLEAN_SIGMA + 0.001` → `"some"`) is unchanged and still passes — σ 0.021 asks for a real 1.1×.
+
 ## v0.438.1 — 2026-09-13 — the coaching card stops promising a cleaner background over a card that has just measured the background clean
 
 *(Builder, branch `claude/sweet-babbage-lbjt6j` — 🟠 BUG (trust + friendliness, PRIORITY 3, the same
