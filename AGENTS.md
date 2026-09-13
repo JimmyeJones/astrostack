@@ -794,9 +794,16 @@ install. The 2026-09-09 deploy failure was exactly that gap. So: **any change to
 outside those directories must be checked against the image, not the tree** —
 `docker build --target frontend -f docker/Dockerfile .` for the frontend (fast, no
 ASTAP download), and for Python a non-editable `pip install` of a copy holding only
-what the Dockerfile copies, imported from `cd /`. Until the `READY` CI job in the
-backlog lands, that is a manual step, and a run that skips it has not verified the
-artifact. The same rule in test form: a "regression test" whose fixture cannot show
+what the Dockerfile copies, imported from `cd /`. **That is no longer a manual
+step — the `READY` CI job this paragraph was waiting on shipped as v0.418.0**
+*(corrected 2026-09-13; the sentence had been sending every run to hand-run a
+Docker build that CI has run on every PR since 2026-09-11)*. It is the third
+`image` job in `.github/workflows/ci.yml`, and it does exactly the two checks
+above plus a guard that the image is not carrying Qt. So the rule is now: make
+such a change, and **read that job's result on your PR** rather than trusting the
+Python and frontend jobs — a run that merges past a red `Image contract` has not
+verified the artifact. Build it locally only when you are iterating on a failure
+CI has already shown you. The same rule in test form: a "regression test" whose fixture cannot show
 the bug — the stack-depth A1 case, the ragged-mosaic D1 band — is green for the same
 reason a Dockerfile-context break is green: it is looking at something other than
 what the owner has. Before claiming a fix is pinned, revert the fix in a scratch
