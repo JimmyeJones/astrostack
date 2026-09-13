@@ -1,5 +1,65 @@
 # Shipped — the record
 
+## v0.438.16 — 2026-09-13 — the settings list said "Off" against two passes a mosaic had run
+
+*(Builder, branch `claude/sweet-babbage-vt87e3` — 🟠 BUG (trust, PRIORITY 3, on the mosaic frontier), the
+second finding on the **listings** axis, in the same pass as v0.438.15 and one layer under it. Verified red
+by a scratch revert. Additive: one defaulted response field; no config, schema, on-disk, default or
+existing-response-shape change.)*
+
+**A dump of the request, read as a record of the run.** The Gallery card's "Stacking settings" disclosure
+lists every labelled option the run stored, key by key, straight out of `options_json`. That is right for
+almost every key — and wrong for two, because `run_stack` turns them on from the **canvas** rather than from
+the options:
+
+```python
+if options.photometric_normalize or is_mosaic_canvas:     # stacker.py:2786
+do_final_grad = options.final_gradient_removal or is_mosaic_canvas   # :3481
+```
+
+Both are deliberate and both are load-bearing for this owner — a mosaic's panels are shot at different times
+through different air, so the gradient pass evens the sky across the joins and the photometric pass
+gain-matches a hazy panel (each panel against *itself*, never its neighbours). Neither writes back to the
+stored options. **So on every mosaic he has ever stacked, the card printed `Off` against a pass that ran.**
+
+**Measured on the app's own demo, not reasoned about.** `scripts/agent-dogfood.sh --mosaic` stacks the
+bundled 2×2 sample; its run record stores `photometric_normalize: false, final_gradient_removal: false`,
+and the same run's `/info` provenance answers
+`photometric = {mode: transparency, n_adjusted: 18, auto: true, n_panels: 4}`. Eighteen frames gain-matched,
+under a settings row reading "Off".
+
+**The card needed one fact it did not have.** `GalleryItem` gains `is_mosaic` — the run's **own** recorded
+flag (`is_mosaic=bool(is_mosaic_canvas)`, written by `run_stack` since schema 8), not a re-derivation from
+`seam_verdict` or a panel count, and free: the row is already in hand. `None` on a pre-column run and on an
+editor export (whose canvas is a re-render, not a combine) reads as *claim nothing*, which is today's
+behaviour — as does an older backend omitting the field.
+
+**One module owns "where the stored value is not the whole truth".** New
+`frontend/src/stackSettings.ts::settingOverride` returns the short replacement for the On/Off column plus
+the sentence behind it, for exactly three cases and `null` everywhere else:
+`final_gradient_removal` and `photometric_normalize` on a mosaic → **"On — automatic"**, and
+`quality_weighted` that the min/max combine discarded → **"On — not used"**, reusing v0.438.15's gate and
+note rather than a second copy of them. The row keeps its label, turns yellow, and carries a `HintAnchor`
+saying who overrode the switch and why — including the honest caveat that the photometric pass is
+self-cancelling on subs with no usable transparency measurement. **Nothing removed, no new element**, and
+every replacement is ≤ 16 characters, pinned by a length-budget test: the rows are `wrap="nowrap"` with the
+label truncating, so a long value eats the setting's own name (the v0.438.3 lesson, one surface over).
+
+**The mirror is guarded against the engine, not against a second copy of the list.**
+`tests/test_mosaic_auto_passes_mirror.py` regexes `stacker.py`'s own source for `options.X or
+is_mosaic_canvas`, asserts the set is exactly these two, and asserts `MOSAIC_AUTO_OPTIONS` matches it and
+that every key it names is a real `StackOptions` field. This one is worth having rather than a comment
+because of the *direction* it fails in: the gates live in the engine and the copy lives in the frontend, so
+a third automatic pass would be added by someone with no reason to open a TypeScript file.
+
+**Tests (+16, five red before).** Python: 3 mirror guards, and 2 in `tests/webapp/test_gallery.py` (the
+three-way True/False/`None` on the wire, and that the card agrees with the noise card — which already serves
+this flag — about one run). Frontend: 9 in `stackSettings.test.ts` (both mosaic keys annotated; a single
+field, an unknown canvas, and an already-ticked box left alone; no other key reached; the weighting case
+with its three stand-downs; the length budget) and 5 in `Gallery.test.tsx` on the rows themselves.
+`settingRows` is exported and tested pure because Mantine's `Spoiler` never opens under jsdom — every
+element measures 0 px, so it decides there is nothing to hide and renders no control.
+
 ## v0.438.15 — 2026-09-13 — a card that promised a weighting the combine had thrown away
 
 *(Builder, branch `claude/sweet-babbage-vt87e3` — 🟠 BUG (trust, PRIORITY 3), the first finding on the one

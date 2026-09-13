@@ -2118,6 +2118,13 @@ export interface GalleryItem {
    *  than of the target's total (see `components/target/perPixel.ts`). Absent
    *  on an older backend and on a single field — both read as 1. */
   field_fulls?: number | null;
+  /** Was this stacked onto a union-of-footprints **mosaic** canvas (the run's
+   *  own recorded flag)? The card's settings list is a verbatim dump of the
+   *  stored options, and two passes are turned on by the *canvas* rather than
+   *  by the user — see `stackSettings.ts`. Absent/null on an older backend, on
+   *  a pre-column run and on an editor export, all of which read as "claim
+   *  nothing", i.e. today's behaviour. */
+  is_mosaic?: boolean | null;
 }
 
 // A finished Moon/Sun still, as the Gallery lists it alongside stack runs. It is
