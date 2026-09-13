@@ -2072,8 +2072,9 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
         from datetime import UTC, datetime
 
         from seestack.io.project import Project
-        from seestack.printexport import print_advice, print_options, render_print
+        from seestack.printexport import print_advice, print_options, print_refusal, render_print
         from seestack.stack.output import safe_basename, save_display_jpeg
+        from webapp.field_fulls import native_frame_shape, samples_per_pixel_of_run
 
         lib = Library.open_or_create(settings.resolved_library_root)
         try:
@@ -2092,10 +2093,29 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
                 h, w = out.shape[0], out.shape[1]
                 options = print_options(w, h)
                 if not options:
-                    raise ValueError(
-                        "This picture doesn't have enough detail for a sharp "
-                        "print yet — another night or two of subs will get it "
-                        "there.")
+                    # The refusal is the *shared* wording (`print_refusal`), not a
+                    # sentence written here: this branch used to promise that
+                    # "another night or two of subs will get it there", which is
+                    # exactly what `print_advice` and the print-sizes endpoint
+                    # both go out of their way to say is false — a print needs
+                    # pixels, and more exposure adds none. The run's own canvas
+                    # goes with it, because a recipe that *crops* is the ordinary
+                    # way a printable stack renders to an unprintable picture and
+                    # the user can undo it on the spot.
+                    frame_shape = native_frame_shape(proj)
+                    frame_w, frame_h = (
+                        frame_shape if frame_shape is not None else (None, None))
+                    raise ValueError(print_refusal(
+                        w, h,
+                        source_w=int(run.canvas_w or 0),
+                        source_h=int(run.canvas_h or 0),
+                        samples_per_pixel=samples_per_pixel_of_run(
+                            run.canvas_w, run.canvas_h,
+                            n_frames_used=run.n_frames_used,
+                            frame_w=frame_w, frame_h=frame_h,
+                            options_json=run.options_json,
+                        ),
+                    ))
                 if size_name:
                     option = next((o for o in options if o.name == size_name), None)
                     if option is None:

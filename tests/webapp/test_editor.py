@@ -2326,6 +2326,54 @@ def test_export_print_honours_a_smaller_size_and_refuses_one_that_would_be_soft(
     assert "print soft" in (bad_job.get("error") or "")
 
 
+def test_a_crop_that_makes_a_print_impossible_says_so_without_promising_more_subs(
+        client, solved_library):
+    """The refusal a *cropping* user meets, and the one sentence it must not say.
+
+    ``print-sizes`` is costed off the run's canvas and says so — "a recipe that
+    crops makes this a little optimistic; the export itself re-checks against the
+    real rendered pixels" — so this branch is the designed landing place for a
+    tight crop, not an edge case. It used to answer it with *"another night or
+    two of subs will get it there"*: the one lever that cannot work (subs add
+    signal, not pixels), two inches under a panel whose own advice line exists to
+    say exactly that, and on a picture whose pixels were never the problem in the
+    first place.
+    """
+    from seestack.printexport import print_options
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # 1200x800 prints sharply; the crop leaves 480x320, which prints at nothing.
+    rid = _make_run(solved_library, safe, basename="cropped", h=800, w=1200)
+    recipe = {"ops": [
+        {"id": "tone.stretch", "params": {"stretch": 0.6}},
+        {"id": "geometry.crop",
+         "params": {"x0": 0.3, "x1": 0.7, "y0": 0.3, "y1": 0.7}},
+    ]}
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{rid}/editor/print",
+                    json={"recipe": recipe})
+    assert r.status_code == 200
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "error", job
+    err = job.get("error") or ""
+
+    # Not the untruth, in any wording: nothing here may suggest that shooting
+    # more gets this picture printed.
+    assert "night" not in err.lower()
+    assert "more exposure" in err               # …named only to rule it out
+    # It names what is actually being exported, what it was cut from, and the
+    # lever the user can pull right now.
+    assert "480×320" in err and "1200×800" in err
+    assert "crop or resize" in err
+    assert print_options(1200, 800)[0].name in err
+    # The whole-canvas offer still stands on the same run, which is what makes
+    # the refusal's advice checkable rather than a guess.
+    sizes = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/print-sizes").json()
+    assert sizes["sizes"], sizes
+    assert sizes["sizes"][0]["name"] == print_options(1200, 800)[0].name
+
+
 def test_export_share_bakes_the_nameplate_when_requested(client, solved_library):
     """With ``nameplate=true`` the share JPEG carries a baked-on acquisition footer
     (built from the run's own metadata); without it the pixels are unchanged."""
