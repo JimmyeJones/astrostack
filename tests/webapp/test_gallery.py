@@ -373,3 +373,40 @@ def test_gallery_offers_no_sharpen_when_the_stack_baked_one_in(client, data_root
     # The endpoint agrees — which is the whole reason the offer is withheld.
     r = client.post("/api/videos/Lunar_video/sharpen", json={"amount": 0.6})
     assert r.status_code == 400
+
+
+def test_gallery_carries_the_runs_own_mosaic_canvas_flag(client, solved_library):
+    """The card's settings list is a verbatim dump of the stored options, and two
+    passes are turned on by the *canvas* rather than by the user (``run_stack``'s
+    ``or is_mosaic_canvas`` gates — see ``tests/test_mosaic_auto_passes_mirror``).
+    Without this field the dump prints "Off" against a pass that ran."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    mosaic = _register_run(solved_library, safe, {"sigma_clip": True},
+                           is_mosaic=True)
+    single = _register_run(solved_library, safe, {"sigma_clip": True},
+                           is_mosaic=False)
+    legacy = _register_run(solved_library, safe, {"sigma_clip": True})
+
+    by_id = {it["run_id"]: it for it in client.get("/api/gallery").json()["items"]}
+    assert by_id[mosaic]["is_mosaic"] is True
+    assert by_id[single]["is_mosaic"] is False
+    # A run recorded before the column existed says nothing rather than "no",
+    # so the card falls back to the stored option instead of claiming a pass
+    # neither ran nor didn't.
+    assert by_id[legacy]["is_mosaic"] is None
+
+
+def test_gallery_and_the_noise_card_agree_about_one_runs_canvas(
+        client, solved_library):
+    """Two surfaces, one fact. The noise card already serves this flag (it has
+    to credit a mosaic's ratio to one panel's depth rather than the target's
+    subs), so the card and it must not disagree about one picture."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_run(solved_library, safe, {"sigma_clip": True},
+                           is_mosaic=True)
+
+    card = next(it for it in client.get("/api/gallery").json()["items"]
+                if it["run_id"] == run_id)
+    noise = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise").json()
+    assert card["is_mosaic"] == noise["is_mosaic"] is True
