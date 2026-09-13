@@ -7,6 +7,7 @@ import {
   recentreCropRect, recentreKeptLabel, recentreRefusalLine,
 } from "../editor/recentreCrop";
 import { cropCoverageFraction } from "../editor/mosaicTrim";
+import { mosaicDepthText } from "../../mosaicEffort";
 
 const TONE: Record<StackFraming["level"], { color: string; icon: string }> = {
   centred: { color: "teal", icon: "🎯" },
@@ -105,6 +106,17 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
     enabled: v?.level === "partial",
   });
   const plan = v?.level === "partial" ? identity.data?.mosaic?.text : undefined;
+  // …and the panel count stops where the *decision* starts. "About a 3x3 mosaic
+  // (9 panels)" is a shape, not a commitment, and a beginner has no way to tell
+  // whether that is an evening or a season — while the planner's own framing
+  // badge has priced exactly this grid, out of exactly this `MosaicPlan`, since
+  // v0.416.0. It could, because it is handed the owner's pace; these library
+  // screens are not, so they say it in the hours the readiness card on the same
+  // page is already speaking (`mosaicDepthText`, sharing the planner's clause and
+  // its per-field goal so the two are one claim in two currencies).
+  const cost = v?.level === "partial"
+    ? mosaicDepthText(identity.data?.mosaic, identity.data?.type, identity.data?.difficulty)
+    : null;
   if (!v) return null;
   const tone = TONE[v.level] ?? TONE.centred;
   // A *disabled* crop op isn't shrinking anything, which `cropCoverageFraction`
@@ -137,6 +149,9 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
           the one verdict whose fix is panels rather than a better pointing. */}
       {plan ? (
         <Text size="sm" mt={6} data-testid="framing-mosaic-plan">{plan}</Text>
+      ) : null}
+      {cost ? (
+        <Text size="sm" c="dimmed" mt={2} data-testid="framing-mosaic-cost">{cost}</Text>
       ) : null}
       {/* "Re-centre it next session" is only advice you can act on once you know
           which way. Absent on an older backend, or where a re-point isn't the fix. */}
