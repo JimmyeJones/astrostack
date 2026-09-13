@@ -69,4 +69,38 @@ describe("CompareWithLastCard", () => {
     expect(screen.getByRole("link", { name: /Compare with my last one/ }))
       .toHaveAttribute("href", "/compare?a=M_42:9&b=M_42:7");
   });
+
+  it("offers 'How far you've come' — the first picture, not the previous one", () => {
+    renderCard([run(9), run(7), run(3)]);
+    const link = screen.getByRole("link", { name: /How far you.ve come/ });
+    // `a` is the newest on BOTH links, so the two comparisons read the same way
+    // round across the divider.
+    expect(link).toHaveAttribute("href", "/compare?a=M_42:9&b=M_42:3");
+    expect(screen.getByTestId("first-vs-now-hint")).toBeInTheDocument();
+  });
+
+  it("offers only ONE button on a two-picture target, where both links would be the same URL", () => {
+    renderCard([run(9), run(7)]);
+    expect(screen.getByRole("link", { name: /Compare with my last one/ }))
+      .toHaveAttribute("href", "/compare?a=M_42:9&b=M_42:7");
+    expect(screen.queryByTestId("first-vs-now")).toBeNull();
+    expect(screen.queryByTestId("first-vs-now-hint")).toBeNull();
+  });
+
+  it("counts only comparable runs when deciding the two are the same pair", () => {
+    // Three rows, but the oldest has no picture — so the first comparable one IS
+    // the previous one and the second button must still stand down.
+    renderCard([run(9), run(7), run(3, { has_preview: false })]);
+    expect(screen.queryByTestId("first-vs-now")).toBeNull();
+  });
+
+  it("dates the first picture by when its subs were shot", () => {
+    renderCard([
+      run(9, { capture_night_start: "2026-05-01" }),
+      run(7, { capture_night_start: "2026-04-01" }),
+      run(3, { capture_night_start: "2025-09-14", timestamp_utc: "2026-05-02T00:00:00Z" }),
+    ]);
+    expect(screen.getByTestId("first-vs-now-hint").textContent)
+      .toMatch(/14 Sep 2025/);
+  });
 });
