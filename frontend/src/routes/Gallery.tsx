@@ -44,6 +44,9 @@ import {
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { runSlideKey, showFromHref, videoSlideKey } from "../showAndTell";
 import { HintAnchor } from "../components/HintAnchor";
+import {
+  WEIGHTING_UNUSED_LABEL, minMaxIgnoresWeighting, weightingUnusedNote,
+} from "../weightingHint";
 
 export type GallerySort = "newest" | "cleanest";
 export type CalFilter = "all" | "calibrated" | "uncalibrated";
@@ -322,14 +325,48 @@ function fmt(v: unknown): string {
 
 /** A few headline settings shown as badges on every card. The combine method
  * (σ-clip / min-max / drizzle) is shown separately by <RejectionBadge>, which
- * carries a plain-language tooltip and honours the engine's method precedence. */
-function highlightBadges(opts: Record<string, unknown>) {
-  const badges: { label: string; on: boolean }[] = [];
-  if (opts.quality_weighted) badges.push({ label: "Quality-weighted", on: true });
-  if (opts.background_flatten) badges.push({ label: "BG flatten", on: true });
-  if (opts.final_gradient_removal) badges.push({ label: "Gradient removal", on: true });
+ * carries a plain-language tooltip and honours the engine's method precedence.
+ *
+ * **A ticked option is not the same as an option that counted** (corrected
+ * 2026-09-13). These chips are read straight off the run's stored options, and
+ * one of those options has a combine that throws it away: min/max rejection is
+ * an order statistic, so `run_stack` stamps `WGTSKIP` — "weighting requested
+ * but not applied" — and History's run-info panel says so in words. The card
+ * next to it went on saying "Quality-weighted" regardless, which is the exact
+ * shape the walk-away path reaches: "Process target" turns quality weighting on
+ * for a stack it also lets `auto_reject` resolve to min/max below ~11 subs, so
+ * a beginner's small first-light stack carries both chips and the app's two
+ * surfaces disagree about one picture.
+ *
+ * The gate is `weightingHint.minMaxIgnoresWeighting`, the same one the Stack
+ * form's pre-run caution asks, and it is fed `n_frames_used` — the frames that
+ * actually combined, which can only *understate* the dispatcher's own candidate
+ * count. So the chip is withdrawn only where the engine certainly ignored the
+ * weights, and every other run keeps today's badge. Nothing is removed: the
+ * chip stays on the card, greyed, and now carries the sentence explaining it. */
+function highlightBadges(opts: Record<string, unknown>, nFramesUsed: number | null) {
+  const badges: { label: string; color: string; title?: string }[] = [];
+  if (opts.quality_weighted) {
+    const ignored = minMaxIgnoresWeighting({
+      minMaxReject: !!opts.min_max_reject,
+      qualityWeighted: true,
+      drizzle: !!opts.drizzle,
+      frames: nFramesUsed,
+    });
+    badges.push(ignored
+      ? {
+        label: WEIGHTING_UNUSED_LABEL,
+        color: "gray",
+        title: weightingUnusedNote(nFramesUsed),
+      }
+      : { label: "Quality-weighted", color: "violet" });
+  }
+  if (opts.background_flatten) badges.push({ label: "BG flatten", color: "violet" });
+  if (opts.final_gradient_removal) badges.push({ label: "Gradient removal", color: "violet" });
   if (typeof opts.lucky_fraction === "number" && opts.lucky_fraction < 1) {
-    badges.push({ label: `Lucky ${Math.round(opts.lucky_fraction * 100)}%`, on: true });
+    badges.push({
+      label: `Lucky ${Math.round(opts.lucky_fraction * 100)}%`, color: "violet",
+    });
   }
   return badges;
 }
@@ -341,7 +378,7 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
   selected: boolean;
   onToggleSelect: () => void;
 }) {
-  const badges = highlightBadges(item.options);
+  const badges = highlightBadges(item.options, item.n_frames_used ?? null);
   // Full settings list (only keys we have a label for, in schema order).
   const rows = useMemo(
     () =>
@@ -455,7 +492,13 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
       {badges.length > 0 ? (
         <Group gap={6} mt="xs">
           {badges.map((b) => (
-            <Badge key={b.label} size="sm" variant="dot" color="violet">{b.label}</Badge>
+            b.title ? (
+              <HintAnchor key={b.label} label={b.title} multiline w={280}>
+                <Badge size="sm" variant="dot" color={b.color}>{b.label}</Badge>
+              </HintAnchor>
+            ) : (
+              <Badge key={b.label} size="sm" variant="dot" color={b.color}>{b.label}</Badge>
+            )
           ))}
         </Group>
       ) : null}

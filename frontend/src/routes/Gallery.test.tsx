@@ -1123,3 +1123,54 @@ describe("Gallery — the date on a picture says which date it is", () => {
     expect(line.textContent).not.toMatch(/Invalid/);
   });
 });
+
+describe("Gallery card — the quality-weighting chip", () => {
+  function showCard(options: Record<string, unknown>, n_frames_used = 6) {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), options, n_frames_used }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    renderGallery();
+  }
+
+  it("stops claiming 'Quality-weighted' on a run whose min/max combine ignored it", async () => {
+    // The walk-away shape: "Process target" turns quality weighting on and lets
+    // auto_reject resolve to min/max below ~11 subs, so the engine stamps
+    // WGTSKIP and History's run-info panel says the weights never counted.
+    showCard({ quality_weighted: true, min_max_reject: true, auto_reject: true });
+
+    expect(await screen.findByText("Weighting unused")).toBeInTheDocument();
+    expect(screen.queryByText("Quality-weighted")).not.toBeInTheDocument();
+  });
+
+  it("keeps the badge where the weights really were applied", async () => {
+    showCard({ quality_weighted: true, sigma_clip: true });
+
+    expect(await screen.findByText("Quality-weighted")).toBeInTheDocument();
+    expect(screen.queryByText("Weighting unused")).not.toBeInTheDocument();
+  });
+
+  it("keeps it on the drizzle path, which honours per-frame weights", async () => {
+    showCard({ quality_weighted: true, min_max_reject: true, drizzle: true });
+
+    expect(await screen.findByText("Quality-weighted")).toBeInTheDocument();
+  });
+
+  it("keeps it below the engine's own frame gate, where min/max falls back to a mean", async () => {
+    showCard({ quality_weighted: true, min_max_reject: true }, 2);
+
+    expect(await screen.findByText("Quality-weighted")).toBeInTheDocument();
+  });
+
+  it("leaves the other headline chips alone", async () => {
+    showCard({
+      quality_weighted: true, min_max_reject: true,
+      background_flatten: true, final_gradient_removal: true,
+    });
+
+    expect(await screen.findByText("Weighting unused")).toBeInTheDocument();
+    expect(screen.getByText("BG flatten")).toBeInTheDocument();
+    expect(screen.getByText("Gradient removal")).toBeInTheDocument();
+  });
+});

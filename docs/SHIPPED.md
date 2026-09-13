@@ -1,5 +1,64 @@
 # Shipped — the record
 
+## v0.438.15 — 2026-09-13 — a card that promised a weighting the combine had thrown away
+
+*(Builder, branch `claude/sweet-babbage-vt87e3` — 🟠 BUG (trust, PRIORITY 3), the first finding on the one
+axis the download-copy sweep had never been run against: **the listings** — a card's copy vs the row behind
+it, named as the gap in the entry filed with v0.438.9. Verified red by a scratch revert. Frontend-only; no
+endpoint, config, schema, on-disk, API-shape or default change.)*
+
+**The two chips on one Gallery card that cannot both be true.** `highlightBadges` renders a run's headline
+settings straight off its stored `options`, and one of those options has a combine that throws it away.
+Min/max rejection is an **order statistic** — `MinMaxRejectAccumulator` drops the k highest and lowest
+values at each pixel and averages the rest — so it ignores per-frame weights entirely, and `run_stack`
+knows it: `weights_applied = not _min_max_reject_runs(eff, n)` gates the `WGTMODE` provenance card and
+stamps **`WGTSKIP`** ("weighting requested but not applied") instead. History's run-info panel reads that
+card and says so in words (`weightingSkippedText`). The Gallery card sitting next to it went on showing a
+violet **"Quality-weighted"** chip an inch from the **"min-max"** chip that had discarded it.
+
+**Reachable on the owner's own path, and on the beginner's first stack.** This is not a hand-built
+combination: `webapp/pipeline.py`'s walk-away `auto` chain turns `quality_weighted` on for a stack whose
+rejection it also picks, and `_resolve_auto_reject` resolves to min/max below `kappa_min_frames` (11 at the
+default κ=3) because κ-σ is mathematically blind to a lone trail there. So a first-light stack of 3–10 subs
+made by "Process target" or the watcher carries **both** chips, and the one that is false is the one that
+sounds like quality. Note the shape of the near-miss that proves the app already cares about this: the same
+`auto` branch deliberately declines to switch weighting on when the user's *saved defaults* name min/max,
+with a comment saying that would make the run stamp `WGTSKIP` and mislead History. The card was the half
+nobody checked.
+
+**The gate is the one the Stack form already asks — not a second copy of it.**
+`frontend/src/weightingHint.ts` has owned this predicate since v0.237.1: it is the hint the Stack form and
+the Settings defaults show *before* a stack runs, and `tests/test_weighting_hint_mirror.py` already pins its
+frame floor against `stacker.MIN_MAX_MIN_FRAMES` **and** against the dispatcher's own behaviour. All that
+was missing was a caller. `minMaxIgnoresWeighting(input)` is the gate split out of
+`minMaxIgnoresWeightingHint`, which now delegates to it — so the finished card and the pre-run caution
+cannot form different opinions about one stack — and a vitest case asserts the two agree case for case
+rather than describing it in a comment.
+
+**Fed a count that can only understate, so the chip is withdrawn only where the engine certainly ignored
+the weights.** The dispatcher asks `n >= 3` of its *candidate* frames; the card has `n_frames_used`, the
+frames that actually combined, which is `<= n`. Understating can only answer `false`, i.e. leave the badge
+exactly as it is today; overstating would invent a "your weighting didn't count" on a stack where it did.
+Below the floor, on the drizzle path (which honours per-frame weights and runs its own rejection), and on
+every κ-σ or mean stack, the chip is byte-for-byte what it always was.
+
+**Nothing removed — the owner's one hard constraint.** The chip stays on the card. It turns grey, reads
+**"Weighting unused"** — deliberately the same 16 characters as the label it stands in for, because a
+longer chip pushes its neighbours down a line on a 280 px card (the v0.438.3 lesson, and pinned here by a
+length-budget test) — and gains a `HintAnchor` carrying `weightingUnusedNote`, which says what the run
+recorded, why an order statistic cannot use weights, and the one thing that would change it next time
+(stack again with sigma clipping). Past tense throughout: the pre-run hint's *"your quality weighting won't
+affect this stack"* reads as something you can still change, and on a finished picture you cannot. The
+other three headline chips — BG flatten, Gradient removal, Lucky N % — are untouched.
+
+**Tests (+11, two red before).** `weightingHint.test.ts` (+6): the split gate agrees with the sentence it
+drives across all seven inputs; an unknown count answers conditionally-true like the wording does; the
+note is past tense, names the count, still explains itself without one, and names the lever; and the chip
+label is no wider than the one it replaces. `Gallery.test.tsx` (+5): the walk-away shape loses the claim
+and gains the grey chip; κ-σ, drizzle and a sub-floor count all keep it; and the other chips still render
+beside it. The two that fail before were confirmed by restoring the pre-fix `Gallery.tsx` in a scratch copy
+and watching them go red.
+
 ## v0.438.13–v0.438.14 — 2026-09-13 — a cropped picture claimed a depth its pixels never had
 
 *(Builder, branch `claude/sweet-babbage-ls3t8z` — 🟠 BUG (trust, PRIORITY 3, on the PRIORITY 1/4 mosaic
