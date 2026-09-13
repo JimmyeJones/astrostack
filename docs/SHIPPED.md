@@ -1,5 +1,47 @@
 # Shipped — the record
 
+## v0.438.6 — 2026-09-13 — one switch, three exports: the caption bar named only the one it wasn't about to ruin
+
+*(Builder, branch `claude/sweet-babbage-puvgip` — 🟡 BUG (trust + friendliness, PRIORITY 3), found in the same
+pass as v0.438.5 by reading the editor export panel's controls against what each one actually calls; verified
+red by reverting the copy. Frontend copy only — one `description` string and a comment. No endpoint, config,
+schema, on-disk, API-shape or default change, and no behaviour change of any kind.)*
+
+**The control, as it was.** The export panel's
+
+> ☐ **Add caption bar (target, exposure, date)**
+> *Bakes a tidy nameplate onto the shared picture — no typing.*
+
+**It is not one export, it is three.** The single `nameplate` state in `frontend/src/routes/Editor.tsx` is
+passed to `api.exportShare` for **Download share image (JPEG)**, to `api.exportShare` again for **Share to
+app** — and to `api.exportPrint` for **Download print file**. The backend has always meant it to:
+`submit_editor_print`'s own docstring says *"When `nameplate` is set, the same acquisition footer the share
+export bakes on is drawn onto the print, at the print's own resolution."* So the file is right and the
+sentence was wrong, which is the half this sweep fixes in place.
+
+**Why it matters more here than on a JPEG.** A share image is a post; a print is a physical object someone
+has paid a lab to make, and there is no undo on a print with an unwanted black caption bar across the bottom.
+A user who wanted a captioned post *and* a clean print could always have both — tick, download the share,
+untick, download the print — but nothing on screen told them there was anything to untick.
+
+**And the checkbox sits directly under the button it does *not* reach.** The panel order is **Download
+full-res PNG**, its hint, then this checkbox, then the share button. `downloadPng` never passes `nameplate`,
+so the PNG never gets a footer — which a control placed immediately beneath it ought to say out loud rather
+than leave to the reader.
+
+So the description now names both halves of its scope:
+
+> *Bakes a tidy nameplate onto the share image and the print file — no typing. The full-res PNG above never
+> gets one.*
+
+**Tests (+1, red before).** `Editor.test.tsx`'s new case is deliberately not a string assertion: it mounts the
+panel with a printable size, asserts the description names the print file **and** the full-res PNG exclusion,
+then clicks **Download print file** twice — unticked and ticked — and pins `exportPrint`'s `nameplate`
+argument at `false` then `true`. So the sentence is checked against the wiring it describes, and decoupling
+the toggle from the print export would make the copy false and this test red in the same move. It sits beside
+the existing "threads the caption-bar toggle into the share render" case, which had pinned exactly one of the
+three destinations.
+
 ## v0.438.5 — 2026-09-13 — the print refusal stops telling a beginner to shoot more subs for pixels
 
 *(Builder, branch `claude/sweet-babbage-puvgip` — 🟠 BUG (trust + friendliness, PRIORITY 3), the "copy of a
