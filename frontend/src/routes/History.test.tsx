@@ -2094,7 +2094,7 @@ describe("HistoryView panel-seam chip", () => {
       .mockResolvedValue([mkRun({ seam_verdict: "flat", grain_verdict: "uneven" })]);
     renderHistory();
     await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
-    expect(screen.getByText("Sky even, one part thinner")).toBeInTheDocument();
+    expect(screen.getByText("Sky even")).toBeInTheDocument();
     expect(screen.queryByText("Panels even")).not.toBeInTheDocument();
   });
 

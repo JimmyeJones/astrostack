@@ -37,10 +37,11 @@ import { HintAnchor } from "./HintAnchor";
  * far more often than it is asked, and on the Gallery and Compare cards, where
  * a beginner chooses between two pictures, this chip is the only thing on the
  * row that knows anything about the panels at all. So when the grain is uneven
- * the label names **both** measurements. The verdict, the colour and the help
- * are untouched, and a run with no grain measurement — every single field,
- * every evenly-covered mosaic, every run recorded before the column existed and
- * every older backend — is byte-for-byte the chip it has always been.
+ * the label names the measurement that was actually taken. The verdict, the
+ * colour and the help are untouched, and a run with no grain measurement —
+ * every single field, every evenly-covered mosaic, every run recorded before
+ * the column existed and every older backend — is byte-for-byte the chip it has
+ * always been.
  */
 export function seamsLabel(
   verdict?: string | null, grain?: string | null,
@@ -48,12 +49,20 @@ export function seamsLabel(
   switch (verdict) {
     case "flat":
       return {
-        // "Sky even" rather than "Panels even" because the sky level is what
-        // this verdict measured; "one part thinner" is the app's own plain word
-        // for the other half (the health note's "Part of this mosaic is thinner
-        // than the rest"), kept out of the glossary term "panel depth" so the
-        // chip needs no lookup to be read.
-        label: grain === "uneven" ? "Sky even, one part thinner" : "Panels even",
+        // "Sky even" rather than "Panels even": the sky level is what this
+        // verdict measured, and the word that has to go is *panels*, which the
+        // reader takes to cover everything a panel can differ in.
+        //
+        // **It is shorter than what it replaces, and that is a requirement, not
+        // a preference** (measured in the browser, 2026-09-13). Both badge rows
+        // this chip lives in are `<Group wrap="nowrap">` sharing a row with the
+        // run's name, so a *longer* label does not wrap — it squeezes every chip
+        // beside it into an ellipsis. A first attempt at "Sky even, one part
+        // thinner" turned the History card's row into `MIN-… | SKY EVEN, ONE
+        // PART TH… | 21 FRA…`, i.e. it cost two neighbouring facts to add one.
+        // The other half of the story is the help text, which has carried it
+        // since v0.406.1 and is tappable (`HintAnchor`).
+        label: grain === "uneven" ? "Sky even" : "Panels even",
         color: "teal",
         help: grain === "uneven"
           ? "This mosaic's panels evened out — the sky matches across the joins, so where the picture looks grainier that's a difference in depth (fewer subs on that panel), not a step in the sky."

@@ -67,7 +67,7 @@ describe("PanelSeamsBadge", () => {
     // of them, and on the Gallery/Compare cards the chip is the only thing on
     // the row that knows about the panels — was told the panels are even.
     const v = seamsLabel("flat", "uneven");
-    expect(v?.label).toBe("Sky even, one part thinner");
+    expect(v?.label).toBe("Sky even");
     expect(v?.label).not.toBe("Panels even");
     // Still good news, and still the same measurement: only the wording of what
     // was measured moved.
@@ -75,10 +75,23 @@ describe("PanelSeamsBadge", () => {
     expect(v?.help).toBe(seamsLabel("flat", "uneven")?.help);
   });
 
-  it("renders the two-measurement label on the real chip", () => {
+  it("renders the honest label on the real chip", () => {
     renderBadge("flat", "uneven");
-    expect(screen.getByText("Sky even, one part thinner")).toBeInTheDocument();
+    expect(screen.getByText("Sky even")).toBeInTheDocument();
     expect(screen.queryByText("Panels even")).not.toBeInTheDocument();
+  });
+
+  it("is never longer than the label it replaces", () => {
+    // Not a style rule — a layout one, measured in a browser. Both badge rows
+    // this chip lives in are `<Group wrap="nowrap">` sharing a row with the run
+    // name, so a longer label does not wrap: it squeezes its neighbours into
+    // ellipses. "Sky even, one part thinner" turned History's row into
+    // `MIN-… | SKY EVEN, ONE PART TH… | 21 FRA…`, costing two facts to add one.
+    // jsdom does no layout, so the only thing that can be pinned here is the
+    // budget itself.
+    const honest = seamsLabel("flat", "uneven")!.label;
+    const plain = seamsLabel("flat")!.label;
+    expect(honest.length).toBeLessThanOrEqual(plain.length);
   });
 
   it("keeps exactly its old label when nothing measured the grain", () => {

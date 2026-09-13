@@ -115,17 +115,25 @@ decision is being made.
 
 **The fix is the chip's own label, not a second chip.** When `grain === "uneven"` the `flat` verdict now reads
 
-> `SKY EVEN, ONE PART THINNER`
+> `SKY EVEN`
 
-— naming the measurement that was taken (*sky level*, which is what `seam_verdict` is) and the one that was
-not. `Sky even` rather than `Panels even` because the sky level is what this verdict measured; *one part
-thinner* because that is the app's own plain word for the other half (the health note's "Part of this mosaic is
-thinner than the rest"), deliberately not the glossary term *panel depth*, so the chip needs no lookup to be
-read. **Nothing is removed and nothing is added:** the verdict is untouched, the colour stays **teal** (the seam
-measurement really is good news, and a thinner panel is not a fault — it is less time on one panel, which the
-app elsewhere says evens out as you keep shooting), the help text is byte-for-byte v0.406.1's, and no element
-joins the badge row — which is what AGENTS.md §1's standing "prefer a consolidation over a new card" asks for
-on rows a beginner already finds busy.
+— naming the measurement that was actually taken. The word that had to go is *panels*, which a reader takes to
+cover everything a panel can differ in; *sky* is what `seam_verdict` measures and all it measures. **Nothing is
+removed and nothing is added:** the verdict is untouched, the colour stays **teal** (the seam measurement
+really is good news, and a thinner panel is not a fault — it is less time on one panel, which the app elsewhere
+says evens out as you keep shooting), the help text is byte-for-byte v0.406.1's, and no element joins the badge
+row — which is what AGENTS.md §1's standing "prefer a consolidation over a new card" asks for on rows a
+beginner already finds busy.
+
+**The label is *shorter* than the one it replaces, and that is a requirement rather than a preference — found
+in a browser, not in jsdom.** The first attempt said both halves outright, `Sky even, one part thinner`. Both
+badge rows this chip lives in are `<Group wrap="nowrap">` sharing a row with the run's name, so a longer label
+does not wrap: it squeezes its neighbours into ellipses. The History card's row came back as
+`MIN-… | SKY EVEN, ONE PART TH… | 21 FRA…` — two facts lost to add one, on a row v0.437.7 had just made
+honest. The depth half stays where v0.406.1 put it, in the tappable help. A `seamsLabel` test now pins the
+budget (the honest label may never be longer than the plain one), since jsdom does no layout and nothing else
+could catch the next attempt. Verified after the change in the running app on the mosaic sample:
+`MIN-MAX | SKY EVEN | 21 FRAMES`, full width, no console errors, on both History and the Gallery.
 
 **Deliberately out of scope, with reasons** (so they are not re-picked as oversights):
 
@@ -143,12 +151,13 @@ run recorded before `grain_ratio` existed, and any older backend omitting the fi
 chip it has always had, label included. `grain_verdict` was already being passed at all three call sites
 (`History.tsx`, `Gallery.tsx`, `Compare.tsx`) since v0.406.1; nothing new is fetched.
 
-**Tests (+5, three verified red by a scratch revert of the label line):**
-`PanelSeamsBadge.test.tsx` — the two-measurement label is what `seamsLabel` returns and what the rendered chip
-shows, the colour and help are unchanged by it, and every "no grain measured" spelling (`null`, `undefined`,
-`""`, an unknown word) plus `check` keep today's label exactly. `History.test.tsx` — the real run card shows the
-honest label on a flat-but-unevenly-deep mosaic and the plain one on an evenly deep one. The existing v0.406.1
-assertions on the help text pass unchanged, so the tooltip fix was added to, not traded away.
+**Tests (+6, three verified red by a scratch revert of the label line):**
+`PanelSeamsBadge.test.tsx` — the honest label is what `seamsLabel` returns and what the rendered chip shows,
+the colour and help are unchanged by it, every "no grain measured" spelling (`null`, `undefined`, `""`, an
+unknown word) plus `check` keep today's label exactly, and the label-length budget above.
+`History.test.tsx` — the real run card shows the honest label on a flat-but-unevenly-deep mosaic and the plain
+one on an evenly deep one. The existing v0.406.1 assertions on the help text pass unchanged, so the tooltip fix
+was added to, not traded away.
 
 ## v0.438.2 — 2026-09-13 — the grain projection stops asking for the light the picture already has
 
