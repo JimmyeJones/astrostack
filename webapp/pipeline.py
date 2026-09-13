@@ -1925,6 +1925,36 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int,
                                       "display_space": True}),
             notes="edited",
             engine_version=APP_VERSION,
+            # The same light, so the same exposure and the same calibration.
+            # An export *re-renders* pixels a stack already combined; it collects
+            # no photons of its own, so every fact about the frames that went in
+            # is still true of it. Without these three the finished picture — the
+            # one the owner actually shares and pins as a cover — lost how long
+            # it was exposed for and what calibrated it: its Gallery and History
+            # cards showed no integration time at all, and "My best pictures"
+            # ranked it over two of the four metrics its blend has, because
+            # ``seestack.portfolio._score`` renormalises over the figures an
+            # entry carries and a missing one is simply a lower placing. Same
+            # reasoning as the capture window below.
+            total_exposure_s=run.total_exposure_s,
+            calstat=run.calstat,
+            transparency_ratio=run.transparency_ratio,
+            # Deliberately NOT carried, and the line between the two lists is
+            # the whole rule: these describe the *pixels* or the stacking work,
+            # both of which an edit changes.
+            #   * ``noise_sigma`` / ``stack_fwhm_px`` / ``seam_residual`` /
+            #     ``grain_ratio`` are measurements of the combined image. A
+            #     denoise or a sharpen moves them, so inheriting one would be a
+            #     measurement of something else presented as this picture's.
+            #   * ``is_mosaic`` is read *behaviourally*, not just shown:
+            #     ``webapp.routers.editor._run_is_mosaic`` falls back to the
+            #     coverage map's distribution only while it is NULL, and an
+            #     export's coverage is uniform — so stamping True here would make
+            #     re-opening the edit apply a mosaic border trim to a picture
+            #     Auto has already trimmed.
+            #   * ``duration_s`` and the rejection/coverage columns say what the
+            #     stacker did; ``duration_s``'s own docstring already names an
+            #     editor export as a row that must not carry one.
             # An export is the *same light* as the run it was edited from, so it
             # carries that run's capture window forward. Without this an edited
             # picture would lose the one date that says when it was shot and fall
