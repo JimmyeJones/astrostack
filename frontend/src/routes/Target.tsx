@@ -1835,12 +1835,15 @@ export function TargetView() {
           ) },
           { key: "story", label: "Story", node: (
             <>
-              {/* "Did it get better?" — one link into the run-vs-run A/B page
+              {/* "Did it get better?" — two links into the run-vs-run A/B page
                   that has existed since v0.150 and that a beginner who never
-                  opens History never discovers. It joins this group rather than
-                  adding another always-on control, and self-hides on the same
-                  condition the reel below it does: fewer than two comparable
-                  pictures, nothing to say. */}
+                  opens History never discovers: the newest picture against the
+                  one before it, and (from three pictures on) the newest against
+                  the *first ever*, which is the comparison that actually shows
+                  how far they've come. They join this group rather than adding
+                  another always-on control, and self-hide on the same condition
+                  the reel below it does: fewer than two comparable pictures,
+                  nothing to say. */}
               <CompareWithLastCard safe={safe} runs={runs.data} />
               {/* "Night after night" — the same target getting deeper across
                   re-stacks (self-hides until there are ≥2 stacks to compare). */}
