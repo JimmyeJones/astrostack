@@ -82,6 +82,36 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **BUG (found 2026-09-13 by the on-NAS observer account, measured on the owner's box; confirmed in the code
+  here) — `SeestarManager.stop()` sets a flag and returns without joining either thread, and neither loop
+  waits on that flag, so a stopped manager keeps polling for up to 5 s and overlapping app instances stack
+  up.** *(Pillar: correctness / shutdown hygiene — size XS; severity low in production, real in tests.
+  Confidence: reproduced — thread census taken per-test on the NAS.)* `webapp/seestar/manager.py:99`
+  `stop()` does `self._stop.set()`, `self._scan_now.set()`, disconnects clients — and never
+  `self._poll_thread.join()` / `self._scan_thread.join()`. The loops cannot notice promptly anyway:
+  `_poll_loop` blocks in `time.sleep(_IDLE_SLEEP)` (line 232, `_IDLE_SLEEP = 5.0`) and
+  `time.sleep(max(2, poll_interval_s))` (line 257) rather than `self._stop.wait(...)`, so the flag is only
+  read at the top of the next iteration. **Measured**, running `tests/webapp/test_incoming_readonly_guard.py`
+  with a per-test thread census (the `client` fixture is function-scoped, so every test builds a fresh app and
+  runs its full lifespan):
+  ```
+  test_the_sentinel_actually_fires          active=1  proc_threads=4   {MainThread:1}
+  test_reprocess_all_leaves_the_source...   active=2  proc_threads=8   {MainThread:1, seestar-poll:1}
+  test_the_video_pipeline_never_touches...  active=3  proc_threads=10  {MainThread:1, seestar-poll:2}
+  test_ingest_still_copies_and_never...     active=4  proc_threads=10  {MainThread:1, seestar-poll:3}
+  ```
+  Three `seestar-poll` threads from already-torn-down apps running alongside the live one. It plateaus rather
+  than growing without bound (they are daemons and do exit a few seconds late), so this is **not** a runaway
+  leak — but a `stop()` that returns before the thing has stopped is a false contract, and in the suite it
+  means every webapp test runs with two or three stale pollers underneath it.
+  **Shape:** have both loops wait on the stop event instead of sleeping (`self._stop.wait(delay)` returns
+  immediately when set), and have `stop()` join both threads with a bounded timeout. **Regression test:**
+  start a manager, `stop()` it, assert both threads are dead **when `stop()` returns** — not after a sleep.
+  **Care:** `_scan_now` is a separate event used to wake the scan loop early; don't collapse the two.
+  **Not the cause of the suite's 12 solver failures** — the same census showed the *passing* configuration
+  carrying **more** threads (active=7) than the failing one (active=4), so this was explicitly ruled out as
+  the explanation for those and is filed on its own merits.
+
 - **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
   question is closed unanswerable. Read before prioritising the audit's items.**
   - **The pre-D1 saved-recipe crop (⭐ item below — ✅ IT HAS SINCE SHIPPED, don't go looking for it; all three
