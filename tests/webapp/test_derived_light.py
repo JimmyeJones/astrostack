@@ -23,8 +23,13 @@ from seestack.io.project import StackRunRow
 from webapp.derived_light import (
     INHERITED_LIGHT_FACTS,
     stacking_coverage_max,
+    stacking_field_fulls,
+    stacking_samples_per_pixel,
     with_inherited_light_facts,
 )
+
+# Match the ``solved_library`` fixture's seeded frames (tests/webapp/conftest.py).
+FRAME_W, FRAME_H = 480, 320
 
 
 @dataclass
@@ -37,6 +42,9 @@ class _Row:
     calstat: str | None = None
     transparency_ratio: float | None = None
     noise_sigma: float | None = None
+    canvas_w: int | None = None
+    canvas_h: int | None = None
+    n_frames_used: int | None = None
 
 
 @dataclass
@@ -174,9 +182,98 @@ def test_the_placeholder_is_what_the_export_writer_actually_records():
     assert "coverage_min=1, coverage_max=1," in src
 
 
+# --- The column that is true about the row and wrong as a divisor -----------
+#
+# ``canvas_w``/``canvas_h`` really are the export's pixels. What they are not is
+# the sky the light was spread over: a crop shrinks them while
+# ``total_exposure_s`` and ``n_frames_used`` come through whole, so every
+# per-pixel figure divided by them rises by exactly the crop factor.
+
+_SHAPE = (float(FRAME_W), float(FRAME_H))
+
+
+def _sized(run_id: int, w: int, h: int, *, derived_from: int | None = None,
+           n_frames_used: int | None = None, drizzle_scale: float | None = None,
+           ) -> _Row:
+    options: dict = ({"editor_recipe": {"ops": []}, "derived_from": derived_from}
+                     if derived_from is not None else {"sigma_clip": True})
+    if drizzle_scale is not None:
+        options |= {"drizzle": True, "drizzle_scale": drizzle_scale}
+    return _Row(id=run_id, options_json=json.dumps(options),
+                canvas_w=w, canvas_h=h, n_frames_used=n_frames_used)
+
+
+def test_a_stack_is_measured_against_its_own_canvas():
+    stack = _sized(1, FRAME_W * 2, FRAME_H * 2)
+    assert stacking_field_fulls(stack, {1: stack}, _SHAPE) == 4.0
+
+
+def test_a_cropped_export_is_measured_against_the_canvas_it_was_stacked_on():
+    """The bug. A 2x2 mosaic cropped back to one native frame is still a picture
+    of four field-fulls' worth of subs — dividing its inherited light by 1.0
+    would report a depth four times what any pixel holds."""
+    stack = _sized(1, FRAME_W * 2, FRAME_H * 2)
+    export = _sized(2, FRAME_W, FRAME_H, derived_from=1)
+    assert stacking_field_fulls(export, {1: stack, 2: export}, _SHAPE) == 4.0
+
+
+def test_an_edit_of_an_edit_is_measured_against_the_stack_underneath():
+    """Second pass on a finished picture: the immediate source is another crop,
+    so a one-hop lookup would still be reading a cropped canvas."""
+    stack = _sized(1, FRAME_W * 3, FRAME_H * 3)
+    first = _sized(2, FRAME_W * 2, FRAME_H * 2, derived_from=1)
+    second = _sized(3, FRAME_W, FRAME_H, derived_from=2)
+    by_id = {1: stack, 2: first, 3: second}
+    assert stacking_field_fulls(second, by_id, _SHAPE) == 9.0
+
+
+def test_a_pruned_source_falls_back_to_the_rows_own_canvas():
+    """Not a guess but the only thing left: with the stack gone from History
+    there is nothing else to measure against, which is what this read did for
+    every row before the rule existed."""
+    orphan = _sized(2, FRAME_W, FRAME_H, derived_from=99)
+    assert stacking_field_fulls(orphan, {2: orphan}, _SHAPE) == 1.0
+
+
+def test_the_drizzle_scale_travels_with_the_canvas():
+    """It is the *stack* that drizzled; an export's options record no scale at
+    all, so reading the export's own would divide a 2x drizzled 2x2 mosaic's
+    pixels by nothing and call it a 16-field raster."""
+    stack = _sized(1, FRAME_W * 4, FRAME_H * 4, drizzle_scale=2.0)
+    export = _sized(2, FRAME_W * 4, FRAME_H * 4, derived_from=1)
+    assert stacking_field_fulls(export, {1: stack, 2: export}, _SHAPE) == 4.0
+
+
+def test_no_native_frame_shape_means_no_scaling():
+    stack = _sized(1, FRAME_W * 2, FRAME_H * 2)
+    assert stacking_field_fulls(stack, {1: stack}, None) is None
+
+
+def test_samples_per_pixel_divides_the_inherited_count_by_the_stacks_canvas():
+    """``_apply_editor_to_run`` carries ``n_frames_used`` forward whole, so the
+    numerator needs no correction and the denominator is the whole bug: 200 subs
+    over a 2x2 is 50 a pixel, cropped or not."""
+    stack = _sized(1, FRAME_W * 2, FRAME_H * 2, n_frames_used=200)
+    export = _sized(2, FRAME_W, FRAME_H, derived_from=1, n_frames_used=200)
+    by_id = {1: stack, 2: export}
+    assert stacking_samples_per_pixel(stack, by_id, _SHAPE) == 50.0
+    assert stacking_samples_per_pixel(export, by_id, _SHAPE) == 50.0
+
+
+def test_samples_per_pixel_declines_rather_than_guessing():
+    stack = _sized(1, FRAME_W * 2, FRAME_H * 2, n_frames_used=None)
+    assert stacking_samples_per_pixel(stack, {1: stack}, _SHAPE) is None
+    assert stacking_samples_per_pixel(
+        _sized(1, FRAME_W, FRAME_H, n_frames_used=200), {}, None) is None
+
+
 # --- The surfaces -----------------------------------------------------------
 
-def _register_pair(data_root, safe: str) -> tuple[int, int]:
+def _register_pair(
+    data_root, safe: str,
+    stack_canvas: tuple[int, int] = (FRAME_W, FRAME_H),
+    edit_canvas: tuple[int, int] = (FRAME_W, FRAME_H),
+) -> tuple[int, int]:
     """A stack and an editor export of it, shaped as a pre-v0.438.7 install has
     them: the export recorded with none of the light's facts."""
     lib = Library.open_or_create(data_root / "library")
@@ -186,7 +283,8 @@ def _register_pair(data_root, safe: str) -> tuple[int, int]:
             src_id = proj.add_stack_run(StackRunRow(
                 id=None, timestamp_utc="2026-05-02T00:00:00Z",
                 output_basename="deepstack", fits_path=None, tiff_path=None,
-                preview_path=None, n_frames_used=180, canvas_h=320, canvas_w=480,
+                preview_path=None, n_frames_used=180,
+                canvas_w=stack_canvas[0], canvas_h=stack_canvas[1],
                 coverage_min=1, coverage_max=180,
                 options_json=json.dumps({"sigma_clip": True}),
                 total_exposure_s=5400.0, calstat="dark+flat",
@@ -195,7 +293,8 @@ def _register_pair(data_root, safe: str) -> tuple[int, int]:
             edit_id = proj.add_stack_run(StackRunRow(
                 id=None, timestamp_utc="2026-09-13T10:00:00Z",
                 output_basename="deepstack_edit", fits_path=None, tiff_path=None,
-                preview_path=None, n_frames_used=180, canvas_h=320, canvas_w=480,
+                preview_path=None, n_frames_used=180,
+                canvas_w=edit_canvas[0], canvas_h=edit_canvas[1],
                 coverage_min=1, coverage_max=1,
                 options_json=json.dumps({"editor_recipe": {"ops": []},
                                          "derived_from": src_id}),
@@ -236,6 +335,7 @@ def test_the_gallery_card_of_an_old_edit_names_its_integration(
 def _register_previewed(
     data_root, safe: str, *, basename: str, timestamp: str,
     exposure_s: float | None, derived_from: int | None = None,
+    canvas: tuple[int, int] = (FRAME_W, FRAME_H),
 ) -> int:
     """A finished picture — the wall only shows runs whose preview file is on
     disk. ``derived_from`` makes it an editor export, recorded exactly the way
@@ -254,7 +354,7 @@ def _register_previewed(
             run_id = proj.add_stack_run(StackRunRow(
                 id=None, timestamp_utc=timestamp, output_basename=basename,
                 fits_path=None, tiff_path=None, preview_path=str(preview),
-                n_frames_used=180, canvas_h=320, canvas_w=480,
+                n_frames_used=180, canvas_w=canvas[0], canvas_h=canvas[1],
                 coverage_min=1,
                 coverage_max=1 if derived_from is not None else 180,
                 options_json=json.dumps(options),
@@ -325,3 +425,84 @@ def test_the_wall_does_not_rank_a_finished_picture_down_for_never_stacking(
     assert items[0]["run_id"] == edit_id
     # Best on everything it carries → the top of the scale, not 0.867 of it.
     assert items[0]["score"] == 1.0
+
+
+# --- …and the same row, on the four surfaces that divide by it --------------
+
+
+def test_the_run_listing_measures_an_edit_against_the_stacks_canvas(
+    client, solved_library,
+):
+    """History's noise-vs-time trend fits per-pixel integration across runs, so
+    a 2x2 mosaic and the cropped picture made from it must not report two
+    different amounts of sky for one set of subs."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    src_id, edit_id = _register_pair(
+        solved_library, safe,
+        stack_canvas=(FRAME_W * 2, FRAME_H * 2), edit_canvas=(FRAME_W, FRAME_H))
+
+    runs = {r["id"]: r for r in client.get(f"/api/targets/{safe}/stack-runs").json()}
+    assert runs[src_id]["field_fulls"] == 4.0
+    # Its own canvas would say 1.0 — and the per-pixel integration the trend
+    # fits would jump 4x between two rows describing one stack's light.
+    assert runs[edit_id]["field_fulls"] == 4.0
+    assert runs[edit_id]["canvas_w"] == FRAME_W  # the file itself is unchanged
+
+
+def test_the_gallery_card_measures_an_edit_against_the_stacks_canvas(
+    client, solved_library,
+):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _src, edit_id = _register_pair(
+        solved_library, safe,
+        stack_canvas=(FRAME_W * 3, FRAME_H * 3), edit_canvas=(FRAME_W, FRAME_H))
+
+    items = {it["run_id"]: it for it in client.get("/api/gallery").json()["items"]}
+    assert items[edit_id]["field_fulls"] == 9.0
+
+
+def test_the_dashboard_strip_measures_an_edit_against_the_stacks_canvas(
+    client, solved_library,
+):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _src, edit_id = _register_pair(
+        solved_library, safe,
+        stack_canvas=(FRAME_W * 2, FRAME_H * 2), edit_canvas=(FRAME_W, FRAME_H))
+
+    recent = {r["run_id"]: r
+              for r in client.get("/api/stats").json()["recent_stacks"]}
+    assert recent[edit_id]["field_fulls"] == 4.0
+
+
+def test_the_wall_ranks_a_cropped_picture_on_the_sky_its_subs_covered(
+    client, solved_library,
+):
+    """The surface with teeth again. "My best pictures" ranks on integration and
+    frame count **per pixel**, and the representative of an edited target is the
+    export — so a 2x2 mosaic finished and cropped back to one frame claimed four
+    times the depth it has, and outranked a genuinely deeper single-field stack.
+
+    Both targets here hold the same 180 subs and the same 5 h. The mosaic spread
+    them over four field-fulls of sky, so per pixel it is a quarter as deep as
+    the single field, and the single field must lead.
+    """
+    targets = client.get("/api/targets").json()
+    mosaic, single = targets[0]["safe_name"], targets[1]["safe_name"]
+    src = _register_previewed(
+        solved_library, mosaic, basename="wide", timestamp="2026-05-02T00:00:00Z",
+        exposure_s=18000.0, canvas=(FRAME_W * 2, FRAME_H * 2))
+    edit_id = _register_previewed(
+        solved_library, mosaic, basename="wide_edit",
+        timestamp="2026-09-13T10:00:00Z", exposure_s=None, derived_from=src,
+        canvas=(FRAME_W, FRAME_H))
+    _register_previewed(
+        solved_library, single, basename="deep", timestamp="2026-05-02T00:00:00Z",
+        exposure_s=18000.0, canvas=(FRAME_W, FRAME_H))
+
+    items = client.get("/api/gallery/best").json()["items"]
+    shown = next(it for it in items if it["safe"] == mosaic)
+    assert shown["run_id"] == edit_id
+    # The cropped export is still a picture of a four-field raster's light…
+    assert shown["field_fulls"] == 4.0
+    # …so the single field, four times deeper per pixel, leads the wall.
+    assert items[0]["safe"] == single

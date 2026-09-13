@@ -2104,7 +2104,8 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
         from seestack.io.project import Project
         from seestack.printexport import print_advice, print_options, print_refusal, render_print
         from seestack.stack.output import safe_basename, save_display_jpeg
-        from webapp.field_fulls import native_frame_shape, samples_per_pixel_of_run
+        from webapp.derived_light import stacking_samples_per_pixel
+        from webapp.field_fulls import native_frame_shape
 
         lib = Library.open_or_create(settings.resolved_library_root)
         try:
@@ -2113,7 +2114,10 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
                 raise FileNotFoundError(f"no target '{safe}'")
             proj = Project.open(lib.target_dir(entry))
             try:
-                run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+                # The siblings too: the refusal below names this picture's
+                # depth, and a finished export's own canvas is a cropped one.
+                runs = list(proj.iter_stack_runs())
+                run = next((r for r in runs if r.id == run_id), None)
                 if run is None or not run.fits_path or not Path(run.fits_path).exists():
                     raise FileNotFoundError(f"run {run_id} has no FITS")
                 op_errors: list[str] = []
@@ -2132,19 +2136,13 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
                     # goes with it, because a recipe that *crops* is the ordinary
                     # way a printable stack renders to an unprintable picture and
                     # the user can undo it on the spot.
-                    frame_shape = native_frame_shape(proj)
-                    frame_w, frame_h = (
-                        frame_shape if frame_shape is not None else (None, None))
                     raise ValueError(print_refusal(
                         w, h,
                         source_w=int(run.canvas_w or 0),
                         source_h=int(run.canvas_h or 0),
-                        samples_per_pixel=samples_per_pixel_of_run(
-                            run.canvas_w, run.canvas_h,
-                            n_frames_used=run.n_frames_used,
-                            frame_w=frame_w, frame_h=frame_h,
-                            options_json=run.options_json,
-                        ),
+                        samples_per_pixel=stacking_samples_per_pixel(
+                            run, {r.id: r for r in runs},
+                            native_frame_shape(proj)),
                     ))
                 if size_name:
                     option = next((o for o in options if o.name == size_name), None)

@@ -21,12 +21,8 @@ from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
 from seestack.stackhealth import grain_verdict, seam_verdict
 from webapp import deps, estimate_cache, pipeline
 from webapp.capture_nights import capture_night_count, capture_night_range
-from webapp.derived_light import with_inherited_light_facts
-from webapp.field_fulls import (
-    drizzle_scale_from_options,
-    field_fulls_of_sky,
-    native_frame_shape,
-)
+from webapp.derived_light import stacking_field_fulls, with_inherited_light_facts
+from webapp.field_fulls import native_frame_shape
 from webapp.preview_orient import (
     baked_north_up_deg,
     recovered_north_up_deg,
@@ -863,6 +859,10 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
         # light it is made of. Answered here from the sibling row the listing
         # already holds; never a write, and never an overwrite.
         runs = with_inherited_light_facts(list(proj.iter_stack_runs()))
+        # …and the divisor `field_fulls` reads those totals per-pixel with comes
+        # off the same sibling row, because a crop shrinks the canvas without
+        # taking any light out of the pixels that survived it.
+        by_id = {r.id: r for r in runs}
         # The pinned "cover" run (library-level), so the History card can mark it.
         entry = lib.find_target(safe)
         cover_id = entry.cover_stack_run_id if entry is not None else None
@@ -966,13 +966,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             engine_version=r.engine_version,
             unexported_edit=unexported.get(r.id, False),
             auto_edited=auto_edited.get(r.id, False),
-            field_fulls=(
-                field_fulls_of_sky(
-                    r.canvas_w, r.canvas_h,
-                    frame_w=native_shape[0], frame_h=native_shape[1],
-                    drizzle_scale=drizzle_scale_from_options(r.options_json),
-                ) if native_shape is not None else None
-            ),
+            field_fulls=stacking_field_fulls(r, by_id, native_shape),
         ))
     return out
 

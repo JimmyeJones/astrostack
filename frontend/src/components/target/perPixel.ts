@@ -17,9 +17,18 @@
  * correction lives for the surfaces that *report* it.
  *
  * The scale is `field_fulls` — how many single-frame field-fulls of sky the
- * run's own canvas covers, served per run by `webapp/field_fulls.py` (canvas
- * area ÷ one native frame's area, drizzle divided out). A single field is 1.0,
- * a 2×2 no-overlap mosaic 4.0, a 2×2 at 50 % overlap ~2.25.
+ * run's subs were spread over, served per run by `webapp/field_fulls.py`
+ * (canvas area ÷ one native frame's area, drizzle divided out). A single field
+ * is 1.0, a 2×2 no-overlap mosaic 4.0, a 2×2 at 50 % overlap ~2.25.
+ *
+ * "The run's subs", not "the run's canvas", because a **finished picture is a
+ * crop**: an editor export records the canvas it wrote while carrying the
+ * source stack's frame count and integration forward whole, and the editor
+ * seeds Auto — which trims the border — on first open. So the backend measures
+ * a re-render against the canvas it was *stacked* on
+ * (`webapp/derived_light.stacking_field_fulls`); measured on the bundled 2×2
+ * sample, its own canvas read a content crop as 3.2× deeper than the coverage
+ * map says it is.
  *
  * **It is a mean, and it is the conservative one.** Dividing by the canvas's
  * area gives the depth of an *evenly shot* raster; a mosaic with one deep panel

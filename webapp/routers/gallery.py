@@ -22,12 +22,12 @@ from seestack.stack.output import save_display_jpeg
 from seestack.stackhealth import grain_verdict, seam_verdict
 from webapp import deps, picturesarchive
 from webapp.capture_nights import capture_night_count, capture_night_range
-from webapp.derived_light import stacking_coverage_max, with_inherited_light_facts
-from webapp.field_fulls import (
-    drizzle_scale_from_options,
-    field_fulls_of_sky,
-    native_frame_shape,
+from webapp.derived_light import (
+    stacking_coverage_max,
+    stacking_field_fulls,
+    with_inherited_light_facts,
 )
+from webapp.field_fulls import native_frame_shape
 from webapp.run_options import parse_run_options, run_has_reusable_options
 from webapp.site_location import resolve_site_lon
 
@@ -232,6 +232,10 @@ def get_gallery(request: Request) -> GalleryResponse:
                 # see :mod:`webapp.derived_light`.
                 runs = with_inherited_light_facts(
                     list(proj.iter_stack_runs()))
+                # …and the divisor those figures are read per-pixel with comes
+                # off the stack the export was rendered from, not off the canvas
+                # a crop left behind — same module, same reason.
+                by_id = {r.id: r for r in runs}
                 # One LIMIT-1 read for the target's native sub shape, so every
                 # run below can be scaled to a per-pixel depth without paying
                 # for it once per run (the same split the run listing uses).
@@ -251,6 +255,7 @@ def get_gallery(request: Request) -> GalleryResponse:
                             t, run, proj, RECIPE_META_PREFIX,
                             EXPORTED_RECIPE_META_PREFIX, _unexported_edit,
                             AUTO_EDIT_BAKED_LOOK_PREFIX, lon, native_shape,
+                            by_id,
                         ))
                     except Exception:  # noqa: BLE001 — one bad run must not hide the rest
                         # Every required field is NOT NULL today, so nothing here
@@ -278,6 +283,7 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
                   unexported_edit, baked_look_prefix: str = "",
                   lon_deg: float | None = None,
                   native_shape: tuple[float, float] | None = None,
+                  by_id: dict | None = None,
                   ) -> GalleryItem:  # noqa: ANN001
     """One finished stack's gallery card. Split out so the loop above can skip a
     single unreadable run without losing every other target's pictures."""
@@ -315,13 +321,7 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         calstat=run.calstat,
         seam_verdict=seam_verdict(run.seam_residual),
         grain_verdict=grain_verdict(run.grain_ratio),
-        field_fulls=(
-            field_fulls_of_sky(
-                run.canvas_w, run.canvas_h,
-                frame_w=native_shape[0], frame_h=native_shape[1],
-                drizzle_scale=drizzle_scale_from_options(run.options_json),
-            ) if native_shape is not None else None
-        ),
+        field_fulls=stacking_field_fulls(run, by_id or {}, native_shape),
         # Three extra keyed reads on the project DB the caller already has open —
         # the same near-free lookups the run listing does, which is what made
         # this affordable library-wide.
@@ -568,13 +568,11 @@ def get_best_pictures(
                 # One LIMIT-1 read on the project this loop already has open —
                 # the same pair the Gallery listing pays for once per target.
                 native_shape = native_frame_shape(proj)
-                field_fulls = (
-                    field_fulls_of_sky(
-                        pick.canvas_w, pick.canvas_h,
-                        frame_w=native_shape[0], frame_h=native_shape[1],
-                        drizzle_scale=drizzle_scale_from_options(pick.options_json),
-                    ) if native_shape is not None else None
-                )
+                # The representative is very often an *export* — the finished
+                # picture is the one people pin as a cover — and an export's own
+                # canvas is a cropped one. Divide by the stack's.
+                field_fulls = stacking_field_fulls(
+                    pick, {r.id: r for r in runs}, native_shape)
                 info = identify_object(t.name, t.ra_deg, t.dec_deg, catalog=catalog)
                 night_start, night_end = capture_night_range(
                     pick.capture_start_utc, pick.capture_end_utc, lon)
