@@ -5,7 +5,7 @@ import {
   isoDate, minAltOptions, MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel,
   moonShootColor, moonShootLabel, moonShootWindowNote,
   moonWindowNote, notUpTonightNote, objectTypeBucket, partitionByUpTonight,
-  planDateBounds, planNightLabel, scoreColor, splitTargets, typeFilterOptions,
+  planDateBounds, planNightLabel, scoreColor, splitTargets, targetRowLabel, typeFilterOptions,
   usableWindowNote,
 } from "./tonight";
 import type { NightPlan, PlannedTarget } from "./api/client";
@@ -214,6 +214,39 @@ describe("splitTargets", () => {
     ]);
     expect(already.map((t) => t.id)).toEqual(["A", "C"]);
     expect(fresh.map((t) => t.id)).toEqual(["B", "D"]);
+  });
+});
+
+describe("targetRowLabel", () => {
+  // The bug this pins: a library row's `id` IS its slugified name, so printing
+  // both took three lines on a phone and pushed the table's last column off.
+  it("prints an already-targeted row's friendly name alone, not its folder name too", () => {
+    const t = { ...mk("Sample_Orion_Nebula_M42", true), name: "Sample: Orion Nebula (M42)" };
+    expect(targetRowLabel(t)).toBe("Sample: Orion Nebula (M42)");
+    expect(targetRowLabel(t)).not.toContain("Sample_Orion_Nebula_M42");
+  });
+
+  it("keeps both halves on a catalog row, where the id and the name are different facts", () => {
+    const t = { ...mk("M31", false), name: "Andromeda Galaxy" };
+    expect(targetRowLabel(t)).toBe("M31 — Andromeda Galaxy");
+  });
+
+  it("falls back to the id when there is no distinct name to show", () => {
+    // A folder-named target the plate solve hasn't renamed yet…
+    expect(targetRowLabel({ ...mk("NGC_6888_SUB", true), name: "NGC_6888_SUB" }))
+      .toBe("NGC_6888_SUB");
+    // …a catalog object with no proper name…
+    expect(targetRowLabel({ ...mk("M106", false), name: "M106" })).toBe("M106");
+    // …and an older backend, or a name that is only whitespace.
+    expect(targetRowLabel({ ...mk("M106", false), name: "  " })).toBe("M106");
+    expect(targetRowLabel({ ...mk("M106", false), name: undefined as unknown as string }))
+      .toBe("M106");
+  });
+
+  it("still shows a renamed target's display name, which its folder name no longer matches", () => {
+    // `rename_target` deliberately leaves `safe_name` alone, so the two really
+    // can diverge — and the name is the half a reader recognises.
+    expect(targetRowLabel({ ...mk("NGC_6888_SUB", true), name: "NGC 6888" })).toBe("NGC 6888");
   });
 });
 
