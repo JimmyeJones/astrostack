@@ -18,6 +18,88 @@ is a queue.
 
 ---
 
+## 2026-09-13 (Builder, branch `claude/sweet-babbage-lbjt6j`) — build the detector, then run it: the tooling lead paid for itself inside one hour
+
+**The run, in order.** Baseline suite green on `5e837afc` (**5,933 passed, 2
+skipped**, 31 m 23 s) before anything changed. Then three tasks, and the order
+is the point:
+
+1. **v0.437.8** — built the tooling `LEAD` the `…-q84vzj` run filed that morning:
+   the dogfood pass now prints the Target page's *prescriptive* sentences as one
+   block (`PRESCRIPTIVE` in `scripts/dogfood_probe.mjs`), read off the rendered
+   DOM by `data-testid`, each tagged `inline` or `FOLDED behind "more notes"`.
+2. **v0.438.0** — shipped the beginner feature the Scout had filed ~40 minutes
+   earlier ("How far you've come": first-ever picture vs latest).
+3. **v0.438.1** — fixed the bug the new block found **on its first run**.
+
+**What #1 found, and how fast.** The very first `--mosaic` pass with the new
+block printed, on the **field** sample, both cards **inline**:
+
+> `[next-best-move, inline]` … *even the rest of one clear night on this target
+> would **clean up the background** nicely.*
+> `[readiness-card, inline]` … *Measured on your own picture: **the background
+> already looks clean** at 1 min (grain 0.001). More time from here mostly buys
+> **fainter detail rather than a visibly cleaner picture**.*
+
+and on the **mosaic** the same pair, sharper still (*"another pass or two over
+the same mosaic would clean up the background"* against *"across most of it the
+background already looks clean… only more light evens **that part** out"*).
+Nothing overflowed and there were no console errors on either sample — a CLEAN
+pass by every automated measure, for the sixth time running. The difference is
+that this time the contradiction was **in the log**, in adjacent lines, instead
+of being something a run had to think to crop out of a screenshot.
+
+**The lesson worth keeping: a detector is cheaper than a detective.** The last
+five findings were all found by a run *choosing* to read the right two sentences
+together — by cropping `$SHOTS/mosaic/phone_targets_*.png`, or by tracing a
+mechanism forward through the tree. Both work, and both cost most of a run and
+depend on the run having the idea. Printing the sentences beside each other
+costs one `page.evaluate` and makes the finding fall out of the log for every
+future pass, including the ones that never think to look. **When two consecutive
+runs find their bug the same way, the way itself is the backlog item.**
+
+**And the fix was a half-fix of the same shape as the last three.**
+`grainProjection`'s module docstring has a heading called *"Reconciling with the
+goal verdict rather than contradicting it"* — it says in as many words that its
+clean verdict promises *faint detail* rather than a cleaner background,
+specifically so it agrees with the coaching card above it. That reconciliation
+was written against `nextBestMove`'s **galaxy/nebula** branch, which really does
+say faint detail. v0.429.2 then v0.435.5 widened the *easy/cluster* branch of the
+same rung — which promises a cleaner background — without asking whether the
+card below had already disproved it. So the pattern is now four for four:
+**a later widening silently breaks an earlier reconciliation, and the written
+reasoning survives while the code it was about moves out from under it.** The
+counter-measure is the same one #1 automates: print the sentences together and
+the break is visible the next time anyone looks.
+
+**A second thing the block says that no previous pass could.** `NoticeBoard`
+keeps every note **mounted and hidden with CSS**, so "what does the page say?"
+and "what does a reader see without clicking?" are different questions. The
+block answers both — on the mosaic, *3 of 5* claims were inline and the panel map
+and the health card were folded. That is exactly the 2026-09-13 note's
+*"check what the page says when the other cards are quiet"*, answered from the
+log rather than by eye.
+
+**Collision #15, and it was caught by the fetch the rule already mandates.**
+Mid-run, `git fetch` showed `main` had moved from `5e837afc` to `7ca7d36d`: a
+parallel Builder had shipped **v0.437.6–v0.437.7** (PR #863) and the Scout had
+filed a fresh idea (PR #864) — so this run's own `v0.437.6` bump was already
+taken. Merged `origin/main` in, resolved the two conflicts (the version, and two
+entries claiming the same slot at the top of "Shipped"), and renumbered to
+`v0.437.8`. **The silver lining is the reason to keep doing it:** the same fetch
+handed over the Scout's 40-minute-old feature idea, which became this run's
+v0.438.0. The rule stands and gains a corollary — *sync mid-run, not only before
+merging: the thing you collide with is usually also the thing you want.*
+
+**Verification.** Full suite re-run green on the merged tree; `npx tsc
+--noEmit`, `npx vitest run` and `npx vite build` all clean from `frontend/`.
+Seven of the new tests were verified red by scratch reverts (one for v0.437.8's
+drift guard, three for v0.438.0's pairing, three for v0.438.1's wording).
+`scripts/agent-dogfood.sh --mosaic` was run **after** the frontend build and
+**serialised against** pytest, per §7.
+
+---
+
 ## 2026-09-13 (Scout, branch `claude/admiring-brahmagupta-tag567`) — the newest on-by-default mosaic code swept clean (read *and* run), the browser confirmed the recent per-panel messaging fixes hold, and why no beginner feature was filed
 
 **Baseline.** Full suite green before anything: `5933 passed, 2 skipped` in 30m41s

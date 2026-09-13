@@ -1,5 +1,66 @@
 # Shipped — the record
 
+## v0.438.1 — 2026-09-13 — the coaching card stops promising a cleaner background over a card that has just measured the background clean
+
+*(Builder, branch `claude/sweet-babbage-lbjt6j` — 🟠 BUG (trust + friendliness, PRIORITY 3, the same
+whole-canvas/measured-picture family as v0.437.3–v0.437.5), found by the **v0.437.8 dogfood probe's
+prescriptive-claims block on its very first run** — on the field sample *and* the mosaic, with **both cards
+inline**, not folded. Frontend-only, copy only: no endpoint, config, schema, on-disk, API-shape or default
+change, no threshold moved, no number changed, and the rung that fires is provably unmoved.)*
+
+**The two sentences, one inch apart, both inline, on the bundled M42 sample:**
+
+* `nextBestMove` → *"💡 To make your Sample: Orion Nebula (M42) even better — Add more time — 1 min so far.
+  This one comes up quickly for a Seestar, so even the rest of one clear night on this target **would clean
+  up the background nicely**."*
+* the readiness card's `grainProjection` → *"Measured on your own picture: **the background already looks
+  clean** at 1 min (grain 0.001). More time from here mostly buys **fainter detail rather than a visibly
+  cleaner picture**."*
+
+One is reasoning from integration time alone; the other has measured the actual picture. They are the
+opposite claim about the same background, and the measured one is the better answer — which is exactly what
+`grainProjection`'s own module docstring already says, under the heading *"Reconciling with the goal verdict
+rather than contradicting it"*: its clean verdict *"deliberately says more time now buys **faint detail**
+rather than a visibly cleaner background — true, and it agrees with the 'keep going to pull out fainter
+detail' sitting directly above it"*.
+
+**So the reconciliation was written, and then silently broken by a later widening.** The branch it was
+written against is the galaxy/nebula one, which really does say *"would pull out much more faint detail"*.
+The **easy/cluster** branch of the same rung says *"would clean up the background"* — and that branch was
+introduced by v0.429.2 (clusters) and widened by v0.435.5 (every curated-easy target: M42, M31, the Blue
+Snowball, the Cat's Eye) *after* the reconciliation was written, without asking whether the promise it makes
+is the one the card below had already disproved. A half-fix that a forward trace finds and a screenshot does
+not — the same shape as v0.437.5's σ axis.
+
+**The fix changes the reason, never the lever.** `NextBestMoveInput` gains one optional `grainLevel`, taken
+from `cardGrainProjection(runs)?.level` — the level the card below actually prints, so the two cannot form
+different opinions about one picture — and it is read **only** by the `integration` rung's easy/cluster
+branch. Under a quarter of the goal, more time is still the right advice and still buys real faint detail,
+so `kind` is unchanged; a test drives the whole ladder (`locate`/`thin`/`integration`/`good`/silent) across
+every level and asserts the rung that fires is identical with and without the measurement.
+
+**Scoped the way this family is now always scoped.** σ is one estimate over the whole canvas, so on an
+unevenly deep mosaic "already clean" describes most of it — the thin part really does only come down with
+more light, which is what the health note beside it says. So `grain_verdict === "uneven"` gets its own
+sentence keeping *both* claims in the order they pay off: *"…and across most of it the background already
+looks clean — so another pass or two over the same mosaic evens out the thinner part, and elsewhere pulls
+out fainter detail."* Read off the same field the `good` rung reads, so the ladder holds one notion of
+"is this canvas uneven" rather than two.
+
+**Byte-for-byte where the promise is still true:** `"some"`, `"grainy"`, no measurement, a run with no σ, an
+editor-export-only history and an older backend all keep the v0.435.5 wording exactly; and the
+galaxy/nebula branch is untouched in every case, because it already said faint detail.
+
+**Upgrade-safe (§9):** one optional frontend-only input over a field the page already fetches. Nothing
+served, stored or computed changes.
+
+**Tests (+4):** three in `nextBestMove.test.ts` (the clean case; the uneven-mosaic scoping; and the
+byte-for-byte pin across `some`/`grainy`/`null`/`undefined` plus the galaxy branch) and one in
+`Target.test.tsx` pinning the **wiring** — the measured level surviving the run row →
+`cardGrainProjection` → `NextBestMoveBadge` — plus a fourth asserting the rung never moves. Three verified
+red by a scratch revert (`alreadyClean = false`).
+
+
 ## v0.438.0 — 2026-09-13 — "How far you've come": the first picture you ever got of this, beside the one you have now
 
 *(Builder, branch `claude/sweet-babbage-lbjt6j` — ✨ NEW BEGINNER FEATURE (pillar: enjoy + understand,

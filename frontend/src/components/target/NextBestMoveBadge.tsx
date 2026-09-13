@@ -5,6 +5,7 @@ import { IconBulb } from "@tabler/icons-react";
 import { nextBestMove } from "./nextBestMove";
 import type { GoalDifficulty } from "../../readiness";
 import { softerThanUsual } from "./softStars";
+import type { GrainLevel } from "./grainProjection";
 
 /**
  * "💡 To make this even better" — a single calm, plain-language line on the
@@ -33,6 +34,7 @@ export function NextBestMoveBadge(
     objectType,
     difficulty,
     grainVerdict,
+    grainLevel,
   }: {
     name: string;
     nFramesUsed: number | null | undefined;
@@ -60,6 +62,12 @@ export function NextBestMoveBadge(
      * scopes its praise the way the "How's my stack?" panel below it scopes its
      * measurement. Optional — null/absent reads exactly as before. */
     grainVerdict?: string | null;
+    /** The measured grain level of the picture the readiness card beside this
+     * one is describing (`cardGrainProjection(runs)?.level`), so the "add more
+     * time" rung stops promising a cleaner background over a card that has just
+     * measured the background clean. Optional — null/absent reads exactly as
+     * before, and it never changes which rung fires. */
+    grainLevel?: GrainLevel | null;
   },
 ) {
   const tip = useMemo(
@@ -73,9 +81,10 @@ export function NextBestMoveBadge(
         objectType,
         difficulty,
         grainVerdict,
+        grainLevel,
       }),
     [nFramesUsed, integrationS, nUnsolved, runs, fieldFulls, objectType,
-     difficulty, grainVerdict],
+     difficulty, grainVerdict, grainLevel],
   );
   if (!tip) return null;
 

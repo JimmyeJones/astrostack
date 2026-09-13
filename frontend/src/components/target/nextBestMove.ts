@@ -35,6 +35,7 @@ import {
 } from "../../readiness";
 import { objectTypeBucket } from "../../tonight";
 import type { SoftStars } from "./softStars";
+import type { GrainLevel } from "./grainProjection";
 
 // A plate-solve shortfall is worth flagging as the top lever only when it's both
 // a real share of the session AND several subs — a stray unsolved frame or two
@@ -142,9 +143,19 @@ export interface NextBestMoveInput {
    * `seestack.stackhealth.grain_verdict`, already served on every run row. It is
    * `null` by construction on a single field and on an evenly covered mosaic (a
    * single field has no coverage levels to compare), and on an older backend —
-   * all of which keep every phrase below byte-for-byte what it was. Read only by
-   * the `good` rung; see the comment there for why. */
+   * all of which keep every phrase below byte-for-byte what it was. Read by the
+   * `good` rung and — since v0.438.1, to scope the same claim the same way — by
+   * the `integration` rung; see the comments there. */
   grainVerdict?: string | null;
+  /** The *measured* grain of the picture the readiness card on this same page is
+   * describing — `cardGrainProjection(runs)`'s own `level`, so the two cards
+   * cannot come to different opinions about one picture. Only the `integration`
+   * rung reads it, and only to choose which of two true things it offers as the
+   * reason for adding time: a cleaner background (when the picture is not clean
+   * yet) or fainter detail (when it already measures clean). Omit / null — no
+   * finished stack with a measured σ, or an older backend — and every phrase is
+   * byte-for-byte what it was. It never changes the rung that fires. */
+  grainLevel?: GrainLevel | null;
 }
 
 function finite(v: number | null | undefined): number | null {
@@ -289,6 +300,32 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
     const quickly = cluster
       ? "Clusters come up quickly"
       : "This one comes up quickly for a Seestar";
+    // …and the easy/cluster half of that sentence promises a *cleaner
+    // background*, which is the one claim this target's own measured grain can
+    // already have disproved. `grainProjection`'s module docstring says so in
+    // as many words — its clean verdict "deliberately says more time now buys
+    // **faint detail** rather than a visibly cleaner background… it agrees with
+    // the 'keep going to pull out fainter detail' sitting directly above it" —
+    // and that reconciliation was written against the *other* branch, the one
+    // that really does say faint detail. v0.429.2 and v0.435.5 then widened this
+    // easy/cluster branch over the same rung without asking, so on a
+    // curated-easy target measuring clean the two cards sat one inch apart
+    // saying opposite things ("would clean up the background nicely" over "the
+    // background already looks clean… more time from here mostly buys fainter
+    // detail rather than a visibly cleaner picture").
+    //
+    // The lever does not change — under a quarter of the goal, more time is
+    // still the right advice and still buys real faint detail — only the reason
+    // given for it, and only when the picture has actually been measured clean.
+    // Any other level, or no measurement at all, keeps every phrase below
+    // byte-for-byte what it has said since v0.435.5.
+    const alreadyClean = input.grainLevel === "clean";
+    // Scoped the way v0.437.3/v0.437.4 scope the same family: σ is one estimate
+    // over the whole canvas, so on an unevenly deep mosaic "already clean"
+    // describes most of it and the thin part still only comes down with light.
+    // Read from the same field the `good` rung reads, so the ladder holds one
+    // notion of "is this canvas uneven" rather than two.
+    const uneven = input.grainVerdict === "uneven";
     return {
       kind: "integration",
       phrase: mosaic
@@ -296,14 +333,26 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
           `${fieldsOfSkyLabel(input.fieldFulls)}, so each part of this picture ` +
           `has ${soFar}. ` +
           (cluster || curatedEasy
-            ? `${quickly}, so even another pass or two over the ` +
-              `same mosaic would clean up the background.`
+            ? (alreadyClean && uneven
+              ? `${quickly}, and across most of it the background already looks ` +
+                `clean — so another pass or two over the same mosaic evens out ` +
+                `the thinner part, and elsewhere pulls out fainter detail.`
+              : alreadyClean
+                ? `${quickly}, and the background here already looks clean — so ` +
+                  `more passes over the same mosaic now pull out fainter detail ` +
+                  `rather than cleaning it up further.`
+                : `${quickly}, so even another pass or two over the ` +
+                  `same mosaic would clean up the background.`)
             : `Galaxies and nebulae reward hours, so more passes over ` +
               `the same mosaic would pull out much more faint detail.`)
         : `Add more time — ${soFar}. ` +
           (cluster || curatedEasy
-            ? `${quickly}, so even the rest of one clear night on ` +
-              `this target would clean up the background nicely.`
+            ? (alreadyClean
+              ? `${quickly}, and the background here already looks clean — so ` +
+                `more time now pulls out fainter detail rather than cleaning ` +
+                `it up further.`
+              : `${quickly}, so even the rest of one clear night on ` +
+                `this target would clean up the background nicely.`)
             : `Galaxies and nebulae reward hours, so another clear night or two ` +
               `on this target would pull out much more faint detail.`),
     };
