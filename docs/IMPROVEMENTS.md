@@ -76,7 +76,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **"About a 3×3 mosaic (9 panels)" now says what that costs** — `mosaicEffort.mosaicDepthText`
+  on the measured framing verdict and the identity card. Builder 2026-09-13, branch
+  `claude/sweet-babbage-bwinih`.
 
 ---
 

@@ -315,6 +315,68 @@ describe("FramingVerdictNote — the offer tells the truth", () => {
     expect(identify).toHaveBeenCalledWith("M_42");
   });
 
+  it("says what that grid costs, not only how many panels it is", async () => {
+    // The panel count is a shape; whether 9 panels is an evening or a season is
+    // the part that decides it. The planner's own framing badge has priced
+    // exactly this `MosaicPlan` all along — these library screens have no pace
+    // to divide by, so they say it in the hours the readiness card on the same
+    // page is already quoting as this object's goal.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "partial",
+        coverage: 0.15,
+        text: "is bigger than your frame — only about 15% of it is in this "
+          + "picture. Shoot it in mosaic mode to capture all of it.",
+      }));
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M 42", name: "Orion Nebula", type: "nebula", constellation: "Orion",
+      constellation_abbr: "Ori", ra_deg: 83.822, dec_deg: -5.391,
+      matched_by: "name", size_arcmin: 85,
+      mosaic: { cols: 3, rows: 3, panels: 9,
+        text: "About a 3×3 mosaic (9 panels) covers all of it." },
+    });
+    renderNote();
+
+    // 9 panels × the 4 h a nebula's field is worth.
+    expect(await screen.findByTestId("framing-mosaic-cost")).toHaveTextContent(
+      "Giving all 9 panels the depth you'd give one field (~4 h each) is about "
+      + "36 h of shooting.");
+  });
+
+  it("carries the object's own difficulty into the price", async () => {
+    // A curated "easy" verdict halves the per-field goal on the readiness card,
+    // so it has to halve this too — otherwise one page prices one field two ways.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({ level: "partial", coverage: 0.15, text: "is bigger than your frame." }));
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M 42", name: "Orion Nebula", type: "nebula", constellation: "Orion",
+      constellation_abbr: "Ori", ra_deg: 83.822, dec_deg: -5.391,
+      matched_by: "name", size_arcmin: 85,
+      difficulty: { level: "easy", label: "Easy", text: "…", curated: true },
+      mosaic: { cols: 3, rows: 3, panels: 9,
+        text: "About a 3×3 mosaic (9 panels) covers all of it." },
+    });
+    renderNote();
+
+    expect(await screen.findByTestId("framing-mosaic-cost")).toHaveTextContent(
+      "(~2 h each) is about 18 h of shooting.");
+  });
+
+  it("prices nothing on a verdict that has no grid to price", async () => {
+    // No plan, no price — and never an empty line where the catalogue is silent.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({ level: "partial", coverage: 0.4, text: "is bigger than your frame." }));
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M 42", name: "Orion Nebula", type: "nebula", constellation: "Orion",
+      constellation_abbr: "Ori", ra_deg: 83.822, dec_deg: -5.391,
+      matched_by: "name", mosaic: null,
+    });
+    renderNote();
+
+    await screen.findByText(/is bigger than your frame/);
+    expect(screen.queryByTestId("framing-mosaic-cost")).not.toBeInTheDocument();
+  });
+
   it("does not ask for a plan on a verdict a re-point fixes", async () => {
     // `clipped`, `off_centre` and `centred` are fixed by aim, not by panels — and
     // a plan there would be a second, unrelated answer on the same card. It must

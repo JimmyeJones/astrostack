@@ -6,6 +6,7 @@ import { useState } from "react";
 import { api, type DifficultyHint, type FramingHint, type MosaicPlan } from "../api/client";
 import { loadDismissedSig, saveDismissedSig } from "../dismissal";
 import { FieldFillDiagram } from "./FieldFillDiagram";
+import { mosaicDepthText } from "../mosaicEffort";
 
 /** Where a dismissed "use this name?" offer is remembered, per target. The
  *  stored signature is the suggested *name*, following the app's dismissal
@@ -122,6 +123,7 @@ export function ObjectInfoCard(
   if (!d) return null;
   const offered = allowRename ? (d.rename_to || "") : "";
   const suggestion = offered && offered !== dismissed ? offered : "";
+  const mosaicCost = mosaicDepthText(d.mosaic, d.type, d.difficulty);
   return (
     <Paper withBorder p="sm" radius="md" bg="var(--mantine-color-default-hover)">
       <Group gap="sm" wrap="nowrap" align="flex-start">
@@ -161,6 +163,20 @@ export function ObjectInfoCard(
           {d.framing && !hideFraming ? (
             <Text size="sm" c={framingColor(d.framing.level)}>
               {framingWithMosaic(d.name || d.id, d.framing, d.mosaic)}
+            </Text>
+          ) : null}
+          {/* …and what that grid costs, in the same hours the readiness card on
+              this page is already quoting as the object's goal. The panel count
+              answers "how big a mosaic?" and stops there; whether 9 panels is an
+              evening or a season is the part that decides it, and the planner's
+              framing badge has been pricing exactly this `MosaicPlan` all along
+              — it just never reached the library screens, which have no pace to
+              divide by. One dimmed line under the sentence it finishes, inside
+              the card's existing grouping; silent for anything that isn't a
+              real grid or has no vetted type. */}
+          {d.framing && !hideFraming && mosaicCost ? (
+            <Text size="xs" c="dimmed" data-testid="object-mosaic-cost">
+              {mosaicCost}
             </Text>
           ) : null}
           {/* …and the same answer as a picture. "Fits comfortably in a single
