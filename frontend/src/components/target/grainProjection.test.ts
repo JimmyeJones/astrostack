@@ -177,6 +177,46 @@ describe("grainProjection", () => {
     expect(grainProjection([run(HOUR, GRAINY_SIGMA)])?.level).toBe("grainy");
   });
 
+  it("never asks for the light it already has — the lower fence", () => {
+    // (0.0202 / 0.02)² = 1.0206× the light, which rounds to 1.0× at the one
+    // decimal this module quotes, so the extra hours collapse to zero and
+    // `fmtHours` floors that to its own minimum. Before the fence this printed
+    // "About 1× the light in total — roughly 1 min more — would bring it down
+    // to a clean-looking result": a no-op multiple and a rounding artefact, in
+    // the σ band the owner's own deep stacks land in.
+    const p = grainProjection([run(HOUR, 0.0202)]);
+    expect(p?.level).toBe("clean");
+    expect(p?.moreLightFactor).toBeNull();
+    expect(p?.extraHours).toBeNull();
+    expect(p?.sentence).not.toContain("1× the light");
+    expect(p?.sentence).not.toContain("1 min more");
+    expect(p?.sentence).not.toContain("little grain left");
+    expect(p?.sentence).toContain("already looks clean");
+  });
+
+  it("puts that fence exactly where the multiple stops rounding to 1×", () => {
+    // The last σ whose projection asks for nothing…
+    expect(grainProjection([run(HOUR, 0.0204)])?.level).toBe("clean");
+    // …and the first one that asks for something still asks for it, in full.
+    const p = grainProjection([run(HOUR, 0.0205)]);
+    expect(p?.level).toBe("some");
+    expect(p?.moreLightFactor).toBeCloseTo(1.1, 6);
+    expect(p?.sentence).toContain("1.1× the light");
+    expect(p?.sentence).toContain("little grain left");
+  });
+
+  it("scopes the fenced case on an uneven mosaic, like every other clean verdict", () => {
+    // The fence routes these σ into the clean branch, which is the branch that
+    // has to say *where* it measured clean — otherwise this reintroduces the
+    // v0.437.3 contradiction on the pictures the owner actually shoots.
+    const p = grainProjection([
+      { total_exposure_s: HOUR, noise_sigma: 0.0202, grain_verdict: "uneven" },
+    ]);
+    expect(p?.level).toBe("clean");
+    expect(p?.sentence).toContain("across most of it");
+    expect(p?.sentence).toContain("thinner than the rest");
+  });
+
   it("still quotes a big light multiple when the base is short enough to reach", () => {
     // 25× the light off a 20-minute first attempt is one long evening, not a
     // fantasy — the clamp is on the hours, not the multiple, so it must quote.
