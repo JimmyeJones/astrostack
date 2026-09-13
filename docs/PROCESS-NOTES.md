@@ -279,14 +279,25 @@ subset the script happens to collect. It was found by cropping
 top to bottom — worth doing on every pass, because the block the script prints
 is a convenience, not the boundary of the claim.
 
-**LEAD, not built this run (tooling, size S):** the script's "what the app SAYS
-about this mosaic" block collects `mosaicmap` and `stackhealth` only. Adding the
-readiness card's three sentences (`integrationReadiness`, `cardGrainProjection`,
-`nextBestMove`) to it would have put this contradiction in the log rather than
-in a screenshot, and those are the surfaces that have produced four of the last
-five findings. They are frontend-only, so the script would have to read them
-from the rendered page rather than from Python — which is the reason it is a
-lead rather than a line.
+~~**LEAD, not built this run (tooling, size S):** the script's "what the app SAYS
+about this mosaic" block collects `mosaicmap` and `stackhealth` only.~~ —
+**✅ BUILT as v0.437.8** (Builder 2026-09-13), in the place the lead's own last
+sentence points at: the **browser probe**, not the shell script. `PRESCRIPTIVE`
+in `scripts/dogfood_probe.mjs` reads the Target page's prescriptive cards off the
+rendered DOM by `data-testid` and prints them as one block, and
+`tests/test_dogfood_probe_anchors.py` is the drift guard that stops a renamed
+testid silently shortening that paragraph. One thing the lead had not foreseen
+and the build did: `NoticeBoard` keeps every note **mounted and hidden**, so the
+probe can also say which claims are *folded* behind "N more notes" — i.e. what
+the page does **not** say to a reader who never expands it, which is the
+2026-09-13 note's own "check what the page says when the other cards are quiet",
+now answered by the log instead of by a screenshot. Original text:
+*Adding the readiness card's three sentences (`integrationReadiness`,
+`cardGrainProjection`, `nextBestMove`) to it would have put this contradiction in
+the log rather than in a screenshot, and those are the surfaces that have
+produced four of the last five findings. They are frontend-only, so the script
+would have to read them from the rendered page rather than from Python — which is
+the reason it is a lead rather than a line.*
 
 ---
 

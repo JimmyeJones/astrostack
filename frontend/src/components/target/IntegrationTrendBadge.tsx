@@ -95,6 +95,7 @@ export function IntegrationTrendBadge(
       color="orange"
       variant="light"
       icon={<IconChartLine size={18} />}
+      data-testid="integration-trend"
       title={
         // The heading and the footnote are two more claims about this picture,
         // and on a mosaic with an under-shot panel the unscoped forms are the

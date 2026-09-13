@@ -87,7 +87,8 @@ export function NextBestMoveBadge(
       ? `💡 Nice work on ${name}`
       : `💡 To make your ${name} even better`;
   return (
-    <Alert color={color} variant="light" icon={<IconBulb size={18} />} title={title}>
+    <Alert color={color} variant="light" icon={<IconBulb size={18} />} title={title}
+      data-testid="next-best-move">
       <Text size="sm">{tip.phrase}</Text>
       {tip.action ? (
         <Anchor component={Link} to={tip.action.href} size="xs" fw={500}>
