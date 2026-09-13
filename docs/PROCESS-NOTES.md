@@ -144,9 +144,16 @@ measured ones correctly pinned at **1.0**. All correct. **No engine bug found** 
 consistent with the closed state; nothing filed to "Bugs".
 
 **Dogfood (`agent-dogfood.sh --mosaic --editor`), green.** Page heights healthy
-(tallest phone `/tonight` 3617px, nothing over ~3.6k; desktop max ~2.7k),
-"nothing overflowing, no console errors"; the editor drove all 21 ops with the
-live preview re-rendering on each. The `--mosaic` messaging block — the exact
+on *both* the single-field and mosaic probes (tallest phone `/tonight` 3617px,
+mosaic Target page 3509px, mosaic editor 3303px; desktop max ~2.7k), "nothing
+overflowing, no console errors". The **single-field** editor drive completed all
+21 ops (each re-rendered) plus undo/redo — logged "editor drive clean". The
+**mosaic** editor drive rendered 17/21 ops cleanly (Stretch → Crop) and was then
+cut off by my own `timeout 900` (`EXIT=124`; the trailing "Target page … has been
+closed" is the timeout killing the app mid-render, **not** an app error) — two
+full 21-op drives plus two stacks and two probes overran the 15-min cap. Nothing
+failed; the truncation is a tooling budget, and a re-run should raise the timeout
+or pass `--no-probe`. The `--mosaic` messaging block — the exact
 place the last three findings hid (§7) — now reads **consistent** held together:
 the panel map (`thin=False`, "about 30 s behind at the top-right"),
 `grain_uneven` ("~23% has 3 subs where most has 6 → ~1.4× grainier … but it's
