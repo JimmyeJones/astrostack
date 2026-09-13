@@ -22,6 +22,7 @@ from seestack.io.library import Library
 from seestack.io.project import StackRunRow
 from webapp.derived_light import (
     INHERITED_LIGHT_FACTS,
+    stacking_coverage_max,
     with_inherited_light_facts,
 )
 
@@ -36,6 +37,14 @@ class _Row:
     calstat: str | None = None
     transparency_ratio: float | None = None
     noise_sigma: float | None = None
+
+
+@dataclass
+class _CoverageRow:
+    """The two fields :func:`stacking_coverage_max` reads."""
+
+    options_json: str
+    coverage_max: int | None = None
 
 
 def _edit(run_id: int, source_id: int | None, **kw) -> _Row:
@@ -120,6 +129,51 @@ def test_the_inherited_set_is_the_one_the_export_writes():
         f"the export does not carry {set(INHERITED_LIGHT_FACTS) - written}")
 
 
+# --- The one column a re-render is worse than silent about ------------------
+
+def _cov(coverage_max, *, derived_from: int | None = None) -> _CoverageRow:
+    options: dict = ({"editor_recipe": {"ops": []}, "derived_from": derived_from}
+                     if derived_from is not None else {"sigma_clip": True})
+    return _CoverageRow(options_json=json.dumps(options), coverage_max=coverage_max)
+
+
+def test_a_stacks_own_coverage_is_reported_as_measured():
+    assert stacking_coverage_max(_cov(180)) == 180
+
+
+def test_a_re_renders_placeholder_coverage_reads_as_unrecorded():
+    """``_apply_editor_to_run`` writes a literal 1, not a NULL — so without this
+    the blend reads the finished picture as one sub deep at its deepest pixel."""
+    assert stacking_coverage_max(_cov(1, derived_from=7)) == 0
+    # ...and it is the *derivation* that decides, not the value: an export whose
+    # row happens to carry a real-looking number is still not a measurement.
+    assert stacking_coverage_max(_cov(180, derived_from=7)) == 0
+
+
+def test_a_genuine_one_frame_stack_keeps_its_one():
+    """The rule is keyed on the row being a re-render, never on the value —
+    a single-sub stack really is one frame deep, and says so honestly."""
+    assert stacking_coverage_max(_cov(1)) == 1
+
+
+def test_an_unrecorded_coverage_stays_unrecorded():
+    assert stacking_coverage_max(_cov(None)) == 0
+    assert stacking_coverage_max(_cov(0)) == 0
+
+
+def test_the_placeholder_is_what_the_export_writer_actually_records():
+    """Drift guard, the same shape as the inherited-set one above: this rule
+    exists because ``_apply_editor_to_run`` writes a literal 1 rather than
+    leaving the column NULL. If that ever changes, this rule should be re-read
+    rather than silently kept."""
+    import inspect
+
+    from webapp import pipeline
+
+    src = inspect.getsource(pipeline._apply_editor_to_run)
+    assert "coverage_min=1, coverage_max=1," in src
+
+
 # --- The surfaces -----------------------------------------------------------
 
 def _register_pair(data_root, safe: str) -> tuple[int, int]:
@@ -184,8 +238,10 @@ def _register_previewed(
     exposure_s: float | None, derived_from: int | None = None,
 ) -> int:
     """A finished picture — the wall only shows runs whose preview file is on
-    disk. ``derived_from`` makes it an editor export, recorded the pre-v0.438.7
-    way: no integration time of its own."""
+    disk. ``derived_from`` makes it an editor export, recorded exactly the way
+    ``_apply_editor_to_run`` records one on a pre-v0.438.7 install: no
+    integration time of its own, and ``coverage_min``/``coverage_max`` at the
+    placeholder **1** a re-render writes rather than a real stacking depth."""
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -199,7 +255,8 @@ def _register_previewed(
                 id=None, timestamp_utc=timestamp, output_basename=basename,
                 fits_path=None, tiff_path=None, preview_path=str(preview),
                 n_frames_used=180, canvas_h=320, canvas_w=480,
-                coverage_min=1, coverage_max=180,
+                coverage_min=1,
+                coverage_max=1 if derived_from is not None else 180,
                 options_json=json.dumps(options),
                 total_exposure_s=exposure_s,
             ))
@@ -237,3 +294,34 @@ def test_the_wall_ranks_a_finished_picture_on_the_light_it_holds(
     # ...and the five-hour picture now outranks the ten-minute one, which it did
     # not while its integration read as unknown.
     assert items[0]["safe"] == edited
+
+
+def test_the_wall_does_not_rank_a_finished_picture_down_for_never_stacking(
+    client, solved_library,
+):
+    """The other half of the same row, and the one that is *worse* than silent.
+
+    An export's ``coverage_max`` is not NULL, it is a placeholder **1** — so the
+    blend, which is built to renormalise over the metrics an entry carries, had
+    one present and reading "a single sub deep at the deepest pixel". Here the
+    edited picture is the best in the collection on every metric it actually
+    carries (most integration, same subs per pixel, grain unmeasured), against a
+    rival stack that is identical but 10 % less exposed. It should score a clean
+    1.0 and lead; before the fix the placeholder dragged it to 0.867 and the
+    rival's 0.947 went first.
+    """
+    targets = client.get("/api/targets").json()
+    edited, rival = targets[0]["safe_name"], targets[1]["safe_name"]
+    src = _register_previewed(solved_library, edited, basename="deepstack",
+                              timestamp="2026-05-02T00:00:00Z", exposure_s=18000.0)
+    edit_id = _register_previewed(
+        solved_library, edited, basename="deepstack_edit",
+        timestamp="2026-09-13T10:00:00Z", exposure_s=None, derived_from=src)
+    _register_previewed(solved_library, rival, basename="nearly",
+                        timestamp="2026-05-02T00:00:00Z", exposure_s=16200.0)
+
+    items = client.get("/api/gallery/best").json()["items"]
+    assert items[0]["safe"] == edited
+    assert items[0]["run_id"] == edit_id
+    # Best on everything it carries → the top of the scale, not 0.867 of it.
+    assert items[0]["score"] == 1.0
