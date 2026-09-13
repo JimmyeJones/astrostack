@@ -1,5 +1,84 @@
 # Shipped — the record
 
+## v0.438.4 — 2026-09-13 — the combine-method chip stops promising protection the pass only has at depth
+
+*(Builder, branch `claude/sweet-babbage-2zjges` — 🟠 BUG (trust, PRIORITY 3–4, the v0.422.1 rejection-floor
+family, one surface further out than that fix reached). Found by reading `RejectionBadge`'s tooltips against
+`lone_outlier_min_depth` after the v0.438.3 chip fix put me in the same badge row; verified red by a scratch
+revert. Frontend-only, copy plus one pure helper: no endpoint, config, schema, on-disk, API-shape or default
+change, no threshold moved, and no label changes.)*
+
+**The sentences, as they were.** The violet combine-method chip on **History**, **Gallery** and **Compare**
+carried three tooltips, and each promised protection with no mention of the depth it needs:
+
+> *"Combined by dropping the single highest and lowest value at each pixel before averaging — removes a lone
+> satellite / plane trail on small stacks where κ-σ can't."*
+>
+> *"Combined with κ-σ rejection: at each pixel, values beyond κ standard deviations of the mean are rejected
+> before averaging."*
+>
+> *"Combined with drizzle (with κ-σ outlier rejection): sub-pixel resampling onto a finer grid, rejecting
+> satellites, planes and cosmic rays."*
+
+**v0.422.1 established that none of those is unconditionally true, and fixed the surfaces that make a
+*verdict*.** Every rejection pass has a per-pixel sample depth below which it removes nothing:
+`MinMaxRejectAccumulator` falls through to a plain mean of whatever covered the pixel below three samples
+(verified on the accumulator itself — a pixel covered twice by 10 and 1000 comes out **505**; covered three
+times, **10**); a κ·σ clip tests each sample against statistics that still contain it, so it is blind to a
+*lone* trail until `kappa_min_frames` samples land on one pixel (**11** at the default κ=3); and drizzle's
+two-pass clip is the same κ·σ test with the same κ, measured on a real drizzle stack in
+`tests/test_drizzle_reject.py`. `lone_outlier_min_depth` is the one definition behind all three. The surfaces
+it was written to keep in step — `rejection_reach` on the Stack form, `stackhealth`'s `rejection_blind` note
+on the finished picture, and the `REJNEED`/`REJREACH` cards in the master's own header — all answer correctly.
+
+**This chip is not one of those, and that is the whole design decision.** It renders in a **list**, from the
+run's stored `options` alone. The run's actual verdict (`rejection.reaches`) is read off the **master FITS
+header**, in the per-run "About this stack" panel — so it is not available where the chip draws without a
+file read per item, which is exactly the cost `/api/gallery` is designed not to pay. And estimating the depth
+from `n_frames_used / field_fulls` would have been worse than saying nothing: that is a **mean** over the
+canvas where `REJREACH` is measured on the **peak** pixel, so the chip and the info panel one click away on
+the same card could have disagreed about one run — the failure this whole family exists to remove.
+
+**So the chip states the method's *rule*, not a verdict about the run.** A rule is true of every run, needs no
+data, and can never contradict the header's own answer:
+
+* **min/max** keeps its guarantee verbatim and gains its precondition — *"It needs 3 subs on a pixel to have
+  that many to spare; anywhere fewer overlap — a mosaic panel still part-shot — those samples are averaged in
+  as they are."* The figure scales with a top/bottom-k trim as **2k+1**, the number the Stack form's own copy
+  already uses (`samplesPerPixel.ts`), so `min-max ×3` says 7.
+* **κ-σ** and **drizzle-with-rejection** share one sentence, because they share one bound — *"A lone trail is
+  tested against statistics that still include it, so it only stands out far enough to be clipped once about
+  11 subs overlap on one pixel — on a mosaic that's the subs on one panel, not the total."*
+* A **drizzle run with its clip off** is untouched: there is no pass whose reach to describe, and its existing
+  sentence already says no rejection ran.
+
+**It names the run's own κ, not the default's.** New `frontend/src/kappaMinFrames.ts` is the hand mirror of
+`seestack.stack.stacker.kappa_min_frames` — the frontend has been quoting "11 at the default κ=3" in prose
+comments in four files without ever being able to *compute* it, so a stack clipped at κ=1.5 (which needs 4)
+would have been told 11. An unreadable κ falls back to the app default exactly as
+`stackhealth._run_sigma_kappa` does and for its stated reason, matching the label beside it, which has always
+printed `κ3` for a run with no stored κ.
+
+**Why the owner:** he drizzles mosaics. `stackhealth`'s own comment calls that "exactly the owner's case
+(mosaic panels are thin, and the owner drizzles)" — a run that stamps `REJMODE = drizzle-reject` with
+`REJFRAC 0.0` while the trail is still in the picture. Gallery and Compare are where he picks between two
+pictures, and this chip is the only thing on those rows that says anything about rejection at all.
+
+**Upgrade-safe (§9):** tooltip text and one pure function. No call site changed, no new prop, no new request,
+no run data read that was not already being read. Every label is byte-for-byte what it was, so the Gallery's
+combine-method **filter facet** (`combineMethodKey`, untouched) and every test that pins a label pass
+unchanged.
+
+**Tests (+9, eight verified red by a scratch revert of the three copy additions and the mirror's formula):**
+`RejectionBadge.test.tsx` +5 (the min/max precondition beside its kept guarantee; the 2k+1 scaling at k=2 and
+k=3; the run's own κ bound at κ=3, κ=1.5 and with no stored κ; drizzle's clip getting κ-σ's bound; a
+drizzle-without-clip run saying nothing about reach; and every sentence that names a count saying it is per
+panel). `kappaMinFrames.test.ts` +4 (the whole shared table, the default's 11, the three-sample floor, and
+declining rather than guessing on an unreadable κ). `tests/test_kappa_min_frames_mirror.py` is the drift guard
+in the `test_reject_pct_mirror.py` idiom — one shared `kappaMinFrames.cases.json` read from both languages,
+plus a check that the table straddles the default (so a mirror ignoring κ entirely could not pass) and that
+the TS floor literal is still the engine's `MIN_MAX_MIN_FRAMES`.
+
 ## v0.438.3 — 2026-09-13 — the panel chip says which of the two things it measured on the chip, not only on hover
 
 *(Builder, branch `claude/sweet-babbage-2zjges` — 🟠 BUG (trust + friendliness, PRIORITY 3, the
