@@ -724,6 +724,20 @@ the repo.
 > no failed request, then undoes and redoes. A few minutes on top of a normal
 > pass, which is why it is a flag rather than the default.
 >
+> **The probe now prints that paragraph for you — read "what the Target page
+> SAYS"** *(added 2026-09-13 with v0.437.8)*. The shell block above is the
+> **server-side** half (the panel map and the health notes, straight off the
+> API); the cards that actually produced four of the last five findings —
+> the readiness goal, the grain projection, "to make this even better", the
+> plateau verdict — are computed in the **frontend**, so nothing in Python could
+> print them and every one had to be cropped out of a screenshot afterwards.
+> `dogfood_probe.mjs` reads them off the rendered page and prints them together,
+> **each tagged `inline` or `FOLDED behind "more notes"`**. Read the folded ones
+> too: `NoticeBoard` shows two notes and hides the rest, so what the page says
+> and what a reader sees without clicking are different questions — and the
+> second one is where the "what does this page say when the other cards are
+> quiet?" failures live.
+>
 > **Follow it with `scripts/agent-dogfood.sh --empty`** (≈1 min once playwright is
 > installed): the same probe against an app with **no data at all**. Every
 > measurement this script took before 2026-09-07 was of the *sample-loaded* app, so

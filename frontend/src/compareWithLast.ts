@@ -48,3 +48,41 @@ export function pickCompareWithLast(
   if (usable.length < 2) return null;
   return { newest: usable[0], previous: usable[1] };
 }
+
+/**
+ * "How far you've come" — this target's **first-ever** picture beside its
+ * **latest**.
+ *
+ * A different question from :func:`pickCompareWithLast`, on the same machinery.
+ * "Did another two nights help?" is about the last increment and answers itself
+ * in small steps; *"look how much better you've got at this"* is the one that
+ * actually motivates a beginner, and it is invisible from a version list — the
+ * first picture is at the bottom of History, which is the page they never open.
+ *
+ * Exactly the same honesty rules as the pair above, deliberately reusing the one
+ * filter rather than restating it: both sides must have a picture, and both must
+ * be genuine stacks rather than editor exports (see there for why).
+ *
+ * **Which run is "first" is decided by the list's order, not by a capture date** —
+ * `listStackRuns` is `ORDER BY timestamp_utc DESC`, so the last survivor is the
+ * earliest *stack*. That is the same choice `pickCompareWithLast` makes one
+ * function up, and it is the right one here: a re-stack of a back catalogue is a
+ * new run carrying old capture nights, and "the first picture I ever got out of
+ * this object" is about when the picture existed. The *labels* on the link still
+ * come from `pictureDateLabel`, i.e. from when the subs were shot — the rule the
+ * 2026-08-30 date sweep settled ("a run's own timestamp is right for *which run
+ * is newest* and wrong as the caption on a picture").
+ *
+ * `null` whenever there is nothing to show: fewer than two comparable runs, or a
+ * first that *is* the newest.
+ */
+export function pickFirstVsNow(
+  runs: StackRun[] | undefined | null,
+): { newest: StackRun; first: StackRun } | null {
+  const pair = pickCompareWithLast(runs);
+  if (!pair) return null;
+  const usable = (runs ?? []).filter((r) => r.has_preview && r.reusable !== false);
+  const first = usable[usable.length - 1];
+  if (first.id === pair.newest.id) return null;
+  return { newest: pair.newest, first };
+}

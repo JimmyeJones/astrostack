@@ -370,6 +370,84 @@ describe("nextBestMove", () => {
       );
     });
 
+    it("stops promising a cleaner background over a card that measured it clean", () => {
+      // The contradiction, on one page, one inch apart, both cards inline —
+      // found by the v0.437.8 dogfood probe's prescriptive-claims block on the
+      // bundled M42 sample: this rung said "even the rest of one clear night on
+      // this target would clean up the background nicely" while the readiness
+      // card's grain projection said "the background already looks clean at
+      // 1 min (grain 0.001). More time from here mostly buys fainter detail
+      // rather than a visibly cleaner picture."
+      const tip = nextBestMove({
+        nFramesUsed: 20, integrationS: 10 * 60, objectType: "Open Cluster",
+        grainLevel: "clean",
+      });
+      // The lever is unchanged — under a quarter of the goal, more time is
+      // still the advice, and it still buys real faint detail.
+      expect(tip?.kind).toBe("integration");
+      expect(tip?.phrase).toContain("Add more time");
+      expect(tip?.phrase).not.toContain("clean up the background");
+      expect(tip?.phrase).toContain("already looks clean");
+      expect(tip?.phrase).toContain("fainter detail");
+    });
+
+    it("scopes that to most of an unevenly deep mosaic, and still points at the thin part", () => {
+      // Same family as v0.437.3/v0.437.4: sigma is one estimate over the whole
+      // canvas, so "already clean" describes the part that got the most subs.
+      // The thin part really does only come down with more light — which is
+      // what the health note beside it says — so the sentence keeps both.
+      const tip = nextBestMove({
+        nFramesUsed: 24, integrationS: 40 * 60, objectType: "Open Cluster",
+        fieldFulls: 4, grainLevel: "clean", grainVerdict: "uneven",
+      });
+      expect(tip?.kind).toBe("integration");
+      expect(tip?.phrase).toContain("across most of it the background already looks clean");
+      expect(tip?.phrase).toContain("evens out the thinner part");
+      expect(tip?.phrase).toContain("fainter detail");
+      expect(tip?.phrase).not.toContain("would clean up the background");
+    });
+
+    it("keeps the cleaner-background promise wherever it is still true", () => {
+      // Not clean yet, or never measured, or an older backend: the sentence is
+      // byte-for-byte what v0.435.5 shipped. And the galaxy/nebula branch is
+      // untouched in every case — it already said "faint detail".
+      for (const grainLevel of ["some", "grainy", null, undefined] as const) {
+        const tip = nextBestMove({
+          nFramesUsed: 20, integrationS: 10 * 60, objectType: "Open Cluster",
+          grainLevel,
+        });
+        expect(tip?.phrase).toBe(
+          "Add more time — 10 min so far. Clusters come up quickly, so even " +
+            "the rest of one clear night on this target would clean up the " +
+            "background nicely.",
+        );
+      }
+      const galaxy = nextBestMove({
+        nFramesUsed: 150, integrationS: 1.2 * HOUR, objectType: "Galaxy",
+        grainLevel: "clean",
+      });
+      expect(galaxy?.phrase.toLowerCase()).toContain("galaxies and nebulae");
+      expect(galaxy?.phrase.toLowerCase()).toContain("faint detail");
+    });
+
+    it("never lets the measured grain change which rung fires", () => {
+      // It chooses between two true reasons for one lever; it must not silence
+      // or promote anything. Checked across the whole ladder.
+      const cases = [
+        { nFramesUsed: 3, integrationS: 60, nUnsolved: 9 },                 // locate
+        { nFramesUsed: 2, integrationS: 60 },                               // thin
+        { nFramesUsed: 20, integrationS: 10 * 60 },                         // integration
+        { nFramesUsed: 60, integrationS: 50 * 60, objectType: "Open Cluster" }, // good
+        { nFramesUsed: 300, integrationS: 10 * HOUR },                      // silent
+      ];
+      for (const base of cases) {
+        for (const grainLevel of ["clean", "some", "grainy", null] as const) {
+          expect(nextBestMove({ ...base, grainLevel })?.kind ?? null)
+            .toBe(nextBestMove(base)?.kind ?? null);
+        }
+      }
+    });
+
     it("stops nagging a cluster that the readiness card calls nearly there", () => {
       // 50 min on an open cluster: goal 1.5 h → ratio 0.56, i.e. "solid" on the
       // readiness card. Fails before: the ladder said "add more time — another

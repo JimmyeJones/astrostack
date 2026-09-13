@@ -527,6 +527,14 @@ export function TargetView() {
     () => thinStackWarning(latestRun?.n_frames_used, latestRun?.field_fulls),
     [latestRun],
   );
+  // "Is more time worth it?" — the same question again, but answered from the
+  // *measured* grain of this target's own deepest genuine stack instead of a
+  // per-object-type time goal. It supersedes the goal-independent √N line below
+  // it once a real stack exists (that line reads integration time alone and
+  // would just say a weaker version of the same thing), and stays null until
+  // then, so a target with no stack sees exactly what it saw before.
+  const grain = useMemo(() => cardGrainProjection(runs.data), [runs.data]);
+
   // Which "next best move" tip is currently in play (or null when none) — the
   // plateau verdict defers to it so the two never contradict ("add more time"
   // vs "more time won't help"). Mirrors NextBestMoveBadge's own inputs.
@@ -540,12 +548,13 @@ export function TargetView() {
         fieldFulls: latestRun?.field_fulls,
         objectType: identity.data?.type,
         difficulty: identity.data?.difficulty,
-        // Passed only so this stays a faithful mirror of the badge's inputs: the
-        // verdict changes the `good` rung's *wording*, never its kind, so the
+        // Passed only so this stays a faithful mirror of the badge's inputs:
+        // both of these change a rung's *wording*, never its kind, so the
         // plateau badge's deference is unaffected either way.
         grainVerdict: latestRun?.grain_verdict,
+        grainLevel: grain?.level,
       })?.kind ?? null,
-    [latestRun, unsolvedCount, runs.data, identity.data],
+    [latestRun, unsolvedCount, runs.data, identity.data, grain],
   );
   // When walk-away Auto-stack is on, it now holds a target back rather than
   // publishing a 1-2 frame single-frame-speckle "master" (see auto_stack_min_frames
@@ -808,14 +817,6 @@ export function TargetView() {
         : null,
     [readiness, nights.data],
   );
-
-  // "Is more time worth it?" — the same question again, but answered from the
-  // *measured* grain of this target's own deepest genuine stack instead of a
-  // per-object-type time goal. It supersedes the goal-independent √N line below
-  // it once a real stack exists (that line reads integration time alone and
-  // would just say a weaker version of the same thing), and stays null until
-  // then, so a target with no stack sees exactly what it saw before.
-  const grain = useMemo(() => cardGrainProjection(runs.data), [runs.data]);
 
   // Frames QC couldn't read at all (corrupt/truncated FITS): make them visible —
   // they're skipped when stacking but invisible in the reject breakdown. A full
@@ -1141,6 +1142,7 @@ export function TargetView() {
               color={thinStack.level === "single" ? "orange" : "yellow"}
               variant="light"
               icon={<IconAlertTriangle size={18} />}
+              data-testid="thin-stack-warning"
               title={thinStack.level === "single"
                 ? "This stack is really just one frame"
                 : "Very few frames were combined"}
@@ -1188,6 +1190,10 @@ export function TargetView() {
               objectType={identity.data?.type}
               difficulty={identity.data?.difficulty}
               grainVerdict={latestRun.grain_verdict}
+              /* The measured grain the readiness card below is describing, so
+                 the "add more time" rung cannot promise a cleaner background
+                 over a card that has just measured the background clean. */
+              grainLevel={grain?.level}
             />
           ) : null },
           /* "About as clean as your sky allows": when this target's measured noise
@@ -1456,7 +1462,11 @@ export function TargetView() {
         </Grid.Col>
         {readiness ? (
           <Grid.Col span={{ base: 12, md: 5 }}>
-            <Paper withBorder p="sm" radius="md">
+            {/* `data-testid` here is not for the unit tests — it is the handle
+                `scripts/dogfood_probe.mjs` reads this card's sentences through,
+                so a dogfood pass logs what the page *prescribes* instead of
+                leaving it to be found in a screenshot. See `PRESCRIPTIVE` there. */}
+            <Paper withBorder p="sm" radius="md" data-testid="readiness-card">
               <Group gap="sm" wrap="nowrap" align="flex-start">
                 <IconTargetArrow size={22} style={{ flexShrink: 0, marginTop: 2 }}
                   color={`var(--mantine-color-${readinessColor(readiness.level)}-5)`} />
@@ -1830,12 +1840,15 @@ export function TargetView() {
           ) },
           { key: "story", label: "Story", node: (
             <>
-              {/* "Did it get better?" — one link into the run-vs-run A/B page
+              {/* "Did it get better?" — two links into the run-vs-run A/B page
                   that has existed since v0.150 and that a beginner who never
-                  opens History never discovers. It joins this group rather than
-                  adding another always-on control, and self-hides on the same
-                  condition the reel below it does: fewer than two comparable
-                  pictures, nothing to say. */}
+                  opens History never discovers: the newest picture against the
+                  one before it, and (from three pictures on) the newest against
+                  the *first ever*, which is the comparison that actually shows
+                  how far they've come. They join this group rather than adding
+                  another always-on control, and self-hide on the same condition
+                  the reel below it does: fewer than two comparable pictures,
+                  nothing to say. */}
               <CompareWithLastCard safe={safe} runs={runs.data} />
               {/* "Night after night" — the same target getting deeper across
                   re-stacks (self-hides until there are ≥2 stacks to compare). */}

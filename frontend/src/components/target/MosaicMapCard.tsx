@@ -63,7 +63,7 @@ export function MosaicMapCard({ safe }: { safe: string }) {
   };
 
   return (
-    <Paper withBorder p="sm" radius="md" mt="xs">
+    <Paper withBorder p="sm" radius="md" mt="xs" data-testid="mosaic-map-card">
       <Group gap="sm" wrap="nowrap" align="flex-start">
         <ThemeIcon size={22} radius="xl" variant="light" color="indigo"
           style={{ flexShrink: 0, marginTop: 2 }}>
