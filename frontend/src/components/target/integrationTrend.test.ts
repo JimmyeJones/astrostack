@@ -3,6 +3,7 @@ import {
   integrationTrend,
   MIN_TIME_RATIO,
 } from "./integrationTrend";
+import { cardGrainProjection } from "./grainProjection";
 
 // Minimal run shape: the helper only reads integration time + measured noise σ.
 const run = (t_s: number | null, sigma: number | null) => ({
@@ -132,6 +133,100 @@ describe("integrationTrend", () => {
         expect(scaled?.hoursNow).toBeCloseTo(plain?.hoursNow as number, 10);
         expect(scaled?.sentence).toBe(plain?.sentence);
       }
+    });
+
+    describe("a plateau on a mosaic with one thinner panel", () => {
+      // The fit's σ is one estimate over the whole canvas, so on an unevenly
+      // deep mosaic a plateau describes the part that got the most subs. Said of
+      // the picture, "more subs won't help it much" is the flat opposite of the
+      // "How's my stack?" panel's own note about the same canvas ("grain only
+      // comes down with more light — so another night on that panel is what
+      // evens it out"), and this is the one place nothing counterbalances it:
+      // `cardGrainProjection` goes silent on a plateau and the card goes on to
+      // name a different target to point at instead.
+      const uneven = (t_s: number, sigma: number, ff: number) => ({
+        total_exposure_s: t_s, noise_sigma: sigma, field_fulls: ff,
+        grain_verdict: "uneven",
+      });
+
+      it("scopes the verdict and keeps the thin part's lever", () => {
+        // Fails before: the sentence was the unscoped "this target looks
+        // sky-limited from here, so more subs won't help it much".
+        const t = integrationTrend([
+          uneven(2 * HOUR, 0.030, 4), uneven(8 * HOUR, 0.030, 4),
+        ]);
+        expect(t?.level).toBe("plateaued");
+        expect(t?.unevenDepth).toBe(true);
+        expect(t?.sentence).toContain("Across the deepest part of this picture");
+        expect(t?.sentence).toContain("thinner than the rest");
+        // It must still say the thin part responds to light — the health note's
+        // own claim — and must not tell the owner more subs won't help at all.
+        expect(t?.sentence).toContain("comes down with more light");
+        expect(t?.sentence).not.toContain("more subs won't help it much");
+        // …and the two levers survive, in order rather than instead.
+        expect(t?.sentence).toContain("another pass over it");
+        expect(t?.sentence).toContain("After that, a darker sky or a brighter target");
+        // The measurement is untouched: same hours, same exponent as the even
+        // mosaic of identical depth.
+        const even = integrationTrend([
+          mosaicRun(2 * HOUR, 0.030, 4), mosaicRun(8 * HOUR, 0.030, 4),
+        ]);
+        expect(t?.hoursNow).toBeCloseTo(even?.hoursNow as number, 10);
+        expect(t?.exponent).toBeCloseTo(even?.exponent as number, 10);
+        expect(t?.percentCutIfDoubled).toBe(even?.percentCutIfDoubled);
+      });
+
+      it("reads the verdict off the deepest run, not off any run", () => {
+        // The sentence is about the deepest picture, so an *older*, shallower run
+        // that happened to be uneven must not scope a verdict about a canvas that
+        // has since evened out — and vice versa.
+        const deepEvenly = integrationTrend([
+          uneven(2 * HOUR, 0.030, 4), mosaicRun(8 * HOUR, 0.030, 4),
+        ]);
+        expect(deepEvenly?.level).toBe("plateaued");
+        expect(deepEvenly?.unevenDepth).toBe(false);
+        expect(deepEvenly?.sentence).toContain("more subs won't help it much");
+      });
+
+      it("leaves every other verdict and every other value alone", () => {
+        // Only the plateau branch reads it: an improving or slowing mosaic
+        // already prescribes more time, so its wording is unchanged…
+        // 4x the light: σ 0.015 is the ideal √t ("improving"), σ 0.0212 is
+        // exponent ≈ 0.25 ("slowing").
+        for (const sigma of [0.015, 0.0212]) {
+          const a = integrationTrend([
+            uneven(2 * HOUR, 0.030, 4), uneven(8 * HOUR, sigma, 4),
+          ]);
+          const b = integrationTrend([
+            mosaicRun(2 * HOUR, 0.030, 4), mosaicRun(8 * HOUR, sigma, 4),
+          ]);
+          expect(a?.level).not.toBe("plateaued");
+          expect(a?.sentence).toBe(b?.sentence);
+        }
+        // …and so is every shape of "no verdict", including a measured one that
+        // is not "uneven" (a flat/checked seam says nothing about depth).
+        const base = integrationTrend([
+          mosaicRun(2 * HOUR, 0.030, 4), mosaicRun(8 * HOUR, 0.030, 4),
+        ]);
+        for (const v of [null, undefined, "", "flat", "check"]) {
+          expect(integrationTrend([
+            { total_exposure_s: 2 * HOUR, noise_sigma: 0.030, field_fulls: 4,
+              grain_verdict: v },
+            { total_exposure_s: 8 * HOUR, noise_sigma: 0.030, field_fulls: 4,
+              grain_verdict: v },
+          ])).toEqual(base);
+        }
+      });
+
+      it("still lets cardGrainProjection defer to the plateau", () => {
+        // The two cards' division of labour is gated on the *level*, which none
+        // of this touches — so the projection still stands aside here, and the
+        // scoped sentence is genuinely the only thing counterbalancing the
+        // health note rather than a second opinion beside a third.
+        const runs = [uneven(2 * HOUR, 0.030, 4), uneven(8 * HOUR, 0.030, 4)];
+        expect(integrationTrend(runs)?.level).toBe("plateaued");
+        expect(cardGrainProjection(runs)).toBeNull();
+      });
     });
 
     it("picks the deepest run by depth, and still names that run's total", () => {
