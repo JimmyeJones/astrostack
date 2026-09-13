@@ -18,6 +18,52 @@ is a queue.
 
 ---
 
+## 2026-09-13 (Builder, branch `claude/sweet-babbage-vt87e3`) — the listings axis opened, and a CLEAN `--mosaic` dogfood
+
+**Baseline.** `main` at `ec117fbd`, green (6,001 passed / 2 skipped, 563 s with the BLAS cap + `-n 4`).
+It did not move all run — no collision; `0.438.15` and `0.438.16` were free at merge time.
+
+**The previous run's closing sentence was the whole task list.** Its lead ended: *"Every download control
+has now been read on some axis; what the sweep has never been run against is the **listings** — a card's
+copy vs the row behind it."* Two findings came out of the first Gallery card read, and both are the same
+shape on two different layers — a **chip** and a **row** — which is worth carrying forward as the axis's own
+rule: **a listing renders from the stored *request*, while every surface that makes a verdict renders from
+the recorded *result*** (a header card, a measured column). So the listings are exactly where a request the
+engine declined, or overrode, survives as a claim about the picture. Both were stated as contradictions
+against a sibling surface the app already gets right, not against my own reading: History's run-info panel
+said the weighting had been thrown away while the Gallery chip said "Quality-weighted", and the run's own
+`/info` provenance reported 18 frames gain-matched under a settings row reading "Off".
+
+**Running the app was what sized the second one.** `scripts/agent-dogfood.sh --mosaic` boots a real install,
+and one `curl` of its `/api/gallery` showed **both** bundled samples — the single field *and* the mosaic,
+i.e. the demo path a beginner takes — carrying `quality_weighted: true` **and** `min_max_reject: true`. That
+turned "reachable in principle" into "firing on the app's own front door" in about a minute. The mosaic
+sample's stored `photometric_normalize: false` against its own `PHOTNORM` provenance came from the same two
+requests. Worth repeating: when a finding is about what a *row* says, ask the running app for the row.
+
+**Dogfood: CLEAN** (`scripts/agent-dogfood.sh --mosaic`, with an observing site). Both samples probed at
+1440 px and 420 px: nothing overflowing, no console errors. Auto would trim **7.9 %** of the mosaic canvas
+(§1's bug line is ~15 %). The app's own sentences were read as one paragraph on both targets per AGENTS.md
+§7 and they hold together — the mosaic's next-best-move, readiness card, panel map and framing verdict all
+speak in the same units ("4 min spread across about 4 fields of sky, so each part has 1 min"; goal ~7.3 h;
+"across most of it the background already looks clean … another pass or two over the same mosaic evens out
+the thinner part"). Tallest phone page `/tonight` 3,617 px, the mosaic Target page 3,550 px.
+
+**A testing constraint worth not rediscovering: Mantine's `Spoiler` never opens under jsdom.** Every element
+measures 0 px there, so with `maxHeight={0}` it decides there is nothing to hide and renders **no control** —
+`getByText("Stacking settings")` finds nothing, and four card tests written through the UI timed out at 20 s
+each before the cause was obvious. The fix was to export the row builder (`Gallery.settingRows`) and test it
+pure, which is the arrangement the rest of that file already uses; the note is in the function's docstring so
+the next run doesn't spend the same twenty minutes.
+
+**And a mirror guard that reads the engine rather than a second copy of the list.**
+`tests/test_mosaic_auto_passes_mirror.py` regexes `stacker.py`'s own source for `options.X or
+is_mosaic_canvas` and compares the captured set to the TypeScript constant. The existing mirrors
+(`fullres.ts`, `weightingHint.ts`) pin a *number* against a Python constant; this one pins a *set of keys*
+against the gates themselves, so a third automatic-for-mosaic pass — which would be added by someone with
+no reason to open a TypeScript file — goes red. Same idea is available anywhere the frontend annotates
+behaviour the engine decides.
+
 ## 2026-09-13 (Builder, branch `claude/sweet-babbage-ls3t8z`) — a measured LEAD taken, and a CLEAN `--mosaic --editor` dogfood
 
 **Baseline.** `main` at `2e26afdf`, and it did not move all run — no collision, `0.438.13` and `0.438.14`
