@@ -2354,6 +2354,14 @@ export interface BestPicture {
   // target.
   object_type?: string;
   blurb?: string;
+  /** How many single-frame field-fulls of sky this picture's canvas covers
+   *  (`webapp/field_fulls.py`) — the same per-run figure the Gallery card and
+   *  the History listing carry. `total_exposure_s` and `n_frames_used` above are
+   *  the *target's* totals; on a mosaic they are spread across the raster, so a
+   *  caption quoting them describes the sum of the picture rather than the part
+   *  on the wall. Absent / null / ≤1 on a single field and on an older backend,
+   *  which reads as "no scaling" — exactly today's wording. */
+  field_fulls?: number | null;
 }
 
 export interface UnexportedEditItem {

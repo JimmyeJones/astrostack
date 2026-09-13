@@ -13,6 +13,7 @@ def _register_preview_run(
     data_root, safe: str, *, basename: str,
     n_frames: int, exposure_s: float | None, noise_sigma: float | None,
     coverage_max: int, timestamp: str = "2026-05-02T00:00:00Z",
+    canvas_w: int = 480, canvas_h: int = 320,
 ) -> int:
     """Register a finished stack whose preview file actually exists on disk (the
     ``/best`` wall only shows runs with a rendered picture)."""
@@ -27,7 +28,8 @@ def _register_preview_run(
                 id=None, timestamp_utc=timestamp,
                 output_basename=basename, fits_path=None, tiff_path=None,
                 preview_path=str(preview), n_frames_used=n_frames,
-                canvas_h=320, canvas_w=480, coverage_min=1, coverage_max=coverage_max,
+                canvas_h=canvas_h, canvas_w=canvas_w,
+                coverage_min=1, coverage_max=coverage_max,
                 options_json=json.dumps({"sigma_clip": True}),
                 total_exposure_s=exposure_s, noise_sigma=noise_sigma,
             ))
@@ -335,3 +337,49 @@ def test_best_still_ranks_a_target_the_catalog_has_never_heard_of(
     items = client.get("/api/gallery/best").json()["items"]
     assert len(items) == 2
     assert all(i["object_type"] == "" and i["blurb"] == "" for i in items)
+
+
+# ---------------------------------------------------------------------------
+# Per-pixel reading — the wall ranks the picture, not the target
+# ---------------------------------------------------------------------------
+
+
+def test_best_carries_each_picture_s_field_fulls(client, solved_library):
+    """The wall's rows carry the same per-run scale the Gallery card and the
+    History listing already do, so the caption can say which number is which."""
+    targets = client.get("/api/targets").json()
+    single, mosaic = targets[0]["safe_name"], targets[1]["safe_name"]
+    _register_preview_run(solved_library, single, basename="field",
+                          n_frames=100, exposure_s=3000, noise_sigma=0.04,
+                          coverage_max=100)
+    _register_preview_run(solved_library, mosaic, basename="raster",
+                          n_frames=400, exposure_s=12000, noise_sigma=0.04,
+                          coverage_max=400, canvas_w=960, canvas_h=640)
+
+    by_safe = {it["safe"]: it for it in client.get("/api/gallery/best").json()["items"]}
+    # The fixture's subs are 480x320, so a 480x320 canvas is one field of sky and
+    # a 960x640 one is four.
+    assert by_safe[single]["field_fulls"] == 1.0
+    assert by_safe[mosaic]["field_fulls"] == 4.0
+
+
+def test_best_ranks_a_thin_raster_below_a_genuinely_deep_picture(
+    client, solved_library,
+):
+    """End to end, through the endpoint that builds the entries: a 2x2 raster
+    with four times the subs and four times the integration is the *same* depth
+    as the single field beside it, not four times the picture. It used to take
+    every data axis outright on its totals alone."""
+    targets = client.get("/api/targets").json()
+    single, mosaic = targets[0]["safe_name"], targets[1]["safe_name"]
+    _register_preview_run(solved_library, single, basename="field",
+                          n_frames=100, exposure_s=3000, noise_sigma=0.03,
+                          coverage_max=100)
+    _register_preview_run(solved_library, mosaic, basename="raster",
+                          n_frames=400, exposure_s=12000, noise_sigma=0.05,
+                          coverage_max=400, canvas_w=960, canvas_h=640)
+
+    items = client.get("/api/gallery/best").json()["items"]
+    assert [it["safe"] for it in items] == [single, mosaic]
+    by_safe = {it["safe"]: it for it in items}
+    assert by_safe[single]["score"] > by_safe[mosaic]["score"]
