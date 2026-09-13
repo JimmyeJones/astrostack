@@ -257,8 +257,12 @@ describe("EditorView", () => {
     mockEditorQueries();
     vi.spyOn(client.api, "printSizes").mockResolvedValue({
       sizes: [],
+      // Verbatim `print_advice([])`, which is what the endpoint actually sends
+      // here. The mock used to carry the sentence that function was changed to
+      // stop saying — "another night or two of subs will get it there" — which
+      // left a copy of the untruth sitting in the suite as if it were real.
       advice: "This picture doesn't have enough detail for a sharp print yet — "
-        + "another night or two of subs will get it there.",
+        + "it needs more pixels, not more exposure.",
     });
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
