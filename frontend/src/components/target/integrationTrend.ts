@@ -22,6 +22,14 @@
  * total would call a growing mosaic sky-limited (see `perPixelSeconds`). A
  * single-field target is unaffected — there the two figures are the same number.
  *
+ * The σ it fits is one estimate over each run's **whole** canvas, though, so a
+ * *plateau* read off a mosaic whose panels are unevenly deep is a statement about
+ * the part that got the most subs — and the unscoped prescription ("more subs
+ * won't help it much") is then the flat opposite of the "How's my stack?" panel's
+ * "grain only comes down with more light" about the same picture. The plateau
+ * branch therefore reads the deepest run's own `grain_verdict` and scopes itself;
+ * see it for the full reasoning. Nothing else consults it and no threshold moves.
+ *
  * Fail-safe: returns `null` (say nothing) unless there are at least two stacks
  * that both measured a noise σ *and* span a real integration increase — below
  * that there simply isn't enough signal to judge the trend honestly. A single
@@ -56,6 +64,11 @@ export interface IntegrationTrend {
   exponent: number;
   /** Honest % noise reduction expected from doubling integration time. */
   percentCutIfDoubled: number;
+  /** True when the deepest run's canvas holds a part shot thinner than the rest
+   * (its own `grain_verdict`) — so a card's *heading* and any "point somewhere
+   * else" footnote can carry the same scope `sentence` already does. False on a
+   * single field, an even mosaic, and an older backend. */
+  unevenDepth: boolean;
   /** Plain-language one-liner for the card. */
   sentence: string;
 }
@@ -68,6 +81,14 @@ interface RunLike {
    * 2×2 mosaic. Read here so the trend is fitted against per-pixel integration
    * rather than the target's total — see `perPixelSeconds`. */
   field_fulls?: number | null;
+  /** `"uneven"` when a substantial part of *this run's* canvas was shot with
+   * fewer subs than the rest and measures grainier for it — the backend's own
+   * `seestack.stackhealth.grain_verdict`, already served on every run row. Read
+   * off the deepest run, the one the verdict is about; see the plateau sentence
+   * for why it has to be read at all. `null`/absent on a single field, on an
+   * evenly covered mosaic, and on an older backend, all of which keep today's
+   * wording. */
+  grain_verdict?: string | null;
 }
 
 /** The integration a *pixel* of this run's canvas actually received, in seconds.
@@ -130,6 +151,12 @@ export function integrationTrend(
       // a 12-hour mosaic would be arithmetic nobody could reconcile.
       totalT: r.total_exposure_s as number,
       sigma: r.noise_sigma as number,
+      // Whether *this* run's canvas holds a part that was shot thinner than the
+      // rest. Carried per point, not per target: the plateau sentence is about
+      // the deepest run's picture, so it must read that run's own evenness or
+      // the two halves of one sentence describe two pictures — the same reason
+      // `grainProjection` reads it off the run it took σ from.
+      uneven: r.grain_verdict === "uneven",
     }));
   if (points.length < 2) return null;
 
@@ -173,6 +200,38 @@ export function integrationTrend(
       `steep part of the curve at ${now}. More subs still help a little (about ` +
       `${percentCutIfDoubled}% cleaner if you double your time), but the big gains ` +
       `are behind you.`;
+  } else if (deep.uneven) {
+    // The fit is honest and its prescription was not, on exactly the pictures
+    // the owner shoots. `noise_sigma` is one estimate over the **whole** canvas
+    // (`stacker._compute_noise_sigma`), so on a mosaic whose panels are unevenly
+    // deep it is dominated by the part that got the most subs — which means a
+    // plateau read off it is a statement about *that* part. Told as a statement
+    // about the picture, "more subs won't help it much" is the flat opposite of
+    // what the "How's my stack?" panel on the same page says about the same
+    // canvas: *"about 23 % of the picture has 3 subs where most of it has 6 …
+    // That isn't something processing can fix — grain only comes down with more
+    // light — so another night on that panel is what evens it out."* And this is
+    // the worst place in the app for that pair, because it is the one case where
+    // nothing counterbalances it: `cardGrainProjection` deliberately goes silent
+    // on a plateau, `nextBestMove` is silent once the mean depth clears its deep
+    // bar, and this card then goes on to name a *different* target to point at
+    // instead — actively steering a heavy mosaic user away from a raster with an
+    // under-shot panel in it.
+    //
+    // So the measurement, the hours and the exponent all stay exactly as they
+    // were, and the sentence says what they are about and gives the two levers
+    // in the order they pay off. `grain_verdict` is the health note's own
+    // verdict, read off the same run, so the two cannot come to different
+    // opinions about one picture — and it is null on a single field and on an
+    // even mosaic, which is why no other verdict here changes.
+    sentence =
+      `Across the deepest part of this picture your noise has stopped dropping ` +
+      `even as you added time (${now} in) — that part looks sky-limited, so ` +
+      `more subs won't do much for it. One part of this mosaic is thinner than ` +
+      `the rest, though, and that part still comes down with more light, so ` +
+      `another pass over it is the thing left worth shooting here. After that, ` +
+      `a darker sky or a brighter target will do more than extra time on this ` +
+      `one.`;
   } else {
     sentence =
       `Your noise has stopped dropping even as you added time (${now} in) — this ` +
@@ -180,5 +239,8 @@ export function integrationTrend(
       `darker sky or a brighter target will do more than extra time on this one.`;
   }
 
-  return { level, hoursNow, exponent, percentCutIfDoubled, sentence };
+  return {
+    level, hoursNow, exponent, percentCutIfDoubled,
+    unevenDepth: deep.uneven, sentence,
+  };
 }

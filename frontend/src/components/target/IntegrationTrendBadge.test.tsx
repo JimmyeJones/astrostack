@@ -51,8 +51,20 @@ function response(over: Partial<SuggestResponse> = {}): SuggestResponse {
   };
 }
 
+// The same plateau, on a mosaic that still holds a panel shot thinner than the
+// rest — the run's own `grain_verdict`, which is what the "How's my stack?" panel
+// reads to say "grain only comes down with more light" about that part.
+const PLATEAUED_UNEVEN = PLATEAUED.map((r) => ({
+  ...r, field_fulls: 4, grain_verdict: "uneven",
+}));
+
 function renderBadge(props: {
-  runs?: { total_exposure_s?: number | null; noise_sigma?: number | null }[] | null;
+  runs?: {
+    total_exposure_s?: number | null;
+    noise_sigma?: number | null;
+    field_fulls?: number | null;
+    grain_verdict?: string | null;
+  }[] | null;
   coachKind?: NextBestMoveKind | null;
 }) {
   return render(
@@ -73,6 +85,28 @@ describe("IntegrationTrendBadge", () => {
     renderBadge({ runs: PLATEAUED });
     expect(screen.getByText(/About as clean as your sky allows/)).toBeInTheDocument();
     expect(screen.getByText(/sky-limited/)).toBeInTheDocument();
+  });
+
+  it("scopes its heading on a mosaic that still has a thinner panel", () => {
+    // Fails before: the heading claimed the whole picture was "about as clean as
+    // your sky allows" over a canvas the health panel calls 1.4x grainier across
+    // a quarter of its area.
+    renderBadge({ runs: PLATEAUED_UNEVEN });
+    expect(screen.getByText(/Most of this is as clean as your sky allows/))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/^📉 About as clean as your sky allows$/)).toBeNull();
+    expect(screen.getByText(/thinner than the rest/)).toBeInTheDocument();
+  });
+
+  it("puts the fresh target after the pass still worth shooting here", async () => {
+    // Fails before: "Try <other target> on your next clear night" landed directly
+    // under a sentence naming the pass this mosaic still needs.
+    vi.spyOn(client.api, "suggestTargets").mockResolvedValue(response());
+    renderBadge({ runs: PLATEAUED_UNEVEN });
+    expect(await screen.findByText(/After that, try/)).toBeInTheDocument();
+    // …and the even-mosaic wording is untouched.
+    renderBadge({ runs: PLATEAUED });
+    expect(await screen.findByText(/^Try/)).toBeInTheDocument();
   });
 
   it("is suppressed while the coaching is nudging to add more time (integration)", () => {

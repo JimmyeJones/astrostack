@@ -32,6 +32,7 @@ export function NextBestMoveBadge(
     fieldFulls,
     objectType,
     difficulty,
+    grainVerdict,
   }: {
     name: string;
     nFramesUsed: number | null | undefined;
@@ -54,6 +55,11 @@ export function NextBestMoveBadge(
      * sharpens that same per-type goal. Optional — omitted reads exactly as
      * before. */
     difficulty?: GoalDifficulty;
+    /** The run's own `grain_verdict` ("uneven" when a substantial part of its
+     * canvas is thinner and grainier than the rest), so the well-done note
+     * scopes its praise the way the "How's my stack?" panel below it scopes its
+     * measurement. Optional — null/absent reads exactly as before. */
+    grainVerdict?: string | null;
   },
 ) {
   const tip = useMemo(
@@ -66,9 +72,10 @@ export function NextBestMoveBadge(
         fieldFulls,
         objectType,
         difficulty,
+        grainVerdict,
       }),
     [nFramesUsed, integrationS, nUnsolved, runs, fieldFulls, objectType,
-     difficulty],
+     difficulty, grainVerdict],
   );
   if (!tip) return null;
 

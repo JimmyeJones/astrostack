@@ -56,7 +56,15 @@ export function IntegrationTrendBadge(
     runs,
     coachKind,
   }: {
-    runs?: { total_exposure_s?: number | null; noise_sigma?: number | null }[] | null;
+    runs?: {
+      total_exposure_s?: number | null;
+      noise_sigma?: number | null;
+      field_fulls?: number | null;
+      /** Spelled out here rather than left to structural typing: the verdict is
+       * what scopes the sentence, the heading and the footnote below, so a
+       * caller must not be able to type it away by accident. */
+      grain_verdict?: string | null;
+    }[] | null;
     /** The kind of tip `NextBestMoveBadge` is currently showing (or null when it
      * is hidden), so the plateau verdict can defer to an add-time nudge. */
     coachKind?: NextBestMoveKind | null;
@@ -87,12 +95,24 @@ export function IntegrationTrendBadge(
       color="orange"
       variant="light"
       icon={<IconChartLine size={18} />}
-      title="📉 About as clean as your sky allows"
+      title={
+        // The heading and the footnote are two more claims about this picture,
+        // and on a mosaic with an under-shot panel the unscoped forms are the
+        // same substitution the sentence itself now avoids: "about as clean as
+        // your sky allows" over a canvas a quarter of which the health panel
+        // calls 1.4x grainier, and "try <something else> on your next clear
+        // night" over a sentence that has just named the pass still worth
+        // shooting here. Both keep the whole claim and add the order.
+        trend.unevenDepth
+          ? "📉 Most of this is as clean as your sky allows"
+          : "📉 About as clean as your sky allows"
+      }
     >
       <Text size="sm">{trend.sentence}</Text>
       {pick ? (
         <Text size="sm" mt={8}>
-          Try <Text span fw={600}>{suggestionHeading(pick)}</Text> on your next clear
+          {trend.unevenDepth ? "After that, try " : "Try "}
+          <Text span fw={600}>{suggestionHeading(pick)}</Text> on your next clear
           night — {describeSuggestion(pick)}{" "}
           <Anchor component={Link} to="/tonight">See what else is up →</Anchor>
         </Text>
