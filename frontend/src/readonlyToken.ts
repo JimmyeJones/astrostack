@@ -20,6 +20,7 @@ export const readonlyAllowedReads = [
   "jobs",
   "stats",
   "the target list",
+  "how far behind your imports are",
 ] as const;
 
 /** What the token is for, and — the half that matters — what it can't do. */

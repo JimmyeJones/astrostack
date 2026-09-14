@@ -796,6 +796,22 @@ the repo.
 > can only reach by clicking is a view no route table will ever probe**, so when
 > you add one, add it here too.
 >
+> **And the drop folder itself has never held a file while a browser was
+> looking — `--incoming-lag`** *(added 2026-09-14 with v0.442.0)*. The scratch
+> install's `incoming/` is **empty on every pass**, because the sample arrives
+> through `POST /api/sample`, which writes straight into the library. So every
+> surface that reads that folder is structurally invisible to this tooling — the
+> same hole as the missing observing site and the click-only Compare modes, a
+> third time. `--incoming-lag` writes a few subs there with the app's own sample
+> writer, dates them eleven days ago, and stretches the watcher's quiet period so
+> the batch is not imported mid-pass; it then prints what `/api/incoming-lag`
+> answers. **It is a flag and the default pass stays healthy on purpose**: an
+> observing site is data a real install *has*, whereas unimported subs are a
+> **fault**, and seeding one by default would put a warning banner into every
+> Dashboard screenshot and every page-height baseline — making "CLEAN" mean less
+> rather than more. Run it on any run that touches ingest, the watcher, or the
+> Dashboard's notice board.
+>
 > **Follow it with `scripts/agent-dogfood.sh --empty`** (≈1 min once playwright is
 > installed): the same probe against an app with **no data at all**. Every
 > measurement this script took before 2026-09-07 was of the *sample-loaded* app, so

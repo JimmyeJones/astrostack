@@ -1,5 +1,163 @@
 # Shipped — the record
 
+## v0.442.1 — 2026-09-14 — the drop folder has never held a file while a browser was looking
+
+*(Builder, branch `claude/sweet-babbage-49wpsd` — 🔧 INFRA (maintainability in service of not missing bugs),
+filed and taken in the same run as the feature that proves it. Tooling and AGENTS.md only: nothing in the
+app, the image or the shipped behaviour changes.)*
+
+**The scratch install's `incoming/` is empty on every dogfood pass ever recorded.** The sample arrives
+through `POST /api/sample`, which writes straight into the library, so the drop folder this whole app is
+built around has never held a file while a browser was looking — and *anything* that reads it is therefore
+structurally invisible to the tooling, v0.442.0's "N subs haven't been imported yet" note first. That is
+the missing-observing-site hole (v0.436.1) and the click-only Split/Blink modes (v0.440.2) a third time,
+and the lesson AGENTS.md §7 keeps re-learning: **a state you can only reach by putting the app into it is a
+state no route table will ever photograph.**
+
+`scripts/agent-dogfood.sh --incoming-lag` writes a few subs into the scratch `incoming/` with the app's own
+`webapp.sample_data._write_sample_fits` (so they are the same shape as everything else the install holds),
+dates them **eleven days ago** — the observer's own measurement, and comfortably past the note's
+"has this folder stopped moving?" rule — and stretches the watcher's quiet period so the batch is not handed
+off and imported mid-pass. It then prints what `/api/incoming-lag` answers, the way the observing-site step
+prints `location_source`, because a pass that silently seeded nothing would look exactly like the hole it
+closes.
+
+**A flag, not the default, and the line is the point.** An observing site is data a real install *has*, so a
+pass without one was measuring an unrepresentative app — which is why that one went on by default. Eleven-day-old
+unimported subs are a **fault**. Seeding one by default would put a warning banner into every Dashboard
+screenshot and every page-height baseline, and make "CLEAN" mean less rather than more. Measured on the real
+thing: with the flag the phone Dashboard goes **2,570 → 2,886 px** and the note is in the shot; the pass is
+otherwise identical and still clean.
+
+`-h/--help` also stops truncating: it printed a hard-coded `1,80p`, which silently cut the header every time
+it grew, and it now prints the header block by finding its end.
+
+**Tests +4** (`tests/test_dogfood_lag_anchors.py`) — the same `*_anchors` guard shape as the probe's, because
+the script reaches into the app by *name*: the flag is parsed and still defaults off and is still in the
+usage header; `_write_sample_fits` still exists and still takes `path`/`index`/`star_shift`;
+`/api/incoming-lag` is still a registered route; and the seeded age is still past `LAG_MIN_AGE_S`, so a
+future edit cannot quietly seed subs too fresh for the note to speak about — which would read as a clean
+Dashboard, the exact false negative the flag exists to remove.
+
+## v0.442.0 — 2026-09-14 — the subs that never reached the library, and nothing said so
+
+*(Builder, branch `claude/sweet-babbage-49wpsd` — PRIORITY 2–3 (autonomy + friendliness), the Scout's
+🌟 NEW BEGINNER FEATURE entry filed the same morning from observer issue
+[#883](https://github.com/JimmyeJones/astrostack/issues/883). Additive: one new endpoint, one new Dashboard
+note, one new pure engine function. No config, schema, on-disk, API-shape or default change.)*
+
+**A frame that was never imported has no QC row, no reject reason and nowhere in the record it can be *seen*
+to be absent.** So a library can quietly stop growing while every screen looks perfectly healthy — which is
+exactly what the on-NAS observer measured: **2,259 subs across two full nights sat in `incoming/` for eleven
+days, in no `frames` table anywhere**, and the app surfaced no sign of it.
+
+**Why `jobqueue.import_waiting` (v0.441.1) does not already cover it.** That one fires when a `pipeline` job
+is **queued** and has waited past `IMPORT_WAIT_MIN_HOURS`. That is how the stall happened that time, and it
+is now visible — but it is one of several shapes. A watcher poll that walked a folder during a job that then
+died, a scan-side error swallowed before a row is written, a classification skip: each leaves **nothing
+queued**, so the queue note has nothing to look at. The only signal that catches every shape is the direct
+one — files under `incoming/` that no target has a frame row for — and that is what shipped.
+
+**The cost objection the entry raised is answered by not paying it.** The entry proposed a 60 s roll-up cache
+over a glob-and-diff, because the owner's `incoming/` holds ~57,000 `.fit` across 104 folders and walking it
+on every Dashboard load is out. It turns out **nothing has to walk it at all**: `Watcher.poll_once`
+(`webapp/watcher.py`) already `find_fits_files`-es the whole tree and `stat`s every file, every poll, because
+that is how the stability gate works. So the listing is a **by-product**, not a new cost — the poll now groups
+what it already holds into the units a scan would build (`Watcher._record_incoming_units`, kept in memory,
+never written anywhere) and `Watcher.incoming_units()` hands it over. The library side is
+`Project.source_folders_under(prefix)`, one grouped `COUNT` per target off an existing index — the same read
+`/api/upload-destinations` makes on a page a beginner opens. **Nothing under `incoming/` is walked, opened or
+`stat`ed a second time** (AGENTS.md §10).
+
+**One definition, not a second copy of the rules.** New pure
+`seestack/io/scanner.py::plan_incoming_units(root, files)` derives the scan's *plan* — which folder becomes
+which target, and which folders are deliberately passed over — from a path listing alone, by calling
+`_apply_seestar_convention` itself. So the note cannot name a folder the scanner skips on purpose (a
+Seestar's own `<T>/` output beside its raw subs, `*_video`/`*_photo` captures, `batch_stack_tmp`) and cannot
+miss one it would take, including a whole-device container expanded into its children.
+`test_the_plan_names_the_same_targets_the_scan_builds` runs the plan **and a real `scan_and_organize`** over
+one tree holding every shape the convention rules on and asserts the same targets with the same counts.
+
+**Three rules that make it under-report rather than cry wolf** (`webapp/incominglag.py`, pure — mappings in,
+dataclasses out, the clock passed in):
+1. Only folders a scan would ingest count, per the plan above.
+2. A folder speaks only once its newest file has stopped moving for `LAG_MIN_AGE_S` (2 h — deliberately the
+   same number as `jobqueue.IMPORT_WAIT_MIN_HOURS`, since the two notes describe one delay from opposite
+   ends). A night still arriving over SMB is *supposed* to be ahead of the library. An unknown mtime is
+   treated as "too early to judge" for the same reason.
+3. Registered frames roll up **by path component**, so a target whose subs sit deeper than its unit folder
+   still counts against it, a sibling merely sharing a prefix (`M 42_sub2`) does not, and a folder registered
+   under two targets — issue #878's mosaic double-registration — can only ever make the waiting count
+   *smaller*, floored at zero.
+
+**"Nobody has looked" is kept distinct from "nothing is waiting".** A stale snapshot would name folders that
+have since been imported, so with no listing newer than `SNAPSHOT_MAX_AGE_S` (1 h) the response is
+`checked: false` and every number is zero. A missing `incoming/` clears the listing rather than emptying it —
+a folder that cannot be found has its own note, and answering "all clear" from a poll that could not look
+would be a claim the app cannot make. A grouping failure is swallowed and logged: the watcher's job is to get
+frames *in*, and a report that broke the import would be strictly worse than no report.
+
+**What the owner sees** (`IncomingLagNote`, inside the Dashboard's existing `NoticeBoard` at the `warning`
+rung just below `StuckImportNote` — not a new always-on banner, per the standing IA priority):
+*"2,259 subs in your incoming folder haven't been imported yet — … and they have been there for 11 days.
+Nothing is lost — your subs are safe exactly where they are, and AstroStack never writes to that folder. It
+normally imports new files by itself within a few minutes, so this usually means an import is still waiting
+its turn behind another job."* Reassurance before the offer, deliberately: the folder in question holds the
+owner's **only copy** of those frames. Self-hiding at zero (every healthy install, and every install on its
+first render before a poll has run), dismissable by signature so importing some and leaving others makes it
+speak again, and a failed read renders nothing rather than an error — an older backend has no such endpoint.
+The only action is the ordinary **Scan incoming**, the same thing the watcher would do on its next poll;
+there is nothing to repair, only something to retry. Deliberately **no** link to a list of incoming folders,
+because no screen in the app enumerates them.
+
+`GET /api/incoming-lag` is also the one path added to `_READONLY_GET_PATHS` this run: the observer's own gap
+is that a frame which never reached the library cannot be seen to be absent from the record it reads, and
+this is the endpoint that answers it. Added one path at a time, as that list's comment requires — and
+`tests/test_readonly_paths_mirror.py` duly went red until the Settings screen said so too, which is the
+mirror v0.441.0 shipped doing its job: the screen now names *"how far behind your imports are"* beside the
+other five, because a wrong list there is a promise about a secret.
+
+**Tests +24** — 7 `tests/test_incoming_plan.py` (plan≡scan on a mixed tree; the four convention skips absent;
+container expansion; the parent-scoped sibling rule; recursive newest-mtime; junk in the listing ignored),
+9 `tests/test_incoming_lag.py` (the observer's own numbers; fully-imported silence; the age rule at its
+boundary; unknown mtime; deeper-folder roll-up; the prefix-sibling trap; the `Unsorted` root unit; the #878
+over-count floored; stable ordering), 8 `tests/webapp/test_incoming_lag.py` (end-to-end on the real fixture
+library, including the stale-snapshot and missing-folder declines and a poll that survives a grouping crash),
+plus 8 vitest and one line added to the read-only auth allow-list test. **Nine of them fail before**, verified
+by reverting the convention call and the age rule in a scratch edit and watching them go red.
+
+  - **🌟 NEW BEGINNER FEATURE (Scout 2026-09-14, grounded in observer issue
+    [#883](https://github.com/JimmyeJones/astrostack/issues/883)) — "N subs are in your incoming folder but
+    not in your library yet" — the self-reporting count the observer explicitly asked for.** *(Pillar: get +
+    autonomy/trust — PRIORITY 2–3; size L overall, but the first slice is M. Beginner bar: clears it — a
+    non-expert whose whole setup is "shoot and the library catches up" gets told, in plain language, when it
+    hasn't.)* **The gap this fills, and why v0.441.1 does not fill it:** v0.441.1's `import_waiting`
+    (`webapp/jobqueue.py`) only fires when a `pipeline` job is actually **queued** and has waited > 2 h. But
+    the observer's real box shows the broader failure — 2,259 subs from two nights on disk and in **no**
+    `frames` table — and the queue is only *one* of the ways that happens. The others (`#883` lists them: the
+    watcher never re-offering a folder walked during a job that later died; a scan-side error swallowed before
+    a row is written; a classification skip like `#880`'s mosaic-output gap) leave **nothing queued**, so
+    `import_waiting` stays silent. The only signal that catches all of them is the direct one: files under
+    `incoming/` that no target has a frame row for. The failure is silent by construction — a frame never
+    registered has no QC row, no reject reason, and nowhere in the record it can be *seen* to be absent — so
+    the owner keeps shooting targets whose stacks quietly stop improving. **Beginner-facing shape:** a
+    self-hiding Dashboard note beside the existing `NoticeBoard` (inside the grouping, per the IA priority —
+    NOT a new always-on banner): *"About 2,259 new subs are in your incoming folder that aren't in your
+    library yet — from your last 2 observing nights. Nothing is lost; your subs are safe. AstroStack usually
+    imports these automatically — [Scan incoming now]."* **Hard constraints (§10, non-negotiable):** the count
+    is a **read-only** walk of `incoming/` — the scanner already globs it read-only; reuse that path, never
+    add a write. And it must be **cost-bounded**: the owner's `incoming/` holds 57,035 `.fit` across 104
+    folders, so a full glob-and-diff on every Dashboard load is out. **First slice (M, the safe one):** put it
+    behind the existing `/api/library-progress`-style 60 s roll-up cache (or an explicit "check" button, the
+    pattern v0.402-era storage checks used), compare a cheap **per-folder file count** against each target's
+    registered `source_path` count rather than hashing every path, and report at folder granularity
+    (*"IC 360_sub: 617 of 2,572 not imported yet"*). **Care:** dedupe against `#878` (a folder registered in
+    two targets must not read as double-imported), and treat `library_meta.unvouched_skipped_folders` and the
+    Seestar on-device-output skip (`#880`) as *deliberately* held back, not as lag — otherwise the note cries
+    wolf on the 95 `Stacked_*` strays the observer already accounts for. Additive, read-only, self-hiding at
+    zero; no config/schema/on-disk/default change. This is the observer's own fourth suggested check, and it
+    is the one surface that would have made his eleven-day stall self-reporting from day one.
+
 ## v0.441.2 — 2026-09-14 — the crop that 614 runs record as "no crop"
 
 *(Builder, branch `claude/sweet-babbage-f0hdap` — PRIORITY 4 (image quality / trust), from observer issue
