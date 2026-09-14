@@ -34,6 +34,7 @@ _PATH_WORDS = {
     "/api/jobs": "jobs",
     "/api/stats": "stats",
     "/api/targets": "the target list",
+    "/api/incoming-lag": "how far behind your imports are",
 }
 
 

@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from seestack.io.ingest import find_fits_files
+from seestack.io.scanner import PlannedUnit, plan_incoming_units
 
 log = logging.getLogger(__name__)
 
@@ -138,10 +139,32 @@ class Watcher:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._observer = None  # watchdog observer, if available
+        # The last poll's reading of `incoming/`, as the units a scan would
+        # build from it (see `incoming_units`). Recorded here because this poll
+        # is the only thing in the app that already holds that listing.
+        self._incoming_units: list[PlannedUnit] | None = None
+        self._incoming_polled_at: float = 0.0
         s = get_settings()
         self._tracker = StabilityTracker(
             getattr(s, "watch_quiet_period_s", 30), time_fn=self._time
         )
+
+    def incoming_units(self) -> tuple[list[PlannedUnit], float]:
+        """``(units, polled_at)`` from the most recent poll — the folders under
+        ``incoming/`` and how many FITS each holds, grouped the way a scan would.
+
+        ``polled_at`` is ``0.0`` when no poll has recorded a listing yet (the app
+        has just started, the watcher is switched off, or ``incoming/`` does not
+        exist), and a caller must treat that as *no answer* rather than as an
+        empty folder — see :data:`webapp.incominglag.SNAPSHOT_MAX_AGE_S`.
+
+        This exists so "are there subs down there that never reached the
+        library?" can be answered without a second walk of ``incoming/``: the
+        poll stats every FITS under it anyway, so the grouping is a by-product,
+        not a new cost. Read-only, like everything else that touches that tree
+        (AGENTS.md §10).
+        """
+        return (list(self._incoming_units or []), self._incoming_polled_at)
 
     @staticmethod
     def _default_stat(path: Path) -> tuple[int, float] | None:
@@ -208,18 +231,44 @@ class Watcher:
             self._wake.wait(timeout=interval)
             self._wake.clear()
 
+    def _record_incoming_units(
+        self, incoming: Path, snapshot: dict[str, tuple[int, float]],
+    ) -> None:
+        """Keep this poll's reading of ``incoming/`` for :meth:`incoming_units`.
+
+        Grouping a listing the poll already built costs one pass over paths it
+        already holds, and nothing is opened or re-stat'ed. Failure here must
+        never cost a poll — the watcher's job is to get frames in, and this is a
+        note about frames that did not — so any error leaves the previous reading
+        in place and is logged once.
+        """
+        try:
+            units = plan_incoming_units(
+                incoming, {path: st[1] for path, st in snapshot.items()})
+        except Exception:  # noqa: BLE001 — a report must never break the import
+            log.exception("could not group the incoming listing")
+            return
+        self._incoming_units = units
+        self._incoming_polled_at = self._time()
+
     def poll_once(self) -> set[str]:
         """One poll. Returns newly stable paths and fires the batch callback."""
         s = self._get_settings()
         self._tracker.quiet_period_s = getattr(s, "watch_quiet_period_s", 30)
         incoming = Path(s.resolved_incoming_dir)
         if not incoming.exists():
+            # No listing rather than an empty one: a folder that cannot be found
+            # is a different problem, with its own note, and answering "nothing
+            # is waiting" from it would be a claim this poll cannot make.
+            self._incoming_units = None
+            self._incoming_polled_at = 0.0
             return set()
         snapshot: dict[str, tuple[int, float]] = {}
         for p in find_fits_files(incoming):
             st = self._stat(p)
             if st is not None:
                 snapshot[str(p)] = st
+        self._record_incoming_units(incoming, snapshot)
         newly_stable = self._tracker.update(snapshot)
         if newly_stable:
             log.info("%d new file(s) stable in %s", len(newly_stable), incoming)
