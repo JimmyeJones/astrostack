@@ -195,7 +195,22 @@ def test_fullres_export_keeps_nan_coverage_on_a_no_stretch_recipe(tmp_path):
     assert np.isnan(np.asarray(out2)[:12, :12, :]).all()
 
 
-def _wait_job(client, job_id, timeout=30.0):
+# A *liveness* bound, not an assertion about the app: every claim this module
+# makes is checked after the wait returns, and a job that never finishes still
+# fails here — just later. 30.0 was the lowest budget of the fourteen
+# `_wait_job` helpers in `tests/webapp` (every other module sits at 60–180), and
+# this one waits on the heaviest jobs of the lot: the editor's *print* export
+# renders the picture onto a whole sheet of paper (A3 at 300 dpi is ~3500×4960
+# px, from a 3000×2000 master). Measured on a 4-core box:
+# `test_export_print_is_fitted_to_the_paper_and_carries_its_dpi` takes **6.3 s**
+# alone and **11.1 s** under six busy CPUs — but it timed out under the suite's
+# own `-n 4` (AGENTS.md §7), where the other three workers are stacking, so the
+# real margin was under 3×. Raised to the 120.0 the two sibling *export* modules
+# already use (`test_editor_export_carries_the_light.py`,
+# `test_pictures_archive.py`), so this module is no longer the outlier.
+# **Do not tidy it back down**: a red suite from a starved worker reads exactly
+# like a red `main`, which §2 makes the next run's first task.
+def _wait_job(client, job_id, timeout=120.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         j = client.get(f"/api/jobs/{job_id}").json()

@@ -64,7 +64,9 @@ import { FrameColumnGuide } from "../components/target/FrameColumnGuide";
 import { FRAME_COLUMNS, type SortKey } from "../components/target/frameColumns";
 import { cardGrainProjection } from "../components/target/grainProjection";
 import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadge";
-import { nextBestMove } from "../components/target/nextBestMove";
+import {
+  nextBestMove, readinessCanvasScope,
+} from "../components/target/nextBestMove";
 import { fieldsOfSkyLabel } from "../components/target/perPixel";
 import { softerThanUsual } from "../components/target/softStars";
 import { detectMixedPointings } from "../components/target/mixedPointings";
@@ -801,9 +803,16 @@ export function TargetView() {
             // same units about one question: "it usually looks good in well
             // under an hour" over a goal of six.
             identity.data?.difficulty,
+            // …and the canvas the goal is pricing, on the one screen that has
+            // measured it. Without it this card answers "how much more do I
+            // need?" with a figure for the single field the coaching card an
+            // inch above has just told the owner to stop shooting. Null on
+            // every verdict but a measured fragment, so the sentence is
+            // unchanged on an ordinary target.
+            readinessCanvasScope(measuredFraming),
           )
         : null,
-    [target.data, identity.data, goal.data],
+    [target.data, identity.data, goal.data, measuredFraming],
   );
 
   // "…and how much longer will that take me?" — the question the readiness
