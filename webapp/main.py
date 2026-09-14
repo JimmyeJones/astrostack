@@ -169,6 +169,19 @@ def create_app() -> FastAPI:
 # healthcheck must keep working, and the browser needs the 401 challenge itself.
 _AUTH_OPEN_PATHS = frozenset({"/api/health"})
 
+# Paths the optional **read-only token** may GET (see `webapp/auth.py`). These are
+# deliberately NOT in `_AUTH_OPEN_PATHS`: they still require a credential — this
+# is a narrower credential, not an open door. Opening them to the whole LAN would
+# be a strictly worse trade than the problem the token solves.
+#
+# Exact paths, not prefixes, and only the diagnostics an observer needs: the list
+# is the *whole* privilege, so it should be readable in one glance and grown
+# deliberately (additively, one path at a time) rather than by a prefix that
+# quietly gains whatever GET route is added under it next.
+_READONLY_GET_PATHS = frozenset({
+    "/api/health", "/api/logs", "/api/stats", "/api/jobs", "/api/targets",
+})
+
 
 def _install_auth_gate(app: FastAPI) -> None:
     from starlette.responses import JSONResponse
@@ -180,14 +193,36 @@ def _install_auth_gate(app: FastAPI) -> None:
         store = getattr(request.app.state, "settings_store", None)
         if store is not None and request.url.path not in _AUTH_OPEN_PATHS:
             settings = store.get()
-            if auth.is_enabled(settings) and not auth.check_basic_auth(
-                settings, request.headers.get("Authorization")
-            ):
-                return JSONResponse(
-                    {"detail": "Authentication required"},
-                    status_code=401,
-                    headers={"WWW-Authenticate": 'Basic realm="AstroStack"'},
-                )
+            if auth.is_enabled(settings):
+                header = request.headers.get("Authorization")
+                # Cost note: this only ever asks about the token when the password
+                # check has already said no, so the owner's own browsing pays one
+                # KDF as before and a request with no header pays none (both
+                # checks refuse an absent header before hashing). A request
+                # carrying the token pays two, which is fine for a diagnostics
+                # poll, and a *wrong* password pays two, which is not a problem to
+                # have.
+                if not auth.check_basic_auth(settings, header):
+                    if auth.check_readonly_auth(settings, header):
+                        # A credential we recognise, on a request it may not make.
+                        # 403, not 401: the caller is authenticated and retrying
+                        # with the same token would be pointless, and the refusal
+                        # then reads unambiguously in a log — which is the whole
+                        # point of a token whose limits someone has to trust.
+                        if (request.method == "GET"
+                                and request.url.path in _READONLY_GET_PATHS):
+                            return await call_next(request)
+                        return JSONResponse(
+                            {"detail": "This read-only token may only GET "
+                                       "diagnostics (health, logs, stats, jobs, "
+                                       "targets)."},
+                            status_code=403,
+                        )
+                    return JSONResponse(
+                        {"detail": "Authentication required"},
+                        status_code=401,
+                        headers={"WWW-Authenticate": 'Basic realm="AstroStack"'},
+                    )
         return await call_next(request)
 
 

@@ -1025,6 +1025,10 @@ def test_settings_export_excludes_secrets_and_host_paths(client):
     body = r.json()
     # Secrets and host-specific paths are never in a backup.
     for k in ("auth_password_hash", "auth_salt", "auth_username",
+              # The read-only token is a credential too, so it travels the same
+              # way: never in a backup, and never restorable *from* one (a file
+              # someone could edit must not be able to mint a token they know).
+              "readonly_token_hash", "readonly_token_salt",
               "data_root", "incoming_dir", "library_root", "astap_path"):
         assert k not in body
     # Normal tunables are present.
@@ -1073,6 +1077,8 @@ def test_settings_import_ignores_secrets_host_paths_and_unknown(client):
     r = client.post("/api/settings/import", json={
         "auto_qc": False,                       # applied
         "auth_password_hash": "sneaky",         # ignored (secret)
+        "readonly_token_hash": "sneaky",        # ignored (secret)
+        "readonly_token_salt": "sneaky",        # ignored (secret)
         "data_root": "/etc",                    # ignored (host path)
         "totally_unknown_key": 1,               # ignored (unknown)
     })
@@ -1080,6 +1086,10 @@ def test_settings_import_ignores_secrets_host_paths_and_unknown(client):
     after = r.json()
     assert after["auto_qc"] is False
     assert "auth_password_hash" not in after
+    assert "readonly_token_hash" not in after
+    # An import must not be able to *create* a credential either: a restored
+    # backup that minted a read-only token would be a token its author knows.
+    assert client.get("/api/auth/status").json()["readonly_enabled"] is False
     # data_root is host-owned and must be untouched by an import.
     assert after["resolved_library_root"] == before["resolved_library_root"]
 

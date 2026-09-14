@@ -4141,11 +4141,24 @@ export const api = {
   }),
 
   // access control (optional HTTP Basic auth)
-  authStatus: () => req<{ enabled: boolean; username: string }>("/api/auth/status"),
+  // `readonly_enabled` / `readonly_username` are additive and optional: an older
+  // backend omits them, which reads as "no read-only token", the right answer for
+  // an install that has never minted one.
+  authStatus: () => req<{
+    enabled: boolean; username: string;
+    readonly_enabled?: boolean; readonly_username?: string;
+  }>("/api/auth/status"),
   setAuthPassword: (body: { password: string; username?: string }) =>
     req<{ enabled: boolean; username: string }>("/api/auth/password", {
       method: "POST", body: JSON.stringify(body),
     }),
+  // Mint (or rotate) the read-only token. The token comes back **once** — only a
+  // hash is stored — so whatever shows it has to be the thing that keeps it.
+  mintReadonlyToken: () =>
+    req<{ token: string; username: string; readonly_enabled: boolean }>(
+      "/api/auth/readonly-token", { method: "POST" }),
+  clearReadonlyToken: () =>
+    req<{ readonly_enabled: boolean }>("/api/auth/readonly-token", { method: "DELETE" }),
 
   // calibration masters (library-level dark/flat frames)
   listCalibrationMasters: () => req<CalibrationMaster[]>("/api/calibration/masters"),

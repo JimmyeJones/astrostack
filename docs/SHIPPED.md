@@ -1,5 +1,206 @@
 # Shipped — the record
 
+## v0.441.0 — 2026-09-14 — a read-only credential, so observing the app no longer needs the keys to it
+
+*(Builder, branch `claude/sweet-babbage-fkwilc` — 🔐 OWNER-REQUESTED GATE (infra / observability in service of
+the owner's on-NAS observer agent), filed 2026-09-12 and reproduced on the live deploy. Built as the entry's
+own shape, and verified the way it asked — against a really-running app, not only through the TestClient.
+Additive and off unless minted: two new settings fields defaulting to empty, two new endpoints, two additive
+response fields. No config, schema, on-disk, existing-API-shape or default change.)*
+
+**The problem was a missing *role*, not a missing path.** The owner has a locked-down `astroagent` account on
+the NAS — no password, no SSH, no sudo, not in `docker`, read-only ACL across `$ASTRO` — so an agent can watch
+the running app against real data. It worked for everything except reading the app itself: `GET /api/logs`
+answered 401, because a password is set and the gate exempts only `/api/health`. `webapp/auth.py` had **one
+shared credential and no roles**, so the only two ways through were to hand the observer the secret that also
+posts to `/api/stack`, rewrites `/api/settings` and deletes targets, or to put the account in `docker`, which
+is root on the host. The entry is explicit that the gap is what would eventually tempt someone into the second.
+
+**So: a second, weaker credential — the read-only token.** Minted on request, shown **once**, stored the way
+the password is (`hash_readonly_token` is literally `hash_password`: the same PBKDF2-HMAC-SHA256, the same
+200,000 rounds, a fresh per-mint salt), verified with the same constant-time compare. A weaker *privilege* is
+not a weaker *secret*.
+
+**It is a narrower credential, not an open door** — the entry's one explicit "do NOT", and the reason
+`_AUTH_OPEN_PATHS` is untouched: adding paths there would have opened them unauthenticated to the whole LAN,
+a strictly worse trade than the problem. Instead the gate, having failed the password check, asks whether the
+header carries the token, and if it does allows the request only when it is a **GET** on
+`_READONLY_GET_PATHS` — `/api/health`, `/api/logs`, `/api/stats`, `/api/jobs`, `/api/targets`. Anything else
+is **403, not 401**: the caller is authenticated, retrying with the same token is pointless, and the refusal
+then reads unambiguously in a log, which is the whole point of a token whose limits someone has to trust.
+Exact paths rather than prefixes, deliberately — the list *is* the privilege, so it should be readable in one
+glance and grown one path at a time rather than by a prefix that quietly gains whatever GET route lands under
+it next.
+
+**`check_readonly_auth` never defaults to yes.** `check_basic_auth` returns True when auth is disabled, which
+is right for it and would be a hole here, so the read-only check inverts that: no token minted, no header, or
+a header that isn't the token → False. It answers only *"is this the read-only credential"*, never *"may this
+request proceed"* — the method and path live in the gate, which stays the one place that decides access. The
+token is accepted as `Basic` under the reserved username `readonly` (so `curl -u readonly:<token> …` works,
+and so does the browser dialog) or as `Bearer <token>`, which is what a script reaches for.
+
+**The privilege cannot widen itself.** Minting requires the full credential, so `POST /api/auth/readonly-token`
+and `POST /api/auth/password` are both 403 to the token — pinned by a test, because a read-only credential that
+can rotate itself is not read-only. Minting again replaces the old token, which is how a leak is dealt with
+without turning the feature off; `DELETE` revokes, idempotently. On an install with **no password set** minting
+is refused with a 400 that says why: every path is already reachable by anyone on the LAN, so a token there
+would read as protection while guarding nothing.
+
+**The two new fields travel like the password's.** `readonly_token_hash` / `readonly_token_salt` joined
+`_AUTH_KEYS`, which is what strips them from the settings GET, ignores them on the settings PUT, and — for
+free, because export and import share that tuple — keeps them out of a settings backup and stops a restored
+backup *creating* a token its author knows.
+
+**In the UI:** inside the existing Access-control panel, not as a new card (the standing IA priority says to put
+a feature inside the grouping that exists). A badge, one plain-language paragraph from the new
+`frontend/src/readonlyToken.ts`, and a button. The paragraph leads with what the token cannot do — stack, edit,
+change a setting, upload, delete, *even under the password's own username* — because that is the half someone
+hands it out on. The minted token appears once, with a copy button and a ready-to-paste `curl` against this
+install's own origin (`readonlyCurlExample`) so "does it work?" is one line; it is held in component state
+only, and cleared on replace and remove so a revoked secret is never left on screen beside a badge saying
+otherwise. With no password set the panel says to turn one on first, and offers no button.
+
+**Verified by running it, as the entry required** — uvicorn on a scratch data root, not the TestClient:
+the token GETs `/api/logs` 200 (and via `Bearer` too), plus stats / jobs / targets / health; `GET /api/settings`
+403, `PUT /api/settings` 403, `POST /api/targets` 403, `POST /api/stack` 403, `POST /api/sample` 403,
+`POST /api/upload` 403, `POST /api/auth/readonly-token` 403; the owner's own `admin:secret1` unchanged at 200 on
+both kinds of path; a wrong token 401 with the Basic challenge; the on-disk `config.json` holding hashes and no
+plaintext; and a revoked token back to 401.
+
+**Tests +14 Python / +13 frontend.** `tests/webapp/test_auth.py` (+10) covers the credential (Basic and Bearer,
+the wrong username, the password not being a read-only token, and — the inverse of `check_basic_auth`'s
+"disabled allows everything" — nothing accepted with none minted), the gate both ways, the
+cannot-widen-itself pair, rotation and revocation, the refusal on an open install, the "an install with no
+token behaves exactly as before" case, and the settings PUT not being able to forge one. One test walks the
+app's real routes (recursing into FastAPI's `_IncludedRouter`, since a flat scan of `app.routes` finds none and
+would pass vacuously — it asserts the walk found something first) so a typo in the allowlist cannot ship.
+`tests/test_readonly_paths_mirror.py` (+2) pins what the screen *says* the token can read against what the gate
+allows, in both directions — a promise about a secret is worth a drift test. `tests/webapp/test_config_upgrade.py`
+and `test_api.py` gain the upgrade and backup assertions. Frontend: `readonlyToken.test.ts` (+7) on the wording
+and the curl line, and `Settings.test.tsx` (+6) on the panel — nothing offered while the app is open, the token
+shown once with its username, no stale token left after a remove, the confirm before replacing a live token,
+and clean degradation against a backend that omits the new fields.
+
+*(`renderSettingsWith` gained an optional fourth argument for the auth-status fixture, defaulting to the
+`{ enabled: false }` every existing caller already got — a spy set before the helper was silently overwritten
+by it, which is how the first draft of these six tests "failed".)*
+
+Original entry, as filed:
+
+  - **OWNER-REQUESTED GATE (filed 2026-09-12, measured on the owner's NAS) — there is no read-only credential,
+    so an unprivileged local account cannot read diagnostics at all, and both workarounds are
+    root-equivalent.** *(Pillar: infra / observability in service of the owner's on-NAS Observer agent — size S–M.
+    Confidence: reproduced on the live deploy.)* The owner has stood up a locked-down `astroagent` user on the
+    NAS (uid 3005, no password, no SSH, no sudo, **not** in `docker`, POSIX ACL `user:astroagent:r-x` across all
+    289,853 objects of `$ASTRO`) so an agent can observe the running app against real data. It works — every
+    write and every `docker` call is denied — **except** that `GET /api/logs` returns
+    `{"detail":"Authentication required"}` (HTTP 401) to that account **and to root**, because the owner has a
+    password set and `webapp/main.py::_install_auth_gate` exempts only `/api/health` (`_AUTH_OPEN_PATHS`).
+    **A file-level reader cannot substitute:** `webapp/routers/logs.py` serves
+    `webapp.logbuffer`'s in-memory ring, and nothing writes a log file under `$ASTRO`, so read access to the data
+    root buys nothing here. That leaves exactly two workarounds and **both are wrong**: hand the observer the
+    owner's Basic password — `webapp/auth.py` has **one shared credential and no roles**, so that same secret
+    posts to `/api/stack`, rewrites `/api/settings` and deletes targets — or add the account to `docker`, which
+    is root on the host. This gap is precisely what would later tempt someone into the second one.
+    **Shape:** a *second*, separate credential in settings — a random token, displayed once, stored PBKDF2-hashed
+    and salted exactly as the password already is, compared with `hmac.compare_digest` like
+    `check_basic_auth`. The gate accepts it **only for `GET`**, and only on a read-only allowlist (`/api/health`,
+    `/api/logs`, `/api/stats`, `/api/jobs`, `/api/targets`); any other method carrying it → 403, not 401, so the
+    refusal is unambiguous in a log. **Do NOT** implement this by adding paths to `_AUTH_OPEN_PATHS` — that opens
+    them unauthenticated to the whole LAN, which is a strictly worse trade than the problem it solves.
+    **Upgrade safety (§9):** opt-in and additive. No token in a stored config → byte-identical behaviour; with no
+    password set the app stays wide open exactly as today. **Verify by running it:** with a password set, the
+    token must pass `GET /api/logs`, fail `POST /api/stack` with 403, and the existing Basic password must keep
+    working unchanged on both.
+
+## v0.440.3 — 2026-09-14 — a stopped Seestar manager is stopped when `stop()` returns
+
+*(Builder, branch `claude/sweet-babbage-fkwilc` — 🟠 BUG (correctness / shutdown hygiene), the entry the
+on-NAS observer account filed at the top of "Bugs (fix these first)" the same night, taken as filed and with
+its own measurement reproduced in this container first. Engine/webapp-internal: no config, schema, on-disk,
+API-shape or default change — `stop()` and `start()` keep their signatures and the manager's observable
+behaviour while *running* is byte-identical.)*
+
+**The false contract.** `SeestarManager.stop()` set `_stop`, set `_scan_now`, disconnected the clients — and
+returned. Nothing joined either thread, and the poll loop could not have noticed promptly anyway: it napped in
+`time.sleep(_IDLE_SLEEP)` while Seestar was off and `time.sleep(max(2, poll_interval_s))` while it was on, so
+the flag was read only at the top of the next iteration. A caller that had just torn the manager down still
+had a poller running underneath it for up to five seconds — or, at an hour-long poll interval, for an hour.
+
+**Reproduced here before anything was changed**, with the filed entry's own harness: a per-test thread census
+over `tests/webapp/test_incoming_readonly_guard.py`, whose `client` fixture is function-scoped, so every test
+builds a fresh app and runs its full lifespan. Taken at each test's *start*, i.e. after the previous app has
+been shut down:
+
+```
+                                             before            after
+test_the_sentinel_actually_fires             -                 -
+test_reprocess_all_leaves_the_source...      seestar-poll: 1   -
+test_the_video_pipeline_never_touches...     seestar-poll: 2   -
+test_ingest_still_copies_and_never_moves     seestar-poll: 3   -
+…and 3 for every test after it                                 -
+```
+
+Three pollers from already-closed apps running alongside the live one, exactly as filed; zero now, at every
+test in the file.
+
+**Two halves, both in `webapp/seestar/manager.py`.** `_poll_loop` waits on the stop event instead of sleeping
+(`self._stop.wait(delay)` returns the moment the event is set, so the loop ends when it is asked to rather
+than at the end of the current nap), at both of its sleeps. And `stop()` then *joins* both threads, bounded by
+a new `_STOP_JOIN_TIMEOUT_S` (10 s), skipping a thread that is `None`, already dead, or the calling thread
+itself. The budget is deliberately a **ceiling on shutdown latency, not a guarantee** — a loop mid-poll on
+several silent scopes can outlast any fixed number (`_POLL_TIMEOUT` is 6 s and there are three calls per
+scope) — so a thread still alive at the deadline is logged at WARNING and left alone; both are daemons and do
+exit. The ordering is unchanged where it matters: the flags go up and the clients are disconnected *before*
+the join, so a loop blocked in an RPC is unblocked by the socket closing rather than waited out.
+
+**The care note was honoured:** `_scan_now` stays a separate event. It is what `request_scan()` uses to wake
+the scan loop early, `stop()` still sets it for that reason, and the scan loop's own waits are untouched — it
+already woke promptly, because `stop()` already set the event it waits on. The only thing that changes for the
+scan loop is that it is now joined.
+
+**Tests +4 in `tests/webapp/test_seestar.py`, three red before** (verified by reverting both halves in place
+and re-running): both threads are dead *when `stop()` returns*, asserted with no sleep at all and with the
+elapsed time held under a second so waking is distinguished from napping out; the poll loop at an hour-long
+interval ends its nap the moment the event is set; `stop()` is safe before `start()` and idempotent when
+called twice. The fourth pins the join budget's two bounds against `_POLL_TIMEOUT` and `_RECONNECT_CAP_S`, so
+the constant cannot drift to a number that makes the warning fire on an ordinary busy shutdown.
+
+**Not the cause of the suite's solver failures**, as the filed entry says — kept here so it is not
+re-litigated: the census showed the *passing* configuration carrying more threads than the failing one.
+
+Original entry, as filed:
+
+  - **BUG (found 2026-09-13 by the on-NAS observer account, measured on the owner's box; confirmed in the code
+    here) — `SeestarManager.stop()` sets a flag and returns without joining either thread, and neither loop
+    waits on that flag, so a stopped manager keeps polling for up to 5 s and overlapping app instances stack
+    up.** *(Pillar: correctness / shutdown hygiene — size XS; severity low in production, real in tests.
+    Confidence: reproduced — thread census taken per-test on the NAS.)* `webapp/seestar/manager.py:99`
+    `stop()` does `self._stop.set()`, `self._scan_now.set()`, disconnects clients — and never
+    `self._poll_thread.join()` / `self._scan_thread.join()`. The loops cannot notice promptly anyway:
+    `_poll_loop` blocks in `time.sleep(_IDLE_SLEEP)` (line 232, `_IDLE_SLEEP = 5.0`) and
+    `time.sleep(max(2, poll_interval_s))` (line 257) rather than `self._stop.wait(...)`, so the flag is only
+    read at the top of the next iteration. **Measured**, running `tests/webapp/test_incoming_readonly_guard.py`
+    with a per-test thread census (the `client` fixture is function-scoped, so every test builds a fresh app and
+    runs its full lifespan):
+    ```
+    test_the_sentinel_actually_fires          active=1  proc_threads=4   {MainThread:1}
+    test_reprocess_all_leaves_the_source...   active=2  proc_threads=8   {MainThread:1, seestar-poll:1}
+    test_the_video_pipeline_never_touches...  active=3  proc_threads=10  {MainThread:1, seestar-poll:2}
+    test_ingest_still_copies_and_never...     active=4  proc_threads=10  {MainThread:1, seestar-poll:3}
+    ```
+    Three `seestar-poll` threads from already-torn-down apps running alongside the live one. It plateaus rather
+    than growing without bound (they are daemons and do exit a few seconds late), so this is **not** a runaway
+    leak — but a `stop()` that returns before the thing has stopped is a false contract, and in the suite it
+    means every webapp test runs with two or three stale pollers underneath it.
+    **Shape:** have both loops wait on the stop event instead of sleeping (`self._stop.wait(delay)` returns
+    immediately when set), and have `stop()` join both threads with a bounded timeout. **Regression test:**
+    start a manager, `stop()` it, assert both threads are dead **when `stop()` returns** — not after a sleep.
+    **Care:** `_scan_now` is a separate event used to wake the scan loop early; don't collapse the two.
+    **Not the cause of the suite's 12 solver failures** — the same census showed the *passing* configuration
+    carrying **more** threads (active=7) than the failing one (active=4), so this was explicitly ruled out as
+    the explanation for those and is filed on its own merits.
+
 ## v0.438.16 — 2026-09-13 — the settings list said "Off" against two passes a mosaic had run
 
 *(Builder, branch `claude/sweet-babbage-vt87e3` — 🟠 BUG (trust, PRIORITY 3, on the mosaic frontier), the
