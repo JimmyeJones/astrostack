@@ -1101,6 +1101,42 @@ describe("TargetView framing verdict", () => {
       .not.toContain("bigger than the Seestar's single frame");
   });
 
+  it("stops the coaching card asking for more time on a picture missing most of its object", async () => {
+    // Found by a `--mosaic --editor` dogfood pass: on the bundled M42 sample the
+    // coaching card read "Add more time — 1 min so far…" an inch above the
+    // framing note's "only about 15% of it is in this picture. Shoot it in
+    // mosaic mode to capture all of it." Two different next sessions, from the
+    // card whose whole claim is to name *the single* best move. Pins the
+    // wiring, not the helper: the measured verdict has to reach the badge.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 10 * 60 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      // 40 subs, so the louder thin-stack warning that suppresses this card
+      // stays down and the ladder would otherwise land on `integration`.
+      mkRun({ id: 7, total_exposure_s: 10 * 60, n_frames_used: 40 }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue({
+      level: "partial",
+      text: "is bigger than your frame — only about 15% of it is in this picture. "
+        + "Shoot it in mosaic mode to capture all of it.",
+      coverage: 0.15, coverage_pct: 15, off_centre: 0.1, canvas: "frame",
+      object_name: "Orion Nebula", size_arcmin: 85,
+    });
+
+    renderTarget();
+
+    // The card renders from the run row first and picks the framing lever once
+    // the measured verdict lands, so wait on the sentence rather than the box.
+    await waitFor(() =>
+      expect(screen.getByTestId("next-best-move").textContent ?? "")
+        .toMatch(/mosaic mode/));
+    const tip = screen.getByTestId("next-best-move").textContent ?? "";
+    expect(tip).toMatch(/15%/);
+    expect(tip).not.toMatch(/Add more time/);
+  });
+
   it("keeps the catalogue framing line when no picture has measured it", async () => {
     // No stack yet → no measured verdict → the prediction is the only thing that
     // can answer "will it fit?", so it must still be shown.

@@ -82,26 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **LEAD (Builder 2026-09-14, the half of observer issue [#883](https://github.com/JimmyeJones/astrostack/issues/883)
-  that v0.441.1 deliberately did NOT build) — a long-haul job can hold the single worker for days, and the
-  import job that nobody starts by hand simply waits behind it.** *(Pillar: autonomy — PRIORITY 2; size L;
-  **architectural, do not blind-take it**. Confidence: mechanism verified in the code; the owner-side outcome
-  measured by the observer on his own box.)* `JobManager` is one `queue.Queue` and one worker thread
-  (`webapp/jobs.py`), which is deliberate — two stacks at once on a RAM-capped NAS is an OOM kill (§10). The
-  consequence measured on the owner's install: `reprocess_all` jobs held the worker continuously from
-  2026-09-04, a `pipeline` job sat `queued` from 09-11 and never started, and **2,259 subs over two nights
-  were never imported**. v0.441.1 shipped the *sentence* (`webapp/jobqueue.py` + the Dashboard note), so the
-  failure is no longer silent — but the wait itself is unchanged. **Why it was not fixed with the note, and
-  what a fix would have to be:** re-ordering the queue does nothing here, because the blocker is a *running*
-  job, not a queued one; and a second worker is exactly the change the memory bound exists to prevent. The
-  only shapes that could work are (a) a **cooperative yield** inside the long-haul bodies (`reprocess_all`
-  already loops target-by-target — between targets it could hand the worker back if an import is queued) or
-  (b) a **separate, strictly-bounded ingest lane** that runs only the scan/ingest half, never a stack, so its
-  memory ceiling is a header read rather than a canvas. (a) is the smaller and safer of the two and reuses
-  the existing worker. **Care:** the yield must not let two bodies touch the same project DB at once, and it
-  must be re-entrant — a `reprocess_all` that yields must resume where it stopped, not restart. Measure the
-  import's actual wall time on the owner's library before deciding a yield is worth the complexity.
-
 - **🟠 BUG (autonomy / data-integrity, Scout 2026-09-14 — mechanism traced end-to-end from observer issue
   [#878](https://github.com/JimmyeJones/astrostack/issues/878)) — a mosaic's raw-subs folder is minted as a
   SECOND, hash-suffixed target because `make_safe_name("<T> (mosaic)")` collides with the on-device-output
@@ -599,36 +579,35 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
-- **LEAD (Builder 2026-09-14, found by a `--mosaic --editor` dogfood pass that was otherwise CLEAN) — the
-  coaching card and the framing card prescribe *different next sessions*, and the one that claims to name the
-  single best move has never heard of the other.** *(Pillar: autonomy + friendliness — PRIORITY 2/3; size S to
-  write, **M to be sure of** — read the crowding-out risk before touching it. Confidence: both sentences
-  photographed in a browser this run, on both bundled samples.)*
-  `nextBestMove`'s own docstring is *"the single highest-leverage thing that would most improve this target next
-  time"*, picked from a fixed ladder (`locate` → `thin` → `soft` → `integration` → `good`). **Framing is not on
-  that ladder**, and `FramingVerdictNote` — inline on the same page, an inch away — is often naming a bigger
-  lever. Measured this run:
-  * field sample: *"To make your Sample: Orion Nebula (M42) even better · **Add more time** — 1 min so far…"*
-    over *"Orion Nebula is bigger than your frame — only about **15 %** of it is in this picture. **Shoot it in
-    mosaic mode** to capture all of it."*
-  * mosaic sample: *"…another pass or two over **the same mosaic** evens out the thinner part"* over *"only
-    about **55 %** of it is in this picture. **Adding more panels** next session would capture the rest."*
-  The mosaic pair is the sharper one: "more passes over the same mosaic" and "add more panels" are opposed
-  instructions about where to point the scope next session, not two compatible suggestions. And on a 15 %-framed
-  field, hours of extra depth buy a deeper picture of a fragment.
-  **Why it is filed rather than built.** A ladder picks **one** rung, and the owner is a heavy mosaic user with
-  a 2.1° field on big objects — so a framing rung placed above `integration` would fire on much of his library
-  and **crowd out the depth advice**, which is also true and also what he needs. That is a product judgement
-  about which of two real levers a beginner should be told about first, on the card he sees most, and it should
-  not be made by blind reordering.
-  **Two candidate shapes, neither costed:** (a) a new `framing` rung, needing a captured-fraction threshold and
-  an argued position in the ladder (probably below `locate` and `thin`, since un-solved and one-sub-deep are
-  prerequisites either way); or (b) keep the rung that fires and make its *phrase* stop contradicting the
-  framing card — the v0.437.4 pattern of keeping the lever and scoping the claim — which is smaller but risks
-  restating the framing card's own sentence, against the standing IA rule about repetition.
-  **The datum is already on the page** (`Target.tsx` renders both cards), so whichever shape wins needs no new
-  request. **Check first** whether `framing_advice` is even live on a target the owner has framed well, so the
-  fix doesn't fire on the 95 %-captured case.
+- **LEAD (Builder 2026-09-14, photographed on the bundled single field while shipping the v0.443.0 framing
+  rung) — the readiness card still prices the canvas the coaching card has just told you to stop shooting.**
+  *(Pillar: friendliness — PRIORITY 3; size S to write, **S–M to be sure of**; low severity. Confidence: both
+  sentences photographed in a browser this run, on the field sample.)*
+  With the framing rung live, the single-field Target page reads: *"Shooting it in mosaic mode next session is
+  the biggest win here"* (coaching), *"goal ~2 h · 1 min of ~2 h — a good start"* (readiness), and *"About a
+  3×3 mosaic (9 panels) covers all of it. Giving all 9 panels the depth you'd give one field (~2 h each) is
+  about 18 h of shooting"* (framing note). Each is true of the canvas it is about — and the readiness card's
+  is the canvas the other two say to abandon. It is not the v0.443.0 contradiction again (nobody is being told
+  to point two ways), but a beginner asking *"how much more do I need?"* gets **~2 h** from the card whose
+  whole job is answering that, on a target the same screen has just recommended replacing with an 18 h one.
+  **Why it is filed rather than built.** The honest fix is not obvious and the wrong one is worse: the goal is
+  **not** wrong for this target, and the mosaic really is a *different* target (the Seestar writes its subs to
+  `<T>_mosaic_sub/`), so a card that silently switched to 18 h would be pricing a canvas the user does not
+  have and would break its own "of your `total_exposure_s`" arithmetic. Candidate shapes: (a) leave the number
+  and add one scoping clause — *"…for this single field"* — only when a `partial` framing verdict is on screen
+  (cheap, and the v0.437.4 pattern of keeping the lever and scoping the claim); (b) nothing at all, on the
+  grounds that the framing note already prints the 18 h beside it and a third sentence about hours is exactly
+  the "extremely busy" complaint. **Check first** how often a `partial` verdict co-occurs with a readiness
+  card at all — if it is most of the owner's big-object library, (a) puts a new clause on a card he sees
+  constantly, and (b) is the right answer.
+
+- ~~**LEAD (Builder 2026-09-14, found by a `--mosaic --editor` dogfood pass that was otherwise CLEAN) — the
+  coaching card and the framing card prescribe *different next sessions*.**~~ — **✅ SHIPPED v0.443.0**
+  (Builder 2026-09-14); entry cut to [`SHIPPED.md`](SHIPPED.md), one-liner under "Shipped" below. Built as the
+  lead's shape (a), a new `framing` rung, with the crowding-out risk answered by a coverage bar rather than by
+  the verdict alone: `partial` fires just as readily at 95 % captured, so the rung asks for a third or more of
+  the object to be *missing* (`FRAMING_MAX_COVERAGE = 0.67`). The lead's "check first" was carried out and is
+  what set that bar.
 
 - ~~**LEAD (Builder 2026-09-13, filed with v0.438.10) — a cropped export reports its depth against
   the canvas it has left.**~~ — **✅ SHIPPED v0.438.13–v0.438.14** (Builder 2026-09-13); entry cut to
@@ -3284,6 +3263,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.444.0** — 🟠 PRIORITY 2 (autonomy / data-integrity), the LEAD at the top of "Bugs": the half of observer issue [#883](https://github.com/JimmyeJones/astrostack/issues/883) that v0.441.1 deliberately did NOT build — **a long-haul batch now hands the single worker back to a waiting import, between targets.** v0.441.1 shipped the *sentence*; the wait itself was unchanged, and on the owner's box it was `reprocess_all` holding the worker continuously from 09-04 while an import queued on 09-11 never started and **2,259 subs over two nights were never imported**. Re-ordering the queue could not help (the blocker is a *running* job) and a second worker is the change the memory bound exists to prevent — so `submit_reprocess_all` asks `jobqueue.queued_kind_to_yield_to` at each target boundary and, if an import is queued, stops and re-submits its own remainder (`only_targets` + carried counters) behind it. FIFO does the rest: the import runs next, the remainder after it, **nothing concurrent at any point** — the lead's "must not let two bodies touch the same project DB" satisfied by construction rather than a lock. **A slice never yields before finishing a target**, so a watcher re-enqueuing an import cannot bounce the batch forever and the slice count is bounded by the target count. Only the import (`YIELD_TO_KINDS`) is worth interrupting for — a clicked stack or export is watched and cancellable, and a *running* import is not waiting on anything. Counters and progress are carried, so the Jobs page reads `12/104` rather than restarting, and `reprocessSummary` says *"…so far — paused to let an import through, resuming after it"*: paused is not cancelled. **Residual recorded, not hidden:** a single very long unit of work (one huge restack) still holds the worker — inherent to a serial worker, and not the case the observer measured. Tests +12, three red before under a scratch revert. Additive keys and internal kwargs only; no config, schema, on-disk, API-shape or default change. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.443.0** — 🌟 PRIORITY 2/3 (autonomy + friendliness), from the LEAD a `--mosaic --editor` dogfood pass filed earlier the same day: **the coaching card and the framing card no longer prescribe different next sessions.** `nextBestMove` claims to name *the single* highest-leverage move and had never heard of framing, so on the bundled samples it read "Add more time — 1 min so far…" over "only about **15 %** of it is in this picture. Shoot it in mosaic mode", and "another pass or two over **the same mosaic**" over "**adding more panels** next session would capture the rest" — opposed instructions about where to point the scope, an inch apart. New `framing` rung between `soft` and `integration`: **above** the time rungs because more time cannot buy what never lands on the sensor (and on a single field that depth is *stranded* — mosaic subs go to a separate `<T>_mosaic_sub/` target, so the hours do not carry over), **below** `soft` because a refocus tightens the wider session too. The crowding-out risk the lead filed itself for is answered by a coverage bar rather than by the verdict: `partial` fires just as readily at 95 % captured, so the rung asks for a third or more of the object to be **missing** (`FRAMING_MAX_COVERAGE = 0.67`) — both photographed cases clear it, the 95 % case the lead warned about is untouched. One measurement, one number: `seestack.framing.rounded_coverage_pct` is public and served as an additive `coverage_pct` beside the sentence it is baked into, and the rung **declines** rather than re-rounding `coverage` on an older backend. Not applied to `clipped` (re-centre and shoot longer are jointly satisfiable). `IntegrationTrendBadge`'s `ADD_TIME_KINDS` → `COACH_DEFER_KINDS` now includes `framing`, which keeps that card's visibility byte-for-byte where it was wherever the new rung took over from an add-time one. Tests +13 (9 `nextBestMove.test.ts`, 1 plateau deference, 1 `Target.test.tsx` wiring, 2 Python). Additive field + optional input; no config, schema, on-disk, API-shape or default change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.442.1** — 🔧 INFRA (maintainability in service of not missing bugs), filed and taken in the same run as the feature that proves it: **a dogfood pass can finally put subs in `incoming/` that the library never imported.** The scratch install's drop folder is **empty on every pass ever recorded** — the sample arrives through `POST /api/sample`, which writes straight into the library — so anything that reads that folder is structurally invisible to the tooling, v0.442.0's note first. Same hole as the missing observing site (v0.436.1) and the click-only Split/Blink modes (v0.440.2), a third time. `--incoming-lag` writes a few subs with the app's own `sample_data._write_sample_fits`, dates them eleven days ago (past `incominglag.LAG_MIN_AGE_S`), stretches the watcher's quiet period so they are not imported mid-pass, and prints what `/api/incoming-lag` answers. **A flag, not the default:** an observing site is data a real install *has*; unimported subs are a **fault**, and seeding one by default would put a warning banner in every Dashboard screenshot and every page-height baseline. Measured: phone `/` 2,570 → **2,886 px** with the flag, the note in the shot, otherwise identical and still clean. `-h` also stops truncating its own header. Tests +4 `tests/test_dogfood_lag_anchors.py`, the `*_anchors` guard shape — the script reaches into the app by name, and a renamed writer or route would leave the pass printing CLEAN about a state it no longer reaches. Tooling + AGENTS.md §7 only; nothing in the app or the image changes. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.442.0** — 🌟 NEW BEGINNER FEATURE (PRIORITY 2–3, autonomy + friendliness), the Scout's entry filed the same morning from observer issue [#883](https://github.com/JimmyeJones/astrostack/issues/883): **"N subs are in your incoming folder that aren't in your library yet" — the one signal that catches an import which was never queued at all.** A frame that was never imported has no QC row, no reject reason and nowhere in the record it can be *seen* to be absent, so the library quietly stops growing while every screen looks healthy — the observer measured 2,259 subs sitting in `incoming/` for eleven days. `jobqueue.import_waiting` (v0.441.1) sees only the *queued* shape; a poll that walked a folder during a job that then died, a swallowed scan error or a classification skip leave nothing queued. The entry's cost objection is answered by not paying it: `Watcher.poll_once` already `stat`s every FITS under `incoming/` on every poll, so the listing is a by-product — new `Watcher._record_incoming_units` / `incoming_units()` group what it already holds, and **nothing walks, opens or `stat`s that tree a second time** (§10). New pure `scanner.plan_incoming_units` derives which folder becomes which target by calling `_apply_seestar_convention` itself, so the note can never name a folder the scanner skips on purpose — pinned by a test that runs the plan **and a real `scan_and_organize`** over one tree and compares. `webapp/incominglag.py` under-reports by three rules: convention skips excluded, a folder silent until its newest file has been still for `LAG_MIN_AGE_S` (2 h, the same number as `IMPORT_WAIT_MIN_HOURS` — a night still arriving over SMB is *supposed* to be ahead), and registered frames rolled up by path component so #878's double registration can only ever floor the count at zero. "Nobody has looked" stays distinct from "nothing is waiting" (`checked: false` past `SNAPSHOT_MAX_AGE_S`). `IncomingLagNote` joins the Dashboard's existing `NoticeBoard` at the `warning` rung below `StuckImportNote`, leads with *nothing is lost, your subs are safe exactly where they are*, and offers only the ordinary Scan incoming. `GET /api/incoming-lag` added to `_READONLY_GET_PATHS`, one path as that list requires — and the v0.441.0 mirror test duly went red until the Settings screen named it too. Tests +24 Python / +8 vitest, **nine fail before** under a scratch revert. Additive endpoint, module and note; no config, schema, on-disk, API-shape or default change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.441.2** — 🟠 BUG (image quality / trust, PRIORITY 4), from observer issue [#877](https://github.com/JimmyeJones/astrostack/issues/877) and verified red by a scratch revert: **a preview PNG that is a *crop* of its canvas, on a run older than the column that records crops, is no longer placed as if it showed the whole canvas.** `stack_runs.preview_crop_json` is NULL on all 614 of the owner's runs while 42 of the stored previews are baked crops, and NULL is contractually “a plain full-canvas downscale” — so the Sky map’s tile and footprint mask, History’s object pins and scale bar, the rejection overlay, the wallpaper crop and the native-resolution gate all measured against a canvas the picture does not show. New `preview_orient.recovered_preview_crop` is the run-row companion to `parse_preview_crop`, shaped like the sibling `baked_north_up_deg`: a recorded value wins outright, and a NULL column falls through to a check of the stored PNG’s own **shape**. A plain downscale preserves the canvas’s aspect ratio, so one that does not is provably not a downscale — and earns `UNKNOWN`, "decline to place geometry", which every consumer already honours, never a fabricated rectangle. Shape rather than size on purpose (`PREVIEW_ASPECT_TOLERANCE = 0.01`): keying on size would accuse every preview an older build wrote at another width and strip a working overlay from a whole library. A baked North-up turn *swaps* the shape and so looks exactly like a crop to a header, so `baked_north_up_deg` and `north_up_pixel_transform` are consulted before anything is accused. All twelve call sites go through the one resolver; the sky-overlay etag and the footprint fingerprint now key on the resolved crop rather than the NULL. No backfill migration — the verdict is free at read time and reversible, where a migration would write a guess into the owner's database. Tests +9, five red before. Full entry in [`SHIPPED.md`](SHIPPED.md).

@@ -90,6 +90,7 @@ def framing_payload(
         framing_result_verdict,
         recentre_nudge,
         recentre_outcome,
+        rounded_coverage_pct,
     )
     from seestack.io.wcs_io import arcsec_per_px, celestial_wcs_from_fits
 
@@ -142,6 +143,12 @@ def framing_payload(
         "level": v.level,
         "text": v.text,
         "coverage": v.coverage,
+        # The very integer baked into `text` above ("only about 55% of it is in
+        # this picture"), served separately so another card on the same page can
+        # name the same shortfall without re-deriving the rounding and printing
+        # a different number for one measurement — see
+        # :func:`seestack.framing.rounded_coverage_pct`.
+        "coverage_pct": rounded_coverage_pct(v.coverage),
         "off_centre": v.off_centre,
         # Which shape of picture the sentence above is about ("frame" or
         # "mosaic"), so a UI heading can't contradict the sentence under it.

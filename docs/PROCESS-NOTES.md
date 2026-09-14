@@ -18,6 +18,50 @@ is a queue.
 
 ---
 
+## 2026-09-14 (Builder, branch `claude/sweet-babbage-kjaxp8`) — two shipped, a clean `--mosaic --editor` sweep, and the pytest trap that costs 22 phantom failures
+
+**Baseline.** `main` at `74082f51` (v0.442.1). Full suite green (`-n 4` + BLAS cap, 11m57s).
+
+**Shipped:** v0.443.0 (the coaching card's `framing` rung) and v0.444.0 (the reprocess batch handing the
+single worker back to a waiting import). Entries in [`SHIPPED.md`](SHIPPED.md).
+
+**⚠️ Do not edit a file while `pytest` is running — it costs 22 failures that are not real, and they look
+exactly like a red `main`.** The baseline run was still going at 39 % when this run started editing
+`seestack/framing.py` and `webapp/framing_advice.py`; it finished `22 failed, 6057 passed`, every failure in
+`tests/webapp/test_stack_framing.py` and `tests/webapp/test_plan.py` — i.e. precisely the two modules whose
+source had changed underneath the workers. Re-run against the *settled* tree: **172 passed**. `main` had been
+green all along.
+
+This is the same family as the `| tail` trap and the `cd frontend` trap in AGENTS.md §7: a result that reads
+as a verdict about the repository when it is really a verdict about the harness. The tell is that every
+failure names a module you have touched in the last few minutes. **The rule that follows: start the baseline
+suite, and do not touch a source file until its summary line has printed.** Reading is free; editing is not.
+A 12-minute suite feels like dead time and it is not — reading the backlog, the code and the docs fills it
+exactly.
+
+**Dogfood, `--mosaic` (page probe) — CLEAN**, and read as one paragraph the way AGENTS.md §7 asks. Auto's trim
+on the generated 2×2 was **7.9 %** of the canvas (well under the 15 % bug bar). Tallest phone pages:
+`/tonight` 3,590 px, the mosaic Target page 3,572 px, the single-field Target page 3,287 px, `/` 3,132 px —
+all in line with the v0.437.x standings, nothing overflowing, no console errors.
+
+**And the paragraph is what the run's first task came from.** Before v0.443.0 the two cards an inch apart read
+*"Add more time — 1 min so far…"* over *"only about 15 % of it is in this picture. Shoot it in mosaic mode"*,
+and on the mosaic *"another pass or two over the same mosaic"* over *"adding more panels next session would
+capture the rest"* — opposed instructions about where to point the scope. After it, the coaching card names
+the framing lever on both samples and the pair agrees. This is the fourth or fifth finding in a row that was
+**two of the app's own true sentences disagreeing**, not one of them wrong, which keeps being the highest-yield
+question to ask of that block.
+
+**Dogfood, `--mosaic --editor` — CLEAN.** All 21 ops in the Add menu added one at a time on **both** the
+single field and the mosaic run, each re-rendering the live preview with no console error and no failed
+request, plus undo/redo. No editor defect found; recorded here rather than in "Bugs", per the three-file rule.
+
+**Backlog state, for the next Builder.** "Bugs (fix these first)" is now down to entries that are *gated* —
+#878's remaining half is an owner-sign-off merge migration, #880's (a) is storage hygiene with nothing
+user-visible and (b) is documented-deliberate, the D1 weighted-coverage residual is measured and probably not
+worth building — plus two stand-downs that carry numbers. The Ideas lists are similar: several entries this
+run grepped were already shipped. **Two tasks was the honest count for this run**, not a shortfall.
+
 ## 2026-09-14 (Scout, branch `claude/admiring-brahmagupta-s4lpxh`) — the observer's five open issues triaged, four filed, one closed; no code shipped
 
 **Baseline.** `main` at `dead8e6e` (v0.441.1), green (`-n 4` + BLAS cap, ~11 min). No code changed this run —

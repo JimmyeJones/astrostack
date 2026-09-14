@@ -8,11 +8,21 @@ import type { NextBestMoveKind } from "./nextBestMove";
 import { api } from "../../api/client";
 import { describeSuggestion, suggestionHeading } from "../suggestTargets";
 
-/** Coaching kinds that nudge the user to add more *time* to this target. When
- * "next best move" is showing one of these, a "more time won't help" plateau
- * verdict would directly contradict it, so we stay silent and let the actionable
- * add-time nudge win. */
-const ADD_TIME_KINDS: ReadonlySet<NextBestMoveKind> = new Set(["integration", "good"]);
+/** Coaching kinds whose advice this verdict would contradict. Two families:
+ *
+ * - `integration` / `good` nudge the user to add more *time* to this target,
+ *   which "more time won't help" is the flat opposite of.
+ * - `framing` says the object is mostly outside the picture and the next
+ *   session should widen it. This verdict's last sentence sends the reader to
+ *   *a different target*, so the pair is the same "which way do I point
+ *   tonight?" contradiction in a second costume. It also keeps this card's
+ *   visibility exactly where it was for every target where the framing rung
+ *   simply took over from an add-time one.
+ *
+ * When "next best move" is showing one of these we stay silent and let the
+ * actionable nudge win. */
+const COACH_DEFER_KINDS: ReadonlySet<NextBestMoveKind> =
+  new Set(["integration", "good", "framing"]);
 
 /**
  * "📉 About as clean as your sky allows" — a compact, plain-language read on the
@@ -32,8 +42,9 @@ const ADD_TIME_KINDS: ReadonlySet<NextBestMoveKind> = new Set(["integration", "g
  * picture. It renders nothing when:
  *   - there isn't enough measured history to judge the trend (`integrationTrend`
  *     returns null), or the verdict isn't "plateaued"; or
- *   - the "next best move" coaching is currently nudging *add more time*
- *     (`coachKind` is "integration" or "good") — the two must never contradict.
+ *   - the "next best move" coaching is currently naming a lever this would
+ *     contradict (`coachKind` in `COACH_DEFER_KINDS`) — the two must never
+ *     prescribe different next sessions.
  *
  * `runs` must be the target's stack runs (order doesn't matter — the trend reads
  * by integration time, not chronology).
@@ -76,7 +87,7 @@ export function IntegrationTrendBadge(
   // one on a target that isn't showing the sentence would be a request nobody
   // ever sees the answer to.
   const showing = trend?.level === "plateaued"
-    && !(coachKind != null && ADD_TIME_KINDS.has(coachKind));
+    && !(coachKind != null && COACH_DEFER_KINDS.has(coachKind));
   const suggest = useQuery({
     queryKey: ["suggest-targets"],
     queryFn: () => api.suggestTargets(),
