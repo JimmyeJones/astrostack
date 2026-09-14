@@ -18,6 +18,13 @@
 // export to within 3 % at every proxy step, so the backend never flags them.
 // Advisory only — the backend sets `denoise_preview_understates` on the
 // histogram, and nothing about the render changes.
+//
+// "Don't raise the strength" is the right instruction and half an answer: it
+// says what not to do and leaves the reader with a slider they still cannot set.
+// The other half is the full-size check, which shows the export's own pixels at
+// this strength, so it is named in the same breath.
+
+import { FULL_SIZE_CHECK_LABEL } from "./loupe";
 
 export interface DenoisePreviewInfo {
   denoise_preview_understates?: boolean;
@@ -33,7 +40,8 @@ export function denoiseUnderstatesCaption(
     "Bilateral noise reduction previews weaker than it exports — at this size "
     + "the downscaled preview can't smooth the grain as thoroughly as the "
     + "full-resolution export will, so the saved picture comes out smoother than "
-    + "this. Don't raise the strength to make the preview look clean. Wavelet "
-    + "previews exactly what it saves, at any size."
+    + "this. Don't raise the strength to make the preview look clean — "
+    + `"${FULL_SIZE_CHECK_LABEL}" instead. Wavelet previews exactly what it `
+    + "saves, at any size."
   );
 }

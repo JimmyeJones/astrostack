@@ -14,6 +14,12 @@
 // true in every measurement: judge the final strength on the export. The backend
 // flag keeps its original name (`star_reduce_preview_overstates`) for API
 // compatibility. Advisory only.
+//
+// "Judge the final strength on the export" was true and unhelpful: the export is
+// the thing you get *after* deciding. It now names the control that shows the
+// export's own pixels before you commit to them.
+
+import { FULL_SIZE_CHECK_LABEL } from "./loupe";
 
 export interface StarReducePreviewInfo {
   star_reduce_preview_overstates?: boolean;
@@ -28,6 +34,6 @@ export function starReduceDiffersCaption(
   return (
     "Star reduction looks different here — this downscaled preview can't shrink "
     + "the stars by exactly the amount the exported full-resolution image will. "
-    + "Judge the final strength on the export."
+    + `"${FULL_SIZE_CHECK_LABEL}" to judge the final strength.`
   );
 }

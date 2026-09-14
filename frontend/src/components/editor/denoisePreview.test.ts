@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { denoiseUnderstatesCaption } from "./denoisePreview";
+import { FULL_SIZE_CHECK_LABEL } from "./loupe";
 
 describe("denoiseUnderstatesCaption", () => {
   it("returns null for missing/empty input", () => {
@@ -24,5 +25,13 @@ describe("denoiseUnderstatesCaption", () => {
     expect(cap).toContain("Don't raise the strength");
     // ...and it names the method that has no such gap, since that is the action.
     expect(cap).toContain("Wavelet");
+  });
+
+  it("offers the way to see it, not only the thing not to do", () => {
+    // "Don't raise the strength" leaves a reader with a slider they still
+    // cannot set. The full-size check renders this strength on the export's own
+    // pixels, which is the other half of the instruction.
+    const cap = denoiseUnderstatesCaption({ denoise_preview_understates: true }) ?? "";
+    expect(cap).toContain(FULL_SIZE_CHECK_LABEL);
   });
 });
