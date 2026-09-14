@@ -1,5 +1,118 @@
 # Shipped — the record
 
+## v0.441.0 — 2026-09-14 — a read-only credential, so observing the app no longer needs the keys to it
+
+*(Builder, branch `claude/sweet-babbage-fkwilc` — 🔐 OWNER-REQUESTED GATE (infra / observability in service of
+the owner's on-NAS observer agent), filed 2026-09-12 and reproduced on the live deploy. Built as the entry's
+own shape, and verified the way it asked — against a really-running app, not only through the TestClient.
+Additive and off unless minted: two new settings fields defaulting to empty, two new endpoints, two additive
+response fields. No config, schema, on-disk, existing-API-shape or default change.)*
+
+**The problem was a missing *role*, not a missing path.** The owner has a locked-down `astroagent` account on
+the NAS — no password, no SSH, no sudo, not in `docker`, read-only ACL across `$ASTRO` — so an agent can watch
+the running app against real data. It worked for everything except reading the app itself: `GET /api/logs`
+answered 401, because a password is set and the gate exempts only `/api/health`. `webapp/auth.py` had **one
+shared credential and no roles**, so the only two ways through were to hand the observer the secret that also
+posts to `/api/stack`, rewrites `/api/settings` and deletes targets, or to put the account in `docker`, which
+is root on the host. The entry is explicit that the gap is what would eventually tempt someone into the second.
+
+**So: a second, weaker credential — the read-only token.** Minted on request, shown **once**, stored the way
+the password is (`hash_readonly_token` is literally `hash_password`: the same PBKDF2-HMAC-SHA256, the same
+200,000 rounds, a fresh per-mint salt), verified with the same constant-time compare. A weaker *privilege* is
+not a weaker *secret*.
+
+**It is a narrower credential, not an open door** — the entry's one explicit "do NOT", and the reason
+`_AUTH_OPEN_PATHS` is untouched: adding paths there would have opened them unauthenticated to the whole LAN,
+a strictly worse trade than the problem. Instead the gate, having failed the password check, asks whether the
+header carries the token, and if it does allows the request only when it is a **GET** on
+`_READONLY_GET_PATHS` — `/api/health`, `/api/logs`, `/api/stats`, `/api/jobs`, `/api/targets`. Anything else
+is **403, not 401**: the caller is authenticated, retrying with the same token is pointless, and the refusal
+then reads unambiguously in a log, which is the whole point of a token whose limits someone has to trust.
+Exact paths rather than prefixes, deliberately — the list *is* the privilege, so it should be readable in one
+glance and grown one path at a time rather than by a prefix that quietly gains whatever GET route lands under
+it next.
+
+**`check_readonly_auth` never defaults to yes.** `check_basic_auth` returns True when auth is disabled, which
+is right for it and would be a hole here, so the read-only check inverts that: no token minted, no header, or
+a header that isn't the token → False. It answers only *"is this the read-only credential"*, never *"may this
+request proceed"* — the method and path live in the gate, which stays the one place that decides access. The
+token is accepted as `Basic` under the reserved username `readonly` (so `curl -u readonly:<token> …` works,
+and so does the browser dialog) or as `Bearer <token>`, which is what a script reaches for.
+
+**The privilege cannot widen itself.** Minting requires the full credential, so `POST /api/auth/readonly-token`
+and `POST /api/auth/password` are both 403 to the token — pinned by a test, because a read-only credential that
+can rotate itself is not read-only. Minting again replaces the old token, which is how a leak is dealt with
+without turning the feature off; `DELETE` revokes, idempotently. On an install with **no password set** minting
+is refused with a 400 that says why: every path is already reachable by anyone on the LAN, so a token there
+would read as protection while guarding nothing.
+
+**The two new fields travel like the password's.** `readonly_token_hash` / `readonly_token_salt` joined
+`_AUTH_KEYS`, which is what strips them from the settings GET, ignores them on the settings PUT, and — for
+free, because export and import share that tuple — keeps them out of a settings backup and stops a restored
+backup *creating* a token its author knows.
+
+**In the UI:** inside the existing Access-control panel, not as a new card (the standing IA priority says to put
+a feature inside the grouping that exists). A badge, one plain-language paragraph from the new
+`frontend/src/readonlyToken.ts`, and a button. The paragraph leads with what the token cannot do — stack, edit,
+change a setting, upload, delete, *even under the password's own username* — because that is the half someone
+hands it out on. The minted token appears once, with a copy button and a ready-to-paste `curl` against this
+install's own origin (`readonlyCurlExample`) so "does it work?" is one line; it is held in component state
+only, and cleared on replace and remove so a revoked secret is never left on screen beside a badge saying
+otherwise. With no password set the panel says to turn one on first, and offers no button.
+
+**Verified by running it, as the entry required** — uvicorn on a scratch data root, not the TestClient:
+the token GETs `/api/logs` 200 (and via `Bearer` too), plus stats / jobs / targets / health; `GET /api/settings`
+403, `PUT /api/settings` 403, `POST /api/targets` 403, `POST /api/stack` 403, `POST /api/sample` 403,
+`POST /api/upload` 403, `POST /api/auth/readonly-token` 403; the owner's own `admin:secret1` unchanged at 200 on
+both kinds of path; a wrong token 401 with the Basic challenge; the on-disk `config.json` holding hashes and no
+plaintext; and a revoked token back to 401.
+
+**Tests +14 Python / +13 frontend.** `tests/webapp/test_auth.py` (+10) covers the credential (Basic and Bearer,
+the wrong username, the password not being a read-only token, and — the inverse of `check_basic_auth`'s
+"disabled allows everything" — nothing accepted with none minted), the gate both ways, the
+cannot-widen-itself pair, rotation and revocation, the refusal on an open install, the "an install with no
+token behaves exactly as before" case, and the settings PUT not being able to forge one. One test walks the
+app's real routes (recursing into FastAPI's `_IncludedRouter`, since a flat scan of `app.routes` finds none and
+would pass vacuously — it asserts the walk found something first) so a typo in the allowlist cannot ship.
+`tests/test_readonly_paths_mirror.py` (+2) pins what the screen *says* the token can read against what the gate
+allows, in both directions — a promise about a secret is worth a drift test. `tests/webapp/test_config_upgrade.py`
+and `test_api.py` gain the upgrade and backup assertions. Frontend: `readonlyToken.test.ts` (+7) on the wording
+and the curl line, and `Settings.test.tsx` (+6) on the panel — nothing offered while the app is open, the token
+shown once with its username, no stale token left after a remove, the confirm before replacing a live token,
+and clean degradation against a backend that omits the new fields.
+
+*(`renderSettingsWith` gained an optional fourth argument for the auth-status fixture, defaulting to the
+`{ enabled: false }` every existing caller already got — a spy set before the helper was silently overwritten
+by it, which is how the first draft of these six tests "failed".)*
+
+Original entry, as filed:
+
+  - **OWNER-REQUESTED GATE (filed 2026-09-12, measured on the owner's NAS) — there is no read-only credential,
+    so an unprivileged local account cannot read diagnostics at all, and both workarounds are
+    root-equivalent.** *(Pillar: infra / observability in service of the owner's on-NAS Observer agent — size S–M.
+    Confidence: reproduced on the live deploy.)* The owner has stood up a locked-down `astroagent` user on the
+    NAS (uid 3005, no password, no SSH, no sudo, **not** in `docker`, POSIX ACL `user:astroagent:r-x` across all
+    289,853 objects of `$ASTRO`) so an agent can observe the running app against real data. It works — every
+    write and every `docker` call is denied — **except** that `GET /api/logs` returns
+    `{"detail":"Authentication required"}` (HTTP 401) to that account **and to root**, because the owner has a
+    password set and `webapp/main.py::_install_auth_gate` exempts only `/api/health` (`_AUTH_OPEN_PATHS`).
+    **A file-level reader cannot substitute:** `webapp/routers/logs.py` serves
+    `webapp.logbuffer`'s in-memory ring, and nothing writes a log file under `$ASTRO`, so read access to the data
+    root buys nothing here. That leaves exactly two workarounds and **both are wrong**: hand the observer the
+    owner's Basic password — `webapp/auth.py` has **one shared credential and no roles**, so that same secret
+    posts to `/api/stack`, rewrites `/api/settings` and deletes targets — or add the account to `docker`, which
+    is root on the host. This gap is precisely what would later tempt someone into the second one.
+    **Shape:** a *second*, separate credential in settings — a random token, displayed once, stored PBKDF2-hashed
+    and salted exactly as the password already is, compared with `hmac.compare_digest` like
+    `check_basic_auth`. The gate accepts it **only for `GET`**, and only on a read-only allowlist (`/api/health`,
+    `/api/logs`, `/api/stats`, `/api/jobs`, `/api/targets`); any other method carrying it → 403, not 401, so the
+    refusal is unambiguous in a log. **Do NOT** implement this by adding paths to `_AUTH_OPEN_PATHS` — that opens
+    them unauthenticated to the whole LAN, which is a strictly worse trade than the problem it solves.
+    **Upgrade safety (§9):** opt-in and additive. No token in a stored config → byte-identical behaviour; with no
+    password set the app stays wide open exactly as today. **Verify by running it:** with a password set, the
+    token must pass `GET /api/logs`, fail `POST /api/stack` with 403, and the existing Basic password must keep
+    working unchanged on both.
+
 ## v0.440.3 — 2026-09-14 — a stopped Seestar manager is stopped when `stop()` returns
 
 *(Builder, branch `claude/sweet-babbage-fkwilc` — 🟠 BUG (correctness / shutdown hygiene), the entry the

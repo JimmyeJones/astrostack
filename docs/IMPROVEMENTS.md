@@ -435,6 +435,37 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **LEAD (Builder 2026-09-14, found by a `--mosaic --editor` dogfood pass that was otherwise CLEAN) — the
+  coaching card and the framing card prescribe *different next sessions*, and the one that claims to name the
+  single best move has never heard of the other.** *(Pillar: autonomy + friendliness — PRIORITY 2/3; size S to
+  write, **M to be sure of** — read the crowding-out risk before touching it. Confidence: both sentences
+  photographed in a browser this run, on both bundled samples.)*
+  `nextBestMove`'s own docstring is *"the single highest-leverage thing that would most improve this target next
+  time"*, picked from a fixed ladder (`locate` → `thin` → `soft` → `integration` → `good`). **Framing is not on
+  that ladder**, and `FramingVerdictNote` — inline on the same page, an inch away — is often naming a bigger
+  lever. Measured this run:
+  * field sample: *"To make your Sample: Orion Nebula (M42) even better · **Add more time** — 1 min so far…"*
+    over *"Orion Nebula is bigger than your frame — only about **15 %** of it is in this picture. **Shoot it in
+    mosaic mode** to capture all of it."*
+  * mosaic sample: *"…another pass or two over **the same mosaic** evens out the thinner part"* over *"only
+    about **55 %** of it is in this picture. **Adding more panels** next session would capture the rest."*
+  The mosaic pair is the sharper one: "more passes over the same mosaic" and "add more panels" are opposed
+  instructions about where to point the scope next session, not two compatible suggestions. And on a 15 %-framed
+  field, hours of extra depth buy a deeper picture of a fragment.
+  **Why it is filed rather than built.** A ladder picks **one** rung, and the owner is a heavy mosaic user with
+  a 2.1° field on big objects — so a framing rung placed above `integration` would fire on much of his library
+  and **crowd out the depth advice**, which is also true and also what he needs. That is a product judgement
+  about which of two real levers a beginner should be told about first, on the card he sees most, and it should
+  not be made by blind reordering.
+  **Two candidate shapes, neither costed:** (a) a new `framing` rung, needing a captured-fraction threshold and
+  an argued position in the ladder (probably below `locate` and `thin`, since un-solved and one-sub-deep are
+  prerequisites either way); or (b) keep the rung that fires and make its *phrase* stop contradicting the
+  framing card — the v0.437.4 pattern of keeping the lever and scoping the claim — which is smaller but risks
+  restating the framing card's own sentence, against the standing IA rule about repetition.
+  **The datum is already on the page** (`Target.tsx` renders both cards), so whichever shape wins needs no new
+  request. **Check first** whether `framing_advice` is even live on a target the owner has framed well, so the
+  fix doesn't fire on the 95 %-captured case.
+
 - ~~**LEAD (Builder 2026-09-13, filed with v0.438.10) — a cropped export reports its depth against
   the canvas it has left.**~~ — **✅ SHIPPED v0.438.13–v0.438.14** (Builder 2026-09-13); entry cut to
   [`SHIPPED.md`](SHIPPED.md), one-liner under "Shipped" below. The lead's own first instruction was
@@ -2593,32 +2624,6 @@ uncached path costs every time (a cold one pays both, 1,116 ms), the 129 ms bein
 
 ### Infra / maintainability
 
-- **OWNER-REQUESTED GATE (filed 2026-09-12, measured on the owner's NAS) — there is no read-only credential,
-  so an unprivileged local account cannot read diagnostics at all, and both workarounds are
-  root-equivalent.** *(Pillar: infra / observability in service of the owner's on-NAS Observer agent — size S–M.
-  Confidence: reproduced on the live deploy.)* The owner has stood up a locked-down `astroagent` user on the
-  NAS (uid 3005, no password, no SSH, no sudo, **not** in `docker`, POSIX ACL `user:astroagent:r-x` across all
-  289,853 objects of `$ASTRO`) so an agent can observe the running app against real data. It works — every
-  write and every `docker` call is denied — **except** that `GET /api/logs` returns
-  `{"detail":"Authentication required"}` (HTTP 401) to that account **and to root**, because the owner has a
-  password set and `webapp/main.py::_install_auth_gate` exempts only `/api/health` (`_AUTH_OPEN_PATHS`).
-  **A file-level reader cannot substitute:** `webapp/routers/logs.py` serves
-  `webapp.logbuffer`'s in-memory ring, and nothing writes a log file under `$ASTRO`, so read access to the data
-  root buys nothing here. That leaves exactly two workarounds and **both are wrong**: hand the observer the
-  owner's Basic password — `webapp/auth.py` has **one shared credential and no roles**, so that same secret
-  posts to `/api/stack`, rewrites `/api/settings` and deletes targets — or add the account to `docker`, which
-  is root on the host. This gap is precisely what would later tempt someone into the second one.
-  **Shape:** a *second*, separate credential in settings — a random token, displayed once, stored PBKDF2-hashed
-  and salted exactly as the password already is, compared with `hmac.compare_digest` like
-  `check_basic_auth`. The gate accepts it **only for `GET`**, and only on a read-only allowlist (`/api/health`,
-  `/api/logs`, `/api/stats`, `/api/jobs`, `/api/targets`); any other method carrying it → 403, not 401, so the
-  refusal is unambiguous in a log. **Do NOT** implement this by adding paths to `_AUTH_OPEN_PATHS` — that opens
-  them unauthenticated to the whole LAN, which is a strictly worse trade than the problem it solves.
-  **Upgrade safety (§9):** opt-in and additive. No token in a stored config → byte-identical behaviour; with no
-  password set the app stays wide open exactly as today. **Verify by running it:** with a password set, the
-  token must pass `GET /api/logs`, fail `POST /api/stack` with 403, and the existing Basic password must keep
-  working unchanged on both.
-
 - ~~**LEAD (Builder 2026-09-12, filed with v0.435.0 because it is what that fix could not reach) — the
   bundled sample cannot light up the whole "PLAN A NIGHT" half of the app, so no dogfood pass has ever
   seen those screens with data.**~~ — **✅ SHIPPED v0.436.1** as the entry's own shape (a), and it found
@@ -3115,6 +3120,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.441.0** — 🔐 OWNER-REQUESTED GATE (infra / observability in service of the owner's on-NAS observer agent), filed 2026-09-12 and built as its own shape: **a read-only credential, so observing the app no longer means handing over the keys to it.** `webapp/auth.py` had one shared secret and no roles, so letting an agent read `GET /api/logs` meant handing it the credential that also posts to `/api/stack` and deletes targets — and the only alternative was the `docker` group, i.e. root on the host. New `readonly_token_hash`/`readonly_token_salt` (the password's own PBKDF2, rounds and per-mint salt), `auth.check_readonly_auth` (Basic under the reserved username `readonly`, or `Bearer`; **never** True by default, unlike `check_basic_auth`), and `POST`/`DELETE /api/auth/readonly-token` — minted on request, shown **once**, rotation revoking the old one. The gate accepts it for **GET** only and only on `_READONLY_GET_PATHS` (health, logs, stats, jobs, targets); anything else is **403, not 401**, and `_AUTH_OPEN_PATHS` is untouched — this is a narrower credential, not an open door, which was the entry's one explicit "do NOT". It cannot mint or rotate itself. Minting is refused on a password-less install, where it would guard nothing. Off unless minted, so an upgraded install's gate is byte-for-byte what it was; the two fields joined `_AUTH_KEYS`, so they are stripped from the settings GET/PUT and from a settings backup, and an import cannot forge one. UI inside the existing Access-control panel (no new card), leading with what the token *cannot* do, plus a copyable `curl` against this install's own origin. **Verified against a really-running app** as the entry required, not only the TestClient. Tests +14 Python / +13 frontend, including a mirror test pinning what the screen says the token may read against what the gate allows. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.440.3** — 🟠 BUG (correctness / shutdown hygiene), the entry the on-NAS observer account filed at the top of "Bugs (fix these first)" the same night, taken as filed and with its own measurement reproduced here first: **`SeestarManager.stop()` now returns only once both loop threads have actually stopped.** `_poll_loop` waits on the stop event instead of `time.sleep` at both of its naps, and `stop()` joins both threads bounded by a new `_STOP_JOIN_TIMEOUT_S` (a ceiling on shutdown latency, not a guarantee — a loop mid-poll on several silent scopes can outlast any fixed number, so a miss is logged and the daemons are left to exit). `_scan_now` stays a separate event, as the entry's care note asked. Measured with the filed harness: stale `seestar-poll` threads across `test_incoming_readonly_guard.py` go **1 → 2 → 3 → 0**. Tests +4, three red before under a scratch revert. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.440.0** — 🟠 BUG (trust + friendliness, PRIORITY 3, on the PRIORITY 1/4 mosaic frontier), the first of the four "other listings" the v0.438.16 lead named, and verified red by a scratch revert: **Compare's Split and Blink modes dropped the thin-stack cue the Side-by-side mode on the same page shows.** `AbSide` — the A/B provenance strip whose own docstring says those modes are "as trustworthy as Side by side" about which stack is which — printed `{n_frames_used} frames` as bare text, while `CardMeta` has run the identical number through `FrameCountBadge` (and so through the run's `field_fulls`) since v0.437.7. On a mosaic those are different numbers — nine subs over a 3×3 raster is one sub everywhere — so on the one page whose entire question is *"which of these is better?"*, the loudest answer it has disappeared the moment you changed comparison mode. The strip now renders the **same shared component**, so the two modes cannot spell one count two ways; kept on its existing row (badge at natural width, the rest of the provenance truncating beside it) so no row is added to a compact strip, and every clause — integration, date, measured noise — still reads exactly as it did. Frontend-only; no endpoint, config, schema, on-disk, API-shape or default change. Tests +3 in `Compare.test.tsx`, **two red before** under a scratch revert (the Split and the Blink cue); the third pins that nothing was removed to make room.
 - **v0.440.2** — 🔧 INFRA (maintainability in service of not missing bugs), filed and taken in the same run as the bug that proves it: **a dogfood pass now reaches `/compare`, and clicks its Split and Blink modes.** Compare is the only route whose URL carries *data* — two `<safe>:<run_id>` refs — so it could not be a constant in `dogfood_probe.mjs`'s route table and had simply never been there: the page whose entire job is weighing two pictures against each other had never been in front of a browser, at either width, on any pass ever recorded. The route is built from the running app's own `/api/gallery` rather than from a new env var (the pictures are already on the wire, and on a `--mosaic` pass the pair is the mosaic **and** the single field — the one comparison where a per-pixel figure and a total are different numbers); fewer than two pictures, as under `--empty` or `--no-stack`, skips it rather than probing an error state the page is right to show. And its Split and Blink comparators are behind a `SegmentedControl`, carrying a provenance strip "Side by side" does not have — **a whole element no amount of navigating could reach**, which is exactly where v0.440.0 lived. The route loop's body is split out as `probeCurrentView`, so a view reached by a click is held to the identical overflow / squeeze / clipped-label / console checks as one reached by a URL, and each route's reported height is taken on landing so a click cannot move it. Verified against the running app: six new screenshots, the sweep still clean, the height table unmoved. Tooling only — nothing in the app, the image or the suite changes.
