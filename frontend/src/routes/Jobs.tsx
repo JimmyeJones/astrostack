@@ -22,6 +22,7 @@ import { TryHarderButton } from "../components/TryHarderButton";
 import { thinStackWarning, type ThinStackWarning } from "../components/target/thinStack";
 import { rejectionNote } from "../components/target/rejectionNote";
 import { type EtaSample, etaLabel, updateEtaAnchor } from "../jobEta";
+import { importWaitingNote } from "../importWaiting";
 import {
   isJobNotifyEnabled, notificationsSupported, requestNotificationPermission,
   setJobNotifyEnabled,
@@ -1408,6 +1409,15 @@ export function JobsView() {
     queryFn: () => api.listJobs(),
     refetchInterval: 1500,
   });
+  // Whether the import is stuck behind the one serial worker. Its own query
+  // (and its own, slower interval) rather than a field on the jobs list: the
+  // answer only changes on the scale of hours, and the list is polled every
+  // 1.5 s for progress bars.
+  const queueHealth = useQuery({
+    queryKey: ["job-queue-health"], queryFn: api.jobQueueHealth,
+    refetchInterval: 60_000,
+  });
+  const stuckImport = importWaitingNote(queueHealth.data?.waiting, jobKindLabel);
   const notify = useJobFinishNotifications();
   const cancel = useMutation({
     mutationFn: (id: string) => api.cancelJob(id),
@@ -1466,6 +1476,15 @@ export function JobsView() {
           ) : null}
         </Group>
       </Group>
+      {/* A queued import nobody asked for looks identical to an idle queue on
+          every other screen, so the one page that *has* the queue says it out
+          loud — above the rows, because the row itself only reads "queued". */}
+      {stuckImport ? (
+        <Alert color="yellow" variant="light" title={stuckImport.title}>
+          <Text size="sm">{stuckImport.body}</Text>
+          <Text size="sm" mt={4}>{stuckImport.reassurance}</Text>
+        </Alert>
+      ) : null}
       {jobs.length === 0 ? (
         <Paper withBorder p="xl">
           <Stack align="center" gap="sm">

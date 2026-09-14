@@ -42,6 +42,38 @@ function renderJobs() {
 afterEach(() => vi.restoreAllMocks());
 
 describe("JobsView", () => {
+  it("says nothing about the queue while the import is keeping up", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([mkJob()]);
+    vi.spyOn(client.api, "jobQueueHealth").mockResolvedValue({ waiting: null });
+
+    renderJobs();
+    await waitFor(() => expect(client.api.jobQueueHealth).toHaveBeenCalled());
+    expect(screen.queryByText(/waiting to be imported/)).not.toBeInTheDocument();
+  });
+
+  it("says out loud when an import has been queued behind a long job", async () => {
+    // A queued import reads as a bare grey "queued" badge on its own row, which
+    // is indistinguishable from one enqueued a second ago — so the page that
+    // *has* the queue has to say it above the rows.
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({ id: "rep", kind: "reprocess_all", target: null, state: "running" }),
+      mkJob({ id: "imp", kind: "pipeline", target: null, state: "queued" }),
+    ]);
+    vi.spyOn(client.api, "jobQueueHealth").mockResolvedValue({
+      waiting: {
+        job_id: "imp", queued_utc: "2026-09-11T01:04:48Z", waiting_hours: 70,
+        n_waiting: 1, holder_id: "rep", holder_kind: "reprocess_all",
+        holder_target: null, holder_hours: 96,
+      },
+    });
+
+    renderJobs();
+    expect(await screen.findByText("New frames are waiting to be imported"))
+      .toBeInTheDocument();
+    expect(screen.getByText(/waiting 3 days behind “Reprocessing all targets”/))
+      .toBeInTheDocument();
+  });
+
   it("shows an error notification when cancelling a job fails", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([mkJob()]);
     vi.spyOn(client.api, "cancelJob").mockRejectedValue(new Error("job already finished"));
