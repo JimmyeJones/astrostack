@@ -7,6 +7,14 @@
  * scrap of sky they are looking at learns nothing from it.
  */
 
+/** What the control that answers "then how do I judge it?" is called on screen.
+ *
+ * One place owns the wording, the `fullres.ts` / `removed.ts` pattern, because
+ * five surfaces now name it: the button itself and the four advisories that
+ * send the reader to it. A caption pointing at "check it at full size" while the
+ * button says something else is a caption pointing at nothing. */
+export const FULL_SIZE_CHECK_LABEL = "Check it at full size";
+
 const clampUnit = (v: number): number =>
   Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0.5;
 
