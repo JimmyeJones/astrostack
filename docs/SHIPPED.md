@@ -1,5 +1,46 @@
 # Shipped — the record
 
+## v0.446.2 — 2026-09-14 — the full-size check is clicked, and the field leg stops driving the mosaic
+
+*(Builder, branch `claude/sweet-babbage-nhiajs` — INFRA (the finder, not the app), serving PRIORITY 1. One
+`data-testid` added to a shipped component; everything else is `scripts/`. No endpoint, config, schema,
+on-disk, API-shape or default change.)*
+
+**Half one — a view behind a click is a view no route table probes.** v0.446.0 made the editor's
+decimated-preview surface *reachable*; it did not make anything reach the part of it that is behind a
+button. `FullSizeCheck` is a modal, and inside it the navigator, the marker, the `X-Loupe-Window` sentence
+and the split comparison are each another click deep — the split two. `dogfood_editor.mjs` adds every op the
+Add menu offers and had never pressed any of them, which is the same blind spot `--editor` itself was
+written for (v0.437.x) and the one `--mosaic`'s Split/Blink modes hit in v0.440.2.
+
+New `driveFullSizeCheck()` opens it, waits for the real full-resolution window, prints the three sentences it
+draws as one paragraph (the caption, the where-line, the split caption — three files, one window), clicks a
+**corner** of the navigator (the case where the window's clamp inside the canvas actually does something) and
+checks the marker followed, turns the comparison on, drags the divider through its pointer capture, and
+drains console errors and failed requests at each step. Driven on the real app: the window rendered, *"This
+is the middle of your picture."* became *"This is the top-left of your picture."*, the split drew, and
+nothing errored.
+
+It is explicit about **not** reaching it, too: on a 1:1 preview it says *"not offered (preview is 1:1 — run
+with `--big` to reach it)"*, and on a geometry refusal it prints the sentence being withheld instead. A
+silent skip reads as a clean run, which is the `location_source` lesson from v0.436.1.
+
+One `data-testid="full-size-check-caption"` was added, on the modal's lead sentence — the only place the
+shrink factor is named, and the line v0.446.1's bug was sitting in. It is guarded both ways by
+`test_dogfood_big_anchors.py` (+4): every id the drive asks for is rendered by real non-test source, the
+click-only ones cannot be quietly dropped from the drive, and the drive must still say when it could not
+reach the surface.
+
+**Half two — a defect the first `--big` pass exposed in the tooling itself.** `SAFE`, the target the "sample"
+leg probes and edits, was `/api/targets`' **first row**. That list is ordered by activity, so the moment a
+second demo was loaded and stacked it became the mosaic: the pass ran both editor drives on one target, and
+the field sample's `$SHOTS` — the directory whose page heights the §1 baselines in `PROCESS-NOTES.md` are
+measured against — would have held a mosaic's numbers under the same filenames. Observed in the log as two
+consecutive drives of `/targets/Sample_M42_mosaic_2_2_full_size/edit/1`. It now asks `/api/sample` which
+target the field sample *is*, falling back to the first row so a `--serve` against a real library with no
+sample loaded behaves exactly as before. The exposure predates `--big` (`--mosaic` could do it too); the
+third demo is what made it happen.
+
 ## v0.446.1 — 2026-09-14 — "about a 2th of full size", found the first time anything drew it
 
 *(Builder, branch `claude/sweet-babbage-nhiajs` — PRIORITY 1 (editor) + 3 (friendliness). Copy only, two
