@@ -18,6 +18,42 @@ is a queue.
 
 ---
 
+## 2026-09-14 (Scout, branch `claude/admiring-brahmagupta-s4lpxh`) — the observer's five open issues triaged, four filed, one closed; no code shipped
+
+**Baseline.** `main` at `dead8e6e` (v0.441.1), green (`-n 4` + BLAS cap, ~11 min). No code changed this run —
+the deliverable is a triaged inbox and a filed backlog.
+
+**The inbox.** Six observer/owner GitHub issues were open. Disposition:
+- **#883** (ingestion stalled 11 days) — already fully triaged by the v0.441.1 run: comment posted, the
+  starvation `LEAD` filed at the top of "Bugs". Left open, no new action, as its own comment directs.
+- **#878** (76 % of frames double-registered; 11 `-<hex>` duplicate targets) — **mechanism traced and
+  arithmetic-confirmed.** `mosaic_target_name` names a mosaic subs folder `"<T> (mosaic)"`, and
+  `make_safe_name("<T> (mosaic)")` collapses spaces+parens to `_` → stem `<T>_mosaic`, *identical* to the
+  on-device-output folder's stem, so `_allocate_safe_name` mints `<T>_mosaic-sha1("<T> (mosaic)")[:8]`.
+  Verified `sha1("73 Leonis (mosaic)")[:8]=="328c48ae"` and `sha1("Alphecca (mosaic)")[:8]=="c7bed385"`,
+  exactly the observer's targets. Added: the old `<T>_mosaic_sub`-named twin is classified single-field by
+  `is_mosaic_target_name`, so it is a wrong-mode stack, not just clutter. Filed (size L, architectural),
+  cross-linked to #880 (whose classification fix stops recurrence).
+- **#880** (11 accepted-but-unstackable device-output targets; Python traceback as reject reason) — traced
+  three defects to their lines (`qc/runner.py:113` repr, `apply_qc_result_to_db` never setting accept=0,
+  `scanner.py:377` mosaic skip). Filed; (a) reject-reason namespacing marked the safe standalone slice.
+- **#877** (preview_crop_json NULL on 42 baked-crop previews) and **#876** (42 stale auto-crop recipes) —
+  code paths confirmed, both filed as historical-only (no live picture affected), carrying the observer's
+  own cautious fixes (backfill / flag-don't-rewrite) and the "do not re-open the trim algorithm" guardrail.
+- **#879** (rejection census, 12.5 %, no dominant reason) — **closed** (`not_planned`): self-described shape
+  report, no defect; the one signal (2025-08-10, 87 % fwhm) is unfalsifiable from a table with no per-frame
+  history. Commented with the reasoning and what would reopen it.
+
+**Why no drive-by fix.** #880(a) looked like the small safe win, but `reject_reason.startswith("qc_error")`
+is consumed in six modules and 135 rows already carry the old format — not a one-file, obviously-safe change
+on a live install, so it went to the Builder with care notes rather than a rushed patch (scout prompt §5).
+
+**Feature pipeline.** Filed one novel beginner feature — "N subs in incoming not in your library yet", the
+observer's own fourth suggested check (#883), distinct from v0.441.1's `import_waiting` (which only catches a
+*queued* job). Did **not** manufacture a second idea: the "plan a night" pillar is saturated
+(v0.425/430/433/405/403), and §4 says idea supply was never the constraint — 4 verified bugs with concrete
+fix slices is the run's value.
+
 ## 2026-09-14 (Builder, branch `claude/sweet-babbage-jadqn3`) — collision #15, an observer issue verified and half-fixed, and a stand-down no scan of the backlog can see
 
 **Baseline.** `main` at `8a547026`, green (6,012 passed / 2 skipped, 565 s with the BLAS cap + `-n 4`).
