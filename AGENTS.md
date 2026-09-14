@@ -610,6 +610,24 @@ cd frontend && npm install
 > (2026-09-03). Use `python -m pytest -q > run.log 2>&1; echo "EXIT=$?"` and read
 > the file. **A summary line that does not end in `passed` or `failed` is not a
 > result**, whatever the exit code said.
+>
+> **⚠️ Clear `/tmp/pytest-of-root` between suite runs** *(added 2026-09-14)*. One
+> run leaves **~7 GB** there — pytest keeps the last three `tmp_path` roots per
+> invocation and `-n 4` multiplies them — so the fourth suite of a run hits
+> `OSError: [Errno 28] No space left on device` **inside pytest's own terminal
+> writer**, and `vitest` dies the same way mid-file. That reads exactly like a
+> broken checkout and is not one: `rm -rf /tmp/pytest-of-root` took a box with
+> 147 MB free back to 28 GB and the identical re-run passed. On any ENOSPC, look
+> there first (see the container note about the fixed per-session allowance —
+> `df`'s "Used" will look small while "Avail" is zero).
+>
+> **And the suite is ~11 minutes, not ~75 — cap the BLAS threads before the first
+> run, not after the third.** `OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+> MKL_NUM_THREADS=1 … python -m pytest -q -n 4 --dist worksteal`, after
+> `pip install pytest-xdist` into the run's own `.venv` (it is deliberately not a
+> project dependency, and installing it changes nothing in the repo). Sequential,
+> the same suite projects to about 75 minutes and nothing about that looks wrong
+> while it is happening. Details in `docs/PROCESS-NOTES.md`, 2026-09-13.
 If the Qt system libs above can't be installed in your environment (e.g. `apt`
 is blocked, so `libEGL.so.1` is missing), fall back to:
 `python -m pytest tests/ -p no:pytest-qt --ignore=tests/test_compare_dialog.py --ignore=tests/test_end_to_end.py --ignore=tests/test_footprint_view.py -q`
@@ -737,6 +755,21 @@ the repo.
 > and what a reader sees without clicking are different questions — and the
 > second one is where the "what does this page say when the other cards are
 > quiet?" failures live.
+>
+> **The sweep now reaches `/compare`, and its Split and Blink modes** *(added
+> 2026-09-14 with v0.440.2)*. That page was never in the route table because it
+> is the only one whose URL carries data — two `<safe>:<run_id>` refs — so the
+> screen whose entire job is weighing two pictures against each other had never
+> been photographed at all; the route is now built from the running app's own
+> `/api/gallery`, and on a `--mosaic` pass the pair is the mosaic *and* the
+> single field, which is the comparison where a per-pixel figure and a total are
+> different numbers. Its other two comparators are behind a `SegmentedControl`
+> and carry a **provenance strip "Side by side" does not have**, so navigating
+> alone could never see them — the same blind spot `--editor` exists for, and
+> where v0.440.0 lived. Each mode is clicked and held to the identical overflow /
+> squeeze / clipped-label / console checks. The lesson generalises: **a view you
+> can only reach by clicking is a view no route table will ever probe**, so when
+> you add one, add it here too.
 >
 > **Follow it with `scripts/agent-dogfood.sh --empty`** (≈1 min once playwright is
 > installed): the same probe against an app with **no data at all**. Every

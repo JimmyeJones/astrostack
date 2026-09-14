@@ -32,6 +32,15 @@
 // last five dogfood findings were two of those sentences disagreeing, and every
 // one had to be found by cropping a screenshot afterwards.
 //
+// Two views it reaches that a route table cannot. `/compare` is the only page
+// whose URL carries data — two `<safe>:<run_id>` refs — so it was never in the
+// table at all, and the page whose entire job is weighing two pictures against
+// each other had never been in front of a browser; the route is now built from
+// the app's own /api/gallery. And its Split and Blink comparators are behind a
+// SegmentedControl, carrying a provenance strip "Side by side" does not have —
+// so navigating could not see them, which is where v0.440.0 lived. Each mode is
+// clicked and held to the identical checks.
+//
 // It is a FINDER, not a test: what it reports still needs a real regression test
 // in the suite before anything is called fixed.
 import { existsSync } from "node:fs";
@@ -51,6 +60,40 @@ const SHOTS = process.env.SHOTS_DIR || "/tmp/astrostack-dogfood/shots";
 const SAFE = process.env.TARGET_SAFE || "";
 const RUN_ID = process.env.TARGET_RUN_ID || "";
 
+/** `/compare` needs two `<safe>:<run_id>` refs in its query string, so unlike
+ * every other route it cannot be a constant — which is why it has never been in
+ * this table, and why the A/B provenance strip above Split and Blink had never
+ * been in front of a browser at all (v0.440.0 was a bug that lived exactly
+ * there: the strip printed a raw frame count where the Side-by-side card on the
+ * same page ran it through `field_fulls`).
+ *
+ * Built from the app's own `/api/gallery` rather than from an env var: the two
+ * pictures a run has are already on the wire, no new plumbing is needed, and on
+ * a `--mosaic` pass the pair is the mosaic *and* the single field — the one
+ * comparison where a per-pixel figure and a total are different numbers.
+ * Returns "" when there are fewer than two pictures (`--empty`, `--no-stack`),
+ * and the route is then simply skipped rather than probing an error state the
+ * page is right to show. */
+async function compareRoute() {
+  try {
+    const res = await fetch(`${BASE}/api/gallery`);
+    if (!res.ok) return "";
+    const items = (await res.json()).items ?? [];
+    if (items.length < 2) return "";
+    const [a, b] = items;
+    return `/compare?a=${a.safe}:${a.run_id}&b=${b.safe}:${b.run_id}`;
+  } catch {
+    return "";
+  }
+}
+
+const COMPARE = await compareRoute();
+
+/** The comparators that only exist behind a click. `page.goto` lands on "Side
+ * by side", so a sweep that only navigates can never see the other two — the
+ * same blind spot `--editor` exists for on the editor. */
+const COMPARE_MODES = ["Split", "Blink"];
+
 // The real route table (frontend/src/main.tsx) — a typo here reads as a bug
 // ("Unexpected Application Error! 404 Not Found") that is entirely the probe's.
 const ROUTES = [
@@ -58,6 +101,7 @@ const ROUTES = [
   "/universe", "/life-list",
   "/telescope", "/moon-sun", "/calibration", "/combine", "/jobs", "/storage",
   "/logs", "/settings", "/glossary",
+  ...(COMPARE ? [COMPARE] : []),
   ...(SAFE ? [`/targets/${SAFE}`, `/targets/${SAFE}/stack`,
               `/targets/${SAFE}/history`] : []),
   // The editor is priority 1, so it is worth a shot even though it is slow.
@@ -262,6 +306,43 @@ for (const { name, width, height } of WIDTHS) {
     if (m.type() === "error" && ours(m.text())) errors.push(m.text());
   });
 
+  /** Shoot and measure whatever the page is showing right now.
+   *
+   * Split out of the route loop so a view reached by a *click* — a comparator
+   * mode, and anything else added later — is held to the identical checks as a
+   * view reached by a URL. `label` is what the findings are reported under;
+   * `slug` names the screenshot. */
+  const probeCurrentView = async (label, slug) => {
+    await page.screenshot({
+      path: `${SHOTS}/${name}${slug}.png`, fullPage: true,
+    });
+    for (const o of await page.evaluate(overflowingLeaves)) {
+      findings++;
+      console.log(
+        `[${name}] ${label}: OVERFLOW <${o.tag}> ${o.clientWidth}px box vs ` +
+        `${o.scrollWidth}px content — "${o.text}" (${o.cls})`,
+      );
+    }
+    for (const s of await page.evaluate(squeezedText, { minChars: 40, minRatio: 0.35 })) {
+      findings++;
+      console.log(
+        `[${name}] ${label}: SQUEEZED <${s.tag}> ${s.width}px of a ${s.parentWidth}px ` +
+        `row, ${s.lines} lines — "${s.text}"`,
+      );
+    }
+    for (const c of await page.evaluate(clippedLabels)) {
+      findings++;
+      console.log(
+        `[${name}] ${label}: CLIPPED LABEL ${c.clientWidth}px box vs ` +
+        `${c.scrollWidth}px word — "${c.text}" (scrolling cannot reveal it)`,
+      );
+    }
+    for (const e of errors.slice(0, 3)) {
+      findings++;
+      console.log(`[${name}] ${label}: CONSOLE ERROR ${e.slice(0, 200)}`);
+    }
+  };
+
   for (const route of ROUTES) {
     errors.length = 0;
     currentRoute = route;   // the console/pageerror handlers filter by route
@@ -274,47 +355,35 @@ for (const { name, width, height } of WIDTHS) {
     }
     await page.waitForTimeout(400);   // let self-hiding cards make their minds up
     const slug = route.replace(/\W+/g, "_") || "root";
-    await page.screenshot({
-      path: `${SHOTS}/${name}${slug}.png`, fullPage: true,
-    });
-    const over = await page.evaluate(overflowingLeaves);
-    for (const o of over) {
-      findings++;
-      console.log(
-        `[${name}] ${route}: OVERFLOW <${o.tag}> ${o.clientWidth}px box vs ` +
-        `${o.scrollWidth}px content — "${o.text}" (${o.cls})`,
-      );
-    }
-    for (const s of await page.evaluate(squeezedText, { minChars: 40, minRatio: 0.35 })) {
-      findings++;
-      console.log(
-        `[${name}] ${route}: SQUEEZED <${s.tag}> ${s.width}px of a ${s.parentWidth}px ` +
-        `row, ${s.lines} lines — "${s.text}"`,
-      );
-    }
-    for (const c of await page.evaluate(clippedLabels)) {
-      findings++;
-      console.log(
-        `[${name}] ${route}: CLIPPED LABEL ${c.clientWidth}px box vs ` +
-        `${c.scrollWidth}px word — "${c.text}" (scrolling cannot reveal it)`,
-      );
-    }
-    for (const e of errors.slice(0, 3)) {
-      findings++;
-      console.log(`[${name}] ${route}: CONSOLE ERROR ${e.slice(0, 200)}`);
+    await probeCurrentView(route, slug);
+    // How far the owner has to scroll. Not a finding on its own — a settings
+    // page is legitimately long — but the standing information-architecture
+    // work (AGENTS.md §1) is scored on exactly this number, and it has twice
+    // been measured by hand from these screenshots afterwards. Report it here
+    // so "which page is the wall?" is answered by the run. Taken before any
+    // click below, so a route's height is always its *landing* height.
+    heights.push([name, route, (await page.evaluate(
+      () => document.documentElement.scrollHeight))]);
+    // Compare's other two comparators are behind a SegmentedControl, and they
+    // carry a provenance strip that "Side by side" does not — a whole element
+    // this sweep could not reach by navigating. One click each, then the same
+    // checks. A missing control is not a finding: the page legitimately refuses
+    // Split when a stack has no preview.
+    if (COMPARE && route === COMPARE) {
+      for (const mode of COMPARE_MODES) {
+        errors.length = 0;
+        const button = page.getByText(mode, { exact: true }).first();
+        if (!(await button.count())) continue;
+        await button.click();
+        await page.waitForTimeout(600);
+        await probeCurrentView(`${route} [${mode}]`, `${slug}_${mode.toLowerCase()}`);
+      }
     }
     // Collected at the desktop width only: the phone pass would say the same
     // sentences twice, and the fold is decided by priority rather than by width.
     if (SAFE && route === `/targets/${SAFE}` && name === "desktop") {
       claims = await page.evaluate(prescriptiveClaims, PRESCRIPTIVE);
     }
-    // How far the owner has to scroll. Not a finding on its own — a settings
-    // page is legitimately long — but the standing information-architecture
-    // work (AGENTS.md §1) is scored on exactly this number, and it has twice
-    // been measured by hand from these screenshots afterwards. Report it here
-    // so "which page is the wall?" is answered by the run.
-    heights.push([name, route, (await page.evaluate(
-      () => document.documentElement.scrollHeight))]);
   }
   await ctx.close();
 }

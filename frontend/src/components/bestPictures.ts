@@ -11,6 +11,49 @@ import type { BestPicture } from "../api/client";
 import { formatIntegration } from "../format";
 import { perPixel, spansMoreThanOneField } from "./target/perPixel";
 
+/** How the wall's ranking actually works, in the words a beginner reads.
+ *
+ * One key per metric `seestack.portfolio.PORTFOLIO_WEIGHTS` blends, mapped to
+ * the phrase the hint uses for it. A TypeScript file cannot import a Python
+ * dict, so the key set is mirrored by hand and guarded by
+ * `tests/test_portfolio_hint_mirror.py` — a fifth metric added to the scorer
+ * turns that test red until this sentence names it.
+ *
+ * **Why this needed a guard.** The hint used to read *"picked automatically by
+ * total integration time, cleanliness, and frame count"*, and both halves of
+ * that were wrong: it named three of the four metrics (`coverage` has been in
+ * the blend and unmentioned), and it called the leading one a **total** when
+ * the ranker deliberately reads integration, frames and coverage *per pixel* —
+ * dividing each by the run's `field_fulls` — precisely so a mosaic is judged on
+ * how deep it is rather than on the sum of its panels. On a 3x3 raster those
+ * are an order of magnitude apart, and this one sentence is the only thing on
+ * the page that explains the order the pictures are in.
+ */
+export const RANKING_METRIC_WORDS: Record<string, string> = {
+  exposure: "integration time",
+  frames: "frame count",
+  noise: "how clean it came out",
+  coverage: "how deeply the subs overlap",
+};
+
+/** The wall's one-sentence explanation of its own ordering.
+ *
+ * Built from {@link RANKING_METRIC_WORDS} rather than written out, so the list
+ * of metrics and the sentence that names them cannot drift into two answers.
+ *
+ * It opens on the *detail* rather than on "your finest finished stacks, ranked
+ * automatically", because the page's intro paragraph an inch above already says
+ * exactly that ("deepest, cleanest first") — checked in a browser, where the two
+ * read as a stutter. The intro is the summary; this is what is behind it. */
+export function rankingHint(): string {
+  const { exposure, noise, frames, coverage } = RANKING_METRIC_WORDS;
+  return (
+    `Ranked by ${exposure}, ${noise}, ${frames} and ${coverage} — each ` +
+    "measured on one part of the picture rather than added up across it, so a " +
+    "mosaic is judged on how deep it is and not on the size of its canvas."
+  );
+}
+
 /** The "why it's good" caption clauses for one picture, most-meaningful first:
  *  - integration time ("3.4 h") when the run recorded it,
  *  - frame count ("500 frames"), and

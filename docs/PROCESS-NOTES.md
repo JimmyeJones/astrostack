@@ -18,6 +18,78 @@ is a queue.
 
 ---
 
+## 2026-09-14 (Builder, branch `claude/sweet-babbage-9drl8s`) — the "other listings" read, and the page that had never been photographed
+
+**Baseline.** `main` at `38804a8d`, green (6,008 passed / 2 skipped, 673 s with the BLAS cap + `-n 4`). It did
+not move all run — no collision; `0.440.0`–`0.440.2` were free at merge time.
+
+**The BLAS-cap note two blocks down saved about an hour, and it is worth reading before the first command.**
+The first, sequential run of the suite was at **16 % after twelve minutes** — a ~75-minute projection — and
+nothing about that looks wrong while it is happening. `OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+MKL_NUM_THREADS=1` + `pip install pytest-xdist` + `-n 4 --dist worksteal` took it to 673 s. It is the single
+highest-leverage thing a run can do in its first minute, and it is already written down.
+
+**The task list came from the previous-but-one run's closing sentence, twelve hours cold.** The v0.438.16 lead
+names four listings nobody had read against the row behind them — the Library tile, the Life list, "My best
+pictures" and Compare's side-by-side. The run that filed it was over, and the §11 "claimed-in-spirit" window
+(~2 hours) had long passed, so this was ready work rather than a collision risk.
+
+**Two of the four were bugs, and they are the same failure wearing a different face.** On the Gallery card the
+listings axis is *stored request vs recorded result*. On a listing that renders no options at all it is **one
+page telling the same fact two ways** — which is worth stating separately, because a sweep looking for a
+settings row will walk straight past it. **Compare** (v0.440.0): `AbSide` printed a raw `n_frames_used` where
+`CardMeta`, on the *same page*, has run the identical number through `FrameCountBadge` and so through
+`field_fulls` since v0.437.7 — under a docstring promising those modes are "as trustworthy as Side by side".
+**"My best pictures"** (v0.440.1): the badge hint named three of `PORTFOLIO_WEIGHTS`' four metrics and called
+the leading one a **total**, an inch above card captions (v0.437.6) that get it right.
+
+**The other two were clean, and checking them was most of the value.** The Library tile's `total_exposure_s` is
+summed `accepted_only=True` in `library.py::update_target_stats`, so it agrees with the `n_accepted/n_total`
+badge beside it; the Life list's `captured` gate and its "You've captured N of 110" header are one function, so
+the tiles and the count cannot disagree. Recorded in the backlog entry so the next run does not re-read them.
+
+**One measured divergence deliberately NOT shipped.** `Gallery.highlightBadges`' "Lucky 50%" chip is a claim
+about a kept fraction, and `run_stack` keeps `kept + without_fwhm` — frames with no QC FWHM are kept whole, and
+with none at all the selection is skipped silently, so the real fraction runs from `lucky_fraction` up to 1.0.
+`lucky_fraction` defaults to 1.0, no automatic path sets it, and **there is no recorded result to render the
+honest number from** — so the fix is an engine provenance stamp on an opt-in advanced knob, not a copy change.
+Filed with the reasoning rather than built.
+
+**And the finding that produced the third commit was about the tooling, not the app.** After fixing `AbSide` I
+went to look at it in a browser and discovered the probe has no `/compare` — because it is the only route whose
+URL carries *data*, so it could never be a constant in the route table. The page whose entire job is weighing
+two pictures against each other had never been photographed at either width on any pass ever recorded, and two
+of its three comparators are behind a `SegmentedControl` carrying an element "Side by side" does not have.
+Shipped as **v0.440.2**. The transferable rule: **a view you can only reach by clicking is a view no route
+table will ever probe** — `--editor` exists for exactly this reason on the editor, and the same question is
+worth asking of every tab, mode switch and disclosure in the app.
+
+**Dogfood: CLEAN** (`scripts/agent-dogfood.sh --mosaic --editor`, with an observing site). Both samples probed
+at 1440 px and 420 px: nothing overflowing, no console errors, all **21** editor ops re-rendering on the mosaic
+run, then undo and redo. Auto would trim **7.9 %** of the mosaic canvas (§1's bug line is ~15 %). The app's own
+sentences hold together as one paragraph — the next-best-move, readiness card, panel map, health notes and
+framing verdict all price the same 2x2 the same way (4 min over ~4 fields, 1 min a part, the top-right panel
+30 s behind, goal ~7.3 h) and the 3x3 figure is scoped to the 3x3 in the sentence that prints it. Tallest phone
+page `/tonight` 3,680 px, the mosaic Target page 3,592 px — the standings the last four passes recorded.
+
+**A smaller thing worth not rediscovering: a JSX comment cannot open a ternary's branch.**
+`cond ? ({/* … */}<Foo/>) : null` is an esbuild parse error (`Expected ")" but found "label"`), because
+`{…}` there is an object literal, not a child slot. The comment has to go *outside* the ternary. Cost one
+confusing test run.
+
+**One run of the suite leaves ~7 GB in `/tmp/pytest-of-root`, and four of them fill the box.** The final
+pre-merge run died on `OSError: [Errno 28] No space left on device` inside pytest's own terminal writer, and
+`vitest` died the same way mid-file — which reads like a broken checkout and is not one. `df` showed **147 MB
+free**; `/tmp/pytest-of-root` was **28 GB** across this run's four suites (pytest keeps the last three `tmp_path`
+roots per invocation, and `-n 4` multiplies them). `rm -rf /tmp/pytest-of-root` took it straight back to 28 GB
+free and the re-run passed unchanged. So: on any ENOSPC, look there first, and on a run that expects to execute
+the suite more than twice, clear it between runs rather than at the end.
+
+**And a browser is what sized the final wording.** The `/best` hint read well in isolation and stuttered on the
+page: it opened "Your finest finished stacks across every target, ranked automatically by…" an inch under an
+intro paragraph reading "Your finest finished stacks, ranked automatically — deepest, cleanest first." Only
+visible with the page open. It now opens on the detail, and the intro stays the summary.
+
 ## 2026-09-13 (Builder, branch `claude/sweet-babbage-bwinih`) — two CLEAN dogfood passes, a feature out of one of them, and a comment that cost the run its second task
 
 **Baseline.** `main` at `94aeaba7`, green (6,005 passed / 2 skipped, 670 s with the BLAS cap + `-n 4`). The
