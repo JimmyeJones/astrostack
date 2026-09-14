@@ -20,6 +20,7 @@
 #   scripts/agent-dogfood.sh --editor        # ALSO drive the editor (adds every op)
 #   scripts/agent-dogfood.sh --mosaic        # ALSO load/stack/probe a 2x2 MOSAIC sample
 #   scripts/agent-dogfood.sh --no-site       # leave the scratch install with no observing site
+#   scripts/agent-dogfood.sh --incoming-lag  # ALSO leave subs in incoming/ the library never imported
 #
 # --no-site turns OFF something a normal pass now does by default. Every pass
 # before 2026-09-12 left the scratch install with no site at all: the bundled
@@ -44,6 +45,21 @@
 # with no console error and no failed request. It is off by default only because
 # it costs a few minutes on top of a pass that already stacks the sample — run it
 # on any run that touches the editor.
+#
+# --incoming-lag exists because the scratch `incoming/` is EMPTY on every pass:
+# the sample arrives through `POST /api/sample`, which writes straight into the
+# library, so the drop folder this whole app is built around has never held a
+# file while a browser was looking. Anything that reads it — v0.442.0's "N subs
+# haven't been imported yet" note first — is therefore structurally invisible,
+# which is the missing-observing-site hole (v0.436.1) and the unreachable
+# Split/Blink modes (v0.440.2) a third time. It writes a few subs with the app's
+# own sample writer, dates them eleven days ago (the observer's own measurement,
+# and past the note's "has this folder stopped moving?" rule), and stretches the
+# watcher's quiet period so the batch is not handed off and imported mid-pass.
+# A flag, not the default, and the line is deliberate: an observing site is data
+# a real install *has*, while unimported subs are a *fault* — seeding one by
+# default would put a warning banner in every Dashboard screenshot and every
+# page-height baseline, and make "CLEAN" mean less rather than more.
 #
 # --mosaic exists because AGENTS.md §1 judges every Auto/editor claim on a tiled
 # mosaic at the owner's scale, never on the 6-frame single field — and until now
@@ -86,7 +102,12 @@ REPO="$PWD"
 
 DOGFOOD_DIR="${DOGFOOD_DIR:-${TMPDIR:-/tmp}/astrostack-dogfood}"
 DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0; DO_EDITOR=0; DO_MOSAIC=0
-DO_SITE=1
+DO_SITE=1; DO_LAG=0
+# How many aged subs --incoming-lag leaves in the scratch incoming/, and how old
+# it makes them. Eleven days is the observer's own measurement; the count is
+# small on purpose (this seeds a *state*, not a workload).
+DOGFOOD_LAG_SUBS="${DOGFOOD_LAG_SUBS:-7}"
+DOGFOOD_LAG_DAYS="${DOGFOOD_LAG_DAYS:-11}"
 # Where the scratch install pretends to observe from. A round mid-northern
 # latitude: obviously synthetic, and the band most Seestar owners are in, so the
 # planner's answers are representative rather than polar or equatorial. It is
@@ -103,7 +124,10 @@ for arg in "$@"; do
     --editor) DO_EDITOR=1 ;;
     --mosaic) DO_MOSAIC=1 ;;
     --no-site) DO_SITE=0 ;;
-    -h|--help) sed -n '1,80p' "$0"; exit 0 ;;
+    --incoming-lag) DO_LAG=1 ;;
+    # The whole header block, found rather than hard-coded: a fixed line count
+    # silently truncates -h every time the header grows, which it has.
+    -h|--help) sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
@@ -247,6 +271,67 @@ print("   [tonight] location_source=%s, %d row(s) to show" % (src, len(rows)))
 if src != "settings":
     print("   [tonight] the site did NOT take — the plan half is still empty")
 ' 2>/dev/null || echo "   [tonight] could not read /api/plan/tonight"
+fi
+
+# 3d. Subs in `incoming/` that never reached the library (--incoming-lag). Every
+#     pass ever recorded left the scratch `incoming/` EMPTY — the sample arrives
+#     through `POST /api/sample`, which writes straight into the library — so no
+#     screen that depends on that folder holding files has ever been in front of
+#     a browser. That is the same shape of hole as the missing observing site
+#     (v0.436.1) and the unreachable Split/Blink modes (v0.440.2), and the lesson
+#     AGENTS.md §7 keeps re-learning: a state you can only reach by *putting the
+#     app into it* is a state no route table will ever photograph.
+#
+#     It is a FLAG rather than the default, and the distinction is worth keeping:
+#     an observing site is data a real install *has*, so a pass without one was
+#     measuring an unrepresentative app. Eleven-day-old unimported subs are a
+#     *fault*. Photographing one by default would put a warning banner into every
+#     Dashboard screenshot and into every page-height baseline, and would make
+#     "CLEAN" a weaker statement rather than a stronger one.
+#
+#     The subs are written with the app's own `_write_sample_fits`, so they are
+#     the same shape as everything else the scratch install holds, and they are
+#     aged so the note's own "has this folder stopped moving?" rule is satisfied
+#     (`webapp.incominglag.LAG_MIN_AGE_S`). The quiet period is stretched for the
+#     same reason it is stretched nowhere else: the watcher would otherwise hand
+#     the batch off mid-pass and import the very state this is seeding.
+if [ "$DO_LAG" = 1 ]; then
+  echo "-- seeding ${DOGFOOD_LAG_SUBS} sub(s) into incoming/ that the library has no row for"
+  echo "   (a FAULT state, on purpose — --incoming-lag only; the default pass stays healthy)"
+  curl -sf -X PUT "$BASE/api/settings" -H 'Content-Type: application/json' \
+       -d '{"watch_poll_interval_s": 5, "watch_quiet_period_s": 900}' >/dev/null \
+    || echo "warn: could not retune the watcher — it may import the seeded subs mid-pass"
+  INCOMING="$DATA/incoming/IC 360_sub" python - "$DOGFOOD_LAG_SUBS" "$DOGFOOD_LAG_DAYS" <<'PY'
+import os, pathlib, sys, time
+from webapp.sample_data import _write_sample_fits
+
+n, days = int(sys.argv[1]), float(sys.argv[2])
+d = pathlib.Path(os.environ["INCOMING"])
+d.mkdir(parents=True, exist_ok=True)
+when = time.time() - days * 86400
+for i in range(n):
+    p = d / f"frame_{i:03d}.fit"
+    _write_sample_fits(p, index=i, star_shift=(0.0, 0.0))
+    os.utime(p, (when, when))
+print(f"   wrote {n} sub(s) into {d}, dated {days:g} days ago")
+PY
+  # Say what the app now reports, the way the site step does — a pass that
+  # silently seeded nothing would look exactly like the coverage hole it closes.
+  for _ in $(seq 1 24); do
+    LAG_JSON="$(curl -sf "$BASE/api/incoming-lag" || true)"
+    case "$LAG_JSON" in *'"n_waiting":0'*|"") sleep 3 ;; *) break ;; esac
+  done
+  printf '%s' "$LAG_JSON" | python -c '
+import json, sys
+raw = sys.stdin.read()
+d = json.loads(raw) if raw.strip() else {}
+if not d.get("checked"):
+    print("   [incoming-lag] the watcher has no listing yet — the note will stay silent")
+print("   [incoming-lag] %d sub(s) waiting across %d folder(s): %s"
+      % (d.get("n_waiting", 0), d.get("n_folders", 0),
+         ", ".join("%s +%d" % (i.get("folder") or "(loose)", i.get("n_waiting", 0))
+                   for i in d.get("items", [])) or "none"))
+' 2>/dev/null || echo "   [incoming-lag] could not read /api/incoming-lag"
 fi
 
 run_id_of() {  # newest stack run id for a target, or empty

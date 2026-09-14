@@ -1,5 +1,44 @@
 # Shipped — the record
 
+## v0.442.1 — 2026-09-14 — the drop folder has never held a file while a browser was looking
+
+*(Builder, branch `claude/sweet-babbage-49wpsd` — 🔧 INFRA (maintainability in service of not missing bugs),
+filed and taken in the same run as the feature that proves it. Tooling and AGENTS.md only: nothing in the
+app, the image or the shipped behaviour changes.)*
+
+**The scratch install's `incoming/` is empty on every dogfood pass ever recorded.** The sample arrives
+through `POST /api/sample`, which writes straight into the library, so the drop folder this whole app is
+built around has never held a file while a browser was looking — and *anything* that reads it is therefore
+structurally invisible to the tooling, v0.442.0's "N subs haven't been imported yet" note first. That is
+the missing-observing-site hole (v0.436.1) and the click-only Split/Blink modes (v0.440.2) a third time,
+and the lesson AGENTS.md §7 keeps re-learning: **a state you can only reach by putting the app into it is a
+state no route table will ever photograph.**
+
+`scripts/agent-dogfood.sh --incoming-lag` writes a few subs into the scratch `incoming/` with the app's own
+`webapp.sample_data._write_sample_fits` (so they are the same shape as everything else the install holds),
+dates them **eleven days ago** — the observer's own measurement, and comfortably past the note's
+"has this folder stopped moving?" rule — and stretches the watcher's quiet period so the batch is not handed
+off and imported mid-pass. It then prints what `/api/incoming-lag` answers, the way the observing-site step
+prints `location_source`, because a pass that silently seeded nothing would look exactly like the hole it
+closes.
+
+**A flag, not the default, and the line is the point.** An observing site is data a real install *has*, so a
+pass without one was measuring an unrepresentative app — which is why that one went on by default. Eleven-day-old
+unimported subs are a **fault**. Seeding one by default would put a warning banner into every Dashboard
+screenshot and every page-height baseline, and make "CLEAN" mean less rather than more. Measured on the real
+thing: with the flag the phone Dashboard goes **2,570 → 2,886 px** and the note is in the shot; the pass is
+otherwise identical and still clean.
+
+`-h/--help` also stops truncating: it printed a hard-coded `1,80p`, which silently cut the header every time
+it grew, and it now prints the header block by finding its end.
+
+**Tests +4** (`tests/test_dogfood_lag_anchors.py`) — the same `*_anchors` guard shape as the probe's, because
+the script reaches into the app by *name*: the flag is parsed and still defaults off and is still in the
+usage header; `_write_sample_fits` still exists and still takes `path`/`index`/`star_shift`;
+`/api/incoming-lag` is still a registered route; and the seeded age is still past `LAG_MIN_AGE_S`, so a
+future edit cannot quietly seed subs too fresh for the note to speak about — which would read as a clean
+Dashboard, the exact false negative the flag exists to remove.
+
 ## v0.442.0 — 2026-09-14 — the subs that never reached the library, and nothing said so
 
 *(Builder, branch `claude/sweet-babbage-49wpsd` — PRIORITY 2–3 (autonomy + friendliness), the Scout's
