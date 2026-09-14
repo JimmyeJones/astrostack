@@ -791,6 +791,21 @@ the repo.
 > second one is where the "what does this page say when the other cards are
 > quiet?" failures live.
 >
+> **And it reads `/tonight` the same way — "what the TONIGHT page SAYS"** *(added
+> 2026-09-14 with v0.445.1)*. The Target page tells the owner what to do with a
+> picture he already has; **Tonight is the other page that prescribes**, and it
+> does so from **four independent self-hiding cards in one column** — the
+> wishlist card, "nearly there", "shoot these before they're gone" and the week
+> plan — each naming a target, none knowing what the others named. That column
+> had never been read as one paragraph, and v0.445.0 was found in the gap between
+> two of its cards: one arguing *"a clear night spent on one of these buys
+> something the rest of the year can't"*, the other answering *"which night
+> should I go out?"* from a score that has never heard of a season ending. Ask of
+> the block it now prints: **do these point at the same night and the same
+> target, and if not, does the page say which wins?** Note it is silent without an
+> observing site — a normal pass sets one (v0.436.1), `--no-site` and `--empty`
+> do not.
+>
 > **The sweep now reaches `/compare`, and its Split and Blink modes** *(added
 > 2026-09-14 with v0.440.2)*. That page was never in the route table because it
 > is the only one whose URL carries data — two `<safe>:<run_id>` refs — so the
