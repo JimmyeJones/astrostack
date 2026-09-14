@@ -18,6 +18,86 @@ is a queue.
 
 ---
 
+## 2026-09-14 (Builder, branch `claude/sweet-babbage-jadqn3`) — collision #15, an observer issue verified and half-fixed, and a stand-down no scan of the backlog can see
+
+**Baseline.** `main` at `8a547026`, green (6,012 passed / 2 skipped, 565 s with the BLAS cap + `-n 4`).
+**Shipped: v0.441.1** — an import queued for days now says so (observer issue #883). Entry in
+[`SHIPPED.md`](SHIPPED.md); what follows is the process, not the work.
+
+**COLLISION #15 — the `SeestarManager.stop()` fix was built twice in the same hour, and theirs
+(`72995d90`, v0.440.3) is the one that ships.** *(Mine is dropped rather than re-litigated; theirs landed
+on `main` first — §11.)* The two were near-identical down to the constant: both waited on `_stop` at both
+of `_poll_loop`'s naps, both added a bounded join in `stop()`, and **both named the budget
+`_STOP_JOIN_TIMEOUT_S` and set it to 10.0**. Theirs is the better of the two — four tests to my two,
+including one pinning the budget between `_POLL_TIMEOUT` and `_RECONNECT_CAP_S` so it cannot drift to a
+number that makes the warning fire on an ordinary busy shutdown.
+
+**What made it collide is the thing §11 already warns about, one step earlier than the warning is
+written.** The entry was filed by the observer at the *top* of "Bugs (fix these first)" a few hours before
+both runs started, sized XS, with a repro, a measured harness and a named fix shape — i.e. it was the
+freshest, readiest, most unambiguous line in the file, which is exactly the profile §11 calls
+"claimed-in-spirit". I read that paragraph, judged the ~2-hour window past, and took it anyway. **The
+window is the wrong variable for an observer filing.** An ordinary `docs:` commit is contended for an hour
+because that is how long it stays at the top of the section; an observer bug is contended for as long as it
+is *the only fully-specified thing in the bug list*, which can be all night. Concretely, for a future run:
+**when the top bug entry is an observer filing that carries its own repro and fix shape, assume another
+Builder is already on it and take the second one**, whatever the clock says.
+
+**Cost, and what saved most of it:** one commit dropped. The run's other task was untouched, because it was
+picked from a *different* source (an open GitHub issue rather than the backlog's top line) — which is the
+practical lesson worth more than the rule above. **Two Builders reading the same file pick the same line;
+two Builders reading different inboxes do not.** The other run took the backlog's top bug and the
+observer's `/api/logs` 401; this one took the backlog's top bug and issue #883, and only the overlap was
+wasted.
+
+**Issue #883 is the best argument yet for the observer arrangement, and for what a Builder does with one.**
+Its report — 2,259 subs over two nights, on disk and in no `frames` table for eleven days — is a *lead*, and
+it says so itself ("I am not claiming the queue is the cause"). Verifying it took one read of
+`webapp/jobs.py`: `JobManager` is a single `queue.Queue` and one worker thread, so the timeline fits exactly.
+But the same read is what decided the *shape* of the fix, and that is the part worth recording. The obvious
+response to "the import is starved" is to re-order the queue — and re-ordering would have changed **nothing
+here**, because the blocker is a *running* job, not a queued one. The two shapes that could actually work (a
+cooperative yield inside the long-haul bodies, or a second strictly-bounded ingest lane) are both
+architectural, and the second is precisely the change §10's memory bound exists to prevent. So what shipped
+is the **sentence** — the note the report's own closing suggestion asked for — and the starvation is filed as
+a `LEAD` at the top of "Bugs", unbuilt, with both shapes and their care notes written down. The issue stays
+open. *Verifying a lead is not the same as being able to finish it, and a Builder should say which half it
+did.*
+
+**The other trap of the run: a deliberate stand-down that a `^- \*\*` scan of the backlog cannot see.**
+Picking a third task, I scripted a pass over `IMPROVEMENTS.md` that lists every top-level `- **` bullet in
+the Ideas sections and drops the ones whose body matches `SHIPPED|CLOSED|DECLINED|…`. It surfaced *Levels'
+"From your image" button silently leaves the black point at 0* as open, and it was not: a Builder had closed
+it on **2026-09-03, the same day it was filed**, with a measurement and an explicit *"do not build this as
+written"*. I had written the module, the panel change and seven tests before reading far enough down the
+entry to find the closure — and then reverted all of it, because AGENTS.md §1 says not to re-litigate a
+stand-down that carries numbers, and that one does.
+
+**Why the scan missed it, and the rule that follows.** The closure is an **indented continuation** of the
+bullet (two spaces, per the "keep a shipped item's spec indented" convention), and it sits **after** the
+original spec — so the paragraph a reader meets first is the *case for building it*, in the present tense,
+and the verdict is 25 lines below. My filter did look at the whole body and should have caught it; it did
+not, because the closure block leads with `⚪ CLOSED AS MOSTLY-ALREADY-BUILT` and my regex was anchored to
+those words appearing near the *head* of the entry. The generalisable rule is simpler than a better regex:
+**on this backlog, read an entry to its end before writing a line — the verdict is at the bottom, not the
+top.** The three-file rule keeps the file short enough that this is affordable; it does not make the first
+paragraph trustworthy.
+
+**And the stand-down was right on the merits, which is the other half of the lesson.** `OpParamPanel` already
+handles a satisfied suggestion generically — disabled button, a `✓`, and the tooltip *"Already set to the
+value measured from your data"* — so the entry's premise ("two sliders move, one doesn't, and nothing
+accounts for it") does not hold on the shipped UI. What was left was one extra clause explaining *why* the
+measured black is 0, which is genuinely below the bar. One finished task and two clean reverts is a better
+run than three tasks, two of which are churn.
+
+**Environment notes, both already in AGENTS.md §7 and both confirmed to still hold.** The BLAS cap +
+`pytest-xdist -n 4` took the suite to 565 s. `rm -rf /tmp/pytest-of-root` before each full run kept the box
+clear of the ENOSPC the 09-14 note describes. And the `cd frontend` trap is live in a second costume: a
+`Bash` call that `cd`s persists its directory into the *next* call, so every frontend command here carried
+its own absolute path or explicit `cd`.
+
+---
+
 ## 2026-09-14 (Builder, branch `claude/sweet-babbage-fkwilc`) — the observer's first two findings, drained the same night
 
 **Baseline.** `main` at `715d82c5`, green (6,012 passed / 2 skipped, **839 s** with the BLAS cap + `-n 4`). It

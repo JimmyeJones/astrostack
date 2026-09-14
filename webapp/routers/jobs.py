@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import asdict
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 from webapp import deps
+from webapp.jobqueue import import_waiting
 from webapp.jobs import Job
-from webapp.schemas import JobOut
+from webapp.schemas import ImportWaitingOut, JobOut, JobQueueHealthOut
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -33,6 +36,25 @@ def clear_history(request: Request) -> dict:
     """Delete all finished jobs (keeps running/queued ones)."""
     jm = deps.get_job_manager(request)
     return {"removed": jm.clear_history()}
+
+
+@router.get("/queue-health", response_model=JobQueueHealthOut)
+def queue_health(request: Request) -> JobQueueHealthOut:
+    """Is the import stuck behind the one serial worker?
+
+    Declared **before** ``/{job_id}`` so the literal path wins the match. Answers
+    ``{"waiting": null}`` on a healthy queue, which is the ordinary case — the
+    caller renders nothing rather than an "all fine" banner. Reads only the
+    active jobs (never the DB history: a *queued* job is by definition still
+    live in memory), so this is cheap enough for a page to poll.
+    """
+    jm = deps.get_job_manager(request)
+    waiting = import_waiting(
+        [j.to_dict() for j in jm.active()], datetime.now(UTC),
+    )
+    if waiting is None:
+        return JobQueueHealthOut()
+    return JobQueueHealthOut(waiting=ImportWaitingOut(**asdict(waiting)))
 
 
 @router.get("/{job_id}", response_model=JobOut)
