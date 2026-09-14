@@ -170,6 +170,11 @@ export function reprocessSummary(r: Record<string, unknown>): {
     .filter(Boolean);
   let line = `Restacked ${stacked}/${total} target${total === 1 ? "" : "s"}`;
   if (r.cancelled) line += " (cancelled early)";
+  // The batch stood aside mid-way so a waiting import could have the single
+  // worker, and the rest is queued behind it. Said here because otherwise a
+  // half-finished batch reads as one that stopped for no reason — and "paused"
+  // is the honest word: nothing was skipped and nothing needs re-clicking.
+  else if (r.yielded) line += " so far — paused to let an import through, resuming after it";
   // Only present when the deep-rescan option was used (re-ran QC/solve/grade first).
   if (rescanned > 0) line += ` — re-ran QC/solve/grade on ${rescanned}`;
   // Only present when the auto-edit option was used (finished pictures, not linear).

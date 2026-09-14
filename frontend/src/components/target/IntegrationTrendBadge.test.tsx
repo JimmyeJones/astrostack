@@ -119,6 +119,15 @@ describe("IntegrationTrendBadge", () => {
     expect(screen.queryByText(/sky allows/)).toBeNull();
   });
 
+  it("is suppressed while the coaching says to widen the framing", () => {
+    // Fails before: this verdict ends by naming a *different* target to point
+    // at, which is the same "which way tonight?" contradiction as the add-time
+    // pair — and it is also what keeps this card's visibility unchanged on
+    // every target where the framing rung took over from an add-time one.
+    renderBadge({ runs: PLATEAUED, coachKind: "framing" });
+    expect(screen.queryByText(/sky allows/)).toBeNull();
+  });
+
   it("still shows beside a non-add-time coaching tip (e.g. locate)", () => {
     renderBadge({ runs: PLATEAUED, coachKind: "locate" });
     expect(screen.getByText(/About as clean as your sky allows/)).toBeInTheDocument();

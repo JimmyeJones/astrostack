@@ -413,9 +413,17 @@ _OFF_CENTRE_LIMIT = 0.34
 _ALL_IN = 0.99
 
 
-def _rounded_pct(fraction: float) -> int:
+def rounded_coverage_pct(fraction: float) -> int:
     """A friendly percentage: rounded to the nearest 5, never 0 or 100 (those
-    would contradict the sentence they sit in)."""
+    would contradict the sentence they sit in).
+
+    Public because the *coaching* card on the same page now names the same
+    shortfall (``nextBestMove``'s ``framing`` rung), and two cards printing two
+    different percentages of one measurement is exactly the "same page, two
+    claims" failure this file keeps closing. The webapp serves this number
+    beside the sentence it is baked into (``framing_advice.framing_payload``'s
+    ``coverage_pct``) so the frontend never re-derives it.
+    """
     pct = int(round(fraction * 100 / 5.0) * 5)
     return min(95, max(5, pct))
 
@@ -495,14 +503,14 @@ def framing_result_verdict(
             if mosaic:
                 return FramingResult(
                     "clipped",
-                    f"runs off the edge of this mosaic — about {_rounded_pct(coverage)}% "
+                    f"runs off the edge of this mosaic — about {rounded_coverage_pct(coverage)}% "
                     "of it made it in. It would fit whole, so just re-centre the mosaic "
                     "next session.",
                     coverage, off_centre, kind,
                 )
             return FramingResult(
                 "clipped",
-                f"runs off the edge of the frame — about {_rounded_pct(coverage)}% of "
+                f"runs off the edge of the frame — about {rounded_coverage_pct(coverage)}% of "
                 "it made it in. It would fit whole, so just re-centre it next session.",
                 coverage, off_centre, kind,
             )
@@ -511,14 +519,14 @@ def framing_result_verdict(
             # advice they took. The honest next step is a wider one.
             return FramingResult(
                 "partial",
-                f"is bigger than this mosaic — only about {_rounded_pct(coverage)}% of "
+                f"is bigger than this mosaic — only about {rounded_coverage_pct(coverage)}% of "
                 "it is in this picture. Adding more panels next session would capture "
                 "the rest.",
                 coverage, off_centre, kind,
             )
         return FramingResult(
             "partial",
-            f"is bigger than your frame — only about {_rounded_pct(coverage)}% of it "
+            f"is bigger than your frame — only about {rounded_coverage_pct(coverage)}% of it "
             "is in this picture. Shoot it in mosaic mode to capture all of it.",
             coverage, off_centre, kind,
         )

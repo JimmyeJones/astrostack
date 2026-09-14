@@ -136,3 +136,38 @@ def import_waiting(
                        and holder.get("target") else None),
         holder_hours=round(holder_hours, 1) if holder_hours is not None else None,
     )
+
+
+#: The job kinds a long-haul batch stands aside for at the first safe boundary
+#: it reaches. Just the import, and deliberately so: it is the one job nobody
+#: starts by hand, the one whose delay costs *frames missing from the library*
+#: rather than someone's patience, and the one whose own cost is minutes. A
+#: stack or an export somebody clicked can wait its turn — they are watching it,
+#: and they can cancel it.
+YIELD_TO_KINDS: frozenset[str] = frozenset({IMPORT_KIND})
+
+
+def queued_kind_to_yield_to(
+    jobs: Iterable[Mapping[str, Any]],
+    *,
+    kinds: frozenset[str] = YIELD_TO_KINDS,
+) -> str | None:
+    """The kind of the queued job a long-haul batch should hand the worker to,
+    or ``None`` when nothing waiting is worth pausing for.
+
+    The companion to :func:`import_waiting`, which only *describes* the stall.
+    That one is the sentence; this one is what a batch asks itself between two
+    units of work so the sentence stops being needed.
+
+    ``jobs`` is any iterable of job mappings in the shape ``Job.to_dict()``
+    emits — normally the live ones (``JobManager.active()``). Only ``queued``
+    counts: the batch asking the question is itself ``running``, and a job that
+    is already running cannot be waiting on it.
+    """
+    for job in jobs:
+        if job.get("state") != _QUEUED:
+            continue
+        kind = job.get("kind")
+        if isinstance(kind, str) and kind in kinds:
+            return kind
+    return None

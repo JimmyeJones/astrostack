@@ -26,6 +26,11 @@ class _FakeJM:
     def maybe_flush(self, job) -> None:  # noqa: ANN001
         pass
 
+    def active(self):
+        """The live jobs a batch asks about between targets. Empty by default —
+        an idle queue, which is every test that isn't about yielding."""
+        return []
+
 
 def _settings(root) -> Settings:
     return Settings(data_root=str(root), auto_ingest=False, auto_qc=False,
@@ -975,6 +980,143 @@ def test_reprocess_all_cancels_between_targets(solved_library, monkeypatch):
     assert summary["cancelled"] is True
     assert calls == []                       # never started a stack
     assert summary["stacked"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# Handing the single worker back to a waiting import (webapp/jobqueue.py)
+# --------------------------------------------------------------------------- #
+
+class _YieldingJM(_FakeJM):
+    """A job manager with a fixed set of live jobs, recording every submit.
+
+    The real one hands a batch its own queue through ``active()``; this is the
+    same shape, frozen, so a test can put an import behind the batch and watch
+    what the batch does about it.
+    """
+
+    def __init__(self, live: list[Job] | None = None) -> None:
+        self.live = list(live or [])
+        self.submitted: list[tuple[str, object]] = []
+
+    def active(self) -> list[Job]:
+        return self.live
+
+    def submit(self, kind, fn, *, target=None):  # noqa: ANN001
+        job = Job(kind=kind, target=target)
+        self.submitted.append((kind, fn))
+        return job
+
+
+def _reprocess_body(settings, jm, **kwargs):
+    """The batch's job body, as `submit_reprocess_all` hands it to the manager."""
+    pipeline.submit_reprocess_all(settings, jm, **kwargs)
+    kind, fn = jm.submitted.pop(0)
+    assert kind == "reprocess_all"
+    return fn
+
+
+def test_reprocess_all_hands_the_worker_to_a_waiting_import(solved_library, monkeypatch):
+    """The observer's case: an import queued behind a batch that runs for days.
+
+    The queue is serial on purpose, so re-ordering it could not help — the
+    blocker is the *running* batch. It therefore stops at a target boundary and
+    re-submits its own remainder, which lands behind the import.
+    """
+    stacked: list = []
+    _patch_run_stack(monkeypatch, capture=stacked)
+    jm = _YieldingJM([Job(kind="pipeline", state="queued")])
+    job = Job(kind="reprocess_all")
+    summary = _reprocess_body(_settings(solved_library), jm)(job)
+
+    # One target done — never zero, or a slice could make no progress at all.
+    assert len(stacked) == 1
+    assert summary["yielded"] is True
+    assert summary["yielded_to"] == "pipeline"
+    assert summary["remaining"] == 1
+    assert summary["stacked"] == 1
+    assert summary["total"] == 2          # the *batch's* total, not the slice's
+    assert summary["cancelled"] is False  # paused is not cancelled
+    assert summary["resumed_job_id"]
+    # …and the remainder is queued as a job of its own, not silently dropped.
+    assert [k for k, _ in jm.submitted] == ["reprocess_all"]
+    assert "paused" in (job.detail or "").lower()
+
+
+def test_the_resumed_slice_finishes_the_batch_and_reports_the_whole_thing(
+        solved_library, monkeypatch):
+    """Re-entrancy: the second slice does what the first did not, and its summary
+    is about the batch rather than about itself."""
+    stacked: list = []
+    _patch_run_stack(monkeypatch, capture=stacked)
+    jm = _YieldingJM([Job(kind="pipeline", state="queued")])
+    first = Job(kind="reprocess_all")
+    _reprocess_body(_settings(solved_library), jm)(first)
+    # The import has now run, so the queue is clear for the remainder.
+    jm.live = []
+    resumed_kind, resumed_fn = jm.submitted.pop(0)
+    assert resumed_kind == "reprocess_all"
+    second = Job(kind="reprocess_all")
+    summary = resumed_fn(second)
+
+    assert summary["yielded"] is False
+    assert summary["total"] == 2
+    assert summary["stacked"] == 2        # 1 carried + 1 this slice
+    assert summary["failed"] == []
+    # Two targets stacked across the two slices, and neither twice.
+    assert len(stacked) == 2
+    assert jm.submitted == []             # nothing left queued
+    assert second.done == 2 and second.total == 2
+
+
+def test_a_batch_never_yields_before_it_has_finished_a_target(solved_library, monkeypatch):
+    """Forward progress, guaranteed. A watcher that re-enqueues an import every
+    poll must not be able to bounce the batch forever — so a slice always
+    completes at least one target before it stands aside."""
+    stacked: list = []
+    _patch_run_stack(monkeypatch, capture=stacked)
+    # An import is queued the whole time, including before the first target.
+    jm = _YieldingJM([Job(kind="pipeline", state="queued")])
+    first = _reprocess_body(_settings(solved_library), jm)(Job(kind="reprocess_all"))
+    assert first["yielded"] is True
+    assert len(stacked) == 1              # a slice that stacked nothing is a bounce
+    # The remainder runs with the import still queued, and stacks its target too.
+    second = jm.submitted.pop(0)[1](Job(kind="reprocess_all"))
+    assert len(stacked) == 2
+    # One target left, so there was no boundary to yield at — the batch finished.
+    assert second["yielded"] is False
+    assert second["stacked"] == 2
+    assert jm.submitted == []
+
+
+def test_a_job_somebody_started_does_not_interrupt_the_batch(solved_library, monkeypatch):
+    """Only the import is worth pausing for. A queued stack is watched and
+    cancellable, and letting one in would make a long batch never finish."""
+    stacked: list = []
+    _patch_run_stack(monkeypatch, capture=stacked)
+    jm = _YieldingJM([Job(kind="stack", state="queued"),
+                      # …and a *running* import is not waiting on anything.
+                      Job(kind="pipeline", state="running")])
+    summary = _reprocess_body(_settings(solved_library), jm)(Job(kind="reprocess_all"))
+
+    assert summary["yielded"] is False
+    assert summary["stacked"] == 2
+    assert len(stacked) == 2
+    assert jm.submitted == []             # nothing re-submitted
+
+
+def test_an_idle_queue_leaves_the_batch_byte_for_byte_what_it_was(
+        solved_library, monkeypatch):
+    """The live install's ordinary case: nothing else queued, so the batch runs
+    straight through and its summary carries only the keys it always had, plus
+    an honest `yielded: False`."""
+    _patch_run_stack(monkeypatch)
+    job = Job(kind="reprocess_all")
+    summary = _run_body(pipeline.submit_reprocess_all, _settings(solved_library), job)
+
+    assert summary["yielded"] is False
+    assert summary["stacked"] == 2
+    assert summary["total"] == 2
+    assert "resumed_job_id" not in summary
 
 
 def _run_body(submit_fn, settings, job, **submit_kwargs):

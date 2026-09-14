@@ -1813,6 +1813,10 @@ export interface StackFraming {
   level: "centred" | "off_centre" | "clipped" | "partial";
   text: string;           // the sentence, prefixed by the caller with the name
   coverage: number;       // 0–1: how much of the object landed in the frame
+  // Additive: the same fraction as the friendly integer already baked into
+  // `text` ("about 55%"), so a second card can name the shortfall without
+  // rounding it differently. Omitted by an older backend.
+  coverage_pct?: number;
   off_centre: number;     // 0 = dead centre, 1 = on the frame's edge
   object_name: string;    // the catalog's friendly name ("Orion Nebula")
   size_arcmin: number;

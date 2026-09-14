@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from webapp.jobqueue import IMPORT_WAIT_MIN_HOURS, import_waiting
+from webapp.jobqueue import (
+    IMPORT_WAIT_MIN_HOURS,
+    YIELD_TO_KINDS,
+    import_waiting,
+    queued_kind_to_yield_to,
+)
 
 NOW = datetime(2026, 9, 14, 3, 0, tzinfo=timezone.utc)
 
@@ -178,3 +183,46 @@ def test_queue_health_endpoint_reports_a_stalled_import(client):
     assert body["waiting"]["job_id"] == imp.id
     assert body["waiting"]["holder_kind"] == "reprocess_all"
     assert body["waiting"]["waiting_hours"] >= 69.9
+
+
+# --------------------------------------------------------------------------- #
+# queued_kind_to_yield_to — the half that makes the sentence stop being needed
+# --------------------------------------------------------------------------- #
+
+def test_a_queued_import_is_worth_standing_aside_for():
+    assert queued_kind_to_yield_to([_job(kind="pipeline", state="queued")]) == "pipeline"
+
+
+def test_nothing_queued_means_nothing_to_stand_aside_for():
+    assert queued_kind_to_yield_to([]) is None
+    assert queued_kind_to_yield_to([_job(kind="pipeline", state="running")]) is None
+
+
+def test_a_job_somebody_clicked_waits_its_turn():
+    # A stack or an export is watched, cancellable and expected to queue. Only
+    # the import — which nobody starts by hand — is worth interrupting a batch
+    # for, and letting anything else in would make a long batch never finish.
+    for kind in ("stack", "editor_export", "reprocess_all", "calibration"):
+        assert queued_kind_to_yield_to([_job(kind=kind, state="queued")]) is None
+    assert "stack" not in YIELD_TO_KINDS
+
+
+def test_it_answers_with_the_first_queued_kind_it_recognises():
+    jobs = [
+        _job(id="a", kind="stack", state="queued"),
+        _job(id="b", kind="pipeline", state="queued"),
+    ]
+    assert queued_kind_to_yield_to(jobs) == "pipeline"
+
+
+def test_a_row_with_no_kind_at_all_is_skipped_rather_than_guessed_at():
+    assert queued_kind_to_yield_to([{"state": "queued"}]) is None
+    assert queued_kind_to_yield_to([{"state": "queued", "kind": None}]) is None
+
+
+def test_it_reads_a_generator_once_and_does_not_need_a_clock():
+    # It is asked between two units of work on the hot path, so it takes the
+    # live jobs as they stream and never parses a timestamp: "is anything
+    # waiting?" has no threshold, unlike "has it waited too long?".
+    jobs = iter([_job(kind="pipeline", state="queued")])
+    assert queued_kind_to_yield_to(jobs) == "pipeline"

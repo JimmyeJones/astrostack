@@ -1,5 +1,146 @@
 # Shipped — the record
 
+## v0.444.0 — 2026-09-14 — the batch that held the worker for eleven days now stands aside for an import
+
+*(Builder, branch `claude/sweet-babbage-kjaxp8` — 🟠 PRIORITY 2 (autonomy / data-integrity), the LEAD at the
+top of "Bugs (fix these first)": the half of observer issue
+[#883](https://github.com/JimmyeJones/astrostack/issues/883) that v0.441.1 deliberately did **not** build.)*
+
+**What v0.441.1 shipped was the sentence; this is the wait itself.** `JobManager` is one `queue.Queue` and one
+worker thread, deliberately — two stacks at once on a RAM-capped NAS is an OOM kill (§10) — so a job that runs
+for days holds the worker for days. Measured by the observer on the owner's own library: `reprocess_all` jobs
+held the worker continuously from 2026-09-04, a `pipeline` (import) job sat `queued` from 09-11 and never
+started, and **2,259 subs over two nights were never imported**. The import is the one job *nobody starts by
+hand*, so while it waits the app looks completely healthy: every target still shows the frame count it had, and
+a frame that was never imported has no QC row, no reject reason and nowhere in the record it can be *seen* to
+be absent.
+
+**The two shapes the lead named, and why (a).** Re-ordering the queue does nothing here — the blocker is a
+*running* job, not a queued one — and a second worker is exactly the change the memory bound exists to
+prevent. That leaves (a) a **cooperative yield** in the long-haul bodies, or (b) a separate strictly-bounded
+ingest lane. (a) is the smaller and safer, reuses the existing worker, and `reprocess_all` already loops
+target-by-target with a clean boundary at which nothing is half-done.
+
+**What it does.** At each target boundary the batch asks whether an import is queued
+(`webapp/jobqueue.queued_kind_to_yield_to`, the companion to `import_waiting` — the same module, one describing
+the stall and one ending it). If one is, it stops and re-submits its own untouched remainder as a fresh
+`reprocess_all` carrying `only_targets` and the counters so far. The queue is FIFO and the import was enqueued
+first, so the import runs next and the remainder after it. **Nothing runs concurrently at any point** — which
+is the whole property the serial worker exists for, and the lead's first care note ("the yield must not let two
+bodies touch the same project DB at once") is satisfied by construction rather than by a lock.
+
+**Forward progress is guaranteed, not hoped for.** A slice never yields before it has finished at least one
+target. Without that, a watcher re-enqueuing an import on every poll could bounce the batch forever and it
+would make no progress at all; with it, every slice completes work and the number of slices is bounded by the
+target count. That is the lead's second care note ("it must be re-entrant — a `reprocess_all` that yields must
+resume where it stopped, not restart"): the resumed slice takes the remaining safe names from the *same*
+snapshot, in order, and a name that has since disappeared is dropped rather than failing the slice.
+
+**Only the import is worth interrupting a batch for** (`YIELD_TO_KINDS`). A stack or an export somebody
+clicked is watched and cancellable and is *expected* to queue; letting one in would mean a long batch on a busy
+install never finishes. A *running* import is not waiting on anything, so it does not count either.
+
+**The summary keeps describing the batch, not the slice.** `total`, `stacked`, `skipped`, `rescanned`,
+`auto_edited` and `failed` are carried across slices, and progress counts from where the previous slice
+stopped, so the Jobs page shows `12/104` rather than restarting at zero. `reprocessSummary` gains one clause —
+*"Restacked 12/104 targets so far — paused to let an import through, resuming after it"* — because a
+half-finished batch otherwise reads as one that stopped for no reason. **Paused is not cancelled:** nothing was
+skipped and nothing needs re-clicking.
+
+**Residual, recorded rather than hidden.** The yield is between *targets*, so a single very long unit of work
+— one huge mosaic restack, or a user-started stack of thousands of subs — still holds the worker until it
+finishes. That is inherent to a serial worker and is not this fix's to close; what it removes is the case the
+observer actually measured, where the holder was a *batch* that had a safe boundary every few minutes and used
+none of them. The lead's other shape, a bounded ingest lane, remains available if a single-job stall is ever
+measured.
+
+**Upgrade-safe (§9):** two internal keyword arguments, one additive `yielded` key (always present now, so
+"did not yield" is distinguishable from "an older build that could not") plus three more only on a yielded
+slice; no config, schema, on-disk, endpoint or default change, and an idle queue leaves the batch byte-for-byte
+what it was. The duplicate-batch guard (`active_of_kind`) keeps working: while a slice finishes and its
+remainder is queued, a user's "Reprocess all" is correctly told one is already running.
+
+**Tests (+12):** 6 pure in `tests/webapp/test_job_queue_health.py` (a queued import is stood aside for; nothing
+queued and a *running* import are not; a clicked job waits its turn; the first recognised kind wins; a row with
+no kind is skipped rather than guessed at; it takes a generator and needs no clock) and 6 in
+`tests/webapp/test_reprocess_all.py` (the observer's case end to end; the resumed slice finishing the batch and
+reporting the whole of it; forward progress with an import queued throughout; a clicked job not interrupting;
+an idle queue unchanged; and the Jobs summary clause). **Three fail before** under a scratch revert of the
+yield.
+
+## v0.443.0 — 2026-09-14 — the two cards that prescribed different next sessions
+
+*(Builder, branch `claude/sweet-babbage-kjaxp8` — 🌟 PRIORITY 2/3 (autonomy + friendliness), from the LEAD
+filed earlier the same day by a `--mosaic --editor` dogfood pass that was otherwise CLEAN.)*
+
+**The problem, photographed in a browser on both bundled samples.** `nextBestMove`'s own docstring is *"the
+single highest-leverage thing that would most improve this target next time"*, and its ladder — `locate` →
+`thin` → `soft` → `integration` → `good` — had never heard of framing. `FramingVerdictNote` renders an inch
+below it on the same page and was routinely naming a bigger lever:
+
+* field sample: *"To make your Sample: Orion Nebula (M42) even better · **Add more time** — 1 min so far…"*
+  over *"only about **15 %** of it is in this picture. **Shoot it in mosaic mode** to capture all of it."*
+* mosaic sample: *"…another pass or two over **the same mosaic** evens out the thinner part"* over *"only
+  about **55 %** of it is in this picture. **Adding more panels** next session would capture the rest."*
+
+The mosaic pair is the sharp one: "more passes over the same mosaic" and "add more panels" are opposed
+instructions about where to point the scope next session, not two compatible suggestions.
+
+**Built as the lead's shape (a) — a new `framing` rung — and the crowding-out risk it filed the lead for is
+answered by a coverage bar rather than by the verdict alone.** A `partial` verdict only says the object
+cannot fit this canvas *at all*: it fires just as readily at 95 % captured (a nebula slightly wider than the
+frame, well centred), where the missing sliver is an outer edge and depth is plainly the better lever. So the
+rung asks for a third or more of the object to be **missing** — `FRAMING_MAX_COVERAGE = 0.67`, i.e. what is
+outside the picture is at least half as much again as what is in it — which is what stops it firing on much
+of a heavy mosaic user's library. Both photographed cases (15 %, 55 %) clear it; the 95 % case the lead
+warned about stays exactly as it was. Carrying out the lead's "check first" is what set the bar.
+
+**Where it sits, and why.** Between `soft` and `integration`:
+
+* **Above the two time rungs**, because more time cannot buy what never lands on the sensor — and on a
+  single field the depth it *would* buy is stranded: the Seestar writes mosaic subs into a separate
+  `<T>_mosaic_sub/` folder, so switching to mosaic mode starts a **new target** and the hours added to the
+  narrow field do not carry over. The two cards were not merely inconsistent there; they were competing for
+  the same clear nights, and one of the two answers wasted them.
+* **Below `soft`**, because a refocus tightens the wider session too, and below `locate`/`thin`, which are
+  prerequisites either way.
+
+**One measurement, one number.** The sentence names the same percentage the framing note names, and takes it
+off the wire rather than re-deriving it: `seestack.framing._rounded_pct` is now public
+`rounded_coverage_pct`, and `framing_advice.framing_payload` serves it as an additive `coverage_pct` beside
+the `text` it is baked into. The rung **declines** when that field is absent (an older backend) rather than
+re-rounding `coverage` itself — re-deriving it is exactly how two cards come to print two percentages of one
+measurement, which is the failure this whole family of fixes keeps closing.
+
+**It repeats the framing note's measurement rather than pointing at it**, against the standing IA rule about
+repetition, and deliberately: `NoticeBoard` shows two notes and folds the rest, and the coaching card sorts
+*above* the framing one, so on a busy target the reader can easily have this sentence inline and that one
+folded behind "N more notes". A coaching line that says "see the note you cannot see" is worse than a
+repeated percentage.
+
+**Not applied to `clipped`.** "It would fit whole, so re-centre it next session" and "shoot it for longer"
+are jointly satisfiable in one session, so those two cards do not compete and the rung stands aside — the
+one verdict whose fix is more sky rather than a better pointing is the one it answers.
+
+**The plateau card's deference moved with it.** `IntegrationTrendBadge`'s `ADD_TIME_KINDS` is now
+`COACH_DEFER_KINDS` and includes `framing`: that verdict's last sentence names *a different target* to point
+at, which is the same "which way tonight?" contradiction in a second costume — and including it keeps that
+card's visibility **byte-for-byte where it was** on every target where the framing rung simply took over
+from an add-time one.
+
+**Upgrade-safe (§9):** one additive response field, one new optional frontend input; no config, schema,
+on-disk, endpoint or default change. An older frontend ignores `coverage_pct`; an older backend omitting it
+leaves the ladder exactly what it was, as does any caller that passes no framing verdict at all.
+
+**Tests (+13):** 9 in `nextBestMove.test.ts` (both photographed cases; the 95 % stand-down; the bar at and a
+hair above it; `partial` only; the full ordering against `locate`/`thin`/`soft`/`integration`/`good`; the
+older-backend decline; every framing-less caller unchanged; and no `undefined` in place of a missing name),
+1 in `IntegrationTrendBadge.test.tsx` (the plateau card defers), 1 in `Target.test.tsx` pinning the *wiring*
+— the measured verdict has to travel `useStackFraming` → the badge, which is the half a pure-function test
+cannot see — and 2 Python (`test_framing.py`, that the shared helper's answer really is the integer baked
+into the sentence and that both clamps hold; `tests/webapp/test_stack_framing.py`, that the endpoint's
+`coverage_pct` is the number in its own `text`).
+
 ## v0.442.1 — 2026-09-14 — the drop folder has never held a file while a browser was looking
 
 *(Builder, branch `claude/sweet-babbage-49wpsd` — 🔧 INFRA (maintainability in service of not missing bugs),

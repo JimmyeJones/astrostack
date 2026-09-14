@@ -120,6 +120,10 @@ def test_an_object_bigger_than_the_canvas_is_told_to_use_mosaic_mode(client,
     body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
     assert body["level"] == "partial"
     assert "mosaic mode" in body["text"]
+    # The coaching card on the same page names this shortfall too, and takes the
+    # integer from here rather than re-rounding `coverage` into a second answer
+    # — so the number served has to be the one baked into the sentence.
+    assert f"about {body['coverage_pct']}%" in body["text"]
 
 
 def test_an_off_centre_picture_is_offered_a_re_centring_crop(client, solved_library):

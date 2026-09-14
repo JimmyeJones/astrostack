@@ -11,9 +11,10 @@
  * head.
  *
  * This picks exactly ONE lever — the highest-priority unmet one, in a fixed sane
- * order (can't-locate-subs → too-thin → soft-stars → short-integration →
- * all-good) — and says it plainly, translating counts/minutes into "install the
- * star DB / add subs / refocus / add time" rather than a QC table. It never
+ * order (can't-locate-subs → too-thin → soft-stars → mostly-outside-the-picture
+ * → short-integration → all-good) — and says it plainly, translating
+ * counts/minutes into "install the star DB / add subs / refocus / shoot it wider
+ * / add time" rather than a QC table. It never
  * judges star sharpness against an absolute bar (FWHM in pixels needs per-camera
  * calibration to read as "soft"); the soft-star rung fires only on a *relative*
  * signal — this target's newest stack being softer than its own history (see
@@ -101,7 +102,51 @@ export function integrationBars(
   };
 }
 
-export type NextBestMoveKind = "locate" | "thin" | "soft" | "integration" | "good";
+// How much of the object has to be *missing* before capturing the rest of it
+// outranks deepening the part you have.
+//
+// `FramingVerdictNote` sits an inch below this card and, on a `partial` verdict,
+// prescribes a different next session: "shoot it in mosaic mode" / "adding more
+// panels would capture the rest", against this card's "add more time" / "more
+// passes over the same mosaic". Both are true; a beginner cannot act on both,
+// and this card is the one whose docstring claims to name *the single*
+// highest-leverage move — so it is the one that has to know about the other.
+//
+// The bar is two thirds captured, i.e. "a third or more of it is missing", and
+// it is a judgement rather than a measurement, so here is the argument. A
+// `partial` verdict only says the object cannot fit this canvas *at all* — it
+// fires just as readily at 95 % captured (a nebula slightly wider than the
+// frame, well centred), where the missing sliver is an outer edge and depth is
+// plainly the better lever. Below two thirds the picture is of a *fragment* —
+// what is missing is at least half as much again as what is there — and no
+// amount of integration will ever bring it in, because it never reaches the
+// sensor. The two photographed cases
+// that filed this (a single field with 15 % of M42 in it; a 2x2 mosaic with
+// 55 % of its object) both clear it comfortably, and the 95 % case the lead
+// warned against stays silent.
+//
+// Deliberately NOT applied to the `clipped` verdict, whose fix is a better
+// pointing: "re-centre it next session" and "shoot it for longer" are jointly
+// satisfiable in one session, so those two cards do not compete.
+export const FRAMING_MAX_COVERAGE = 0.67;
+
+export type NextBestMoveKind =
+  | "locate" | "thin" | "soft" | "framing" | "integration" | "good";
+
+/** The measured framing verdict for the same run, as `/framing` serves it —
+ *  structurally typed so the caller can hand over the response it already has.
+ *  Every field is optional: an older backend, a run with no usable WCS, or a
+ *  target that isn't a sized catalogue object all read as "no verdict", which
+ *  leaves this ladder exactly what it was. */
+export interface NextBestMoveFraming {
+  level?: string | null;
+  coverage?: number | null;
+  /** The backend's own friendly integer for `coverage` — never re-rounded here,
+   *  so the two cards cannot print two percentages of one measurement. */
+  coverage_pct?: number | null;
+  canvas?: string | null;
+  object_name?: string | null;
+}
 
 export interface NextBestMove {
   kind: NextBestMoveKind;
@@ -156,10 +201,62 @@ export interface NextBestMoveInput {
    * finished stack with a measured σ, or an older backend — and every phrase is
    * byte-for-byte what it was. It never changes the rung that fires. */
   grainLevel?: GrainLevel | null;
+  /** The measured framing verdict for the same run (`/framing`), so the ladder
+   * knows about the lever the card an inch below it is naming. Only a `partial`
+   * verdict under `FRAMING_MAX_COVERAGE` changes anything; omit / null / any
+   * other verdict and every phrase below is byte-for-byte what it was. */
+  framing?: NextBestMoveFraming | null;
 }
 
 function finite(v: number | null | undefined): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** The `framing` rung, or `null` when this run's framing isn't the top lever.
+ *
+ * Silent unless the verdict is `partial` — the one verdict whose fix is more
+ * sky rather than a better pointing — *and* the measured coverage is under
+ * `FRAMING_MAX_COVERAGE`, *and* the backend served the friendly percentage the
+ * sentence names (an older one didn't, and re-rounding it here is exactly the
+ * drift the shared number exists to prevent). Any of those missing leaves the
+ * ladder byte-for-byte what it was.
+ *
+ * The sentence repeats the framing card's measurement rather than pointing at
+ * it, which the standing IA rule would normally discourage — but `NoticeBoard`
+ * shows two notes and folds the rest, and this card sorts *above* the framing
+ * one, so on a busy target the reader can easily have this sentence inline and
+ * that one folded. A coaching line that says "see the note you cannot see" is
+ * worse than a repeated percentage.
+ */
+function framingRung(v: NextBestMoveFraming | null | undefined): NextBestMove | null {
+  if (!v || v.level !== "partial") return null;
+  const coverage = finite(v.coverage);
+  const pct = finite(v.coverage_pct);
+  if (coverage == null || pct == null) return null;
+  if (coverage > FRAMING_MAX_COVERAGE) return null;
+  // The catalogue's friendly name when there is one; otherwise say it without,
+  // never "undefined is bigger than your frame".
+  const name = (v.object_name ?? "").trim();
+  const it = name || "this target";
+  if (v.canvas === "mosaic") {
+    return {
+      kind: "framing",
+      phrase:
+        `A large part of ${it} is still outside this mosaic — only about ` +
+        `${pct}% of it made it in. Adding more panels next session is the ` +
+        `biggest win here: more passes over the panels you already have can ` +
+        `deepen this picture, but they can't bring the rest of it in.`,
+    };
+  }
+  return {
+    kind: "framing",
+    phrase:
+      `A large part of ${it} is still outside this picture — only about ` +
+      `${pct}% of it made it in, and it's bigger than one frame, so more time ` +
+      `can't bring the rest in. Shooting it in mosaic mode next session is the ` +
+      `biggest win here; you can build up depth once the whole object is in ` +
+      `the picture.`,
+  };
 }
 
 /**
@@ -172,10 +269,15 @@ function finite(v: number | null | undefined): number | null {
  *                      the ladder is complete).
  *   3. `soft`        — a healthy stack whose stars came out softer than usual for
  *                      this target (relative to its own history) → check focus.
- *   4. `integration` — a healthy stack but under a quarter of this object
+ *   4. `framing`     — a healthy stack of only *part* of the object, because the
+ *                      object is bigger than the canvas: capturing the rest
+ *                      outranks deepening the fragment (see
+ *                      `FRAMING_MAX_COVERAGE`). Below `soft` on purpose — a
+ *                      refocus tightens the panels you are about to shoot too.
+ *   5. `integration` — a healthy stack but under a quarter of this object
  *                      type's integration goal, *per pixel* (~1 h for a
  *                      nebula or an unrecognised target; see `integrationBars`).
- *   5. `good`        — decent result; encourage + name the one lever (time) that
+ *   6. `good`        — decent result; encourage + name the one lever (time) that
  *                      still helps. Silent once the stack is genuinely deep. On
  *                      a mosaic the run's own `grain_verdict` says whether that
  *                      praise is true of the whole canvas or only of most of it,
@@ -257,11 +359,26 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
     };
   }
 
+  // 4. Framing. The stack is healthy, but it is a stack of only *part* of the
+  //    object — and the two "add more light" rungs below prescribe a different
+  //    next session from the framing card on the same page. Ask that card's own
+  //    measurement rather than a second opinion about it, so this can only ever
+  //    fire when the sentence it is deferring to is genuinely on screen.
+  //
+  //    It sits above the time rungs because more time cannot buy what never
+  //    lands on the sensor, and — on a single field — the depth it would buy is
+  //    stranded: the Seestar writes mosaic subs into a separate `_mosaic_sub`
+  //    folder, so switching to mosaic mode starts a *new* target and the hours
+  //    added to the narrow field do not carry over. It sits below `soft`
+  //    because a refocus tightens the wider session too.
+  const framingMove = framingRung(input.framing);
+  if (framingMove) return framingMove;
+
   // The integration-based levers need a known total exposure. Without it, a
   // healthy stack gets no guess — stay silent rather than invent advice.
   if (integrationS == null || perPixelS == null) return null;
 
-  // 3. Short-integration. A healthy frame count but not much light where the
+  // 5. Short-integration. A healthy frame count but not much light where the
   //    beginner is looking; more hours is the lever that pulls out faint detail
   //    on deep-sky targets.
   if (perPixelS < bars.shortS) {
@@ -361,7 +478,7 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
   // Genuinely deep and healthy → nothing worth nudging; stay silent.
   if (perPixelS >= bars.deepS) return null;
 
-  // 4. All good (decent depth, but more time always still helps).
+  // 6. All good (decent depth, but more time always still helps).
   //
   // …except that "plenty of subs went in" is a claim about the *canvas*, and on
   // a mosaic whose panels are unevenly deep the canvas is not one number. Every
