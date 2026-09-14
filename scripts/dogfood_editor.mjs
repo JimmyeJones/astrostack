@@ -87,6 +87,22 @@ const previewSrc = () => page.evaluate(() => {
   return img ? img.currentSrc || img.src : null;
 });
 
+/** Every advisory the preview column is currently saying, as one block.
+ *
+ * Six sentences describe one limitation — the live preview is a strided
+ * decimation of the real canvas — and they are written independently of each
+ * other, which is how v0.445.3 ended up with one telling the reader to raise a
+ * radius and its neighbour telling them not to raise a strength for the
+ * identical reason. So they are printed *together*, the way PROCESS-NOTES keeps
+ * finding things: the question is not "is each of these true?" but "could a
+ * beginner hold all of them at once, and do any two say opposite things?".
+ *
+ * Silent on any sample under the 1500 px proxy cap — which was every sample
+ * this tooling had until `--big`. */
+async function advisories() {
+  return page.getByTestId("preview-advisory").allInnerTexts();
+}
+
 /** Wait for the debounced preview to settle. `networkidle` alone isn't enough —
  * the editor polls while a render job runs — so settle, then idle, then settle. */
 async function settle() {
@@ -107,6 +123,11 @@ const opened = await previewSrc();
 if (!opened) {
   findings++;
   console.log("  ! open: no live preview image rendered");
+}
+// What the preview column says about the recipe the editor *opened* on — which
+// since v0.390.0 is the auto-seeded one, i.e. what the owner actually meets.
+for (const line of await advisories()) {
+  console.log(`  [says on open] ${line.replace(/\s+/g, " ").trim()}`);
 }
 
 // ---- "Check it at full size" ----------------------------------------------
@@ -328,6 +349,9 @@ for (const { index, label } of ops) {
   // finding, and only a human reading the list can tell the two apart.
   const changed = !!after && after !== before;
   console.log(`${label}: preview ${changed ? "re-rendered" : "unchanged (identity default?)"}`);
+  for (const line of await advisories()) {
+    console.log(`  [says] ${line.replace(/\s+/g, " ").trim()}`);
+  }
   drain(label);
   await page.screenshot({
     path: `${SHOTS}/editor-op-${label.replace(/\W+/g, "_")}.png`, fullPage: true,

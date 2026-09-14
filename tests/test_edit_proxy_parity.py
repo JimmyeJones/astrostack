@@ -536,3 +536,57 @@ def test_the_colour_blotch_smoothing_previews_what_it_exports(_noisy_field):
                 "the saved picture have stopped agreeing")
     # ...and it is not the op the denoise advisory is about, at any scale.
     assert denoise_understates_on_proxy("chroma", 0.9, 6.0) is False
+
+
+def test_the_full_size_check_really_does_what_its_advisories_now_promise():
+    """Two advisories tell the reader the preview shows them nothing, and now
+    name "Check it at full size" as the way to see it. That is a claim about the
+    engine, so it is checked here rather than asserted in a caption test.
+
+    The loupe builds its context with ``proxy_scale=1.0`` (``_render_loupe_png``),
+    which is the only thing both promises rest on: hot-pixel removal is skipped
+    *because* the proxy is strided, and deconvolution collapses to a near-no-op
+    *because* the PSF is sub-pixel there. Both conditions are properties of the
+    scale, so both lift at 1.0 — and if either ever stopped lifting, the captions
+    would be sending a beginner to a control that shows them the same nothing.
+    """
+    from seestack.edit.ops.detail import (
+        deconv_understates_on_proxy, hot_pixels_skipped_on_proxy,
+    )
+
+    # 1. The predicates that gate the two advisories are both false at 1:1 — i.e.
+    #    neither limitation applies to the window the loupe renders.
+    assert hot_pixels_skipped_on_proxy(1.0) is False
+    assert deconv_understates_on_proxy(1.5, 1.0) is False
+    assert hot_pixels_skipped_on_proxy(float(_PROXY_STEP)) is True
+
+    # 2. …and the ops really behave that way, not just the predicates. A single
+    #    stuck pixel on a flat sky: untouched at the preview's scale, removed at
+    #    the loupe's.
+    rng = np.random.default_rng(5)
+    sky = rng.normal(0.20, 0.002, size=(160, 160, 3)).astype(np.float32)
+    sky[80, 80, :] = 0.95  # one stuck pixel, nothing else to confuse the test
+
+    previewed = _apply("detail.hot_pixels", sky, float(_PROXY_STEP), {})
+    assert float(previewed[80, 80, 0]) == pytest.approx(0.95, abs=1e-6), (
+        "hot-pixel removal ran on a strided proxy — the advisory's premise is gone"
+    )
+    at_full_size = _apply("detail.hot_pixels", sky, 1.0, {})
+    assert float(at_full_size[80, 80, 0]) < 0.3, (
+        "the full-size render leaves the stuck pixel in place, so the caption "
+        "now sends the reader to a control that shows them nothing"
+    )
+
+    # 3. Deconvolution: the same picture sharpened harder at 1:1 than on the
+    #    proxy, which is what "judge it at full size" means for that one.
+    star = np.zeros((64, 64, 3), dtype=np.float32) + 0.05
+    yy, xx = np.indices((64, 64))
+    star += (0.6 * np.exp(-((xx - 32) ** 2 + (yy - 32) ** 2) / (2 * 1.5 ** 2))
+             )[..., None].astype(np.float32)
+    peak = float(star[32, 32, 0])
+    on_proxy = float(_apply("detail.deconvolve", star, 4.0, {})[32, 32, 0])
+    at_one = float(_apply("detail.deconvolve", star, 1.0, {})[32, 32, 0])
+    assert at_one - peak > (on_proxy - peak) * 1.5, (
+        "deconvolution no longer sharpens more at 1:1 than on a step-4 proxy, so "
+        "the advisory's 'the export applies it at full strength' is not true"
+    )
