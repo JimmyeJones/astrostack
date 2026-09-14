@@ -18,6 +18,62 @@ is a queue.
 
 ---
 
+## 2026-09-14 (Builder, branch `claude/sweet-babbage-rhcmsd`) — the method turned on the editor, and the subsystem no dogfood pass has ever drawn
+
+**Baseline: GREEN.** `main` at `7b8f2941` (v0.445.1). Full suite `6094 passed, 2 skipped` in **9m27s**
+(`-n 4` + BLAS cap, 4-core box). After both tasks, on the same tree: `6096 passed, 2 skipped` in **8m53s**.
+Frontend `279 files / 4073 tests` green, `tsc` clean, `vite build` clean.
+
+**The method the last six notes describe was pointed at PRIORITY 1 for the first time, and it found two.**
+Those notes read the Target page's cards, the Dashboard's notice board and Tonight's prescribing column as one
+paragraph each. The editor has a column of the same shape that nobody had read that way: under the live
+preview sit **five** self-hiding advisories, all about one limitation — the preview is a ≤1500 px strided
+decimation of what may be a 150 MP mosaic — plus the control that answers them, `FullSizeCheck`.
+
+**Finding 1 (v0.445.2): the answer disappears on a recipe the questions don't care about.** The five captions
+are computed from `proxy_scale` and the enabled ops; the control is gated on `_loupe_geometry_problem`. Enable
+a `geometry.rotate` on a mosaic-scale canvas and the captions go on saying *judge it at full size* while the
+button is gone. The sentence naming the op to move was **already** computed (`loupe_info`'s `reason`), sent,
+and typed in `client.ts` — and `FullSizeCheck` opened with `if (!info.data?.available) return null`. Three
+layers had carried a string to a component that dropped it. The new `fixable` flag is not decoration: it is
+what keeps the *other* refusal silent, and that one has to stay silent, because at `proxy_scale == 1` none of
+the five captions is speaking either.
+
+**Finding 2 (v0.445.3): the same column gives opposite instructions about the same mechanism.**
+`sharpenPreview.ts` closed with *"Raise the radius if you want to judge it here"*; `denoisePreview.ts`, an
+inch below, says *"Don't raise the strength to make the preview look clean"* — and it says so because it was
+written (v0.434.2) to stop exactly the behaviour its neighbour recommends. **This is drift with a date on
+it**: `git log` shows the denoise caption is the newest of the five and the loupe shipped in v0.329.0, so the
+sharpen wording is simply the best answer available before either existed, never revisited. Worth generalising:
+*a caption that predates its own fix is invisible to every audit that reads the fix*.
+
+**Dogfood `--mosaic --editor` — CLEAN, and it is what proved the finding can't be photographed.** Auto's trim
+on the 2×2 was **7.9 %** (bar is 15 %). Both editor drives clean, all 21 ops re-rendering, undo/redo applied.
+Page heights unmoved from the previous run's standings — phone `/tonight` 3,591 px, Target 3,287 px, editor
+3,143 px, `/` 3,132 px — which is the point: one commit replaced sentences and the other put a line exactly
+where a button had been.
+
+**And that CLEAN is the fifth instance of this file's recurring hole, now filed as a lead.**
+`sample_data._WIDTH` is **480** and the mosaic sample's union canvas is ~907×615; `seestack/edit/proxy.py`
+decimates above **1500**. So `get_proxy` has **never strided on any dogfood pass ever run**, and everything
+gated on a strided proxy is structurally unreachable: all five advisories, and the whole of `FullSizeCheck`
+— button, modal, navigator, `X-Loupe-Window` marker, split comparison, ~250 lines of the priority-1 screen
+that no pass has ever drawn. The `--editor` drive adds *Rotate* on every run and still cannot reach it (a
+fresh rotate op has `angle = 0`, which `preview_crop_of_recipe` correctly treats as no rotation). The owner's
+mosaics are ~3494×2470, so this is his everyday state. Both fixes this run are pinned by jsdom and
+fail-before reverts, and neither has been rendered in a browser — the same sentence the last note had to
+write about the closing-season card, about a whole subsystem this time. Filed under "Infra / maintainability"
+with the lever (a third opt-in sample shape, the `--mosaic` / `--incoming-lag` precedent) and the cost that
+has to be measured first (a canvas that strides is ≥ ~4× the panel pixels; a twenty-minute dogfood pass
+stops being run).
+
+**Backlog state.** "Bugs (fix these first)" still contains no takeable bug, and "Features that serve real
+workflows" still has no ready item — unchanged in shape for a fifth note. This run again took nothing from
+the backlog and put one lead back into it. The honest source of work remains **reading a surface as one
+paragraph**; what this run adds is that the surface can be the editor's, and that the question *"do these
+two sentences tell the reader to do opposite things?"* is a second way to ask it, distinct from *"can a
+beginner hold both at once?"* — the first one found v0.445.2, the second found v0.445.3.
+
 ## 2026-09-14 (Builder, branch `claude/sweet-babbage-ro3v8y`) — the Tonight page read as one paragraph, and the card that proves the method can't be photographed
 
 **Baseline: GREEN.** `main` at `39376e22` (v0.444.4). Full suite `6091 passed, 2 skipped` in **9m32s**
