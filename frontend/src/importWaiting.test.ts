@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ImportWaiting } from "./api/client";
-import { importWaitingNote, waitedFor } from "./importWaiting";
+import {
+  importIsWaiting, importWaitingNote, incomingLagCause, waitedFor,
+} from "./importWaiting";
 
 const label = (kind: string) =>
   ({ reprocess_all: "Reprocessing all targets", stack: "Stacking" })[kind] ?? kind;
@@ -87,5 +89,52 @@ describe("importWaitingNote", () => {
   it("declines rather than printing an empty duration", () => {
     expect(importWaitingNote(waiting({ waiting_hours: 0 }), label)).toBeNull();
     expect(importWaitingNote(waiting({ waiting_hours: Number.NaN }), label)).toBeNull();
+  });
+});
+
+describe("importIsWaiting", () => {
+  it("is exactly the condition importWaitingNote speaks on", () => {
+    // The whole point of the predicate: one note may only defer to another if
+    // the two ask the identical question. Checked at the boundary, not just in
+    // the middle — `waitedFor` is what decides both.
+    for (const hours of [70, 24, 1, 0.5, 0, -3, Number.NaN]) {
+      const w = waiting({ waiting_hours: hours });
+      expect(importIsWaiting(w)).toBe(importWaitingNote(w, label) !== null);
+    }
+  });
+
+  it("answers false for a backend that has no such endpoint", () => {
+    expect(importIsWaiting(null)).toBe(false);
+    expect(importIsWaiting(undefined)).toBe(false);
+  });
+});
+
+describe("incomingLagCause", () => {
+  it("quotes the queue rather than guessing, and withholds the scan", () => {
+    const c = incomingLagCause(waiting({ waiting_hours: 264 }));
+    expect(c.sentence).toContain("already queued and has been waiting 11 days");
+    expect(c.sentence).not.toContain("usually means");
+    // A serial worker: a second scan joins the back of the queue the first one
+    // is already at the front of.
+    expect(c.scanHelps).toBe(false);
+    expect(c.sentence).toContain("only add a second job behind it");
+  });
+
+  it("drops the reassurance the stuck-import note is already giving", () => {
+    // Both notes rank `warning` and the board keeps two inline, so repeating
+    // "nothing is lost" would spend half of what the owner reads on one
+    // sentence said twice.
+    expect(incomingLagCause(waiting()).reassurance).toBe("");
+    expect(incomingLagCause(null).reassurance).toContain("Nothing is lost");
+  });
+
+  it("says a scan is the answer when the queue really is empty", () => {
+    for (const w of [null, undefined, waiting({ waiting_hours: 0 })]) {
+      const c = incomingLagCause(w);
+      expect(c.scanHelps).toBe(true);
+      expect(c.sentence).toContain("nothing is queued waiting to run");
+      // And never claims a wait it cannot see.
+      expect(c.sentence).not.toContain("already queued");
+    }
   });
 });

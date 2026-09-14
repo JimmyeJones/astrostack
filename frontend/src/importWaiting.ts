@@ -86,3 +86,71 @@ export function importWaitingNote(
       + "shallower than they are.",
   };
 }
+
+/** Whether a stuck-import note is speaking right now.
+ *
+ * Deliberately the *same* predicate `importWaitingNote` returns non-null on,
+ * rather than a second reading of the same field: the only honest way for one
+ * note to defer to another is to ask the identical question. A backend with no
+ * such endpoint (or a failed read) answers `false`, which is the state every
+ * caller already renders for.
+ */
+export function importIsWaiting(waiting: ImportWaiting | null | undefined): boolean {
+  return !!waiting && !!waitedFor(waiting.waiting_hours);
+}
+
+export interface IncomingLagCause {
+  /** Why those files are still on disk, in one sentence. */
+  sentence: string;
+  /** Whether starting a scan is what actually picks them up. `false` while an
+   *  import is already queued: the worker is serial, so a second scan only
+   *  joins the back of the queue the first one is already at the front of. */
+  scanHelps: boolean;
+  /** Said only when there is no queued import to point at — the reassurance
+   *  `StuckImportNote` would otherwise be saying an inch higher up the same
+   *  notice board. */
+  reassurance: string;
+}
+
+/** What the incoming-lag note should say about *why* files are still waiting.
+ *
+ * The note used to guess — *"this usually means an import is still waiting its
+ * turn behind another job"* — while its sibling directly above it on the same
+ * notice board said exactly that as a **measured fact with a duration**, and
+ * then offered the opposite action ("Scan incoming now" against "cancel it on
+ * the Jobs page to let the import through"). Both notes fire on the same event
+ * (they were built from one observer report), both are `warning`, and the board
+ * keeps two notes inline — so the owner's own case is precisely the one where a
+ * beginner reads a guess, a fact and two contradictory instructions at once.
+ *
+ * So the cause is *read* rather than guessed, from the queue health the sibling
+ * has already fetched under the same query key. Neither branch invents
+ * anything: with an import queued the wait is quoted from the queue; with
+ * nothing queued the old sentence was simply wrong about the cause, and a scan
+ * is genuinely the right retry.
+ */
+export function incomingLagCause(
+  waiting: ImportWaiting | null | undefined,
+): IncomingLagCause {
+  if (!importIsWaiting(waiting)) {
+    return {
+      sentence: "AstroStack normally imports new files by itself within a few minutes, "
+        + "and nothing is queued waiting to run — so a scan is what picks these up. "
+        + "Starting one is safe to do at any time; it only ever adds what is missing.",
+      scanHelps: true,
+      reassurance: "Nothing is lost — your subs are safe exactly where they are, and "
+        + "AstroStack never writes to that folder.",
+    };
+  }
+  const waited = waitedFor(waiting!.waiting_hours);
+  return {
+    sentence: `An import is already queued and has been waiting ${waited} for `
+      + "AstroStack's one job slot, so these are on their way in rather than "
+      + "overlooked. Starting another scan would only add a second job behind it.",
+    scanHelps: false,
+    // Withheld on purpose: the note above is already saying "nothing is lost",
+    // and two notes are all the board keeps inline — so repeating it here would
+    // spend half of what the owner reads on one sentence said twice.
+    reassurance: "",
+  };
+}

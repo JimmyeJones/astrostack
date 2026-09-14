@@ -1,5 +1,108 @@
 # Shipped — the record
 
+## v0.444.4 — 2026-09-14 — a dogfood pass finally reads the Dashboard's notice board as one paragraph
+
+*(Builder, branch `claude/sweet-babbage-wrud4o` — 🔧 INFRA (the finder, not the app), filed and built in the
+same run as v0.444.3 because that fix is the evidence for it. Scripts only: no app code, no test id added to
+a shipped component.)*
+
+**The hole, stated plainly.** `dogfood_probe.mjs` has printed *"what the Target page SAYS"* since v0.437.8,
+because four of five findings in a row were two of those cards disagreeing. The **Dashboard** is the screen
+the owner actually opens, it carries **twelve** conditional notes on one `NoticeBoard`, and nothing had ever
+printed it. v0.444.3 was found by reading that board's **source**, note by note, in an editor — a
+`StuckImportNote` stating a measured wait with `StuckImportNote`'s own duration, and an `IncomingLagNote` an
+inch below guessing at the same cause and offering the opposite action. No pass could have found it: every
+note on that board is self-hiding, so an ordinary pass photographs an **empty** board, and even the
+`--incoming-lag` pass (v0.442.0) only printed what the **API** answered — never what the board said.
+
+**Read structurally, not from a list of ids.** `noticeBoardClaims(testId)` walks the board's own children:
+`NoticeBoard` sorts by priority, renders one wrapper `<div>` per item and hides the ones past `inlineCount`
+with `display: none` rather than unmounting them, so the wrappers *are* the notes, in the order a reader
+meets them, with the fold readable off the box height — the same rule `prescriptiveClaims` already uses, and
+the same `innerText`-or-walk-the-leaves fallback (a `display: none` subtree has no `innerText`). A hand-kept
+id list would need editing every time a note is added, and **it would have been wrong on the first run**: the
+verification pass's top note was the ASTAP-readiness alert, which is an inline `<Alert>` in `Dashboard.tsx`
+with **no `data-testid` at all** and is reported as `(untagged alert)` rather than silently dropped.
+
+**Verified by running it against a seeded fault**, not by reasoning about it —
+`scripts/agent-dogfood.sh --incoming-lag --no-stack`, which prints both speaking notes, tags them `inline`,
+and counts them (`2 of 2 speaking notes are visible without a click`). The block's own prompt asks the three
+questions v0.444.3 answered: is one note guessing at something the other measured, do they point the same
+way, and does either say twice what the board has room to say once.
+
+**A silent board says so out loud.** With no fault seeded the block prints *"the Dashboard's notice board is
+silent (a healthy install — seed a fault with `--incoming-lag` to read it)"*, because "CLEAN" on an empty
+board is a statement about nothing being there — the same lesson as the missing observing site (v0.436.1),
+the click-only Compare modes (v0.440.2) and the empty `incoming/` (v0.442.0), a fourth time.
+
+**No app change, so nothing to regress:** `scripts/` is not in the Docker image's file set and not imported by
+the suite. Page heights unmoved — phone `/` 2,890 px against 2,886 px on the same pass before the change,
+`/tonight` 3,442 px, the Target page 3,287 px — nothing overflowing, no console errors.
+
+## v0.444.3 — 2026-09-14 — the incoming-lag note stops guessing at a cause the note above it has measured, and stops offering a scan that cannot help
+
+*(Builder, branch `claude/sweet-babbage-wrud4o` — 🟡 PRIORITY 3 (friendliness) + PRIORITY 2 (autonomy),
+found by reading the Dashboard's notice board as one paragraph rather than note by note. Frontend-only; no
+backend, config, schema, on-disk, API or default change.)*
+
+**The two notes, on the owner's own reported event.** `StuckImportNote` (v0.441.1) and `IncomingLagNote`
+(v0.442.0) were built the same day from the same observer report — 2,259 subs sitting in `incoming/` for
+eleven days. They describe that one event from opposite ends, both rank `NOTICE_PRIORITY.warning`, they are
+ranked adjacent in `Dashboard.tsx`, and `NoticeBoard`'s `inlineCount` is **2**. So the case they exist for is
+exactly the case where they are the two notes a beginner reads, one above the other, and nothing else is
+inline. Read that way they did three things wrong, none of which is visible from inside either file:
+
+1. **A guess sitting under a measurement.** The upper note said *"importing your new frames has been waiting
+   11 days behind “Reprocessing all targets”, which has been running for 11 days"* — a fact, with a duration,
+   off `/api/jobs/queue-health`. The lower one then said *"It normally imports new files by itself within a
+   few minutes, so this **usually means** an import is still waiting its turn behind another job."* The app
+   knew; the second note was hedging about it anyway.
+2. **Contradictory instructions, an inch apart.** The upper note's body ends *"Let it finish, or cancel it on
+   the Jobs page to let the import through."* The lower one's only button was **"Scan incoming now"**, and
+   `POST /api/scan` does not de-duplicate (`submit_pipeline` → `jm.submit("pipeline", …)` unconditionally) —
+   the worker is serial, so pressing it enqueues a **second** import behind the very job the note above asks
+   you to let through, then navigates to Jobs to watch it not start.
+3. **The reassurance said twice.** *"Nothing is lost — your subs are safe in your incoming folder"* and
+   *"Nothing is lost — your subs are safe exactly where they are"*, in consecutive notes, on a board whose
+   whole design is that only two notes fit (the standing "extremely busy" owner priority, AGENTS.md §1).
+
+**The fix reads the queue instead of guessing, at zero cost.** `incomingLagCause(waiting)` and
+`importIsWaiting(waiting)` join `importWaiting.ts` — which already exists so that two surfaces cannot make
+two claims about one queue, which is precisely the failure here. `importIsWaiting` is deliberately *the same
+predicate* `importWaitingNote` returns non-null on rather than a second reading of `waiting_hours`: one note
+may only defer to another if the two ask the identical question, and a test walks the boundary
+(70/24/1/0.5/0/−3/NaN hours) asserting they agree at every rung. `IncomingLagNote` reads it from a
+`useQuery` on the **same key and options** the sibling already uses (`["job-queue-health"]`, `refetchInterval`
+60 s, `staleTime` 30 s), so the two share one cache entry: no second request on a polling page, and no way
+for them to hold different opinions.
+
+**Both branches are honest, and neither invents anything.** With an import queued: the wait is quoted from
+the queue (*"An import is already queued and has been waiting 11 days for AstroStack's one job slot, so these
+are on their way in rather than overlooked. Starting another scan would only add a second job behind it."*),
+the button becomes **Open Jobs** so the pair points one way, and the duplicated reassurance is withheld.
+With nothing queued the old sentence was simply **wrong about the cause** — so it now says so
+(*"…and nothing is queued waiting to run — so a scan is what picks these up"*) and the scan button is
+genuinely earned rather than offered on a hunch.
+
+**Nothing was removed** (the owner's rule): every sentence and every count this note carried is still on the
+screen — the folder names, the `N of M not imported` lines, the "and K more", the duration, the reassurance —
+the only difference is that the reassurance is now said **once** across the two notes instead of twice, which
+is consolidation rather than removal, and the one sentence that changed was the one that was guessing.
+
+**Upgrade-safe (§9):** frontend-only. A backend with no `/api/jobs/queue-health` (the read is `.catch(() =>
+null)`) lands in the scan branch, which is byte-for-byte today's note — pinned by its own test.
+
+**Tests (+9).** 6 unit in `importWaiting.test.ts` (the predicate agrees with `importWaitingNote` at every
+rung; `null`/`undefined` answer false; the queued branch quotes the wait, drops "usually means", and
+withholds the scan; the reassurance is empty when queued and present when not; the empty-queue branch never
+claims a wait it cannot see) and 3 rendered in `IncomingLagNote.test.tsx` (the queued case: no
+"Scan incoming now", an "Open Jobs" link, `api.scan` never called, and the folder detail still all there; the
+quiet-queue case says so in words; and an older backend keeps today's wording and button). All three rendered
+tests were **reverted-and-watched-fail** before the fix, per AGENTS.md §8. The existing
+"offers a scan, which is the only action and is always safe" was renamed to name its precondition — the same
+assertion, not a loosened one — and the file's `beforeEach` now mocks a healthy queue explicitly rather than
+leaving the branch to a failed jsdom fetch.
+
 ## v0.444.2 — 2026-09-14 — the readiness card now says which canvas its goal is for
 
 *(Builder, branch `claude/sweet-babbage-t0x3rf` — 🟢 PRIORITY 3 (friendliness), the LEAD filed by the run that

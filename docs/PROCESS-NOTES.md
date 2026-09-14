@@ -18,6 +18,71 @@ is a queue.
 
 ---
 
+## 2026-09-14 (Builder, branch `claude/sweet-babbage-wrud4o`) — two shipped from ONE finding, the first `--incoming-lag` sweep on record, and the board nothing had ever photographed
+
+**Baseline: GREEN.** `main` at `39ba1a3b` (v0.444.2). Full suite `6091 passed, 2 skipped` in **11m49s**
+(`-n 4` + BLAS cap, 4-core box). Frontend `279 files / 4057 tests` green, `tsc` clean, `vite build` clean. **Re-run after both tasks: `6091 passed, 2 skipped` in 11m51s, on the merged tree.**
+
+**The §7 "do not edit while pytest runs" rule was followed to the letter this run, and it is worth recording
+what that 12 minutes was actually spent on**, because the previous two notes both treat it as a hazard to
+survive rather than as time. It was spent reading: AGENTS.md end to end, the whole of "Bugs (fix these
+first)", four Ideas sections, and then the *source* of the Dashboard's notice board. **The run's entire output
+came out of that last read.** A 12-minute suite is not dead time; it is the only uninterrupted reading window
+a run gets, and the thing this project keeps finding bugs by doing — holding several of the app's own true
+sentences in mind at once — is a reading task, not a running one.
+
+**The finding, and why no tool could have made it.** `StuckImportNote` (v0.441.1) and `IncomingLagNote`
+(v0.442.0) were built the same day from one observer report, both rank `NOTICE_PRIORITY.warning`, sit
+adjacent in `Dashboard.tsx`, and `NoticeBoard`'s `inlineCount` is **2** — so the event they exist for is
+exactly the one where they are *the* two notes a beginner reads. There the lower one guessed
+(*"this **usually means** an import is still waiting its turn"*) at what the upper one had just **measured**
+with a duration, offered **"Scan incoming now"** against the upper note's *"cancel it on the Jobs page to let
+the import through"* — and `POST /api/scan` does not de-duplicate, so on a serial worker that enqueues a
+*second* import behind the very job you were asked to let through — and repeated *"Nothing is lost — your
+subs are safe…"* on a board where only two notes fit. Three failures, none visible from inside either file,
+all obvious the moment the two are read as one paragraph. Shipped as **v0.444.3**.
+
+**And that is the generalisable half: the "read it as ONE paragraph" question is what found this, applied to
+a surface nobody had applied it to.** AGENTS.md §7 aims that question at the *mosaic* block and at the Target
+page's cards. The Dashboard has **twelve** conditional notes on one board and had never been read that way —
+so **v0.444.4** teaches `dogfood_probe.mjs` to print it, the same treatment `prescriptiveClaims` gives the
+Target page. Read off the board's own children rather than a list of test ids, which is not a style
+preference: the verification pass's top note was the ASTAP-readiness alert, an inline `<Alert>` with **no
+`data-testid` at all**, and a list would have silently dropped it on the first run.
+
+**Dogfood: `--incoming-lag`, twice — CLEAN both times, and the first time that flag appears in this file.**
+It shipped with v0.442.1 and no pass had ever recorded it. Seeded 7 subs into `incoming/` dated 11 days back;
+`/api/incoming-lag` answered `n_waiting: 7, n_folders: 1, still_hours: 264.0`. Nothing overflowing, no
+console errors, on either pass. Page heights (phone): `/tonight` 3,442 px, Target 3,287 px, editor 3,143 px,
+`/life-list` 3,094 px, `/` 2,886 → **2,890 px** across the v0.444.3 change, i.e. unmoved — the point being
+that the fix *replaced* a sentence rather than adding a card.
+
+**What the new block printed, for the next run to compare against:** two speaking notes, both inline
+(`2 of 2`), being `(untagged alert)` — ASTAP readiness — and `incoming-lag-note` carrying the new honest
+wording. **One tension in it is the scratch install's, not the owner's, and is recorded so it is not re-filed
+as a bug:** the ASTAP note says *"set it up **before you drop in frames**"* while the incoming-lag note
+reports frames already dropped in. The owner's install bundles ASTAP in the Docker image, so that pair cannot
+co-fire for him; it is an artifact of a container with no solver.
+
+**A "regression test that fails before" was taken literally.** All three rendered tests were run against the
+*stashed* source (`git stash push -- <the two source files>`) and watched go red — `3 failed | 8 passed` —
+before being accepted. AGENTS.md §8's rule about a fixture that cannot exhibit its bug applies just as much
+to a frontend assertion that would pass on the old component.
+
+**Backlog state, for the next Builder.** Unchanged in shape from the last three notes and worth saying plainly
+so nobody spends a third run rediscovering it: **"Bugs (fix these first)" contains no takeable bug.** Every
+entry is gated on data only the owner's box has, stood down with numbers on both sides, or routed to owner
+sign-off. The Ideas lists are mostly closed entries with strike-throughs, and "Features that serve real
+workflows" has **no ready item** — its open entries are one gated on a bundled constellation dataset that
+does not exist and one explicitly *"worth doing only once someone actually uploads a big archive"*. Several
+things that look like gaps are already built; this run grep-checked and dropped three candidate features on
+that basis (an incoming-folder browser — `webapp/skipped_folders.py` + `BringFolderInButton` already cover
+it; a progress timelapse — `stacker.assemble_progress_reel` already writes one; a what's-new page — the
+"N targets out of date" badge and `reprocess_all --stale-only` already tell that story). **So the honest
+source of work right now is not the backlog: it is reading a surface as one paragraph and finding two of the
+app's own true sentences that cannot both be held at once.** That has now produced findings five runs
+running, and v0.444.4 exists to point it at a new surface.
+
 ## 2026-09-14 (Builder, branch `claude/sweet-babbage-t0x3rf`) — a red baseline that was the harness again, the readiness scope clause, and a clean `--mosaic` sweep
 
 **Baseline: RED, and it was not `main`.** `main` at `ad167d3f` (v0.444.0). The full suite (`-n 4` + BLAS cap,
