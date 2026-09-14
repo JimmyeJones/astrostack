@@ -11,6 +11,17 @@
 // the backend flags it (`hot_pixels_preview_skipped`); we say so plainly rather
 // than let the preview show a starless picture the export won't produce.
 // Advisory only — the export still removes hot pixels.
+//
+// It used to stop at "your export still gets the cleanup", which is reassurance
+// without an answer: this op carries a **Threshold (σ)** slider (2–10), and a
+// reader told the preview shows none of it has a knob and no way to set it. The
+// full-size check is that way — it renders at `proxy_scale == 1`, where
+// `hot_pixels_skipped_on_proxy` is False and `_hot_pixels` really runs — and it
+// sits directly under this sentence. v0.445.3 left this caption alone on the
+// grounds that it "asks for no judgement"; the op's own params say otherwise,
+// and that call was made before anyone had rendered the screen.
+
+import { FULL_SIZE_CHECK_LABEL } from "./loupe";
 
 export interface HotPixelsPreviewInfo {
   hot_pixels_preview_skipped?: boolean;
@@ -25,6 +36,7 @@ export function hotPixelsSkippedCaption(
   return (
     "Hot-pixel removal isn't shown on this downscaled preview — at preview scale "
     + "a real star looks just like a stray pixel, so previewing it would wrongly "
-    + "erase stars. Your exported full-resolution image still gets the cleanup."
+    + "erase stars. Your exported full-resolution image still gets the cleanup — "
+    + `"${FULL_SIZE_CHECK_LABEL}" to see it, at the threshold you've set.`
   );
 }

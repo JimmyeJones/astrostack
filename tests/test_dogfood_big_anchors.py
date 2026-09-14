@@ -140,7 +140,12 @@ def test_the_drive_still_covers_the_parts_only_a_click_reaches():
     for needed in ("full-size-check-open", "full-size-check-image",
                    "full-size-check-navigator", "full-size-check-marker",
                    "full-size-check-where", "full-size-check-split-toggle",
-                   "full-size-check-split-divider", "full-size-check-caption"):
+                   "full-size-check-split-divider", "full-size-check-caption",
+                   # The box *around* the window, measured against it: the band
+                   # of its own black background that a caption below it used to
+                   # stretch it into is the one defect here that jsdom, which
+                   # lays nothing out, can never see.
+                   "full-size-check-viewport"):
         assert needed in ids, f"the drive stopped checking {needed}"
 
 

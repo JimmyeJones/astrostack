@@ -2049,7 +2049,7 @@ export function EditorView() {
               </Text>
             ) : null}
             {previewScaleCaption(hist.data) ? (
-              <Text size="xs" c="dimmed" mt={4}>
+              <Text size="xs" c="dimmed" mt={4} data-testid="preview-advisory">
                 {previewScaleCaption(hist.data)}
               </Text>
             ) : null}
@@ -2106,7 +2106,7 @@ export function EditorView() {
               <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
                 <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
                   style={{ flexShrink: 0, marginTop: 2 }} />
-                <Text size="xs" c="dimmed">{deconvUnderstatesCaption(hist.data)}</Text>
+                <Text size="xs" c="dimmed" data-testid="preview-advisory">{deconvUnderstatesCaption(hist.data)}</Text>
               </Group>
             ) : null}
             {/* Star reduction erodes with a footprint that clamps to 1 px on a
@@ -2117,7 +2117,7 @@ export function EditorView() {
               <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
                 <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
                   style={{ flexShrink: 0, marginTop: 2 }} />
-                <Text size="xs" c="dimmed">{starReduceDiffersCaption(hist.data)}</Text>
+                <Text size="xs" c="dimmed" data-testid="preview-advisory">{starReduceDiffersCaption(hist.data)}</Text>
               </Group>
             ) : null}
             {/* Sharpen's radius is a full-res measure; once proxy_scale shrinks
@@ -2128,7 +2128,7 @@ export function EditorView() {
               <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
                 <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
                   style={{ flexShrink: 0, marginTop: 2 }} />
-                <Text size="xs" c="dimmed">{sharpenUnderstatesCaption(hist.data)}</Text>
+                <Text size="xs" c="dimmed" data-testid="preview-advisory">{sharpenUnderstatesCaption(hist.data)}</Text>
               </Group>
             ) : null}
             {/* Noise reduction's bilateral method smooths the right *patch* on
@@ -2140,7 +2140,7 @@ export function EditorView() {
               <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
                 <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
                   style={{ flexShrink: 0, marginTop: 2 }} />
-                <Text size="xs" c="dimmed">{denoiseUnderstatesCaption(hist.data)}</Text>
+                <Text size="xs" c="dimmed" data-testid="preview-advisory">{denoiseUnderstatesCaption(hist.data)}</Text>
               </Group>
             ) : null}
             {/* Hot-pixel removal can't run on a strided proxy without mistaking
@@ -2150,7 +2150,7 @@ export function EditorView() {
               <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
                 <IconInfoCircle size={14} color="var(--mantine-color-dimmed)"
                   style={{ flexShrink: 0, marginTop: 2 }} />
-                <Text size="xs" c="dimmed">{hotPixelsSkippedCaption(hist.data)}</Text>
+                <Text size="xs" c="dimmed" data-testid="preview-advisory">{hotPixelsSkippedCaption(hist.data)}</Text>
               </Group>
             ) : null}
             {/* Which white-balance path the recipe's colour-calibration op ran on
