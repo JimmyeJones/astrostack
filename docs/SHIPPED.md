@@ -1,5 +1,44 @@
 # Shipped — the record
 
+## v0.444.4 — 2026-09-14 — a dogfood pass finally reads the Dashboard's notice board as one paragraph
+
+*(Builder, branch `claude/sweet-babbage-wrud4o` — 🔧 INFRA (the finder, not the app), filed and built in the
+same run as v0.444.3 because that fix is the evidence for it. Scripts only: no app code, no test id added to
+a shipped component.)*
+
+**The hole, stated plainly.** `dogfood_probe.mjs` has printed *"what the Target page SAYS"* since v0.437.8,
+because four of five findings in a row were two of those cards disagreeing. The **Dashboard** is the screen
+the owner actually opens, it carries **twelve** conditional notes on one `NoticeBoard`, and nothing had ever
+printed it. v0.444.3 was found by reading that board's **source**, note by note, in an editor — a
+`StuckImportNote` stating a measured wait with `StuckImportNote`'s own duration, and an `IncomingLagNote` an
+inch below guessing at the same cause and offering the opposite action. No pass could have found it: every
+note on that board is self-hiding, so an ordinary pass photographs an **empty** board, and even the
+`--incoming-lag` pass (v0.442.0) only printed what the **API** answered — never what the board said.
+
+**Read structurally, not from a list of ids.** `noticeBoardClaims(testId)` walks the board's own children:
+`NoticeBoard` sorts by priority, renders one wrapper `<div>` per item and hides the ones past `inlineCount`
+with `display: none` rather than unmounting them, so the wrappers *are* the notes, in the order a reader
+meets them, with the fold readable off the box height — the same rule `prescriptiveClaims` already uses, and
+the same `innerText`-or-walk-the-leaves fallback (a `display: none` subtree has no `innerText`). A hand-kept
+id list would need editing every time a note is added, and **it would have been wrong on the first run**: the
+verification pass's top note was the ASTAP-readiness alert, which is an inline `<Alert>` in `Dashboard.tsx`
+with **no `data-testid` at all** and is reported as `(untagged alert)` rather than silently dropped.
+
+**Verified by running it against a seeded fault**, not by reasoning about it —
+`scripts/agent-dogfood.sh --incoming-lag --no-stack`, which prints both speaking notes, tags them `inline`,
+and counts them (`2 of 2 speaking notes are visible without a click`). The block's own prompt asks the three
+questions v0.444.3 answered: is one note guessing at something the other measured, do they point the same
+way, and does either say twice what the board has room to say once.
+
+**A silent board says so out loud.** With no fault seeded the block prints *"the Dashboard's notice board is
+silent (a healthy install — seed a fault with `--incoming-lag` to read it)"*, because "CLEAN" on an empty
+board is a statement about nothing being there — the same lesson as the missing observing site (v0.436.1),
+the click-only Compare modes (v0.440.2) and the empty `incoming/` (v0.442.0), a fourth time.
+
+**No app change, so nothing to regress:** `scripts/` is not in the Docker image's file set and not imported by
+the suite. Page heights unmoved — phone `/` 2,890 px against 2,886 px on the same pass before the change,
+`/tonight` 3,442 px, the Target page 3,287 px — nothing overflowing, no console errors.
+
 ## v0.444.3 — 2026-09-14 — the incoming-lag note stops guessing at a cause the note above it has measured, and stops offering a scan that cannot help
 
 *(Builder, branch `claude/sweet-babbage-wrud4o` — 🟡 PRIORITY 3 (friendliness) + PRIORITY 2 (autonomy),

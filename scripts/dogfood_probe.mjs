@@ -32,6 +32,19 @@
 // last five dogfood findings were two of those sentences disagreeing, and every
 // one had to be found by cropping a screenshot afterwards.
 //
+// It prints the SAME block for the DASHBOARD'S NOTICE BOARD, which is the screen
+// the owner actually opens and the one surface of twelve conditional notes that
+// nothing had ever photographed as a paragraph. v0.444.3 came out of reading
+// that board's *source* note by note — `StuckImportNote` stating a measured wait
+// while `IncomingLagNote` guessed at the same cause an inch below and offered
+// the opposite action — a finding this probe was structurally unable to make:
+// every one of those notes is self-hiding on a healthy install, so a default
+// pass sees an empty board, and even a `--incoming-lag` pass only printed what
+// the *API* answered, never what the board said. Read off the board's own DOM
+// rather than a list of test ids, so a note added tomorrow is in the block
+// without anyone remembering to add it (and the two notes that are inline
+// `<Alert>`s with no test id of their own are not silently skipped).
+//
 // Two views it reaches that a route table cannot. `/compare` is the only page
 // whose URL carries data — two `<safe>:<run_id>` refs — so it was never in the
 // table at all, and the page whose entire job is weighing two pictures against
@@ -273,6 +286,56 @@ function prescriptiveClaims(ids) {
   return out;
 }
 
+/** What a `NoticeBoard` is saying, in its own display order.
+ *
+ *  The board's children ARE the notes: `NoticeBoard` sorts by priority, renders
+ *  one wrapper `<div>` per item, and hides the ones past `inlineCount` with
+ *  `display: none` rather than unmounting them. So walking those wrappers gives
+ *  every note the board holds, in the order a reader meets them, with the fold
+ *  readable off the box height — the same rule `prescriptiveClaims` uses.
+ *
+ *  Read structurally instead of from a list of test ids on purpose. A list would
+ *  need editing every time a note is added (twelve exist today, and two of them
+ *  — the folder and ASTAP readiness alerts — are inline `<Alert>`s with no test
+ *  id at all, so a list would have quietly omitted them). The label falls back
+ *  to the wrapper's own test id when its note carries one, which is most of them.
+ *
+ *  Deliberately a near-duplicate of `prescriptiveClaims`' text extraction rather
+ *  than a shared helper: both are serialised into the page by `page.evaluate`,
+ *  which cannot close over anything defined out here. */
+function noticeBoardClaims(testId) {
+  const board = document.querySelector(`[data-testid="${testId}"]`);
+  if (!board) return [];
+  const out = [];
+  for (const host of board.children) {
+    // The "N more notes" discloser is the board's own child, not a note.
+    if (!host.matches("div")) continue;
+    const hidden = host.getBoundingClientRect().height === 0;
+    let text;
+    if (!hidden) {
+      text = (host.innerText || "").trim().replace(/\s*\n+\s*/g, " · ");
+    } else {
+      // `innerText` is empty on a `display: none` subtree, which is exactly the
+      // folded case worth reporting — so walk the leaves instead.
+      const parts = [];
+      for (const n of host.querySelectorAll("*")) {
+        if (n.children.length) continue;
+        const t = (n.textContent || "").trim();
+        if (t) parts.push(t);
+      }
+      text = parts.join(" · ");
+    }
+    if (!text) continue;               // a note that is silent, i.e. most of them
+    const tagged = host.querySelector("[data-testid]");
+    out.push({
+      id: tagged ? tagged.getAttribute("data-testid") : "(untagged alert)",
+      folded: hidden,
+      text: text.slice(0, 400),
+    });
+  }
+  return out;
+}
+
 const browser = await chromium.launch(
   BUNDLED ? { executablePath: BUNDLED } : {},
 );
@@ -282,6 +345,8 @@ const heights = [];
 /** What the Target page prescribes, collected once (desktop) and printed at the
  *  end so the sentences land together rather than scattered through the sweep. */
 let claims = [];
+/** What the Dashboard's notice board says, same treatment, collected on `/`. */
+let notices = [];
 for (const { name, width, height } of WIDTHS) {
   const ctx = await browser.newContext({ viewport: { width, height } });
   const page = await ctx.newPage();
@@ -384,6 +449,11 @@ for (const { name, width, height } of WIDTHS) {
     if (SAFE && route === `/targets/${SAFE}` && name === "desktop") {
       claims = await page.evaluate(prescriptiveClaims, PRESCRIPTIVE);
     }
+    // Same reasoning, and the same width: the fold is decided by priority, not
+    // by how wide the window is.
+    if (route === "/" && name === "desktop") {
+      notices = await page.evaluate(noticeBoardClaims, "dashboard-notes");
+    }
   }
   await ctx.close();
 }
@@ -402,6 +472,29 @@ if (claims.length) {
   console.log(
     `   (${inline} of ${claims.length} are visible without a click — the folded`
     + " ones are what the page does NOT say to a reader who never expands it)");
+}
+
+if (notices.length) {
+  console.log(
+    "\nwhat the DASHBOARD'S notice board SAYS — the same question, on the screen"
+    + "\nthe owner actually opens. Two notes stay inline; ask of the pair whether"
+    + "\none is guessing at something the other has measured, whether they point"
+    + "\nthe same way, and whether either says twice what the board only has room"
+    + "\nto say once (that trio is exactly what v0.444.3 fixed):");
+  for (const n of notices) {
+    const where = n.folded ? 'FOLDED behind "more notes"' : "inline";
+    console.log(`   [${n.id}, ${where}] ${n.text}`);
+  }
+  const inline = notices.filter((n) => !n.folded).length;
+  console.log(
+    `   (${inline} of ${notices.length} speaking notes are visible without a click)`);
+} else {
+  // Worth saying out loud: an empty board is the healthy answer, and it is also
+  // what every pass before `--incoming-lag` existed could ever have seen. A
+  // "CLEAN" here is a statement about a board with nothing on it.
+  console.log(
+    "\nthe Dashboard's notice board is silent (a healthy install — seed a fault"
+    + " with --incoming-lag to read it)");
 }
 
 // Tallest first, so the worst offender is the first line you read.
