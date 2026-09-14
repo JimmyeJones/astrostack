@@ -40,6 +40,7 @@ before committing CPU time to a stack.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -281,6 +282,134 @@ def _apply_seestar_convention(
             continue
         units.append((name, files))
     return units
+
+
+@dataclass(frozen=True)
+class PlannedUnit:
+    """One target's worth of FITS that a scan **would** ingest, derived from a
+    list of file paths alone — no filesystem access, no library, no ingest.
+
+    This is the scan's *plan*, which is a different and much cheaper thing than
+    the scan: it says which folder becomes which target and how many files that
+    is, without opening a single frame. It exists so a caller who already holds a
+    listing of ``incoming/`` (the watcher stats every FITS under it on every
+    poll) can answer "is anything down there not in my library yet?" without
+    walking the one tree this app may never write to a second time
+    (AGENTS.md §10).
+
+    ``folder`` is the unit's directory **relative to the scan root**, joined with
+    :data:`os.sep` — deliberately the same spelling
+    :meth:`seestack.io.project.Project.source_folders_under` reports for a
+    registered frame, so the two sides of that comparison need no translation.
+    The empty string means the files sit loose in the root (the ``Unsorted``
+    catch-all).
+    """
+
+    target_name: str
+    folder: str
+    n_files: int
+    #: Newest ``st_mtime`` among the unit's files, or ``0.0`` when unknown. The
+    #: age of a folder is what tells "these have been sitting there for days"
+    #: from "this night is still being copied over SMB".
+    newest_mtime: float = 0.0
+
+
+def plan_incoming_units(
+    root: str | Path, files: dict[str, float],
+) -> list[PlannedUnit]:
+    """The units :func:`scan_and_organize` would build from ``files``.
+
+    ``files`` maps an absolute path to that file's ``st_mtime``; it is exactly
+    the snapshot :meth:`webapp.watcher.Watcher.poll_once` already holds. Paths
+    outside ``root`` and non-FITS names are ignored.
+
+    The folder→target mapping and every skip come from
+    :func:`_apply_seestar_convention` — the *same* function the real scan uses,
+    called with the same ``(name, files)`` / ``parents`` shape — so a plan can
+    never claim a folder the scan would skip, or name a target the scan would
+    not. ``tests/test_incoming_plan.py`` pins that against a real tree by running
+    both over it.
+
+    **One deliberate approximation.** The real scan recognises a whole-device
+    *container* (``incoming/MyWorks/{M 31_sub, …}``) with
+    :func:`_looks_like_seestar_container`, which reads the directory; here the
+    only evidence is the paths, so a container is one whose own level holds no
+    FITS and one of whose child folders *containing FITS* is named ``*_sub``. A
+    container whose only ``_sub`` child happens to be empty is therefore read as
+    a single unit rather than expanded. That costs nothing to the one question
+    this answers: an unexpanded container's folder is the prefix of its
+    children's, and the caller rolls registered counts up by prefix, so the
+    totals agree either way — only the name attached to them is coarser.
+    """
+    root = Path(root)
+    # Group by the file's directory, as a tuple of path components relative to
+    # the root. Everything below is a question about those components.
+    by_rel: dict[tuple[str, ...], list[tuple[Path, float]]] = {}
+    for raw, mtime in files.items():
+        p = Path(raw)
+        if p.suffix.lower() not in FITS_SUFFIXES:
+            continue
+        try:
+            rel = p.relative_to(root)
+        except ValueError:  # not under the root at all
+            continue
+        by_rel.setdefault(tuple(rel.parts[:-1]), []).append((p, float(mtime)))
+
+    def _under(prefix: tuple[str, ...]) -> list[tuple[Path, float]]:
+        out: list[tuple[Path, float]] = []
+        for parts, entries in by_rel.items():
+            if parts[: len(prefix)] == prefix:
+                out.extend(entries)
+        out.sort(key=lambda e: str(e[0]))
+        return out
+
+    subdirs_with_fits: list[tuple[str, list[Path]]] = []
+    parents: list[str] = []
+    # Keyed on the first file's path rather than on list identity: the
+    # convention returns the very list objects it was given, but a rule this
+    # depends on should be one that cannot be broken by an innocent refactor.
+    folder_of: dict[str, str] = {}
+    newest_of: dict[str, float] = {}
+
+    def _add(name: str, parent: str, folder: str,
+             entries: list[tuple[Path, float]]) -> None:
+        subdirs_with_fits.append((name, [p for p, _ in entries]))
+        parents.append(parent)
+        folder_of[str(entries[0][0])] = folder
+        newest_of[folder] = max(m for _, m in entries)
+
+    for d in sorted({parts[0] for parts in by_rel if parts}):
+        children = sorted({parts[1] for parts in by_rel
+                           if len(parts) >= 2 and parts[0] == d})
+        is_container = (
+            not by_rel.get((d,))
+            and any(c.lower().endswith(_SUB_SUFFIX) for c in children)
+        )
+        if is_container:
+            for child in children:
+                entries = _under((d, child))
+                if entries:
+                    _add(child, str(root / d), os.path.join(d, child), entries)
+            continue
+        entries = _under((d,))
+        if entries:
+            _add(d, str(root), d, entries)
+
+    planned: list[PlannedUnit] = []
+    for target_name, unit_files in _apply_seestar_convention(
+            subdirs_with_fits, parents):
+        folder = folder_of[str(unit_files[0])]
+        planned.append(PlannedUnit(
+            target_name=target_name, folder=folder, n_files=len(unit_files),
+            newest_mtime=newest_of[folder],
+        ))
+    loose = by_rel.get(())
+    if loose:
+        planned.append(PlannedUnit(
+            target_name=UNSORTED_TARGET_NAME, folder="", n_files=len(loose),
+            newest_mtime=max(m for _, m in loose),
+        ))
+    return planned
 
 
 def _looks_like_seestar_container(d: Path) -> bool:

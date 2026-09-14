@@ -19,6 +19,7 @@ import { ContinueTonightCard } from "../components/ContinueTonightCard";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { FirstLookStrip } from "../components/dashboard/FirstLookStrip";
 import { MissingFilesNote } from "../components/dashboard/MissingFilesNote";
+import { IncomingLagNote } from "../components/dashboard/IncomingLagNote";
 import { StuckImportNote } from "../components/dashboard/StuckImportNote";
 import { NewSubsWaitingNote } from "../components/dashboard/NewSubsWaitingNote";
 import { OverTrimmedNote } from "../components/dashboard/OverTrimmedNote";
@@ -246,6 +247,14 @@ export function Dashboard() {
           // queue, which is every ordinary minute.
           { key: "stuck-import", priority: NOTICE_PRIORITY.warning,
             node: <StuckImportNote /> },
+          // The same silence, measured from the other end: files in `incoming/`
+          // the library has no row for, whether or not anything was ever queued.
+          // Ranked just below the queue note because when both fire they are the
+          // same event and the queued job is the more actionable half — it names
+          // what is holding the worker. Self-hiding at zero and while a night is
+          // still arriving, which is every ordinary install.
+          { key: "incoming-lag", priority: NOTICE_PRIORITY.warning,
+            node: <IncomingLagNote /> },
           // A target that stopped producing pictures. Same rung as the other
           // warnings: nothing is corrupt, but the walk-away workflow the owner
           // relies on has quietly stopped delivering for that target, and the
