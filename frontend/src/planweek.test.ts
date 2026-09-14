@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { PlanWeek, TargetBestNight, WeekNight } from "./api/client";
+import type {
+  ClosingTarget, PlanWeek, SeasonClosing, TargetBestNight, WeekNight,
+} from "./api/client";
 import {
-  bestNightOfWeek, otherTargetNights, targetNightPhrase, weekDarkPhrase,
-  weekEmptyReason, weekHeadline, weekMoonNote, weekNightLabel,
-  weekNightLabelInline,
+  bestNightOfWeek, closingRowFor, closingWeekNote, otherTargetNights,
+  targetNightPhrase, weekDarkPhrase, weekEmptyReason, weekHeadline,
+  weekMoonNote, weekNightLabel, weekNightLabelInline,
 } from "./planweek";
 
 // A Wednesday evening, so the weekday labels below are unambiguous.
@@ -188,6 +190,115 @@ describe("otherTargetNights", () => {
 
   it("phrases a row as name — night", () => {
     expect(targetNightPhrase(targets[0], NOW)).toBe("M 31 — Saturday");
+  });
+});
+
+// The card above this one ("Shoot these before they're gone") argues that a
+// clear night spent on a closing target buys something the rest of the year
+// can't; `plan_week`'s score is pure observability and knows nothing about it.
+// These pin the two halves that stop the pair reading as two prescriptions with
+// no way to choose between them.
+describe("the week plan and the season that is closing", () => {
+  // Six targets, so that dropping the headline's own row still leaves five —
+  // one more than the cap. M 27, the one that is leaving, is last by date and
+  // is therefore exactly the row the cap cuts.
+  const targets: TargetBestNight[] = [
+    { safe: "M_31", name: "M 31", date: "2026-09-05", minutes_above_min_alt: 246, score: 90 },
+    { safe: "M_42", name: "M 42", date: "2026-09-06", minutes_above_min_alt: 130, score: 44 },
+    { safe: "M_13", name: "M 13", date: "2026-09-07", minutes_above_min_alt: 120, score: 40 },
+    { safe: "M_81", name: "M 81", date: "2026-09-07", minutes_above_min_alt: 115, score: 39 },
+    { safe: "M_57", name: "M 57", date: "2026-09-08", minutes_above_min_alt: 110, score: 38 },
+    { safe: "M_27", name: "M 27", date: "2026-09-08", minutes_above_min_alt: 100, score: 30 },
+  ];
+  function season(over: Partial<ClosingTarget> = {}): ClosingTarget {
+    return {
+      safe: "M_27", name: "M 27", minutes_now: 180, weeks_left: 2,
+      last_night: "2026-09-23", total_exposure_s: 3600, noise_gain: 0.29,
+      ...over,
+    };
+  }
+  function closing(rows: ClosingTarget[]): SeasonClosing {
+    return {
+      location_source: "settings",
+      observer: { lat_deg: 51.5, lon_deg: -0.13, elevation_m: 30 },
+      generated_utc: "2026-09-02T20:00:00+00:00",
+      min_altitude_deg: 30, horizon_weeks: 8, targets: rows,
+    };
+  }
+  // The headline names M 31 on the 5th, so M 31's own row is dropped and the
+  // remaining five overflow the cap of four — which is what pushes M 27, last
+  // by date, out of the list.
+  const p = plan({
+    nights: [night({ date: "2026-09-05", best: pick({ score: 90 }) })],
+    targets,
+  });
+
+  it("keeps the leaving target's night when the cap would have cut it", () => {
+    // Fails before: the plain slice ends at M 57 and never mentions the one
+    // target the card above says is about to be gone for a year.
+    expect(otherTargetNights(p).map((t) => t.safe))
+      .toEqual(["M_42", "M_13", "M_81", "M_57"]);
+    expect(otherTargetNights(p, 4, closing([season()])).map((t) => t.safe))
+      .toEqual(["M_42", "M_13", "M_81", "M_27"]);
+  });
+
+  it("keeps the list the same length, and in its own soonest-first order", () => {
+    const rows = otherTargetNights(p, 3, closing([season()]));
+    expect(rows).toHaveLength(3);
+    expect(rows.map((t) => t.safe)).toEqual(["M_42", "M_13", "M_27"]);
+  });
+
+  it("changes nothing when nothing is leaving", () => {
+    expect(otherTargetNights(p, 4, closing([])).map((t) => t.safe))
+      .toEqual(otherTargetNights(p, 4).map((t) => t.safe));
+    expect(otherTargetNights(p, 4, null).map((t) => t.safe))
+      .toEqual(otherTargetNights(p, 4).map((t) => t.safe));
+  });
+
+  it("marks the row with the same countdown the card above uses", () => {
+    expect(targetNightPhrase(targets[5], NOW, season()))
+      .toBe("M 27 — Tuesday (about 2 weeks left)");
+    expect(targetNightPhrase(targets[5], NOW, season({ weeks_left: 0 })))
+      .toBe("M 27 — Tuesday (this is its last week)");
+    // The bracket matters: rows are joined with " · ", so a " · " suffix would
+    // have made one row read as two.
+    expect(targetNightPhrase(targets[5], NOW, season())).not.toContain(" · ");
+  });
+
+  it("says which night doesn't come round again", () => {
+    expect(closingWeekNote(p, closing([season()]), NOW)).toBe(
+      "M 27 is on its way out of your sky — about 2 weeks left."
+      + " Its best night this week is Tuesday"
+      + " — and unlike the others here, that one doesn't come round again.");
+  });
+
+  it("stays silent when there is nothing to reconcile", () => {
+    // Nothing leaving at all — the ordinary week, and an older backend.
+    expect(closingWeekNote(p, closing([]), NOW)).toBeNull();
+    expect(closingWeekNote(p, null, NOW)).toBeNull();
+    expect(closingWeekNote(p, undefined, NOW)).toBeNull();
+    // Leaving, but not placed anywhere this week: there is no night to name.
+    expect(closingWeekNote(p, closing([season({ safe: "M_99", name: "M 99" })]), NOW))
+      .toBeNull();
+    // Leaving, and it is exactly what the headline already prescribes.
+    expect(closingWeekNote(p, closing([season({ safe: "M_31", name: "M 31" })]), NOW))
+      .toBeNull();
+  });
+
+  it("names the soonest to leave that is actually placed this week", () => {
+    const note = closingWeekNote(p, closing([
+      season({ safe: "M_99", name: "M 99", weeks_left: 0 }),   // leaving first, not placed
+      season({ safe: "M_13", name: "M 13", weeks_left: 1 }),
+      season(),                                                // M 27, 2 weeks
+    ]), NOW);
+    expect(note).toContain("M 13 is on its way out");
+    expect(note).toContain("about a week left");
+  });
+
+  it("hands back the closing row for a target, or null", () => {
+    expect(closingRowFor("M_27", closing([season()]))?.weeks_left).toBe(2);
+    expect(closingRowFor("M_31", closing([season()]))).toBeNull();
+    expect(closingRowFor("M_27", null)).toBeNull();
   });
 });
 

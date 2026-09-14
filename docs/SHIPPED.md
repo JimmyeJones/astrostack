@@ -1,5 +1,74 @@
 # Shipped — the record
 
+## v0.445.0 — 2026-09-14 — the week plan acknowledges the season that is closing
+
+*(Builder, branch `claude/sweet-babbage-ro3v8y` — 🟡 PRIORITY 3 (friendliness) + 2 (autonomy). Found by
+reading the **Tonight page** as one paragraph, the method the last five runs have found everything by, applied
+to a surface nobody had applied it to. Frontend-only; no endpoint, response-shape, config, schema, on-disk or
+default change.)*
+
+**The two sentences, and why a beginner cannot hold both.** `ClosingSeasonCard` and `PlanWeekCard` are
+adjacent on `/tonight`, in that order, and both are true. The upper one says
+
+> *"M 27 is on its way out of your sky — about 2 weeks left."*
+> *"Once a target sets during your dark hours it's gone until the same season next year. **A clear night spent
+> on one of these buys something the rest of the year can't.**"*
+
+and the lower one, an inch below, answers *"which night should I go out, and what at?"* with
+
+> *"Your best night is Saturday — M 31, 4.1 h above 30°."*
+
+`plan_week`'s ranking is **pure observability** — `seestack/nightplan.py::plan_week` scores altitude and Moon
+and nothing else, and has no idea a season is ending. So on any week where the best-*placed* target is not the
+one that is *leaving*, the page hands the reader two prescriptions and withholds the one fact that would let
+them choose: that one of those nights does not come round again. Nobody is told to point two ways; the reader
+is simply left to do the cross-reference, and the argument the card above just made is dropped by the card
+that turns it into a night.
+
+**And the follow-up line silently dropped the very target it was about.** `otherTargetNights` takes the first
+**4** of `plan.targets`, which is ordered by **date**, out of up to `WEEK_MAX_TARGETS = 40`. A closing target's
+best night is typically later in the week — it is the one setting earliest, so it clears the altitude floor for
+long enough only on the nights furthest out — which is exactly the row a head-slice cuts. So the one line on
+the card that could have named it was the line most likely not to.
+
+**The fix says the thing, and changes no ranking.** Three additive pieces in `frontend/src/planweek.ts`:
+
+- `closingWeekNote(plan, closing, now)` — one sentence under the headline: *"M 27 is on its way out of your
+  sky — about 2 weeks left. Its best night this week is Tuesday — and unlike the others here, that one doesn't
+  come round again."* It is a **correction to the headline**, so it sits directly under it rather than becoming
+  a fifth card on the page the owner already calls busy (the standing "prefer a consolidation" rule).
+- `otherTargetNights(plan, limit, closing)` — a leaving target keeps its place in the follow-up line even when
+  the cap would have cut it, the list stays the **same length**, and the rows around it keep `plan.targets`'
+  own soonest-first order. Promoting a row must not reorder its neighbours.
+- `targetNightPhrase(t, now, season)` — *"M 27 — Tuesday (about 2 weeks left)"*, the countdown borrowed from
+  `closingSeason.weeksLeftPhrase` rather than worded a second time, so the two cards cannot come to two
+  opinions about how long is left. Bracketed, because rows are joined with `" · "` and a `" · "` suffix would
+  have made one row read as two.
+
+**Deliberately NOT done: teaching `plan_week` to score a closing season.** That is a blind weighting change on
+the planner's on-by-default hot path, and the honest weight ("how much is a night that doesn't repeat worth
+against 40 minutes more altitude?") is a judgement no measurement in this repo settles. The reader is given the
+fact and keeps the decision, which is also what the card above already assumes.
+
+**Silent in every case where there is nothing to reconcile**, which is most weeks: no closing plan at all (an
+older backend 404s `/api/plan/closing`, and nothing leaving is the ordinary answer), nothing leaving that is
+also placed this week, and — the case worth naming — the headline **already** prescribing the leaving target,
+where the two cards agree and a third sentence would be noise.
+
+**One request, not two.** The card asks with the identical query key, altitude floor and options
+`ClosingSeasonCard` uses (`["plan-closing", minAlt ?? null]`, `staleTime` 900 s, `retry: false`), so React Query
+serves both from one fetch — and, more to the point, the two cards can never be answered by two different
+snapshots of the same question.
+
+**Upgrade-safe (§9):** frontend-only, additive, self-hiding. An older backend's 404 leaves the card byte-for-byte
+what it was, pinned by a test.
+
+**Tests: +11 (8 `planweek.test.ts`, 3 `PlanWeekCard.test.tsx`), 9 of them red before** under a
+`git stash push` of the two source files — including both rendered ones. The unchanged-behaviour guard
+("says nothing extra on an ordinary week, or to an older backend") passes either way on purpose: it exists to
+pin that nothing moved, not to exhibit the bug.
+
+
 ## v0.444.4 — 2026-09-14 — a dogfood pass finally reads the Dashboard's notice board as one paragraph
 
 *(Builder, branch `claude/sweet-babbage-wrud4o` — 🔧 INFRA (the finder, not the app), filed and built in the

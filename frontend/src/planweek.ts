@@ -4,7 +4,10 @@
 // Kept out of the component so the claims it makes ("Thursday is your best M 31
 // night") are testable without a DOM, exactly as `tonight.ts` is.
 
-import type { PlanWeek, TargetBestNight, WeekNight } from "./api/client";
+import type {
+  ClosingTarget, PlanWeek, SeasonClosing, TargetBestNight, WeekNight,
+} from "./api/client";
+import { weeksLeftPhrase } from "./closingSeason";
 import { formatMinutes } from "./tonight";
 
 // A night's own local date, as the backend labels it: the calendar date of the
@@ -112,19 +115,95 @@ export function weekEmptyReason(plan: PlanWeek): string | null {
  * forty-target library doesn't become a wall.
  */
 export function otherTargetNights(
-  plan: PlanWeek, limit = 4,
+  plan: PlanWeek, limit = 4, closing?: SeasonClosing | null,
 ): TargetBestNight[] {
   const headline = bestNightOfWeek(plan.nights);
   const named = headline?.best?.safe;
   const namedDate = headline?.date;
-  return plan.targets
-    .filter((t) => !(t.safe === named && t.date === namedDate))
-    .slice(0, limit);
+  const rows = plan.targets
+    .filter((t) => !(t.safe === named && t.date === namedDate));
+  const leaving = closingSafeNames(closing);
+  if (leaving.size === 0) return rows.slice(0, limit);
+  // A target whose season is ending keeps its place in this list even when the
+  // cap would have cut it: the card above has just said a clear night on it buys
+  // something the rest of the year can't, and `plan.targets` is ordered by date,
+  // so the one row that cannot wait is exactly the one a later-in-the-week night
+  // pushes over the edge. Filling around it keeps the list the same length.
+  const kept = rows.filter((t) => leaving.has(t.safe)).slice(0, limit);
+  const room = limit - kept.length;
+  const fill = room > 0
+    ? rows.filter((t) => !leaving.has(t.safe)).slice(0, room)
+    : [];
+  const chosen = new Set([...kept, ...fill]);
+  // Re-read in `plan.targets`' own order so the line still runs soonest-first;
+  // promoting a row must not reorder the ones around it.
+  return rows.filter((t) => chosen.has(t));
 }
 
-/** "M 31 — Thursday" for one of those rows. */
-export function targetNightPhrase(t: TargetBestNight, now: Date): string {
-  return `${t.name} — ${weekNightLabel(t.date, now)}`;
+/** The `safe` names the season-closing plan is naming, or an empty set. */
+function closingSafeNames(closing: SeasonClosing | null | undefined): Set<string> {
+  return new Set((closing?.targets ?? []).map((t) => t.safe));
+}
+
+/**
+ * The closing-season row for a target, when the plan names it — so a caller can
+ * say *why* a row matters without re-deriving the season arithmetic.
+ */
+export function closingRowFor(
+  safe: string, closing: SeasonClosing | null | undefined,
+): ClosingTarget | null {
+  return (closing?.targets ?? []).find((t) => t.safe === safe) ?? null;
+}
+
+/** "M 31 — Thursday", and "M 27 — Tuesday (about 2 weeks left)" for a target
+ *  whose season is ending.
+ *
+ * The suffix borrows `weeksLeftPhrase` rather than wording a second countdown,
+ * so this line and the "Shoot these before they're gone" card above it cannot
+ * come to two different opinions about how long is left. Bracketed rather than
+ * separated by the " · " the caller joins rows with, which would have made one
+ * row read as two.
+ */
+export function targetNightPhrase(
+  t: TargetBestNight, now: Date, season?: ClosingTarget | null,
+): string {
+  const base = `${t.name} — ${weekNightLabel(t.date, now)}`;
+  return season ? `${base} (${weeksLeftPhrase(season.weeks_left)})` : base;
+}
+
+/**
+ * The one sentence that stops this card and "Shoot these before they're gone"
+ * prescribing different nights without acknowledging each other — or `null`
+ * when there is nothing to reconcile.
+ *
+ * The two cards sit adjacent on the Tonight page and are both true. The card
+ * above argues that *"a clear night spent on one of these buys something the
+ * rest of the year can't"*; this one answers "which night should I go out?" with
+ * `plan_week`'s score, which is pure observability (altitude and Moon) and knows
+ * nothing about a season ending. So on any week where the best-placed target is
+ * not the one that is leaving, the reader is handed two prescriptions and the
+ * fact that would let them choose — that one of those nights does not come round
+ * again — is stated on neither card.
+ *
+ * Silent in all three cases where there is no tension: no closing plan (an older
+ * backend, or nothing leaving — which is most of the year), nothing leaving that
+ * is also placed this week, and the headline already naming the leaving target.
+ */
+export function closingWeekNote(
+  plan: PlanWeek, closing: SeasonClosing | null | undefined, now: Date,
+): string | null {
+  const rows = closing?.targets ?? [];
+  if (rows.length === 0) return null;
+  const headlineSafe = bestNightOfWeek(plan.nights)?.best?.safe;
+  for (const season of rows) {       // soonest to leave first, as served
+    if (season.safe === headlineSafe) return null;   // the cards already agree
+    const night = plan.targets.find((t) => t.safe === season.safe);
+    if (!night) continue;
+    return `${season.name} is on its way out of your sky — ${weeksLeftPhrase(season.weeks_left)}.`
+      + ` Its best night this week is ${weekNightLabelInline(night.date, now)}`
+      + " — and unlike the others here, that one doesn't come round again.";
+  }
+  return null;
 }
 
 /**
