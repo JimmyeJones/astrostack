@@ -255,6 +255,33 @@ const PRESCRIPTIVE = [
   "over-trimmed-target-note", "rejection-outlook-note", "framing-verdict",
 ];
 
+/** The same question, on `/tonight` — the other page that *prescribes*.
+ *
+ *  The Target page tells the owner what to do with a picture he already has;
+ *  this one tells him where to point tonight, and it does so from **four
+ *  independent self-hiding cards** stacked in a column, each of which names a
+ *  target and none of which knows what the others said. That is the shape every
+ *  finding of the last six runs has had, and until v0.445.0 nobody had read this
+ *  column as one paragraph: `ClosingSeasonCard` argued "a clear night spent on
+ *  one of these buys something the rest of the year can't" while `PlanWeekCard`,
+ *  an inch below, answered "which night should I go out?" from a score that has
+ *  never heard of a season ending.
+ *
+ *  Listed by test id rather than walked structurally, unlike `noticeBoardClaims`:
+ *  these are siblings in a plain `<Stack>` alongside the page's own header, the
+ *  two big tables and the three summary cards, so there is no container whose
+ *  children *are* the claims. Every one of them carries a test id today; a new
+ *  card that does not will be missed, which is the cost of the page not having a
+ *  board. It is also why this list, unlike `PRESCRIPTIVE`, is worth re-reading
+ *  against `routes/Tonight.tsx` when a card is added.
+ *
+ *  Note `/tonight` is empty of all four without an observing site — which every
+ *  pass before v0.436.1 was. A normal pass now sets one. */
+const TONIGHT_PRESCRIPTIVE = [
+  "wishlist-tonight-card", "nearly-there-card", "closing-season",
+  "plan-week", "plan-week-closing", "worth-more-time",
+];
+
 function prescriptiveClaims(ids) {
   // `innerText` is what a reader gets — but it is empty on a `display: none`
   // note, which is precisely the folded case worth reporting. So fall back to
@@ -347,6 +374,8 @@ const heights = [];
 let claims = [];
 /** What the Dashboard's notice board says, same treatment, collected on `/`. */
 let notices = [];
+/** What the Tonight page's four prescribing cards say, collected on `/tonight`. */
+let tonight = [];
 for (const { name, width, height } of WIDTHS) {
   const ctx = await browser.newContext({ viewport: { width, height } });
   const page = await ctx.newPage();
@@ -454,6 +483,11 @@ for (const { name, width, height } of WIDTHS) {
     if (route === "/" && name === "desktop") {
       notices = await page.evaluate(noticeBoardClaims, "dashboard-notes");
     }
+    // Same treatment, same width, same reason: these cards self-hide on data,
+    // not on how wide the window is.
+    if (route === "/tonight" && name === "desktop") {
+      tonight = await page.evaluate(prescriptiveClaims, TONIGHT_PRESCRIPTIVE);
+    }
   }
   await ctx.close();
 }
@@ -495,6 +529,26 @@ if (notices.length) {
   console.log(
     "\nthe Dashboard's notice board is silent (a healthy install — seed a fault"
     + " with --incoming-lag to read it)");
+}
+
+if (tonight.length) {
+  console.log(
+    "\nwhat the TONIGHT page SAYS — the other page that PRESCRIBES, and the one"
+    + "\nwhere four self-hiding cards each name a target without knowing what the"
+    + "\nothers named. Read them as ONE paragraph and ask: do they point at the"
+    + "\nsame night and the same target, and if not, does the page say which wins?"
+    + "\n(v0.445.0 was exactly that — 'shoot these before they're gone' against a"
+    + "\nweek plan scored on altitude alone):");
+  for (const c of tonight) {
+    const where = c.folded ? "hidden" : "inline";
+    console.log(`   [${c.id}, ${where}] ${c.text}`);
+  }
+} else {
+  // Not a clean bill of health: without an observing site these cards cannot
+  // speak at all, and that was every pass before v0.436.1.
+  console.log(
+    "\nthe Tonight page prescribes nothing (no observing site, or nothing of"
+    + " yours is well placed — check the location_source line above)");
 }
 
 // Tallest first, so the worst offender is the first line you read.

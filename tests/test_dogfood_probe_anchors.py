@@ -84,3 +84,69 @@ def test_the_browser_only_cards_stay_on_the_list() -> None:
         "these cards are computed in the frontend, so the browser probe is the "
         f"only thing that can print them: {sorted(BROWSER_ONLY - ids)}"
     )
+
+
+# --- the Tonight page's prescribing column ----------------------------------
+#
+# `/tonight` is the *other* page that tells the owner what to do, and it does it
+# from four independent self-hiding cards in one column, none of which knows what
+# the others said — which is the shape every finding of the last six runs has
+# had. The list has the same string-rot problem as `PRESCRIPTIVE` above, plus one
+# of its own: these cards are siblings in a plain `<Stack>` rather than children
+# of a `NoticeBoard`, so the probe cannot walk them structurally the way
+# `noticeBoardClaims` walks the Dashboard's. A name is all there is.
+
+#: The cards whose *whole purpose* is to name a target for tonight. Losing one of
+#: these from the list would take the paragraph back to the half that never
+#: disagreed, which is the drift v0.445.0 was found in the gap between.
+TONIGHT_PRESCRIBERS = {"closing-season", "plan-week"}
+
+
+def _tonight_ids() -> list[str]:
+    """The ids in the probe's ``TONIGHT_PRESCRIPTIVE`` array.
+
+    Fails loudly when the declaration can't be found, for the same reason
+    :func:`_prescriptive_ids` does.
+    """
+    src = PROBE.read_text(encoding="utf-8")
+    m = re.search(r"^const TONIGHT_PRESCRIPTIVE = \[(.*?)\];", src, re.S | re.M)
+    assert m, (
+        "could not find `const TONIGHT_PRESCRIPTIVE = [...]` in dogfood_probe.mjs"
+    )
+    ids = re.findall(r'"([a-z0-9-]+)"', m.group(1))
+    assert ids, "TONIGHT_PRESCRIPTIVE is empty — the probe would print nothing"
+    return ids
+
+
+def test_every_tonight_id_the_probe_reads_is_rendered_by_a_real_card() -> None:
+    rendered = _rendered_testids()
+    missing = [i for i in _tonight_ids() if i not in rendered]
+    assert not missing, (
+        "dogfood_probe.mjs collects Tonight data-testid(s) nothing renders: "
+        f"{missing}. The pass still reports CLEAN and simply prints a shorter "
+        "paragraph, which is the failure this guard exists for."
+    )
+
+
+def test_the_cards_that_name_a_target_for_tonight_stay_on_the_list() -> None:
+    ids = set(_tonight_ids())
+    assert TONIGHT_PRESCRIBERS <= ids, (
+        "these are the cards that prescribe a target for tonight; reading the "
+        "column without them is reading it without the disagreement: "
+        f"{sorted(TONIGHT_PRESCRIBERS - ids)}"
+    )
+
+
+def test_the_probe_actually_reads_the_tonight_route() -> None:
+    """A list nothing calls is decoration. The probe must collect it on
+    ``/tonight`` and print it, or the ids above are guarded for nothing."""
+    src = PROBE.read_text(encoding="utf-8")
+    assert 'route === "/tonight"' in src, (
+        "TONIGHT_PRESCRIPTIVE is never collected — no route reads it"
+    )
+    assert "prescriptiveClaims, TONIGHT_PRESCRIPTIVE" in src, (
+        "the Tonight ids are not passed to the extractor that reads them"
+    )
+    assert "what the TONIGHT page SAYS" in src, (
+        "nothing prints the paragraph, so a run would never see it"
+    )

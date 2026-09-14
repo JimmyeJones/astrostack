@@ -1,5 +1,46 @@
 # Shipped — the record
 
+## v0.445.1 — 2026-09-14 — a dogfood pass reads the Tonight page as one paragraph
+
+*(Builder, branch `claude/sweet-babbage-ro3v8y` — 🔧 INFRA (the finder, not the app), filed and built in the
+same run as v0.445.0 because that fix is the evidence for it. Scripts, tests and AGENTS.md only: no app code,
+no test id added to a shipped component, nothing in the Docker image's file set.)*
+
+**The hole.** `dogfood_probe.mjs` prints *"what the Target page SAYS"* (v0.437.8) and *"what the Dashboard's
+notice board SAYS"* (v0.444.4). Those are the screen that tells the owner what to do with a picture he has,
+and the screen he opens first. **`/tonight` is the other page that prescribes** — it tells him where to point
+— and nothing had ever printed it. It is also the page most exposed to the failure the printing exists for:
+four *independent, self-hiding* cards stacked in one column (`WishlistTonightCard`, `NearlyThereCard`,
+`ClosingSeasonCard`, `PlanWeekCard`), each of which names a target for tonight, and **none of which knows what
+the others said**. v0.445.0, shipped in this run, is exactly that gap — and it had to be found by reading
+`routes/Tonight.tsx` and two card sources in an editor, because no tool in this repo could show the column
+together.
+
+**What it prints.** `TONIGHT_PRESCRIPTIVE` through the existing `prescriptiveClaims` extractor, collected on
+`/tonight` at the desktop width (the cards self-hide on *data*, not on window width, so the phone pass would
+say the same sentences twice), with the question spelled out under it: *do these point at the same night and
+the same target, and if not, does the page say which wins?*
+
+**By test id, not structurally — and the difference is recorded rather than glossed.** `noticeBoardClaims`
+walks the Dashboard's board because `NoticeBoard`'s children **are** its notes. Tonight has no board: these
+cards are siblings in a plain `<Stack>` next to the page header, two big tables and three summary cards, so
+there is nothing whose children are the claims. A name is all there is, and a name rots silently.
+
+**So it is guarded.** `tests/test_dogfood_probe_anchors.py` gains the same three-way guard the
+`PRESCRIPTIVE` list has, **all three red before** under a scratch revert of the probe: every Tonight id is
+rendered by some non-test source file; the two cards that actually *prescribe a target for tonight*
+(`closing-season`, `plan-week`) cannot be dropped from the list, because reading the column without them is
+reading it without the disagreement; and the probe must genuinely collect **and print** it, since a list
+nothing calls is decoration.
+
+**Silence is reported as silence, not as CLEAN.** With no observing site — which is what every pass before
+v0.436.1 had — all four cards are empty, so the block says the page prescribes nothing *and names the reason*
+rather than printing an approving blank. The missing-site / click-only-Compare / empty-`incoming/` lesson, a
+fourth time.
+
+AGENTS.md §7 gains the paragraph, beside the Target-page and notice-board ones.
+
+
 ## v0.445.0 — 2026-09-14 — the week plan acknowledges the season that is closing
 
 *(Builder, branch `claude/sweet-babbage-ro3v8y` — 🟡 PRIORITY 3 (friendliness) + 2 (autonomy). Found by
