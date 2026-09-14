@@ -1,5 +1,32 @@
 # Shipped — the record
 
+## v0.444.1 — 2026-09-14 — the suite's lowest job-wait budget, on its heaviest job
+
+*(Builder, branch `claude/sweet-babbage-t0x3rf` — 🔧 INFRA (test reliability). `main` was **red** at the start
+of this run, on `test_export_print_is_fitted_to_the_paper_and_carries_its_dpi`, which AGENTS.md §2 makes the
+run's first task.)*
+
+**Not a product bug, and established as such before anything was touched.** The failure was
+`AssertionError: job did not finish in time` from `_wait_job` — the wait, not any assertion about the file the
+test is checking. Measured on this 4-core box: the same test passes in **6.3 s** alone and **11.1 s** under
+six busy CPUs. It timed out under the suite's own `-n 4` (AGENTS.md §7), where the other three workers are
+stacking; nothing in the v0.443.0/v0.444.0 diff that landed before it touches `webapp/jobs.py` or the export
+path.
+
+**What was actually wrong is a number, and it was the outlier.** `tests/webapp` carries fourteen hand-rolled
+`_wait_job` helpers with budgets from 60 to 180 seconds. `test_editor.py`'s was **30.0** — the lowest of the
+fourteen — while the jobs it waits on are the heaviest of the lot: the editor's *print* export renders the
+picture onto a whole sheet of paper (A3 at 300 dpi is ~3500×4960 px, from a 3000×2000 master). Raised to the
+**120.0** the two sibling *export* modules already use
+(`test_editor_export_carries_the_light.py`, `test_pictures_archive.py`), with the measurement written down
+beside it so it is not tidied back down.
+
+**Not a weakened test (§10).** Every claim the module makes is checked *after* the wait returns, and all 21
+call sites are unchanged; a job that genuinely never finishes still fails here, four times later. The budget
+is a liveness bound on a test helper, not an assertion about the app. Tests: none added — the fix is to a test
+helper, and the 21 tests that go through it are the coverage.
+
+
 ## v0.444.0 — 2026-09-14 — the batch that held the worker for eleven days now stands aside for an import
 
 *(Builder, branch `claude/sweet-babbage-kjaxp8` — 🟠 PRIORITY 2 (autonomy / data-integrity), the LEAD at the
