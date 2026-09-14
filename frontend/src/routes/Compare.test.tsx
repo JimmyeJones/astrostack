@@ -409,6 +409,70 @@ describe("CompareView", () => {
     expect(screen.getByTestId("ab-side-B")).toHaveTextContent("690 frames");
   });
 
+  // The strip exists so Split and Blink are "as trustworthy as Side by side"
+  // about which stack is which — and the one fact that most often decides that
+  // is depth. It printed a raw count where the side-by-side card has run the
+  // same number through `FrameCountBadge` (and so through `field_fulls`) since
+  // v0.437.7, so on a mosaic the loudest answer this page has disappeared the
+  // moment you switched comparison mode.
+  it("flags the thin side in Split mode, exactly as Side by side does", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    a.n_frames_used = 9;
+    a.field_fulls = 9; // a 3x3 raster: nine subs is one sub everywhere
+    b.n_frames_used = 690;
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Split")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Split"));
+    const sideA = await screen.findByTestId("ab-side-A");
+    // Nothing removed: both counts still read as they always did.
+    expect(sideA).toHaveTextContent("9 frames");
+    expect(screen.getByTestId("ab-side-B")).toHaveTextContent("690 frames");
+    // …and exactly the thin one carries the cue, on the strip rather than
+    // somewhere else on the page.
+    expect(sideA.querySelectorAll(".tabler-icon-alert-triangle")).toHaveLength(1);
+    expect(
+      screen.getByTestId("ab-side-B").querySelector(".tabler-icon-alert-triangle"),
+    ).toBeNull();
+  });
+
+  it("flags the thin side in Blink mode too", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    a.n_frames_used = 9;
+    a.field_fulls = 9;
+    b.n_frames_used = 690;
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Blink")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Blink"));
+    const sideA = await screen.findByTestId("ab-side-A");
+    expect(sideA.querySelectorAll(".tabler-icon-alert-triangle")).toHaveLength(1);
+    expect(
+      screen.getByTestId("ab-side-B").querySelector(".tabler-icon-alert-triangle"),
+    ).toBeNull();
+  });
+
+  // Two healthy single fields are byte-for-byte what they were: the strip keeps
+  // its integration, date and noise clauses beside the count, with no cue.
+  it("keeps the rest of the strip's provenance beside the count", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    a.n_frames_used = 412;
+    a.total_exposure_s = 3600;
+    b.n_frames_used = 690;
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Split")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Split"));
+    const sideA = await screen.findByTestId("ab-side-A");
+    expect(sideA).toHaveTextContent("412 frames");
+    expect(sideA).toHaveTextContent("1.0 h");
+    expect(sideA).toHaveTextContent(/Stacked /);
+    expect(sideA.querySelector(".tabler-icon-alert-triangle")).toBeNull();
+  });
+
   it("Split falls back with guidance when a stack has no preview", async () => {
     const a = item(3, "M_42", "Orion");
     const b = item(7, "M_42", "OrionV2");

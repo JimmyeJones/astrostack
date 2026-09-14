@@ -239,12 +239,35 @@ function AbSide({ label, color, item }: { label: string; color: string; item: Ga
         </Text>
       </Group>
       <Text size="xs" c="dimmed" truncate>{item.output_basename}</Text>
-      <Text size="xs" c="dimmed" truncate>
-        {item.n_frames_used} frames
-        {item.total_exposure_s ? ` · ${formatIntegration(item.total_exposure_s)}` : ""}
-        {date ? ` · ${date}` : ""}
-        {hasNoise(item.noise_sigma) ? <> · <NoiseReadout sigma={item.noise_sigma} /></> : null}
-      </Text>
+      {/* The frame count goes through the *same* `FrameCountBadge` the "Side by
+          side" cards use, rather than being re-spelled as text. This strip's
+          whole claim is that Split and Blink are "as trustworthy as Side by
+          side" about which stack is which — and until now the one fact that
+          most often decides that question was the one they told differently:
+          the badge scales the count by the run's `field_fulls` and turns
+          warning-coloured when each part of the picture is only a sub or two
+          deep, while this line printed the raw total. On a mosaic those are
+          different numbers (nine subs over a 3×3 is one sub everywhere), so
+          switching comparison mode silently dropped the loudest answer this
+          page has. Kept on the same row — the badge takes its own width and the
+          rest of the provenance truncates beside it — so no row is added to a
+          compact strip. */}
+      <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+        <div style={{ flexShrink: 0 }}>
+          <FrameCountBadge
+            nFramesUsed={item.n_frames_used}
+            fieldFulls={item.field_fulls}
+          />
+        </div>
+        <Text size="xs" c="dimmed" truncate>
+          {item.total_exposure_s ? formatIntegration(item.total_exposure_s) : ""}
+          {item.total_exposure_s && date ? " · " : ""}
+          {date}
+          {hasNoise(item.noise_sigma)
+            ? <>{item.total_exposure_s || date ? " · " : ""}<NoiseReadout sigma={item.noise_sigma} /></>
+            : null}
+        </Text>
+      </Group>
     </Stack>
   );
 }
