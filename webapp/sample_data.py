@@ -55,9 +55,25 @@ SAMPLE_TARGET_NAME = "Sample: Orion Nebula (M42)"
 # overlap band) through twenty sweeps and three audits.
 SAMPLE_MOSAIC_TARGET_NAME = "Sample: M42 mosaic (2×2)"
 
+# The third, opt-in demo: the same 2×2 mosaic shot with **full-size panels**, so
+# its union canvas is larger than the editor's proxy cap and the live preview is
+# finally a *decimated* one.
+#
+# Why it exists: ``seestack/edit/proxy.py`` strides above ``PROXY_MAX_PX`` (1500),
+# and both demos above are far below it — the field sample is 480 px wide and the
+# mosaic's union canvas ~907 px — so ``get_proxy`` returns ``proxy_scale == 1.0``
+# on each. Everything the editor gates on a decimated proxy is therefore
+# structurally unreachable by any pass over them: the five preview↔export
+# advisories (sharpen/deconvolution/denoise/hot-pixels/star-reduction), the
+# preview-scale caption, and the whole of "Check it at full size" — its button,
+# its modal, its navigator and its split comparison. The owner's own mosaics are
+# ~3494×2470 and up, i.e. that is his everyday state, and it was the tooling's
+# permanent blind spot.
+SAMPLE_BIG_TARGET_NAME = "Sample: M42 mosaic (2×2, full size)"
+
 #: Which demo to load / ask about. ``"field"`` is the default everywhere, so an
 #: existing caller (and the Dashboard button) is unchanged.
-SampleShape = Literal["field", "mosaic"]
+SampleShape = Literal["field", "mosaic", "big"]
 
 # Subfolder (inside the target dir) that holds the generated source subs, so a
 # ``remove_files=True`` delete of the target sweeps them away too.
@@ -123,6 +139,7 @@ def _render_star_field(
     origin: tuple[int, int] = (0, 0),
     signal_scale: float = 1.0,
     sky_scale: float = 1.0,
+    frame: tuple[int, int] | None = None,
 ) -> np.ndarray:
     """Render one sub: the window of ``stars`` this frame points at, uint16.
 
@@ -132,10 +149,15 @@ def _render_star_field(
     hazy night does — multiplicative on the signal, additive on the sky, which is
     the one thing per-frame photometric normalisation cannot fix from inside a
     single panel.
+
+    ``frame`` is the sensor size in pixels, defaulting to the two demos' shared
+    small one. The full-size mosaic passes its own, and the default keeps every
+    frame the other two write bit-identical.
     """
+    width, height = frame if frame is not None else (_WIDTH, _HEIGHT)
     rng_noise = np.random.default_rng(noise_seed)
     img = rng_noise.normal(
-        loc=1000.0 * sky_scale, scale=50.0, size=(_HEIGHT, _WIDTH)
+        loc=1000.0 * sky_scale, scale=50.0, size=(height, width)
     ).astype(np.float32)
 
     box, half = _STAR_BOX, _STAR_BOX // 2
@@ -151,7 +173,7 @@ def _render_star_field(
         # A panel's edge cuts stars in half — clip the paste rather than dropping
         # them, or every panel border would be a suspiciously star-free strip.
         xa, ya = max(0, x0), max(0, y0)
-        xb, yb = min(_WIDTH, x0 + box), min(_HEIGHT, y0 + box)
+        xb, yb = min(width, x0 + box), min(height, y0 + box)
         if xb <= xa or yb <= ya:
             continue
         img[ya:yb, xa:xb] += kernel[ya - y0 : yb - y0, xa - x0 : xb - x0]
@@ -198,6 +220,7 @@ def _frame_wcs(
     *,
     origin: tuple[int, int] = (0, 0),
     window: tuple[int, int] | None = None,
+    frame: tuple[int, int] | None = None,
 ):
     """The true WCS for a frame dithered by ``star_shift`` on the sensor.
 
@@ -215,7 +238,8 @@ def _frame_wcs(
 
     dx, dy = star_shift
     ox, oy = origin
-    win_w, win_h = window if window is not None else (_WIDTH, _HEIGHT)
+    frame_w, frame_h = frame if frame is not None else (_WIDTH, _HEIGHT)
+    win_w, win_h = window if window is not None else (frame_w, frame_h)
     w = WCS(naxis=2)
     w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
     w.wcs.crval = [_RA_CENTER_DEG, _DEC_CENTER_DEG]
@@ -229,9 +253,13 @@ def _wcs_header_text(
     *,
     origin: tuple[int, int] = (0, 0),
     window: tuple[int, int] | None = None,
+    frame: tuple[int, int] | None = None,
 ) -> str:
     """:func:`_frame_wcs` as the header text the project DB stores."""
-    return str(_frame_wcs(star_shift, origin=origin, window=window).to_header(relax=True))
+    return str(
+        _frame_wcs(star_shift, origin=origin, window=window, frame=frame)
+        .to_header(relax=True)
+    )
 
 
 def _frame_center_deg(
@@ -239,6 +267,7 @@ def _frame_center_deg(
     *,
     origin: tuple[int, int] = (0, 0),
     window: tuple[int, int] | None = None,
+    frame: tuple[int, int] | None = None,
 ) -> tuple[float, float]:
     """Where *this frame's* centre points, in RA/Dec degrees.
 
@@ -248,8 +277,9 @@ def _frame_center_deg(
     whose subs all recorded the mosaic's centre would cluster as one pointing and
     exercise none of it.
     """
-    w = _frame_wcs(star_shift, origin=origin, window=window)
-    ra, dec = w.wcs_pix2world([[(_WIDTH - 1) / 2, (_HEIGHT - 1) / 2]], 0)[0]
+    frame_w, frame_h = frame if frame is not None else (_WIDTH, _HEIGHT)
+    w = _frame_wcs(star_shift, origin=origin, window=window, frame=frame)
+    ra, dec = w.wcs_pix2world([[(frame_w - 1) / 2, (frame_h - 1) / 2]], 0)[0]
     return float(ra), float(dec)
 
 
@@ -285,6 +315,80 @@ _MOSAIC_NIGHTS = ("2024-11-15", "2024-11-15", "2024-11-15", "2024-11-16")
 _MOSAIC_N_STARS = 200
 _MOSAIC_SUBDIR = "sample_mosaic_subs"
 
+# The full-size mosaic's own sensor. Everything else about it — the 2×2 grid, the
+# 82 % step, the uneven depth, the hazy panel, the two nights — is the small
+# mosaic's exactly, so the two differ in *scale alone* and a finding on one is a
+# question about the other.
+#
+# 900×600 is chosen as the **smallest** panel that puts the union canvas past the
+# editor's 1500 px proxy cap (it lands at 1686×1144, i.e. ``proxy_scale`` 2 — the
+# gentlest decimation there is, and the one a run this size actually gets). Going
+# bigger costs stacking time quadratically for no new *kind* of coverage: at
+# scale 2 every proxy-gated surface is already speaking.
+_BIG_FRAME_W = 900
+_BIG_FRAME_H = 600
+# Stars per sky window rather than per frame, matching the small mosaic's on-sky
+# density (~3.6e-4 stars/px) over a window ~3.5× the area.
+_BIG_N_STARS = 700
+_BIG_SUBDIR = "sample_big_subs"
+
+
+@dataclass(frozen=True)
+class _MosaicSample:
+    """One mosaic demo: its reserved name, its sensor, and where its subs live.
+
+    The two instances below differ **only** in scale — same grid, same step, same
+    uneven depth, same hazy panel — so the full-size one is the small one's own
+    picture shot with a bigger sensor, not a second fixture with its own habits.
+    """
+
+    shape: SampleShape
+    name: str
+    subdir: str
+    frame_w: int
+    frame_h: int
+    n_stars: int
+    noise_base: int
+    object_name: str
+    notes: str
+
+    @property
+    def frame(self) -> tuple[int, int]:
+        return (self.frame_w, self.frame_h)
+
+
+_MOSAIC_SMALL = _MosaicSample(
+    shape="mosaic",
+    name=SAMPLE_MOSAIC_TARGET_NAME,
+    subdir=_MOSAIC_SUBDIR,
+    frame_w=_WIDTH,
+    frame_h=_HEIGHT,
+    n_stars=_MOSAIC_N_STARS,
+    noise_base=500,
+    object_name="M42 mosaic (sample)",
+    notes="A generated demo mosaic — remove it any time from the Dashboard.",
+)
+
+_MOSAIC_BIG = _MosaicSample(
+    shape="big",
+    name=SAMPLE_BIG_TARGET_NAME,
+    subdir=_BIG_SUBDIR,
+    frame_w=_BIG_FRAME_W,
+    frame_h=_BIG_FRAME_H,
+    n_stars=_BIG_N_STARS,
+    # A different noise stream from the small mosaic's, so nothing about the two
+    # is accidentally shared beyond the star catalog's seed.
+    noise_base=900,
+    object_name="M42 mosaic (sample, full size)",
+    notes="A generated full-size demo mosaic — remove it any time from the "
+          "Dashboard.",
+)
+
+_MOSAIC_SAMPLES: dict[str, _MosaicSample] = {
+    _MOSAIC_SMALL.shape: _MOSAIC_SMALL,
+    _MOSAIC_BIG.shape: _MOSAIC_BIG,
+}
+
 
 @dataclass(frozen=True)
 class _MosaicPanel:
@@ -298,20 +402,30 @@ class _MosaicPanel:
     night: str
 
 
-def _mosaic_layout() -> tuple[list[_MosaicPanel], tuple[int, int]]:
-    """The panels and the sky window they tile, in catalog pixel coordinates."""
-    step_x = int(round(_WIDTH * _MOSAIC_STEP_FRAC))
-    step_y = int(round(_HEIGHT * _MOSAIC_STEP_FRAC))
+def _mosaic_layout(cfg: _MosaicSample = _MOSAIC_SMALL,
+                   ) -> tuple[list[_MosaicPanel], tuple[int, int]]:
+    """The panels and the sky window they tile, in catalog pixel coordinates.
+
+    The pointing jitter scales with the sensor, so the union canvas's *ragged*
+    fraction is the same on both mosaics — a bigger sample must be a bigger
+    picture of the same thing, not a tidier one.
+    """
+    step_x = int(round(cfg.frame_w * _MOSAIC_STEP_FRAC))
+    step_y = int(round(cfg.frame_h * _MOSAIC_STEP_FRAC))
+    jitter = [
+        (int(round(jx * cfg.frame_w / _WIDTH)), int(round(jy * cfg.frame_h / _HEIGHT)))
+        for jx, jy in _MOSAIC_JITTER_PX
+    ]
     raw = [
         (col * step_x + jx, row * step_y + jy)
-        for (col, row), (jx, jy) in zip(_MOSAIC_GRID, _MOSAIC_JITTER_PX, strict=True)
+        for (col, row), (jx, jy) in zip(_MOSAIC_GRID, jitter, strict=True)
     ]
     min_x = min(x for x, _ in raw)
     min_y = min(y for _, y in raw)
     origins = [(x - min_x, y - min_y) for x, y in raw]
     window = (
-        max(x for x, _ in origins) + _WIDTH,
-        max(y for _, y in origins) + _HEIGHT,
+        max(x for x, _ in origins) + cfg.frame_w,
+        max(y for _, y in origins) + cfg.frame_h,
     )
     panels = [
         _MosaicPanel(
@@ -335,6 +449,7 @@ def _write_mosaic_fits(
     sub: int,
     noise_seed: int,
     star_shift: tuple[float, float],
+    cfg: _MosaicSample = _MOSAIC_SMALL,
 ) -> None:
     """Write one sub of one mosaic panel (no WCS — injected in the DB)."""
     from astropy.io import fits
@@ -346,6 +461,7 @@ def _write_mosaic_fits(
         origin=panel.origin,
         signal_scale=panel.signal_scale,
         sky_scale=panel.sky_scale,
+        frame=cfg.frame,
     )
     hdu = fits.PrimaryHDU(data=data)
     hdu.header["BAYERPAT"] = "RGGB"
@@ -358,7 +474,7 @@ def _write_mosaic_fits(
     # from the frame rather than trusting the string.
     hdu.header["INSTRUME"] = "Seestar S30"
     hdu.header["FOCALLEN"] = 150.0
-    hdu.header["OBJECT"] = "M42 mosaic (sample)"
+    hdu.header["OBJECT"] = cfg.object_name
     hdu.writeto(path, overwrite=True)
 
 
@@ -373,7 +489,8 @@ def _dither_offsets(n: int) -> list[tuple[float, float]]:
 
 def sample_target_name(shape: SampleShape = "field") -> str:
     """The reserved display name for one demo shape."""
-    return SAMPLE_MOSAIC_TARGET_NAME if shape == "mosaic" else SAMPLE_TARGET_NAME
+    cfg = _MOSAIC_SAMPLES.get(shape)
+    return cfg.name if cfg is not None else SAMPLE_TARGET_NAME
 
 
 def get_sample_status(lib: Library, shape: SampleShape = "field") -> SampleStatus:
@@ -397,11 +514,13 @@ def load_sample(lib: Library, shape: SampleShape = "field") -> SampleStatus:
 
     Idempotent: if the sample already exists it is returned unchanged rather than
     duplicated, so a double-tap is harmless. ``shape="mosaic"`` builds the second,
-    opt-in demo (a separate target) instead; the default is the single field the
-    Dashboard's "Try it" button has always loaded.
+    opt-in demo (a separate target) and ``shape="big"`` the third, full-size one;
+    the default is the single field the Dashboard's "Try it" button has always
+    loaded.
     """
-    if shape == "mosaic":
-        return _load_mosaic_sample(lib)
+    cfg = _MOSAIC_SAMPLES.get(shape)
+    if cfg is not None:
+        return _load_mosaic_sample(lib, cfg)
     existing = get_sample_status(lib)
     if existing.loaded:
         return existing
@@ -458,29 +577,32 @@ def load_sample(lib: Library, shape: SampleShape = "field") -> SampleStatus:
     return SampleStatus(loaded=True, safe=entry.safe_name, n_frames=n_frames)
 
 
-def _load_mosaic_sample(lib: Library) -> SampleStatus:
-    """Build the 2×2 mosaic demo: four overlapping panels of one shared sky.
+def _load_mosaic_sample(lib: Library, cfg: _MosaicSample = _MOSAIC_SMALL) -> SampleStatus:
+    """Build one 2×2 mosaic demo: four overlapping panels of one shared sky.
 
     Same machinery as the single field — generate → ingest → QC → inject the true
     WCS — with three differences that are the whole point of it: the panels are
     windows onto **one** star catalog (so an overlap really holds the same
     stars), their depth is uneven, and one of them was shot through haze.
+
+    ``cfg`` picks the sensor: the small mosaic, or the full-size one whose union
+    canvas is past the editor's proxy cap.
     """
-    existing = get_sample_status(lib, shape="mosaic")
+    existing = get_sample_status(lib, shape=cfg.shape)
     if existing.loaded:
         return existing
 
-    panels, window = _mosaic_layout()
+    panels, window = _mosaic_layout(cfg)
     stars = _star_catalog(
-        seed=42, width=window[0], height=window[1], n_stars=_MOSAIC_N_STARS,
+        seed=42, width=window[0], height=window[1], n_stars=cfg.n_stars,
     )
 
     entry, proj = lib.create_target(
-        SAMPLE_MOSAIC_TARGET_NAME, ra_deg=_RA_CENTER_DEG, dec_deg=_DEC_CENTER_DEG,
-        notes="A generated demo mosaic — remove it any time from the Dashboard.",
+        cfg.name, ra_deg=_RA_CENTER_DEG, dec_deg=_DEC_CENTER_DEG,
+        notes=cfg.notes,
     )
     try:
-        sample_dir = lib.target_dir(entry) / _MOSAIC_SUBDIR
+        sample_dir = lib.target_dir(entry) / cfg.subdir
         sample_dir.mkdir(parents=True, exist_ok=True)
         # Filenames sort panel-major, so the ingested frames pair back up with
         # this list by sorted source path — the same pairing the field sample uses.
@@ -490,7 +612,8 @@ def _load_mosaic_sample(lib: Library) -> SampleStatus:
                 path = sample_dir / f"sample_p{panel.index}_{sub:03d}.fit"
                 _write_mosaic_fits(
                     path, stars=stars, panel=panel, sub=sub,
-                    noise_seed=500 + panel.index * 20 + sub, star_shift=shift,
+                    noise_seed=cfg.noise_base + panel.index * 20 + sub,
+                    star_shift=shift, cfg=cfg,
                 )
                 plan.append((panel, shift))
 
@@ -507,15 +630,17 @@ def _load_mosaic_sample(lib: Library) -> SampleStatus:
         for frame, (panel, shift) in zip(frames, plan, strict=False):
             if frame.id is None:
                 continue
-            ra, dec = _frame_center_deg(shift, origin=panel.origin, window=window)
+            ra, dec = _frame_center_deg(
+                shift, origin=panel.origin, window=window, frame=cfg.frame)
             proj.update_frame(
                 frame.id,
-                wcs_json=_wcs_header_text(shift, origin=panel.origin, window=window),
+                wcs_json=_wcs_header_text(
+                    shift, origin=panel.origin, window=window, frame=cfg.frame),
                 ra_center_deg=ra,
                 dec_center_deg=dec,
                 pixscale_arcsec=_PIXSCALE_ARCSEC,
-                width_px=_WIDTH,
-                height_px=_HEIGHT,
+                width_px=cfg.frame_w,
+                height_px=cfg.frame_h,
                 bayer_pattern="RGGB",
             )
         n_frames = sum(1 for _ in proj.iter_frames())
@@ -529,11 +654,11 @@ def _load_mosaic_sample(lib: Library) -> SampleStatus:
 def remove_sample(lib: Library) -> bool:
     """Delete the demo targets and their generated files.
 
-    Removes **both** shapes — one "remove the sample" action, whichever demos the
-    user asked for — and returns False only when neither existed.
+    Removes **every** shape — one "remove the sample" action, whichever demos the
+    user asked for — and returns False only when none existed.
     """
     removed = False
-    for shape in ("field", "mosaic"):
+    for shape in ("field", "mosaic", "big"):
         entry = lib.find_target(sample_target_name(shape))  # type: ignore[arg-type]
         if entry is None:
             continue

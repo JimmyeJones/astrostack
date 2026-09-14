@@ -821,6 +821,31 @@ the repo.
 > can only reach by clicking is a view no route table will ever probe**, so when
 > you add one, add it here too.
 >
+> **And the editor's shrunk preview has never been drawn at all — `--big`**
+> *(added 2026-09-14 with v0.446.0)*. Both other samples fit *inside* the
+> editor's proxy: `seestack/edit/proxy.py` strides only above `PROXY_MAX_PX`
+> (1500), the field sample is 480 px wide and the mosaic's union canvas ~907, so
+> `get_proxy` hands each back at `proxy_scale == 1.0`. Everything gated on a
+> **decimated** preview was therefore structurally unreachable by this tooling —
+> the five preview↔export advisories (sharpen, deconvolution, denoise, hot
+> pixels, star reduction), the preview-scale caption, and the **whole** of "Check
+> it at full size": its button, its modal, its navigator, its `X-Loupe-Window`
+> marker and its split comparison, ~250 lines of the priority-1 screen, pinned by
+> jsdom alone. Even `--editor`, which clicks every op in the Add menu, could not
+> reach one of them; the owner's own mosaics are ~3494×2470 and up, i.e. that is
+> his everyday state. `--big` loads a third sample: the same 2×2 mosaic — same
+> grid, same 82 % step, same uneven depth, same hazy panel, same ragged corners —
+> shot with 900×600 panels, so its union canvas is **1694×1150** and the preview
+> is decimated by exactly **2**. That is the *smallest* canvas that reaches the
+> surface at all, chosen deliberately: stacking cost grows with the pixels and a
+> pass nobody runs finds nothing (measured, ≈ 60 s of stack on top of
+> `--mosaic`). It prints what `/editor/loupe-info` answers — canvas, the shrink
+> factor, and whether the full-size check is offered — so a sample that drifted
+> back under the cap cannot pass for a clean pass, and writes its shots to
+> `$SHOTS/big/`. **Use it on any run that touches the editor's preview**, and
+> combine with `--editor` to drive the ops on the one run whose preview is not
+> 1:1.
+>
 > **And the drop folder itself has never held a file while a browser was
 > looking — `--incoming-lag`** *(added 2026-09-14 with v0.442.0)*. The scratch
 > install's `incoming/` is **empty on every pass**, because the sample arrives

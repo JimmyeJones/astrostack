@@ -109,6 +109,142 @@ if (!opened) {
   console.log("  ! open: no live preview image rendered");
 }
 
+// ---- "Check it at full size" ----------------------------------------------
+//
+// The control is gated on `proxy_scale > 1`, i.e. on a canvas past the editor's
+// 1500 px proxy cap — which no bundled sample produced until `--big` (v0.446.0).
+// So for its whole life the modal behind it, its navigator, its marker, its
+// `X-Loupe-Window` header and its split comparison were reachable by nobody:
+// this drive adds every op in the Add menu and never saw the button, and the
+// page probe photographs one state and cannot click. It is ~250 lines of the
+// priority-1 screen whose only coverage is jsdom.
+//
+// The button's absence is *correct* on a small stack, so a pass that does not
+// reach it says so rather than reporting nothing — the same reason the shell
+// prints `location_source` and the `proxy_scale` it measured.
+async function driveFullSizeCheck() {
+  const unavailable = page.getByTestId("full-size-check-unavailable");
+  const open = page.getByTestId("full-size-check-open");
+  if (!(await open.count())) {
+    if (await unavailable.count()) {
+      // A geometry refusal: the control is gone and the advisories asking the
+      // reader to use it are still speaking. v0.445.2 exists for this state.
+      console.log(`full-size check: withheld — "${(await unavailable.first().innerText()).trim()}"`);
+    } else {
+      console.log("full-size check: not offered (preview is 1:1 — run with --big to reach it)");
+    }
+    return;
+  }
+
+  await open.first().click();
+  await page.waitForTimeout(600);
+  // The window is a real full-resolution render on the request path, not a
+  // cached blob — give it room, then say what it drew.
+  const shot = page.getByTestId("full-size-check-image");
+  try {
+    await shot.waitFor({ state: "visible", timeout: 45000 });
+  } catch {
+    findings++;
+    const err = page.getByTestId("full-size-check-error");
+    const why = (await err.count()) ? (await err.first().innerText()).trim() : "no image and no error";
+    console.log(`  ! full-size check: the window never rendered — ${why}`);
+  }
+  await page.waitForTimeout(800);
+  drain("full-size check (open)");
+
+  // Read the modal as ONE paragraph, the way the shell reads the mosaic's
+  // notes: three sentences about one window, written in three files.
+  for (const [tag, id] of [
+    ["caption", "full-size-check-caption"],
+    ["where", "full-size-check-where"],
+    ["split", "full-size-check-split-caption"],
+  ]) {
+    const el = page.getByTestId(id);
+    if (await el.count()) {
+      console.log(`   [${tag}] ${(await el.first().innerText()).trim().replace(/\s+/g, " ")}`);
+    }
+  }
+  for (const id of ["full-size-check-navigator", "full-size-check-marker"]) {
+    if (!(await page.getByTestId(id).count())) {
+      findings++;
+      console.log(`  ! full-size check: ${id} is missing from the open modal`);
+    }
+  }
+  await page.screenshot({ path: `${SHOTS}/editor-loupe-01-open.png`, fullPage: true });
+
+  // Move the window: the navigator is the modal's only control, and "did the
+  // marker follow the click?" is a question only a browser can answer.
+  const nav = page.getByTestId("full-size-check-navigator");
+  if (await nav.count()) {
+    const before = await page.evaluate(() => {
+      const m = document.querySelector('[data-testid="full-size-check-marker"]');
+      return m ? m.getAttribute("style") : null;
+    });
+    const box = await nav.first().boundingBox();
+    if (box) {
+      // A corner, not the centre: the window is clamped inside the canvas, so
+      // a corner click is also the case where the clamp does something.
+      await page.mouse.click(box.x + box.width * 0.15, box.y + box.height * 0.2);
+      await page.waitForTimeout(6000);
+      const after = await page.evaluate(() => {
+        const m = document.querySelector('[data-testid="full-size-check-marker"]');
+        return m ? m.getAttribute("style") : null;
+      });
+      if (!after) {
+        findings++;
+        console.log("  ! full-size check: the marker vanished after moving the window");
+      } else if (after === before) {
+        findings++;
+        console.log("  ! full-size check: clicking the navigator did not move the window marker");
+      } else {
+        console.log("full-size check: the window followed a click on the navigator");
+      }
+      const where = page.getByTestId("full-size-check-where");
+      if (await where.count()) {
+        console.log(`   [where, moved] ${(await where.first().innerText()).trim()}`);
+      }
+      drain("full-size check (moved)");
+    }
+  }
+
+  // …and the split, which is a second thing behind a click behind a click.
+  const toggle = page.getByTestId("full-size-check-split-toggle");
+  if (!(await toggle.count())) {
+    console.log("full-size check: no preview comparison offered for this window");
+  } else {
+    await toggle.first().click();
+    await page.waitForTimeout(1500);
+    for (const id of ["full-size-check-split-before", "full-size-check-split-divider"]) {
+      if (!(await page.getByTestId(id).count())) {
+        findings++;
+        console.log(`  ! full-size check: ${id} missing after turning the comparison on`);
+      }
+    }
+    const cap = page.getByTestId("full-size-check-split-caption");
+    if (await cap.count()) {
+      console.log(`   [split] ${(await cap.first().innerText()).trim().replace(/\s+/g, " ")}`);
+    }
+    // Drag the divider: the one interaction in the modal with pointer capture.
+    const win = page.getByTestId("full-size-check-window");
+    const wbox = (await win.count()) ? await win.first().boundingBox() : null;
+    if (wbox) {
+      await page.mouse.move(wbox.x + wbox.width * 0.5, wbox.y + wbox.height * 0.5);
+      await page.mouse.down();
+      await page.mouse.move(wbox.x + wbox.width * 0.25, wbox.y + wbox.height * 0.5, { steps: 8 });
+      await page.mouse.up();
+      await page.waitForTimeout(800);
+    }
+    await page.screenshot({ path: `${SHOTS}/editor-loupe-02-split.png`, fullPage: true });
+    drain("full-size check (split)");
+  }
+
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(600);
+  drain("full-size check (closed)");
+}
+
+await driveFullSizeCheck();
+
 /** Every op the Add menu offers, as `{index, label}` in menu order.
  *
  * Read from the open menu rather than from a hard-coded list, so an op added
