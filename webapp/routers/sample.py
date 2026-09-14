@@ -28,23 +28,33 @@ class SampleStatusOut(BaseModel):
     mosaic_loaded: bool = False
     mosaic_safe: str | None = None
     mosaic_n_frames: int = 0
+    # The third, opt-in demo: the same 2×2 mosaic at full-size panels, whose
+    # union canvas is past the editor's proxy cap. Additive and defaulted for
+    # exactly the same reason the mosaic fields above are.
+    big_loaded: bool = False
+    big_safe: str | None = None
+    big_n_frames: int = 0
 
 
 class SampleLoadIn(BaseModel):
     """Which demo to build. Absent body → the single field, as before."""
 
-    shape: Literal["field", "mosaic"] = "field"
+    shape: Literal["field", "mosaic", "big"] = "field"
 
 
 def _to_out(
     status: sample_data.SampleStatus,
     mosaic: sample_data.SampleStatus | None = None,
+    big: sample_data.SampleStatus | None = None,
 ) -> SampleStatusOut:
     return SampleStatusOut(
         loaded=status.loaded, safe=status.safe, n_frames=status.n_frames,
         mosaic_loaded=bool(mosaic and mosaic.loaded),
         mosaic_safe=mosaic.safe if mosaic else None,
         mosaic_n_frames=mosaic.n_frames if mosaic else 0,
+        big_loaded=bool(big and big.loaded),
+        big_safe=big.safe if big else None,
+        big_n_frames=big.n_frames if big else 0,
     )
 
 
@@ -55,6 +65,7 @@ def sample_status(request: Request) -> SampleStatusOut:
         return _to_out(
             sample_data.get_sample_status(lib),
             sample_data.get_sample_status(lib, shape="mosaic"),
+            sample_data.get_sample_status(lib, shape="big"),
         )
     finally:
         lib.close()
@@ -69,6 +80,7 @@ def load_sample(request: Request, body: SampleLoadIn | None = None) -> SampleSta
         return _to_out(
             sample_data.get_sample_status(lib),
             sample_data.get_sample_status(lib, shape="mosaic"),
+            sample_data.get_sample_status(lib, shape="big"),
         )
     finally:
         lib.close()
@@ -82,6 +94,7 @@ def remove_sample(request: Request) -> SampleStatusOut:
         return _to_out(
             sample_data.get_sample_status(lib),
             sample_data.get_sample_status(lib, shape="mosaic"),
+            sample_data.get_sample_status(lib, shape="big"),
         )
     finally:
         lib.close()

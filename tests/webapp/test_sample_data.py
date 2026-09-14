@@ -339,3 +339,168 @@ def test_api_loads_the_field_sample_by_default_and_the_mosaic_on_request(client)
     gone = client.delete("/api/sample").json()
     assert gone["loaded"] is False and gone["mosaic_loaded"] is False
     assert client.get(f"/api/targets/{mosaic_safe}").status_code == 404
+
+
+# --- the full-size mosaic sample -------------------------------------------
+#
+# Both samples above fit *inside* the editor's preview proxy: `edit/proxy.py`
+# strides only above `PROXY_MAX_PX` (1500), the field sample is 480 px wide and
+# the mosaic's union canvas ~907 px, so `get_proxy` hands each back at
+# `proxy_scale == 1.0`. Everything the editor gates on a decimated proxy is
+# therefore unreachable on them — the five preview↔export advisories, the
+# preview-scale caption, and the whole of "Check it at full size" (its button,
+# modal, navigator, `X-Loupe-Window` marker and split comparison). The owner's
+# own mosaics are ~3494×2470, i.e. that is his ordinary state. These pin the
+# third demo, which is the same 2×2 mosaic shot at full-size panels.
+
+
+def test_the_big_sample_is_the_only_one_the_editor_proxy_decimates(lib):
+    """The property the full-size demo exists for: `proxy_scale > 1`.
+
+    Fails on both other samples by construction — their canvases are under the
+    1500 px cap — which is why the editor's whole decimated-proxy surface could
+    never be reached by a pass over them.
+    """
+    from seestack.edit.coverage_trim import coverage_is_mosaic
+    from seestack.edit.proxy import PROXY_MAX_PX, build_proxy
+
+    # The two existing samples' canvases are below the cap, said in the same
+    # currency the proxy uses, so this test states *why* a third one was needed
+    # rather than only asserting the third one's own number.
+    for cfg in (sample_data._MOSAIC_SMALL,):
+        _panels, window = sample_data._mosaic_layout(cfg)
+        assert max(window) <= PROXY_MAX_PX
+    assert max(sample_data._WIDTH, sample_data._HEIGHT) <= PROXY_MAX_PX
+
+    status = sample_data.load_sample(lib, shape="big")
+    assert status.loaded is True
+    assert status.n_frames == sum(sample_data._MOSAIC_PANEL_SUBS)
+
+    entry = lib.find_target(sample_data.SAMPLE_BIG_TARGET_NAME)
+    assert entry is not None
+    proj = lib.open_target(entry.safe_name)
+    try:
+        result = run_stack(
+            proj, StackOptions(sigma_clip=False, max_workers=1, output_name="big")
+        )
+        assert result.n_frames_used == sum(sample_data._MOSAIC_PANEL_SUBS)
+        assert result.n_align_failed == 0
+
+        from astropy.io import fits
+
+        stacked = fits.getdata(result.fits_path).astype(np.float32)
+        # Past the cap on its long side — the one thing the other two are not.
+        assert stacked.shape[-1] > PROXY_MAX_PX
+
+        _proxy, scale = build_proxy(result.fits_path)
+        # Exactly 2: the gentlest decimation there is, chosen deliberately so
+        # the sample is the *smallest* canvas that reaches this surface at all.
+        assert scale == 2.0
+
+        # …and it is still the same ragged, multi-level mosaic — a bigger
+        # picture of the same thing, not a tidier one. Uncovered corners are
+        # NaN (not zeros), so the coverage-gated surfaces still speak too.
+        uncovered = float(np.mean(~np.isfinite(stacked)))
+        assert 0.005 < uncovered < 0.25
+
+        cov = fits.getdata(
+            Path(result.fits_path).parent / f"{Path(result.fits_path).stem}_framecov.fits"
+        ).astype(np.float32)
+        assert coverage_is_mosaic(cov) is True
+    finally:
+        proj.close()
+
+
+def test_the_big_sample_points_its_panels_the_way_the_small_one_does(lib):
+    """Four panels, uneven depth — the scale is the only thing that differs."""
+    from seestack.stack.pointings import pointing_groups
+
+    sample_data.load_sample(lib, shape="big")
+    entry = lib.find_target(sample_data.SAMPLE_BIG_TARGET_NAME)
+    proj = lib.open_target(entry.safe_name)
+    try:
+        frames = sorted(proj.iter_frames(), key=lambda f: f.source_path)
+        assert all(f.accept for f in frames)
+        assert all(f.wcs_json for f in frames)
+        # The frames record the full-size sensor, not the small one's.
+        assert {(f.width_px, f.height_px) for f in frames} == {
+            (sample_data._BIG_FRAME_W, sample_data._BIG_FRAME_H)
+        }
+
+        labels = pointing_groups(
+            [(f.ra_center_deg, f.dec_center_deg) for f in frames], min_members=3)
+        assert labels is not None
+        assert len(set(labels)) == len(sample_data._MOSAIC_PANEL_SUBS)
+        sizes = sorted(labels.count(lab) for lab in set(labels))
+        assert sizes == sorted(sample_data._MOSAIC_PANEL_SUBS)
+    finally:
+        proj.close()
+
+
+def test_the_three_samples_are_separate_targets_and_all_are_removed(lib):
+    field = sample_data.load_sample(lib)
+    mosaic = sample_data.load_sample(lib, shape="mosaic")
+    big = sample_data.load_sample(lib, shape="big")
+    assert len({field.safe, mosaic.safe, big.safe}) == 3
+
+    dirs = [lib.targets_dir / s.safe for s in (field, mosaic, big)]
+    assert all(d.exists() for d in dirs)
+
+    assert sample_data.remove_sample(lib) is True
+    for shape in ("field", "mosaic", "big"):
+        assert sample_data.get_sample_status(lib, shape=shape).loaded is False
+    assert not any(d.exists() for d in dirs)
+
+
+def test_the_existing_two_samples_generate_byte_identical_pixels():
+    """A pin, not a check: the field sample's page-height baselines and the
+    mosaic's trim/coverage numbers were all measured on these exact pixels.
+
+    The frame size became a parameter when the full-size demo was added, so
+    anything that reaches for it by accident — a default changed, a constant
+    threaded one call too far — moves data every recorded measurement rests on.
+    A digest is the cheapest thing that notices.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    for i, shift in enumerate(sample_data._dither_offsets(sample_data._N_SUBS)):
+        h.update(sample_data._make_star_field(
+            seed=42, noise_seed=100 + i, star_shift=shift).tobytes())
+    assert h.hexdigest() == (
+        "9542995fa105c120d7ebb23fbc772d77d62ff72d84ac3d55f2806eeba9263ccf"
+    ), "the single-field sample's generated subs moved"
+
+    cfg = sample_data._MOSAIC_SMALL
+    panels, window = sample_data._mosaic_layout(cfg)
+    assert window == (900, 610)
+    stars = sample_data._star_catalog(
+        seed=42, width=window[0], height=window[1], n_stars=cfg.n_stars)
+    h = hashlib.sha256()
+    for panel in panels:
+        for sub, shift in enumerate(sample_data._dither_offsets(panel.n_subs)):
+            h.update(sample_data._render_star_field(
+                stars, noise_seed=cfg.noise_base + panel.index * 20 + sub,
+                star_shift=shift, origin=panel.origin,
+                signal_scale=panel.signal_scale, sky_scale=panel.sky_scale,
+                frame=cfg.frame).tobytes())
+    assert h.hexdigest() == (
+        "00f0faae83d03fe5ee8b2f33e07937e1f55a6bddf36b981c7f5a76a64a38b24f"
+    ), "the 2×2 mosaic sample's generated subs moved"
+
+
+def test_api_loads_the_big_sample_on_request(client):
+    body = client.post("/api/sample", json={"shape": "big"}).json()
+    # The other two are untouched — this is a third target, not a replacement.
+    assert body["loaded"] is False
+    assert body["mosaic_loaded"] is False
+    assert body["big_loaded"] is True
+    assert body["big_n_frames"] == sum(sample_data._MOSAIC_PANEL_SUBS)
+    big_safe = body["big_safe"]
+    assert client.get(f"/api/targets/{big_safe}").status_code == 200
+
+    status = client.get("/api/sample").json()
+    assert status["big_loaded"] is True and status["big_safe"] == big_safe
+    gone = client.delete("/api/sample").json()
+    assert gone["big_loaded"] is False and gone["big_safe"] is None
+    assert client.get(f"/api/targets/{big_safe}").status_code == 404
