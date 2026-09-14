@@ -77,6 +77,14 @@ page `/tonight` 3,680 px, the mosaic Target page 3,592 px — the standings the 
 `{…}` there is an object literal, not a child slot. The comment has to go *outside* the ternary. Cost one
 confusing test run.
 
+**One run of the suite leaves ~7 GB in `/tmp/pytest-of-root`, and four of them fill the box.** The final
+pre-merge run died on `OSError: [Errno 28] No space left on device` inside pytest's own terminal writer, and
+`vitest` died the same way mid-file — which reads like a broken checkout and is not one. `df` showed **147 MB
+free**; `/tmp/pytest-of-root` was **28 GB** across this run's four suites (pytest keeps the last three `tmp_path`
+roots per invocation, and `-n 4` multiplies them). `rm -rf /tmp/pytest-of-root` took it straight back to 28 GB
+free and the re-run passed unchanged. So: on any ENOSPC, look there first, and on a run that expects to execute
+the suite more than twice, clear it between runs rather than at the end.
+
 **And a browser is what sized the final wording.** The `/best` hint read well in isolation and stuttered on the
 page: it opened "Your finest finished stacks across every target, ranked automatically by…" an inch under an
 intro paragraph reading "Your finest finished stacks, ranked automatically — deepest, cleanest first." Only
