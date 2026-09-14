@@ -2423,6 +2423,24 @@ export interface Job {
   result: Record<string, unknown> | null;
 }
 
+/** An import job that has been sitting in the queue too long, and the job holding
+ * the single serial worker. See `webapp/jobqueue.py` — `null` on a healthy queue,
+ * which is the ordinary answer. */
+export interface ImportWaiting {
+  job_id: string;
+  queued_utc: string;
+  waiting_hours: number;
+  n_waiting: number;
+  holder_id?: string | null;
+  holder_kind?: string | null;
+  holder_target?: string | null;
+  holder_hours?: number | null;
+}
+
+export interface JobQueueHealth {
+  waiting?: ImportWaiting | null;
+}
+
 export interface StackOptionField {
   key: string;
   label: string;
@@ -3661,6 +3679,7 @@ export const api = {
   // TanStack `queryFn`, which would hand the query context in as `limit`.
   listJobs: (limit = 2000) => req<Job[]>(`/api/jobs?limit=${limit}`),
   clearJobs: () => req<{ removed: number }>("/api/jobs/clear", { method: "POST" }),
+  jobQueueHealth: () => req<JobQueueHealth>("/api/jobs/queue-health"),
   getJob: (id: string) => req<Job>(`/api/jobs/${id}`),
   cancelJob: (id: string) => req(`/api/jobs/${id}/cancel`, { method: "POST" }),
 
