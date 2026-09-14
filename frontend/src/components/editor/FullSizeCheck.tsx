@@ -189,8 +189,20 @@ export function FullSizeCheck({
             {/* The window itself, at its natural size — scaling it would defeat
                 the whole point, so it scrolls rather than shrinks on a phone. */}
             <Stack gap={4}>
-              <div style={{ maxWidth: "100%", overflow: "auto", background: "#000",
-                            borderRadius: 6, minWidth: 120, minHeight: 40 }}>
+              {/* `width: fit-content` is load-bearing, not tidying. This box is
+                  a block-level child of the Stack, so without it it stretches to
+                  whatever the *widest sibling below* makes the column — and the
+                  split's caption is a long sentence. Turning the comparison on
+                  therefore painted ~350 px of this box's own black background
+                  beside the window (measured in a browser: 512 px wide before
+                  the toggle, 858 after), on the one screen whose entire job is
+                  showing the reader their real pixels. `maxWidth: 100%` still
+                  wins on a window wider than the space, so that case shrinks and
+                  scrolls exactly as before. */}
+              <div style={{ width: "fit-content", maxWidth: "100%",
+                            overflow: "auto", background: "#000",
+                            borderRadius: 6, minWidth: 120, minHeight: 40 }}
+                data-testid="full-size-check-viewport">
                 {window_.data ? (
                   <div
                     ref={windowRef}
