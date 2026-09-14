@@ -1,5 +1,76 @@
 # Shipped — the record
 
+## v0.446.0 — 2026-09-14 — the editor's shrunk preview, drawn in a browser for the first time
+
+*(Builder, branch `claude/sweet-babbage-nhiajs` — INFRA / maintainability in service of not missing bugs,
+serving PRIORITY 1. Additive: a third opt-in sample shape, three defaulted response fields and a dogfood
+flag. No config, schema, on-disk, default or API-shape change; the two existing samples' generated pixels
+are byte-identical, pinned by digest.)*
+
+**The hole.** `seestack/edit/proxy.py` decimates the live preview only above `PROXY_MAX_PX` (1500). The
+bundled field sample is **480 px** wide and the `--mosaic` sample's union canvas **907×615** — so
+`get_proxy` hands both back at `proxy_scale == 1.0`, and everything the editor gates on a *shrunk* preview
+was structurally unreachable by `scripts/agent-dogfood.sh`:
+
+* the five preview↔export advisories — `sharpen_preview_understates`, `deconv_…`, `denoise_…`,
+  `hot_pixels_preview_skipped`, `star_reduce_preview_overstates`;
+* `previewScaleCaption`, which says nothing at scale 1 by construction;
+* and the **whole** of `FullSizeCheck` — its button, its modal, its navigator, its `X-Loupe-Window` marker
+  and its split comparison, ~250 lines of the priority-1 screen.
+
+Even `--editor`, which adds every op the Add menu offers one at a time, could not reach one of them. The
+owner's own mosaics are ~3494×2470 and up, i.e. **that is his everyday state** — and both fixes shipped the
+run before this one (v0.445.2, v0.445.3) live on exactly that surface, were found by *reading*, and are
+pinned by jsdom alone.
+
+**The fix, and the measurement that set its size.** A third opt-in shape,
+`sample_data.load_sample(lib, shape="big")`: the same 2×2 mosaic — same grid, same 82 % step, same uneven
+depth (6/6/6/3), same hazy panel, same two nights, same ragged corners — shot with **900×600** panels. The
+lead's own instruction was *measure the smallest canvas that strides before scoping anything larger*, and
+that is what the number is:
+
+| | union canvas | `proxy_scale` | uncovered | stack |
+|---|---|---|---|---|
+| `--mosaic` | 907×615 | **1.0** | 4.8 % | 19.0 s |
+| `--big` | **1694×1150** | **2.0** | 3.7 % | 61.5 s |
+
+Scale 2 is the gentlest decimation there is and the one a run this size actually gets; going bigger costs
+stacking time with the pixels and reaches no new *kind* of surface, and a pass nobody runs finds nothing.
+The flag therefore costs about a minute on top of `--mosaic`, not the twenty the lead worried about.
+
+**The existing two samples are untouched, and that is pinned rather than argued.** The frame size became a
+parameter (`_render_star_field(frame=…)`, `_frame_wcs(frame=…)`, `_mosaic_layout(cfg)`), with every default
+the module's own constants — so a `_MosaicSample` dataclass now names the two mosaics and they differ in
+**scale alone**. The pointing jitter scales with the sensor, so the big canvas's ragged fraction is the same
+kind of raggedness rather than a tidier one. `test_the_existing_two_samples_generate_byte_identical_pixels`
+hashes every generated sub of both and pins the digests: the field sample's page-height baselines in
+`PROCESS-NOTES.md` and the mosaic's trim/coverage numbers all rest on those exact pixels, and a digest is
+the cheapest thing that notices a constant threaded one call too far.
+
+**The pass says what it reached, so a shrunken sample can't pass for a clean one.** `--big` prints what
+`/editor/loupe-info` answers — the canvas, the shrink factor, and whether the full-size check is offered —
+and says **explicitly** that every proxy-gated surface is still unreached if `proxy_scale` comes back at 1.
+That is the `location_source` lesson from v0.436.1: a silent failure that reads as the old empty state is
+worse than no tooling. Its shots go to `$SHOTS/big/`, so the field sample's baselines are not disturbed, and
+with `--editor` the ops are driven on the one run whose preview is not 1:1.
+
+**Tests (+11).** `tests/webapp/test_sample_data.py` +5 — the big sample is the only one the proxy decimates
+(`scale == 2.0`, canvas past the cap, **verified fail-before** by sizing the panels back to 480×320 in a
+scratch revert: `assert 907 > 1500`), it is still a ragged multi-level mosaic with NaN corners, its four
+panels cluster with the same uneven depth and record the full-size sensor, all three demos are separate
+targets that one remove sweeps, and the byte-identity digests above. New `tests/test_dogfood_big_anchors.py`
++6 — the same `*_anchors` shape as the probe and incoming-lag guards: the flag is parsed, off by default and
+in the `-h` header; the shape literal the script POSTs is one `SampleLoadIn` accepts; the `big_safe` key it
+reads is a real, defaulted `SampleStatusOut` field; `/editor/loupe-info` still exists in the OpenAPI paths;
+and — the one that matters — the sample's layout is genuinely past `PROXY_MAX_PX` while the other two are
+under it, so a sample that drifted back under the cap fails here instead of leaving every pass reporting
+CLEAN about a surface it had stopped drawing.
+
+**Upgrade-safe (§9).** Three additive, defaulted response fields (`big_loaded`/`big_safe`/`big_n_frames`)
+alongside the mosaic ones; a widened request `Literal` (nothing an old client sent is now rejected); no new
+endpoint, no schema, no on-disk layout, no default flipped. The Dashboard's "Try it" button still POSTs no
+body and still gets the single field. `remove_sample` sweeps the third shape too.
+
 ## v0.445.3 — 2026-09-14 — one limitation, five captions, two opposite instructions
 
 *(Builder, branch `claude/sweet-babbage-rhcmsd` — PRIORITY 1 (editor). Frontend copy only: no endpoint,

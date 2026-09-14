@@ -19,6 +19,7 @@
 #   scripts/agent-dogfood.sh --empty         # probe a FIRST-RUN app: no data at all
 #   scripts/agent-dogfood.sh --editor        # ALSO drive the editor (adds every op)
 #   scripts/agent-dogfood.sh --mosaic        # ALSO load/stack/probe a 2x2 MOSAIC sample
+#   scripts/agent-dogfood.sh --big           # ALSO a FULL-SIZE mosaic: the editor's preview is decimated
 #   scripts/agent-dogfood.sh --no-site       # leave the scratch install with no observing site
 #   scripts/agent-dogfood.sh --incoming-lag  # ALSO leave subs in incoming/ the library never imported
 #
@@ -79,6 +80,27 @@
 # --editor, the editor is driven on the mosaic run too. Opt-in because the field
 # sample is what keeps a standard pass fast.
 #
+# --big exists because BOTH samples above fit inside the editor's preview proxy,
+# so the whole of its decimated-proxy surface has never been drawn in a browser.
+# `seestack/edit/proxy.py` strides only above PROXY_MAX_PX (1500); the field
+# sample is 480 px wide and the mosaic's union canvas ~907, so `get_proxy` hands
+# both back at proxy_scale == 1.0. Everything gated on a *shrunk* preview is
+# therefore structurally unreachable — the five preview<->export advisories
+# (sharpen, deconvolution, denoise, hot pixels, star reduction), the
+# preview-scale caption, and the whole of "Check it at full size": its button,
+# its modal, its navigator, its X-Loupe-Window marker and its split comparison,
+# ~250 lines of the PRIORITY-1 screen, pinned by jsdom alone. Even --editor,
+# which clicks every op in the Add menu, could not reach any of it. The owner's
+# own mosaics are ~3494x2470 and up, i.e. that is his everyday state.
+# --big loads a third sample (`POST /api/sample` with {"shape":"big"}): the same
+# 2x2 mosaic — same grid, same 82 % step, same uneven depth, same hazy panel,
+# same ragged corners — shot with 900x600 panels, so its union canvas is
+# 1694x1150 and the editor's preview is decimated by exactly 2. That is the
+# *smallest* canvas that reaches this surface at all, chosen because stacking
+# cost grows with the pixels and a pass nobody runs finds nothing: it adds about
+# a minute over --mosaic. It prints what the app answers about the shrunk
+# preview (`/editor/loupe-info`) and, with --editor, drives the editor on it.
+#
 # --empty exists because every measurement this script has ever taken was of the
 # sample-loaded app, so the screens a beginner meets *first* — an empty Dashboard,
 # Library, Gallery, life list — had never been in front of a browser. It boots a
@@ -102,6 +124,7 @@ REPO="$PWD"
 
 DOGFOOD_DIR="${DOGFOOD_DIR:-${TMPDIR:-/tmp}/astrostack-dogfood}"
 DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0; DO_EDITOR=0; DO_MOSAIC=0
+DO_BIG=0
 DO_SITE=1; DO_LAG=0
 # How many aged subs --incoming-lag leaves in the scratch incoming/, and how old
 # it makes them. Eleven days is the observer's own measurement; the count is
@@ -123,6 +146,7 @@ for arg in "$@"; do
     --empty) DO_EMPTY=1 ;;
     --editor) DO_EDITOR=1 ;;
     --mosaic) DO_MOSAIC=1 ;;
+    --big) DO_BIG=1 ;;
     --no-site) DO_SITE=0 ;;
     --incoming-lag) DO_LAG=1 ;;
     # The whole header block, found rather than hard-coded: a fixed line count
@@ -217,6 +241,22 @@ if [ "$DO_MOSAIC" = 1 ] && [ "$DO_EMPTY" = 0 ]; then
                  | python -c 'import json,sys; print(json.load(sys.stdin).get("mosaic_safe") or "")' \
                  2>/dev/null || true)"
   echo "-- mosaic target: ${MOSAIC_SAFE:-<none>}"
+fi
+
+# 3c. The full-size mosaic sample (--big): the same 2x2, shot with 900x600
+#     panels, so the union canvas is past the editor's 1500 px proxy cap and the
+#     live preview is finally a *decimated* one. It is the only data this script
+#     can produce on which the editor's whole shrunk-preview surface — the five
+#     preview<->export advisories and "Check it at full size" — exists at all.
+BIG_SAFE=""
+if [ "$DO_BIG" = 1 ] && [ "$DO_EMPTY" = 0 ]; then
+  echo "-- loading the bundled FULL-SIZE mosaic sample (900x600 panels)"
+  curl -sf -X POST "$BASE/api/sample" -H 'Content-Type: application/json' \
+       -d '{"shape":"big"}' >/dev/null || echo "warn: big sample load failed"
+  BIG_SAFE="$(curl -sf "$BASE/api/sample" \
+              | python -c 'import json,sys; print(json.load(sys.stdin).get("big_safe") or "")' \
+              2>/dev/null || true)"
+  echo "-- full-size target: ${BIG_SAFE:-<none>}"
 fi
 
 # 4. A finished picture, so the picture-shaped surfaces (hero card, Gallery,
@@ -344,6 +384,35 @@ run_id_of() {  # newest stack run id for a target, or empty
 if [ "$DO_STACK" = 1 ]; then
   stack_target "$SAFE" "sample"
   stack_target "$MOSAIC_SAFE" "mosaic sample"
+  stack_target "$BIG_SAFE" "full-size mosaic sample"
+fi
+
+# 4a-bis. What the app says about the *shrunk* preview — the question only the
+#     full-size sample can ask. `available: false` here with proxy_scale 1 would
+#     mean the sample is not big enough after all and every surface below it is
+#     still unreached, which is exactly the silent failure --big exists to stop
+#     (the same trap the observing site's `location_source` line closed).
+if [ -n "$BIG_SAFE" ]; then
+  BIG_RUN="$(run_id_of "$BIG_SAFE")"
+  if [ -n "$BIG_RUN" ]; then
+    curl -sf "$BASE/api/targets/$BIG_SAFE/stack-runs/$BIG_RUN/editor/loupe-info" \
+      | python -c '
+import json, sys
+d = json.load(sys.stdin)
+scale = d.get("proxy_scale") or 1.0
+canvas = "%sx%s" % (d.get("canvas_width"), d.get("canvas_height"))
+if scale <= 1.0:
+    print("-- full-size preview: proxy_scale %.1f on a %s canvas <-- NOT decimated:"
+          % (scale, canvas))
+    print("   the sample is too small, and every proxy-gated surface is STILL unreached")
+else:
+    print("-- full-size preview: canvas %s, shrunk to 1/%.0f for the editor"
+          % (canvas, scale))
+    print("   [full-size check] available=%s%s"
+          % (d.get("available"), "  reason: %s" % d["reason"] if d.get("reason") else ""))
+    print("   so the five preview<->export advisories and the loupe are all live here")
+' 2>/dev/null || echo "-- full-size preview: could not read /editor/loupe-info"
+  fi
 fi
 
 # 4b. What Auto would trim off the mosaic. AGENTS.md §1: on a mosaic canvas a
@@ -471,6 +540,27 @@ if [ "$DO_PROBE" = 1 ] || [ "$DO_EDITOR" = 1 ]; then
         (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS/mosaic" \
            TARGET_SAFE="$MOSAIC_SAFE" TARGET_RUN_ID="$MOSAIC_RUN" node editor.mjs) \
           || echo "warn: mosaic editor drive failed"
+      fi
+    fi
+    # …and again on the full-size mosaic, into its own shots dir. This is the
+    # only one of the three whose editor preview is decimated, so it is the only
+    # pass on which the shrunk-preview advisories and "Check it at full size"
+    # are on the screen being photographed at all.
+    if [ -n "$BIG_SAFE" ]; then
+      BIG_RUN="$(run_id_of "$BIG_SAFE")"
+      mkdir -p "$SHOTS/big"
+      if [ "$DO_PROBE" = 1 ]; then
+        echo "-- probing the running app on the FULL-SIZE target"
+        (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS/big" \
+           TARGET_SAFE="$BIG_SAFE" TARGET_RUN_ID="$BIG_RUN" node probe.mjs) \
+          || echo "warn: full-size probe failed"
+      fi
+      if [ "$DO_EDITOR" = 1 ] && [ -n "$BIG_RUN" ]; then
+        echo "-- driving the editor on the FULL-SIZE run (the only decimated preview)"
+        cp "$REPO/scripts/dogfood_editor.mjs" "$PW_DIR/editor.mjs"
+        (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS/big" \
+           TARGET_SAFE="$BIG_SAFE" TARGET_RUN_ID="$BIG_RUN" node editor.mjs) \
+          || echo "warn: full-size editor drive failed"
       fi
     fi
     echo "-- screenshots: $SHOTS"
