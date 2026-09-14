@@ -23,6 +23,7 @@ from seestack.io.scanner import ScanResult, run_qc_and_solve, scan_and_organize
 from seestack.render.thumbnail import invalidate_frame_thumbs
 from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
 from webapp import __version__ as APP_VERSION
+from webapp import jobqueue
 from webapp.config import Settings
 from webapp.jobs import Job, JobManager
 from webapp.preview_orient import baked_north_up_deg
@@ -1292,10 +1293,60 @@ def _refresh_target(settings: Settings, jm: JobManager, job: Job,
         log.warning("reprocess-all deep-rescan failed for %s: %s", safe, exc)
 
 
+def _reprocess_yield(settings: Settings, jm: JobManager, job: Job, waiting_kind: str, *,
+                     remaining: list[str], counters: dict[str, Any],
+                     stale_only: bool, deep_rescan: bool,
+                     auto_edit: bool) -> dict[str, Any]:
+    """Stand down mid-batch so a waiting import can have the single worker.
+
+    Re-submits the untouched remainder of the batch as a fresh ``reprocess_all``
+    job carrying the counters so far, then returns this slice's summary. The
+    queue is FIFO and the import was enqueued first, so it runs next and the
+    remainder after it — one job at a time throughout, which is the whole point
+    of the serial worker.
+
+    Nothing is lost by pausing here: the batch's unit of work is one target, each
+    already writes a *new* run alongside the old output, and the boundary this is
+    called at has none in flight.
+    """
+    resumed = submit_reprocess_all(
+        settings, jm, stale_only=stale_only, deep_rescan=deep_rescan,
+        auto_edit=auto_edit, only_targets=remaining, carried=counters)
+    done = int(counters.get("done") or 0)
+    total = int(counters.get("total") or 0)
+    what = "import" if waiting_kind == jobqueue.IMPORT_KIND else waiting_kind
+    job.detail = (
+        f"Paused after {done}/{total} targets so a waiting {what} can run — "
+        "the rest resumes straight afterwards."
+    )
+    jm.maybe_flush(job)
+    log.info("reprocess-all: yielding to a queued %s job after %d/%d targets; "
+             "%d remaining resume as job %s", waiting_kind, done, total,
+             len(remaining), resumed.id)
+    return {
+        "total": total,
+        "stacked": int(counters.get("stacked") or 0),
+        "skipped": int(counters.get("skipped") or 0),
+        "rescanned": int(counters.get("rescanned") or 0),
+        "auto_edited": int(counters.get("auto_edited") or 0),
+        "failed": list(counters.get("failed") or []),
+        "cancelled": False,
+        # Additive: this slice stopped early *on purpose* and the work continues
+        # in another job. A reader that does not know the key sees an honest
+        # partial summary, which is what it is.
+        "yielded": True,
+        "yielded_to": waiting_kind,
+        "resumed_job_id": resumed.id,
+        "remaining": len(remaining),
+    }
+
+
 def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                          stale_only: bool = False,
                          deep_rescan: bool = False,
-                         auto_edit: bool = False) -> Job:
+                         auto_edit: bool = False,
+                         only_targets: list[str] | None = None,
+                         carried: dict[str, Any] | None = None) -> Job:
     """Restack *every* target with the current engine — the owner's one-click
     "reprocess everything after an upgrade" maintenance action.
 
@@ -1340,35 +1391,87 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
     once, so it's an explicit opt-in. It only touches each *new* run's own recipe and
     preview thumbnail (never an existing run's saved edit), is best-effort per run (a
     failure never fails the batch), and is fully reversible in the editor (Reset/undo).
+
+    **It hands the worker back to a waiting import, between targets.** The job
+    manager is one queue and one thread on purpose (two stacks at once on a
+    RAM-capped NAS is an OOM kill), so a batch that runs for days holds the
+    worker for days — and the job behind it is usually the *import*, which
+    nobody starts by hand and whose delay means new subs are simply not in the
+    library. Measured on the owner's box: 2,259 subs across two nights sat on
+    disk for eleven days behind exactly this job. Re-ordering the queue could
+    not have helped (the blocker was *running*, not queued) and a second worker
+    is the change the memory bound exists to prevent — so at each target
+    boundary this batch asks whether an import is waiting
+    (:func:`webapp.jobqueue.queued_kind_to_yield_to`) and, if one is, stops and
+    re-submits its own remainder. The import then runs, and the remainder runs
+    after it. Nothing runs concurrently at any point.
+
+    ``only_targets`` and ``carried`` are how a resumed slice picks up: the safe
+    names still to do, and the counters of the slices already done so the
+    summary is about the whole batch rather than the last piece of it. They are
+    internal — the router never passes them — and a batch never yields before it
+    has finished at least one target, so every slice makes progress and the
+    number of slices is bounded by the target count.
     """
     def body(job: Job) -> dict[str, Any]:
         lib = Library.open_or_create(settings.resolved_library_root)
         try:
             targets = list(lib.list_targets())
-            total = len(targets)
-            job.set_progress("reprocess", 0, total, f"0/{total} targets")
+            if only_targets is not None:
+                # A resumed slice: the same snapshot, minus what is already done,
+                # in its original order. A safe name that has since disappeared
+                # is simply dropped rather than failing the slice.
+                by_safe = {e.safe_name: e for e in targets}
+                targets = [by_safe[s] for s in only_targets if s in by_safe]
+            prior = dict(carried or {})
+            done_before = int(prior.get("done") or 0)
+            # The *batch's* total, not this slice's, so progress and the summary
+            # keep describing the thing the user asked for.
+            total = int(prior.get("total") or 0) or len(targets)
+            job.set_progress("reprocess", done_before, total,
+                             f"{done_before}/{total} targets")
             jm.maybe_flush(job)
-            stacked = 0
-            skipped = 0
-            rescanned = 0
-            auto_edited = 0
-            failed: list[dict[str, str]] = []
+            stacked = int(prior.get("stacked") or 0)
+            skipped = int(prior.get("skipped") or 0)
+            rescanned = int(prior.get("rescanned") or 0)
+            auto_edited = int(prior.get("auto_edited") or 0)
+            failed: list[dict[str, str]] = list(prior.get("failed") or [])
             cancelled = False
             for i, entry in enumerate(targets):
                 if job.cancel_requested():
                     cancelled = True
                     break
+                # Hand the worker to a waiting import, at the one boundary where
+                # nothing is half-done. Never before the first target of a slice:
+                # a slice that yields having stacked nothing would make no
+                # progress, and a watcher re-enqueuing an import could then bounce
+                # the batch forever. See the docstring.
+                waiting = (jobqueue.queued_kind_to_yield_to(
+                    j.to_dict() for j in jm.active()) if i > 0 else None)
+                if waiting is not None:
+                    return _reprocess_yield(
+                        settings, jm, job, waiting,
+                        remaining=[e.safe_name for e in targets[i:]],
+                        counters={
+                            "total": total, "done": done_before + i,
+                            "stacked": stacked, "skipped": skipped,
+                            "rescanned": rescanned, "auto_edited": auto_edited,
+                            "failed": failed,
+                        },
+                        stale_only=stale_only, deep_rescan=deep_rescan,
+                        auto_edit=auto_edit)
                 safe = entry.safe_name
                 name = entry.name or safe
                 if stale_only and _last_stack_version_for_target(lib, safe) == APP_VERSION:
                     # Up to date on the current build — nothing would change, skip it.
                     skipped += 1
-                    job.set_progress("reprocess", i + 1, total, f"{i + 1}/{total} targets")
+                    job.set_progress("reprocess", done_before + i + 1, total,
+                                     f"{done_before + i + 1}/{total} targets")
                     jm.maybe_flush(job)
                     continue
                 # Persistent label; the inner run_stack progress updates
                 # phase/done/total per frame but leaves detail untouched.
-                job.detail = f"Target {i + 1}/{total}: {name}"
+                job.detail = f"Target {done_before + i + 1}/{total}: {name}"
                 jm.maybe_flush(job)
                 if deep_rescan and not job.cancel_requested():
                     # Re-derive QC/solve/grade with the current engine first, so the
@@ -1414,7 +1517,8 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                                 lib, safe, run_id,
                                 auto_crop=settings.auto_crop_border) is not None:
                             auto_edited += 1
-                job.set_progress("reprocess", i + 1, total, f"{i + 1}/{total} targets")
+                job.set_progress("reprocess", done_before + i + 1, total,
+                                 f"{done_before + i + 1}/{total} targets")
                 jm.maybe_flush(job)
             return {
                 "total": total,
@@ -1424,6 +1528,9 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                 "auto_edited": auto_edited,
                 "failed": failed,
                 "cancelled": cancelled,
+                # Always present so a reader never has to tell "did not yield"
+                # apart from "an older build that could not".
+                "yielded": False,
             }
         finally:
             lib.close()
