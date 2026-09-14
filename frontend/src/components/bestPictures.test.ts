@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { bestPictureClauses, bestPictureReason, isPinnedPick, pinnedNote } from "./bestPictures";
+import {
+  RANKING_METRIC_WORDS, bestPictureClauses, bestPictureReason, isPinnedPick,
+  pinnedNote, rankingHint,
+} from "./bestPictures";
 import type { BestPicture } from "../api/client";
 
 function pic(over: Partial<BestPicture>): BestPicture {
@@ -106,5 +109,37 @@ describe("isPinnedPick / pinnedNote", () => {
     expect(note).toContain("M42");
     expect(note).toContain("cover");
     expect(note).toMatch(/History/);
+  });
+});
+
+describe("rankingHint", () => {
+  // The wall's count badge carries the only sentence that explains the order
+  // its pictures are in. It is a claim about `seestack.portfolio`, and it had
+  // drifted from it in both directions it could: three metrics named where the
+  // blend carries four, and the leading one called a *total* where the ranker
+  // reads it per pixel. `tests/test_portfolio_hint_mirror.py` holds the metric
+  // list to the scorer's own; these pin what a reader actually gets.
+  it("names every metric the scorer blends", () => {
+    const hint = rankingHint();
+    for (const word of Object.values(RANKING_METRIC_WORDS)) {
+      expect(hint).toContain(word);
+    }
+  });
+
+  it("says the figures are per part of the picture, not target totals", () => {
+    const hint = rankingHint();
+    expect(hint).toContain("part of the picture");
+    expect(hint).toMatch(/mosaic/);
+    // The exact word the old sentence was wrong by.
+    expect(hint).not.toMatch(/total integration/);
+  });
+
+  it("reads as one plain sentence, not a list of keys", () => {
+    const hint = rankingHint();
+    expect(hint.endsWith(".")).toBe(true);
+    for (const key of Object.keys(RANKING_METRIC_WORDS)) {
+      // "noise" and "coverage" are engine names; a beginner gets the phrases.
+      expect(hint).not.toContain(`${key}:`);
+    }
   });
 });

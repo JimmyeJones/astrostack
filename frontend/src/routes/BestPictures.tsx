@@ -12,7 +12,7 @@ import { sharePictureText } from "../share";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
-import { bestPictureReason, pinnedNote } from "../components/bestPictures";
+import { bestPictureReason, pinnedNote, rankingHint } from "../components/bestPictures";
 import { hasAnythingToShow, runSlideKey, showFromHref } from "../showAndTell";
 import { HintAnchor } from "../components/HintAnchor";
 
@@ -94,8 +94,15 @@ export function BestPicturesView() {
       <Group gap="xs">
         <IconSparkles size={24} />
         <Title order={2}>My best pictures</Title>
+        {/* The hint's wording comes from `bestPictures.rankingHint` rather than
+            being spelled here, because it is a claim about what
+            `seestack.portfolio.rank_portfolio` blends — and it was wrong on
+            both counts it could be (it named three of the four metrics, and
+            called the leading one a *total* where the ranker reads it per
+            pixel). One place owns it, and a mirror test holds the metric list to
+            the scorer's own. */}
         {items.length > 0 ? (
-          <HintAnchor label="Your finest finished stacks across every target, picked automatically by total integration time, cleanliness, and frame count.">
+          <HintAnchor label={rankingHint()} multiline w={320}>
             <Badge variant="light">{items.length}</Badge>
           </HintAnchor>
         ) : null}
