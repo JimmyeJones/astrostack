@@ -1,5 +1,82 @@
 # Shipped — the record
 
+## v0.446.4 — 2026-09-14 — the two advisories that said "you can't see this" and not where you could
+
+*(Builder, branch `claude/sweet-babbage-fplnkq` — PRIORITY 1 (editor). Frontend copy plus one engine test:
+no endpoint, config, schema, on-disk, API-shape or default change, and no new element on a panel the owner
+already calls busy.)*
+
+**How it was found.** `dogfood_editor.mjs` now prints the editor's preview column as **one block** after
+every op, off a new `data-testid="preview-advisory"` on the six proxy-gated captions. Reading a column as
+one paragraph is the method the last six process notes found everything by; what was new here is that the
+column only *speaks* on a canvas past the 1500 px proxy cap, which v0.446.0 is what produced.
+
+**The gap.** Five captions describe one limitation. v0.445.2 gave the reader back the control when a
+rotation took it away; v0.445.3 stopped three of them telling the reader to turn a knob up in order to see
+the effect. The two left over are the two that say the preview shows the effect **not at all**:
+
+* hot-pixel removal — *"Your exported full-resolution image still gets the cleanup."*
+* deconvolution — *"…but the exported full-resolution image applies it at full strength."*
+
+Both end in reassurance, and neither named "Check it at full size", which sits directly beneath them and
+shows exactly what they are describing.
+
+**Why the earlier stand-down does not hold.** v0.445.3 left these two alone on the reasoning that *"neither
+asks for a judgement"*. The ops' own parameter lists disagree: `detail.hot_pixels` carries **Threshold (σ)**
+(2–10, default 5) and `detail.deconvolve` carries **Iterations** (1–50) and **Blur width** (0.5–5 px). A
+reader told the preview shows none of the effect has a knob and no way to set it — and on deconvolution the
+obvious move is to turn the iterations up until the preview shows *something*, which saves a picture with
+ringing nobody judged. That is the identical trap `sharpenPreview.ts` was rewritten to close, on the
+identical mechanism, so deconvolution now carries the same warning in the same words. The call was also made
+before anybody had rendered this screen. **Worth generalising: a stand-down reasoned from a caption's
+wording can be overturned by the op's signature.**
+
+**The claim is checked in the engine, because it is a claim about the engine.** A caption promising that a
+control shows what another cannot is worthless if the control does not. `_render_loupe_png` builds its
+context with `proxy_scale=1.0`, and both limitations are properties of the scale, so both lift there —
+measured in `tests/test_edit_proxy_parity.py`:
+
+* one stuck pixel on a flat sky: **0.95 → 0.95** at proxy step 3 (the op is skipped, as the advisory says),
+  **0.95 → 0.20** at 1:1;
+* deconvolution's peak gain on a 1.5 px star: **0.020** on a step-4 proxy against **1.056** at full size,
+  a 52× difference.
+
+So if either limitation ever stopped lifting at 1:1, the test goes red rather than the captions quietly
+pointing a beginner at a control that shows them the same nothing.
+
+**Tests (+6):** 1 in `hotPixelsPreview.test.ts`, 2 in `deconvPreview.test.ts` (including the panel-wide rule
+that no advisory may invite the reader to change the saved picture in order to see it), and the engine test
+above. Nothing loosened; the existing "still gets the cleanup" and "full strength" assertions stand
+unchanged beside the new ones.
+
+## v0.446.3 — 2026-09-14 — 350 px of black beside your picture, painted by the caption underneath it
+
+*(Builder, branch `claude/sweet-babbage-fplnkq` — PRIORITY 1 (editor). One CSS property, one test id, one
+browser-side measurement: no endpoint, config, schema, on-disk, API-shape or default change.)*
+
+**Measured, on the first canvas that could open this modal at all** (v0.446.0's big sample). The scroll
+container around the full-size window is a block-level child of the modal's right-hand column, with
+`background: "#000"` and no width of its own — so it stretched to whatever the widest sibling *below* made
+that column. Turning on "Compare with the preview" adds `LOUPE_SPLIT_CAPTION`, a full sentence:
+
+| state | box around the window | the window |
+| --- | --- | --- |
+| before the toggle | 512 px | 512 px |
+| after the toggle | **858 px** | 512 px |
+
+About 350 px of flat black beside the reader's own pixels, in a modal whose entire purpose is showing them
+those pixels, and with nothing else on screen that colour.
+
+`width: "fit-content"` makes it hug the window. `maxWidth: "100%"` is untouched, so a window bigger than the
+available space still shrinks and scrolls exactly as before — re-measured after the fix at 512 / 512 either
+side of the toggle, and 512 at phone width with no page overflow.
+
+**And the browser-side half, because jsdom cannot see it.** A jsdom test can only assert that the property
+is set; it lays nothing out, so it can never catch the band coming back by another route.
+`scripts/dogfood_editor.mjs` measures the box against the window on every `--editor` pass and reports any
+gap over 8 px as a finding, and `test_dogfood_big_anchors.py` keeps `full-size-check-viewport` on the list
+of ids the drive must not stop checking.
+
 ## v0.446.2 — 2026-09-14 — the full-size check is clicked, and the field leg stops driving the mosaic
 
 *(Builder, branch `claude/sweet-babbage-nhiajs` — INFRA (the finder, not the app), serving PRIORITY 1. One
