@@ -2851,6 +2851,32 @@ export interface OverTrimmedItem {
   suggested_keep_fraction?: number | null;
 }
 
+/** One folder of `incoming/` holding subs the library has no frame row for —
+ * see `/api/incoming-lag`. Every field is defaulted server-side, so an older
+ * backend that has no such endpoint simply reports nothing. */
+export interface IncomingLagItem {
+  folder: string;
+  target_name: string;
+  n_on_disk: number;
+  n_imported: number;
+  n_waiting: number;
+  newest_utc: string;
+  /** How long the folder has sat unchanged — i.e. how long these have waited. */
+  still_hours: number;
+}
+
+/** `checked: false` means *nobody has looked* (no watcher listing to judge
+ * against), which is a different statement from "nothing is waiting" and has to
+ * stay tellable apart: the note renders nothing either way, but only one of them
+ * is evidence. */
+export interface IncomingLagResponse {
+  n_waiting: number;
+  n_folders: number;
+  checked_utc: string;
+  checked: boolean;
+  items: IncomingLagItem[];
+}
+
 export interface CalibrationMaster {
   id: number;
   name: string;
@@ -3865,6 +3891,14 @@ export const api = {
   // never rewrites a recipe.
   getOverTrimmedPictures: () =>
     req<{ count: number; items: OverTrimmedItem[] }>("/api/over-trimmed-pictures"),
+
+  // Which folders of `incoming/` hold subs that never reached the library. Its
+  // own endpoint for the same reason as the three above, and a different
+  // question from `/api/jobs/queue-health`: that one asks whether an import is
+  // *queued*, this one asks whether the frames are *there*, which is the only
+  // signal that catches an import that was never queued at all. Read-only — it
+  // never scans, and nothing it touches writes to `incoming/`.
+  getIncomingLag: () => req<IncomingLagResponse>("/api/incoming-lag"),
 
   // logs
   getLogs: (level?: string, limit = 1000) =>

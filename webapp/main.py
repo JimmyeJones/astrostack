@@ -27,9 +27,9 @@ from webapp.config import SettingsStore
 from webapp.jobs import JobManager
 from webapp.routers import (
     auth as auth_router,
-    calibration, editor, frames, gallery, glossary, jobs, lifelist, logs, newsubs,
-    overtrim, plan, sample, seestar, settings, sky, stack, stackfailures, stats,
-    storage, system, targets, upload, video, wishlist,
+    calibration, editor, frames, gallery, glossary, incominglag, jobs, lifelist,
+    logs, newsubs, overtrim, plan, sample, seestar, settings, sky, stack,
+    stackfailures, stats, storage, system, targets, upload, video, wishlist,
 )
 from webapp.routers import pipeline as pipeline_router
 from webapp.seestar.manager import SeestarManager
@@ -156,7 +156,7 @@ def create_app() -> FastAPI:
         seestar.router, editor.router, calibration.router, auth_router.router,
         plan.router, upload.router, sample.router, video.router, lifelist.router,
         stackfailures.router, newsubs.router, wishlist.router, overtrim.router,
-        glossary.router,
+        glossary.router, incominglag.router,
     ):
         app.include_router(r)
 
@@ -180,6 +180,12 @@ _AUTH_OPEN_PATHS = frozenset({"/api/health"})
 # quietly gains whatever GET route is added under it next.
 _READONLY_GET_PATHS = frozenset({
     "/api/health", "/api/logs", "/api/stats", "/api/jobs", "/api/targets",
+    # Added deliberately, one path: the observer's own reason for existing is
+    # that a frame which never reached the library cannot be seen to be absent
+    # from the record it reads, and this is the one endpoint that answers it.
+    # Read-only by construction (it compares counts and touches nothing), and it
+    # names folders and numbers, never a path outside the library.
+    "/api/incoming-lag",
 })
 
 

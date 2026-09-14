@@ -130,7 +130,10 @@ def test_the_token_reads_diagnostics_and_is_refused_everything_else(client):
 
     # The reproduced failure: the observer can read the log ring at last.
     assert client.get("/api/logs", auth=ro).status_code == 200
-    for path in ("/api/stats", "/api/jobs", "/api/targets", "/api/health"):
+    for path in ("/api/stats", "/api/jobs", "/api/targets", "/api/health",
+                 # The observer's own gap: a frame that never reached the library
+                 # cannot be seen to be absent from the record it reads.
+                 "/api/incoming-lag"):
         assert client.get(path, auth=ro).status_code == 200, path
 
     # Everything else is 403 — a credential we know, on a request it may not
