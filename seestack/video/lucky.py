@@ -192,6 +192,20 @@ def _sampling_stride(n_frames: int, max_frames: int) -> int:
     return int(math.ceil(n_frames / max_frames))
 
 
+def ordinal(n: int) -> str:
+    """``2`` → ``"2nd"``, ``13`` → ``"13th"`` — English's own irregularity, once.
+
+    The stride warning below used to be written ``f"every {stride}th frame"``, a
+    hard-coded suffix on a computed integer, so a 3,000-frame capture at the
+    default ``max_frames`` of 1,500 told the owner it had *"graded every 2th
+    frame"*. Pure, so the wording and the arithmetic are testable apart.
+    """
+    n = int(n)
+    if 11 <= abs(n) % 100 <= 13:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(abs(n) % 10, 'th') }"
+
+
 def _measure_shift(ref_luma: np.ndarray, luma: np.ndarray) -> tuple[float, float] | None:
     """Sub-pixel (dy, dx) that brings ``luma`` onto ``ref_luma``, or ``None``.
 
@@ -267,7 +281,7 @@ def grade_video(
     stride = _sampling_stride(vinfo.n_frames, opts.max_frames)
     if stride > 1:
         warnings.append(
-            f"Long capture ({vinfo.n_frames} frames) — graded every {stride}th frame "
+            f"Long capture ({vinfo.n_frames} frames) — graded every {ordinal(stride)} frame "
             f"to keep this quick; seeing changes slowly, so the sharp moments are "
             f"still found."
         )

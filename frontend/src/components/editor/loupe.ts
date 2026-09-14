@@ -1,3 +1,5 @@
+import { keptFractionWords } from "./recentreCrop";
+
 /** Pure geometry for the "check it at full size" window marker.
  *
  * The loupe reads a fixed number of *source* pixels — 512 by default — out of a
@@ -158,12 +160,26 @@ export function loupeWhereText(
  * The one-line explanation under the full-size view: what it is, and why it is
  * not the same thing as the preview. Plain language, no jargon — "1:1" and
  * "decimation" mean nothing to the reader this is for.
+ *
+ * The shrink used to be written `a ${Math.round(proxyScale)}th`, a hard-coded
+ * ordinal suffix on a computed integer — so it said **"about a 2th of full
+ * size"** at scale 2 and **"a 3th"** at scale 3. Those are not exotic values:
+ * `proxy_scale` is `ceil(longest / 1500)`, so 2 covers every canvas up to
+ * 3000 px and 3 covers the owner's own ~3494 px mosaics. It survived because
+ * the control is gated on a decimated proxy and no bundled sample produced one
+ * until v0.446.0 — its test pinned scale **8**, the one value where "8th"
+ * happens to be right, which is a fixture that cannot exhibit its own bug.
+ *
+ * It now says it in the words the app already uses for a fraction of a picture
+ * (`keptFractionWords`, the re-centring crop's), so the editor cannot come to a
+ * second way of saying "half".
  */
 export function loupeCaption(sizePx: number, proxyScale: number | null | undefined): string {
   const px = Math.round(sizePx);
   const shrunk = proxyScale && proxyScale > 1
-    ? ` The preview is shrunk to about a ${Math.round(proxyScale)}th of full size to stay quick, `
-      + "so fine detail — sharpening, star size, speckles — reads differently there."
+    ? ` The preview is shrunk to about ${keptFractionWords(1 / proxyScale)} of full size `
+      + "to stay quick, so fine detail — sharpening, star size, speckles — reads "
+      + "differently there."
     : "";
   return `Every pixel, full size: a ${px} × ${px} piece of your finished picture, `
     + `edited exactly as the preview is.${shrunk}`;

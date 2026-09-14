@@ -64,8 +64,34 @@ describe("loupeCaption", () => {
     const s = loupeCaption(512, 8);
     expect(s).toContain("512 × 512");
     expect(s).toContain("full size");
-    expect(s).toContain("8th of full size");
+    expect(s).toContain("an eighth of full size");
     expect(s).not.toMatch(/decimat|proxy|1:1/i);
+  });
+
+  // The scales a real canvas actually produces. `proxy_scale` is
+  // `ceil(longest / 1500)`, so **2** is every canvas up to 3000 px and **3** is
+  // the owner's own ~3494 px mosaics — and those were exactly the two the old
+  // hard-coded "th" got wrong ("a 2th of full size", "a 3th"). The previous
+  // fixture pinned only 8, where the suffix happens to be right, so it could
+  // not exhibit the bug it was guarding.
+  it.each([
+    [2, "half"],
+    [3, "a third"],
+    [4, "a quarter"],
+    [5, "a fifth"],
+    [8, "an eighth"],
+  ])("says the shrink in words at proxy_scale %i", (scale, words) => {
+    const s = loupeCaption(512, scale);
+    expect(s).toContain(`shrunk to about ${words} of full size`);
+    // No ordinal-suffixed number anywhere: that spelling is the bug's shape,
+    // and it would read "a 2th" again the moment someone reintroduces it.
+    expect(s).not.toMatch(/\d(?:st|nd|rd|th)\b/);
+  });
+
+  it("falls back to a percentage rather than inventing a word for a huge shrink", () => {
+    // Past the smallest simple fraction the app words, "a sixteenth" is worse
+    // than a number — the same line `keptFractionWords` already draws.
+    expect(loupeCaption(512, 16)).toContain("shrunk to about 6% of full size");
   });
 
   it("drops the shrunk-preview clause when there is no shrinking", () => {
