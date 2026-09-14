@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Alert, Anchor, Text } from "@mantine/core";
 import { Link } from "react-router-dom";
 import { IconBulb } from "@tabler/icons-react";
-import { nextBestMove } from "./nextBestMove";
+import { nextBestMove, type NextBestMoveFraming } from "./nextBestMove";
 import type { GoalDifficulty } from "../../readiness";
 import { softerThanUsual } from "./softStars";
 import type { GrainLevel } from "./grainProjection";
@@ -35,6 +35,7 @@ export function NextBestMoveBadge(
     difficulty,
     grainVerdict,
     grainLevel,
+    framing,
   }: {
     name: string;
     nFramesUsed: number | null | undefined;
@@ -68,6 +69,12 @@ export function NextBestMoveBadge(
      * measured the background clean. Optional — null/absent reads exactly as
      * before, and it never changes which rung fires. */
     grainLevel?: GrainLevel | null;
+    /** The measured framing verdict for the same run (`useStackFraming`), so
+     * the coaching line knows about the lever the framing note on this page is
+     * naming and the two stop prescribing different next sessions. Optional —
+     * absent, or any verdict but a badly-short `partial`, reads exactly as
+     * before. */
+    framing?: NextBestMoveFraming | null;
   },
 ) {
   const tip = useMemo(
@@ -82,9 +89,10 @@ export function NextBestMoveBadge(
         difficulty,
         grainVerdict,
         grainLevel,
+        framing,
       }),
     [nFramesUsed, integrationS, nUnsolved, runs, fieldFulls, objectType,
-     difficulty, grainVerdict, grainLevel],
+     difficulty, grainVerdict, grainLevel, framing],
   );
   if (!tip) return null;
 
