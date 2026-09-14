@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PlanWeekCard } from "./PlanWeekCard";
 import * as client from "../../api/client";
-import type { PlanWeek, WeekNight } from "../../api/client";
+import type {
+  ClosingTarget, PlanWeek, SeasonClosing, WeekNight,
+} from "../../api/client";
 
 // Frozen so the "Tonight / Tomorrow / Saturday" labels are deterministic.
 const NOW = new Date("2026-09-02T20:00:00");
@@ -60,7 +62,30 @@ function renderCard(props: { minAlt?: number } = {}) {
   );
 }
 
-beforeEach(() => vi.setSystemTime(NOW));
+function season(over: Partial<ClosingTarget> = {}): ClosingTarget {
+  return {
+    safe: "M_27", name: "M 27", minutes_now: 180, weeks_left: 2,
+    last_night: "2026-09-23", total_exposure_s: 3600, noise_gain: 0.29,
+    ...over,
+  };
+}
+
+function closing(targets: ClosingTarget[] = []): SeasonClosing {
+  return {
+    location_source: "settings",
+    observer: { lat_deg: 51.5, lon_deg: -0.13, elevation_m: 30 },
+    generated_utc: "2026-09-02T20:00:00+00:00",
+    min_altitude_deg: 30, horizon_weeks: 8, targets,
+  };
+}
+
+beforeEach(() => {
+  vi.setSystemTime(NOW);
+  // The card now asks what is leaving the sky as well as what is well placed.
+  // Nothing leaving is the ordinary answer and the default here, so every test
+  // that predates this asserts exactly what it asserted before.
+  vi.spyOn(client.api, "getSeasonClosing").mockResolvedValue(closing());
+});
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -215,5 +240,65 @@ describe("PlanWeekCard", () => {
       expect(screen.getByTestId("plan-week")).toBeInTheDocument());
     expect(screen.queryByRole("link", { name: /Add this week to your calendar/ }))
       .not.toBeInTheDocument();
+  });
+
+  // The "Shoot these before they're gone" card sits directly above this one and
+  // argues that a clear night on a closing target buys something the rest of the
+  // year can't. This card's own ranking is pure observability, so without these
+  // the page hands the reader two prescriptions and no way to choose.
+  it("names the night that doesn't come round again", async () => {
+    vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+      nights: [night("2026-09-05", { best: { ...night("2026-09-05").best!, score: 90 } })],
+      targets: [
+        { safe: "M_31", name: "M 31", date: "2026-09-05", minutes_above_min_alt: 246, score: 90 },
+        { safe: "M_27", name: "M 27", date: "2026-09-08", minutes_above_min_alt: 100, score: 30 },
+      ],
+    }));
+    vi.spyOn(client.api, "getSeasonClosing").mockResolvedValue(closing([season()]));
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-week-closing")).toBeInTheDocument());
+    expect(screen.getByTestId("plan-week-closing"))
+      .toHaveTextContent(/M 27 is on its way out of your sky — about 2 weeks left/);
+    expect(screen.getByTestId("plan-week-closing"))
+      .toHaveTextContent(/best night this week is Tuesday/);
+    // …and the row itself carries the same countdown, not a second one.
+    expect(screen.getByText(/M 27 — Tuesday \(about 2 weeks left\)/))
+      .toBeInTheDocument();
+  });
+
+  it("says nothing extra on an ordinary week, or to an older backend",
+    async () => {
+      vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+        nights: [night("2026-09-04")],
+        targets: [
+          { safe: "M_42", name: "M 42", date: "2026-09-06", minutes_above_min_alt: 120, score: 50 },
+        ],
+      }));
+      renderCard();
+      await waitFor(() =>
+        expect(screen.getByTestId("plan-week")).toBeInTheDocument());
+      expect(screen.queryByTestId("plan-week-closing")).not.toBeInTheDocument();
+      expect(screen.getByText(/M 42 — Sunday$/)).toBeInTheDocument();
+
+      // A backend too old to know `/api/plan/closing` 404s it. The card must be
+      // exactly what it was before this clause existed, not an error.
+      vi.spyOn(client.api, "getSeasonClosing")
+        .mockRejectedValue(new Error("404"));
+      renderCard();
+      await waitFor(() =>
+        expect(screen.getAllByTestId("plan-week")).toHaveLength(2));
+      expect(screen.queryByTestId("plan-week-closing")).not.toBeInTheDocument();
+    });
+
+  it("asks the season question with the page's own altitude floor", async () => {
+    // Same key, same floor, same options as ClosingSeasonCard — so the two
+    // share one request and can never be answered by two different snapshots.
+    vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan());
+    const spy = vi.spyOn(client.api, "getSeasonClosing")
+      .mockResolvedValue(closing());
+    renderCard({ minAlt: 45 });
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ minAlt: 45 }));
   });
 });
