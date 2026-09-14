@@ -212,14 +212,62 @@ function finite(v: number | null | undefined): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+/** True when the measured framing verdict says this picture holds only a
+ * *fragment* of its object: `partial` — the one verdict whose fix is more sky
+ * rather than a better pointing — at or under `FRAMING_MAX_COVERAGE`.
+ *
+ * Split out of `framingRung` because a second card on the same page now has to
+ * ask the identical question: the readiness card prices "is it enough yet?"
+ * against the canvas in front of it, which on a fragment is the canvas this
+ * ladder has just said to stop shooting (see `readinessCanvasScope`). Two
+ * surfaces disagreeing about whether a single field is the right canvas is the
+ * very contradiction the rung exists to close, so they share one gate rather
+ * than two copies of a constant.
+ *
+ * The rung asks for one thing more — the backend's own friendly percentage,
+ * because its sentence *names* it — which is why that check stays there. The
+ * scope clause names no number, so it does not need one.
+ */
+export function framingIsFragment(
+  v: NextBestMoveFraming | null | undefined,
+): boolean {
+  if (!v || v.level !== "partial") return false;
+  const coverage = finite(v.coverage);
+  return coverage != null && coverage <= FRAMING_MAX_COVERAGE;
+}
+
+/** The canvas a readiness goal is really pricing, or `null` to leave the
+ * verdict exactly as it is.
+ *
+ * "goal ~2 h · 1 min of ~2 h — a good start" is true of the single field it
+ * measures, and it sat an inch under "Shooting it in mosaic mode next session
+ * is the biggest win here" and "…is about 18 h of shooting". Nobody is being
+ * told to point two ways — but a beginner asking *how much more do I need?*
+ * got **~2 h** from the card whose whole job is answering that, about a canvas
+ * the same screen had just recommended replacing.
+ *
+ * So the number stays (it is not wrong, and the mosaic is a genuinely different
+ * target — the Seestar writes its subs to `<T>_mosaic_sub/`, so a card that
+ * silently switched to 18 h would price a canvas the owner does not have and
+ * break its own "of your total exposure" arithmetic). What it gains is the
+ * scope it always assumed: *"1 min of ~2 h **for this single field** — a good
+ * start"*. One clause, on the card that already exists, and only where the page
+ * has **measured** a fragment — not on every oversized object, which would put
+ * a new clause on a card a big-object owner sees constantly.
+ */
+export function readinessCanvasScope(
+  v: NextBestMoveFraming | null | undefined,
+): string | null {
+  if (!framingIsFragment(v)) return null;
+  return v?.canvas === "mosaic" ? "this mosaic" : "this single field";
+}
+
 /** The `framing` rung, or `null` when this run's framing isn't the top lever.
  *
- * Silent unless the verdict is `partial` — the one verdict whose fix is more
- * sky rather than a better pointing — *and* the measured coverage is under
- * `FRAMING_MAX_COVERAGE`, *and* the backend served the friendly percentage the
- * sentence names (an older one didn't, and re-rounding it here is exactly the
- * drift the shared number exists to prevent). Any of those missing leaves the
- * ladder byte-for-byte what it was.
+ * Silent unless the verdict names a fragment (`framingIsFragment`) *and* the
+ * backend served the friendly percentage the sentence names (an older one
+ * didn't, and re-rounding it here is exactly the drift the shared number exists
+ * to prevent). Either missing leaves the ladder byte-for-byte what it was.
  *
  * The sentence repeats the framing card's measurement rather than pointing at
  * it, which the standing IA rule would normally discourage — but `NoticeBoard`
@@ -229,11 +277,9 @@ function finite(v: number | null | undefined): number | null {
  * worse than a repeated percentage.
  */
 function framingRung(v: NextBestMoveFraming | null | undefined): NextBestMove | null {
-  if (!v || v.level !== "partial") return null;
-  const coverage = finite(v.coverage);
+  if (!v || !framingIsFragment(v)) return null;
   const pct = finite(v.coverage_pct);
-  if (coverage == null || pct == null) return null;
-  if (coverage > FRAMING_MAX_COVERAGE) return null;
+  if (pct == null) return null;
   // The catalogue's friendly name when there is one; otherwise say it without,
   // never "undefined is bigger than your frame".
   const name = (v.object_name ?? "").trim();

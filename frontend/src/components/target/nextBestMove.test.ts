@@ -6,6 +6,7 @@ import {
   SHORT_INTEGRATION_S,
   DEEP_INTEGRATION_S,
   FRAMING_MAX_COVERAGE,
+  readinessCanvasScope,
   type NextBestMoveKind,
 } from "./nextBestMove";
 import { integrationReadiness, type ReadinessLevel } from "../../readiness";
@@ -688,6 +689,61 @@ describe("nextBestMove", () => {
       });
       expect(tip?.phrase).toContain("this target");
       expect(tip?.phrase).not.toContain("undefined");
+    });
+  });
+
+  describe("readinessCanvasScope", () => {
+    // The readiness card prices "is it enough yet?" against the canvas in front
+    // of it. On a fragment that is the canvas this ladder has just said to stop
+    // shooting, so the two have to agree about *which* canvas — which is why
+    // they share `framingIsFragment` rather than two copies of the constant.
+    const partial = (coverage: number, canvas?: "frame" | "mosaic") => ({
+      level: "partial", coverage, coverage_pct: 20, canvas,
+      object_name: "Orion Nebula",
+    });
+
+    it("names the single field a measured fragment was shot on", () => {
+      expect(readinessCanvasScope(partial(0.15, "frame")))
+        .toBe("this single field");
+    });
+
+    it("names the mosaic when that is the canvas that fell short", () => {
+      expect(readinessCanvasScope(partial(0.55, "mosaic"))).toBe("this mosaic");
+    });
+
+    it("reads an older backend's missing canvas as a single frame", () => {
+      // `canvas` is additive; before it existed every verdict was about one
+      // frame, which is what the framing note's own headings assume too.
+      expect(readinessCanvasScope(partial(0.15))).toBe("this single field");
+    });
+
+    it("stays silent on a well-framed target, so an ordinary card is untouched", () => {
+      // The 95 %-captured case: `partial` fires on any object bigger than its
+      // canvas, and scoping the goal there would put a new clause on a card a
+      // big-object owner sees constantly.
+      expect(readinessCanvasScope(partial(0.95, "frame"))).toBeNull();
+      for (const level of ["centred", "off_centre", "clipped"]) {
+        expect(readinessCanvasScope({ ...partial(0.15, "frame"), level }))
+          .toBeNull();
+      }
+      for (const v of [null, undefined, {}, { level: "partial" }]) {
+        expect(readinessCanvasScope(v)).toBeNull();
+      }
+    });
+
+    it("turns on exactly the bar the coaching card turns on", () => {
+      // One gate, asked twice — a page that scoped the goal at a coverage the
+      // coaching card stayed quiet about would be the same contradiction with
+      // the cards swapped.
+      expect(readinessCanvasScope(partial(FRAMING_MAX_COVERAGE, "frame")))
+        .toBe("this single field");
+      expect(readinessCanvasScope(partial(FRAMING_MAX_COVERAGE + 0.01, "frame")))
+        .toBeNull();
+    });
+
+    it("declines a non-finite coverage rather than scoping from nothing", () => {
+      expect(readinessCanvasScope({ ...partial(0.15, "frame"), coverage: NaN }))
+        .toBeNull();
     });
   });
 });
