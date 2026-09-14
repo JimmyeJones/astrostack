@@ -102,6 +102,103 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   must be re-entrant — a `reprocess_all` that yields must resume where it stopped, not restart. Measure the
   import's actual wall time on the owner's library before deciding a yield is worth the complexity.
 
+- **🟠 BUG (autonomy / data-integrity, Scout 2026-09-14 — mechanism traced end-to-end from observer issue
+  [#878](https://github.com/JimmyeJones/astrostack/issues/878)) — a mosaic's raw-subs folder is minted as a
+  SECOND, hash-suffixed target because `make_safe_name("<T> (mosaic)")` collides with the on-device-output
+  target's `<T>_mosaic`, so the same subs are QC'd, solved and stacked twice.** *(Pillar: autonomy —
+  PRIORITY 2; size L; **architectural + touches on-disk layout — do not blind-take it**. Severity: medium
+  — no image is wrong, but 76 % of the owner's frames (41,732 of 54,681) are double-registered, doubling
+  CPU/disk on a box with a recorded OOM history, and the Library shows two entries per mosaic. Confidence:
+  **mechanism TRACED and arithmetic-verified**; owner-side counts **measured** by the observer.)*
+  **Root cause, confirmed by computing the hashes:** `mosaic_target_name` names a mosaic subs folder
+  `<T>_mosaic_sub/` → display `"<T> (mosaic)"`, and `make_safe_name("<T> (mosaic)")` collapses the spaces
+  and parens to `_` and strips them, yielding safe stem `<T>_mosaic` — *identical* to the safe stem of the
+  Seestar's on-device output folder `<T>_mosaic/` (display `"<T>_mosaic"`, safe `<T>_mosaic`). Since the
+  output folder is ingested as its own target (see #880), `<T>_mosaic` is already owned by a *different*
+  display name, so `Library._allocate_safe_name` (`seestack/io/library.py:427`) disambiguates with
+  `sha1("<T> (mosaic)")[:8]` → `<T>_mosaic-<hex>`. Verified: `sha1("73 Leonis (mosaic)")[:8] == "328c48ae"`
+  and `sha1("Alphecca (mosaic)")[:8] == "c7bed385"`, both exactly matching the observer's minted targets.
+  The 11 targets all being created in one 2026-07-25 3-minute window is the convention-upgrade re-scan that
+  first applied `"<T> (mosaic)"` naming to folders an older scan had ingested under their raw folder name
+  (`<T>_mosaic_sub` → display `"<T> mosaic_sub"` → safe `<T>_mosaic_sub`) — which is the OTHER member of each
+  pair the observer lists. **Second, correctness-adjacent consequence Scout adds:** the *old* duplicate
+  (`<T>_mosaic_sub`, named `"<T> mosaic_sub"`) does **not** end in `" (mosaic)"`, so
+  `is_mosaic_target_name` (`seestack/io/scanner.py:87`) classifies it as a **single field** and stacks the
+  mosaic subs in single-field mode — a genuinely wrong stack sitting in the library, not just clutter.
+  **Code location:** `seestack/io/library.py:446` (`_allocate_safe_name` collision → hash suffix),
+  `library.py:195` (`make_safe_name` lossy collapse of `" (mosaic)"`≡`"_mosaic"`), `scanner.py:82`
+  (`mosaic_target_name`), `scanner.py:113` (`_seestar_target_name`). **Repro:** `sha1("<T> (mosaic)")[:8]`
+  reproduces every `-<hex>` suffix; and `make_safe_name("X (mosaic)") == make_safe_name("X_mosaic")` for any
+  X. **Why NOT a drive-by:** the obvious fix — give a mosaic target a distinct safe stem — changes on-disk
+  paths for existing installs (§9 forbids), and de-duplicating the 11 existing pairs is a merge migration
+  that must never touch `incoming/` (§10) and must keep the more-complete target. **Note the strong link to
+  #880:** if the bare `<T>_mosaic/` on-device output were skipped at ingest (as single-field `<T>/` output
+  already is), the stem `<T>_mosaic` would be free and the subs target would claim it cleanly with no hash
+  suffix — so fixing #880's classification gap *prevents this collision going forward* (it does not un-mint
+  the existing 11). Sensible first slice for the Builder: (1) make `_seestar_output_bases` recognise the
+  mosaic output naming so `<T>_mosaic/` is skipped, closing recurrence; then (2) a separate, owner-sign-off
+  merge pass for the existing duplicates. Do NOT ship a `make_safe_name` change that moves live folders.
+
+- **🟡 BUG (friendliness + autonomy, Scout 2026-09-14 — verified from observer issue
+  [#880](https://github.com/JimmyeJones/astrostack/issues/880)) — a raw Python exception repr is stored as a
+  user-facing `reject_reason`, and QC-error frames stay `accept=1`, so 11 mosaic-output-only targets sit in
+  the library as accepted-but-unstackable.** *(Pillar: friendliness — PRIORITY 3; size S–M. Severity: low —
+  no image damaged, no stack polluted (observer ruled out pollution: the 54 frames are in bare `<T>_mosaic`
+  targets with zero stack_runs, disjoint from the real `<T>_mosaic_sub` targets). Confidence: **traced** to
+  the exact lines.)* Three distinct, separable defects: **(a)** `qc/runner.py:113` stores
+  `reject_reason = f"{reason}:{result.error or 'unknown'}"`, and `result.error` is the raw exception string
+  from `fits_loader.py:219` (`ValueError: expected 2D Bayer array, got shape (3, 3840, 2160)`) — a Python
+  repr shown wherever a reject reason surfaces, against a namespaced vocabulary everywhere else
+  (`auto:grade:fwhm_px`, `auto:seestar_output`). The cheap, independently-correct fix: store a namespaced
+  code (`qc_error:unsupported_layout`) and keep the exception text in a detail column, so no surface ever
+  shows a repr. **Care:** `reject_reason.startswith("qc_error")` is matched in `rejection_summary.py:82`,
+  `session_recap.py:91`, `stackhealth.py:520`, `solve/runner.py`, `project.py:1319` — the prefix must be
+  preserved, and the 135 existing rows carrying the old format must still bucket correctly (add a migration
+  or a read-time normaliser; do not rewrite rows in place without a test). **(b)** QC error leaves `accept`
+  untouched (`apply_qc_result_to_db` sets only `reject_reason` when `metrics is None`) — combined with the
+  mosaic-output classification gap (`scanner.py:377` skips mosaics in `_seestar_output_bases`), the 54
+  device-output frames stay `accept=1` and count as accepted for 11 targets no stack can ever use. **(c)**
+  the classification gap itself is the same one #878 turns on — fixing it (recognise `<T>_mosaic/` device
+  output and reject/skip it like single-field output) closes both the accepted-clutter here and #878's hash
+  collision. (a) is the safe small win; (b)/(c) are the shared mosaic-output work.
+
+- **🟡 BUG (correctness / trust, Scout 2026-09-14 — verified from observer issue
+  [#877](https://github.com/JimmyeJones/astrostack/issues/877)) — `stack_runs.preview_crop_json` is NULL on
+  all 614 runs, but 42 stored preview PNGs are baked *crops* of their canvas, so every consumer places
+  overlay geometry on a canvas the picture does not show.** *(Pillar: image-quality / trust — PRIORITY 4;
+  size M. Severity: medium — silent misplacement, but on **superseded** runs only: all 77 *current* target
+  previews match their canvas AR within 2 %, observer-verified. Confidence: **measured** — 42 PNG IHDR
+  dims reconciled to the runs' saved crop rectangles to within a pixel.)* NULL is contractually "plain
+  full-canvas downscale" (`seestack/previewcrop.py` docstring), so `parse_preview_crop(None)` returns None
+  and `preview_orient.py:83`, `routers/stack.py` (887/1312/1405/1937/2298/4150/4253/4477/4556) and
+  `routers/sky.py` (177/397) proceed on the full canvas. Written by `webapp/pipeline.py:3508`
+  `_preview_crop_json_for_recipe`, which postdates these runs. **Fix (observer's, sound):** a backfill is
+  safe here because the value is derivable from data already on disk — the PNG's dims vs `canvas_w/canvas_h`,
+  or `preview_crop_of_recipe` over the saved recipe — and `UNKNOWN` (already a `parse_preview_crop` state
+  meaning "decline to place geometry") is the right answer when a recipe can't reduce to a plain crop.
+  **Check first (scopes the work down):** whether History actually offers a geometry overlay on a superseded
+  run in today's UI — if not, exposure is smaller than the code survey implies and a lazy `UNKNOWN`-at-read
+  may suffice over a migration.
+
+- **⚪ BUG (trust, Scout 2026-09-14 — verified from observer issue
+  [#876](https://github.com/JimmyeJones/astrostack/issues/876)) — 42 saved edit recipes on 35 targets carry
+  the old over-aggressive auto-crop (worst keeps 2.91 % of canvas), and `_load_saved_recipe` serves each
+  back verbatim; 41 of 42 violate the D1 fix's own `TRIM_KEEP_RATIO = 0.8` against their run's coverage
+  bound.** *(Pillar: trust — PRIORITY 1-adjacent (editor) / 4; size S. Severity: low-to-medium — **no live
+  picture is cropped** (observer ruled out three ways: 0/77 live previews cropped, `_target_pick` lands on
+  an uncropped run for all 35, `cover_stack_run_id` NULL on all 89). Exposure is: open History → an older
+  run → the editor loads a 3–70 % crop as "your saved edit", and every export/share/wallpaper from that run
+  renders it. Confidence: **measured and traced**.)* Will **not** self-heal: `pipeline.py:3627`'s
+  unattended auto-edit refuses to overwrite a recipe lacking an `editor_auto_baked_look:` stamp (the stamp
+  postdates these 42), treating each as the user's own work — the guard is correct, the consequence is
+  permanence. **Fix (observer's, and the right shape):** do NOT rewrite the 42 recipes (that breaks the same
+  promise the `_baked_look` guard keeps). Instead make `_load_saved_recipe` / the editor recipe response
+  **flag** a saved crop whose kept area is below `TRIM_KEEP_RATIO` of the run's coverage bound and offer
+  "re-trim this" — both numbers are already computable from the sibling coverage map `_trim_rect_for_run`
+  (`webapp/routers/editor.py:294`) reads. **Do NOT re-open the trim algorithm** on the strength of the low
+  absolute percentages: the observer's control shows today's trim sits at 0.81–1.00 of its coverage bound on
+  the owner's *current* runs; the low numbers are sparse union canvases, not over-trimming.
+
 - **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
   question is closed unanswerable. Read before prioritising the audit's items.**
   - **The pre-D1 saved-recipe crop (⭐ item below — ✅ IT HAS SINCE SHIPPED, don't go looking for it; all three
@@ -2292,6 +2389,38 @@ missing. Don't re-file it.)*
 *(The Scout's 2026-09-12 "draw the full Moon to scale" entry shipped as v0.432.0 and was cut to
 [`SHIPPED.md`](SHIPPED.md) — `ScaleBar.moon_fraction` + `skymarks._moon_disc_box` + `frontend/src/moonDisc.ts`,
 off by default. Don't re-file it.)*
+
+- **🌟 NEW BEGINNER FEATURE (Scout 2026-09-14, grounded in observer issue
+  [#883](https://github.com/JimmyeJones/astrostack/issues/883)) — "N subs are in your incoming folder but
+  not in your library yet" — the self-reporting count the observer explicitly asked for.** *(Pillar: get +
+  autonomy/trust — PRIORITY 2–3; size L overall, but the first slice is M. Beginner bar: clears it — a
+  non-expert whose whole setup is "shoot and the library catches up" gets told, in plain language, when it
+  hasn't.)* **The gap this fills, and why v0.441.1 does not fill it:** v0.441.1's `import_waiting`
+  (`webapp/jobqueue.py`) only fires when a `pipeline` job is actually **queued** and has waited > 2 h. But
+  the observer's real box shows the broader failure — 2,259 subs from two nights on disk and in **no**
+  `frames` table — and the queue is only *one* of the ways that happens. The others (`#883` lists them: the
+  watcher never re-offering a folder walked during a job that later died; a scan-side error swallowed before
+  a row is written; a classification skip like `#880`'s mosaic-output gap) leave **nothing queued**, so
+  `import_waiting` stays silent. The only signal that catches all of them is the direct one: files under
+  `incoming/` that no target has a frame row for. The failure is silent by construction — a frame never
+  registered has no QC row, no reject reason, and nowhere in the record it can be *seen* to be absent — so
+  the owner keeps shooting targets whose stacks quietly stop improving. **Beginner-facing shape:** a
+  self-hiding Dashboard note beside the existing `NoticeBoard` (inside the grouping, per the IA priority —
+  NOT a new always-on banner): *"About 2,259 new subs are in your incoming folder that aren't in your
+  library yet — from your last 2 observing nights. Nothing is lost; your subs are safe. AstroStack usually
+  imports these automatically — [Scan incoming now]."* **Hard constraints (§10, non-negotiable):** the count
+  is a **read-only** walk of `incoming/` — the scanner already globs it read-only; reuse that path, never
+  add a write. And it must be **cost-bounded**: the owner's `incoming/` holds 57,035 `.fit` across 104
+  folders, so a full glob-and-diff on every Dashboard load is out. **First slice (M, the safe one):** put it
+  behind the existing `/api/library-progress`-style 60 s roll-up cache (or an explicit "check" button, the
+  pattern v0.402-era storage checks used), compare a cheap **per-folder file count** against each target's
+  registered `source_path` count rather than hashing every path, and report at folder granularity
+  (*"IC 360_sub: 617 of 2,572 not imported yet"*). **Care:** dedupe against `#878` (a folder registered in
+  two targets must not read as double-imported), and treat `library_meta.unvouched_skipped_folders` and the
+  Seestar on-device-output skip (`#880`) as *deliberately* held back, not as lag — otherwise the note cries
+  wolf on the 95 `Stacked_*` strays the observer already accounts for. Additive, read-only, self-hiding at
+  zero; no config/schema/on-disk/default change. This is the observer's own fourth suggested check, and it
+  is the one surface that would have made his eleven-day stall self-reporting from day one.
 
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
