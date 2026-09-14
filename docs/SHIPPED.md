@@ -1,5 +1,69 @@
 # Shipped — the record
 
+## v0.444.3 — 2026-09-14 — the incoming-lag note stops guessing at a cause the note above it has measured, and stops offering a scan that cannot help
+
+*(Builder, branch `claude/sweet-babbage-wrud4o` — 🟡 PRIORITY 3 (friendliness) + PRIORITY 2 (autonomy),
+found by reading the Dashboard's notice board as one paragraph rather than note by note. Frontend-only; no
+backend, config, schema, on-disk, API or default change.)*
+
+**The two notes, on the owner's own reported event.** `StuckImportNote` (v0.441.1) and `IncomingLagNote`
+(v0.442.0) were built the same day from the same observer report — 2,259 subs sitting in `incoming/` for
+eleven days. They describe that one event from opposite ends, both rank `NOTICE_PRIORITY.warning`, they are
+ranked adjacent in `Dashboard.tsx`, and `NoticeBoard`'s `inlineCount` is **2**. So the case they exist for is
+exactly the case where they are the two notes a beginner reads, one above the other, and nothing else is
+inline. Read that way they did three things wrong, none of which is visible from inside either file:
+
+1. **A guess sitting under a measurement.** The upper note said *"importing your new frames has been waiting
+   11 days behind “Reprocessing all targets”, which has been running for 11 days"* — a fact, with a duration,
+   off `/api/jobs/queue-health`. The lower one then said *"It normally imports new files by itself within a
+   few minutes, so this **usually means** an import is still waiting its turn behind another job."* The app
+   knew; the second note was hedging about it anyway.
+2. **Contradictory instructions, an inch apart.** The upper note's body ends *"Let it finish, or cancel it on
+   the Jobs page to let the import through."* The lower one's only button was **"Scan incoming now"**, and
+   `POST /api/scan` does not de-duplicate (`submit_pipeline` → `jm.submit("pipeline", …)` unconditionally) —
+   the worker is serial, so pressing it enqueues a **second** import behind the very job the note above asks
+   you to let through, then navigates to Jobs to watch it not start.
+3. **The reassurance said twice.** *"Nothing is lost — your subs are safe in your incoming folder"* and
+   *"Nothing is lost — your subs are safe exactly where they are"*, in consecutive notes, on a board whose
+   whole design is that only two notes fit (the standing "extremely busy" owner priority, AGENTS.md §1).
+
+**The fix reads the queue instead of guessing, at zero cost.** `incomingLagCause(waiting)` and
+`importIsWaiting(waiting)` join `importWaiting.ts` — which already exists so that two surfaces cannot make
+two claims about one queue, which is precisely the failure here. `importIsWaiting` is deliberately *the same
+predicate* `importWaitingNote` returns non-null on rather than a second reading of `waiting_hours`: one note
+may only defer to another if the two ask the identical question, and a test walks the boundary
+(70/24/1/0.5/0/−3/NaN hours) asserting they agree at every rung. `IncomingLagNote` reads it from a
+`useQuery` on the **same key and options** the sibling already uses (`["job-queue-health"]`, `refetchInterval`
+60 s, `staleTime` 30 s), so the two share one cache entry: no second request on a polling page, and no way
+for them to hold different opinions.
+
+**Both branches are honest, and neither invents anything.** With an import queued: the wait is quoted from
+the queue (*"An import is already queued and has been waiting 11 days for AstroStack's one job slot, so these
+are on their way in rather than overlooked. Starting another scan would only add a second job behind it."*),
+the button becomes **Open Jobs** so the pair points one way, and the duplicated reassurance is withheld.
+With nothing queued the old sentence was simply **wrong about the cause** — so it now says so
+(*"…and nothing is queued waiting to run — so a scan is what picks these up"*) and the scan button is
+genuinely earned rather than offered on a hunch.
+
+**Nothing was removed** (the owner's rule): every sentence and every count this note carried is still on the
+screen — the folder names, the `N of M not imported` lines, the "and K more", the duration, the reassurance —
+the only difference is that the reassurance is now said **once** across the two notes instead of twice, which
+is consolidation rather than removal, and the one sentence that changed was the one that was guessing.
+
+**Upgrade-safe (§9):** frontend-only. A backend with no `/api/jobs/queue-health` (the read is `.catch(() =>
+null)`) lands in the scan branch, which is byte-for-byte today's note — pinned by its own test.
+
+**Tests (+9).** 6 unit in `importWaiting.test.ts` (the predicate agrees with `importWaitingNote` at every
+rung; `null`/`undefined` answer false; the queued branch quotes the wait, drops "usually means", and
+withholds the scan; the reassurance is empty when queued and present when not; the empty-queue branch never
+claims a wait it cannot see) and 3 rendered in `IncomingLagNote.test.tsx` (the queued case: no
+"Scan incoming now", an "Open Jobs" link, `api.scan` never called, and the folder detail still all there; the
+quiet-queue case says so in words; and an older backend keeps today's wording and button). All three rendered
+tests were **reverted-and-watched-fail** before the fix, per AGENTS.md §8. The existing
+"offers a scan, which is the only action and is always safe" was renamed to name its precondition — the same
+assertion, not a loosened one — and the file's `beforeEach` now mocks a healthy queue explicitly rather than
+leaving the branch to a failed jsdom fetch.
+
 ## v0.444.2 — 2026-09-14 — the readiness card now says which canvas its goal is for
 
 *(Builder, branch `claude/sweet-babbage-t0x3rf` — 🟢 PRIORITY 3 (friendliness), the LEAD filed by the run that
