@@ -124,7 +124,8 @@ def test_without_a_fresh_listing_it_declines_to_answer(built_library, client):
     assert client.get("/api/incoming-lag").json()["n_waiting"] == 1
 
     watcher = client.app.state.watcher
-    watcher._incoming_polled_at = time.time() - SNAPSHOT_MAX_AGE_S - 1
+    units, _ = watcher.incoming_units()
+    watcher._incoming_reading = (units, time.time() - SNAPSHOT_MAX_AGE_S - 1)
     body = client.get("/api/incoming-lag").json()
     assert body["checked"] is False
     assert body["n_waiting"] == 0

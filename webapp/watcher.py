@@ -140,10 +140,14 @@ class Watcher:
         self._thread: threading.Thread | None = None
         self._observer = None  # watchdog observer, if available
         # The last poll's reading of `incoming/`, as the units a scan would
-        # build from it (see `incoming_units`). Recorded here because this poll
-        # is the only thing in the app that already holds that listing.
-        self._incoming_units: list[PlannedUnit] | None = None
-        self._incoming_polled_at: float = 0.0
+        # build from it, paired with when it was taken (see `incoming_units`).
+        # Recorded here because this poll is the only thing in the app that
+        # already holds that listing. **One field, holding both halves**: it is
+        # written on the watcher thread and read on a request thread, and a pair
+        # of fields could be read mid-update — a fresh timestamp over a stale
+        # listing, which is the one combination that would let the note name a
+        # folder that has since been imported.
+        self._incoming_reading: tuple[list[PlannedUnit], float] | None = None
         s = get_settings()
         self._tracker = StabilityTracker(
             getattr(s, "watch_quiet_period_s", 30), time_fn=self._time
@@ -164,7 +168,11 @@ class Watcher:
         not a new cost. Read-only, like everything else that touches that tree
         (AGENTS.md §10).
         """
-        return (list(self._incoming_units or []), self._incoming_polled_at)
+        reading = self._incoming_reading
+        if reading is None:
+            return ([], 0.0)
+        units, at = reading
+        return (list(units), at)
 
     @staticmethod
     def _default_stat(path: Path) -> tuple[int, float] | None:
@@ -248,8 +256,7 @@ class Watcher:
         except Exception:  # noqa: BLE001 — a report must never break the import
             log.exception("could not group the incoming listing")
             return
-        self._incoming_units = units
-        self._incoming_polled_at = self._time()
+        self._incoming_reading = (units, self._time())
 
     def poll_once(self) -> set[str]:
         """One poll. Returns newly stable paths and fires the batch callback."""
@@ -260,8 +267,7 @@ class Watcher:
             # No listing rather than an empty one: a folder that cannot be found
             # is a different problem, with its own note, and answering "nothing
             # is waiting" from it would be a claim this poll cannot make.
-            self._incoming_units = None
-            self._incoming_polled_at = 0.0
+            self._incoming_reading = None
             return set()
         snapshot: dict[str, tuple[int, float]] = {}
         for p in find_fits_files(incoming):
