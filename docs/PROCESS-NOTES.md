@@ -18,6 +18,64 @@ is a queue.
 
 ---
 
+## 2026-09-14 (Builder, branch `claude/sweet-babbage-t0x3rf`) — a red baseline that was the harness again, the readiness scope clause, and a clean `--mosaic` sweep
+
+**Baseline: RED, and it was not `main`.** `main` at `ad167d3f` (v0.444.0). The full suite (`-n 4` + BLAS cap,
+**9m26s** on this 4-core box) came back `1 failed, 6090 passed, 2 skipped` —
+`tests/webapp/test_editor.py::test_export_print_is_fitted_to_the_paper_and_carries_its_dpi`, failing on
+`AssertionError: job did not finish in time`. §2 makes that the run's first task, so it was, but the first
+thing it needed was a diagnosis rather than a fix.
+
+**The tell was the same family as the three traps already in AGENTS.md §7, in a fourth costume: the failure
+is in the *wait*, not in any assertion.** Every claim that test makes about the printed file is checked after
+`_wait_job` returns. Measured before anything was touched: the same test passes in **6.3 s** alone and
+**11.1 s** under six busy CPUs — and `git show --stat` on the two commits that landed just before it
+(v0.443.0, v0.444.0) touches neither `webapp/jobs.py` nor the export path, only `pipeline.submit_reprocess_all`
+and a pure helper. So it was a starved xdist worker, not a regression.
+
+**What was genuinely wrong is worth carrying forward: `tests/webapp` has fourteen hand-rolled `_wait_job`
+helpers, and their budgets range from 30 to 180 seconds with no stated reason.** `test_editor.py` held the
+lowest of the fourteen (30.0) while waiting on the heaviest jobs of the lot — the editor's *print* export
+renders onto a whole sheet of paper. Raised to the 120.0 the two sibling export modules already use
+(v0.444.1), with the measurement written down beside it so it is not tidied back down. **The general lesson:
+a `_wait_job` timeout is a liveness bound on a test helper, not an assertion — but it is also the one number
+in a test file that a starved worker can turn into something indistinguishable from a red `main`.** If
+another module's budget ever fires, check its isolated runtime before believing it.
+
+**Shipped:** v0.444.1 (above) and **v0.444.2** — the readiness card now names the canvas its goal is for, from
+the LEAD the v0.443.0 run filed. Entries in [`SHIPPED.md`](SHIPPED.md).
+
+**The lead's "check first" was already answered by the previous run's own measurement, which is the part worth
+recording.** The lead asked *"how often does a `partial` verdict co-occur with a readiness card? If it is most
+of the owner's big-object library, (a) puts a new clause on a card he sees constantly."* That is the identical
+question v0.443.0 answered when it chose `FRAMING_MAX_COVERAGE` over the bare verdict — `partial` fires on any
+object bigger than its canvas, 95 %-captured included. So the answer cost nothing to look up, and the gate is
+now **one predicate asked twice** (`framingIsFragment`) rather than a second copy of a constant: a card that
+scoped the goal at a coverage the coaching card stayed quiet about would be the same contradiction with the
+cards swapped. **When a lead says "check first", grep the entry that set the neighbouring threshold before
+designing a measurement — twice now the number was already in the tree.**
+
+**Dogfood, `--mosaic` — CLEAN, and it is where the change was verified rather than merely asserted.** Auto's
+trim on the generated 2×2 was **7.9 %** (well under the 15 % bug bar). The new clause renders on both samples:
+*"1 min of ~2 h **for this single field** — a good start"* and *"4 min of ~7.3 h **for this mosaic** — a good
+start"*. Page heights unmoved — phone `/tonight` 3,591 px, the single-field Target page 3,287 px, the mosaic
+Target page 3,572 px, `/` 3,132 px — i.e. identical to the previous run's standings, which is the point: the
+clause lives inside a sentence the card already rendered, so no page got taller. Nothing overflowing, no
+console errors.
+
+**Read as one paragraph, the Target page now holds together on both samples** — the coaching card, the
+readiness card, the grain projection and the framing note all agree about which canvas is being talked about,
+which was the whole complaint. **One new lead came out of reading it that way** and is filed under "Autonomy &
+friendliness": the mosaic effort clause prices a 3×3 *from scratch* on a target that is already a 2×2, and
+`mosaicDepthText`'s own stand-down (*"a few minutes against a figure in hours"*) was argued for a target the
+owner has not started. It is real-data-gated — whether a 3×3's panel centres contain a 2×2's is not something
+this repo can answer — so it is filed with the measurement to take, not built.
+
+**Backlog state, for the next Builder.** Unchanged in shape from the last run's note: "Bugs (fix these first)"
+is entirely gated, stood-down-with-numbers, or owner-sign-off, and the Ideas lists are mostly closed entries.
+**Two shipped tasks and a clean sweep was the honest count**, and the one lead filed is a lead rather than a
+task for a reason.
+
 ## 2026-09-14 (Builder, branch `claude/sweet-babbage-kjaxp8`) — two shipped, a clean `--mosaic --editor` sweep, and the pytest trap that costs 22 phantom failures
 
 **Baseline.** `main` at `74082f51` (v0.442.1). Full suite green (`-n 4` + BLAS cap, 11m57s).

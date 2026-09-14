@@ -61,6 +61,60 @@ describe("integrationReadiness", () => {
     );
   });
 
+  it("scopes the verdict to the canvas when the page has measured a fragment", () => {
+    // The contradiction this closes, photographed on the bundled single field:
+    // "1 min of ~2 h — a good start" an inch under "Shooting it in mosaic mode
+    // next session is the biggest win here" and "about 18 h of shooting". The
+    // goal is right for the canvas it measures; it just never said which canvas.
+    expect(
+      integrationReadiness(1.8 * H, "galaxy", null, null, null, "this single field")
+        ?.verdict,
+    ).toBe(
+      "1.8 h of ~6 h for this single field — a solid start — keep going to "
+      + "pull out fainter detail.",
+    );
+    expect(
+      integrationReadiness(1.8 * H, "galaxy", null, null, null, "this mosaic")
+        ?.verdict,
+    ).toBe(
+      "1.8 h of ~6 h for this mosaic — a solid start — keep going to pull out "
+      + "fainter detail.",
+    );
+  });
+
+  it("replaces the noun on `plenty`, where the claim is about the object", () => {
+    // "plenty for a clean image of this target" is the one phrase that makes a
+    // claim about the *object* rather than the picture — on a fragment it is
+    // not merely unscoped, it is false.
+    expect(
+      integrationReadiness(8 * H, "galaxy", null, null, null, "this single field")
+        ?.verdict,
+    ).toBe("8.0 h — plenty for a clean image of this single field.");
+    expect(integrationReadiness(8 * H, "galaxy")?.verdict)
+      .toBe("8.0 h — plenty for a clean image of this target.");
+  });
+
+  it("leaves every caller without a scope byte-for-byte unchanged", () => {
+    // Only the Target page has a framing verdict to hand; the planner rows, the
+    // Dashboard and the library roll-up must read exactly as they always did.
+    for (const seconds of [0.5 * H, 1.8 * H, 5 * H, 8 * H]) {
+      const before = integrationReadiness(seconds, "galaxy");
+      for (const scope of [null, undefined, "", "   "]) {
+        expect(integrationReadiness(seconds, "galaxy", null, null, null, scope))
+          .toEqual(before);
+      }
+    }
+  });
+
+  it("scopes the sentence without moving the number", () => {
+    const plain = integrationReadiness(1.8 * H, "galaxy");
+    const scoped =
+      integrationReadiness(1.8 * H, "galaxy", null, null, null, "this mosaic");
+    expect(scoped?.goalHours).toBe(plain?.goalHours);
+    expect(scoped?.fraction).toBe(plain?.fraction);
+    expect(scoped?.level).toBe(plain?.level);
+  });
+
   it("uses a positive user goal override instead of the per-type default", () => {
     // A galaxy defaults to 6 h; the user wants 10 h → the goal and verdict follow.
     const r = integrationReadiness(5 * H, "galaxy", 10);
