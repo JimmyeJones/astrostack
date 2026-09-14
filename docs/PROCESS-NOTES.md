@@ -18,6 +18,55 @@ is a queue.
 
 ---
 
+## 2026-09-14 (Builder, branch `claude/sweet-babbage-fkwilc`) — the observer's first two findings, drained the same night
+
+**Baseline.** `main` at `715d82c5`, green (6,012 passed / 2 skipped, **839 s** with the BLAS cap + `-n 4`). It
+moved once mid-run, to `8a547026` — docs only, and it is what this run's whole task list came from (see below).
+No collision; `0.440.3` and `0.441.0` were free at merge time.
+
+**The task list arrived while the baseline was running, and that is the point worth recording.** The run began
+with the backlog in the state three previous runs had described it in: the "Bugs" section is owner-gated,
+real-data-gated or closed-with-measurements, and "Features that serve real workflows" has one open entry, which
+is itself gated on a dataset the app must not add. Then `8a547026` landed on `main` at 02:17 — the commit that
+stands up the **on-NAS observer account** — carrying **two verified findings** with it, one at the top of "Bugs
+(fix these first)" and one in "Infra". Both were built and shipped this run (`v0.440.3`, `v0.441.0`).
+
+So the observer's first output was a run's worth of work on a night whose backlog was otherwise dry, and both
+items had the property the gated ones don't: **they were measured against the real install**, which is the one
+thing no agent in this container can do. Worth knowing when the next run finds the backlog thin — check
+`git log origin/main` for a fresh `docs:` commit before concluding there is nothing ready. (And §11's
+"treat a freshly filed entry as claimed-in-spirit" cuts the other way here: with nothing else ready, the
+alternative was an idle run. Fetched again before the first line of each task, per that section's own advice.)
+
+**Both findings reproduced in this container before a line changed**, and both reproductions were worth the
+minutes. For `v0.440.3` the filed thread census (1 → 2 → 3 stale `seestar-poll` threads over
+`test_incoming_readonly_guard.py`) replayed exactly, which meant the after-number (0 at every test) was a
+comparison rather than a claim; the first draft of the census read the *live* app's threads because
+`pytest_runtest_teardown` runs before the function-scoped fixture's own teardown — `pytest_runtest_setup` is
+the hook that sees what the *previous* test left behind. For `v0.441.0` the entry demanded verification against
+a really-running app, and that found the thing the TestClient cannot: the env var is `ASTROSTACK_DATA`, not
+`ASTROSTACK_DATA_ROOT`, so a scratch run silently used the container's own `/data`.
+
+**A dogfood pass (`--mosaic --editor`) came back CLEAN, on both samples.** No console errors, nothing
+overflowing at 1440 px or 420 px, all 21 ops re-rendering the live preview plus undo/redo on the field sample
+*and* on the mosaic. Mosaic trim **7.9 %** (well under the 15 % D1 bar). Page heights: `/tonight` 3,680 px
+phone (up from 3,578 at v0.437.0 — worth a look if it keeps climbing), the mosaic Target page 3,592 px, `/`
+3,095 px, `/life-list` 3,094 px.
+
+**Two things the probe's own output prompted, recorded so they are not re-derived:**
+
+* **`thin=False` beside a health note about a thin panel is *not* a contradiction** — I went looking. The
+  panel map has three states, not two: `thin` (materially thinner *and* behind by enough to be worth a night),
+  `behind` (thinner by the same fraction but by minutes), and even. The sample is `behind`, the probe's
+  `thin=%s` line prints only the first, and `_verdict_text`'s `behind` branch and the health note already share
+  `format_duration` and the same closing clause — deliberately, per the comment there. The probe line is
+  coarse, not wrong; don't file it.
+* **The coaching card and the framing card prescribe different next sessions.** Filed as a `LEAD` under
+  "Autonomy & friendliness" with both samples' exact sentences, because it needs a judgement about ladder
+  order that would change the advice on most of a heavy mosaic user's library — not a copy tweak.
+
+---
+
 ## 2026-09-14 (Builder, branch `claude/sweet-babbage-9drl8s`) — the "other listings" read, and the page that had never been photographed
 
 **Baseline.** `main` at `38804a8d`, green (6,008 passed / 2 skipped, 673 s with the BLAS cap + `-n 4`). It did

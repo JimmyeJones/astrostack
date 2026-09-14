@@ -27,6 +27,15 @@ log = logging.getLogger(__name__)
 _IDLE_SLEEP = 5.0   # how often the loops re-check settings while disabled
 _POLL_TIMEOUT = 6.0  # per-call RPC timeout while polling (keeps the loop snappy)
 _RECONNECT_CAP_S = 300.0  # ceiling on the per-scope reconnect backoff
+#: Ceiling on how long :meth:`SeestarManager.stop` may block waiting for each
+#: loop thread to return. Both loops wait on the stop event rather than sleeping,
+#: so an *idle* manager joins in microseconds; this budget only bites when a loop
+#: is mid-RPC (:data:`_POLL_TIMEOUT` per telemetry call, three per scope) or
+#: mid-subnet-scan, where app shutdown must not block indefinitely either. It is
+#: deliberately a ceiling and not a guarantee — a loop polling several silent
+#: scopes can outlast any fixed number — so a thread still alive at the deadline
+#: is logged and left alone; both are daemons and do exit.
+_STOP_JOIN_TIMEOUT_S = 10.0
 
 
 def _reconnect_delay_s(fails: int, base: float, cap: float) -> float:
@@ -98,11 +107,27 @@ class SeestarManager:
 
     def stop(self) -> None:
         self._stop.set()
-        self._scan_now.set()
+        self._scan_now.set()  # wakes the scan loop out of its interval wait
         with self._lock:
             for client in self._clients.values():
                 client.disconnect()
             self._clients.clear()
+        # Then *wait* for the loops, so a returned ``stop()`` means stopped.
+        # Setting the flag alone was a false contract: nothing joined, and the
+        # poll loop only read the flag at the top of its next iteration, so a
+        # torn-down manager kept polling for up to ``_IDLE_SLEEP`` seconds. In
+        # the test suite — a fresh app, and a fresh manager, per test — that
+        # left two or three ``seestar-poll`` threads from already-closed apps
+        # running underneath every webapp test.
+        current = threading.current_thread()
+        for thread in (self._poll_thread, self._scan_thread):
+            if thread is None or thread is current or not thread.is_alive():
+                continue
+            thread.join(_STOP_JOIN_TIMEOUT_S)
+            if thread.is_alive():
+                log.warning("seestar %s thread still running %.0fs after stop; "
+                            "it is a daemon and will exit on its own",
+                            thread.name, _STOP_JOIN_TIMEOUT_S)
 
     # ---- public API (used by the router) ---------------------------------
 
@@ -229,7 +254,10 @@ class SeestarManager:
         while not self._stop.is_set():
             settings = self._get_settings()
             if not settings.seestar_enabled:
-                time.sleep(_IDLE_SLEEP)
+                # ``_stop.wait`` rather than ``time.sleep``: the wait returns the
+                # moment ``stop()`` sets the event, so the loop ends when it is
+                # asked to instead of at the end of the current nap.
+                self._stop.wait(_IDLE_SLEEP)
                 continue
             with self._lock:
                 items = list(self._clients.items())
@@ -254,7 +282,7 @@ class SeestarManager:
                         log.info("seestar %s: connected but %s", ip, detail)
                     self._last_ok[ip] = False
                     self._mark_error(ip, detail)
-            time.sleep(max(2, int(settings.seestar_poll_interval_s)))
+            self._stop.wait(max(2, int(settings.seestar_poll_interval_s)))
 
     def _teardown_all(self) -> None:
         with self._lock:

@@ -12,10 +12,12 @@ from webapp import deps
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-# Auth credentials are managed only via /api/auth/password. They're never
-# exposed in the settings GET nor accepted through the settings PUT — otherwise
-# a client could read the hash or set a password to one it already knows.
-_AUTH_KEYS = ("auth_password_hash", "auth_salt", "auth_username")
+# Auth credentials are managed only via /api/auth/password (and, for the
+# read-only token, /api/auth/readonly-token). They're never exposed in the
+# settings GET nor accepted through the settings PUT — otherwise a client could
+# read the hash or set a credential to one it already knows.
+_AUTH_KEYS = ("auth_password_hash", "auth_salt", "auth_username",
+              "readonly_token_hash", "readonly_token_salt")
 
 
 def _sanitize_patch(clean: dict[str, Any]) -> dict[str, Any]:
