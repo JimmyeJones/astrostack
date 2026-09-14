@@ -738,6 +738,21 @@ the repo.
 > second one is where the "what does this page say when the other cards are
 > quiet?" failures live.
 >
+> **The sweep now reaches `/compare`, and its Split and Blink modes** *(added
+> 2026-09-14 with v0.440.2)*. That page was never in the route table because it
+> is the only one whose URL carries data — two `<safe>:<run_id>` refs — so the
+> screen whose entire job is weighing two pictures against each other had never
+> been photographed at all; the route is now built from the running app's own
+> `/api/gallery`, and on a `--mosaic` pass the pair is the mosaic *and* the
+> single field, which is the comparison where a per-pixel figure and a total are
+> different numbers. Its other two comparators are behind a `SegmentedControl`
+> and carry a **provenance strip "Side by side" does not have**, so navigating
+> alone could never see them — the same blind spot `--editor` exists for, and
+> where v0.440.0 lived. Each mode is clicked and held to the identical overflow /
+> squeeze / clipped-label / console checks. The lesson generalises: **a view you
+> can only reach by clicking is a view no route table will ever probe**, so when
+> you add one, add it here too.
+>
 > **Follow it with `scripts/agent-dogfood.sh --empty`** (≈1 min once playwright is
 > installed): the same probe against an app with **no data at all**. Every
 > measurement this script took before 2026-09-07 was of the *sample-loaded* app, so
