@@ -238,6 +238,29 @@ async function driveFullSizeCheck() {
     drain("full-size check (split)");
   }
 
+  // The black box has to hug the window. It is a block-level child of the
+  // column, so anything wider *below* it — the split's caption is a full
+  // sentence — stretches it and paints its own background beside the reader's
+  // pixels. That is what it did on the first pass that could open this modal at
+  // all (512 px box before the toggle, 858 after), and it is a measurement no
+  // jsdom test can take: jsdom lays nothing out, so it can only ever assert that
+  // the property is set, never that the band is gone.
+  const band = await page.evaluate(() => {
+    const win = document.querySelector('[data-testid="full-size-check-window"]');
+    const view = document.querySelector('[data-testid="full-size-check-viewport"]');
+    if (!win || !view) return null;
+    return Math.round(view.getBoundingClientRect().width
+      - win.getBoundingClientRect().width);
+  });
+  if (band == null) {
+    console.log("full-size check: could not measure the box around the window");
+  } else if (band > 8) {
+    findings++;
+    console.log(`  ! full-size check: ${band}px of empty black beside the window`);
+  } else {
+    console.log(`full-size check: the black box hugs the window (${band}px spare)`);
+  }
+
   await page.keyboard.press("Escape");
   await page.waitForTimeout(600);
   drain("full-size check (closed)");
