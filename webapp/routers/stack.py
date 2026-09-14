@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from seestack.edit.proxy import rejection_map_path_for
 from seestack.io.project import readable_frame_path
 from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
-from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
+from seestack.previewcrop import PreviewCrop, crop_pixel_box, preview_crop_json
 from seestack.stackhealth import grain_verdict, seam_verdict
 from webapp import deps, estimate_cache, pipeline
 from webapp.capture_nights import capture_night_count, capture_night_range
@@ -26,6 +26,7 @@ from webapp.field_fulls import native_frame_shape
 from webapp.preview_orient import (
     baked_north_up_deg,
     recovered_north_up_deg,
+    recovered_preview_crop,
     remaining_north_up_deg,
 )
 from webapp.run_options import parse_run_options, run_has_reusable_options
@@ -910,7 +911,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
         # What the stored preview shows of the canvas — an auto-edit border trim,
         # or geometry we can't reconcile at all. The pins/scale bar are measured
         # on the un-cropped FITS grid, so the UI needs both to draw on those bytes.
-        crop = parse_preview_crop(r.preview_crop_json)
+        crop = recovered_preview_crop(r)
         night_start, night_end = capture_night_range(
             r.capture_start_utc, r.capture_end_utc, lon)
         nights = capture_night_count(
@@ -1329,14 +1330,18 @@ async def sky_overlay(safe: str, run_id: int, request: Request) -> Response:
         raise HTTPException(status_code=404, detail="No preview for this run")
     fits_path = run.fits_path
     north_up_deg = baked_north_up_deg(run)
-    crop = parse_preview_crop(run.preview_crop_json)
+    crop = recovered_preview_crop(run)
 
     # Every input that can move a pixel of the answer: the two files' identities
     # and the geometry the preview was saved with. Cheap enough (two stats) to
     # compute before deciding whether any work is needed at all.
     etag = _derived_image_etag(
         "sky-overlay", _file_stamp(preview_path), _file_stamp(fits_path),
-        north_up_deg, run.preview_crop_json,
+        # The *resolved* crop, not the stored column: on a run older than that
+        # column the geometry is recovered from the preview's own shape
+        # (``recovered_preview_crop``), so keying on the NULL it holds would give
+        # two different compositions one entity tag.
+        north_up_deg, preview_crop_json(crop),
     )
     cache_headers = {"Cache-Control": "private, no-cache", "ETag": etag}
     if _etag_matches(request, etag):
@@ -1422,7 +1427,7 @@ async def rejection_overlay(
     map_path = rejection_map_path_for(run.fits_path)
     if not map_path.exists():
         raise HTTPException(status_code=404, detail="No rejection map for this run")
-    crop = parse_preview_crop(run.preview_crop_json)
+    crop = recovered_preview_crop(run)
     if crop == CROP_UNKNOWN:
         raise HTTPException(status_code=404,
                             detail="Preview geometry can't be matched to the map")
@@ -1966,7 +1971,7 @@ async def stack_run_annotations(safe: str, run_id: int, request: Request) -> dic
         # render is the *full* canvas, so both answers have to be available).
         # ``None`` unless the run really is cropped, so an uncropped run's payload
         # is byte-for-byte what it was.
-        crop = parse_preview_crop(run.preview_crop_json)
+        crop = recovered_preview_crop(run)
         # …and it can also be a picture a past "Adjust → North up → Save" turned.
         # A turn keeps the pixel scale and grows the canvas, so both marks are
         # answerable on those bytes — which is what the shared JPEG has baked
@@ -2327,7 +2332,7 @@ def _target_pixel_in_preview(run: Any, entry: Any,
     if ra is None or dec is None or not run.fits_path:
         return None
     baked = baked_north_up_deg(run)
-    crop = parse_preview_crop(run.preview_crop_json)
+    crop = recovered_preview_crop(run)
     # The un-turned grid these bytes sit on. Recovered from the bytes rather than
     # from the master's dimensions: `wallpaper_target_pixel` maps into the
     # *cropped* rectangle, so handing it the full-canvas grid re-centres a
@@ -4172,14 +4177,13 @@ def _native_picture_gate(run: Any, preview_png: bytes, baked_north_up: float,
     cannot drift from the code that makes it. Two stats and a PNG header — no
     render, no FITS pixel read.
     """
-    from seestack.previewcrop import parse_preview_crop
     from seestack.wallpaper import png_size
 
     if baked_north_up:
         return None
     if _preview_is_display_space(run.options_json) and not recipe_json:
         return None
-    crop = parse_preview_crop(run.preview_crop_json)
+    crop = recovered_preview_crop(run)
     if crop is not None and not _render_reproduces_the_crop(run, crop, recipe_json):
         return None                       # a trimmed preview isn't the whole canvas
     fits_path = run.fits_path
@@ -4276,13 +4280,11 @@ def _native_picture_size(run: Any, preview_png: bytes, baked_north_up: float,
     would be over-stated. Nothing here decides *what* is served — only what a
     caller says about it in advance.
     """
-    from seestack.previewcrop import parse_preview_crop
-
     size = _native_picture_gate(run, preview_png, baked_north_up,
                                 needed_long_edge, recipe_json)
     if size is None:
         return None
-    canvas = _visible_canvas(run, parse_preview_crop(run.preview_crop_json))
+    canvas = _visible_canvas(run, recovered_preview_crop(run))
     w, h = (canvas[0], canvas[1]) if len(canvas) == 2 else size
     long_edge = min(int(needed_long_edge), max(w, h))
     scale = long_edge / max(w, h)
@@ -4506,7 +4508,7 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # Only paid for when marks were actually asked for.
         preview_width = (
             _unrotated_preview_width(preview, run.fits_path, baked_north_up,
-                                     parse_preview_crop(run.preview_crop_json))
+                                     recovered_preview_crop(run))
             if scale else 0
         )
         # How far the pixels the marks are drawn on sit from the FITS grid, so the
@@ -4585,7 +4587,7 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         if scale:
             marks = _sky_marks_for_run(run.fits_path, preview_width,
                                        applied_north_up,
-                                       parse_preview_crop(run.preview_crop_json),
+                                       recovered_preview_crop(run),
                                        moon=moon)
         # label_objects bakes the named catalog objects in the field onto the
         # shared picture — the same pins and names the Target page draws on
@@ -4596,7 +4598,7 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         if label_objects:
             labels = _object_labels_for_run(
                 run.fits_path, north_up_turns,
-                parse_preview_crop(run.preview_crop_json))
+                recovered_preview_crop(run))
         data = png_bytes_to_jpeg(
             preview,
             nameplate=plate if nameplate else None,

@@ -1,5 +1,67 @@
 # Shipped — the record
 
+## v0.441.2 — 2026-09-14 — the crop that 614 runs record as "no crop"
+
+*(Builder, branch `claude/sweet-babbage-f0hdap` — PRIORITY 4 (image quality / trust), from observer issue
+[#877](https://github.com/JimmyeJones/astrostack/issues/877), triaged into the backlog by the Scout the same
+morning and verified here before a line was written. Additive: one new resolver, no new endpoint. No config,
+schema, on-disk, API-shape or default change.)*
+
+**`stack_runs.preview_crop_json` is NULL on all 614 of the owner's runs, and 42 of the stored preview PNGs
+are demonstrably crops of their canvas.** NULL is contractually "a plain full-canvas downscale"
+(`seestack/previewcrop.py`), so every surface that lines up with those bytes — the Sky map's tile placement
+and footprint mask, History's object pins and scale bar, the rejection overlay, the wallpaper crop, the
+native-resolution gate — places its geometry on the whole canvas and lands off by the trim's offset and
+scale. The column is written by `webapp/pipeline.py::_preview_crop_json_for_recipe`, which postdates those
+runs; the observer reconciled all 42 PNG IHDR dimensions to their runs' saved crop rectangles to within a
+pixel.
+
+**The fix is the sibling of a fix this repo already made, on the other column.** `webapp/preview_orient.py`
+exists because `preview_north_up_deg` has exactly the same shape of hole — a rotation baked into a stored
+preview by a save that predates the column — and it closes it by *checking* the stored PNG's dimensions
+rather than assuming. Its module docstring already named this case and stopped at it: *"A preview that is a
+crop of the canvas … its size is neither grid, so the arithmetic can't speak; `preview_crop_json` says so and
+we stop."* On a run older than that column, `preview_crop_json` does **not** say so. That sentence is the bug.
+
+**New `preview_orient.recovered_preview_crop(run)`**, the run-row companion to `parse_preview_crop` and
+shaped like `baked_north_up_deg`: a recorded value wins outright, and only a NULL/blank column falls through
+to a check. The check answers `UNKNOWN` — "decline to place geometry", a state every consumer already
+honours — and **never a rectangle**: a PNG header can disprove the plain-downscale contract and cannot say
+which part of the canvas survived. All twelve call sites (ten in `routers/stack.py`, two in `routers/sky.py`)
+now go through it, so the Sky map, History, the overlays and the download gates cannot reach three different
+answers about one picture.
+
+**Shape, not size, and that is the load-bearing choice.** A plain downscale preserves the canvas's aspect
+ratio; a border trim generally does not. Keying on the *size* would have accused every preview any older
+build had written at a different width — silently withdrawing a working overlay from a whole library, which
+is a far worse trade than missing the rare crop that happens to preserve its canvas's shape. New
+`PREVIEW_ASPECT_TOLERANCE = 0.01` is ~10× the largest disagreement two independently-rounded sides can
+produce. The one other way a stored preview legitimately leaves the canvas grid — a baked North-up turn,
+which *swaps* the shape and so looks exactly like a crop to a header — is asked about first, via
+`baked_north_up_deg` and the renderer's own `north_up_pixel_transform`, before anything is accused.
+
+**The asymmetry against the North-up column, which is what makes this safe.** `preview_crop_json` stores
+NULL for a *full-canvas* crop as well as for no crop — deliberately, so a re-render that stops cropping
+clears the column instead of leaving a stale rectangle. So unlike an explicit `0.0` angle, this column can
+never say "I checked, and it is the whole canvas": a NULL is always an open question, and reading the bytes
+is the only way to answer it. Pinned by its own test, because the whole recovery rests on it.
+
+**Cost:** one PNG header read on a NULL-column run, and nothing more on the ordinary answer — a preview that
+is exactly the canvas grid short-circuits before any WCS is touched. Two of the three hot call sites already
+paid that read for `baked_north_up_deg` on the line above.
+
+**Etags and cache keys now carry the *resolved* crop**, not the stored column (`stack.py`'s sky-overlay tag,
+`sky.py`'s footprint fingerprint) — keying on the NULL would give two different compositions one entity tag.
+
+**Tests +9** (`tests/webapp/test_preview_crop_legacy.py`), **five red before** under a scratch revert of the
+resolver: the recovery itself, the recorded-value precedence, the full-canvas-is-NULL asymmetry, History's
+`preview_geometry_unknown`, and the sky overlay declining rather than punching transparency through the wrong
+pixels. The other four are the no-accusation cases and assert today's behaviour is preserved exactly: an
+ordinary downscale, a preview rendered at another width, and a legacy North-up save.
+
+**Not done, deliberately:** no backfill migration. The verdict is derivable at read time for the same cost,
+and a migration would write a guess into a user's database where a lazy answer is free and reversible.
+
 ## v0.441.1 — 2026-09-14 — the import that had been queued for three days, and nothing said so
 
 *(Builder, branch `claude/sweet-babbage-jadqn3` — PRIORITY 2/3 (autonomy + trust), from observer issue

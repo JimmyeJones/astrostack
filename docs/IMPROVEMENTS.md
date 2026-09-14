@@ -138,6 +138,24 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   the existing 11). Sensible first slice for the Builder: (1) make `_seestar_output_bases` recognise the
   mosaic output naming so `<T>_mosaic/` is skipped, closing recurrence; then (2) a separate, owner-sign-off
   merge pass for the existing duplicates. Do NOT ship a `make_safe_name` change that moves live folders.
+  **⚠ BUILDER VERIFICATION 2026-09-14 (branch `claude/sweet-babbage-f0hdap`) — THE NAMED FIRST SLICE IS
+  ALREADY IN THE CODE; do not build it.** Run against `_apply_seestar_convention` directly, with
+  `["<T>_mosaic_sub", "<T>_mosaic", "M 42_sub", "M 42"]` as the drop: units `['<T> (mosaic)', 'M 42']`,
+  skipped `[('<T>_mosaic', 'device_output'), ('M 42', 'device_output')]`. The bare-folder sibling test is
+  `(parent, low + _SUB_SUFFIX) in sibling_names` (`scanner.py`), and `"<T>_mosaic" + "_sub"` *is*
+  `"<T>_mosaic_sub"` — so a mosaic's device output sitting beside its subs folder has been skipped all
+  along, by the single-field rule, without anyone noticing it covered both. **Recurrence is therefore
+  already closed**, and the 11 minted duplicates are pre-convention leftovers rather than a live leak.
+  `classify_seestar_junk_target` already offers one-click removal for exactly that shape too — it carries
+  an explicit `is_mosaic = low.endswith(_MOSAIC_SUFFIX)` branch with its own wording ("its own stacked
+  image of each mosaic panel") and checks the `<T>_mosaic_sub` sibling on disk. **What is genuinely still
+  open here is (2)** — de-duplicating the 11 existing pairs, which this entry already routes to owner
+  sign-off — **plus the correctness-adjacent half the Scout adds**: an old `<T>_mosaic_sub`-named duplicate
+  is classified single-field by `is_mosaic_target_name` and stacked in single-field mode. That last one is
+  the only *wrong stack* in this entry and is the part worth a Builder's slot. The one place
+  `_seestar_output_bases` really does skip mosaics is the **healing** companion, for output frames an old
+  scan merged *into* a `_sub` target — a different population from these, which sit in their own bare
+  targets.
 
 - **🟡 BUG (friendliness + autonomy, Scout 2026-09-14 — verified from observer issue
   [#880](https://github.com/JimmyeJones/astrostack/issues/880)) — a raw Python exception repr is stored as a
@@ -161,26 +179,24 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   the classification gap itself is the same one #878 turns on — fixing it (recognise `<T>_mosaic/` device
   output and reject/skip it like single-field output) closes both the accepted-clutter here and #878's hash
   collision. (a) is the safe small win; (b)/(c) are the shared mosaic-output work.
+  **⚠ BUILDER VERIFICATION 2026-09-14 (branch `claude/sweet-babbage-f0hdap`) — (a) is NOT user-facing and
+  (b) is deliberate; read this before spending a slot here.**
+  **(a):** the exception repr is *stored*, never *shown*. Every surface that renders a reject reason maps
+  it first — `frontend/src/routes/Target.tsx::rejectReasonLabel` answers `"QC error"` for anything
+  `startsWith("qc_error")` (pinned by `Target.test.tsx:1990`), `webapp/rejection_summary._bucket_for`
+  buckets it as `"error"`, and `seestack/session_recap.py:91` says `"unreadable"`. The observer sees the
+  repr because it reads `project.sqlite` directly, which is not a UI. So this is **storage hygiene, not a
+  friendliness bug**: real, and worth doing if the file is touched, but it costs a migration or a read-time
+  normaliser for the 135 existing rows plus five `startswith("qc_error")` consumers and buys the owner
+  nothing visible. Do not carry it as PRIORITY 3.
+  **(b):** `accept` staying True on a QC error is **documented, deliberate design**, not an oversight —
+  `seestack/solve/runner.py:336-342` spells out the carve-out and why it exists. Flipping it is not a
+  one-liner: the recovery branch (`qc/runner.py:135-140`) clears only `reject_reason` when a later QC
+  succeeds, so setting `accept=False` on the *retryable* first failure would let one transient NAS blip
+  permanently un-accept a good frame. Any change here must restore `accept` in that branch too, and needs a
+  test for the blip-then-recover path. **(c)** is answered by the #878 note above.
 
-- **🟡 BUG (correctness / trust, Scout 2026-09-14 — verified from observer issue
-  [#877](https://github.com/JimmyeJones/astrostack/issues/877)) — `stack_runs.preview_crop_json` is NULL on
-  all 614 runs, but 42 stored preview PNGs are baked *crops* of their canvas, so every consumer places
-  overlay geometry on a canvas the picture does not show.** *(Pillar: image-quality / trust — PRIORITY 4;
-  size M. Severity: medium — silent misplacement, but on **superseded** runs only: all 77 *current* target
-  previews match their canvas AR within 2 %, observer-verified. Confidence: **measured** — 42 PNG IHDR
-  dims reconciled to the runs' saved crop rectangles to within a pixel.)* NULL is contractually "plain
-  full-canvas downscale" (`seestack/previewcrop.py` docstring), so `parse_preview_crop(None)` returns None
-  and `preview_orient.py:83`, `routers/stack.py` (887/1312/1405/1937/2298/4150/4253/4477/4556) and
-  `routers/sky.py` (177/397) proceed on the full canvas. Written by `webapp/pipeline.py:3508`
-  `_preview_crop_json_for_recipe`, which postdates these runs. **Fix (observer's, sound):** a backfill is
-  safe here because the value is derivable from data already on disk — the PNG's dims vs `canvas_w/canvas_h`,
-  or `preview_crop_of_recipe` over the saved recipe — and `UNKNOWN` (already a `parse_preview_crop` state
-  meaning "decline to place geometry") is the right answer when a recipe can't reduce to a plain crop.
-  **Check first (scopes the work down):** whether History actually offers a geometry overlay on a superseded
-  run in today's UI — if not, exposure is smaller than the code survey implies and a lazy `UNKNOWN`-at-read
-  may suffice over a migration.
-
-- **⚪ BUG (trust, Scout 2026-09-14 — verified from observer issue
+- **⚪ ~~BUG (trust, Scout 2026-09-14 — verified from observer issue~~ — ✅ ALREADY SHIPPED; CLOSED
   [#876](https://github.com/JimmyeJones/astrostack/issues/876)) — 42 saved edit recipes on 35 targets carry
   the old over-aggressive auto-crop (worst keeps 2.91 % of canvas), and `_load_saved_recipe` serves each
   back verbatim; 41 of 42 violate the D1 fix's own `TRIM_KEEP_RATIO = 0.8` against their run's coverage
@@ -198,6 +214,28 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   (`webapp/routers/editor.py:294`) reads. **Do NOT re-open the trim algorithm** on the strength of the low
   absolute percentages: the observer's control shows today's trim sits at 0.81–1.00 of its coverage bound on
   the owner's *current* runs; the low numbers are sparse union canvases, not over-trimming.
+  **✅ CLOSED BY BUILDER VERIFICATION 2026-09-14 (branch `claude/sweet-babbage-f0hdap`) — the fix this entry
+  asks for shipped as v0.416.0 + v0.417.0 and is in the tree today; do not build it again.** The entry's own
+  prescription — *"make `_load_saved_recipe` / the editor recipe response **flag** a saved crop whose kept
+  area is below the run's coverage bound and offer 're-trim this'"* — is exactly `webapp/stale_crop.py`
+  (`STALE_CROP_KEEP_RATIO`, `crop_is_stale`, `stale_crop_verdict`) and its frontend twin
+  `frontend/src/components/editor/mosaicTrim.ts` (`OVER_TRIM_KEEP_RATIO`, `overTrimmedVerdict`,
+  `overTrimmedSentence`), on three surfaces: the editor's own note (`routes/Editor.tsx:1291`), the Target
+  page (`OverTrimmedTargetNote.tsx`), and a library-wide Dashboard count (`routers/overtrim.py`,
+  `OverTrimmedNote.tsx`). It judges and never rewrites, offers a one-click re-seed that replaces only the
+  crop op, and `tests/test_stale_crop.py` greps the TypeScript so the two thresholds cannot drift. **The
+  triage that re-filed this missed the note at the top of this very section** (the 2026-09-11 owner-answers
+  block: *"✅ IT HAS SINCE SHIPPED, don't go looking for it; all three surfaces closed in v0.416.0 +
+  v0.417.0"*) — which is the "grep before you build" rule, AGENTS.md §1, costing a slot.
+  **Two real residuals, recorded so they are not re-discovered as the whole bug:** (1) the shipped rule uses
+  `0.25` where the observer measured against `TRIM_KEEP_RATIO = 0.8`, so it flags only a 4× gap — deliberate
+  (`stale_crop.py` argues a half would accuse someone framing on the middle 40 % of their mosaic), but it
+  means well short of 41 of the 42 are named; (2) both halves **decline to judge** when the border rule
+  proposes no trim, which is every single-field run — also deliberate and documented in
+  `stale_crop_verdict`'s docstring ("catching it in one surface and not the others would be worse than
+  missing it in all three"). Either is a *threshold/scope* question with numbers already recorded on both
+  sides, i.e. a stand-down per AGENTS.md §1 — do not blind-flip either; re-open only with a measurement of
+  how many of the owner's 42 each choice would actually name.
 
 - **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
   question is closed unanswerable. Read before prioritising the audit's items.**
@@ -3269,6 +3307,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.441.2** — 🟠 BUG (image quality / trust, PRIORITY 4), from observer issue [#877](https://github.com/JimmyeJones/astrostack/issues/877) and verified red by a scratch revert: **a preview PNG that is a *crop* of its canvas, on a run older than the column that records crops, is no longer placed as if it showed the whole canvas.** `stack_runs.preview_crop_json` is NULL on all 614 of the owner's runs while 42 of the stored previews are baked crops, and NULL is contractually “a plain full-canvas downscale” — so the Sky map’s tile and footprint mask, History’s object pins and scale bar, the rejection overlay, the wallpaper crop and the native-resolution gate all measured against a canvas the picture does not show. New `preview_orient.recovered_preview_crop` is the run-row companion to `parse_preview_crop`, shaped like the sibling `baked_north_up_deg`: a recorded value wins outright, and a NULL column falls through to a check of the stored PNG’s own **shape**. A plain downscale preserves the canvas’s aspect ratio, so one that does not is provably not a downscale — and earns `UNKNOWN`, "decline to place geometry", which every consumer already honours, never a fabricated rectangle. Shape rather than size on purpose (`PREVIEW_ASPECT_TOLERANCE = 0.01`): keying on size would accuse every preview an older build wrote at another width and strip a working overlay from a whole library. A baked North-up turn *swaps* the shape and so looks exactly like a crop to a header, so `baked_north_up_deg` and `north_up_pixel_transform` are consulted before anything is accused. All twelve call sites go through the one resolver; the sky-overlay etag and the footprint fingerprint now key on the resolved crop rather than the NULL. No backfill migration — the verdict is free at read time and reversible, where a migration would write a guess into the owner's database. Tests +9, five red before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.441.1** — 🟢 PRIORITY 2/3 (autonomy + trust), from observer issue [#883](https://github.com/JimmyeJones/astrostack/issues/883) and verified in the code before a line was written: **an import job that has been queued for days now says so, on the Dashboard and on the Jobs page.** `JobManager` is one `queue.Queue` and one worker (deliberately — two stacks at once on a RAM-capped NAS is an OOM kill), so a `reprocess_all` that runs for days holds the queue for days; and the import job is the one **nobody starts by hand**, so while it waits nothing anywhere says so — every target keeps the frame count it had, and a frame that was never imported has no QC row, no reject reason and nowhere in the record it can be *seen* to be absent. On the owner's box that came to **2,259 subs over two nights sitting on disk for eleven days**, with an import queued and never started for the last three. New pure `webapp/jobqueue.py::import_waiting` reports the longest-waiting queued `pipeline` past `IMPORT_WAIT_MIN_HOURS` (2.0) plus the running job holding the worker — only that kind (an editor export waiting its turn is ordinary serialisation), **still reporting when nothing is running at all** (a queue that is not busy and not moving is the worse case), and skipping an unparseable or future-dated stamp rather than manufacturing a stall. New `JobManager.active()` (in-memory only, no DB read) and `GET /api/jobs/queue-health`, declared before `/{job_id}` and pinned there by a test. One wording in `frontend/src/importWaiting.ts` serves both surfaces; days rather than "70.4 h"; the holder's engine kind goes through `jobKindLabel`; every body leads with *nothing is lost, your subs are safe in incoming/*. The Dashboard note joins the existing `NoticeBoard` as `StuckImportNote` beside `MissingFilesNote` rather than becoming a new banner, self-hiding on a healthy queue and silent against an older backend. **The starvation itself is NOT fixed** — filed as a LEAD at the top of "Bugs", and issue #883 stays open. Tests +30 (14 Python, 16 vitest). Additive endpoint, module and note; no config, schema, on-disk, API-shape or default change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.441.0** — 🔐 OWNER-REQUESTED GATE (infra / observability in service of the owner's on-NAS observer agent), filed 2026-09-12 and built as its own shape: **a read-only credential, so observing the app no longer means handing over the keys to it.** `webapp/auth.py` had one shared secret and no roles, so letting an agent read `GET /api/logs` meant handing it the credential that also posts to `/api/stack` and deletes targets — and the only alternative was the `docker` group, i.e. root on the host. New `readonly_token_hash`/`readonly_token_salt` (the password's own PBKDF2, rounds and per-mint salt), `auth.check_readonly_auth` (Basic under the reserved username `readonly`, or `Bearer`; **never** True by default, unlike `check_basic_auth`), and `POST`/`DELETE /api/auth/readonly-token` — minted on request, shown **once**, rotation revoking the old one. The gate accepts it for **GET** only and only on `_READONLY_GET_PATHS` (health, logs, stats, jobs, targets); anything else is **403, not 401**, and `_AUTH_OPEN_PATHS` is untouched — this is a narrower credential, not an open door, which was the entry's one explicit "do NOT". It cannot mint or rotate itself. Minting is refused on a password-less install, where it would guard nothing. Off unless minted, so an upgraded install's gate is byte-for-byte what it was; the two fields joined `_AUTH_KEYS`, so they are stripped from the settings GET/PUT and from a settings backup, and an import cannot forge one. UI inside the existing Access-control panel (no new card), leading with what the token *cannot* do, plus a copyable `curl` against this install's own origin. **Verified against a really-running app** as the entry required, not only the TestClient. Tests +14 Python / +13 frontend, including a mirror test pinning what the screen says the token may read against what the gate allows. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.440.3** — 🟠 BUG (correctness / shutdown hygiene), the entry the on-NAS observer account filed at the top of "Bugs (fix these first)" the same night, taken as filed and with its own measurement reproduced here first: **`SeestarManager.stop()` now returns only once both loop threads have actually stopped.** `_poll_loop` waits on the stop event instead of `time.sleep` at both of its naps, and `stop()` joins both threads bounded by a new `_STOP_JOIN_TIMEOUT_S` (a ceiling on shutdown latency, not a guarantee — a loop mid-poll on several silent scopes can outlast any fixed number, so a miss is logged and the daemons are left to exit). `_scan_now` stays a separate event, as the entry's care note asked. Measured with the filed harness: stale `seestar-poll` threads across `test_incoming_readonly_guard.py` go **1 → 2 → 3 → 0**. Tests +4, three red before under a scratch revert. Full entry in [`SHIPPED.md`](SHIPPED.md).
