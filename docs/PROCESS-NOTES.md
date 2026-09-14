@@ -18,6 +18,59 @@ is a queue.
 
 ---
 
+## 2026-09-14 (Builder, branch `claude/sweet-babbage-ro3v8y`) — the Tonight page read as one paragraph, and the card that proves the method can't be photographed
+
+**Baseline: GREEN.** `main` at `39376e22` (v0.444.4). Full suite `6091 passed, 2 skipped` in **9m32s**
+(`-n 4` + BLAS cap, 4-core box). Frontend `279 files / 4057 tests` green before the change, `4068` after;
+`tsc` clean, `vite build` clean.
+
+**The method the last five notes describe was applied to a new surface, and it worked again.** AGENTS.md §7
+now points the "read it as ONE paragraph" question at three places: the mosaic block, the Target page's cards,
+and (since v0.444.4) the Dashboard's notice board. **`/tonight` is the other page that *prescribes*** — it is
+the tallest page in the standings, and it says where to point from **four independent self-hiding cards in one
+column**, each naming a target and none knowing what the others named. Nobody had read that column.
+
+**The finding (v0.445.0).** `ClosingSeasonCard` argues *"Once a target sets during your dark hours it's gone
+until the same season next year. A clear night spent on one of these buys something the rest of the year
+can't."* `PlanWeekCard`, an inch below, answers *"which night should I go out?"* with *"Your best night is
+Saturday — M 31"* — and `nightplan.plan_week`'s score is **pure observability**, altitude and Moon, with no
+idea a season is ending. Both true; a beginner cannot hold both. And the one line that could have reconciled
+them was the line most likely not to: `otherTargetNights` head-slices `plan.targets` (ordered by **date**, up
+to `WEEK_MAX_TARGETS = 40`) to **4**, and a closing target's best night is typically *latest* in the week —
+it is the one setting earliest, so it clears the floor for long enough only on the nights furthest out — i.e.
+exactly the row the cap cuts.
+
+**What was deliberately NOT built, and why it is the interesting half.** The tempting fix is to teach
+`plan_week` to weight a closing season. That is a blind weighting change on the planner's on-by-default hot
+path, and the honest weight — *how much is a night that does not repeat worth against forty more minutes of
+altitude?* — is a judgement no measurement in this repo settles (AGENTS.md §1's "do not blind-flip a threshold
+on the on-by-default hot path"). So the fix **states the fact and leaves the choice**, which is also what the
+card above already assumes its reader will do. No ranking moved.
+
+**Dogfood, `--mosaic` — CLEAN, and it is what filed the lead.** Auto's trim on the generated 2×2 was **7.9 %**
+(well under the 15 % bar). Page heights unmoved from the previous run's standings — phone `/tonight` **3,591
+px**, mosaic Target **3,572 px**, `/` **3,132 px**, `/life-list` **3,094 px** — which is the point: the new
+sentence lives inside a card that already existed and is self-hiding, so nothing got taller. Nothing
+overflowing, no console errors, on either sample.
+
+**And the new block printed exactly one card.** `what the TONIGHT page SAYS` reported `plan-week` alone:
+`wishlist-tonight-card`, `nearly-there-card` and — the one that matters — **`closing-season` were all silent**,
+because the scratch install's two samples sit at M 42's coordinates and M 42's season in September is
+*opening*. So the fix this run shipped is pinned by jsdom and a fail-before revert but **has never been
+rendered in a browser**. Filed as a LEAD under "Infra / maintainability", with the arithmetic that kills the
+obvious lever written down: a season closes on **RA against the date**, not on where you stand, so no
+`DOGFOOD_SITE` can make the bundled sample close. That is the missing-site / click-only-Compare /
+empty-`incoming/` hole a fourth time, and the note says plainly that one un-photographable card is a thin
+reason to grow the sample surface — take it only if a second finding turns up in that column.
+
+**Backlog state, unchanged in shape for a fourth note running and worth saying plainly.** "Bugs (fix these
+first)" still contains **no takeable bug**: every entry is gated on data only the owner's box has, stood down
+with numbers on both sides, or routed to owner sign-off. "Features that serve real workflows" still has no
+ready item. This run took nothing from the backlog and put two things back into it, which is what the honest
+source of work is right now: **read a surface as one paragraph, and find two of the app's own true sentences
+that cannot both be held at once.** Six runs running.
+
+
 ## 2026-09-14 (Builder, branch `claude/sweet-babbage-wrud4o`) — two shipped from ONE finding, the first `--incoming-lag` sweep on record, and the board nothing had ever photographed
 
 **Baseline: GREEN.** `main` at `39ba1a3b` (v0.444.2). Full suite `6091 passed, 2 skipped` in **11m49s**
