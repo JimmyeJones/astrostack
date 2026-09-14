@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import socket
 import threading
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,7 +14,9 @@ from webapp.seestar import discovery, telemetry
 from webapp.seestar.client import SeestarClient, SeestarError
 from webapp.seestar.manager import (
     SeestarManager,
+    _POLL_TIMEOUT,
     _RECONNECT_CAP_S,
+    _STOP_JOIN_TIMEOUT_S,
     _reconnect_delay_s,
     collect_telemetry,
 )
@@ -395,6 +399,85 @@ def test_poll_reconnect_recovers_and_clears_backoff():
 def test_reconnect_cap_constant_sane():
     # Sanity: the cap actually bounds a long outage's delay.
     assert _reconnect_delay_s(64, 2.0, _RECONNECT_CAP_S) == _RECONNECT_CAP_S
+
+
+# --------------------------------------------------------------------------- #
+# SeestarManager lifecycle — a returned stop() must mean stopped
+# --------------------------------------------------------------------------- #
+
+def _loop_settings(**over) -> SimpleNamespace:
+    """Settings stub for the manager's own loop threads. Seestar is **off** by
+    default, so the scan loop never goes near the network."""
+    base: dict[str, object] = dict(
+        seestar_enabled=False, seestar_poll_interval_s=2,
+        seestar_scan_interval_s=30, seestar_scan_subnet="", seestar_known_ips=(),
+    )
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+#: How long a loop that woke on the event rather than sleeping out its nap is
+#: allowed to take. Microseconds in practice; a whole second is generous even on
+#: a loaded CI box, and still far under either nap this separates it from.
+_WOKE_PROMPTLY_S = 1.0
+
+
+def test_stop_returns_only_once_both_loops_have_actually_stopped():
+    mgr = SeestarManager(lambda: _loop_settings())
+    mgr.start()
+    poll, scan = mgr._poll_thread, mgr._scan_thread
+    assert poll is not None and scan is not None
+    assert poll.is_alive() and scan.is_alive()
+
+    t0 = time.monotonic()
+    mgr.stop()
+    # Asserted with no sleep at all: the point is what is true *when stop()
+    # returns*. Before the fix it set a flag and returned, leaving the poll loop
+    # in `time.sleep(_IDLE_SLEEP)` for up to five more seconds — which is how
+    # torn-down apps' pollers piled up underneath later tests.
+    assert not poll.is_alive()
+    assert not scan.is_alive()
+    # And it got there by waking, not by waiting the nap out.
+    assert time.monotonic() - t0 < _WOKE_PROMPTLY_S
+
+
+def test_the_poll_loop_ends_its_long_nap_the_moment_stop_is_set():
+    # An hour between polls — a legitimate setting, and the shape that makes the
+    # difference between `time.sleep` and `Event.wait` impossible to miss.
+    mgr = SeestarManager(lambda: _loop_settings(seestar_enabled=True,
+                                                seestar_poll_interval_s=3600))
+    thread = threading.Thread(target=mgr._poll_loop, name="seestar-poll", daemon=True)
+    mgr._poll_thread = thread
+    thread.start()
+    # There are no clients, so one pass is all it takes to reach the nap.
+    thread.join(timeout=0.5)
+    assert thread.is_alive(), "expected the loop to be napping, not finished"
+
+    t0 = time.monotonic()
+    mgr.stop()
+    assert not thread.is_alive()
+    assert time.monotonic() - t0 < _WOKE_PROMPTLY_S
+
+
+def test_stop_is_safe_before_start_and_when_called_twice():
+    mgr = SeestarManager(lambda: _loop_settings())
+    mgr.stop()            # never started: nothing to join, no exception
+    mgr.start()
+    mgr.stop()
+    mgr.stop()            # idempotent — the threads are already dead
+    assert mgr._poll_thread is not None and not mgr._poll_thread.is_alive()
+    assert mgr._scan_thread is not None and not mgr._scan_thread.is_alive()
+
+
+def test_stop_join_budget_is_a_bounded_shutdown_ceiling():
+    # The budget is a ceiling on how long shutdown may block, NOT a promise that
+    # the thread will always be joined: a loop stuck mid-poll on several silent
+    # scopes can outlast any fixed number, which is why the threads are daemons
+    # and a miss is logged rather than raised. What it must be is long enough to
+    # cover an ordinary in-flight RPC (so the common busy shutdown still joins)
+    # and short enough that nobody waits on a backed-off scope's next attempt.
+    assert _STOP_JOIN_TIMEOUT_S >= _POLL_TIMEOUT
+    assert _STOP_JOIN_TIMEOUT_S < _RECONNECT_CAP_S
 
 
 # --------------------------------------------------------------------------- #

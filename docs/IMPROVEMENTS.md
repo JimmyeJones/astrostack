@@ -82,36 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **BUG (found 2026-09-13 by the on-NAS observer account, measured on the owner's box; confirmed in the code
-  here) — `SeestarManager.stop()` sets a flag and returns without joining either thread, and neither loop
-  waits on that flag, so a stopped manager keeps polling for up to 5 s and overlapping app instances stack
-  up.** *(Pillar: correctness / shutdown hygiene — size XS; severity low in production, real in tests.
-  Confidence: reproduced — thread census taken per-test on the NAS.)* `webapp/seestar/manager.py:99`
-  `stop()` does `self._stop.set()`, `self._scan_now.set()`, disconnects clients — and never
-  `self._poll_thread.join()` / `self._scan_thread.join()`. The loops cannot notice promptly anyway:
-  `_poll_loop` blocks in `time.sleep(_IDLE_SLEEP)` (line 232, `_IDLE_SLEEP = 5.0`) and
-  `time.sleep(max(2, poll_interval_s))` (line 257) rather than `self._stop.wait(...)`, so the flag is only
-  read at the top of the next iteration. **Measured**, running `tests/webapp/test_incoming_readonly_guard.py`
-  with a per-test thread census (the `client` fixture is function-scoped, so every test builds a fresh app and
-  runs its full lifespan):
-  ```
-  test_the_sentinel_actually_fires          active=1  proc_threads=4   {MainThread:1}
-  test_reprocess_all_leaves_the_source...   active=2  proc_threads=8   {MainThread:1, seestar-poll:1}
-  test_the_video_pipeline_never_touches...  active=3  proc_threads=10  {MainThread:1, seestar-poll:2}
-  test_ingest_still_copies_and_never...     active=4  proc_threads=10  {MainThread:1, seestar-poll:3}
-  ```
-  Three `seestar-poll` threads from already-torn-down apps running alongside the live one. It plateaus rather
-  than growing without bound (they are daemons and do exit a few seconds late), so this is **not** a runaway
-  leak — but a `stop()` that returns before the thing has stopped is a false contract, and in the suite it
-  means every webapp test runs with two or three stale pollers underneath it.
-  **Shape:** have both loops wait on the stop event instead of sleeping (`self._stop.wait(delay)` returns
-  immediately when set), and have `stop()` join both threads with a bounded timeout. **Regression test:**
-  start a manager, `stop()` it, assert both threads are dead **when `stop()` returns** — not after a sleep.
-  **Care:** `_scan_now` is a separate event used to wake the scan loop early; don't collapse the two.
-  **Not the cause of the suite's 12 solver failures** — the same census showed the *passing* configuration
-  carrying **more** threads (active=7) than the failing one (active=4), so this was explicitly ruled out as
-  the explanation for those and is filed on its own merits.
-
 - **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
   question is closed unanswerable. Read before prioritising the audit's items.**
   - **The pre-D1 saved-recipe crop (⭐ item below — ✅ IT HAS SINCE SHIPPED, don't go looking for it; all three
@@ -3145,6 +3115,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.440.3** — 🟠 BUG (correctness / shutdown hygiene), the entry the on-NAS observer account filed at the top of "Bugs (fix these first)" the same night, taken as filed and with its own measurement reproduced here first: **`SeestarManager.stop()` now returns only once both loop threads have actually stopped.** `_poll_loop` waits on the stop event instead of `time.sleep` at both of its naps, and `stop()` joins both threads bounded by a new `_STOP_JOIN_TIMEOUT_S` (a ceiling on shutdown latency, not a guarantee — a loop mid-poll on several silent scopes can outlast any fixed number, so a miss is logged and the daemons are left to exit). `_scan_now` stays a separate event, as the entry's care note asked. Measured with the filed harness: stale `seestar-poll` threads across `test_incoming_readonly_guard.py` go **1 → 2 → 3 → 0**. Tests +4, three red before under a scratch revert. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.440.0** — 🟠 BUG (trust + friendliness, PRIORITY 3, on the PRIORITY 1/4 mosaic frontier), the first of the four "other listings" the v0.438.16 lead named, and verified red by a scratch revert: **Compare's Split and Blink modes dropped the thin-stack cue the Side-by-side mode on the same page shows.** `AbSide` — the A/B provenance strip whose own docstring says those modes are "as trustworthy as Side by side" about which stack is which — printed `{n_frames_used} frames` as bare text, while `CardMeta` has run the identical number through `FrameCountBadge` (and so through the run's `field_fulls`) since v0.437.7. On a mosaic those are different numbers — nine subs over a 3×3 raster is one sub everywhere — so on the one page whose entire question is *"which of these is better?"*, the loudest answer it has disappeared the moment you changed comparison mode. The strip now renders the **same shared component**, so the two modes cannot spell one count two ways; kept on its existing row (badge at natural width, the rest of the provenance truncating beside it) so no row is added to a compact strip, and every clause — integration, date, measured noise — still reads exactly as it did. Frontend-only; no endpoint, config, schema, on-disk, API-shape or default change. Tests +3 in `Compare.test.tsx`, **two red before** under a scratch revert (the Split and the Blink cue); the third pins that nothing was removed to make room.
 - **v0.440.2** — 🔧 INFRA (maintainability in service of not missing bugs), filed and taken in the same run as the bug that proves it: **a dogfood pass now reaches `/compare`, and clicks its Split and Blink modes.** Compare is the only route whose URL carries *data* — two `<safe>:<run_id>` refs — so it could not be a constant in `dogfood_probe.mjs`'s route table and had simply never been there: the page whose entire job is weighing two pictures against each other had never been in front of a browser, at either width, on any pass ever recorded. The route is built from the running app's own `/api/gallery` rather than from a new env var (the pictures are already on the wire, and on a `--mosaic` pass the pair is the mosaic **and** the single field — the one comparison where a per-pixel figure and a total are different numbers); fewer than two pictures, as under `--empty` or `--no-stack`, skips it rather than probing an error state the page is right to show. And its Split and Blink comparators are behind a `SegmentedControl`, carrying a provenance strip "Side by side" does not have — **a whole element no amount of navigating could reach**, which is exactly where v0.440.0 lived. The route loop's body is split out as `probeCurrentView`, so a view reached by a click is held to the identical overflow / squeeze / clipped-label / console checks as one reached by a URL, and each route's reported height is taken on landing so a click cannot move it. Verified against the running app: six new screenshots, the sweep still clean, the height table unmoved. Tooling only — nothing in the app, the image or the suite changes.
 - **v0.440.1** — 🟠 BUG (trust, PRIORITY 3), the second of the same four, and the same axis with a different face — not a stored request contradicting a recorded result, but **one sentence describing a scorer that is not the one running**: **the "My best pictures" wall said it ranked by "total integration time, cleanliness, and frame count".** `seestack.portfolio.rank_portfolio` blends **four** weighted metrics (`PORTFOLIO_WEIGHTS` — exposure, frames, noise **and** coverage), and it runs every higher-is-better one through `per_pixel_total`, dividing by the run's `field_fulls` *precisely* so a mosaic is judged on its depth rather than on the sum of its panels — the substitution v0.437.3–v0.438.14 spent themselves undoing, restated as a **total** on the one sentence that explains why someone's pictures are in the order they are in, an inch above card captions (v0.437.6) that get it right. New `bestPictures.RANKING_METRIC_WORDS` + `rankingHint()` own the wording and build the sentence *from* the metric list, and `tests/test_portfolio_hint_mirror.py` holds that list to `PORTFOLIO_WEIGHTS` itself — the `fullres.ts` arrangement — so a fifth term added by someone with no reason to open a TypeScript file goes red, and the route may no longer spell a description of its own. Frontend + one guard; no behaviour, endpoint, config, schema, on-disk, API-shape or default change. Tests +4 Python / +3 vitest, **all four Python red before** under a scratch revert.
