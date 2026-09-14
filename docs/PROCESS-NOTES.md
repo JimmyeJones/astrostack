@@ -18,6 +18,70 @@ is a queue.
 
 ---
 
+## 2026-09-14 (Builder, branch `claude/sweet-babbage-nhiajs`) — the blind spot closed, and the sentence behind it
+
+**Baseline: GREEN.** `main` at `ccb970a9` (v0.445.3). Full suite `6096 passed, 2 skipped` in **14m57s**
+(`-n 4` + BLAS cap; the box was slower than the 9m the note below records, same tree). After all three
+tasks: `6112 passed, 2 skipped` in **14m40s**. Frontend `279 files / 4079 tests` green, `tsc` clean,
+`vite build` clean.
+
+**Three tasks, and the second and third were produced by the first.** v0.446.0 built the `--big` sample the
+lead below asked for; running it found v0.446.1 in the first screenshot; extending the drive to click the
+modal found v0.446.2's tooling defect in the first log. That is the shape worth recording: the tooling task
+was not a detour from finding bugs, it was the only way to find these.
+
+**Measurements, so the next run does not re-derive them.**
+
+| | union canvas | `proxy_scale` | uncovered | stack (1 worker) |
+|---|---|---|---|---|
+| field sample | 480×320 | 1.0 | 0 % | — |
+| `--mosaic` | 907×615 | 1.0 | 4.8 % | 19.0 s |
+| `--big` | **1694×1150** | **2.0** | 3.7 % | **61.5 s** |
+
+`--big` therefore costs about a minute over `--mosaic`, not the twenty the lead worried about. 900×600 panels
+are the *smallest* that reach the surface at all (`ceil(1694/1500) == 2`), and that is deliberate: cost grows
+with the pixels and a pass nobody runs finds nothing.
+
+**Page heights on the full-size target** (phone, for comparison with the DOGFOOD BASELINE block below, which
+was measured on the field sample and is not disturbed — `--big` writes to `$SHOTS/big/`):
+`/tonight` 3556 px, `/targets/<big>` 3538 px, `/targets/<big>/edit/1` 3323 px, `/` 3095 px. Nothing
+overflowing, no console errors, both editor drives clean.
+
+**What `--big` newly puts on screen, verified in a browser rather than argued:** the preview-scale caption
+(*"Preview shown at 847 px — export renders at full resolution (2.0× larger)"*), the **"Check it at full
+size"** button, the sharpen advisory, and — once the drive clicks it — the modal, its navigator, its marker,
+its where-line and its split. Not everything: at `proxy_scale` 2 the *sharpen* advisory fires
+(`radius/scale < 0.6`, and Auto's recipe carries a sub-1.2 px radius) while deconvolution's and star
+reduction's thresholds want a heavier stride. **So `--big` is the floor, not the ceiling** — if a future run
+needs those two, it wants a scale-4 sample (≈3000 px canvas), and should measure the stack cost the same way
+before choosing one.
+
+**The bug the pass produced, and why it had lived.** The modal's lead sentence read *"The preview is shrunk
+to about **a 2th** of full size"* — `a ${Math.round(proxyScale)}th`, a hard-coded ordinal on a computed
+integer. Its test pinned `loupeCaption(512, 8)`, the one value where the suffix happens to be right. That is
+AGENTS.md §8's *fixture that cannot exhibit its own bug*, and the thing that kept it alive was not the
+fixture: it was that the control is gated on a decimated proxy and **no bundled sample produced one**, so
+nothing outside jsdom had ever read the sentence. Two fixes shipped into that column the run before, both
+found by reading source. **The generalisation worth carrying:** when a surface's only coverage is jsdom,
+ask what makes it unreachable in a browser and fix *that* first — the bug will be waiting on the other side.
+`grep`ping for the bug's *shape* (`}th`) then found the second instance immediately, in `lucky.py`.
+
+**And a defect in the tooling that only the third sample could expose.** `agent-dogfood.sh`'s `SAFE` — the
+target the "sample" leg probes and edits — was `/api/targets`' **first row**, which is ordered by activity. So
+the moment a second demo was loaded *and stacked*, the field leg silently became the mosaic: two editor
+drives on one target, and a mosaic's page heights written into the field sample's `$SHOTS` under the same
+filenames the DOGFOOD BASELINE block is compared against. It now asks `/api/sample` which target the field
+sample *is*. The exposure predates `--big` (`--mosaic` could do it too, given the right ordering); the third
+demo is what made it actually happen, in the log, as two consecutive
+`editor drive: /targets/Sample_M42_mosaic_2_2_full_size/edit/1` lines.
+
+**One process slip, recorded because it is cheap to repeat.** I ran `npx vite build` while the full suite was
+running — the exact collision AGENTS.md §7 warns about (`emptyOutDir: true` on `../webapp/static`). It did
+not bite this time (the build landed at the 8 % mark and no `tests/webapp` fixture was constructing an app in
+that 30-second window), but "it did not bite" is luck, not a method. The rule is not only *dogfood before
+pytest* — it is **any** `vite build`, including a bare one run to satisfy the §5 checklist. Do the frontend
+build before starting the suite, or after it finishes.
+
 ## 2026-09-14 (Builder, branch `claude/sweet-babbage-rhcmsd`) — the method turned on the editor, and the subsystem no dogfood pass has ever drawn
 
 **Baseline: GREEN.** `main` at `7b8f2941` (v0.445.1). Full suite `6094 passed, 2 skipped` in **9m27s**
