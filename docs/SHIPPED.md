@@ -1,5 +1,48 @@
 # Shipped — the record
 
+## v0.445.2 — 2026-09-14 — the full-size check says which op took it away, instead of vanishing
+
+*(Builder, branch `claude/sweet-babbage-rhcmsd` — PRIORITY 1 (editor). One additive response field and one
+dimmed line; no config, schema, on-disk, API-shape or default change.)*
+
+**The finding, read as one paragraph.** Under the editor's live preview sits a column of advisories about the
+same single limitation — the preview is a ≤1500 px strided decimation of what may be a 150 MP mosaic:
+*deconvolution understates*, *sharpening understates*, *star reduction differs*, *hot-pixel removal is
+skipped*, *bilateral denoise previews weaker than it exports*. Each is honest, and each leaves a beginner with
+a slider they cannot set by eye. `FullSizeCheck` — **"Check it at full size"** — is the app's answer to all
+five, and its own docstring says so.
+
+Every one of those five advisories is computed from the **proxy scale and the ops present**
+(`editor.py`'s `sharpen_preview_understates` &co.). The full-size check is gated on something else:
+`_loupe_geometry_problem`, which refuses a recipe carrying an enabled `geometry.rotate` with a real angle, or
+a geometry op ahead of a background pass. **So the two disagree on exactly the recipe where it matters**: turn
+on a rotation over a mosaic-scale canvas and the advisories carry on saying *judge it at full size*, while the
+way to do that is gone from the screen without a word.
+
+And the word existed. `loupe_info` already returns a plain-language `reason` naming the op to move — *"This
+picture is rotated… Turn the rotation off to check it at full size."* — and the component's first line was
+`if (!info.data?.available) return null;`. The sentence was computed, sent over the wire, typed in
+`client.ts`, and rendered nowhere.
+
+**The fix, and why it is not one more banner.** `LoupeInfoOut` gains `fixable: bool = False`, true only for
+the two *geometry* refusals. The other refusal — "this picture is small enough that the preview already shows
+every pixel" — stays silent on purpose, and that is the whole reason for the field rather than just rendering
+`reason`: at `proxy_scale == 1` none of the five advisories is speaking either, so there is nothing to
+answer, and a line there would be a new always-on element on the one surface whose standing complaint is that
+it is too busy. Where it does speak, it takes the line the button would have taken, not an extra one.
+
+**Tests (+5).** Python: `fixable` is true for both geometry refusals and false for both of the others; and —
+the test that says why the field exists — a rotated recipe carrying a sharpen and a hot-pixel op is asserted
+to *still* flag `sharpen_preview_understates` and `hot_pixels_preview_skipped` on the histogram while
+`loupe-info` refuses, i.e. the advisories and their answer really do disagree on one recipe. Both fail before
+(`KeyError: 'fixable'`), verified by stashing the router. Vitest: the reason is rendered for a fixable
+refusal (fails before), nothing is rendered for a backend that sends `reason` without `fixable`, and the
+existing "takes no line at all when there is nothing to check" gains an assertion that the explanation is
+absent there too — strengthened, not weakened.
+
+**Upgrade-safe (§9):** one additive field with a default; `fixable` is optional in the TS type, so an older
+backend simply leaves the editor as quiet as it was, and an older frontend ignores it.
+
 ## v0.445.1 — 2026-09-14 — a dogfood pass reads the Tonight page as one paragraph
 
 *(Builder, branch `claude/sweet-babbage-ro3v8y` — 🔧 INFRA (the finder, not the app), filed and built in the

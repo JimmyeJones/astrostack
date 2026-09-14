@@ -179,6 +179,66 @@ def test_a_crop_after_the_background_pass_is_fine(client, built_library):
     assert info["available"] is True
 
 
+def test_a_refusal_the_user_can_undo_is_marked_apart_from_one_they_cannot(
+        client, built_library):
+    """``fixable`` separates "move this op and it comes back" from "there is
+    nothing here to check", so the editor can explain the first without putting a
+    line on every small stack."""
+    big = _big(client, built_library, basename="fixable")
+    rotated = _enc([{"uid": "ro", "id": "geometry.rotate", "enabled": True,
+                     "params": {"angle": 5.0}}, *FLAT_RECIPE])
+    crop_first = _enc([{"uid": "cr", "id": "geometry.crop", "enabled": True,
+                        "params": {"x0": 0.1, "y0": 0.1, "x1": 0.9, "y1": 0.9}},
+                       *FLAT_RECIPE])
+
+    def info(run_id: int, recipe: str) -> dict:
+        return client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe-info",
+                          params={"recipe": recipe}).json()
+
+    # Both geometry refusals: the reader can move an op and get the check back.
+    for recipe in (rotated, crop_first):
+        body = info(big, recipe)
+        assert body["available"] is False
+        assert body["fixable"] is True
+
+    # The refusal nothing can be done about stays silent.
+    assert info(big, _enc(FLAT_RECIPE))["fixable"] is False
+    small = _make_run(built_library, "M_42", basename="fixsmall", w=200, h=140)
+    body = info(small, _enc(FLAT_RECIPE))
+    assert body["available"] is False
+    assert body["fixable"] is False
+
+
+def test_the_advisories_it_answers_keep_speaking_through_a_geometry_refusal(
+        client, built_library):
+    """Why ``fixable`` is worth a field: the four "the preview isn't the export"
+    advisories are gated on the *proxy*, not on the geometry — so a rotation
+    leaves the reader told to judge sharpening at full size with no way to."""
+    run_id = _big(client, built_library, basename="cofire")
+    ops = [{"uid": "ro", "id": "geometry.rotate", "enabled": True,
+            "params": {"angle": 5.0}},
+           {"uid": "sh", "id": "detail.sharpen", "enabled": True,
+            "params": {"radius": 1.0, "amount": 0.5}},
+           {"uid": "hp", "id": "detail.hot_pixels", "enabled": True, "params": {}},
+           *FLAT_RECIPE]
+    recipe = _enc(ops)
+
+    hist = client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/histogram",
+                      params={"recipe": recipe})
+    assert hist.status_code == 200, hist.text
+    body = hist.json()
+    assert body["sharpen_preview_understates"] is True
+    assert body["hot_pixels_preview_skipped"] is True
+
+    info = client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe-info",
+                      params={"recipe": recipe}).json()
+    assert info["available"] is False
+    # …so the sentence that names the op to move is the only thing standing
+    # between the reader and advice they cannot act on.
+    assert info["fixable"] is True
+    assert "rotation" in info["reason"]
+
+
 # --- where it looks -----------------------------------------------------------
 
 def _window(resp) -> dict:
