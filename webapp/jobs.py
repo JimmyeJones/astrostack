@@ -281,6 +281,18 @@ class JobManager:
         self._queue.put((job, fn))
         return job
 
+    def active(self) -> list[Job]:
+        """Every non-terminal (queued/running) job, newest first.
+
+        Active jobs always live in the in-memory map, so this needs no DB read —
+        unlike ``list()``, which merges history and is bounded by ``limit``. Use
+        this when the question is only about what is live right now.
+        """
+        with self._lock:
+            live = [j for j in self._jobs.values() if j.state not in _TERMINAL]
+        live.sort(key=lambda j: j.created_utc or "", reverse=True)
+        return live
+
     def active_of_kind(self, kind: str) -> Job | None:
         """The first non-terminal (queued/running) job of ``kind``, or ``None``.
 

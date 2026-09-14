@@ -1,5 +1,80 @@
 # Shipped — the record
 
+## v0.441.1 — 2026-09-14 — the import that had been queued for three days, and nothing said so
+
+*(Builder, branch `claude/sweet-babbage-jadqn3` — PRIORITY 2/3 (autonomy + trust), from observer issue
+[#883](https://github.com/JimmyeJones/astrostack/issues/883), verified in the code here before a line was
+written. Additive: one new endpoint, one new module, one new note on an existing board. No config, schema,
+on-disk, API-shape or default change.)*
+
+**Eleven days of the owner's shooting was on disk and invisible, and every screen said everything was
+fine.** The observer's census: nothing captured after 2026-09-03 has been imported; 2,259 subs across two
+full nights (12.6 h, seven targets) exist in `incoming/` and in no `frames` table; and `jobs.sqlite` shows
+a `pipeline` job **queued since 2026-09-11T01:04:48Z that has still not started**, while `reprocess_all`
+jobs have held the worker continuously since the 9th.
+
+**Verified in the code, and the mechanism is exactly what the report suspected.** `JobManager` is a single
+`queue.Queue` and one worker thread (`webapp/jobs.py`) — deliberately, because two stacks at once on a
+RAM-capped NAS is an OOM kill. So a job that runs for days holds the queue for days. That is visible and
+fine for a job a person started; the import job is the one **nobody starts by hand** — `_on_batch_ready`
+enqueues it from the watcher, and `active_of_kind("pipeline")` then correctly refuses to enqueue a second,
+so one queued import silently absorbs every later night. Meanwhile nothing looks wrong: every target keeps
+the frame count it had before, and a frame that was never imported has **no QC row, no reject reason and
+no place in the record where it can be seen to be absent**. The only surface that knew was a grey `queued`
+badge on the Jobs page, which reads identically whether the job was enqueued three days ago or three
+seconds ago.
+
+**What shipped is the sentence, not a re-order.** Deliberately: the observed stall is a *running* job
+holding the worker, which no amount of queue re-ordering would have released, and a second worker is
+precisely the change the memory bound exists to prevent (AGENTS.md §10). The root-cause half — whether
+long-haul work should yield to the import — is filed as a lead in `IMPROVEMENTS.md`, unbuilt.
+
+* **`webapp/jobqueue.py`** (pure): `import_waiting(jobs, now)` → `ImportWaiting | None`. Reports the
+  longest-waiting queued `pipeline` job once it is past `IMPORT_WAIT_MIN_HOURS` (**2.0** — the watcher
+  polls every few minutes and an ordinary import finishes in minutes, while a stack somebody started can
+  legitimately run an hour or two and must not raise a note), together with the running job holding the
+  worker. Takes mappings, returns a dataclass: no manager, no request, no clock of its own.
+  **Three properties chosen rather than fallen into**: only `pipeline` counts (an editor export waiting its
+  turn is ordinary serialisation, and the person who pressed the button is watching it); **nothing running
+  still reports**, because a queue that is not busy and not moving is the worse case, not the quiet one;
+  and an unparseable stamp, a missing one, or one from the *future* (a source clock skewed ahead) is
+  skipped rather than guessed at, so one bad row can never manufacture a stall.
+* **`JobManager.active()`**: every non-terminal job, newest first, straight off the in-memory map — no DB
+  read, unlike `list()`, which merges history and is bounded by `limit`. A queued job is by definition live
+  in memory, so this is cheap enough to poll.
+* **`GET /api/jobs/queue-health`** → `{"waiting": null}` on a healthy queue, which is the ordinary answer.
+  Declared **before** `/{job_id}` so the literal path wins the match — pinned by a test, because a route
+  regression there would silently mean the note can never fire again. It is deliberately **not** added to
+  v0.441.0's `_READONLY_GET_PATHS`: that allowlist matches paths exactly, so nothing breaks either way, and
+  widening a credential's privilege is that feature's call to make, not this one's.
+* **`frontend/src/importWaiting.ts`** (pure): one wording for both surfaces, the `fullres.ts` arrangement,
+  so two screens cannot make two claims about one queue. `waitedFor` reads in hours below a day and **days**
+  beyond it — "70.4 h" is a number the reader has to divide, and the point of the sentence is that it
+  lands. Three bodies: held by a named job ("…waiting 3 days behind *Reprocessing all targets*, which has
+  been running for 4 days. Let it finish, or cancel it on the Jobs page"), held by nothing at all
+  ("…but nothing is running. Restarting AstroStack should let it start" — *not* "wait for it to finish",
+  which would be advice about a job that does not exist), and a count when more than one has piled up. The
+  holder's engine kind never reaches the screen: it goes through the Jobs page's own `jobKindLabel`.
+  Every body carries the same reassurance first — **nothing is lost, the subs are safe in `incoming/`** —
+  because that is the first thing a beginner reading "your frames aren't imported" needs to know.
+* **Two surfaces.** The Jobs page, above the rows. And the Dashboard's `NoticeBoard` as `StuckImportNote`,
+  ranked `warning` beside its sibling `MissingFilesNote` — the same shape of silence at library scale —
+  because `overnight.py`'s own note applies: Jobs is "a screen a beginner has no reason to open", and this
+  is a failure you only go looking for once you already suspect it. It joins the board rather than becoming
+  one more always-on banner (AGENTS.md §1), is self-hiding on a healthy queue, and swallows a failed read,
+  so an older backend with no such endpoint renders nothing. Not dismissable: like the missing-files note
+  it is a live condition that clears itself the moment the worker frees up.
+
+**Tests (+30).** 14 Python (`tests/webapp/test_job_queue_health.py`) over the rule, `active()` and the
+endpoint both ways; 10 vitest on the wording (including that `reprocess_all` never reaches the screen, that
+a holder with no recorded start does not get an invented duration, and that the nothing-running body drops
+the "cancel it" advice); 3 on the Dashboard note; 2 on the Jobs page. Written against the shape the
+observer measured — an import queued 70 h behind a `reprocess_all` running 96 — not against a convenient
+fixture.
+
+**Issue #883 stays open**: the surfacing is done, the starvation is not.
+
+
 ## v0.441.0 — 2026-09-14 — a read-only credential, so observing the app no longer needs the keys to it
 
 *(Builder, branch `claude/sweet-babbage-fkwilc` — 🔐 OWNER-REQUESTED GATE (infra / observability in service of

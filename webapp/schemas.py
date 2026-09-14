@@ -926,6 +926,26 @@ class JobOut(BaseModel):
     result: dict[str, Any] | None = None
 
 
+class ImportWaitingOut(BaseModel):
+    """An import job that has been queued too long, and what is holding the one
+    serial worker. See `webapp/jobqueue.py`."""
+
+    job_id: str
+    queued_utc: str
+    waiting_hours: float
+    n_waiting: int
+    holder_id: str | None = None
+    holder_kind: str | None = None
+    holder_target: str | None = None
+    holder_hours: float | None = None
+
+
+class JobQueueHealthOut(BaseModel):
+    """``waiting`` is None on a healthy queue, which is the ordinary answer."""
+
+    waiting: ImportWaitingOut | None = None
+
+
 class TargetCreate(BaseModel):
     name: str
 

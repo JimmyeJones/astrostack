@@ -19,6 +19,7 @@ import { ContinueTonightCard } from "../components/ContinueTonightCard";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
 import { FirstLookStrip } from "../components/dashboard/FirstLookStrip";
 import { MissingFilesNote } from "../components/dashboard/MissingFilesNote";
+import { StuckImportNote } from "../components/dashboard/StuckImportNote";
 import { NewSubsWaitingNote } from "../components/dashboard/NewSubsWaitingNote";
 import { OverTrimmedNote } from "../components/dashboard/OverTrimmedNote";
 import { StackFailuresNote } from "../components/dashboard/StackFailuresNote";
@@ -238,6 +239,13 @@ export function Dashboard() {
           // louder cousin. Self-hiding at zero.
           { key: "missing-files", priority: NOTICE_PRIORITY.warning,
             node: <MissingFilesNote /> },
+          // The one serial worker holding the import back. Same rung and the
+          // same shape of silence as its neighbour above: nothing looks wrong —
+          // every target keeps the frame count it had — while the last nights
+          // of shooting simply are not in the library. Self-hiding on a healthy
+          // queue, which is every ordinary minute.
+          { key: "stuck-import", priority: NOTICE_PRIORITY.warning,
+            node: <StuckImportNote /> },
           // A target that stopped producing pictures. Same rung as the other
           // warnings: nothing is corrupt, but the walk-away workflow the owner
           // relies on has quietly stopped delivering for that target, and the
