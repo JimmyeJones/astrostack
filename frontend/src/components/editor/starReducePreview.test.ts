@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { FULL_SIZE_CHECK_LABEL } from "./loupe";
 import { starReduceDiffersCaption } from "./starReducePreview";
 
 describe("starReduceDiffersCaption", () => {
@@ -26,5 +27,14 @@ describe("starReduceDiffersCaption", () => {
     // size, so any directional word here would be wrong about as often as right.
     const cap = starReduceDiffersCaption({ star_reduce_preview_overstates: true }) ?? "";
     expect(cap).not.toMatch(/overstates|understates|more than|less than|larger|smaller/);
+  });
+
+  it("names the control that shows the export, not the export itself", () => {
+    // "Judge the final strength on the export" is true and unhelpful — the
+    // export is what you get after deciding. The full-size check is the same
+    // pixels before you commit to them.
+    const cap = starReduceDiffersCaption({ star_reduce_preview_overstates: true }) ?? "";
+    expect(cap).toContain(FULL_SIZE_CHECK_LABEL);
+    expect(cap).not.toContain("Judge the final strength on the export");
   });
 });

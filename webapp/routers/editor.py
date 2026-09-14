@@ -1695,10 +1695,24 @@ class LoupeInfoOut(BaseModel):
     ``available`` is ``False`` with a plain-language ``reason`` when the recipe's
     geometry makes the mapping unanswerable, and when the preview is already 1:1
     — on a small stack the proxy *is* the picture, so there is nothing to check.
+
+    ``fixable`` separates those two, because only one of them is worth a line on
+    screen. "Your picture is already shown whole" takes the control away and
+    leaves nothing behind it: the four preview advisories the check answers are
+    all gated on a decimated proxy, so at 1:1 none of them is speaking either.
+    A *geometry* refusal takes it away while they carry on speaking — the reader
+    is told sharpening previews weaker than it exports and that the way to judge
+    it is at full size, and the way to judge it at full size has silently gone.
+    The sentence here names the op to move; ``fixable`` is what lets the editor
+    show it there without putting an explanation on every small stack.
     """
 
     available: bool
     reason: str | None = None
+    #: True only for a refusal the *user* can undo (a rotation, or a geometry op
+    #: ahead of a background pass). False for the two nothing can be done about:
+    #: a picture the preview already shows whole, and a run with no image file.
+    fixable: bool = False
     proxy_scale: float = 1.0
     size_px: int = LOUPE_SIZE_PX
     canvas_width: int | None = None
@@ -1734,6 +1748,7 @@ async def loupe_info(safe: str, run_id: int, request: Request,
                        "shows every pixel — what you see is what you'll get.")
         problem = _loupe_geometry_problem(rec)
         return LoupeInfoOut(available=problem is None, reason=problem,
+                            fixable=problem is not None,
                             proxy_scale=float(scale),
                             canvas_height=shape[0], canvas_width=shape[1])
 

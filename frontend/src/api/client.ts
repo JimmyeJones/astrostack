@@ -2629,6 +2629,12 @@ export interface LoupeWindow {
 export interface LoupeInfo {
   available: boolean;
   reason: string | null;
+  /** Whether `reason` names something the user can undo to get the check back
+   *  (a rotation, a geometry op ahead of a background pass) as opposed to a
+   *  refusal nothing can be done about (the picture is already shown whole).
+   *  Optional: a backend that predates it simply doesn't say, and the editor
+   *  then stays as quiet as it always was. */
+  fixable?: boolean;
   proxy_scale: number;
   size_px: number;
   canvas_width: number | null;

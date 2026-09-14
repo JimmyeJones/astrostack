@@ -4,8 +4,8 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api, type Recipe } from "../../api/client";
 import {
-  clickFraction, loupeCaption, loupeMarkerFromWindow, loupeMarkerRect,
-  loupePreviewCrop, loupeWhereText,
+  FULL_SIZE_CHECK_LABEL, clickFraction, loupeCaption, loupeMarkerFromWindow,
+  loupeMarkerRect, loupePreviewCrop, loupeWhereText,
 } from "./loupe";
 import { splitClipLeft, splitFraction, splitLeftPct } from "./splitCompare";
 
@@ -31,9 +31,17 @@ export const LOUPE_SPLIT_CAPTION =
  * picture you were looking at.
  *
  * **Self-hiding.** On a stack small enough that the preview already shows every
- * pixel, or a recipe whose geometry makes "which part of the picture is this?"
- * unanswerable, it renders nothing at all — the editor's standing complaint is
- * that it is too busy, so a control that cannot act does not take a line.
+ * pixel it renders nothing at all — the editor's standing complaint is that it
+ * is too busy, so a control that cannot act does not take a line, and at 1:1
+ * none of those four advisories is speaking either.
+ *
+ * **Except when the recipe took it away.** A rotation (or a geometry op ahead of
+ * a background pass) makes "which part of the picture is this?" unanswerable, and
+ * *those* advisories go on speaking — the reader is told sharpening previews
+ * weaker than it exports and to check it at full size, with nothing left to check
+ * it with. The server already writes the sentence naming the op to move; it is
+ * shown here, where the button would have been, on the `fixable` flag that tells
+ * the two refusals apart.
  *
  * **Why the window is fetched rather than hung off an `<img src>`.** The server
  * answers "which part of the picture did I actually cut?" in the response's
@@ -89,7 +97,26 @@ export function FullSizeCheck({
     return () => { if (url) URL.revokeObjectURL(url); };
   }, [window_.data?.url]);
 
-  if (!info.data?.available) return null;
+  if (!info.data?.available) {
+    // **Self-hiding, except where hiding is the bug.** A picture the preview
+    // already shows whole takes no line: nothing is being withheld, and the four
+    // advisories this control answers are all gated on a decimated proxy, so at
+    // 1:1 none of them is speaking either. A *geometry* refusal is the other
+    // case — those advisories carry on saying "judge it at full size" while the
+    // way to do that has quietly gone, and the server has already written the
+    // sentence naming the op to move. Saying it here is not a new element: it
+    // stands exactly where the button the reader is looking for would be.
+    if (!info.data?.fixable || !info.data.reason) return null;
+    return (
+      <Group gap={6} wrap="nowrap" align="flex-start" mt={4}>
+        <IconZoomScan size={14} color="var(--mantine-color-dimmed)"
+          style={{ flexShrink: 0, marginTop: 2 }} />
+        <Text size="xs" c="dimmed" data-testid="full-size-check-unavailable">
+          {info.data.reason}
+        </Text>
+      </Group>
+    );
+  }
   // The server's own rectangle when it has answered; the client-side guide while
   // the render is in flight, and on a backend that doesn't send one.
   const marker = loupeMarkerFromWindow(window_.data?.window)
@@ -115,7 +142,7 @@ export function FullSizeCheck({
         <Button size="compact-xs" variant="subtle" color="grape"
           data-testid="full-size-check-open"
           onClick={() => setOpen(true)}>
-          Check it at full size
+          {FULL_SIZE_CHECK_LABEL}
         </Button>
       </Group>
 
