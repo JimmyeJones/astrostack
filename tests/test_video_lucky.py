@@ -23,6 +23,7 @@ from seestack.video.lucky import (
     MIN_FRAMES,
     VideoStackCancelled,
     _sampling_stride,
+    ordinal,
     frame_luma,
     frame_sharpness,
 )
@@ -135,6 +136,43 @@ def test_sampling_stride_bounds_the_graded_frame_count():
     assert _sampling_stride(3000, 1500) == 2
     assert _sampling_stride(4001, 1000) == 5
     assert _sampling_stride(0, 1000) == 1
+
+
+def test_the_stride_warning_counts_in_english():
+    """The warning is shown to the owner on the Moon & Sun page, and it used to
+    be written ``f"every {stride}th frame"`` — a hard-coded suffix on a computed
+    integer, so the very first stride a long capture reaches read *"graded every
+    2th frame"*.
+
+    ``_sampling_stride(3000, 1500)`` is 2, i.e. the default ``max_frames`` makes
+    2 the *common* case rather than an exotic one, and 3 is the next.
+    """
+    assert ordinal(_sampling_stride(3000, 1500)) == "2nd"
+    assert ordinal(_sampling_stride(4001, 1000)) == "5th"
+    assert [ordinal(n) for n in (1, 2, 3, 4, 5, 8)] == [
+        "1st", "2nd", "3rd", "4th", "5th", "8th"]
+    # The teens are the exception every naive implementation gets wrong.
+    assert [ordinal(n) for n in (11, 12, 13, 14)] == [
+        "11th", "12th", "13th", "14th"]
+    # …and the twenties are where a naive *fix* for the teens breaks instead.
+    assert [ordinal(n) for n in (21, 22, 23, 101, 111, 112)] == [
+        "21st", "22nd", "23rd", "101st", "111th", "112th"]
+
+
+def test_the_owner_reads_that_warning_in_english(tmp_path):
+    """The end-to-end half: a real capture long enough to be sampled, and the
+    sentence the Moon & Sun page actually renders (``result.warnings``).
+
+    The unit test above pins the helper; this pins that the helper is what the
+    warning is built from — the two can drift apart, and the reason this bug
+    lived is that nothing ever read the finished sentence.
+    """
+    path = lunar_video(tmp_path / "Lunar_video.mp4", n_frames=8, w=64, h=48)
+    result = grade_video(path, LuckyOptions(max_frames=4))
+    stride_warnings = [w for w in result.warnings if "graded every" in w]
+    assert stride_warnings, "the capture was not sampled, so nothing is pinned here"
+    assert "graded every 2nd frame" in stride_warnings[0]
+    assert "2th" not in stride_warnings[0]
 
 
 # --------------------------------------------------------------------------

@@ -1,5 +1,48 @@
 # Shipped — the record
 
+## v0.446.1 — 2026-09-14 — "about a 2th of full size", found the first time anything drew it
+
+*(Builder, branch `claude/sweet-babbage-nhiajs` — PRIORITY 1 (editor) + 3 (friendliness). Copy only, two
+sites: no endpoint, config, schema, on-disk, API-shape or default change.)*
+
+**The finding.** The `--big` sample shipped an hour earlier (v0.446.0) put the editor's decimated-preview
+surface in front of a browser for the first time. The lead sentence of the modal it unlocks — the one that
+explains what "full size" means — read:
+
+> The preview is shrunk to about **a 2th of full size** to stay quick…
+
+`loupeCaption` wrote the shrink as `a ${Math.round(proxyScale)}th`: a hard-coded ordinal suffix on a computed
+integer. And the values are not exotic. `proxy_scale` is `ceil(longest / 1500)`, so **2** is every canvas up
+to 3000 px and **3** is the owner's own ~3494 px mosaics — *"a 3th of full size"*. The suffix is only right
+from 4 up.
+
+**Why it survived.** `loupe.test.ts` pinned exactly one value: `loupeCaption(512, 8)` → `"8th of full size"`,
+the one number where the hard-coded suffix happens to be correct. That is the AGENTS.md §8 pattern in its
+purest form — *a test whose fixture cannot exhibit its own bug* — and it held because the control is gated on
+`proxy_scale > 1`, which no bundled sample produced, so nothing outside jsdom had ever read the sentence.
+
+**The fix.** The app already owns this vocabulary: `recentreCrop.ts::keptFractionWords` turns a fraction into
+the words a beginner reads ("half", "a third", "a quarter", …, and a plain percentage below a twelfth, on the
+argument that *"a sixteenth"* is worse than *"6%"*). `loupeCaption` now calls it with `1 / proxyScale`, so the
+editor cannot come to a second way of saying "half", and the caption reads *"shrunk to about half of full
+size"* / *"about a third of full size"*.
+
+**And the same bug in a second place, found by grepping for its shape.** `seestack/video/lucky.py` built its
+sampling warning as `f"every {stride}th frame"` — so a long Moon or Sun capture told the owner it had
+*"graded every 2th frame"*, on the Moon & Sun page, at the very first stride a capture reaches
+(`_sampling_stride(3000, 1500) == 2` at the default `max_frames`). New pure `lucky.ordinal(n)`, with the
+teens and the hundred-elevens that a naive fix gets wrong.
+
+**Tests (+9, eight fail-before).** `loupe.test.ts`: the scale-8 assertion re-pinned on the correct words, plus
+a table over **2, 3, 4, 5, 8** — the scales a real canvas produces, i.e. the ones the old fixture could not
+reach — each also asserting the caption contains *no* ordinal-suffixed number at all, since that spelling is
+the bug's shape; plus the percentage fall-back at 16. `tests/test_video_lucky.py`: `ordinal` over 1–8, the
+teens (11–14) and the twenties/hundreds a naive teens-fix breaks (21st, 22nd, 111th), **and** an end-to-end
+one that grades a real 8-frame synthetic capture at `max_frames=4` and reads the finished sentence off
+`result.warnings` — verified fail-before against the exact string *"graded every 2th frame"*. The unit test
+pins the helper; the end-to-end one pins that the warning is built from it, because the two can drift and
+"nothing ever read the finished sentence" is why this lived.
+
 ## v0.446.0 — 2026-09-14 — the editor's shrunk preview, drawn in a browser for the first time
 
 *(Builder, branch `claude/sweet-babbage-nhiajs` — INFRA / maintainability in service of not missing bugs,
