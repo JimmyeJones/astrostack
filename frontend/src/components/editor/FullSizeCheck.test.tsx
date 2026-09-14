@@ -67,6 +67,33 @@ describe("FullSizeCheck", () => {
            reason: "This picture is small enough that the preview already shows every pixel." });
     await waitFor(() => expect(client.api.loupeInfo).toHaveBeenCalled());
     expect(screen.queryByText("Check it at full size")).not.toBeInTheDocument();
+    // …and not the reason either: nothing is being withheld here, and at 1:1 the
+    // advisories this control answers are all silent too.
+    expect(screen.queryByTestId("full-size-check-unavailable")).not.toBeInTheDocument();
+  });
+
+  it("says which op took the check away, where the button would have been", async () => {
+    // The other refusal. The four "the preview isn't the export" advisories are
+    // gated on the proxy, not on the geometry, so they carry on telling the
+    // reader to judge it at full size while the way to do that has gone. The
+    // server writes the sentence naming the op to move; dropping it left the
+    // advice unanswerable.
+    const reason = "This picture is rotated, so we can't tell which part of the "
+      + "original frame you're looking at. Turn the rotation off to check it at "
+      + "full size.";
+    wrap({ available: false, fixable: true, reason });
+    expect(await screen.findByTestId("full-size-check-unavailable")).toHaveTextContent(
+      "Turn the rotation off");
+    expect(screen.queryByText("Check it at full size")).not.toBeInTheDocument();
+  });
+
+  it("stays quiet when the backend doesn't say whether the refusal is fixable", async () => {
+    // An older build sends `reason` and no `fixable`. It can't be read as either
+    // refusal, so the editor stays exactly as quiet as it was before the flag.
+    wrap({ available: false, proxy_scale: 4,
+           reason: "This picture is rotated, so we can't tell which part." });
+    await waitFor(() => expect(client.api.loupeInfo).toHaveBeenCalled());
+    expect(screen.queryByTestId("full-size-check-unavailable")).not.toBeInTheDocument();
   });
 
   it("stays hidden when the backend is too old to answer", async () => {
