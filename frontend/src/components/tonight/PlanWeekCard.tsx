@@ -6,8 +6,8 @@ import { Link } from "react-router-dom";
 
 import { api } from "../../api/client";
 import {
-  otherTargetNights, targetNightPhrase, weekDarkPhrase, weekEmptyReason,
-  weekHeadline, weekMoonNote, weekNightLabel,
+  closingRowFor, closingWeekNote, otherTargetNights, targetNightPhrase,
+  weekDarkPhrase, weekEmptyReason, weekHeadline, weekMoonNote, weekNightLabel,
 } from "../../planweek";
 import { formatClock, formatMinutes } from "../../tonight";
 
@@ -34,6 +34,17 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
     // An older backend 404s this; that's a quiet no-op, not an error to retry.
     retry: false,
   });
+  // Which of these targets is leaving the sky, so the week this card plans can
+  // acknowledge the season the card above it is counting down. Deliberately the
+  // *same* query key, staleness and options `ClosingSeasonCard` uses, so the two
+  // share one request rather than asking the same question twice — and so the
+  // two can never be answered by two different snapshots.
+  const closingQ = useQuery({
+    queryKey: ["plan-closing", minAlt ?? null],
+    queryFn: () => api.getSeasonClosing(minAlt != null ? { minAlt } : undefined),
+    staleTime: 900_000,     // a season moves by the week, not by the minute
+    retry: false,
+  });
   // One `now` per render pass, so every label in the card agrees about which
   // night is "Tonight" even if the clock ticks past midnight mid-render.
   const now = useMemo(() => new Date(), []);
@@ -41,10 +52,12 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
   const plan = q.data;
   if (!plan) return null;
 
+  const closing = closingQ.data ?? null;
   const headline = weekHeadline(plan, now);
+  const closingNote = closingWeekNote(plan, closing, now);
   const empty = weekEmptyReason(plan);
   const placed = plan.nights.filter((n) => n.best !== null);
-  const others = otherTargetNights(plan);
+  const others = otherTargetNights(plan, undefined, closing);
 
   return (
     <Paper withBorder p="md" data-testid="plan-week">
@@ -56,10 +69,19 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
       </Group>
 
       {headline ? (
-        <Text size="sm" fw={600} mb="sm">{headline}</Text>
+        <Text size="sm" fw={600} mb={closingNote ? 4 : "sm"}>{headline}</Text>
       ) : (
         <Text size="sm" c="dimmed">{empty}</Text>
       )}
+
+      {/* The night the score can't see. Directly under the headline because it
+          is a correction to it, not an extra fact — and self-hiding, so on the
+          ordinary week where nothing is leaving this card is unchanged. */}
+      {closingNote ? (
+        <Text size="xs" c="orange.7" mb="sm" data-testid="plan-week-closing">
+          {closingNote}
+        </Text>
+      ) : null}
 
       {placed.length > 0 ? (
         <Table highlightOnHover>
@@ -132,7 +154,8 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
       {others.length > 0 ? (
         <Text size="xs" c="dimmed" mt="sm">
           Each target&apos;s own best night:{" "}
-          {others.map((t) => targetNightPhrase(t, now)).join(" · ")}
+          {others.map((t) => targetNightPhrase(t, now, closingRowFor(t.safe, closing)))
+            .join(" · ")}
         </Text>
       ) : null}
 
