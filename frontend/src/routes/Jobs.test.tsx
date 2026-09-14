@@ -1195,6 +1195,25 @@ describe("reprocessSummary", () => {
     expect(reprocessSummary({ total: 3, stacked: 1, skipped: 1, failed: [{ target: "Z" }] }))
       .toEqual({ line: "Restacked 1/3 targets — 1 already up to date — 1 failed.", failed: ["Z"] });
   });
+  it("says a batch that stood aside for an import is paused, not stopped", () => {
+    // A batch that handed the single worker back mid-way reads as one that
+    // stopped for no reason unless the summary says so — and nothing was
+    // skipped and nothing needs re-clicking, so "paused" is the honest word.
+    expect(reprocessSummary({ total: 104, stacked: 12, failed: [], yielded: true }))
+      .toEqual({
+        line: "Restacked 12/104 targets so far — paused to let an import "
+          + "through, resuming after it.",
+        failed: [],
+      });
+    // A cancel is not a pause: the two never both apply, and cancel wins.
+    expect(reprocessSummary({
+      total: 4, stacked: 1, failed: [], cancelled: true, yielded: false,
+    })).toEqual({ line: "Restacked 1/4 targets (cancelled early).", failed: [] });
+    // An older backend sends no flag at all, which reads as the finished batch
+    // it has always been.
+    expect(reprocessSummary({ total: 3, stacked: 3, failed: [] }))
+      .toEqual({ line: "Restacked 3/3 targets.", failed: [] });
+  });
   it("reports how many targets were deep-rescanned (QC/solve/grade) when the option was used", () => {
     expect(reprocessSummary({ total: 3, stacked: 3, rescanned: 3, failed: [] }))
       .toEqual({ line: "Restacked 3/3 targets — re-ran QC/solve/grade on 3.", failed: [] });
