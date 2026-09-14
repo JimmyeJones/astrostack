@@ -82,6 +82,36 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **BUG (found 2026-09-13 by the on-NAS observer account, measured on the owner's box; confirmed in the code
+  here) — `SeestarManager.stop()` sets a flag and returns without joining either thread, and neither loop
+  waits on that flag, so a stopped manager keeps polling for up to 5 s and overlapping app instances stack
+  up.** *(Pillar: correctness / shutdown hygiene — size XS; severity low in production, real in tests.
+  Confidence: reproduced — thread census taken per-test on the NAS.)* `webapp/seestar/manager.py:99`
+  `stop()` does `self._stop.set()`, `self._scan_now.set()`, disconnects clients — and never
+  `self._poll_thread.join()` / `self._scan_thread.join()`. The loops cannot notice promptly anyway:
+  `_poll_loop` blocks in `time.sleep(_IDLE_SLEEP)` (line 232, `_IDLE_SLEEP = 5.0`) and
+  `time.sleep(max(2, poll_interval_s))` (line 257) rather than `self._stop.wait(...)`, so the flag is only
+  read at the top of the next iteration. **Measured**, running `tests/webapp/test_incoming_readonly_guard.py`
+  with a per-test thread census (the `client` fixture is function-scoped, so every test builds a fresh app and
+  runs its full lifespan):
+  ```
+  test_the_sentinel_actually_fires          active=1  proc_threads=4   {MainThread:1}
+  test_reprocess_all_leaves_the_source...   active=2  proc_threads=8   {MainThread:1, seestar-poll:1}
+  test_the_video_pipeline_never_touches...  active=3  proc_threads=10  {MainThread:1, seestar-poll:2}
+  test_ingest_still_copies_and_never...     active=4  proc_threads=10  {MainThread:1, seestar-poll:3}
+  ```
+  Three `seestar-poll` threads from already-torn-down apps running alongside the live one. It plateaus rather
+  than growing without bound (they are daemons and do exit a few seconds late), so this is **not** a runaway
+  leak — but a `stop()` that returns before the thing has stopped is a false contract, and in the suite it
+  means every webapp test runs with two or three stale pollers underneath it.
+  **Shape:** have both loops wait on the stop event instead of sleeping (`self._stop.wait(delay)` returns
+  immediately when set), and have `stop()` join both threads with a bounded timeout. **Regression test:**
+  start a manager, `stop()` it, assert both threads are dead **when `stop()` returns** — not after a sleep.
+  **Care:** `_scan_now` is a separate event used to wake the scan loop early; don't collapse the two.
+  **Not the cause of the suite's 12 solver failures** — the same census showed the *passing* configuration
+  carrying **more** threads (active=7) than the failing one (active=4), so this was explicitly ruled out as
+  the explanation for those and is filed on its own merits.
+
 - **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
   question is closed unanswerable. Read before prioritising the audit's items.**
   - **The pre-D1 saved-recipe crop (⭐ item below — ✅ IT HAS SINCE SHIPPED, don't go looking for it; all three
@@ -2592,6 +2622,32 @@ uncached path costs every time (a cold one pays both, 1,116 ms), the 129 ms bein
   doesn't touch memory bounds or correctness. (M)
 
 ### Infra / maintainability
+
+- **OWNER-REQUESTED GATE (filed 2026-09-12, measured on the owner's NAS) — there is no read-only credential,
+  so an unprivileged local account cannot read diagnostics at all, and both workarounds are
+  root-equivalent.** *(Pillar: infra / observability in service of the owner's on-NAS Observer agent — size S–M.
+  Confidence: reproduced on the live deploy.)* The owner has stood up a locked-down `astroagent` user on the
+  NAS (uid 3005, no password, no SSH, no sudo, **not** in `docker`, POSIX ACL `user:astroagent:r-x` across all
+  289,853 objects of `$ASTRO`) so an agent can observe the running app against real data. It works — every
+  write and every `docker` call is denied — **except** that `GET /api/logs` returns
+  `{"detail":"Authentication required"}` (HTTP 401) to that account **and to root**, because the owner has a
+  password set and `webapp/main.py::_install_auth_gate` exempts only `/api/health` (`_AUTH_OPEN_PATHS`).
+  **A file-level reader cannot substitute:** `webapp/routers/logs.py` serves
+  `webapp.logbuffer`'s in-memory ring, and nothing writes a log file under `$ASTRO`, so read access to the data
+  root buys nothing here. That leaves exactly two workarounds and **both are wrong**: hand the observer the
+  owner's Basic password — `webapp/auth.py` has **one shared credential and no roles**, so that same secret
+  posts to `/api/stack`, rewrites `/api/settings` and deletes targets — or add the account to `docker`, which
+  is root on the host. This gap is precisely what would later tempt someone into the second one.
+  **Shape:** a *second*, separate credential in settings — a random token, displayed once, stored PBKDF2-hashed
+  and salted exactly as the password already is, compared with `hmac.compare_digest` like
+  `check_basic_auth`. The gate accepts it **only for `GET`**, and only on a read-only allowlist (`/api/health`,
+  `/api/logs`, `/api/stats`, `/api/jobs`, `/api/targets`); any other method carrying it → 403, not 401, so the
+  refusal is unambiguous in a log. **Do NOT** implement this by adding paths to `_AUTH_OPEN_PATHS` — that opens
+  them unauthenticated to the whole LAN, which is a strictly worse trade than the problem it solves.
+  **Upgrade safety (§9):** opt-in and additive. No token in a stored config → byte-identical behaviour; with no
+  password set the app stays wide open exactly as today. **Verify by running it:** with a password set, the
+  token must pass `GET /api/logs`, fail `POST /api/stack` with 403, and the existing Basic password must keep
+  working unchanged on both.
 
 - ~~**LEAD (Builder 2026-09-12, filed with v0.435.0 because it is what that fix could not reach) — the
   bundled sample cannot light up the whole "PLAN A NIGHT" half of the app, so no dogfood pass has ever
