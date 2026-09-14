@@ -223,9 +223,22 @@ if [ "$DO_EMPTY" = 0 ] && \
   echo "-- loading the bundled sample target"
   curl -sf -X POST "$BASE/api/sample" >/dev/null || echo "warn: sample load failed"
 fi
-SAFE="$(curl -sf "$BASE/api/targets" \
-        | python -c 'import json,sys; t=json.load(sys.stdin); print(t[0]["safe_name"] if t else "")' \
+# The FIELD sample by name, not `/api/targets`' first row. That list is ordered
+# by activity, so the moment a second demo is loaded and stacked the "sample"
+# leg below can silently become the mosaic — which is not a cosmetic mix-up: the
+# §1 page-height baselines in docs/PROCESS-NOTES.md were all measured on the
+# field sample, and its $SHOTS would then hold a mosaic's numbers under the same
+# filenames, with both editor drives running twice on one target. Observed on a
+# `--big` pass, 2026-09-14. Falls back to the first row so a library with no
+# sample (a --serve against real data) behaves exactly as before.
+SAFE="$(curl -sf "$BASE/api/sample" \
+        | python -c 'import json,sys; print(json.load(sys.stdin).get("safe") or "")' \
         2>/dev/null || true)"
+if [ -z "$SAFE" ]; then
+  SAFE="$(curl -sf "$BASE/api/targets" \
+          | python -c 'import json,sys; t=json.load(sys.stdin); print(t[0]["safe_name"] if t else "")' \
+          2>/dev/null || true)"
+fi
 echo "-- target: ${SAFE:-<none>}"
 
 # 3b. The mosaic sample (--mosaic): a second target, four overlapping panels of

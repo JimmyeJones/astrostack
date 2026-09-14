@@ -149,7 +149,14 @@ export function FullSizeCheck({
       <Modal opened={open} onClose={() => setOpen(false)} size="auto"
         title="Your picture at full size">
         <Stack gap="sm">
-          <Text size="sm" c="dimmed">{loupeCaption(size, info.data.proxy_scale)}</Text>
+          {/* The modal's lead sentence, and the only one that names the shrink
+              factor. Tagged so a dogfood pass can read it off the running page:
+              until v0.446.0 nothing could open this modal at all, and the
+              "a 2th of full size" it had been saying for its whole life was
+              found by looking at a screenshot of it. */}
+          <Text size="sm" c="dimmed" data-testid="full-size-check-caption">
+            {loupeCaption(size, info.data.proxy_scale)}
+          </Text>
           <Group align="flex-start" gap="md" wrap="wrap">
             {/* The navigator: the same preview, with the window marked. Clicking
                 moves the window — the only control this needs, and the picture

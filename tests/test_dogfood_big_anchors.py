@@ -21,10 +21,13 @@ necessary in the first place.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "agent-dogfood.sh"
+EDITOR_DRIVE = REPO / "scripts" / "dogfood_editor.mjs"
+FRONTEND_SRC = REPO / "frontend" / "src"
 
 
 def _script() -> str:
@@ -89,3 +92,80 @@ def test_the_sample_it_loads_is_genuinely_past_the_proxy_cap():
     _panels, small = sample_data._mosaic_layout(sample_data._MOSAIC_SMALL)
     assert max(small) <= PROXY_MAX_PX
     assert max(sample_data._WIDTH, sample_data._HEIGHT) <= PROXY_MAX_PX
+
+
+# --- the editor drive's full-size-check leg --------------------------------
+#
+# `--big` exists so the shrunk-preview surface can be *reached*; the editor
+# drive's `driveFullSizeCheck()` is what actually opens it. It addresses the
+# modal by `data-testid`, which is the same string link the probe's own anchors
+# test guards — rename one in the frontend and the drive keeps running, keeps
+# reporting clean, and silently stops checking that half.
+
+
+def _drive_testids() -> set[str]:
+    """Every ``full-size-check-*`` id the editor drive asks the page for."""
+    src = EDITOR_DRIVE.read_text(encoding="utf-8")
+    ids = set(re.findall(r'"(full-size-check-[a-z0-9-]+)"', src))
+    assert ids, "the editor drive no longer addresses the full-size check at all"
+    return ids
+
+
+def _rendered_testids() -> set[str]:
+    """Every ``data-testid`` literal rendered by non-test frontend source."""
+    out: set[str] = set()
+    for path in FRONTEND_SRC.rglob("*.tsx"):
+        if ".test." in path.name:
+            continue
+        out |= set(re.findall(r'data-testid="([a-z0-9-]+)"', path.read_text(encoding="utf-8")))
+    return out
+
+
+def test_every_id_the_drive_asks_for_is_really_rendered():
+    missing = sorted(_drive_testids() - _rendered_testids())
+    assert not missing, (
+        f"dogfood_editor.mjs addresses {missing}, which no component renders — "
+        "the drive would look for them, find nothing, and report clean"
+    )
+
+
+def test_the_drive_still_covers_the_parts_only_a_click_reaches():
+    """A future edit must not quietly narrow this back to "the button exists".
+
+    The modal, its navigator, the marker that says *where* the window is, and
+    the split comparison are each behind a click, and the split is behind two.
+    Nothing but this drive reaches any of them outside jsdom.
+    """
+    ids = _drive_testids()
+    for needed in ("full-size-check-open", "full-size-check-image",
+                   "full-size-check-navigator", "full-size-check-marker",
+                   "full-size-check-where", "full-size-check-split-toggle",
+                   "full-size-check-split-divider", "full-size-check-caption"):
+        assert needed in ids, f"the drive stopped checking {needed}"
+
+
+def test_the_drive_says_when_it_could_not_reach_the_surface():
+    """A pass that never opened the modal must say so, not report nothing — the
+    `location_source` lesson (v0.436.1): a silent skip reads as a clean run."""
+    src = EDITOR_DRIVE.read_text(encoding="utf-8")
+    assert "--big" in src, (
+        "the drive no longer tells a reader how to reach the surface it skipped"
+    )
+    assert "not offered" in src
+
+
+def test_the_field_leg_picks_the_field_sample_by_name():
+    """Observed on the first ``--big`` pass: `/api/targets`' first row is ordered
+    by activity, so with a second demo loaded and stacked the "sample" leg drove
+    the **mosaic** — both editor drives on one target, and the field sample's
+    ``$SHOTS`` (whose page heights the §1 baselines are measured against) holding
+    a mosaic's numbers under the same filenames.
+    """
+    src = _script()
+    head = src.split("# 3b.")[0]
+    assert '"$BASE/api/sample"' in head, (
+        "the field leg no longer asks which target the field sample is"
+    )
+    # The fall-back stays, so a --serve against a real library with no sample
+    # loaded still picks a target rather than none.
+    assert 't[0]["safe_name"]' in head
