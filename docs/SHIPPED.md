@@ -1,5 +1,160 @@
 # Shipped — the record
 
+## v0.446.2 — 2026-09-14 — the full-size check is clicked, and the field leg stops driving the mosaic
+
+*(Builder, branch `claude/sweet-babbage-nhiajs` — INFRA (the finder, not the app), serving PRIORITY 1. One
+`data-testid` added to a shipped component; everything else is `scripts/`. No endpoint, config, schema,
+on-disk, API-shape or default change.)*
+
+**Half one — a view behind a click is a view no route table probes.** v0.446.0 made the editor's
+decimated-preview surface *reachable*; it did not make anything reach the part of it that is behind a
+button. `FullSizeCheck` is a modal, and inside it the navigator, the marker, the `X-Loupe-Window` sentence
+and the split comparison are each another click deep — the split two. `dogfood_editor.mjs` adds every op the
+Add menu offers and had never pressed any of them, which is the same blind spot `--editor` itself was
+written for (v0.437.x) and the one `--mosaic`'s Split/Blink modes hit in v0.440.2.
+
+New `driveFullSizeCheck()` opens it, waits for the real full-resolution window, prints the three sentences it
+draws as one paragraph (the caption, the where-line, the split caption — three files, one window), clicks a
+**corner** of the navigator (the case where the window's clamp inside the canvas actually does something) and
+checks the marker followed, turns the comparison on, drags the divider through its pointer capture, and
+drains console errors and failed requests at each step. Driven on the real app: the window rendered, *"This
+is the middle of your picture."* became *"This is the top-left of your picture."*, the split drew, and
+nothing errored.
+
+It is explicit about **not** reaching it, too: on a 1:1 preview it says *"not offered (preview is 1:1 — run
+with `--big` to reach it)"*, and on a geometry refusal it prints the sentence being withheld instead. A
+silent skip reads as a clean run, which is the `location_source` lesson from v0.436.1.
+
+One `data-testid="full-size-check-caption"` was added, on the modal's lead sentence — the only place the
+shrink factor is named, and the line v0.446.1's bug was sitting in. It is guarded both ways by
+`test_dogfood_big_anchors.py` (+4): every id the drive asks for is rendered by real non-test source, the
+click-only ones cannot be quietly dropped from the drive, and the drive must still say when it could not
+reach the surface.
+
+**Half two — a defect the first `--big` pass exposed in the tooling itself.** `SAFE`, the target the "sample"
+leg probes and edits, was `/api/targets`' **first row**. That list is ordered by activity, so the moment a
+second demo was loaded and stacked it became the mosaic: the pass ran both editor drives on one target, and
+the field sample's `$SHOTS` — the directory whose page heights the §1 baselines in `PROCESS-NOTES.md` are
+measured against — would have held a mosaic's numbers under the same filenames. Observed in the log as two
+consecutive drives of `/targets/Sample_M42_mosaic_2_2_full_size/edit/1`. It now asks `/api/sample` which
+target the field sample *is*, falling back to the first row so a `--serve` against a real library with no
+sample loaded behaves exactly as before. The exposure predates `--big` (`--mosaic` could do it too); the
+third demo is what made it happen.
+
+## v0.446.1 — 2026-09-14 — "about a 2th of full size", found the first time anything drew it
+
+*(Builder, branch `claude/sweet-babbage-nhiajs` — PRIORITY 1 (editor) + 3 (friendliness). Copy only, two
+sites: no endpoint, config, schema, on-disk, API-shape or default change.)*
+
+**The finding.** The `--big` sample shipped an hour earlier (v0.446.0) put the editor's decimated-preview
+surface in front of a browser for the first time. The lead sentence of the modal it unlocks — the one that
+explains what "full size" means — read:
+
+> The preview is shrunk to about **a 2th of full size** to stay quick…
+
+`loupeCaption` wrote the shrink as `a ${Math.round(proxyScale)}th`: a hard-coded ordinal suffix on a computed
+integer. And the values are not exotic. `proxy_scale` is `ceil(longest / 1500)`, so **2** is every canvas up
+to 3000 px and **3** is the owner's own ~3494 px mosaics — *"a 3th of full size"*. The suffix is only right
+from 4 up.
+
+**Why it survived.** `loupe.test.ts` pinned exactly one value: `loupeCaption(512, 8)` → `"8th of full size"`,
+the one number where the hard-coded suffix happens to be correct. That is the AGENTS.md §8 pattern in its
+purest form — *a test whose fixture cannot exhibit its own bug* — and it held because the control is gated on
+`proxy_scale > 1`, which no bundled sample produced, so nothing outside jsdom had ever read the sentence.
+
+**The fix.** The app already owns this vocabulary: `recentreCrop.ts::keptFractionWords` turns a fraction into
+the words a beginner reads ("half", "a third", "a quarter", …, and a plain percentage below a twelfth, on the
+argument that *"a sixteenth"* is worse than *"6%"*). `loupeCaption` now calls it with `1 / proxyScale`, so the
+editor cannot come to a second way of saying "half", and the caption reads *"shrunk to about half of full
+size"* / *"about a third of full size"*.
+
+**And the same bug in a second place, found by grepping for its shape.** `seestack/video/lucky.py` built its
+sampling warning as `f"every {stride}th frame"` — so a long Moon or Sun capture told the owner it had
+*"graded every 2th frame"*, on the Moon & Sun page, at the very first stride a capture reaches
+(`_sampling_stride(3000, 1500) == 2` at the default `max_frames`). New pure `lucky.ordinal(n)`, with the
+teens and the hundred-elevens that a naive fix gets wrong.
+
+**Tests (+9, eight fail-before).** `loupe.test.ts`: the scale-8 assertion re-pinned on the correct words, plus
+a table over **2, 3, 4, 5, 8** — the scales a real canvas produces, i.e. the ones the old fixture could not
+reach — each also asserting the caption contains *no* ordinal-suffixed number at all, since that spelling is
+the bug's shape; plus the percentage fall-back at 16. `tests/test_video_lucky.py`: `ordinal` over 1–8, the
+teens (11–14) and the twenties/hundreds a naive teens-fix breaks (21st, 22nd, 111th), **and** an end-to-end
+one that grades a real 8-frame synthetic capture at `max_frames=4` and reads the finished sentence off
+`result.warnings` — verified fail-before against the exact string *"graded every 2th frame"*. The unit test
+pins the helper; the end-to-end one pins that the warning is built from it, because the two can drift and
+"nothing ever read the finished sentence" is why this lived.
+
+## v0.446.0 — 2026-09-14 — the editor's shrunk preview, drawn in a browser for the first time
+
+*(Builder, branch `claude/sweet-babbage-nhiajs` — INFRA / maintainability in service of not missing bugs,
+serving PRIORITY 1. Additive: a third opt-in sample shape, three defaulted response fields and a dogfood
+flag. No config, schema, on-disk, default or API-shape change; the two existing samples' generated pixels
+are byte-identical, pinned by digest.)*
+
+**The hole.** `seestack/edit/proxy.py` decimates the live preview only above `PROXY_MAX_PX` (1500). The
+bundled field sample is **480 px** wide and the `--mosaic` sample's union canvas **907×615** — so
+`get_proxy` hands both back at `proxy_scale == 1.0`, and everything the editor gates on a *shrunk* preview
+was structurally unreachable by `scripts/agent-dogfood.sh`:
+
+* the five preview↔export advisories — `sharpen_preview_understates`, `deconv_…`, `denoise_…`,
+  `hot_pixels_preview_skipped`, `star_reduce_preview_overstates`;
+* `previewScaleCaption`, which says nothing at scale 1 by construction;
+* and the **whole** of `FullSizeCheck` — its button, its modal, its navigator, its `X-Loupe-Window` marker
+  and its split comparison, ~250 lines of the priority-1 screen.
+
+Even `--editor`, which adds every op the Add menu offers one at a time, could not reach one of them. The
+owner's own mosaics are ~3494×2470 and up, i.e. **that is his everyday state** — and both fixes shipped the
+run before this one (v0.445.2, v0.445.3) live on exactly that surface, were found by *reading*, and are
+pinned by jsdom alone.
+
+**The fix, and the measurement that set its size.** A third opt-in shape,
+`sample_data.load_sample(lib, shape="big")`: the same 2×2 mosaic — same grid, same 82 % step, same uneven
+depth (6/6/6/3), same hazy panel, same two nights, same ragged corners — shot with **900×600** panels. The
+lead's own instruction was *measure the smallest canvas that strides before scoping anything larger*, and
+that is what the number is:
+
+| | union canvas | `proxy_scale` | uncovered | stack |
+|---|---|---|---|---|
+| `--mosaic` | 907×615 | **1.0** | 4.8 % | 19.0 s |
+| `--big` | **1694×1150** | **2.0** | 3.7 % | 61.5 s |
+
+Scale 2 is the gentlest decimation there is and the one a run this size actually gets; going bigger costs
+stacking time with the pixels and reaches no new *kind* of surface, and a pass nobody runs finds nothing.
+The flag therefore costs about a minute on top of `--mosaic`, not the twenty the lead worried about.
+
+**The existing two samples are untouched, and that is pinned rather than argued.** The frame size became a
+parameter (`_render_star_field(frame=…)`, `_frame_wcs(frame=…)`, `_mosaic_layout(cfg)`), with every default
+the module's own constants — so a `_MosaicSample` dataclass now names the two mosaics and they differ in
+**scale alone**. The pointing jitter scales with the sensor, so the big canvas's ragged fraction is the same
+kind of raggedness rather than a tidier one. `test_the_existing_two_samples_generate_byte_identical_pixels`
+hashes every generated sub of both and pins the digests: the field sample's page-height baselines in
+`PROCESS-NOTES.md` and the mosaic's trim/coverage numbers all rest on those exact pixels, and a digest is
+the cheapest thing that notices a constant threaded one call too far.
+
+**The pass says what it reached, so a shrunken sample can't pass for a clean one.** `--big` prints what
+`/editor/loupe-info` answers — the canvas, the shrink factor, and whether the full-size check is offered —
+and says **explicitly** that every proxy-gated surface is still unreached if `proxy_scale` comes back at 1.
+That is the `location_source` lesson from v0.436.1: a silent failure that reads as the old empty state is
+worse than no tooling. Its shots go to `$SHOTS/big/`, so the field sample's baselines are not disturbed, and
+with `--editor` the ops are driven on the one run whose preview is not 1:1.
+
+**Tests (+11).** `tests/webapp/test_sample_data.py` +5 — the big sample is the only one the proxy decimates
+(`scale == 2.0`, canvas past the cap, **verified fail-before** by sizing the panels back to 480×320 in a
+scratch revert: `assert 907 > 1500`), it is still a ragged multi-level mosaic with NaN corners, its four
+panels cluster with the same uneven depth and record the full-size sensor, all three demos are separate
+targets that one remove sweeps, and the byte-identity digests above. New `tests/test_dogfood_big_anchors.py`
++6 — the same `*_anchors` shape as the probe and incoming-lag guards: the flag is parsed, off by default and
+in the `-h` header; the shape literal the script POSTs is one `SampleLoadIn` accepts; the `big_safe` key it
+reads is a real, defaulted `SampleStatusOut` field; `/editor/loupe-info` still exists in the OpenAPI paths;
+and — the one that matters — the sample's layout is genuinely past `PROXY_MAX_PX` while the other two are
+under it, so a sample that drifted back under the cap fails here instead of leaving every pass reporting
+CLEAN about a surface it had stopped drawing.
+
+**Upgrade-safe (§9).** Three additive, defaulted response fields (`big_loaded`/`big_safe`/`big_n_frames`)
+alongside the mosaic ones; a widened request `Literal` (nothing an old client sent is now rejected); no new
+endpoint, no schema, no on-disk layout, no default flipped. The Dashboard's "Try it" button still POSTs no
+body and still gets the single field. `remove_sample` sweeps the third shape too.
+
 ## v0.445.3 — 2026-09-14 — one limitation, five captions, two opposite instructions
 
 *(Builder, branch `claude/sweet-babbage-rhcmsd` — PRIORITY 1 (editor). Frontend copy only: no endpoint,
