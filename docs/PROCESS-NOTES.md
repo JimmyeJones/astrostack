@@ -18,6 +18,69 @@ is a queue.
 
 ---
 
+## 2026-09-14 (Builder, branch `claude/sweet-babbage-fplnkq`) — COLLISION #15: two Builders built the same lead in the same hour, and what survived it
+
+**Baseline: GREEN.** `main` at `ccb970a9` (v0.445.3). Full suite `6096 passed, 2 skipped` in **8m56s**
+(`-n 4` + BLAS cap, 4-core box).
+
+**Both runs took the previous note's top lead and built it, independently, to the same design.** The other
+run merged first as **PR #896 (v0.446.0–v0.446.2)** while this one was still testing. The convergence was
+near total and is worth recording precisely, because it says something about how contended a freshly-filed
+lead is: both added a third opt-in sample shape called **`"big"`** behind `POST /api/sample`, both added
+**`agent-dogfood.sh --big`**, both taught **`dogfood_editor.mjs`** to click the full-size check, both wrote
+a new test file at the identical path **`tests/test_dogfood_big_anchors.py`**, and both found the same first
+bug — the caption reading **"a 2th / a 3th of full size"**. §11 already says a `docs:`-filed lead is the
+hottest line in the file; this is the second data point that it is *hot enough that the fetch-before-you-
+start rule does not save you* when the item is L-sized and takes a full run. The only lever that would have
+worked is the one §11 names and neither run used: **fetch again after the design read and before the first
+line of code**, and again before the last commit.
+
+**What was kept, and what was dropped.** The duplicated half was discarded outright rather than merged —
+theirs is on `main`, and where the two differed theirs is the better answer twice over: they built the big
+sample as a **full-size 2×2 mosaic** (union canvas past the cap, so it is mosaic-shaped at the owner's scale
+rather than a single oversized field), they routed the fraction through the app's existing
+**`keptFractionWords`** instead of a second private word list, and they found a **second instance of the same
+ordinal bug** in `seestack/video/lucky.py` that this run's frontend-only grep never saw. Two findings were
+genuinely additive and were rebased onto their work as **v0.446.3** and **v0.446.4**; the rest of this run's
+code was thrown away.
+
+**v0.446.3 — the black box grew when the caption below it did.** With the modal finally open in a browser,
+the box around the window measured **512 px before "Compare with the preview" and 858 px after**, against a
+window that stayed 512: ~350 px of its own black background beside the reader's pixels. It is a
+block-level child of the column, so the split's long caption *below* stretched it. `width: fit-content`.
+**The lesson is the test shape:** jsdom lays nothing out, so a jsdom test can only assert the property is
+set — the band can only ever be caught by something that renders, so the drive now measures the box against
+the window on every pass.
+
+**v0.446.4 — the advisory column read as one paragraph, which is the old method on new ground.** With six
+`data-testid="preview-advisory"` markers the drive prints the whole column after every op. Read together,
+the two captions saying the preview shows the effect *not at all* — hot-pixels and deconvolution — were the
+only two that never said where you *could* see it, though the control sits an inch below. v0.445.3 had
+declined exactly those two, on the reasoning that "neither asks for a judgement"; **the ops' own parameter
+lists disagree** (Threshold σ 2–10; Iterations 1–50 and Blur width 0.5–5 px). Worth generalising: *a
+stand-down reasoned from a caption's wording can be overturned by the op's signature.* The promise is
+verified in the engine rather than asserted in a caption test — a stuck pixel 0.95 → 0.95 at step 3 and
+0.95 → 0.20 at 1:1; deconvolution's peak gain 0.020 on a step-4 proxy against 1.056 at full size.
+
+**The measurement this run took that theirs did not, kept because it is what a future run will want.**
+Which advisories speak is a **step function** of `proxy_scale`, evaluated against the shipped predicates
+rather than reasoned about: step 2 (canvas 1501–3000 px) wakes hot-pixels and star-reduction only; step 3
+adds sharpening **at the 1.5 px radius the auto-seeded editor opens with**; step 4 needs a canvas over
+**4500 px** for deconvolution and bilateral denoise. Stack cost measured at **25 s** for 1600×1080 and
+**100 s** for 3120×2100, 4 subs, on a 4-core box. So **step 4 is still unreached and nothing renders those
+last two advisories** — that is the residual, and it costs more than twice the pixels again.
+
+**Dogfood `--big --editor` — CLEAN** on this run's own (discarded) sample: `proxy_scale 3`, full-size check
+available, all 21 ops re-rendering on a 6.6 MP canvas, modal opening, window rendering, navigator moving it,
+split showing, undo/redo applied, no console error and no failed request. The field sample's drive correctly
+reported "not offered", which is the negative control.
+
+**Backlog state.** "Bugs (fix these first)" still holds no takeable bug and "Features that serve real
+workflows" still has no ready item — a seventh note saying so. The through-line of both runs is the same
+and is worth more than either fix: **removing a blind spot and then looking found more in one pass than
+re-reading the reachable surfaces found in five.** The cheapest remaining work is finding the *next* surface
+no pass can reach.
+
 ## 2026-09-14 (Builder, branch `claude/sweet-babbage-nhiajs`) — the blind spot closed, and the sentence behind it
 
 **Baseline: GREEN.** `main` at `ccb970a9` (v0.445.3). Full suite `6096 passed, 2 skipped` in **14m57s**

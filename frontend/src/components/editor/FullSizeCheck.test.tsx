@@ -323,6 +323,29 @@ describe("FullSizeCheck — compare with the preview", () => {
     expect(screen.queryByTestId("full-size-check-split-before")).not.toBeInTheDocument();
   });
 
+  it("keeps its black box hugging the window, so turning the split on adds no band beside the picture", async () => {
+    // Measured in a real browser on the first canvas ever big enough to render
+    // this control (v0.446.0's `--big` sample, proxy step 3): the box around the
+    // window was 512 px wide before the toggle and **858 px** after it, because
+    // it is a block-level child of the column and the split's caption is a long
+    // sentence — so ~350 px of its own `background: #000` was painted beside the
+    // reader's pixels. jsdom lays nothing out, so this pins the property that
+    // fixes it rather than the width; the browser-side check lives in
+    // `scripts/dogfood_editor.mjs`, which measures both boxes.
+    fireEvent.click(await open(WITH_FRACTIONS));
+    await screen.findByTestId("full-size-check-image");
+    const viewport = screen.getByTestId("full-size-check-viewport");
+    expect(viewport.style.width).toBe("fit-content");
+    // …and it must still be allowed to shrink and scroll when the window is
+    // bigger than the space, which is the case on a phone.
+    expect(viewport.style.maxWidth).toBe("100%");
+    expect(viewport.style.overflow).toBe("auto");
+
+    fireEvent.click(screen.getByTestId("full-size-check-split-toggle"));
+    expect(screen.getByTestId("full-size-check-split-caption")).toBeInTheDocument();
+    expect(screen.getByTestId("full-size-check-viewport").style.width).toBe("fit-content");
+  });
+
   it("offers no comparison at all when the halves could not be aligned", async () => {
     // An older container sends no preview fractions, so there is no honest way to
     // put the two on the same patch — and a misaligned split would be worse than
