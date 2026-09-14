@@ -164,6 +164,25 @@ def test_the_reported_percentage_is_friendly_and_never_absurd():
     assert "about 65% of it" in text
 
 
+def test_the_percentage_helper_is_the_one_the_sentence_uses():
+    # It is public now because a *second* card names the same shortfall (the
+    # Target page's coaching line), and the whole point of sharing it is that
+    # the two cannot print two percentages of one measurement — so pin that the
+    # helper's answer really is the number baked into the sentence.
+    from seestack.framing import rounded_coverage_pct
+
+    for v in (verdict(500, 400, 3000), verdict(500, 60, 30), verdict(500, 400, 180)):
+        assert v is not None
+        assert f"about {rounded_coverage_pct(v.coverage)}%" in v.text
+    # …and the two clamps, which are what stop "about 0% of it is in this
+    # picture" and "only about 100% of it made it in".
+    assert rounded_coverage_pct(0.0) == 5
+    assert rounded_coverage_pct(0.001) == 5
+    assert rounded_coverage_pct(0.985) == 95
+    assert rounded_coverage_pct(1.0) == 95
+    assert rounded_coverage_pct(0.62) == 60
+
+
 def test_no_verdict_without_a_vetted_size():
     # We never guess: an unsized catalog object gets no card at all.
     assert verdict(500, 400, None) is None

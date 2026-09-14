@@ -5,6 +5,7 @@ import {
   LOCATE_MIN_UNSOLVED,
   SHORT_INTEGRATION_S,
   DEEP_INTEGRATION_S,
+  FRAMING_MAX_COVERAGE,
   type NextBestMoveKind,
 } from "./nextBestMove";
 import { integrationReadiness, type ReadinessLevel } from "../../readiness";
@@ -556,6 +557,137 @@ describe("nextBestMove", () => {
           objectType: "Galaxy",
         })?.kind,
       ).toBe("integration");
+    });
+  });
+  describe("the framing rung", () => {
+    // The two sentences that filed this, both photographed in a browser on the
+    // bundled samples: the coaching card said "add more time" / "another pass
+    // or two over the same mosaic" while the framing note an inch below said
+    // "shoot it in mosaic mode" / "adding more panels would capture the rest".
+    const partial = (coverage: number, canvas: "frame" | "mosaic") => ({
+      level: "partial",
+      coverage,
+      coverage_pct: Math.min(95, Math.max(5, Math.round(coverage * 20) * 5)),
+      canvas,
+      object_name: "Orion Nebula",
+    });
+
+    it("names the wider framing, not more time, on a single field with 15% of the object", () => {
+      // Fails before: this was `integration` — "Add more time — 1 min so far…".
+      const tip = nextBestMove({
+        nFramesUsed: 6,
+        integrationS: 60,
+        framing: partial(0.15, "frame"),
+      });
+      expect(tip?.kind).toBe("framing");
+      expect(tip?.phrase).toContain("Orion Nebula");
+      expect(tip?.phrase).toContain("15%");
+      expect(tip?.phrase).toContain("mosaic mode");
+      // …and it says why more time is the *smaller* lever, rather than leaving
+      // the reader to reconcile two cards.
+      expect(tip?.phrase).toContain("can't bring the rest in");
+    });
+
+    it("names more panels, not more passes, on a mosaic with 55% of the object", () => {
+      // Fails before: this was `integration`, "another pass or two over the
+      // same mosaic" — the opposite instruction to the note below it.
+      const tip = nextBestMove({
+        nFramesUsed: 21,
+        integrationS: 3 * HOUR,
+        fieldFulls: 4,
+        framing: partial(0.55, "mosaic"),
+      });
+      expect(tip?.kind).toBe("framing");
+      expect(tip?.phrase).toContain("55%");
+      expect(tip?.phrase).toContain("more panels");
+      expect(tip?.phrase).not.toContain("mosaic mode");
+    });
+
+    it("stays out of the way of a well-framed target", () => {
+      // The 95%-captured case the lead warned against: `partial` fires on any
+      // object bigger than its canvas, so the coverage bar is what keeps this
+      // from firing on most of a mosaic user's library.
+      const tip = nextBestMove({
+        nFramesUsed: 40,
+        integrationS: 30 * 60,
+        framing: partial(0.95, "frame"),
+      });
+      expect(tip?.kind).toBe("integration");
+    });
+
+    it("fires exactly at the bar and not a hair above it", () => {
+      const at = nextBestMove({
+        nFramesUsed: 40, integrationS: 30 * 60,
+        framing: partial(FRAMING_MAX_COVERAGE, "frame"),
+      });
+      expect(at?.kind).toBe("framing");
+      const above = nextBestMove({
+        nFramesUsed: 40, integrationS: 30 * 60,
+        framing: partial(FRAMING_MAX_COVERAGE + 0.01, "frame"),
+      });
+      expect(above?.kind).toBe("integration");
+    });
+
+    it("only ever answers a `partial` verdict", () => {
+      // "Runs off the edge — it would fit whole, so re-centre it" and "add more
+      // time" are jointly satisfiable in one session, so those two cards do not
+      // compete and this rung must not steal the tip.
+      for (const level of ["centred", "off_centre", "clipped"]) {
+        const tip = nextBestMove({
+          nFramesUsed: 40, integrationS: 30 * 60,
+          framing: { ...partial(0.2, "frame"), level },
+        });
+        expect(tip?.kind).toBe("integration");
+      }
+    });
+
+    it("outranks the time rungs and the well-done note, but not focus or depth", () => {
+      const framing = partial(0.2, "frame");
+      // Deep and healthy — silent before, now the framing lever.
+      expect(nextBestMove({ nFramesUsed: 400, integrationS: 10 * HOUR, framing })?.kind)
+        .toBe("framing");
+      // …and above the "solid result" note.
+      expect(nextBestMove({ nFramesUsed: 200, integrationS: 2 * HOUR, framing })?.kind)
+        .toBe("framing");
+      // A refocus tightens the wider session too, so it still comes first.
+      expect(
+        nextBestMove({
+          nFramesUsed: 40, integrationS: 30 * 60, framing,
+          softStars: { currentFwhmPx: 5.2, typicalFwhmPx: 3.8 },
+        })?.kind,
+      ).toBe("soft");
+      // And so do the two "you have barely any usable subs" rungs.
+      expect(nextBestMove({ nFramesUsed: 2, framing })?.kind).toBe("thin");
+      expect(nextBestMove({ nFramesUsed: 30, nUnsolved: 30, framing })?.kind)
+        .toBe("locate");
+    });
+
+    it("declines rather than re-rounding when the backend didn't send the percentage", () => {
+      // An older backend serves `coverage` but no `coverage_pct`. Deriving it
+      // here is how two cards come to print two percentages of one
+      // measurement, so the rung simply stands down.
+      const tip = nextBestMove({
+        nFramesUsed: 40, integrationS: 30 * 60,
+        framing: { level: "partial", coverage: 0.2, canvas: "frame" },
+      });
+      expect(tip?.kind).toBe("integration");
+    });
+
+    it("leaves every caller without a framing verdict byte-for-byte unchanged", () => {
+      const base = { nFramesUsed: 40, integrationS: 30 * 60, objectType: "Galaxy" };
+      const before = nextBestMove(base);
+      for (const framing of [null, undefined, {}, { level: "partial" }]) {
+        expect(nextBestMove({ ...base, framing })).toEqual(before);
+      }
+    });
+
+    it("says it without a name rather than saying `undefined`", () => {
+      const tip = nextBestMove({
+        nFramesUsed: 40, integrationS: 30 * 60,
+        framing: { ...partial(0.2, "frame"), object_name: "  " },
+      });
+      expect(tip?.phrase).toContain("this target");
+      expect(tip?.phrase).not.toContain("undefined");
     });
   });
 });

@@ -553,8 +553,12 @@ export function TargetView() {
         // plateau badge's deference is unaffected either way.
         grainVerdict: latestRun?.grain_verdict,
         grainLevel: grain?.level,
+        // …unlike these two, the framing verdict *does* change which rung
+        // fires, so the mirror has to carry it or the plateau badge would
+        // defer to a tip that is no longer the one on screen.
+        framing: measuredFraming,
       })?.kind ?? null,
-    [latestRun, unsolvedCount, runs.data, identity.data, grain],
+    [latestRun, unsolvedCount, runs.data, identity.data, grain, measuredFraming],
   );
   // When walk-away Auto-stack is on, it now holds a target back rather than
   // publishing a 1-2 frame single-frame-speckle "master" (see auto_stack_min_frames
@@ -1194,6 +1198,10 @@ export function TargetView() {
                  the "add more time" rung cannot promise a cleaner background
                  over a card that has just measured the background clean. */
               grainLevel={grain?.level}
+              /* The measured framing verdict the note further down this page
+                 renders, so the coaching line stops telling a beginner to add
+                 time to a picture that is missing most of its object. */
+              framing={measuredFraming}
             />
           ) : null },
           /* "About as clean as your sky allows": when this target's measured noise
