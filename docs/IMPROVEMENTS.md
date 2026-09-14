@@ -2782,6 +2782,30 @@ uncached path costs every time (a cold one pays both, 1,116 ms), the 129 ms bein
 
 ### Infra / maintainability
 
+- **LEAD (Builder 2026-09-14, filed with v0.445.0/v0.445.1 because it is the one thing that fix could not be
+  photographed doing) — the season-closing card is the next self-hiding surface no dogfood pass can reach, and
+  the reason is the sample's fixed coordinates.** *(Pillar: maintainability in service of not missing bugs —
+  size S–M; **check the arithmetic below before building anything**. Confidence: reproduced this run — the
+  `--mosaic` pass printed the new `TONIGHT_PRESCRIPTIVE` block with **only** `plan-week` speaking.)*
+  v0.445.1 teaches the probe to read `/tonight`'s prescribing column as one paragraph. Three of the four cards
+  in it were silent on the pass that verified it, and `closing-season` is the one that matters: v0.445.0's whole
+  point is the sentence that appears *between* it and `plan-week`, so the fix is pinned by jsdom and a
+  fail-before revert but has **never been rendered in a browser**. This is the missing-observing-site (v0.436.1),
+  click-only-Compare (v0.440.2) and empty-`incoming/` (v0.442.1) hole a fourth time.
+  **Why the obvious lever does not work, so nobody spends a slot on it:** a season closes as a function of the
+  target's **RA against the date**, not of where you stand — so no `DOGFOOD_SITE` makes the bundled sample
+  close. Both samples sit at M 42's coordinates (RA ≈ 5h35m), whose season in September is *opening*. A closing
+  target in September wants RA ≈ 16–18 h. So the only honest levers are (a) let the sample writer place a target
+  at caller-chosen coordinates — `sample_data._write_sample_fits` already takes a `star_shift`, and
+  `--incoming-lag` is the precedent for a dogfood flag reaching into it by name — seeded as a **third, opt-in
+  shape** so the field sample's generated pixels stay bit-identical (pinned since v0.386.0) and the default
+  pass's page-height baselines do not move; or (b) accept that this card is verifiable only in jsdom and say so
+  in AGENTS.md §7 rather than leaving a future run to rediscover it. **Prefer (a) only if a second finding turns
+  up in that column** — one un-photographable card is a thin reason to grow the sample surface, and (b) costs a
+  sentence. **Care if (a) is built:** a seeded target must be recognisably a demo, and it must not teach the
+  planner to plan a real owner's night from coordinates nobody chose — the same line v0.436.1 drew when it put
+  the observing site in *Settings* rather than in the sample's FITS headers.
+
 - ~~**LEAD (Builder 2026-09-12, filed with v0.435.0 because it is what that fix could not reach) — the
   bundled sample cannot light up the whole "PLAN A NIGHT" half of the app, so no dogfood pass has ever
   seen those screens with data.**~~ — **✅ SHIPPED v0.436.1** as the entry's own shape (a), and it found
