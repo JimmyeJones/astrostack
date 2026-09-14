@@ -159,6 +159,15 @@ export function fmtGoal(h: number): string {
 // the goal is exactly the per-type one it has always been. A **user-set** goal
 // is never touched by it, for the same reason ``fieldFulls`` leaves it alone.
 //
+// ``canvasScope`` names the canvas the goal is really pricing — "this single
+// field", "this mosaic" — for the one case where saying so matters: a page that
+// has *measured* that the picture holds only a fragment of its object and is
+// telling the owner to shoot it wider. The number is unchanged (it is the
+// honest goal for the canvas they have); only the sentence stops implying it is
+// the whole object. Omit it — every caller that has no framing verdict to hand,
+// which is every surface but the Target page — and the verdict is byte-for-byte
+// what it always was. See ``readinessCanvasScope``.
+//
 // Returns null when there's no integration yet — nothing useful to say — so
 // the caller can simply render nothing.
 export function integrationReadiness(
@@ -167,6 +176,7 @@ export function integrationReadiness(
   goalHoursOverride?: number | null,
   fieldFulls?: number | null,
   difficulty?: GoalDifficulty,
+  canvasScope?: string | null,
 ): IntegrationReadiness | null {
   if (!Number.isFinite(exposureSeconds) || exposureSeconds <= 0) return null;
   const bucket = objectTypeBucket(type);
@@ -194,6 +204,14 @@ export function integrationReadiness(
   const ratio = hours / goalHours;
   const fraction = Math.max(0, Math.min(1, ratio));
 
+  // Blank/whitespace and the absent case are one answer — say nothing extra —
+  // so a caller that computes the scope from a response can pass it straight
+  // through without guarding.
+  const scope =
+    typeof canvasScope === "string" && canvasScope.trim() !== ""
+      ? canvasScope.trim()
+      : null;
+
   let level: ReadinessLevel;
   let phrase: string;
   if (ratio < 0.25) {
@@ -207,14 +225,19 @@ export function integrationReadiness(
     phrase = "nearly there — a little more will really finish it off";
   } else {
     level = "plenty";
-    phrase = "plenty for a clean image of this target";
+    // "plenty for a clean image of this target" is the one phrase that makes a
+    // claim about the *object* rather than about the picture, so on a fragment
+    // it is not merely unscoped but wrong — the scope replaces the noun rather
+    // than being appended to it.
+    phrase = `plenty for a clean image of ${scope ?? "this target"}`;
   }
 
   const so_far = formatIntegration(exposureSeconds);
+  const forScope = scope ? ` for ${scope}` : "";
   const verdict =
     level === "plenty"
       ? `${so_far} — ${phrase}.`
-      : `${so_far} of ~${fmtGoal(goalHours)} h — ${phrase}.`;
+      : `${so_far} of ~${fmtGoal(goalHours)} h${forScope} — ${phrase}.`;
 
   return {
     bucket,

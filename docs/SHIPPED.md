@@ -1,5 +1,57 @@
 # Shipped — the record
 
+## v0.444.2 — 2026-09-14 — the readiness card now says which canvas its goal is for
+
+*(Builder, branch `claude/sweet-babbage-t0x3rf` — 🟢 PRIORITY 3 (friendliness), the LEAD filed by the run that
+shipped the v0.443.0 framing rung, and taken as that lead's own shape (a).)*
+
+**The sentence pair, photographed on the bundled single field.** With the framing rung live, the Target page
+read *"Shooting it in mosaic mode next session is the biggest win here"* (coaching card), *"goal ~2 h · 1 min
+of ~2 h — a good start"* (readiness card), and *"About a 3×3 mosaic (9 panels) covers all of it. Giving all 9
+panels the depth you'd give one field (~2 h each) is about 18 h of shooting"* (framing note). Nobody is being
+told to point two ways — this is not the v0.443.0 contradiction again — but a beginner asking **"how much
+more do I need?"** got **~2 h** from the card whose whole job is answering that, about a canvas the same
+screen had just recommended replacing with an 18 h one.
+
+**The number stays; the sentence gains the scope it always assumed.** *"1 min of ~2 h **for this single
+field** — a good start"*. Switching the card to 18 h was the wrong fix and the lead said so: the goal is not
+wrong for this target, and the mosaic is a genuinely *different* target (the Seestar writes its subs to
+`<T>_mosaic_sub/`), so a card that silently re-priced would quote a canvas the owner does not have and break
+its own "of your `total_exposure_s`" arithmetic. On `plenty` the scope **replaces** a noun rather than being
+appended to one — *"plenty for a clean image of this target"* is the single phrase that makes a claim about
+the **object** rather than the picture, so on a fragment it is not merely unscoped, it is false; it now reads
+*"…of this single field"*.
+
+**The lead's "check first" is what set the gate, and it was already measured.** The lead asked how often a
+`partial` verdict co-occurs with a readiness card — *"if it is most of the owner's big-object library, (a)
+puts a new clause on a card he sees constantly"*. v0.443.0 had already answered it: `partial` fires on **any**
+object bigger than its canvas, 95 %-captured included, which is exactly why that rung is gated on
+`FRAMING_MAX_COVERAGE` (two thirds) rather than on the verdict. So the clause is gated on the same
+**fragment** bar, and the gate is one predicate — new `framingIsFragment`, split out of `framingRung` rather
+than copied — so the card that scopes the goal and the card that prescribes the wider framing cannot come to
+different opinions about which canvas is the right one. A page that scoped the goal at a coverage the coaching
+card stayed quiet about would be the same contradiction with the cards swapped.
+
+**Silent everywhere else, by construction.** `integrationReadiness` gains an optional sixth argument;
+`readinessCanvasScope` answers `null` for every verdict but a measured fragment, for a non-finite coverage,
+and for an absent/older-backend response — and blank/whitespace is folded into the absent case so a caller can
+pass a computed value straight through. The Target page is the only surface that has a framing verdict to
+hand, so the planner rows (`readinessRowHint`/`readinessRowBadge`), `continueTonight` and `libraryProgress`
+are byte-for-byte what they were, pinned by a test that walks all four readiness levels.
+
+**Upgrade-safe (§9):** frontend-only. No endpoint, response shape, config, schema, on-disk or default change;
+no new element on the page (one clause inside a sentence the card already renders), so the standing IA
+priority is untouched and no page gets taller.
+
+**Tests (+11):** 6 in `nextBestMove.test.ts` over `readinessCanvasScope` (the single field; the mosaic; an
+older backend's missing `canvas` reading as a frame; silence on 95 % captured, on the three other verdicts and
+on an empty/absent response; the bar hit exactly and a hair above it, asserted against
+`FRAMING_MAX_COVERAGE` itself; a non-finite coverage declining), 4 in `readiness.test.ts` (the scoped verdict
+on both canvases; the `plenty` noun replaced; every unscoped caller byte-for-byte unchanged across four
+levels; the goal, fraction and level unmoved by the scope), and 1 in `Target.test.tsx` pinning the **wiring**
+— the measured verdict reaching the card — **red before** under a scratch revert of that one argument, plus a
+second Target case asserting a 95 %-captured target keeps the unscoped sentence.
+
 ## v0.444.1 — 2026-09-14 — the suite's lowest job-wait budget, on its heaviest job
 
 *(Builder, branch `claude/sweet-babbage-t0x3rf` — 🔧 INFRA (test reliability). `main` was **red** at the start

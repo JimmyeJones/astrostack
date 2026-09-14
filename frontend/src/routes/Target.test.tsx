@@ -1137,6 +1137,70 @@ describe("TargetView framing verdict", () => {
     expect(tip).not.toMatch(/Add more time/);
   });
 
+  it("scopes the readiness goal to the canvas it is actually pricing", async () => {
+    // Filed as a LEAD by the run that shipped the framing rung, photographed on
+    // the same sample: the readiness card answered "how much more do I need?"
+    // with "~2 h" — for the single field the two cards around it had just said
+    // to replace with an 18 h mosaic. The number is right and stays; what it
+    // gains is the scope it always assumed. Pins the wiring, not the helper:
+    // the measured verdict has to reach the card.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 10 * 60 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 7, total_exposure_s: 10 * 60, n_frames_used: 40 }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue({
+      level: "partial",
+      text: "is bigger than your frame — only about 15% of it is in this picture. "
+        + "Shoot it in mosaic mode to capture all of it.",
+      coverage: 0.15, coverage_pct: 15, off_centre: 0.1, canvas: "frame",
+      object_name: "Orion Nebula", size_arcmin: 85,
+    });
+
+    renderTarget();
+
+    // The card renders from the target row first and picks up the scope once
+    // the measured verdict lands, so wait on the clause rather than the box.
+    await waitFor(() =>
+      expect(screen.getByTestId("readiness-card").textContent ?? "")
+        .toMatch(/for this single field/));
+    // …and the goal itself is untouched — this scopes the sentence, it does not
+    // re-price the canvas.
+    expect(screen.getByTestId("readiness-card").textContent ?? "")
+      .toMatch(/10 min of ~4 h for this single field/);
+  });
+
+  it("leaves the readiness goal unscoped on a well-framed target", async () => {
+    // `partial` fires on any object bigger than its canvas — at 95 % captured
+    // the missing sliver is an outer edge and depth is plainly the better
+    // lever, so scoping there would put a new clause on a card a big-object
+    // owner sees constantly. Same bar as the coaching card, asked once.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ total_exposure_s: 10 * 60 }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 7, total_exposure_s: 10 * 60, n_frames_used: 40 }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    const framing = vi.spyOn(client.api, "stackFraming").mockResolvedValue({
+      level: "partial",
+      text: "is bigger than your frame — only about 95% of it is in this picture.",
+      coverage: 0.95, coverage_pct: 95, off_centre: 0.1, canvas: "frame",
+      object_name: "Orion Nebula", size_arcmin: 85,
+    });
+
+    renderTarget();
+
+    await waitFor(() => expect(framing).toHaveBeenCalledWith("M_42", 7));
+    await waitFor(() =>
+      expect(screen.getByTestId("readiness-card").textContent ?? "")
+        .toMatch(/10 min of ~4 h/));
+    expect(screen.getByTestId("readiness-card").textContent ?? "")
+      .not.toMatch(/for this single field/);
+  });
+
   it("keeps the catalogue framing line when no picture has measured it", async () => {
     // No stack yet → no measured verdict → the prediction is the only thing that
     // can answer "will it fit?", so it must still be shown.
