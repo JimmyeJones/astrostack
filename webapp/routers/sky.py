@@ -27,10 +27,10 @@ from seestack.io.wcs_io import (
 )
 from seestack.post.skymap import bright_star_catalog
 from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
-from seestack.previewcrop import PreviewCrop, crop_pixel_box, parse_preview_crop
+from seestack.previewcrop import PreviewCrop, crop_pixel_box, preview_crop_json
 from webapp import deps
 from webapp.capture_nights import capture_night_range
-from webapp.preview_orient import baked_north_up_deg
+from webapp.preview_orient import baked_north_up_deg, recovered_preview_crop
 
 router = APIRouter(tags=["sky"])
 
@@ -174,7 +174,7 @@ def get_sky(request: Request) -> SkyResponse:
                 # at all; the tile then falls back to the canvas footprint with
                 # no WCS, because a confidently-misplaced tile is worse than an
                 # approximate one.
-                crop = parse_preview_crop(run.preview_crop_json)
+                crop = recovered_preview_crop(run)
                 crop_ok = crop != CROP_UNKNOWN
                 crop = crop if crop_ok else None
                 # When the subs were shot, named as observing nights for this
@@ -392,11 +392,17 @@ def _my_map_pictures(lib) -> tuple[list, dict]:  # noqa: ANN001, ANN202
             stat = Path(run.preview_path).stat()
         except OSError:
             continue
+        crop = recovered_preview_crop(run)
+        # The *resolved* crop, not the stored column: a run older than that column
+        # has its geometry recovered from the preview's own shape
+        # (``recovered_preview_crop``), so the NULL it holds would key two
+        # different footprints the same. (The PNG's size and mtime beside it
+        # already move whenever the recovered answer can.)
         fingerprint["runs"].append(
             [t.safe_name, run.id, int(stat.st_size), int(stat.st_mtime),
-             run.preview_crop_json or ""])
+             preview_crop_json(crop) or ""])
 
-        crop = parse_preview_crop(run.preview_crop_json)
+
         if crop == CROP_UNKNOWN:
             # The preview's geometry can't be reconciled with the canvas, so the
             # mask can't be lined up with it — skip rather than smear a

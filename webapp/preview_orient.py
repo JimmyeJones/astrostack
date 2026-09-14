@@ -30,6 +30,24 @@ Deliberately not detectable, and deliberately left reading as un-rotated:
 * **A preview that is a crop of the canvas** (the one-click auto-edit ends its
   recipe with a border trim). Its size is neither grid, so the arithmetic can't
   speak; ``preview_crop_json`` says so and we stop.
+
+**…except on a run recorded before that column existed, which is the other half
+of the same problem** (:func:`recovered_preview_crop`). ``preview_crop_json`` is
+written by ``webapp.pipeline._preview_crop_json_for_recipe``, which postdates a
+great many runs — the owner's library has it NULL on **all 614** while 42 of the
+stored PNGs are demonstrably crops of their canvas (observer issue #877, 2026-09-14,
+each reconciled to its run's saved crop rectangle to within a pixel). NULL is
+contractually "a plain full-canvas downscale", so every consumer places its
+geometry on the whole canvas and lands off by the trim's offset and scale — the
+exact failure the column was added to prevent, on every run older than it.
+
+The same reasoning that recovers an unrecorded turn recovers *this*: a plain
+downscale keeps the canvas's shape, so a stored preview whose **aspect ratio**
+is not the canvas's (nor the turned canvas's) is provably not one. That earns
+:data:`~seestack.previewcrop.UNKNOWN` — "decline to place geometry" — and never
+a fabricated rectangle: the bounds are not recoverable from a PNG header, only
+the fact that the plain-downscale contract is broken. Shape rather than size on
+purpose, so a preview merely rendered at some other width is never accused.
 """
 
 from __future__ import annotations
@@ -164,3 +182,89 @@ def baked_north_up_deg(run) -> float:  # noqa: ANN001
     if recorded is not None:
         return float(recorded)
     return recovered_north_up_deg(run)
+
+
+#: How far a stored preview's aspect ratio may sit from its canvas's before the
+#: "plain full-canvas downscale" contract is treated as broken.
+#:
+#: A downscale's only infidelity is the integer rounding of two independently
+#: rounded sides, which on the ≥1-px-per-side grids this app writes is well under
+#: 0.1 %. One percent is therefore ~10× the largest honest disagreement, and is
+#: deliberately loose: a false ``UNKNOWN`` silently withdraws a working overlay
+#: from an ordinary run, which is a worse trade than missing the rare crop that
+#: happens to preserve its canvas's shape.
+PREVIEW_ASPECT_TOLERANCE = 0.01
+
+
+def _same_aspect(a: tuple[int, int], b: tuple[int, int]) -> bool:
+    """Whether two pixel grids have the same shape, within
+    :data:`PREVIEW_ASPECT_TOLERANCE`. Degenerate sides answer ``True`` — an
+    unmeasurable grid must not be read as evidence of anything."""
+    if a[1] <= 0 or b[1] <= 0 or a[0] <= 0 or b[0] <= 0:
+        return True
+    ar_a, ar_b = a[0] / a[1], b[0] / b[1]
+    return abs(ar_a - ar_b) <= PREVIEW_ASPECT_TOLERANCE * max(ar_a, ar_b)
+
+
+def recovered_preview_crop(run):  # noqa: ANN001, ANN201
+    """What a run's stored preview shows of its canvas — recorded, or recovered
+    from the bytes when the column predates the run (see the module docstring).
+
+    The run-row companion to :func:`~seestack.previewcrop.parse_preview_crop`,
+    and shaped like :func:`baked_north_up_deg`: a **recorded** value wins outright,
+    and only a NULL/blank column falls through to the check.
+
+    Unlike the North-up angle, this column has **no positive "on the canvas grid"
+    state** — :func:`~seestack.previewcrop.preview_crop_json` deliberately stores
+    NULL for a full-canvas crop as well as for no crop, so that a re-render which
+    stops cropping clears the column rather than leaving a stale rectangle. That
+    is what makes the check safe to run on *every* NULL: the column never says
+    "I checked, and it is the whole canvas", so reading the bytes is the only way
+    anyone can know, and a shape that disagrees is evidence either way.
+
+    The check can return :data:`~seestack.previewcrop.UNKNOWN` but never a
+    rectangle: a PNG header says what *shape* the picture is, which is enough to
+    disprove "plain full-canvas downscale" and nowhere near enough to say which
+    part of the canvas survived. Every consumer already refuses to place geometry
+    on ``UNKNOWN``, so this hands a legacy cropped run to paths that are written
+    and tested — rather than inventing a new one.
+
+    Costs one PNG header read on a NULL-column run, and nothing more on the
+    overwhelmingly common answer (a preview that is exactly the canvas grid short-
+    circuits before any WCS is touched). Callers that also want the turn should
+    ask :func:`baked_north_up_deg`; the two memoise nothing between them, but the
+    turn is only consulted here when the sizes already disagree.
+    """
+    from seestack.previewcrop import UNKNOWN, parse_preview_crop
+
+    stored_json = getattr(run, "preview_crop_json", None)
+    if stored_json:
+        return parse_preview_crop(stored_json)
+
+    flat = _flat_preview_size(run)
+    preview_path = getattr(run, "preview_path", None)
+    stored = _png_size(preview_path) if preview_path else None
+    if flat is None or stored is None:
+        return None                      # unmeasurable — today's behaviour exactly
+    if stored == flat:
+        return None                      # a plain downscale: the ordinary answer
+
+    # The sizes disagree. A baked North-up turn is the one thing other than a crop
+    # that legitimately changes them, so ask what the bytes carry before accusing
+    # them — a 90° turn swaps the canvas's shape, and reading that as a crop would
+    # withdraw the overlay from every run the owner ever saved North-up.
+    expected = flat
+    baked = baked_north_up_deg(run)
+    if baked:
+        from seestack.render.orient import north_up_pixel_transform
+
+        transform = north_up_pixel_transform(flat[0], flat[1], baked)
+        if transform is not None:
+            expected = (transform[2], transform[3])
+    if stored == expected or _same_aspect(stored, expected):
+        # Same shape, different size: a preview rendered at some other width is
+        # still a faithful downscale, and the arithmetic cannot say otherwise.
+        return None
+    log.debug("run %s: stored preview %s is not a downscale of %s — declining to "
+              "place geometry on it", getattr(run, "id", "?"), stored, expected)
+    return UNKNOWN
