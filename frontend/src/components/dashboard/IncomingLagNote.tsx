@@ -2,10 +2,10 @@ import { Alert, Button, Group, Text } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { loadDismissedSig, saveDismissedSig } from "../../dismissal";
-import { waitedFor } from "../../importWaiting";
+import { incomingLagCause, waitedFor } from "../../importWaiting";
 
 const DISMISS_KEY = "astrostack.dashboard.incomingLagDismissed";
 
@@ -42,9 +42,23 @@ const NAMED = 3;
  * **Reassurance first, then the offer.** "Your frames aren't in your library" is
  * an alarming sentence to a beginner whose only copy of those frames is the
  * folder in question, so the note says plainly that nothing is lost and that
- * AstroStack never writes there. The only action is the ordinary "Scan incoming"
- * — the same thing the watcher would do by itself — because there is nothing to
+ * AstroStack never writes there. The action is the ordinary "Scan incoming" —
+ * the same thing the watcher would do by itself — because there is nothing to
  * repair, only something to retry.
+ *
+ * **Except when the sibling above has already answered.** Both notes fire on the
+ * owner's own reported event, both rank `warning`, and the board keeps two
+ * inline — so on the case they were built for, this one used to *guess* at a
+ * cause (`"this usually means an import is still waiting its turn"`) that
+ * `StuckImportNote` had just stated as a measured fact with a duration, repeat
+ * its "nothing is lost", and then offer the opposite action: a scan, while that
+ * note said to let the queue through. The worker is serial, so a second scan
+ * only joins the back of the queue the first one is already at the front of.
+ * `incomingLagCause` reads the queue instead of guessing — off the same query
+ * key the sibling already populates, so it costs no request and the two cannot
+ * disagree — and the note then says what it uniquely knows (how many, which
+ * folders, how long) and points at the Jobs page rather than at a scan that
+ * would not help.
  */
 export function IncomingLagNote() {
   const { data } = useQuery({
@@ -54,6 +68,15 @@ export function IncomingLagNote() {
     // the scale of hours. Once per visit is plenty, and a failed read renders
     // nothing rather than an error — an older backend has no such endpoint.
     staleTime: 300_000,
+  });
+  // Same key and same options as `StuckImportNote`, so the two share one cache
+  // entry: no second request, and no way for them to hold different opinions
+  // about the queue they are both describing.
+  const queue = useQuery({
+    queryKey: ["job-queue-health"],
+    queryFn: () => api.jobQueueHealth().catch(() => null),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
   });
   const [dismissedSig, setDismissedSig] = useState(() => loadDismissedSig(DISMISS_KEY));
   const qc = useQueryClient();
@@ -80,6 +103,7 @@ export function IncomingLagNote() {
   const longest = items.reduce(
     (worst, it) => (it.still_hours > worst ? it.still_hours : worst), 0);
   const sat = waitedFor(longest);
+  const cause = incomingLagCause(queue.data?.waiting);
   const title = waiting === 1
     ? "A sub in your incoming folder hasn't been imported yet"
     : `${waiting.toLocaleString()} subs in your incoming folder haven't been imported yet`;
@@ -97,20 +121,26 @@ export function IncomingLagNote() {
         {data.n_folders > 1 ? `, across ${data.n_folders} folders` : ""}
         {sat ? `, and ${waiting === 1 ? "it has" : "they have"} been there for ${sat}` : ""}.
       </Text>
-      <Text size="sm" mt={4}>
-        Nothing is lost — your subs are safe exactly where they are, and AstroStack
-        never writes to that folder. It normally imports new files by itself within
-        a few minutes, so this usually means an import is still waiting its turn
-        behind another job. Starting a scan is safe to do at any time; it only ever
-        adds what is missing.
-      </Text>
+      {cause.reassurance ? (
+        <Text size="sm" mt={4}>{cause.reassurance}</Text>
+      ) : null}
+      <Text size="sm" mt={4}>{cause.sentence}</Text>
       <Group gap="sm" mt="xs" wrap="wrap">
-        <Button
-          size="compact-xs" variant="light" color="yellow"
-          onClick={() => scan.mutate()} loading={scan.isPending}
-        >
-          Scan incoming now
-        </Button>
+        {cause.scanHelps ? (
+          <Button
+            size="compact-xs" variant="light" color="yellow"
+            onClick={() => scan.mutate()} loading={scan.isPending}
+          >
+            Scan incoming now
+          </Button>
+        ) : (
+          <Button
+            component={Link} to="/jobs"
+            size="compact-xs" variant="light" color="yellow"
+          >
+            Open Jobs
+          </Button>
+        )}
         {named.map((it) => (
           <Text key={it.folder || "(loose files)"} size="xs" c="dimmed">
             {`${it.folder || "loose in the folder"} · ${it.n_waiting.toLocaleString()} of `
