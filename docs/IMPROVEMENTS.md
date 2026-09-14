@@ -150,9 +150,18 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   an explicit `is_mosaic = low.endswith(_MOSAIC_SUFFIX)` branch with its own wording ("its own stacked
   image of each mosaic panel") and checks the `<T>_mosaic_sub` sibling on disk. **What is genuinely still
   open here is (2)** — de-duplicating the 11 existing pairs, which this entry already routes to owner
-  sign-off — **plus the correctness-adjacent half the Scout adds**: an old `<T>_mosaic_sub`-named duplicate
-  is classified single-field by `is_mosaic_target_name` and stacked in single-field mode. That last one is
-  the only *wrong stack* in this entry and is the part worth a Builder's slot. The one place
+  sign-off — **— and that is all.** *(Corrected later the same run, by the Builder who wrote the paragraph
+  above: I had carried the Scout's "stacked in single-field mode" half forward as the one piece worth a
+  slot, and it does not hold either.* **The stack does not consult the target's name.** `is_mosaic_target_name`
+  has exactly two consumers — `objectinfo.py:352`'s `allow_extent_match` and the merge suggester's
+  mosaic/single split at `routers/targets.py:193` — and neither is the stacker. Mosaic mode is decided
+  **geometrically, from the frames' own plate-solved footprints**: `mosaic.py:330`,
+  `is_mosaic = union_area > AUTO_UNION_AREA_RATIO * ref_area` (1.3x, i.e. footprint centres spanning more
+  than ~15 % of the FOV), and that is what `run_stack` persists as the run's `is_mosaic`. So a legacy
+  `<T>_mosaic_sub`-named target holding real mosaic subs **stacks as a mosaic anyway**; what its name
+  actually costs is a merge suggestion that may offer to combine it with its single field, and a weaker
+  object-extent match — both display-level, neither a wrong picture. There is **no wrong stack in this
+  entry**.)* The one place
   `_seestar_output_bases` really does skip mosaics is the **healing** companion, for output frames an old
   scan merged *into* a `_sub` target — a different population from these, which sit in their own bare
   targets.
