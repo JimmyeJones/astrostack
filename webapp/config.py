@@ -372,6 +372,16 @@ class Settings(BaseModel):
     auth_username: str = "admin"
     auth_password_hash: str = ""
     auth_salt: str = ""
+    # An optional *second* credential: a read-only token for a locked-down local
+    # account (the owner's on-NAS observer) that needs to read diagnostics and
+    # must be unable to do anything else. Empty hash = never minted, which is the
+    # default and leaves the gate byte-for-byte what it was. Stored exactly like
+    # the password above (PBKDF2 + per-mint salt, never in the clear) and managed
+    # only via /api/auth/readonly-token — never set these through the settings
+    # PUT. It buys read access, not open access: the gate accepts it for GET only,
+    # and only on its own short diagnostics allowlist (webapp/main.py).
+    readonly_token_hash: str = ""
+    readonly_token_salt: str = ""
 
     # Numeric ranges are enforced by the per-field ``Field(ge=, le=)`` bounds
     # above (a bad value 422s on the settings PUT; see routers/settings.py).

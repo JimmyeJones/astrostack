@@ -48,6 +48,10 @@ def test_old_config_loads_keeps_values_and_defaults_new_fields(tmp_path):
     # unattended stack on its own; a bimodal batch stacks exactly as before until
     # the user opts in.
     assert s.mixed_pointing_guard is False
+    # New read-only token defaults to *never minted*, so an upgraded install's
+    # auth gate is byte-for-byte what it was: one credential, all-or-nothing.
+    # Nothing is accepted under the reserved username until the owner mints one.
+    assert s.readonly_token_hash == "" and s.readonly_token_salt == ""
     # New walk-away minimum-frames floor defaults to 3 → an unattended auto-stack
     # holds a 1-2 frame target back (the single-frame speckle the owner reported)
     # instead of publishing it, while a real stack still goes through. Loads

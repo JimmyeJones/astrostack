@@ -1,7 +1,7 @@
 import {
-  Accordion, Alert, Badge, Button, Center, Divider, FileButton, Group, Loader,
-  NumberInput, Paper, Select, SimpleGrid, Stack, Switch, TagsInput, Text, TextInput,
-  Title,
+  Accordion, Alert, Badge, Button, Center, Code, CopyButton, Divider, FileButton,
+  Group, Loader, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, TagsInput,
+  Text, TextInput, Title,
 } from "@mantine/core";
 import {
   IconDeviceFloppy, IconDownload, IconInfoCircle, IconPlus, IconRefresh,
@@ -23,6 +23,7 @@ import { SectionTabs, type PageSection } from "../components/SectionTabs";
 import type { SettingsSection } from "../settingsSections";
 import { minMaxIgnoresWeightingHint } from "../weightingHint";
 import { folderConflict, settingsErrorMessage } from "../settingsFolders";
+import { readonlyCurlExample, readonlyTokenBlurb } from "../readonlyToken";
 import { formatDiskSize } from "../format";
 
 // Hover hints for every setting (shown via an info icon next to the label).
@@ -514,6 +515,33 @@ function AccessControl() {
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
 
+  // The read-only token. Held in component state only: the server keeps a hash,
+  // so this is the one and only moment it is readable, and a refetch can never
+  // bring it back. Cleared whenever the token is replaced or removed, so a stale
+  // secret is never left on screen next to a badge saying something else.
+  const [mintedToken, setMintedToken] = useState<string | null>(null);
+  const roEnabled = status.data?.readonly_enabled ?? false;
+  const roUsername = status.data?.readonly_username ?? "readonly";
+
+  const mintToken = useMutation({
+    mutationFn: () => api.mintReadonlyToken(),
+    onSuccess: (r) => {
+      setMintedToken(r.token);
+      qc.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
+  const removeToken = useMutation({
+    mutationFn: () => api.clearReadonlyToken(),
+    onSuccess: () => {
+      setMintedToken(null);
+      notifications.show({ message: "Read-only token removed.", color: "teal" });
+      qc.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
+  });
+
   return (
     <Paper withBorder p="lg">
       <Stack>
@@ -549,6 +577,73 @@ function AccessControl() {
             </Button>
           ) : null}
         </Group>
+
+        <Divider />
+
+        <Group gap={6}>
+          <Text fw={600} size="sm">Read-only token</Text>
+          <Badge variant="light" color={roEnabled ? "teal" : "gray"}>
+            {roEnabled ? "active" : "none"}
+          </Badge>
+        </Group>
+        <Text size="sm" c="dimmed">{readonlyTokenBlurb()}</Text>
+        {enabled ? (
+          <>
+            <Group align="center" gap="sm" wrap="wrap">
+              <Button variant="light" loading={mintToken.isPending}
+                onClick={() => {
+                  if (roEnabled && !window.confirm(
+                    "Replace the read-only token? The current one stops working straight away.",
+                  )) return;
+                  setMintedToken(null);
+                  mintToken.mutate();
+                }}>
+                {roEnabled ? "Replace the token" : "Create a token"}
+              </Button>
+              {roEnabled ? (
+                <Button color="red" variant="subtle" loading={removeToken.isPending}
+                  onClick={() => removeToken.mutate()}>
+                  Remove
+                </Button>
+              ) : null}
+              {roEnabled && !mintedToken ? (
+                <Text size="xs" c="dimmed">
+                  Sign in as <Text span fw={500} c="inherit">{roUsername}</Text> with the
+                  token you saved. Lost it? Replace it — the token itself is never stored,
+                  only a check of it.
+                </Text>
+              ) : null}
+            </Group>
+            {mintedToken ? (
+              <Alert color="teal" variant="light" icon={<IconInfoCircle size={16} />}
+                title="Copy this now — it isn't shown again">
+                <Stack gap={6}>
+                  <Group gap="xs" wrap="nowrap" align="center">
+                    <Code style={{ flex: 1, wordBreak: "break-all" }}>{mintedToken}</Code>
+                    <CopyButton value={mintedToken}>
+                      {({ copied, copy }) => (
+                        <Button size="xs" variant={copied ? "filled" : "light"}
+                          color={copied ? "teal" : "gray"} onClick={copy}>
+                          {copied ? "Copied" : "Copy"}
+                        </Button>
+                      )}
+                    </CopyButton>
+                  </Group>
+                  <Text size="xs">
+                    Use it as the password, with the username{" "}
+                    <Text span fw={500}>{roUsername}</Text>. To check it works:
+                  </Text>
+                  <Code block>{readonlyCurlExample(roUsername, window.location.origin)}</Code>
+                </Stack>
+              </Alert>
+            ) : null}
+          </>
+        ) : (
+          <Text size="xs" c="dimmed">
+            Turn on the password above first. With no password set the app is already
+            open to anyone on your network, so a read-only token wouldn't add anything.
+          </Text>
+        )}
       </Stack>
     </Paper>
   );

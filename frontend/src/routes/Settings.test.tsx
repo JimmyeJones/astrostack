@@ -469,6 +469,10 @@ function renderSettingsWith(
   // Extra saved settings for a test that needs real values in the form (the
   // folder fields, say). Omitted, the fixture is exactly what it always was.
   extraSettings: Record<string, unknown> = {},
+  // What `/api/auth/status` answers. Defaults to the open install every existing
+  // caller assumed, so they are unchanged; the access-control tests pass their
+  // own (a spy set *before* this helper would be overwritten by it).
+  authStatus: Record<string, unknown> = { enabled: false },
 ) {
   vi.spyOn(client.api, "getSettings").mockResolvedValue({
     default_stack_options: stackDefaults, ...extraSettings,
@@ -480,7 +484,7 @@ function renderSettingsWith(
     disk: {}, memory: {}, watcher_enabled: false,
   } as never);
   vi.spyOn(client.api, "optionsSchema").mockResolvedValue(STACK_FIELDS);
-  vi.spyOn(client.api, "authStatus").mockResolvedValue({ enabled: false } as never);
+  vi.spyOn(client.api, "authStatus").mockResolvedValue(authStatus as never);
   const qc = new QueryClient();
   return render(
     <MantineProvider>
@@ -759,5 +763,84 @@ describe("Automatic pipeline — wait for the night to settle", () => {
     expect(hint).toMatch(/while you're still shooting/i);
     expect(hint).toMatch(/Nothing is ever skipped/i);
     expect(hint).toMatch(/Set to 0/i);
+  });
+});
+
+// --- the read-only token (v0.441.0) -----------------------------------------
+//
+// The app's only second credential, and the whole point of it is that its limits
+// can be trusted — the owner hands it to a monitoring script or an assistant. So
+// what the screen *says* about it is part of the feature, not decoration.
+
+describe("Access control — the read-only token", () => {
+  function withAuth(status: Record<string, unknown>) {
+    return renderSettingsWith({}, "maintenance", {}, status);
+  }
+
+  it("offers nothing to create while the app has no password", async () => {
+    withAuth({ enabled: false });
+    await screen.findByText(/Turn on the password above first/i);
+    expect(screen.queryByRole("button", { name: /Create a token/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Remove$/i })).toBeNull();
+  });
+
+  it("offers one once a password is set, and says what it can't do", async () => {
+    withAuth({ enabled: true, username: "admin", readonly_enabled: false });
+    expect(await screen.findByRole("button", { name: /Create a token/i })).toBeInTheDocument();
+    expect(screen.getByText(/cannot stack/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Turn on the password above first/i)).toBeNull();
+  });
+
+  it("shows the token once, with the username to use it under", async () => {
+    withAuth({ enabled: true, username: "admin", readonly_enabled: false });
+    const mint = vi.spyOn(client.api, "mintReadonlyToken").mockResolvedValue({
+      token: "tok-abc123", username: "readonly", readonly_enabled: true,
+    } as never);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Create a token/i }));
+    await screen.findByText("tok-abc123");
+    expect(mint).toHaveBeenCalled();
+    // The one warning that matters: a hash is all the server keeps.
+    expect(screen.getByText(/isn't shown again/i)).toBeInTheDocument();
+    // And how to actually use it — the username, and a command against a path
+    // the token is allowed to read.
+    expect(screen.getByText(/curl -u readonly:YOUR_TOKEN/)).toBeInTheDocument();
+  });
+
+  it("does not show a stale token next to a badge saying it was replaced", async () => {
+    // Replacing revokes the old one immediately, so the old string on screen
+    // would be a secret that no longer works, shown as though it does.
+    withAuth({ enabled: true, username: "admin", readonly_enabled: true });
+    vi.spyOn(client.api, "mintReadonlyToken").mockResolvedValue({
+      token: "tok-first", username: "readonly", readonly_enabled: true,
+    } as never);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Replace the token/i }));
+    await screen.findByText("tok-first");
+
+    const removed = vi.spyOn(client.api, "clearReadonlyToken")
+      .mockResolvedValue({ readonly_enabled: false } as never);
+    fireEvent.click(screen.getByRole("button", { name: /^Remove$/i }));
+    await waitFor(() => expect(removed).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText("tok-first")).toBeNull());
+  });
+
+  it("asks before replacing a token that is already in use", async () => {
+    withAuth({ enabled: true, username: "admin", readonly_enabled: true });
+    const mint = vi.spyOn(client.api, "mintReadonlyToken");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Replace the token/i }));
+    expect(confirm).toHaveBeenCalled();
+    expect(mint).not.toHaveBeenCalled();   // declined → the live token survives
+  });
+
+  it("degrades cleanly against a backend that has never heard of it", async () => {
+    // `readonly_enabled` is additive, so an older backend simply omits it. That
+    // has to read as "no token", not as an error or an active one.
+    withAuth({ enabled: true, username: "admin" });
+    expect(await screen.findByRole("button", { name: /Create a token/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Remove$/i })).toBeNull();
   });
 });
