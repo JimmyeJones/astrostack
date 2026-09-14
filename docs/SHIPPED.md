@@ -1,5 +1,52 @@
 # Shipped — the record
 
+## v0.445.3 — 2026-09-14 — one limitation, five captions, two opposite instructions
+
+*(Builder, branch `claude/sweet-babbage-rhcmsd` — PRIORITY 1 (editor). Frontend copy only: no endpoint,
+config, schema, on-disk, API-shape or default change, and no new element on the panel.)*
+
+**The finding.** The same advisory column as v0.445.2, read for what it *tells the reader to do*. Five
+captions describe one limitation — the live preview is a strided decimation, so it is not the export — and
+two of them give an instruction:
+
+* `sharpenPreview.ts`: *"**Raise the radius** if you want to judge it here."*
+* `denoisePreview.ts`: *"**Don't raise the strength** to make the preview look clean."*
+
+They are about the identical mechanism, they can fire in the same column, and they are opposite advice. The
+denoise one is the newer (v0.434.2) and the reasoned one: it was written *because* someone who cannot see the
+smoothing pushes the slider until the preview looks right and saves a picture processed about twice as hard
+as the one they judged. That is exactly what the sharpen caption invites — Auto's own 1.5 px radius raised to
+4 px previews beautifully and saves halos — and it was written before the full-size check existed, so it was
+the best answer available at the time and nothing revisited it when a better one shipped.
+
+**The fix: one voice, and it is the control, not the slider.** No advisory on this panel now asks the reader
+to change the saved picture in order to see it. The three that ask for a judgement name
+`FULL_SIZE_CHECK_LABEL` instead:
+
+* sharpen — *"…applies it at full strength. "Check it at full size" to judge it — raising the radius until it
+  shows here would sharpen the saved picture harder than you meant."*
+* star reduction — *"Judge the final strength on the export"* (true and unhelpful: the export is what you get
+  *after* deciding) → *""Check it at full size" to judge the final strength."*
+* bilateral denoise — *"Don't raise the strength to make the preview look clean — "Check it at full size"
+  instead."*, which is the positive half its own test comment says is "the action".
+
+Deconvolution and hot-pixels are left alone: neither asks for a judgement, both simply state what the export
+will do.
+
+**The label is now owned in one place** (`loupe.ts`'s `FULL_SIZE_CHECK_LABEL`, the `fullres.ts` / `removed.ts`
+pattern), because a caption pointing at *"check it at full size"* while the button reads something else is a
+caption pointing at nothing. The button renders the same constant, and `FullSizeCheck.test.tsx`'s literal
+`findByText("Check it at full size")` pins its value, so the two cannot drift apart in either direction.
+
+**Reads together with v0.445.2**, which is why they shipped in one run: these captions now send the reader to
+a control, and that commit is what makes the control explain itself instead of disappearing when a rotation
+takes it away.
+
+**Tests (+3, all three fail before):** the sharpen caption no longer matches `/raise the radius if/i` and does
+name the control; the star-reduction caption no longer contains "Judge the final strength on the export" and
+does name it; the denoise caption names it too. Verified by stashing the three sources and watching
+`3 failed | 10 passed`.
+
 ## v0.445.2 — 2026-09-14 — the full-size check says which op took it away, instead of vanishing
 
 *(Builder, branch `claude/sweet-babbage-rhcmsd` — PRIORITY 1 (editor). One additive response field and one

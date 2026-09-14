@@ -4,8 +4,8 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api, type Recipe } from "../../api/client";
 import {
-  clickFraction, loupeCaption, loupeMarkerFromWindow, loupeMarkerRect,
-  loupePreviewCrop, loupeWhereText,
+  FULL_SIZE_CHECK_LABEL, clickFraction, loupeCaption, loupeMarkerFromWindow,
+  loupeMarkerRect, loupePreviewCrop, loupeWhereText,
 } from "./loupe";
 import { splitClipLeft, splitFraction, splitLeftPct } from "./splitCompare";
 
@@ -142,7 +142,7 @@ export function FullSizeCheck({
         <Button size="compact-xs" variant="subtle" color="grape"
           data-testid="full-size-check-open"
           onClick={() => setOpen(true)}>
-          Check it at full size
+          {FULL_SIZE_CHECK_LABEL}
         </Button>
       </Group>
 
