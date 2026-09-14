@@ -579,6 +579,32 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **LEAD (Builder 2026-09-14, read off a `--mosaic` dogfood pass that was otherwise CLEAN) — the mosaic
+  effort clause prices the grid from scratch on a target that is *already a mosaic*, and its own stand-down
+  was argued for a target that is not.** *(Pillar: friendliness / trust — PRIORITY 3; size S to write,
+  **M to be sure of** — it is real-data-gated; low severity. Confidence: the two sentences were photographed
+  in a browser this run on the bundled 2×2; the arithmetic on the owner's own mosaics is **not** measured.)*
+  On `Sample_M42_mosaic_2_2` — a target that **is** a 2×2 mosaic — the framing note reads *"About a 3×3 mosaic
+  (9 panels) covers all of it. Giving all 9 panels the depth you'd give one field (~2 h each) is about 18 h of
+  shooting"*, which is the identical sentence the single-field sample gets. `mosaicEffort.mosaicDepthText`'s
+  own docstring says this is deliberate — *"the panel grid is a NEW way to shoot the object, and the subs
+  already on one pointing are a few minutes against a figure in hours… being about 'next session' rather than
+  'what's left', it deliberately does not try to subtract them"* — **and that argument is about a target the
+  owner has not started.** It is the half the stand-down did not consider: on a target that already carries
+  four panels the premise ("a few minutes against hours") is an accident of the sample's depth, and the owner
+  is a heavy mosaic user with 26 mosaics, some many nights deep. There, *"about 18 h of shooting"* may be
+  quoting a job most of which is done.
+  **Why it is filed rather than built, and what to check first.** It is **not** obvious that the existing
+  depth carries over: `mosaic_plan` derives a grid from the object's size and the owner's measured frame
+  field, and a 3×3's panel centres are not a superset of a 2×2's — so "you already have 4 of the 9" may
+  simply be false, in which case 18 h is the honest number and the right answer is **(b) leave it alone**.
+  The measurement that decides it is on the owner's own library, not in this repo: take a real
+  `<T>_mosaic_sub/` target with a `partial` verdict, and compare its **measured** per-panel coverage
+  (`coverage_median_depth` / the `pointing_groups` the panel map already computes) against the plan's grid.
+  Only if the existing pointings genuinely fall inside the proposed grid is there a *"~10 h of that is still
+  to shoot"* to say — and even then it wants to be a clause on the existing sentence, not a third figure in
+  hours (the standing "extremely busy" priority). **Do not blind-subtract the banked hours.**
+
 - ~~**LEAD (Builder 2026-09-14, photographed on the bundled single field while shipping the v0.443.0 framing
   rung) — the readiness card still prices the canvas the coaching card has just told you to stop shooting.**~~
   — **✅ SHIPPED v0.444.2** (Builder 2026-09-14); entry cut to [`SHIPPED.md`](SHIPPED.md), one-liner under
