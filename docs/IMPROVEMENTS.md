@@ -579,6 +579,28 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **LEAD (Builder 2026-09-14, photographed on the bundled single field while shipping the v0.443.0 framing
+  rung) — the readiness card still prices the canvas the coaching card has just told you to stop shooting.**
+  *(Pillar: friendliness — PRIORITY 3; size S to write, **S–M to be sure of**; low severity. Confidence: both
+  sentences photographed in a browser this run, on the field sample.)*
+  With the framing rung live, the single-field Target page reads: *"Shooting it in mosaic mode next session is
+  the biggest win here"* (coaching), *"goal ~2 h · 1 min of ~2 h — a good start"* (readiness), and *"About a
+  3×3 mosaic (9 panels) covers all of it. Giving all 9 panels the depth you'd give one field (~2 h each) is
+  about 18 h of shooting"* (framing note). Each is true of the canvas it is about — and the readiness card's
+  is the canvas the other two say to abandon. It is not the v0.443.0 contradiction again (nobody is being told
+  to point two ways), but a beginner asking *"how much more do I need?"* gets **~2 h** from the card whose
+  whole job is answering that, on a target the same screen has just recommended replacing with an 18 h one.
+  **Why it is filed rather than built.** The honest fix is not obvious and the wrong one is worse: the goal is
+  **not** wrong for this target, and the mosaic really is a *different* target (the Seestar writes its subs to
+  `<T>_mosaic_sub/`), so a card that silently switched to 18 h would be pricing a canvas the user does not
+  have and would break its own "of your `total_exposure_s`" arithmetic. Candidate shapes: (a) leave the number
+  and add one scoping clause — *"…for this single field"* — only when a `partial` framing verdict is on screen
+  (cheap, and the v0.437.4 pattern of keeping the lever and scoping the claim); (b) nothing at all, on the
+  grounds that the framing note already prints the 18 h beside it and a third sentence about hours is exactly
+  the "extremely busy" complaint. **Check first** how often a `partial` verdict co-occurs with a readiness
+  card at all — if it is most of the owner's big-object library, (a) puts a new clause on a card he sees
+  constantly, and (b) is the right answer.
+
 - ~~**LEAD (Builder 2026-09-14, found by a `--mosaic --editor` dogfood pass that was otherwise CLEAN) — the
   coaching card and the framing card prescribe *different next sessions*.**~~ — **✅ SHIPPED v0.443.0**
   (Builder 2026-09-14); entry cut to [`SHIPPED.md`](SHIPPED.md), one-liner under "Shipped" below. Built as the

@@ -636,6 +636,16 @@ cd frontend && npm install
 > the file. **A summary line that does not end in `passed` or `failed` is not a
 > result**, whatever the exit code said.
 >
+> **⚠️ Do not edit a source file while the suite is running** *(added 2026-09-14)*.
+> The workers import modules as they collect, so a file changed mid-run gives
+> failures that belong to the harness rather than to the tree — and they read
+> exactly like a red `main`, which §2 makes task #1. One run edited
+> `seestack/framing.py` at the 39 % mark and finished **`22 failed`**, every one
+> of them in the two test modules whose source had moved; the identical suite
+> against the settled tree passed. The tell is that every failure names
+> something you touched minutes ago. Start the suite, then **read** — the
+> backlog, the code, the docs — until its summary line prints.
+>
 > **⚠️ Clear `/tmp/pytest-of-root` between suite runs** *(added 2026-09-14)*. One
 > run leaves **~7 GB** there — pytest keeps the last three `tmp_path` roots per
 > invocation and `-n 4` multiplies them — so the fourth suite of a run hits
