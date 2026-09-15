@@ -16,7 +16,7 @@ to use it — the app explains the jargon as you go, and there's a
 
 | | **AstroStack Web** | **Seestack desktop** |
 |---|---|---|
-| Runs on | TrueNAS, or any machine with Docker | Windows |
+| Runs on | TrueNAS, or any machine with Docker — including Windows/macOS via Docker Desktop | Windows |
 | You use it from | Any browser on your network — phone, laptop, tablet | The machine it's installed on |
 | Good for | Leaving it running so it processes new subs on its own | Sitting down at one PC to process by hand |
 | Setup | One-time, below | `pip install`, further down |
@@ -37,7 +37,8 @@ of which is the computer doing the work while you wait.
 ## What you need
 
 - **A machine that stays on** — a TrueNAS box, a mini PC, a Raspberry Pi 5, an
-  old laptop. It needs Docker.
+  old laptop. It needs Docker. (Your own Windows or Mac works too, via Docker
+  Desktop — see [below](#using-docker-desktop-on-windows-or-macos).)
 - **Somewhere to put the data.** Astrophotography subs are big; a night can be
   5–20 GB. Point this at a real disk with room to grow, not a USB stick.
 - **A few GB of RAM.** 8 GB is comfortable. Big mosaics like more.
@@ -45,6 +46,50 @@ of which is the computer doing the work while you wait.
 
 You do **not** need to install Python, a plate solver, a star catalogue, or any
 astronomy software. The build downloads all of that for you.
+
+### Using Docker Desktop on Windows or macOS?
+
+Everything below works, and it's a perfectly good way to try the app on the
+machine you already have. Four things differ — read these first, then follow the
+same eight steps.
+
+**Install [Docker Desktop](https://www.docker.com/products/docker-desktop/)**
+and let it finish starting. On Windows, accept the WSL 2 backend when it offers.
+
+**1. Create your data folder yourself, before step 4.** The app is configured to
+*refuse* to start rather than invent a missing folder, which is deliberate — it
+turns a typo into a clear error instead of an app that quietly comes up with an
+empty library. So make it first: `C:\Users\you\astro` or `/Users/you/astro`.
+
+**2. Write the path with forward slashes** in `.env`, even on Windows:
+
+```
+ASTRO_DATA=C:/Users/you/astro
+```
+
+Backslashes get eaten as escape characters. `C:/Users/you/astro` works;
+`C:\Users\you\astro` may not.
+
+**3. On Windows, don't create `.env` with `>`.** PowerShell writes UTF-16 and
+Docker can't read it — you'll get a baffling "path not set" error from a file
+that looks perfectly fine in Notepad. Use this instead:
+
+```powershell
+'ASTRO_DATA=C:/Users/you/astro' | Set-Content -Encoding ascii .env
+```
+
+Or just create `.env` in a text editor and type the one line yourself.
+
+**4. Give Docker enough memory.** Stacking is memory-hungry and Docker Desktop
+ships with a modest default. In **Settings → Resources**, give it at least 8 GB.
+If a stack dies partway through, this is the first thing to raise.
+
+Then open `http://localhost:8000` in step 5 rather than hunting for an IP.
+
+One caveat: file access between your host and the container is slower on Windows
+and macOS than on Linux, so ingesting a few thousand subs takes longer than it
+would on a NAS. It still works; it's just not the setup to leave running
+permanently.
 
 ## 1. Make a folder for your data
 
