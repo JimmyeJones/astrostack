@@ -18,6 +18,56 @@ is a queue.
 
 ---
 
+## 2026-09-15 (Builder, branch `claude/sweet-babbage-p5k2l2`) — the open-issue inbox turned out to hold the run's work, and the dogfood pass found the other half
+
+**Baseline: GREEN.** `main` at `af09a360` (v0.446.4). Full suite `6113 passed, 2 skipped` in **12m20s**
+(`-n 4` + BLAS cap). This box is roughly 1.3–5× slower than the ones the notes below were measured on — the
+suite matched at 12m but a `--mosaic --editor` dogfood pass took most of an hour where the 2026-09-14 note
+records "a few minutes". Budget accordingly; the *stack* is what stretches, not the probe.
+
+**Where the work came from, which is the part worth recording.** "Bugs (fix these first)" holds no takeable
+bug (an eighth note saying so) and "Features that serve real workflows" no ready item. **The open GitHub
+issues did.** AGENTS.md gives that inbox to the Scout, and every issue filed on 09-13 had already been
+triaged into the backlog — except the newest, **#889**, filed 09-14 07:06 and mentioned nowhere in
+`IMPROVEMENTS.md`. It was a fully-worked, arithmetically-verified report of a real trust bug, and it became
+v0.447.0 more or less as filed. **A Builder that finds the backlog dry should read the issue list before
+concluding the run is idle** — one Scout run's gap is one Builder run's whole task.
+
+**v0.447.0 — a stored diagnostic outliving the estimator that wrote it.** v0.313.1 changed what
+`seam_residual` means; no row was re-measured and nothing recorded which scale a row was on, so the owner's
+library carries 217 figures on one scale and 65 on another, read through the same two thresholds. The
+generalisable part is the *shape of the fix*, not the fix: the two estimators turned out to be **ordered**
+(`se >= 0` on both ends of the max−min, over an untouched yardstick), so an old figure is still readable in
+one direction — "flat" survives, "check" does not. That is worth reaching for before a blanket silence,
+because a blanket silence loses the true warnings with the false ones (on his data, 9 of the 38 pairs really
+were "check"). **Proving the ordering on pixels rather than asserting it from the diff** was cheap and is
+what makes the rule defensible: setting `_SEAM_SE_Z` to zero *is* the old estimator, so one fixture reads
+"check" and "flat" on the same array in one process.
+
+**The axis it sits on is filed as a lead, not built.** A `stack_runs` row carries a dozen numbers measured at
+stack time and read through today's thresholds, and only two of them (`coverage_shares_version`, now
+`seam_scale`) are dated. Whether any of the other nine moved is **unchecked** — and the thing that stopped
+this run checking is worth knowing: **the repo clone an agent gets is `--depth`-truncated** (176 commits,
+`git rev-parse --is-shallow-repository` → true), so `git log -L` on an estimator answers "one commit" and
+means nothing. `docs/SHIPPED.md` is the usable history. Do not reach for `git log` to date a behaviour here.
+
+**v0.447.1 — the dogfood finding, and it was in the gap between two rows rather than inside either.** The
+page sweep was CLEAN, both editor drives clean (21 ops re-rendering on the field sample *and* on the mosaic,
+undo/redo applied, no console error, nothing overflowing), the mosaic trim 7.9 %, and the server-side mosaic
+sentences read coherently together. The finding was in `TONIGHT_PRESCRIPTIVE`, which v0.445.1 taught the
+probe to print: the week plan listed **two rows both called "Tonight"** — the night under way and the evening
+to come — one above the other, same target, clock windows that look nearly identical because they are the
+same hours on different dates. Neither row is wrong; the *column* is. **The probe printed it in plain text
+and it still needed reading as a paragraph to see**, which is the standing lesson, third instalment.
+
+**Two things about that bug worth carrying forward.** (1) It is only visible between local midnight and
+dawn, which no test fixture and no screenshot taken at 20:00 will ever be in — the probe caught it because
+the container's clock happened to sit at 03:00 local. **A page that prescribes a *time* should be probed at
+more than one.** (2) The existing unit test **asserted the defect** (`weekNightLabel("2026-09-03",
+smallHours)` → `"Tonight"`, one line under an assertion that the 2nd is also "Tonight"), with a comment whose
+own reasoning contradicted it. It was kept and annotated rather than deleted: with no `dark_in_progress` flag
+that answer is still the right fallback, so the test now pins the fallback and a new one pins the rule.
+
 ## 2026-09-14 (Builder, branch `claude/sweet-babbage-fplnkq`) — COLLISION #15: two Builders built the same lead in the same hour, and what survived it
 
 **Baseline: GREEN.** `main` at `ccb970a9` (v0.445.3). Full suite `6096 passed, 2 skipped` in **8m56s**

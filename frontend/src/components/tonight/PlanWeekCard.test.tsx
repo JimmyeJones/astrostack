@@ -292,6 +292,34 @@ describe("PlanWeekCard", () => {
       expect(screen.queryByTestId("plan-week-closing")).not.toBeInTheDocument();
     });
 
+  it("does not put two rows called Tonight in the Night column", async () => {
+    // Read off a browser at 03:00: the planner legitimately lists the night
+    // under way *and* the evening to come, and the one column whose whole job
+    // is "which night" named them identically — one row above the other, the
+    // same target on both, with clock windows that look nearly the same
+    // because they are the same hours on different dates. The small hours are
+    // exactly when this page gets read.
+    vi.setSystemTime(new Date("2026-09-03T03:00:00"));
+    vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+      nights: [
+        night("2026-09-02", { dark_in_progress: true, dark_minutes: 214 }),
+        night("2026-09-03"),
+      ],
+    }));
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-week")).toBeInTheDocument());
+    expect(screen.getAllByText("Tonight")).toHaveLength(1);
+    expect(screen.getByText("Tomorrow")).toBeInTheDocument();
+    // The two rows are still both there — nothing was hidden to make them
+    // distinguishable; only the naming moved. And the row under way keeps the
+    // "left" wording `weekDarkPhrase` gives it, which is the other half of the
+    // same fact.
+    expect(screen.getByText("3.6 h left")).toBeInTheDocument();
+    expect(screen.getByText("8.0 h dark")).toBeInTheDocument();
+  });
+
   it("asks the season question with the page's own altitude floor", async () => {
     // Same key, same floor, same options as ClosingSeasonCard — so the two
     // share one request and can never be answered by two different snapshots.
