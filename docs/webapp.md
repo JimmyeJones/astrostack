@@ -115,7 +115,7 @@ Editable from the **Settings** page or directly on disk. Key options:
 | `watcher_enabled` | `true` | Auto-process new files |
 | `watch_quiet_period_s` | `30` | Stability window before a file is read |
 | `auto_ingest` / `auto_qc` / `auto_solve` | `true` | Auto pipeline steps |
-| `auto_stack` | `false` | Also auto-stack each target |
+| `auto_stack` | `true` | Also auto-stack each target. **Fresh installs only** — `SettingsStore` re-saves the whole model on every boot, so any install that has ever run carries an explicit stored value and keeps it. Nothing migrates it, because a config file cannot tell "he turned it off" from "the app wrote the old default". Flip it yourself in Settings. |
 | `copy_to_cache` | `false` | Copy frames locally (use for slow/NAS sources) |
 | `astap_path` | `null` | Override ASTAP location (else `$SEESTACK_ASTAP_PATH` → PATH) |
 | `cpu_workers` | all cores | Parallelism for QC/solve/stack |
