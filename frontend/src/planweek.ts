@@ -29,27 +29,67 @@ function daysAhead(date: string, now: Date): number | null {
 }
 
 /**
+ * The date of the night the reader is *inside* right now, or `null` when the
+ * next darkness has not started yet.
+ *
+ * The planner flags the one night whose darkness is already under way
+ * (`dark_in_progress`, the same fact `weekDarkPhrase` turns into "3.6 h left"),
+ * and in the small hours that night is labelled by *yesterday's* date — which is
+ * the whole reason the naming below needs telling. Read from the data rather
+ * than from a clock cutoff: only the planner knows whether darkness has actually
+ * begun at this location tonight, and inventing an hour here would be a second
+ * opinion about it. A future-dated flag is ignored (a night that has not started
+ * cannot be the one you are in), and an older backend that sends no flag simply
+ * gets `null`.
+ */
+export function nightInProgressDate(nights: WeekNight[], now: Date): string | null {
+  for (const n of nights) {
+    if (n.dark_in_progress !== true) continue;
+    const ahead = daysAhead(n.date, now);
+    if (ahead !== null && ahead <= 0) return n.date;
+  }
+  return null;
+}
+
+/**
  * How to name one of the nights ahead: "Tonight", "Tomorrow", then the weekday
  * ("Thursday") while it is still this coming week, and a dated label
  * ("Thu 11 Sep") once a bare weekday would be ambiguous.
  *
  * A user in the small hours is still *inside* last evening's night, so a date
  * one day behind reads "Tonight" rather than a stale weekday.
+ *
+ * **`nightNow` is what stops two rows being called the same thing.** At 03:00
+ * the planner legitimately lists both the night under way (yesterday's date) and
+ * the evening to come (today's) — and on the owner's own page both read
+ * "Tonight", one row apart, naming the same target, with clock windows that look
+ * nearly identical because they are the same hours on different dates. Given the
+ * date of the night in progress (:func:`nightInProgressDate`), *that* night is
+ * "Tonight" and the following evening is "Tomorrow", which is what the reader
+ * means by those words at 03:00. Omitted, the answer is exactly what it has
+ * always been — so a caller with no plan in hand, or an older backend that sends
+ * no flag, is unchanged.
  */
-export function weekNightLabel(date: string, now: Date): string {
+export function weekNightLabel(date: string, now: Date,
+                               nightNow?: string | null): string {
   const d = nightDate(date);
   if (d === null) return date;
   const ahead = daysAhead(date, now);
   if (ahead === null) return date;
-  if (ahead <= 0) return "Tonight";
-  if (ahead === 1) return "Tomorrow";
-  if (ahead <= 6) return d.toLocaleDateString([], { weekday: "long" });
+  // How far the reader's own "tonight" sits from today's date: −1 in the small
+  // hours, 0 the rest of the time, and 0 whenever nobody has said.
+  const shift = (nightNow ? daysAhead(nightNow, now) : 0) ?? 0;
+  const relative = ahead - shift;
+  if (relative <= 0) return "Tonight";
+  if (relative === 1) return "Tomorrow";
+  if (relative <= 6) return d.toLocaleDateString([], { weekday: "long" });
   return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
 }
 
 /** The same label, lower-cased for mid-sentence use ("your best night is Thursday"). */
-export function weekNightLabelInline(date: string, now: Date): string {
-  const label = weekNightLabel(date, now);
+export function weekNightLabelInline(date: string, now: Date,
+                                     nightNow?: string | null): string {
+  const label = weekNightLabel(date, now, nightNow);
   return label === "Tonight" || label === "Tomorrow" ? label.toLowerCase() : label;
 }
 
@@ -82,7 +122,8 @@ export function weekHeadline(plan: PlanWeek, now: Date): string | null {
   const span = hours >= 1
     ? `${hours.toFixed(1)} h`
     : `${Math.round(night.best.minutes_above_min_alt)} min`;
-  return `Your best night is ${weekNightLabelInline(night.date, now)}`
+  return `Your best night is ${weekNightLabelInline(night.date, now,
+    nightInProgressDate(plan.nights, now))}`
     + ` — ${night.best.name}, ${span} above ${Math.round(plan.min_altitude_deg)}°.`;
 }
 
@@ -166,8 +207,9 @@ export function closingRowFor(
  */
 export function targetNightPhrase(
   t: TargetBestNight, now: Date, season?: ClosingTarget | null,
+  nightNow?: string | null,
 ): string {
-  const base = `${t.name} — ${weekNightLabel(t.date, now)}`;
+  const base = `${t.name} — ${weekNightLabel(t.date, now, nightNow)}`;
   return season ? `${base} (${weeksLeftPhrase(season.weeks_left)})` : base;
 }
 
@@ -200,7 +242,8 @@ export function closingWeekNote(
     const night = plan.targets.find((t) => t.safe === season.safe);
     if (!night) continue;
     return `${season.name} is on its way out of your sky — ${weeksLeftPhrase(season.weeks_left)}.`
-      + ` Its best night this week is ${weekNightLabelInline(night.date, now)}`
+      + ` Its best night this week is ${weekNightLabelInline(night.date, now,
+        nightInProgressDate(plan.nights, now))}`
       + " — and unlike the others here, that one doesn't come round again.";
   }
   return null;

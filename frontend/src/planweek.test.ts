@@ -4,9 +4,9 @@ import type {
   ClosingTarget, PlanWeek, SeasonClosing, TargetBestNight, WeekNight,
 } from "./api/client";
 import {
-  bestNightOfWeek, closingRowFor, closingWeekNote, otherTargetNights,
-  targetNightPhrase, weekDarkPhrase, weekEmptyReason, weekHeadline,
-  weekMoonNote, weekNightLabel, weekNightLabelInline,
+  bestNightOfWeek, closingRowFor, closingWeekNote, nightInProgressDate,
+  otherTargetNights, targetNightPhrase, weekDarkPhrase, weekEmptyReason,
+  weekHeadline, weekMoonNote, weekNightLabel, weekNightLabelInline,
 } from "./planweek";
 
 // A Wednesday evening, so the weekday labels below are unambiguous.
@@ -71,7 +71,65 @@ describe("weekNightLabel", () => {
     // 00:30 on the 3rd: the user is inside the night labelled by the 2nd.
     const smallHours = new Date("2026-09-03T00:30:00");
     expect(weekNightLabel("2026-09-02", smallHours)).toBe("Tonight");
+    // Told nothing about which night is under way, the evening to come is still
+    // "Tonight" too — the answer this has always given, kept so an older backend
+    // that sends no `dark_in_progress` (and any caller without a plan in hand)
+    // reads exactly as it did. What that costs, and the fix, is the block below.
     expect(weekNightLabel("2026-09-03", smallHours)).toBe("Tonight");
+  });
+
+  // --- the two rows that were both called "Tonight" ------------------------
+  // Found in a browser: at 03:00 the planner lists the night under way *and*
+  // the evening to come, and the Night column named them identically — one row
+  // above the other, naming the same target, with clock windows that look
+  // nearly the same because they are the same hours on different dates
+  // (03:21–04:16 against 03:17–04:16). The one column whose whole job is
+  // "which night" said the same word twice. The small hours are exactly when
+  // this page gets read.
+
+  it("names the night under way and the evening to come differently", () => {
+    const smallHours = new Date("2026-09-03T03:00:00");
+    const inProgress = "2026-09-02";
+    expect(weekNightLabel("2026-09-02", smallHours, inProgress)).toBe("Tonight");
+    expect(weekNightLabel("2026-09-03", smallHours, inProgress)).toBe("Tomorrow");
+    // …and every later night shifts with them rather than skipping a name.
+    expect(weekNightLabel("2026-09-04", smallHours, inProgress)).toBe("Friday");
+  });
+
+  it("changes nothing on an evening whose darkness has already begun", () => {
+    // 22:00 on the 2nd, with tonight's darkness under way: "tonight" is today's
+    // own date, so the labels are what they always were. The fix must only move
+    // the reading in the small hours.
+    const evening = new Date("2026-09-02T22:00:00");
+    expect(weekNightLabel("2026-09-02", evening, "2026-09-02")).toBe("Tonight");
+    expect(weekNightLabel("2026-09-03", evening, "2026-09-02")).toBe("Tomorrow");
+    expect(weekNightLabel("2026-09-05", evening, "2026-09-02")).toBe("Saturday");
+  });
+
+  it("reads which night is under way off the planner's own flag", () => {
+    const smallHours = new Date("2026-09-03T03:00:00");
+    const nights = [
+      night({ date: "2026-09-02", dark_in_progress: true }),
+      night({ date: "2026-09-03" }),
+    ];
+    expect(nightInProgressDate(nights, smallHours)).toBe("2026-09-02");
+    // An older backend sends no flag at all — nothing to shift by, and the
+    // labels stay exactly as they were.
+    expect(nightInProgressDate([night({ date: "2026-09-02" })], smallHours)).toBeNull();
+    // A flag on a night that has not started yet is not the night you are in.
+    expect(nightInProgressDate(
+      [night({ date: "2026-09-09", dark_in_progress: true })], smallHours)).toBeNull();
+  });
+
+  it("does not leave the headline saying 'tonight' about the wrong night", () => {
+    // The sentence above the table has the same ambiguity, and must resolve it
+    // the same way — one page, one meaning of the word.
+    const smallHours = new Date("2026-09-03T03:00:00");
+    const p = plan({ nights: [
+      night({ date: "2026-09-02", dark_in_progress: true, best: pick({ score: 10 }) }),
+      night({ date: "2026-09-03", best: pick({ score: 40 }) }),
+    ] });
+    expect(weekHeadline(p, smallHours)).toContain("tomorrow");
   });
 
   it("passes a malformed date straight through rather than inventing a day", () => {
