@@ -21,7 +21,11 @@ def _register_run(data_root, safe: str, options: dict,
                 canvas_h=320, canvas_w=480, coverage_min=1, coverage_max=7,
                 options_json=json.dumps(options),
                 total_exposure_s=total_exposure_s,
-                **kw,
+                # What a real stacker stamps. The seam verdict is read against
+                # it — a figure from before v0.313.1 is on a scale today's
+                # thresholds over-read — so an unset version would silently make
+                # every fixture an *undated* run; the old-scale case says so.
+                **{"engine_version": "0.446.4", **kw},
             ))
         finally:
             proj.close()
@@ -83,6 +87,37 @@ def test_gallery_carries_the_panel_flatness_verdict(client, solved_library):
     assert items[stepped]["seam_verdict"] == "check"
     # An ordinary single-field stack has no joins to compare — no chip at all.
     assert items[single]["seam_verdict"] is None
+
+
+def test_the_gallery_does_not_warn_from_a_superseded_seam_scale(
+        client, solved_library):
+    """Compare draws its two cards from this listing, and it is the surface where
+    the mixed-scale library actually speaks: a run stacked before v0.313.1 and a
+    re-stack of the identical frames sit side by side, and the older figure — on
+    a scale that reads higher for the same pixels — used to turn into *"B's sky
+    still steps where its panels join"* about two stacks of one set of files.
+
+    Nothing is re-measured here, so the old card simply stops claiming what its
+    number cannot support. Its neighbour, whose figure says the joins matched,
+    keeps saying so: the fix can only move a figure down, so "flat" survives it.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    old_stepped = _register_run(solved_library, safe, {"sigma_clip": True},
+                                is_mosaic=True, seam_residual=2.2,
+                                engine_version="0.287.2")
+    old_flat = _register_run(solved_library, safe, {"sigma_clip": True},
+                             is_mosaic=True, seam_residual=0.3,
+                             engine_version="0.287.2")
+    # …and once the figure has been re-measured, its own stamp outranks the
+    # version that stacked the run, or healing one would change nothing.
+    healed = _register_run(solved_library, safe, {"sigma_clip": True},
+                           is_mosaic=True, seam_residual=2.2,
+                           engine_version="0.287.2", seam_scale=2)
+
+    items = {it["run_id"]: it for it in client.get("/api/gallery").json()["items"]}
+    assert items[old_stepped]["seam_verdict"] is None
+    assert items[old_flat]["seam_verdict"] == "flat"
+    assert items[healed]["seam_verdict"] == "check"
 
 
 def test_gallery_carries_the_grain_verdict_beside_the_flatness_one(

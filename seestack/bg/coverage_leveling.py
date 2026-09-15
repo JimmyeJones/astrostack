@@ -108,6 +108,26 @@ _MODE_SE_FACTOR = 2.15
 # on.
 _SEAM_SE_Z = 2.0
 
+# Which generation of this estimator wrote a stored ``seam_residual``. The
+# number is not a version — it is the answer to "can today's thresholds be read
+# against that figure?", and it only moves when the *meaning* of the figure
+# does.
+#
+# * **1** — a plain ``max(v) − min(v)`` over the per-level sky modes, up to and
+#   including v0.313.0. It charges every level's own estimation noise to the
+#   seam, which on a deep, heavily-dithered mosaic grows with the sub count.
+# * **2** — today's: the same max−min taken between the levels' ``±_SEAM_SE_Z``
+#   intervals instead of between the point estimates (v0.313.1 onwards).
+#
+# The two are one-sided, and that is load-bearing rather than incidental:
+# ``se >= 0`` makes ``max(v − z·se) <= max(v)`` and ``min(v + z·se) >= min(v)``
+# for every channel, over a yardstick v0.313.1 did not touch — so generation 2
+# can only ever report a figure **less than or equal to** generation 1's on the
+# identical pixels. A generation-1 figure is therefore still readable in one
+# direction (see :func:`seestack.stackhealth.stored_seam_verdict`), which is why
+# this is recorded rather than the rows being silenced or rewritten.
+SEAM_ESTIMATOR_GENERATION = 2
+
 
 # Sigma-clipped statistics used only to *locate* a level (its rough sky, its
 # spread) converge long before they run out of pixels, so cap how many they read.

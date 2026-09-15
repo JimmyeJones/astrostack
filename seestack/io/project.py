@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     grain_ratio REAL,
     grain_thin_frames INTEGER,
     grain_deep_frames INTEGER,
-    grain_thin_share REAL
+    grain_thin_share REAL,
+    seam_scale INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -761,6 +762,22 @@ class Project:
                     "ALTER TABLE frames ADD COLUMN restored_utc TEXT")
             except sqlite3.OperationalError:
                 pass  # already present
+        # Which generation of the seam estimator wrote ``seam_residual``. Added
+        # **without** a ``SCHEMA_VERSION`` bump, like ``duration_s`` and the
+        # ``grain_*`` columns, so a build that has never heard of it can still
+        # open a DB this one wrote — i.e. the upgrade stays rollable. It is
+        # therefore **not** gated on ``from_version``: there is no version at
+        # which it arrived, so it runs for every older DB and is a no-op the
+        # moment it is present (a DB already at the current version never reaches
+        # here at all and gets it from ``_reconcile_table_columns`` instead).
+        # Additive; every existing run stays NULL, which reads as "dated by
+        # ``engine_version``" — the honest answer for a figure nothing has
+        # re-measured.
+        try:
+            self._conn.execute(
+                "ALTER TABLE stack_runs ADD COLUMN seam_scale INTEGER")
+        except sqlite3.OperationalError:
+            pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -1588,9 +1605,10 @@ class Project:
             "  seam_residual, capture_start_utc, capture_end_utc,"
             "  capture_hours_json, coverage_thin_frac, uncovered_frac,"
             "  coverage_shares_version, coverage_median_depth, duration_s,"
-            "  grain_ratio, grain_thin_frames, grain_deep_frames, grain_thin_share"
+            "  grain_ratio, grain_thin_frames, grain_deep_frames, grain_thin_share,"
+            "  seam_scale"
             ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            "         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -1619,6 +1637,7 @@ class Project:
                  else int(run.grain_deep_frames)),
                 (None if run.grain_thin_share is None
                  else float(run.grain_thin_share)),
+                (None if run.seam_scale is None else int(run.seam_scale)),
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -1693,6 +1712,10 @@ class Project:
                 seam_residual=(
                     row["seam_residual"]
                     if "seam_residual" in row.keys() else None
+                ),
+                seam_scale=(
+                    row["seam_scale"]
+                    if "seam_scale" in row.keys() else None
                 ),
                 grain_ratio=(
                     row["grain_ratio"]
@@ -1869,17 +1892,24 @@ class Project:
         return cur.rowcount > 0
 
     def set_stack_seam_residual(self, run_id: int,
-                                ratio: float | None) -> bool:
+                                ratio: float | None,
+                                scale: int | None = None) -> bool:
         """Record how flat a mosaic run's panel joins came out — normally stamped
         by the stack itself, but also filled in after the fact for a run recorded
-        before the column existed
+        before the column existed, or one whose figure is on a superseded scale
         (:func:`seestack.coverage_backfill.backfill_seam_residual`, which
-        re-measures it from the master and coverage map the run wrote). Returns
-        True if a row was updated, False if no run with ``run_id`` exists."""
+        re-measures it from the master and coverage map the run wrote).
+
+        ``scale`` is the estimator generation that produced ``ratio``
+        (:data:`seestack.bg.coverage_leveling.SEAM_ESTIMATOR_GENERATION`) and is
+        written **with** it, in one statement, so a row can never hold a figure
+        whose scale belongs to a different measurement. Returns True if a row was
+        updated, False if no run with ``run_id`` exists."""
         assert self._conn is not None
         cur = self._conn.execute(
-            "UPDATE stack_runs SET seam_residual = ? WHERE id = ?",
-            (None if ratio is None else float(ratio), run_id))
+            "UPDATE stack_runs SET seam_residual = ?, seam_scale = ? WHERE id = ?",
+            (None if ratio is None else float(ratio),
+             None if scale is None else int(scale), run_id))
         return cur.rowcount > 0
 
     def set_stack_coverage_grain(
@@ -2152,6 +2182,17 @@ class StackRunRow:
     grain_thin_frames: int | None = None
     grain_deep_frames: int | None = None
     grain_thin_share: float | None = None
+    # Which generation of the seam estimator wrote ``seam_residual`` — see
+    # :data:`seestack.bg.coverage_leveling.SEAM_ESTIMATOR_GENERATION`. The figure
+    # itself carries no scale, and v0.313.1 changed what it means, so a reader
+    # that has only the number cannot tell a step it should warn about from one
+    # its own estimator noise invented. None means "not recorded", and readers
+    # then fall back to ``engine_version`` — which dates the *stack*, and so
+    # dates the figure too for every row nothing has re-measured since. Added
+    # **without** a ``SCHEMA_VERSION`` bump (like ``duration_s`` and the
+    # ``grain_*`` columns): ``_reconcile_table_columns`` adds it on open, so a
+    # build that has never heard of it can still open a DB this one wrote.
+    seam_scale: int | None = None
 
 
 def _to_db(value: Any) -> Any:

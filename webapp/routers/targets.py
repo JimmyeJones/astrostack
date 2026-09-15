@@ -1309,7 +1309,10 @@ def target_stack_health(
         # stacked before schema 15 never says whether its panels matched, on this
         # card or on the History chip and Gallery card that read the same column.
         # Free on a single-field run — it never opens a file — and a no-op on
-        # every run stacked since.
+        # every run stacked since. It also re-measures a run whose figure is on
+        # the pre-v0.313.1 scale, which is what gives those runs back the "check"
+        # the cautious reading withholds; once for each, then a no-op like the
+        # rest.
         backfill_seam_residual(proj, run)
         # ...and the grain step beside it, off the same two files in the same
         # request, so an existing mosaic explains its grainier panel without
