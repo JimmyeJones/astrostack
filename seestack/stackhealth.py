@@ -22,6 +22,7 @@ import statistics
 from dataclasses import dataclass
 from typing import Iterable
 
+from seestack.bg.coverage_leveling import SEAM_ESTIMATOR_GENERATION
 from seestack.io.project import FrameRow, StackRunRow
 from seestack.session_recap import bucket_reject_reason
 
@@ -148,6 +149,17 @@ _SOFT_STARS_MIN_SUB_FWHM = 5
 # entirely reads 15.7.
 _SEAM_FLAT_RATIO = 1.0
 _SEAM_VISIBLE_RATIO = 1.5
+
+# The release whose estimator fix moved what ``seam_residual`` *means*. v0.313.1
+# stopped charging each coverage level's own estimation noise to the seam, so a
+# figure written before it is on a scale that reads *higher* than today's for the
+# identical pixels — see
+# :data:`seestack.bg.coverage_leveling.SEAM_ESTIMATOR_GENERATION` for why that is
+# one-sided by construction rather than by observation. Runs from before the
+# ``seam_scale`` column existed are dated by their ``engine_version`` instead,
+# which dates the stack and so dates its figure too, nothing having re-measured
+# it since.
+_SEAM_SCALE_FIXED_IN = (0, 313, 1)
 
 # How much grainier a thinly-covered region has to measure before the app says
 # so. ``grain_ratio`` is a ratio of two sky σ, so 1.25 is "that part of the
@@ -295,6 +307,89 @@ def seam_verdict(seam_residual: float | None) -> str | None:
     if seam < _SEAM_FLAT_RATIO:
         return "flat"
     return None
+
+
+def _version_tuple(version: str | None) -> tuple[int, ...] | None:
+    """``"0.313.1"`` → ``(0, 313, 1)``; ``None`` for anything that isn't a plain
+    dotted release. Deliberately strict: a string this can't read is a version
+    nobody here can reason about, and "unknown" has a safe answer below."""
+    if not version:
+        return None
+    parts = str(version).strip().split(".")
+    out: list[int] = []
+    for part in parts:
+        if not part.isdigit():
+            return None
+        out.append(int(part))
+    return tuple(out) if out else None
+
+
+def seam_scale_is_current(seam_scale: int | None,
+                          engine_version: str | None) -> bool:
+    """Was a stored ``seam_residual`` written by **today's** estimator?
+
+    ``seam_scale`` is the generation stamped beside the figure and wins outright
+    when it is there. A row without one — every run recorded before the column,
+    and the only population this question is really about — is dated by
+    ``engine_version``, i.e. by the release that stacked it, because nothing has
+    re-measured the figure since.
+
+    ``False`` for an unrecorded or unreadable version, which is not pessimism: it
+    is the only answer that cannot turn a figure nobody can date into a claim
+    about someone's picture.
+    """
+    if seam_scale is not None:
+        try:
+            return int(seam_scale) >= SEAM_ESTIMATOR_GENERATION
+        except (TypeError, ValueError):
+            return False
+    parsed = _version_tuple(engine_version)
+    if parsed is None:
+        return False
+    return parsed >= _SEAM_SCALE_FIXED_IN
+
+
+def stored_seam_verdict(seam_residual: float | None,
+                        seam_scale: int | None,
+                        engine_version: str | None) -> str | None:
+    """:func:`seam_verdict` for a **stored** run, read on the scale its figure
+    was actually written on.
+
+    :func:`seam_verdict` owns the thresholds and answers for a figure measured
+    now. This is the same reading for one measured *then* — and the difference
+    matters because v0.313.1 changed what the number means and no row was
+    re-measured, so on a library carrying both scales the same two thresholds are
+    being applied to two different quantities.
+
+    A pre-fix figure is still readable, but only in the one direction the scale
+    change cannot have crossed. Re-measured today it can only come out *lower*
+    (``SEAM_ESTIMATOR_GENERATION``), so:
+
+    * ``"flat"`` still holds — a figure already below the bar can only move
+      further below it, so the compliment is honest without re-reading a pixel;
+    * ``"check"`` does not — the same frames may now sit anywhere beneath it, so
+      this says **nothing**, which is the silence the ambiguous middle band
+      already uses rather than a new kind of answer.
+
+    Nothing is re-measured and no row is rewritten here: the figure is what it
+    is, and this only decides what may honestly be said about it.
+    :func:`seestack.coverage_backfill.backfill_seam_residual` is the half that
+    heals — it re-measures a superseded figure when the run's master and coverage
+    map are still there, after which this reads it like any other.
+    """
+    verdict = seam_verdict(seam_residual)
+    if verdict == "check" and not seam_scale_is_current(
+            seam_scale, engine_version):
+        return None
+    return verdict
+
+
+def stored_seam_verdict_for(run: StackRunRow) -> str | None:
+    """:func:`stored_seam_verdict` for a run row — the form every caller with a
+    row in hand should use, so no surface has to remember that the figure and
+    its scale are two columns."""
+    return stored_seam_verdict(run.seam_residual, run.seam_scale,
+                               run.engine_version)
 
 
 def grain_verdict(grain_ratio: float | None) -> str | None:
@@ -964,7 +1059,10 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
         )))
 
     seam = run.seam_residual
-    verdict = seam_verdict(seam)
+    # Read on the scale the figure was written on, not on today's: a run stacked
+    # before v0.313.1 carries a number the current thresholds would over-read,
+    # and the note below quotes it out loud.
+    verdict = stored_seam_verdict_for(run)
     if verdict is not None:
         if verdict == "check":
             scored.append((40, HealthNote(

@@ -309,79 +309,114 @@ def backfill_seam_residual(project: Project,
     master and coverage map it already wrote; record it and return it — or
     ``None`` when it can't be known.
 
-    A no-op (returns the stored value) for a run that already has one, and free —
-    no disk touched at all — for a run the stacker recorded as a single field,
-    which has no joins to compare and never had a seam residual to lose.
+    A no-op (returns the stored value) for a run whose figure is already on
+    today's scale, and free — no disk touched at all — for a run the stacker
+    recorded as a single field, which has no joins to compare and never had a
+    seam residual to lose.
+
+    **A figure on a superseded scale is re-measured rather than returned**, and
+    that is the other half of this function's reason to exist. v0.313.1 changed
+    what ``seam_residual`` means (see
+    :data:`seestack.bg.coverage_leveling.SEAM_ESTIMATOR_GENERATION`), and a row
+    written before it is never revisited, so a library that has been shooting for
+    a while holds both scales at once and nothing says which is which. Reading it
+    on the safe side — :func:`seestack.stackhealth.stored_seam_verdict` — costs
+    the older rows their "check", so this is what gives it back: the same
+    measurement over the same master and coverage map the run already wrote, at
+    the same cost as healing a NULL, stamped with the generation that took it so
+    it is never taken twice.
 
     ``None`` — a single-field or unclassified run, no master path, a missing or
     unreadable master or coverage sibling, a canvas too big to read within the
     stride cap, or a canvas whose levels can't be measured — leaves the row NULL
-    and every seam surface silent, which is exactly what they do today.
+    and every seam surface silent, which is exactly what they do today. A
+    superseded figure whose master has since gone is **kept**, not cleared: it is
+    still the best that was ever measured, and the reading rule already knows how
+    much of it to believe.
     """
-    if run.seam_residual is not None:
+    from seestack.stackhealth import seam_scale_is_current
+
+    stale_scale = (run.seam_residual is not None
+                   and not seam_scale_is_current(run.seam_scale,
+                                                 run.engine_version))
+    if run.seam_residual is not None and not stale_scale:
         return float(run.seam_residual)
+
+    def _unmeasurable() -> float | None:
+        """What to answer when the re-read can't happen. A run that never had a
+        figure keeps its NULL; one whose figure is merely on the old scale keeps
+        *that*, because a number read cautiously is still worth more than no
+        number, and deleting the owner's only measurement to make a point about
+        its scale would be the destructive half of a fix that has a safe one."""
+        return float(run.seam_residual) if stale_scale else None
+
     # A run the stacker did not record as a mosaic has one coverage level and no
     # join to compare: the measurement would decline anyway, so decline first and
     # never open a file for it. A run too old to carry the flag (schema < 8) is
     # unclassified, not single-field — but guessing "mosaic" from the coverage
     # map would be inventing the very fact that decides whether to speak.
     if not run.is_mosaic or not run.fits_path:
-        return None
+        return _unmeasurable()
 
     from pathlib import Path as _Path
 
-    from seestack.bg.coverage_leveling import measure_seam_residual
+    from seestack.bg.coverage_leveling import (
+        SEAM_ESTIMATOR_GENERATION,
+        measure_seam_residual,
+    )
     from seestack.edit.proxy import load_coverage, load_frame_coverage
 
     master = _Path(run.fits_path)
     if not master.exists():
-        return None
+        return _unmeasurable()
     try:
         h, w = int(run.canvas_h), int(run.canvas_w)
     except (TypeError, ValueError):
-        return None
+        return _unmeasurable()
     step = _seam_read_step(h, w)
     if step is None:
-        return None
+        return _unmeasurable()
 
     rgb = _load_strided_rgb(master, step)
     if rgb is None:
-        return None
+        return _unmeasurable()
     # The same two maps, in the same order of preference, that ``run_stack``
     # hands the measurement: the weighted coverage decides the levels, the honest
     # frame count refines them when the run wrote one.
     cov = load_coverage(master, step=step)
     if cov is None:
-        return None
+        return _unmeasurable()
     frame_cov = load_frame_coverage(master, step=step)
     if cov.shape != rgb.shape[:2] or (
             frame_cov is not None and frame_cov.shape != rgb.shape[:2]):
         # A sibling from a different canvas (a hand-tidied output dir, a restored
         # backup) is not this picture's coverage — say nothing rather than
         # measure one image against another's map.
-        return None
+        return _unmeasurable()
     try:
         result = measure_seam_residual(
             rgb, cov, frame_coverage=frame_cov, proxy_scale=float(step))
     except Exception:  # noqa: BLE001 — a diagnostic must never reach the user
         log.debug("could not measure seam residual for run %s", run.id,
                   exc_info=True)
-        return None
+        return _unmeasurable()
     if result is None or not math.isfinite(float(result.ratio)):
-        return None
+        return _unmeasurable()
     # Rounded exactly as ``_compute_seam_residual`` rounds it, so a healed row and
     # a freshly-stacked one are the same kind of number.
     ratio = round(float(result.ratio), 4)
 
     if run.id is not None:
         try:
-            project.set_stack_seam_residual(run.id, ratio)
+            project.set_stack_seam_residual(run.id, ratio,
+                                            SEAM_ESTIMATOR_GENERATION)
         except sqlite3.Error:
             # A read-only DB (or one another process has locked) just means this
             # run pays the read again next time — never an error to the user.
             log.debug("could not record seam_residual for run %s", run.id,
                       exc_info=True)
     run.seam_residual = ratio
+    run.seam_scale = SEAM_ESTIMATOR_GENERATION
     return ratio
 
 

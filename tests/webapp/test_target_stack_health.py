@@ -28,6 +28,12 @@ def _add_run(data_root: Path, safe: str, **kw) -> int:
                 coverage_min=30, coverage_max=30, coverage_thin_frac=0.0,
                 options_json=json.dumps({"sigma_clip": True}),  # a genuine run
                 calstat="dark+flat", is_mosaic=False,
+                # A real stacker stamps the version that made the run, and the
+                # seam figure is now read against it (a pre-v0.313.1 figure is on
+                # a scale today's thresholds over-read). Unset would make every
+                # fixture an *undated* run and quietly exercise the cautious
+                # path; the old-scale cases below set it explicitly instead.
+                engine_version="0.446.4",
             )
             base.update(kw)
             return proj.add_stack_run(StackRunRow(**base))

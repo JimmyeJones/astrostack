@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from seestack.io.project import FrameRow, StackRunRow
-from seestack.stackhealth import recommended_dark_spec, stack_health
+from seestack.stackhealth import (
+    recommended_dark_spec,
+    seam_scale_is_current,
+    stack_health,
+    stored_seam_verdict,
+)
 
 
 def _run(**kw) -> StackRunRow:
@@ -14,6 +19,14 @@ def _run(**kw) -> StackRunRow:
         coverage_min=30, coverage_max=30, coverage_thin_frac=0.0,
         options_json="{}",
         calstat="dark+flat", is_mosaic=False,
+        # Every run a real stacker writes carries the version that made it, and
+        # since v0.313.1 the seam figure is read against it (a pre-fix figure is
+        # on a scale today's thresholds over-read — see
+        # ``stored_seam_verdict``). Leaving it unset here would silently make
+        # every fixture an *undated* run, i.e. exercise the cautious path in
+        # tests that are about something else; the old-scale cases say so
+        # explicitly instead.
+        engine_version="0.446.4",
     )
     base.update(kw)
     return StackRunRow(**base)
@@ -877,6 +890,103 @@ def test_the_seam_warning_ranks_below_the_actionable_next_steps():
     )
     kinds = _kinds(notes)
     assert kinds.index("calibration") < kinds.index("seams")
+
+
+# ---- which scale a stored seam figure is on -------------------------------
+# v0.313.1 changed what ``seam_residual`` *means* (it stopped charging each
+# coverage level's own estimation noise to the seam) and no stored row was ever
+# re-measured, so a library that has been shooting for a while holds both scales
+# at once and the same two thresholds are being read against two different
+# quantities. Measured on the owner's own library: of 38 pairs of runs whose
+# inputs are byte-identical, every one reads lower after the fix, and **25 of
+# them change the displayed verdict** — 20 of those off "check".
+
+def test_a_seam_figure_from_before_the_estimator_fix_is_not_read_as_a_warning():
+    """The one that reaches the owner: an old run's "check" is a claim about a
+    picture that today's estimator may not make at all, printed beside a frame
+    count identical to the new run's — and on Compare it becomes a sentence
+    about one of the two stacks of the same files."""
+    old = _run(is_mosaic=True, seam_residual=2.4, engine_version="0.287.2")
+    notes = stack_health(old, [_frame() for _ in range(20)])
+    assert _note(notes, "seams") is None
+    # …and it does not flip to the compliment either. Silence is the answer the
+    # ambiguous middle band already uses; a second kind of "we don't know" would
+    # be a new thing for a reader to learn.
+    assert _note(notes, "seams_flat") is None
+
+
+def test_an_old_run_whose_panels_matched_keeps_its_compliment():
+    """The half that must NOT be withdrawn, and the reason this is a reading rule
+    rather than a blanket silence. The fix can only ever move a figure *down*
+    (``se >= 0`` on both ends of the max−min, over an unchanged yardstick), so a
+    figure already below the "flat" bar is still below it however it is
+    re-measured — the compliment is honest without reading a pixel."""
+    old = _run(is_mosaic=True, seam_residual=0.12, engine_version="0.287.2")
+    note = _note(stack_health(old, [_frame() for _ in range(20)]), "seams_flat")
+    assert note is not None
+
+
+def test_a_run_stacked_since_the_fix_is_read_exactly_as_before():
+    """The common case, and the one that must not move: a figure on today's
+    scale is read by today's thresholds, unchanged."""
+    fresh = _run(is_mosaic=True, seam_residual=2.4, engine_version="0.401.1")
+    note = _note(stack_health(fresh, [_frame() for _ in range(20)]), "seams")
+    assert note is not None
+    assert "2.4" in note.message
+
+
+def test_a_re_measured_figure_is_believed_whatever_stacked_the_run():
+    """``engine_version`` dates the *stack*; ``seam_scale`` dates the *figure*.
+    They differ for exactly the runs the heal has touched — an old mosaic whose
+    joins were measured from the master it already wrote — and the figure's own
+    stamp has to win, or healing one would achieve nothing."""
+    healed = _run(is_mosaic=True, seam_residual=2.4,
+                  engine_version="0.287.2", seam_scale=2)
+    note = _note(stack_health(healed, [_frame() for _ in range(20)]), "seams")
+    assert note is not None
+
+
+def test_a_figure_nobody_can_date_is_read_on_the_safe_side():
+    """A run from before the version column, and a version string this cannot
+    read, are both "we don't know which estimator wrote this" — which has one
+    safe answer and it is not "warn them"."""
+    for version in (None, "", "dev", "0.313.1-rc1"):
+        undated = _run(is_mosaic=True, seam_residual=2.4,
+                       engine_version=version)
+        notes = stack_health(undated, [_frame() for _ in range(20)])
+        assert _note(notes, "seams") is None, version
+        # The compliment still survives, on the same one-sided argument.
+        flat = _run(is_mosaic=True, seam_residual=0.12, engine_version=version)
+        assert _note(stack_health(flat, [_frame() for _ in range(20)]),
+                     "seams_flat") is not None, version
+
+
+def test_the_scale_boundary_is_the_release_that_moved_the_number():
+    """Pinned as a version comparison, not a string one: 0.313.1 is current and
+    0.313.0 is not, and a two-part or four-part version still orders."""
+    assert seam_scale_is_current(None, "0.313.1")
+    assert seam_scale_is_current(None, "0.313.2")
+    assert seam_scale_is_current(None, "0.446.4")
+    assert seam_scale_is_current(None, "1.0.0")
+    assert not seam_scale_is_current(None, "0.313.0")
+    assert not seam_scale_is_current(None, "0.312.9")
+    assert not seam_scale_is_current(None, "0.287.2")
+    assert not seam_scale_is_current(None, "0.99.99")
+    # A recorded generation wins outright, either way.
+    assert seam_scale_is_current(2, "0.287.2")
+    assert not seam_scale_is_current(1, "0.446.4")
+    assert seam_scale_is_current(3, None)      # a future generation is not older
+
+
+def test_the_reading_rule_is_the_same_one_every_surface_uses():
+    """The chip, the Gallery card and the health note all resolve through this,
+    so the rule is stated once. Asserted directly so a caller that starts
+    re-typing it is a failing test rather than a second opinion."""
+    assert stored_seam_verdict(2.4, None, "0.287.2") is None
+    assert stored_seam_verdict(2.4, None, "0.401.1") == "check"
+    assert stored_seam_verdict(0.3, None, "0.287.2") == "flat"
+    assert stored_seam_verdict(1.2, None, "0.287.2") is None   # already silent
+    assert stored_seam_verdict(None, None, "0.287.2") is None
 
 
 # --- "did the stack get what its subs should have bought?" (√N yardstick) -----

@@ -3476,7 +3476,10 @@ def run_stack(
     # target stacks). For any stack with varying coverage (mosaics, dither
     # margins, partial captures) it kills the panel-rectangle steps that come
     # from per-frame biases the upstream pipeline couldn't fully remove.
-    from seestack.bg.coverage_leveling import level_by_coverage
+    from seestack.bg.coverage_leveling import (
+        SEAM_ESTIMATOR_GENERATION,
+        level_by_coverage,
+    )
 
     progress("Levelling panels", 0, 1)
     # Bin by the true per-pixel frame count (not the quality-weighted Σ-weight
@@ -3786,6 +3789,14 @@ def run_stack(
             # picture's own grain. NULL on a single-field stack (no joins) and
             # when it couldn't be measured — callers self-hide either way.
             seam_residual=seam_residual,
+            # …and which estimator wrote it, stamped beside the figure rather
+            # than left to be inferred from the run's version. The figure carries
+            # no scale of its own and v0.313.1 changed what it means, so a reader
+            # holding only the number cannot tell a step worth warning about from
+            # one an older estimator's own noise invented. NULL when there is no
+            # figure to date.
+            seam_scale=(SEAM_ESTIMATOR_GENERATION
+                        if seam_residual is not None else None),
             # The grain step between a thinly-covered region and the depth most
             # of the canvas was shot at — the panel a levelled mosaic can still
             # show. All four NULL together (a single-field stack, an evenly
