@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from seestack.edit.proxy import rejection_map_path_for
 from seestack.stack.output import save_display_jpeg
-from seestack.stackhealth import grain_verdict, seam_verdict
+from seestack.stackhealth import grain_verdict, stored_seam_verdict_for
 from webapp import deps, picturesarchive
 from webapp.capture_nights import capture_night_count, capture_night_range
 from webapp.derived_light import (
@@ -94,8 +94,10 @@ class GalleryItem(BaseModel):
     # How flat this *mosaic's* panel joins came out, as a word: "flat" | "check",
     # or None when there's nothing honest to say (a single-field stack, a
     # pre-schema-15 run, or the ambiguous middle band). Same
-    # `seestack.stackhealth.seam_verdict` call the run listing and the "How's my
-    # stack?" notes use, so every surface reads one decision; drives the
+    # `seestack.stackhealth.stored_seam_verdict_for` call the run listing and the
+    # "How's my stack?" notes use — which reads the figure on the scale it was
+    # written on, so a run from before v0.313.1 is not judged by thresholds meant
+    # for a different quantity. Every surface reads one decision; drives the
     # "Panels even" / "Panels: check" chip on the Gallery and Compare cards.
     seam_verdict: str | None = None
     # ...and the grain step beside it: "uneven" when a substantial part of the
@@ -331,7 +333,7 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         transparency_ratio=run.transparency_ratio,
         noise_sigma=run.noise_sigma,
         calstat=run.calstat,
-        seam_verdict=seam_verdict(run.seam_residual),
+        seam_verdict=stored_seam_verdict_for(run),
         grain_verdict=grain_verdict(run.grain_ratio),
         field_fulls=stacking_field_fulls(run, by_id or {}, native_shape),
         is_mosaic=run.is_mosaic,

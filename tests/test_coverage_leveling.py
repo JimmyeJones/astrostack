@@ -827,3 +827,73 @@ def test_a_real_step_on_a_deep_dithered_mosaic_is_still_caught():
         seamed = measure_seam_residual(rgb, cov)
         assert seamed is not None
         assert seam_verdict(round(seamed.ratio, 4)) == "check", (n, seamed)
+
+
+def _generation_1_ratio(monkeypatch, rgb, cov) -> float:
+    """What the **pre-v0.313.1** estimator would have written for this canvas.
+
+    Generation 1 was the identical function with no slack at all — a plain
+    ``max(v) − min(v)`` over the per-level sky modes — so setting ``_SEAM_SE_Z``
+    to zero *is* that estimator rather than an imitation of it, over the same
+    levels, the same object mask and the same yardstick.
+    """
+    from seestack.bg import coverage_leveling as cl
+
+    monkeypatch.setattr(cl, "_SEAM_SE_Z", 0.0)
+    try:
+        result = cl.measure_seam_residual(rgb, cov)
+        assert result is not None
+        return round(float(result.ratio), 4)
+    finally:
+        monkeypatch.undo()
+
+
+def test_the_estimator_fix_can_only_ever_read_a_seam_lower(monkeypatch):
+    """The property a stored pre-v0.313.1 figure is read by, proved on pixels
+    rather than argued from the diff.
+
+    ``seestack.stackhealth.stored_seam_verdict`` still believes an old figure
+    that says "flat", and refuses to believe one that says "check", and the whole
+    of that rests on generation 2 never reporting *more* than generation 1 on the
+    same canvas: ``se >= 0`` makes ``max(v − z·se) <= max(v)`` and
+    ``min(v + z·se) >= min(v)`` for every channel, and v0.313.1 left the
+    yardstick alone. Measured here across depths and across a flat canvas, a
+    genuinely stepped one and one with real structure on it.
+    """
+    from seestack.bg.coverage_leveling import measure_seam_residual
+
+    scenes = []
+    for n in (8, 32, 128):
+        rgb, cov = _deep_dither_scene(n)
+        scenes.append((f"flat-{n}", rgb, cov))
+        stepped = rgb.copy()
+        grain = 40.0 / np.sqrt(n)
+        stepped[np.rint(cov).astype(int) >= int(0.8 * n)] += np.float32(3.0 * grain)
+        scenes.append((f"stepped-{n}", stepped, cov))
+
+    for name, rgb, cov in scenes:
+        old = _generation_1_ratio(monkeypatch, rgb, cov)
+        new = measure_seam_residual(rgb, cov)
+        assert new is not None
+        assert round(float(new.ratio), 4) <= old + 1e-9, (name, old, new.ratio)
+
+
+def test_one_canvas_read_by_the_two_estimators_gives_two_verdicts(monkeypatch):
+    """The owner's library, reproduced on a fixture: the same pixels, measured by
+    the two generations, disagree about what to tell him.
+
+    On his box 217 of 282 stored seam figures were written before the fix and 65
+    after, and of the 38 pairs of runs whose inputs are byte-identical **25
+    change the displayed verdict** — the older card reading "check" beside a
+    frame count identical to the newer card's "flat". This is that, in one
+    process: nothing about the picture differs, only which estimator looked at
+    it.
+    """
+    from seestack.bg.coverage_leveling import measure_seam_residual
+
+    rgb, cov = _deep_dither_scene(128)
+    old = _generation_1_ratio(monkeypatch, rgb, cov)
+    new = measure_seam_residual(rgb, cov)
+    assert new is not None
+    assert seam_verdict(old) == "check", old
+    assert seam_verdict(round(float(new.ratio), 4)) == "flat", new

@@ -32,6 +32,12 @@ def _run(**kw) -> StackRunRow:
         fits_path=None, tiff_path=None, preview_path=None, n_frames_used=40,
         canvas_h=600, canvas_w=800, coverage_min=1, coverage_max=4,
         options_json="{}", is_mosaic=True, seam_residual=None,
+        # The version that stacked the run, as a real stacker stamps it. It is
+        # also what dates a stored figure when no ``seam_scale`` sits beside it,
+        # so a fixture that left it unset would be an *undated* run — which is
+        # the superseded-scale case, not the ordinary one. The tests that want
+        # that case name an old version explicitly.
+        engine_version="0.446.4",
     )
     base.update(kw)
     return StackRunRow(**base)
@@ -322,6 +328,86 @@ def test_a_run_that_already_has_a_verdict_is_left_exactly_alone(tmp_path,
         proj.close()
 
 
+# --- the other thing worth healing: a figure on a superseded scale ----------
+# v0.313.1 changed what ``seam_residual`` means and nothing re-measured a stored
+# row, so the owner's library holds both scales at once (his: 217 figures on the
+# old one against 65 on the new). Reading an old one cautiously —
+# ``stored_seam_verdict`` — costs it its "check"; this is what gives it back.
+
+
+def test_a_figure_on_the_superseded_scale_is_re_measured(tmp_path):
+    """The old figure is not merely distrusted, it is replaced — by the same
+    measurement over the same two files a NULL row is healed from, and stamped
+    with the generation that took it so the next read is a no-op."""
+    from seestack.bg.coverage_leveling import SEAM_ESTIMATOR_GENERATION
+
+    rgb, cov = _panel_scene()
+    out = level_by_coverage(rgb.copy(), cov, frame_coverage=cov)
+    fits_path = tmp_path / "out" / "flat.fits"
+    _write_outputs(fits_path, out, cov)
+
+    # What a pre-v0.313.1 engine wrote for this canvas: a figure past the
+    # "check" bar, on a scale that charged the levels' own estimation noise to
+    # the seam.
+    proj, run_id = _project_with_run(
+        tmp_path, _run(fits_path=str(fits_path), seam_residual=2.2,
+                       engine_version="0.287.2"))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert row.seam_scale is None       # what the owner's library looks like
+
+        healed = backfill_seam_residual(proj, row)
+        assert healed is not None
+        assert healed != pytest.approx(2.2)
+        assert seam_verdict(healed) == "flat"
+        assert row.seam_scale == SEAM_ESTIMATOR_GENERATION
+
+        stored = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert stored.seam_residual == pytest.approx(healed)
+        assert stored.seam_scale == SEAM_ESTIMATOR_GENERATION
+    finally:
+        proj.close()
+
+
+def test_a_re_measured_figure_is_not_measured_twice(tmp_path, monkeypatch):
+    """The stamp is the whole point of writing it: a healed row costs the next
+    request nothing, exactly like a freshly-stacked one — even though the run's
+    own ``engine_version`` still, honestly, says an old engine stacked it."""
+    import seestack.coverage_backfill as cb
+
+    def _never(*_a, **_k):  # pragma: no cover - the assertion is that it isn't
+        raise AssertionError("a figure already on today's scale must not be re-read")
+
+    monkeypatch.setattr(cb, "_load_strided_rgb", _never)
+    proj, run_id = _project_with_run(
+        tmp_path, _run(fits_path=str(tmp_path / "whatever.fits"),
+                       seam_residual=0.42, engine_version="0.287.2",
+                       seam_scale=2))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert backfill_seam_residual(proj, row) == pytest.approx(0.42)
+    finally:
+        proj.close()
+
+
+def test_a_superseded_figure_whose_master_is_gone_is_kept_not_cleared(tmp_path):
+    """The heal needs the master and the coverage map; a run whose output has
+    been tidied away has neither. That must not cost the owner the only
+    measurement anyone ever made of his picture — it stays on the row, and the
+    reading rule already knows how much of it to believe."""
+    proj, run_id = _project_with_run(
+        tmp_path, _run(fits_path=str(tmp_path / "gone.fits"),
+                       seam_residual=2.2, engine_version="0.287.2"))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert backfill_seam_residual(proj, row) == pytest.approx(2.2)
+        stored = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert stored.seam_residual == pytest.approx(2.2)
+        assert stored.seam_scale is None    # still undated, and still read as such
+    finally:
+        proj.close()
+
+
 def test_a_read_only_database_still_answers_the_question(tmp_path, monkeypatch):
     """It writes to the project DB from a read path, so a DB it can't write must
     cost the panel its memory of the answer — not raise at the user."""
@@ -371,3 +457,46 @@ def test_a_canvas_too_big_to_hold_keeps_its_null():
     a read-path heal may spend — so it waits for its next stack instead."""
     assert _seam_read_step(40_000, 60_000) is None
     assert _seam_read_step(0, 100) is None
+
+
+def test_an_older_project_gains_the_seam_scale_column_on_open(tmp_path):
+    """Upgrade safety (§9), and specifically **rollback** safety: ``seam_scale``
+    is additive through ``_reconcile_table_columns``, not through a
+    ``SCHEMA_VERSION`` bump — an older build refuses to open a project stamped
+    newer than itself, so bumping would make this upgrade one-way. A project
+    missing the column must gain it on open, keep every row, and read its
+    existing figures exactly as an un-upgraded build's rows deserve: undated, and
+    therefore dated by the run's own version."""
+    import sqlite3
+
+    proj_dir = tmp_path / "t"
+    proj = Project.create(proj_dir, name="T")
+    try:
+        proj.add_stack_run(_run(output_basename="old", seam_residual=2.2,
+                                engine_version="0.287.2"))
+    finally:
+        proj.close()
+
+    conn = sqlite3.connect(proj_dir / "project.sqlite")
+    try:
+        conn.execute("ALTER TABLE stack_runs DROP COLUMN seam_scale")
+        conn.commit()
+        version_before = conn.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        conn.close()
+
+    proj = Project.open(proj_dir)
+    try:
+        assert proj._conn.execute(
+            "PRAGMA user_version").fetchone()[0] == version_before
+        runs = list(proj.iter_stack_runs())
+        assert [r.output_basename for r in runs] == ["old"]
+        assert runs[0].seam_residual == pytest.approx(2.2)
+        assert runs[0].seam_scale is None
+        # …and the figure is still read on the scale its engine wrote it on, so
+        # the upgrade changes nothing about what the owner is told until the
+        # heal actually re-measures it.
+        from seestack.stackhealth import stored_seam_verdict_for
+        assert stored_seam_verdict_for(runs[0]) is None
+    finally:
+        proj.close()
