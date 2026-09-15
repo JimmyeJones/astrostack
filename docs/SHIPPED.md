@@ -1,5 +1,75 @@
 # Shipped — the record
 
+## v0.447.0 — 2026-09-15 — the seam figures written by an older estimator, read on the scale they were written on
+
+*(Builder, branch `claude/sweet-babbage-p5k2l2` — PRIORITY 3/4 (trust), from observer issue
+[#889](https://github.com/JimmyeJones/astrostack/issues/889), verified in the code and reproduced on pixels
+before a line was written. One additive column with **no** `SCHEMA_VERSION` bump, so the upgrade stays
+rollable; no config, on-disk, API-shape or default change, and no frontend change at all.)*
+
+**What was wrong.** v0.313.1 changed what `seam_residual` *means*: `measure_seam_residual` stopped charging
+each coverage level's own estimation noise to the seam (`_MODE_SE_FACTOR`, `_SEAM_SE_Z`). The fix is right and
+its commit message says plainly that it moves the number — but **no stored row was ever re-measured and
+nothing marked which scale a row was on**, while `seam_verdict` kept reading every figure through the same two
+thresholds (`_SEAM_FLAT_RATIO` 1.0, `_SEAM_VISIBLE_RATIO` 1.5). On the owner's library 217 of 282 seam figures
+were written by a pre-fix engine and 65 by a post-fix one, and a `reprocess_all` has been putting **both
+scales in one History list** on 54 targets. Of the 38 pairs whose inputs are byte-identical — same
+`n_frames_used`, `total_exposure_s`, `noise_sigma`, `stack_fwhm_px`, `transparency_ratio`, `is_mosaic` and
+`rejection_fraction` to 6 dp — **all 38 read lower after the fix and 25 changed the displayed verdict**, 20 of
+them off "check". The sharpest surface is Compare, whose `panelComparison` fires on one side reading "flat"
+and the other "check" and renders *"B's sky still steps where its panels join — so B may show faint seams once
+it's stretched"* — about two stacks of the same files.
+
+**The reading rule, and why it is one-sided rather than a silence.** The two estimators are not merely
+different, they are **ordered**: `se >= 0` makes `max(v − z·se) <= max(v)` and `min(v + z·se) >= min(v)` for
+every channel, over a yardstick v0.313.1 did not touch, so generation 2 can only ever report a figure **less
+than or equal to** generation 1's on the identical pixels. So a pre-fix figure is still readable in the one
+direction the change cannot have crossed: `"flat"` (already below the bar) survives untouched, and `"check"`
+says **nothing** — the same silence the ambiguous middle band already uses, rather than a new kind of answer
+for a reader to learn. New `stackhealth.seam_scale_is_current` / `stored_seam_verdict` /
+`stored_seam_verdict_for` state it once; `seam_verdict` keeps its meaning (the reading of a figure measured
+*now*) and its thresholds. The three consumers — `stackhealth.notes`, `routers/gallery.py`,
+`routers/stack.py` — all go through it, so the chip, the Gallery card, Compare and "How's my stack?" cannot
+come to two opinions, and **no frontend change was needed**: the verdict has always been resolved server-side.
+
+**And the half that gives the "check" back.** Withholding it is honest but lossy, so
+`coverage_backfill.backfill_seam_residual` now **re-measures** a figure on a superseded scale instead of
+returning it — the same measurement over the same master and coverage map a NULL row is healed from, at the
+same cost, on the request that is already grading the run. A run whose master has since gone **keeps** its old
+figure rather than losing it (`_unmeasurable`): a number read cautiously is worth more than no number, and
+deleting the owner's only measurement to make a point about its scale would be the destructive half of a fix
+that has a safe one.
+
+**Which estimator wrote the figure is now recorded, because the run's version cannot answer it.** A healed row
+carries a generation-2 figure while its `engine_version` still honestly says an old engine stacked it, so the
+new `stack_runs.seam_scale` (INTEGER) is stamped beside the figure by both writers — `run_stack` and the heal
+— in the same statement as the figure itself (`Project.set_stack_seam_residual(run_id, ratio, scale)`), so a
+row can never hold a figure whose scale belongs to a different measurement. A recorded value wins outright and
+NULL falls through to `engine_version` (the `recovered_preview_crop` / `baked_north_up_deg` precedent).
+`SEAM_ESTIMATOR_GENERATION` lives beside the estimator it describes. **Added without a `SCHEMA_VERSION`
+bump**, like `duration_s` and the `grain_*` columns, so a build that has never heard of it can still open a DB
+this one wrote — the `ALTER` step in `_migrate_schema` is therefore deliberately ungated (there is no version
+at which it arrived), and a DB already at the current version gets it from `_reconcile_table_columns`.
+
+**Nothing is rewritten and nothing is guessed at.** An undated or unparseable version reads as the older
+scale, which is the only answer that cannot turn a figure nobody can date into a claim about someone's
+picture. A run stacked since the fix is byte-for-byte what it was.
+
+**Tests: +14 Python, six verified red by a scratch revert** (the reading rule reverted to a bare
+`seam_verdict`, and the heal's staleness check forced to `False`). Notably
+`test_one_canvas_read_by_the_two_estimators_gives_two_verdicts` reproduces the owner's mixed-scale library in
+one process — the same pixels read "check" by generation 1 and "flat" by generation 2, with generation 1
+obtained by setting `_SEAM_SE_Z` to zero, which *is* the old estimator rather than an imitation of it — and
+`test_the_estimator_fix_can_only_ever_read_a_seam_lower` proves the one-sided property on six scenes
+(flat/stepped × three depths) rather than arguing it from the diff. Plus the §9 upgrade test
+(`test_an_older_project_gains_the_seam_scale_column_on_open`: the column is dropped, the project re-opened,
+`PRAGMA user_version` unchanged, every row intact, and the old figure still read on its own scale). Four
+existing fixtures (`tests/test_stackhealth.py::_run`, `test_seam_backfill.py::_run`,
+`test_target_stack_health.py::_add_run`, `test_gallery.py::_register_run`) now set the `engine_version` a real
+stacker always stamps — they were describing an *undated* run and exercising the cautious path by accident;
+none was loosened, and `test_list_endpoints_degrade` follows the renamed helper it patches.
+
+
 ## v0.446.4 — 2026-09-14 — the two advisories that said "you can't see this" and not where you could
 
 *(Builder, branch `claude/sweet-babbage-fplnkq` — PRIORITY 1 (editor). Frontend copy plus one engine test:

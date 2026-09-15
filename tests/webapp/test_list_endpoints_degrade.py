@@ -187,12 +187,12 @@ def test_gallery_skips_one_unbuildable_run_and_keeps_the_rest(
 
     from webapp.routers import gallery as gallery_mod
 
-    def _boom(residual):  # noqa: ANN001, ANN202
-        if residual is not None:
+    def _boom(run):  # noqa: ANN001, ANN202
+        if run.seam_residual is not None:
             raise ValueError("simulated future field that can raise")
         return None
 
-    monkeypatch.setattr(gallery_mod, "seam_verdict", _boom)
+    monkeypatch.setattr(gallery_mod, "stored_seam_verdict_for", _boom)
 
     r = client.get("/api/gallery")
     assert r.status_code == 200, r.text
