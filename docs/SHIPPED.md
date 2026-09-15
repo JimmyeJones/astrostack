@@ -1,5 +1,54 @@
 # Shipped — the record
 
+## v0.447.1 — 2026-09-15 — two rows both called "Tonight", in the small hours the page is actually read in
+
+*(Builder, branch `claude/sweet-babbage-p5k2l2` — PRIORITY 3 (friendliness), found by a `--mosaic --editor`
+dogfood pass whose page sweep was otherwise CLEAN. Frontend-only: no endpoint, config, schema, on-disk,
+API-shape or default change, and no new element on a page the owner already calls busy.)*
+
+**What the probe printed.** The "what the TONIGHT page SAYS" block, read as one paragraph:
+
+    Your best night is tonight — Sample: Orion Nebula (M42), 60 min above 30°.
+    Night        Point at    Shoot between        Time up
+    Tonight  3.6 h left  …M42  03:21 AM – 04:16 AM  60 min  peaks 38°
+    Tonight  8.4 h dark  …M42  03:17 AM – 04:16 AM  64 min  peaks 38°
+    Tomorrow 8.5 h dark  …M42
+
+Two rows, one above the other, **named the same thing**, carrying the same target, with clock windows that
+look nearly identical because they are the same hours on different dates. The one column whose entire job is
+*which night* said the same word twice, and the headline above the table used it a third time without saying
+which of them it meant.
+
+**Why, and why it is not a fixture artefact.** The planner legitimately returns both: `2026-09-14`, the night
+whose darkness is already under way (`dark_in_progress: true`, its `dark_minutes` clipped to what is left),
+and `2026-09-15`, the evening to come. `weekNightLabel`'s rule was `ahead <= 0 → "Tonight"`, and in the small
+hours **both** of those are `<= 0` — the night under way is one day behind, which that branch exists for, and
+the coming evening is today. So the page reads this way for anyone who opens it between local midnight and
+dawn, which is when an astrophotographer opens it.
+
+**The fix reads the planner's own fact rather than inventing a clock cutoff.** New
+`planweek.nightInProgressDate(nights, now)` returns the date of the night the reader is *inside* — the flagged
+one, ignored if it is somehow future-dated — and `weekNightLabel` / `weekNightLabelInline` take it as an
+optional third argument and name everything relative to it: the night under way is "Tonight", the evening to
+come is "Tomorrow", and the rest shift with them rather than skipping a name. `dark_in_progress` is the same
+fact `weekDarkPhrase` already turns into "3.6 h left" (v0.438.x), for the same reason — that fix stopped one
+page calling a night 8.3 h and 5.9 h long at once; this is the other half of it, in the column beside it.
+A clock cutoff was considered and rejected: only the planner knows whether darkness has actually begun at this
+location, and an hour hard-coded here would be a second opinion about it.
+
+**Nothing is hidden and nothing else moves.** Both rows still render; only the naming changed. Omitting the
+argument gives exactly the answer the function has always given, so an older backend that sends no flag, and
+any caller without a plan in hand, is unchanged — and on an *evening* whose darkness has begun the shift is
+zero, so the ordinary case is byte-for-byte what it was. The card computes the date once and hands it to the
+headline, the table and the per-target line, so the three cannot come to different opinions about which night
+"tonight" is (`closingWeekNote` and `weekHeadline` resolve it from the plan themselves).
+
+**Tests +5 (4 in `planweek.test.ts`, 1 in `PlanWeekCard.test.tsx`), two verified red by a scratch revert.**
+The component test asserts there is exactly **one** element reading "Tonight" while both rows are still
+present and still carry their own "3.6 h left" / "8.0 h dark". The existing small-hours test is kept and
+annotated rather than replaced: what it pins is now explicitly the no-flag fallback, which is a real case.
+
+
 ## v0.447.0 — 2026-09-15 — the seam figures written by an older estimator, read on the scale they were written on
 
 *(Builder, branch `claude/sweet-babbage-p5k2l2` — PRIORITY 3/4 (trust), from observer issue

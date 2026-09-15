@@ -6,8 +6,9 @@ import { Link } from "react-router-dom";
 
 import { api } from "../../api/client";
 import {
-  closingRowFor, closingWeekNote, otherTargetNights, targetNightPhrase,
-  weekDarkPhrase, weekEmptyReason, weekHeadline, weekMoonNote, weekNightLabel,
+  closingRowFor, closingWeekNote, nightInProgressDate, otherTargetNights,
+  targetNightPhrase, weekDarkPhrase, weekEmptyReason, weekHeadline, weekMoonNote,
+  weekNightLabel,
 } from "../../planweek";
 import { formatClock, formatMinutes } from "../../tonight";
 
@@ -58,6 +59,12 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
   const empty = weekEmptyReason(plan);
   const placed = plan.nights.filter((n) => n.best !== null);
   const others = otherTargetNights(plan, undefined, closing);
+  // Which night the reader is actually *in*. In the small hours the planner
+  // lists both the night under way and the evening to come, and without this
+  // every label below calls them the same thing — two rows named "Tonight",
+  // one above the other, often naming the same target. Computed once so the
+  // headline, the table and the per-target line cannot disagree about it.
+  const nightNow = nightInProgressDate(plan.nights, now);
 
   return (
     <Paper withBorder p="md" data-testid="plan-week">
@@ -100,7 +107,7 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
               return (
                 <Table.Tr key={n.date}>
                   <Table.Td>
-                    <Text fw={600} size="sm">{weekNightLabel(n.date, now)}</Text>
+                    <Text fw={600} size="sm">{weekNightLabel(n.date, now, nightNow)}</Text>
                     <Text size="xs" c="dimmed">
                       {weekDarkPhrase(n)}
                     </Text>
@@ -154,8 +161,8 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
       {others.length > 0 ? (
         <Text size="xs" c="dimmed" mt="sm">
           Each target&apos;s own best night:{" "}
-          {others.map((t) => targetNightPhrase(t, now, closingRowFor(t.safe, closing)))
-            .join(" · ")}
+          {others.map((t) => targetNightPhrase(
+            t, now, closingRowFor(t.safe, closing), nightNow)).join(" · ")}
         </Text>
       ) : null}
 
