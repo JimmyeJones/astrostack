@@ -25,6 +25,13 @@ from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
 from webapp import __version__ as APP_VERSION
 from webapp import jobqueue
 from webapp.config import Settings
+# "Is the picture this target is *showing* a finished one?" — one definition,
+# shared with the Library wall's "Not stretched yet" chip and the endpoint
+# behind it, so no two surfaces can disagree about the same target.
+from webapp.finishedpicture import (
+    displayed_picture_run as _displayed_picture_run,
+    run_is_a_finished_picture as _run_is_a_finished_picture,
+)
 from webapp.jobs import Job, JobManager
 from webapp.preview_orient import baked_north_up_deg
 from webapp.schemas import (
@@ -1056,64 +1063,6 @@ def _newest_genuine_stack_run(proj) -> StackRunRow | None:
         if _stack_options_from_run_json(run.options_json) is not None:
             return run
     return None
-
-
-def _displayed_picture_run(runs: list, cover_stack_run_id: int | None):  # noqa: ANN001,ANN201
-    """The run whose preview is this target's **displayed** picture, or ``None``.
-
-    The library-side mirror of ``routers.targets.current_picture_path``, decided
-    from run rows already in hand instead of from the filesystem: a pinned cover
-    first, then the newest run that has a preview at all. It deliberately does
-    *not* stat the preview file — every caller here is counting targets across a
-    whole library, where one stat per target on a sleeping NAS is the expensive
-    part, and a stamp whose file has gone is a rarer case than the one being
-    counted.
-
-    ``runs`` is newest-first, exactly as :meth:`Project.iter_stack_runs` yields.
-    """
-    if cover_stack_run_id is not None:
-        pinned = next((r for r in runs
-                       if r.id == cover_stack_run_id and r.preview_path), None)
-        if pinned is not None:
-            return pinned
-    return next((r for r in runs if r.preview_path), None)
-
-
-def _run_is_a_finished_picture(proj, run) -> bool:  # noqa: ANN001
-    """True when ``run``'s preview is a *finished* picture rather than a flat
-    linear stack — i.e. something a restack would visibly replace.
-
-    Two shapes count, because the app makes finished pictures two ways:
-
-    * the run carries a **saved editor recipe** with at least one enabled op
-      (the one-click Auto look, an unattended auto-edit, or the owner's own
-      edit) — read through ``recipe_from_json`` so a recipe whose ops have all
-      gone stale reads as "not finished", the same way the editor would render
-      it; and
-    * the run **is** an editor export (``options_json`` carrying
-      ``editor_recipe``/``display_space``), whose stacked pixels are already
-      tone-mapped and whose preview is therefore a picture in its own right.
-
-    Best-effort and read-only: an unreadable meta row answers ``False`` rather
-    than failing a count that only drives a warning.
-    """
-    from seestack.edit.recipe import recipe_from_json
-    from webapp.routers.editor import RECIPE_META_PREFIX
-
-    options_json = getattr(run, "options_json", None)
-    if options_json:
-        try:
-            data = json.loads(options_json)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            data = None
-        if isinstance(data, dict) and (data.get("editor_recipe") is not None
-                                       or data.get("display_space")):
-            return True
-    try:
-        recipe = recipe_from_json(proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}"))
-    except Exception:  # noqa: BLE001 — a warning's count never fails the page
-        return False
-    return any(op.enabled for op in recipe.ops)
 
 
 def _last_stack_version_for_target(lib: Library, safe: str) -> str | None:
