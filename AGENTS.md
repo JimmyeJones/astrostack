@@ -72,6 +72,45 @@ frame QC and rejection reasons, solve results, stack-run settings and verdicts,
 saved edit recipes, job history. That record is the durable one and survives a
 restart, which the log buffer does not.
 
+**This repository is PUBLIC, and the owner's data is not** *(added 2026-09-16)*.
+Every issue, comment, commit message and backlog entry is world-readable and
+indexed. The observer reads a real person's home NAS, and three things in that
+data identify him rather than his software:
+
+- **His home address.** The Seestar writes `SITELAT`/`SITELONG` into **every**
+  sub's FITS header (`webapp/site_location.py`), and `Settings.site_lat` /
+  `site_lon` hold the same thing to several decimal places. A pasted header, a
+  settings dump or a planner trace publishes where he lives.
+- **Other people's names.** The NAS has ordinary local accounts belonging to
+  family members, and they own files. Any listing of file ownership, SMB
+  configuration or `getfacl` output names real people who never agreed to
+  appear here.
+- **His network and filesystem.** Host paths (`/mnt/...`), LAN addresses, device
+  serials and Wi-Fi names describe a private machine.
+
+**The rule, for the observer filing an issue and equally for any agent quoting
+one into `docs/IMPROVEMENTS.md`, `SHIPPED.md`, a commit message or a PR:** none
+of the above is ever reproduced, and a finding is expressed as *shapes and
+counts* rather than raw rows. Never paste a FITS header, `state/config.json`, a
+settings payload, an ownership listing or a `getfacl`. Refer to paths as
+`$ASTRO/...` or the container-relative `/data/...`, never the host's own. Say
+"owned by a non-root local account", never the account's name. Catalogue target
+names (`M_42`, `NGC_7000`) are fine — they name the sky, not the owner.
+
+The observer's `observer-issue` helper enforces the mechanical half by refusing
+to post a body that matches these patterns, because a boundary an agent has to
+remember is one it can forget. **That refusal is the guard working; do not route
+around it, reword the finding to trip a different pattern, or file through
+another path — fix the body.** The judgement half — is this detail about the
+software, or about the person running it? — no regex can do, and it stays with
+whoever writes the text.
+
+**If something does get published, editing is not a retraction.** GitHub keeps
+the edit history of an issue or comment visible to anyone who opens it, so the
+original text stays reachable. A real leak needs the issue *deleted* by the
+owner, and even then caches and mirrors may hold it. Which is why this is
+enforced before the write rather than cleaned up after.
+
 **Why two roles:** finding real bugs and planning good features is a different mode
 from writing code; doing all three in one rushed hour makes each shallow. A
 dedicated Scout keeps the Builder supplied with vetted, high-value work, so the
