@@ -1348,3 +1348,202 @@ def test_reprocess_status_endpoint(solved_client, solved_library):
     assert body["outdated"] == 1
     assert body["up_to_date"] == 1
     assert body["total_targets"] == 2
+
+
+# --------------------------------------------------------------------------- #
+# "This will change the pictures on your wall" — the count behind the warning
+# --------------------------------------------------------------------------- #
+# Observer issue #903: a reprocess with "also auto-edit" off silently replaced
+# every target's *displayed* picture with a flat linear stack, because the
+# displayed picture is the newest run and a restack writes an unedited one. The
+# dialog's promises ("your existing edits are untouched") were all true and all
+# about something else. These pin the counts the warning is worded from.
+
+
+def _seed_run_with_preview(proj, *, version, basename="master", options=None,
+                           preview="p.png"):
+    proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc="2026-05-01T00:00:00Z",
+        output_basename=basename, fits_path=None, tiff_path=None,
+        preview_path=preview, n_frames_used=3, canvas_h=10, canvas_w=10,
+        coverage_min=1, coverage_max=3,
+        options_json=json.dumps(options or {"method": "sigma", "sigma_kappa": 4.25}),
+        engine_version=version,
+    ))
+    return max(r.id for r in proj.iter_stack_runs())
+
+
+def _save_recipe(proj, run_id, ops):
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", json.dumps({"ops": ops}))
+
+
+_AUTO_OPS = [{"id": "tone.curves", "enabled": True, "params": {}}]
+
+
+def test_finished_picture_count_names_targets_whose_wall_picture_would_regress(
+        solved_library):
+    """A target displaying a run with a saved edit counts; a plain linear one
+    doesn't. This is the number the confirm dialog quotes."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        edited, plain = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(edited)
+        try:
+            run_id = _seed_run_with_preview(proj, version="0.0.1")
+            _save_recipe(proj, run_id, _AUTO_OPS)
+        finally:
+            proj.close()
+        proj = lib.open_target(plain)
+        try:
+            _seed_run_with_preview(proj, version="0.0.1")
+        finally:
+            proj.close()
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    assert status["finished_pictures"] == 1
+    # Both are stale, so a "only targets not already on this version" batch
+    # restacks both — and would replace the one finished picture among them.
+    assert status["finished_pictures_stale_only"] == 1
+    assert status["outdated"] == 2
+
+
+def test_a_finished_picture_already_on_this_version_is_outside_a_stale_only_batch(
+        solved_library):
+    """``stale_only`` skips a target already stacked on the running build, so its
+    finished picture is safe — the dialog must not count it in that scope."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        current, stale = [e.safe_name for e in lib.list_targets()]
+        for safe, ver in ((current, pipeline.APP_VERSION), (stale, "0.0.1")):
+            proj = lib.open_target(safe)
+            try:
+                run_id = _seed_run_with_preview(proj, version=ver)
+                _save_recipe(proj, run_id, _AUTO_OPS)
+            finally:
+                proj.close()
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    assert status["finished_pictures"] == 2          # a full batch replaces both
+    assert status["finished_pictures_stale_only"] == 1  # only the stale one
+
+
+def test_an_edit_saved_on_an_older_run_does_not_count_the_displayed_one(
+        solved_library):
+    """The picture on the wall is the *newest* run. A target that was restacked
+    once already displays that plain run — its older edited result is not what
+    a further restack would replace."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            old = _seed_run_with_preview(proj, version="0.0.1", basename="old")
+            _save_recipe(proj, old, _AUTO_OPS)
+            _seed_run_with_preview(proj, version="0.0.1", basename="new")
+        finally:
+            proj.close()
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    assert status["finished_pictures"] == 0
+
+
+def test_a_pinned_cover_is_the_displayed_picture_even_when_it_is_not_newest(
+        solved_library):
+    """``current_picture_path`` prefers a pinned cover over the newest run, and
+    the count has to agree with it or the warning names the wrong targets."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            old = _seed_run_with_preview(proj, version="0.0.1", basename="old")
+            _save_recipe(proj, old, _AUTO_OPS)
+            _seed_run_with_preview(proj, version="0.0.1", basename="new")
+        finally:
+            proj.close()
+        lib.set_target_cover(safe, old)
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    assert status["finished_pictures"] == 1
+
+
+def test_an_editor_export_run_counts_as_a_finished_picture(solved_library):
+    """An editor export's pixels are already tone-mapped, so its preview *is* a
+    finished picture even though no recipe is saved against the run."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            _seed_run_with_preview(
+                proj, version="0.0.1", basename="master_edit",
+                options={"editor_recipe": {"ops": _AUTO_OPS},
+                         "display_space": True})
+        finally:
+            proj.close()
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    assert status["finished_pictures"] == 1
+    # It has no *genuine* stack, so it is in neither version bucket — but a
+    # reprocess restacks it in both scopes, so it counts in both warnings.
+    assert status["outdated"] == 0 and status["up_to_date"] == 0
+    assert status["finished_pictures_stale_only"] == 1
+
+
+def test_a_recipe_with_no_enabled_ops_is_not_a_finished_picture(solved_library):
+    """An empty or all-disabled recipe renders as the plain linear stack, so it
+    must not inflate a count whose whole job is "would this visibly change?"."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        empty, disabled = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(empty)
+        try:
+            _save_recipe(proj, _seed_run_with_preview(proj, version="0.0.1"), [])
+        finally:
+            proj.close()
+        proj = lib.open_target(disabled)
+        try:
+            _save_recipe(proj, _seed_run_with_preview(proj, version="0.0.1"),
+                         [{"id": "tone.curves", "enabled": False, "params": {}}])
+        finally:
+            proj.close()
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    assert status["finished_pictures"] == 0
+
+
+def test_reprocess_status_endpoint_serves_the_finished_picture_counts(
+        solved_client, solved_library):
+    """The counts reach the dialog through the existing endpoint — additively,
+    beside the fields it already served."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            _save_recipe(proj, _seed_run_with_preview(proj, version="0.0.1"),
+                         _AUTO_OPS)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = solved_client.get("/api/reprocess-status").json()
+    assert body["finished_pictures"] == 1
+    assert body["finished_pictures_stale_only"] == 1
+    # The fields an older frontend reads are untouched.
+    assert body["outdated"] == 1 and body["total_targets"] == 2

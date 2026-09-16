@@ -1531,6 +1531,22 @@ export interface ReprocessStatus {
   outdated: number;      // targets whose current image was made by an older version
   up_to_date: number;    // targets already stacked on the running version
   total_targets: number;
+  /**
+   * How many targets currently *display* a finished (edited) picture. A
+   * reprocess saves each restack as a new run, and the newest run is the one
+   * every wall shows — so with "also auto-edit each result" off, all of these
+   * go back to showing a flat linear stack until they are edited or re-run.
+   * The edits themselves are untouched (they stay on their own runs, reachable
+   * in History); it is the *displayed* picture that changes.
+   *
+   * `_stale_only` is the same count restricted to the targets a "only targets
+   * not already stacked on this version" batch would actually restack.
+   *
+   * Optional: an older backend sends neither, and the dialog then says nothing
+   * about it — exactly what it did before.
+   */
+  finished_pictures?: number;
+  finished_pictures_stale_only?: number;
 }
 
 export interface AutoCastSummary {

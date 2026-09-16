@@ -1058,6 +1058,64 @@ def _newest_genuine_stack_run(proj) -> StackRunRow | None:
     return None
 
 
+def _displayed_picture_run(runs: list, cover_stack_run_id: int | None):  # noqa: ANN001,ANN201
+    """The run whose preview is this target's **displayed** picture, or ``None``.
+
+    The library-side mirror of ``routers.targets.current_picture_path``, decided
+    from run rows already in hand instead of from the filesystem: a pinned cover
+    first, then the newest run that has a preview at all. It deliberately does
+    *not* stat the preview file — every caller here is counting targets across a
+    whole library, where one stat per target on a sleeping NAS is the expensive
+    part, and a stamp whose file has gone is a rarer case than the one being
+    counted.
+
+    ``runs`` is newest-first, exactly as :meth:`Project.iter_stack_runs` yields.
+    """
+    if cover_stack_run_id is not None:
+        pinned = next((r for r in runs
+                       if r.id == cover_stack_run_id and r.preview_path), None)
+        if pinned is not None:
+            return pinned
+    return next((r for r in runs if r.preview_path), None)
+
+
+def _run_is_a_finished_picture(proj, run) -> bool:  # noqa: ANN001
+    """True when ``run``'s preview is a *finished* picture rather than a flat
+    linear stack — i.e. something a restack would visibly replace.
+
+    Two shapes count, because the app makes finished pictures two ways:
+
+    * the run carries a **saved editor recipe** with at least one enabled op
+      (the one-click Auto look, an unattended auto-edit, or the owner's own
+      edit) — read through ``recipe_from_json`` so a recipe whose ops have all
+      gone stale reads as "not finished", the same way the editor would render
+      it; and
+    * the run **is** an editor export (``options_json`` carrying
+      ``editor_recipe``/``display_space``), whose stacked pixels are already
+      tone-mapped and whose preview is therefore a picture in its own right.
+
+    Best-effort and read-only: an unreadable meta row answers ``False`` rather
+    than failing a count that only drives a warning.
+    """
+    from seestack.edit.recipe import recipe_from_json
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    options_json = getattr(run, "options_json", None)
+    if options_json:
+        try:
+            data = json.loads(options_json)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            data = None
+        if isinstance(data, dict) and (data.get("editor_recipe") is not None
+                                       or data.get("display_space")):
+            return True
+    try:
+        recipe = recipe_from_json(proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}"))
+    except Exception:  # noqa: BLE001 — a warning's count never fails the page
+        return False
+    return any(op.enabled for op in recipe.ops)
+
+
 def _last_stack_version_for_target(lib: Library, safe: str) -> str | None:
     """The ``engine_version`` of the target's most recent *genuine* stack run
     (skipping editor/combine runs), or ``None`` when it has no genuine stack or
@@ -1084,29 +1142,72 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
     "N targets were made with an older version — reprocess" nudge, so it counts
     only images a reprocess would actually change.
 
-    Returns ``{current_version, outdated, up_to_date, total_targets}``.
+    It also counts how many of those targets currently *display* a *finished*
+    picture (:func:`_run_is_a_finished_picture` on the run
+    :func:`_displayed_picture_run` picks). A reprocess writes each restack as a
+    new, unedited run, and the displayed picture is the newest one — so with the
+    batch's "also auto-edit" switch off, every one of these targets goes back to
+    showing a flat linear stack until it is edited or re-run. Nothing is lost
+    (the edits stay on their own runs, reachable in History), but the wall
+    changes, and it used to change silently: the confirm dialog promised
+    "your existing edits are untouched", which is true and answers a different
+    question. ``finished_pictures_stale_only`` is the same count restricted to
+    the targets a ``stale_only`` batch would actually restack, so the dialog can
+    quote the number that matches the scope the user picked.
+
+    Note the two pairs of counters are deliberately **not** the same population.
+    ``outdated``/``up_to_date`` describe *images a reprocess would change*, so a
+    target with no genuine stack is in neither. The finished-picture counters
+    describe *targets the batch will restack*, which is every target —
+    ``stale_only`` skips only those whose newest genuine stack is already on this
+    build, so a target with no genuine stack at all (an editor export and
+    nothing else) is restacked by both modes and counts in both.
+
+    Returns ``{current_version, outdated, up_to_date, total_targets,
+    finished_pictures, finished_pictures_stale_only}``.
     """
     outdated = 0
     up_to_date = 0
     total = 0
+    finished = 0
+    finished_stale_only = 0
     for entry in lib.list_targets():
         total += 1
         proj = lib.open_target(entry.safe_name)
         try:
-            run = _newest_genuine_stack_run(proj)
+            runs = list(proj.iter_stack_runs())  # newest first
+            run = next((r for r in runs
+                        if _stack_options_from_run_json(r.options_json) is not None),
+                       None)
+            shown = _displayed_picture_run(
+                runs, getattr(entry, "cover_stack_run_id", None))
+            is_finished = (shown is not None
+                           and _run_is_a_finished_picture(proj, shown))
         finally:
             proj.close()
-        if run is None:
-            continue  # never stacked — not an out-of-date existing image
-        if run.engine_version == APP_VERSION:
-            up_to_date += 1
-        else:
-            outdated += 1
+        if run is not None:
+            if run.engine_version == APP_VERSION:
+                up_to_date += 1
+            else:
+                outdated += 1
+        if is_finished:
+            finished += 1
+            # What ``stale_only`` actually skips: a target whose newest genuine
+            # stack is already this build (``_last_stack_version_for_target``).
+            # Everything else — including a target with no genuine stack — is
+            # restacked either way.
+            if run is None or run.engine_version != APP_VERSION:
+                finished_stale_only += 1
     return {
         "current_version": APP_VERSION,
         "outdated": outdated,
         "up_to_date": up_to_date,
         "total_targets": total,
+        # How many targets would visibly change if the batch ran without
+        # auto-editing its results — see the docstring. Additive: an older
+        # frontend ignores both keys and behaves exactly as before.
+        "finished_pictures": finished,
+        "finished_pictures_stale_only": finished_stale_only,
     }
 
 
