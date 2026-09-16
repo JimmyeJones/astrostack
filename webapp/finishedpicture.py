@@ -22,11 +22,19 @@ from __future__ import annotations
 import json
 from typing import Any
 
-# The per-run saved editor recipe's project-meta prefix, and the two marks an
-# editor *export* run carries in its own ``options_json``. Spelled here rather
-# than imported from ``webapp.routers.editor`` at module scope so this module
-# stays importable from anywhere without dragging a router in; the functions
-# below import the real constant, and a drift test pins them equal.
+# The two marks an editor *export* run carries in its own ``options_json``.
+# Both are written by the editor's export path and read back by name in several
+# places already — ``pipeline._stack_options_from_run_json`` rejects a run
+# carrying ``editor_recipe`` as "not a genuine stack", and
+# ``routers.editor._run_display_space`` reads ``display_space`` to stop the
+# proxy re-stretching an already-tone-mapped run. They are JSON keys on disk
+# rather than a constant anyone exports, so this is one more hand-spelling of
+# them, not a second definition of anything.
+#
+# (The saved *recipe's* meta prefix is a real constant, and the function below
+# imports it from ``webapp.routers.editor`` rather than re-spelling it. The
+# import is inside the function so this module stays importable from anywhere
+# without dragging a router in at import time.)
 _EXPORT_KEYS = ("editor_recipe", "display_space")
 
 
