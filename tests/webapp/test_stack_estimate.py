@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 
 def test_estimate_basic_reference_canvas(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
@@ -734,3 +736,172 @@ def test_panel_depth_is_unmoved_by_the_knobs_the_form_cautions_about(
         )
     }
     assert depths == {6}
+
+
+# --- "about N subs on each patch of sky" -------------------------------------
+# Observer issue #901: that phrase, and the drizzle / sigma-clip / κ cautions
+# worded from it, read ``panel_depth`` — the *thinnest* pointing cluster. On the
+# owner's mosaics, whose pointings are spaced far closer than a frame's
+# footprint, a pixel is covered by many clusters' frames at once, so the thinnest
+# cluster's count is not a per-pixel number at all: it measured ~0.10× the real
+# depth on 12 of 17 of his mosaics, and told six drizzle runs to turn Drizzle off
+# on pictures 117–153 subs deep. ``pixel_depth`` is the per-pixel answer (canvas
+# area ÷ frame footprint); ``panel_depth`` keeps its thinnest-cluster meaning for
+# method selection, which is the one question it is the right number for.
+
+
+def _lay_out_raster(data_root, safe: str, *, cols: int, rows: int,
+                    spacing_deg: float, per_pointing: int) -> None:
+    """Re-point a target's frames onto a real overlapping raster — WCS and all.
+
+    ``_repoint`` above moves only the DB's ``ra/dec_center_deg``, which is all
+    the *cluster* arithmetic reads; the canvas comes from each frame's own
+    ``wcs_json``, so a canvas-derived depth needs the headers moved too.
+
+    The synthetic frame is 480×320 at 5″/px = 0.667° × 0.444°, so a spacing
+    comfortably under that (and comfortably over ``PANEL_LINK_DIST_DEG``, 0.25°)
+    is exactly the shape the bug lives on: every pointing is its own cluster
+    while every pixel sees several pointings' frames.
+    """
+    from dataclasses import replace
+
+    from seestack.io.library import Library
+    from tests.synth import make_synth_wcs_text
+
+    ra0, dec0 = 83.6, -5.4
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            existing = list(proj.iter_frames())
+            template = existing[0]
+            for r in existing:
+                proj.update_frame(r.id, accept=False)
+            n = 0
+            for cx in range(cols):
+                for cy in range(rows):
+                    ra = ra0 + cx * spacing_deg
+                    dec = dec0 + cy * spacing_deg
+                    for _ in range(per_pointing):
+                        n += 1
+                        proj.add_frame(replace(
+                            template, id=None, accept=True,
+                            source_path=f"{template.source_path}.r{n:04d}",
+                            ra_center_deg=ra, dec_center_deg=dec,
+                            wcs_json=make_synth_wcs_text(
+                                ra_center_deg=ra, dec_center_deg=dec),
+                        ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_pixel_depth_is_the_per_pixel_count_where_panel_depth_is_the_thinnest(
+        client, solved_library):
+    """The bug, on the owner's shape: a 4×4 raster spaced 0.26° apart on a frame
+    0.667° wide. Every pointing is its own cluster (0.26° > the 0.25°
+    ``PANEL_LINK_DIST_DEG``) while every pixel sees several of them, so
+    ``panel_depth`` answers 6 where a pixel has seen ~16 — and 6 is the number
+    the phrase "about N subs on each patch of sky" was quoting.
+
+    Fails before this fix: there was no ``pixel_depth`` at all."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _lay_out_raster(solved_library, safe, cols=4, rows=4,
+                    spacing_deg=0.26, per_pointing=6)
+    data = client.get(f"/api/targets/{safe}/stack-estimate").json()
+
+    assert data["n_frames"] == 96
+    assert data["is_mosaic"] is True
+    # Unchanged: the thinnest substantial cluster, which is what the rejection
+    # answers on this response are still computed from.
+    assert data["panel_depth"] == 6
+    # The per-pixel truth, which is the canvas-area arithmetic and nothing else.
+    expected = 96.0 / ((data["canvas_w"] * data["canvas_h"]) / (480.0 * 320.0))
+    assert data["pixel_depth"] == pytest.approx(expected, rel=1e-6)
+    # …and it is materially bigger than the thinnest cluster — the whole point.
+    # Measured on this fixture: 16.1 against 6, i.e. 2.7×. (The owner's real
+    # mosaics run ~10×; a synthetic raster this small cannot reach that without
+    # tens of thousands of rows, so the assertion is about the *direction* and
+    # the arithmetic, both of which are the same at any size.)
+    assert data["pixel_depth"] > 2.5 * data["panel_depth"]
+    # Never above the total: a pixel cannot have seen more subs than exist.
+    assert data["pixel_depth"] <= data["n_frames"]
+
+
+def test_pixel_depth_is_not_the_frame_count_on_a_genuinely_spread_mosaic(
+        client, solved_library):
+    """The other direction, so the fix is not just "always say the total": a
+    raster whose panels barely overlap really is thin per pixel, and the number
+    has to fall accordingly."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _lay_out_raster(solved_library, safe, cols=3, rows=3,
+                    spacing_deg=0.6, per_pointing=6)
+    data = client.get(f"/api/targets/{safe}/stack-estimate").json()
+
+    assert data["n_frames"] == 54
+    assert data["pixel_depth"] is not None
+    assert data["pixel_depth"] < 54            # nothing like the total
+    # Wider spacing means a bigger canvas and so a thinner pixel than the
+    # tightly-overlapped raster above (measured: ~5.2, against 16.1 there).
+    assert data["pixel_depth"] < 8
+
+
+def test_pixel_depth_is_null_on_a_single_field(client, solved_library):
+    """Where the canvas is one frame there is nothing to correct, and the
+    frontend reads null as "use the frame count" — byte-for-byte what every
+    caution did before this field existed."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    data = client.get(f"/api/targets/{safe}/stack-estimate").json()
+    assert data["is_mosaic"] is False
+    assert data["pixel_depth"] is None
+
+
+def test_pixel_depth_is_null_when_the_mosaic_is_forced_onto_one_frame(
+        client, solved_library):
+    """``mosaic_canvas=reference`` reprojects everything onto the reference
+    frame's footprint, where canvas-area arithmetic has nothing to say. Null, so
+    the frontend falls back to ``panel_depth`` and that mode is unchanged."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _lay_out_raster(solved_library, safe, cols=3, rows=3,
+                    spacing_deg=0.3, per_pointing=6)
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"mosaic_canvas": "reference"}).json()
+    assert data["canvas_w"] == 480 and data["canvas_h"] == 320
+    assert data["pixel_depth"] is None
+    assert data["panel_depth"] == 6            # still served, still the thinnest
+
+
+def test_pixel_depth_does_not_move_the_method_the_engine_picks(
+        client, solved_library):
+    """The load-bearing half of "keep ``auto_reject_depth`` for method
+    selection": whatever the phrase now says, the resolved method must still be
+    the one the engine's own picker resolves from the thinnest cluster."""
+    from seestack.io.library import Library
+    from seestack.stack.stacker import (
+        StackOptions,
+        _resolve_auto_reject,
+        estimate_stack_basis,
+    )
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _lay_out_raster(solved_library, safe, cols=3, rows=3,
+                    spacing_deg=0.3, per_pointing=6)
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"auto_reject": "true"}).json()
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            basis = estimate_stack_basis(proj, "auto")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    eff = _resolve_auto_reject(StackOptions(auto_reject=True),
+                               basis.n_frames, depth=basis.panel_depth)
+    resolved = data["auto_reject_resolved"]
+    assert resolved["panel_depth"] == basis.panel_depth == 6
+    assert resolved["method"] == ("min_max" if eff.min_max_reject else "sigma_clip")
