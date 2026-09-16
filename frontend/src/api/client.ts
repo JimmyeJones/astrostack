@@ -2885,6 +2885,15 @@ export interface OverTrimmedItem {
   suggested_keep_fraction?: number | null;
 }
 
+/** One target whose *displayed* picture is still a flat linear stack — see
+ * `/api/unstretched-pictures`. `run_id` is the run whose linear preview is the
+ * picture being shown, so a caller can link straight to it in the editor. */
+export interface UnstretchedItem {
+  safe: string;
+  target_name: string;
+  run_id: number;
+}
+
 /** One folder of `incoming/` holding subs the library has no frame row for —
  * see `/api/incoming-lag`. Every field is defaulted server-side, so an older
  * backend that has no such endpoint simply reports nothing. */
@@ -3925,6 +3934,14 @@ export const api = {
   // never rewrites a recipe.
   getOverTrimmedPictures: () =>
     req<{ count: number; items: OverTrimmedItem[] }>("/api/over-trimmed-pictures"),
+
+  // Which targets are showing a flat linear stack instead of a finished picture.
+  // A linear master and a finished auto-edit are both a dark-ish square on a
+  // 160px card, so the wall could not tell them apart and neither can a
+  // beginner — the app can, and this is where it says so. Read-only; it never
+  // writes a recipe.
+  getUnstretchedPictures: () =>
+    req<{ count: number; items: UnstretchedItem[] }>("/api/unstretched-pictures"),
 
   // Which folders of `incoming/` hold subs that never reached the library. Its
   // own endpoint for the same reason as the three above, and a different
