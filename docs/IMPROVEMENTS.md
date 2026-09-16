@@ -82,6 +82,84 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟠 BUG (trust / friendliness — PRIORITY 1-adjacent (the displayed picture) / 3, Scout 2026-09-16 — mechanism
+  traced end-to-end in code from observer issue
+  [#903](https://github.com/JimmyeJones/astrostack/issues/903)) — `reprocess_all` with the auto-edit switch OFF
+  silently REPLACES each target's *displayed* picture with a flat linear stack, because the displayed picture is
+  the NEWEST run and a switch-off restack writes an unedited linear autostretch.** *(Pillar: trust — PRIORITY
+  1-adjacent; size M (safe slice) to L (full). Severity: **broken-UX / trust, bordering wrong-result** — the
+  finished picture the owner sees regresses across every wall surface; NOT data loss, the edits survive on the
+  old runs and are reachable in History. Confidence: **mechanism TRACED end-to-end in code**; the owner's
+  44-of-77 pixel measurements (median background 47.7 → 15.7, all 44 pinned in the 15.0–16.3 autostretch band)
+  are the observer's, gated on his library.)*
+  **Root cause, confirmed by reading the two paths:** `current_picture_path` (`webapp/routers/targets.py:1550`)
+  resolves cover → `last_stack_preview` → newest run with a preview; `cover_stack_run_id` is NULL on all 89
+  targets, so the **newest run always wins**, and a restack re-stamps `last_stack_preview` to its own preview.
+  `submit_reprocess_all` (`webapp/pipeline.py:1349`, body ~`:1408`) takes its own `auto_edit: bool = False` and
+  gates on it directly — it does **not** read `settings.auto_edit_on_autostack` or `_wants_auto_edit_for`, unlike
+  the ingest auto-stack path (`webapp/pipeline.py:580`). `ReprocessAllBody.auto_edit` defaults `False`
+  (`webapp/routers/system.py:203`); the Settings switch is `useState(false)` (`frontend/src/routes/Settings.tsx:350`).
+  So with the switch off, each restacked run has no recipe → a plain linear preview → and, being newest, becomes
+  the picture on the library wall (`routers/targets.py:87`), the life list (`routers/lifelist.py:406`), the
+  wishlist thumbnails (`routers/wishlist.py:92`) and the all-sky "My map" (`seestack/post/skymap.py:301`) — all of
+  which read `entry.last_stack_preview` directly. **The confirm/switch copy is literally true and points away from
+  this:** "your existing edits are untouched" (`Settings.tsx:399`), "non-destructive … nothing is ever lost"
+  (`Settings.tsx:408`,`:426`), switch description `Settings.tsx:454`. The edits *are* not lost — the *displayed
+  picture* changes anyway. **Not self-correcting:** no cover pinned anywhere (NULL 89/89), recipes are per-run and
+  never carried forward, and this is the **second** occurrence in the recorded job history (`ec2dd5b63436`,
+  2026-09-04→09, `stacked 75 · auto_edited 0`). **Repro (traced):** on a library whose targets display baked
+  auto-edits, run `reprocess_all` with `auto_edit` off → every restacked target's newest run is a linear master →
+  `current_picture_path` returns it → the wall shows the flat stack until the target is re-edited or auto-stacked.
+  **Fix options (observer's, with Scout's upgrade-safety notes; a Builder should pick — do NOT blind-take L):**
+  (1) **Dialog copy names the consequence** when the switch is off — *"the newest result becomes each target's
+  displayed picture, so targets currently showing a finished auto-edit will show a flat linear stack until you
+  edit or re-run them."* Cheapest, purely additive, turns a silent change into a choice. Safe drive-by size S.
+  (2) **Default the reprocess auto-edit from `settings.auto_edit_on_autostack`** (honouring `_wants_auto_edit_for`).
+  ⚠ **§9 care:** flipping the *backend* default changes behaviour on installs where that setting is on — do it as
+  the *frontend switch's initial checked state* reading the setting (still a visible choice), not a silent backend
+  default flip, and keep `auto_edit=False` as the API default so an old client/bookmark is unchanged.
+  (3) **Pin the cover on supersede** — when a restack supersedes a run that carried a baked auto-edit
+  (`editor_auto_baked_look` stamp), stamp the superseded (edited) run as `cover_stack_run_id` so the finished
+  picture survives until the new one is finished. Robust structural fix; additive (uses existing nullable
+  `cover_stack_run_id`), but touches cover semantics — pin **only** when superseding an edited run and only where
+  the user hasn't set a cover, so a manual cover choice is never overridden; needs an upgrade/migration test.
+  (1)+(3) together fully close it; (1) alone is the safe immediate win.
+
+- **🟡 BUG (trust / friendliness — PRIORITY 3, Scout 2026-09-16 — mechanism traced in code + fix feasibility
+  confirmed, from observer issue [#901](https://github.com/JimmyeJones/astrostack/issues/901)) — the Stack form's
+  "about N subs on each patch of sky" (and the drizzle / sigma-clip / κ cautions worded from it) uses the
+  THINNEST pointing cluster's count, which on the owner's mosaics is ~0.10× the real per-pixel depth, so it gives
+  actively wrong advice on 12 of 17 mosaics.** *(Pillar: trust — PRIORITY 3; size M. Severity: **broken-UX / wrong
+  advice** — e.g. 6 drizzle runs told to "turn Drizzle off" on pictures whose measured per-pixel depth is 117–153,
+  above the engine's own 100-sample bar; NOT a wrong pixel result. Confidence: **mechanism TRACED in code and the
+  fix confirmed feasible from the estimate basis**; the coverage-map measurements (panel_depth/measured median
+  0.10 vs `samples_per_pixel_of_run`/measured median 1.06 over 17 real `_framecov.fits`) are the observer's, gated
+  on his data.)*
+  **Root cause:** the phrase `samplesPerPixelPhrase(nFrames, panelDepth)` (`frontend/src/samplesPerPixel.ts`) and
+  the Stack-form cautions `perPixelSamples = samplesPerPixel(solvedAccepted, estimate.data?.panel_depth)`
+  (`frontend/src/routes/Stack.tsx:594`, cautions at `:718` sigma-clip-off, `:882` drizzle-off, `:933` tighten-κ)
+  are all fed `panel_depth`, served from `webapp/routers/stack.py:510,658` out of
+  `StackCanvasBasis.panel_depth = auto_reject_depth(_frame_radecs(frames))` (`seestack/stack/stacker.py:1370`),
+  which is `min(substantial clusters)` — the **thinnest** substantial pointing cluster (`stacker.py:917`).
+  `PANEL_LINK_DIST_DEG = 0.25°` (`seestack/stack/pointings.py:46`) is ~1/5 of a Seestar frame's short side
+  (footprint ~1.2°×2.1°), so heavily-overlapping pointings are labelled *different* clusters (~4× more clusters
+  than the canvas can hold disjointly), a pixel is covered by many clusters' frames, and the thinnest cluster's
+  count is not a per-pixel sample count at all. **The app already has the right number:** `field_fulls_of_sky` /
+  `samples_per_pixel_of_run` (`webapp/field_fulls.py:88`) — canvas-area ÷ frame-footprint, drizzle-scale aware —
+  reproduces the owner's coverage maps to ~15%. **Fix (feasible + cheap, confirmed):** the estimate basis already
+  carries `dst_shape` (union canvas) and `ref_shape` (frame footprint) (`StackCanvasBasis`, `stacker.py:1309`), so
+  a per-pixel depth = `n_frames × ref_area / dst_area` is pure arithmetic on data already computed — add it to the
+  estimate response and word the phrase + drive the Stack-form cautions from it. **Keep `auto_reject_depth`'s
+  thinnest-panel semantics for method selection** (`_resolve_auto_reject` / `rejection_reach` — that IS the right
+  number for "can the rejection method bite anywhere"); only stop *wording it to the owner* as "on each patch of
+  sky." **Not the v0.437.3–v0.437.5 class** (those routed `grainProjection`/`nextBestMove`/`integrationTrend` to
+  read panel-aware fields; here the panel-aware field itself is the wrong measure for a per-pixel phrase).
+  **Caveat the observer flags:** M_31 goes the *other* way (claims 40 vs measured 16), so the error is not
+  reliably conservative — the fix must handle both directions. Single fields are unaffected (`panel_depth` is
+  `None`, phrase falls back to the frame count). **Repro (code):** any mosaic where pointing spacing < frame
+  footprint makes `auto_reject_depth` return a count far below `n_frames × ref_area / dst_area`; the phrase then
+  quotes the small number as "on each patch of sky" and the cautions fire against it.
+
 - **🟠 BUG (autonomy / data-integrity, Scout 2026-09-14 — mechanism traced end-to-end from observer issue
   [#878](https://github.com/JimmyeJones/astrostack/issues/878)) — a mosaic's raw-subs folder is minted as a
   SECOND, hash-suffixed target because `make_safe_name("<T> (mosaic)")` collides with the on-device-output
@@ -2430,6 +2508,26 @@ missing. Don't re-file it.)*
 *(The Scout's 2026-09-12 "draw the full Moon to scale" entry shipped as v0.432.0 and was cut to
 [`SHIPPED.md`](SHIPPED.md) — `ScaleBar.moon_fraction` + `skymarks._moon_disc_box` + `frontend/src/moonDisc.ts`,
 off by default. Don't re-file it.)*
+
+- **NEW BEGINNER FEATURE (Scout 2026-09-16) — a plain-language "finished / linear / thin" status chip on every
+  library and gallery card, so a beginner scanning their wall can tell at a glance which pictures are done and
+  which still need work.** *(Pillar: understand + trust — PRIORITY 3; size S–M. Beginner bar: yes — a non-expert
+  instantly reads "Finished" vs "Not stretched yet — a flat linear stack" vs "Thin — keep shooting", with a sane
+  default and no knobs.)* **Why now:** observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903)
+  showed 44 of the owner's targets silently displaying flat *linear* stacks after a reprocess-all, with **nothing
+  on any wall surface saying so** — a beginner cannot tell a finished auto-edit from an unstretched master by the
+  thumbnail alone (both are just a dark-ish square). A per-card chip is the standing, general answer to that whole
+  class: it makes "this picture isn't finished" visible wherever the picture is shown, independent of whatever bug
+  produced the linear preview. **Shape:** a small chip on `TargetOut`/`GalleryItem` cards driven by data already
+  near the displayed run — whether the displayed run carries a baked auto-edit recipe (`editor_auto_baked_look`
+  stamp; the observer notes `_auto_edit_recipe_json` returns `None` for a plain linear run) → "Finished" vs "Not
+  stretched yet"; optionally fold in the existing per-pixel depth verdict for a "Thin — keep shooting" state.
+  Additive (one boolean/enum on the list responses, `False`/"unknown" default so an older backend is unaffected),
+  off nothing, no new dependency, offline. Clicking the "Not stretched yet" chip could deep-link to the editor's
+  one-click Auto. **Complements, doesn't duplicate:** the Target page's readiness/grain notes and `stackhealth`
+  live on the *detail* page; nothing carries a finished/linear signal onto the *wall* cards (verified: no such
+  chip in `Library.tsx`/`Gallery.tsx`/`components/`). **Depends on nothing**, but if #903's cover-pin fix (option
+  3) lands first, "Finished" becomes even more reliable because the wall would then already prefer the edited run.
 
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**

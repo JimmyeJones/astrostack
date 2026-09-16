@@ -18,6 +18,47 @@ is a queue.
 
 ---
 
+## 2026-09-16 (Scout, branch `claude/admiring-brahmagupta-x0cz7c`) — the observer inbox was the run; two new verified bugs filed, one issue closed
+
+**Baseline: GREEN** (suite still running to completion at writeup time; all dots, no failures, ~47%+ when the
+docs were written; `main` at `25250a3e`, v0.447.1). Ran `source scripts/agent-setup.sh` (exit 0), then the full
+suite headless with `-n 4` + BLAS cap.
+
+**The run's work came from the open GitHub issue inbox (AGENTS.md §"Agent roles" — the Scout owns it), not from
+a fresh code sweep.** Seven issues open; three were already tracked in the backlog (#876 shipped, #878/#880
+filed). The three unaddressed ones were the highest-value work available, and two survived verification:
+
+- **#903 filed → Bugs (trust, 🟠).** `reprocess_all` with the auto-edit switch off replaces each target's
+  *displayed* picture with a flat linear stack, because `current_picture_path` picks the newest run (cover NULL on
+  89/89, `last_stack_preview` re-stamped by every restack) and a switch-off restack has no recipe.
+  Mechanism TRACED end-to-end in code (`webapp/pipeline.py:1349`, `routers/targets.py:1550`,
+  `routers/system.py:203`, `Settings.tsx:350/399/408/454`); the confirm/switch copy is true but points away from
+  the consequence. Filed with the observer's 3 fix options + §9 care notes (the "default from
+  `auto_edit_on_autostack`" option must not be a silent *backend* default flip).
+- **#901 filed → Bugs (trust, 🟡).** The Stack form's "about N subs on each patch of sky" and its drizzle/κ/σ
+  cautions use `panel_depth` = thinnest pointing cluster (`auto_reject_depth` = `min(substantial)`), which
+  massively undercounts per-pixel depth on mosaics because `PANEL_LINK_DIST_DEG` (0.25°) ≪ the frame footprint,
+  so overlapping pointings become distinct "panels". Confirmed in code that (a) all the Stack-form cautions are
+  fed `panel_depth` (`Stack.tsx:594,718,882,933`), (b) the accurate companion `samples_per_pixel_of_run`
+  (`field_fulls.py:88`) exists, and (c) the fix is cheap — the estimate basis already carries `dst_shape` and
+  `ref_shape`, so per-pixel depth = `n_frames × ref_area / dst_area` is pure arithmetic. Keep `auto_reject_depth`
+  for method selection; only re-word the user phrase + cautions.
+- **#883 closed.** The 2,259-sub ingest stall it reported cleared (observer's own follow-up today confirms it);
+  the surfacing shipped (v0.441.1) and the queue-starvation LEAD is already tracked in the backlog (v0.444.0
+  shipped the yield). Left the 6 stray months-old singleton subs noted, not filed (0.01%, no traced cause).
+
+**One new beginner feature filed** ("Features that serve real workflows"): a per-card "Finished / Not stretched
+yet / Thin" status chip on the library & gallery wall — the standing, general answer to the #903 class (a
+beginner can't tell a finished auto-edit from a linear master by the thumbnail). Verified no such wall chip
+exists today.
+
+**Note on the kickoff↔AGENTS.md tension:** the Scout kickoff prompt says to lead QA with the stacking engine,
+but AGENTS.md §1 / §"Agent roles" say `seestack/stack` + `seestack/calibrate` are closed after ~20 clean sweeps
+and give a different rotation, explicitly warning that runs keep re-sweeping the closed area. Followed AGENTS.md:
+did not re-sweep the engine core; the observer inbox supplied two real, higher-value bugs instead. No code
+shipped — both bugs are non-trivial (cover semantics / estimate wording + frontend), so left to the Builder per
+kickoff step 5.
+
 ## 2026-09-15 (Builder, branch `claude/sweet-babbage-p5k2l2`) — the open-issue inbox turned out to hold the run's work, and the dogfood pass found the other half
 
 **Baseline: GREEN.** `main` at `af09a360` (v0.446.4). Full suite `6113 passed, 2 skipped` in **12m20s**
