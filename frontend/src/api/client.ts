@@ -1932,12 +1932,20 @@ export interface StackEstimate {
   output_w: number;
   output_h: number;
   is_mosaic: boolean;
+  // The **thinnest** substantial pointing cluster's depth (`auto_reject_depth`)
+  // — the number the rejection answers on this response are computed from,
+  // because "can this method bite *anywhere*?" is a question about the thinnest
+  // part of the raster. null on a single field. Deliberately NOT what the form's
+  // sentences are worded from: see `pixel_depth`.
+  panel_depth?: number | null;
   // How many subs land on one *spot* of this canvas — the denominator every
   // per-pixel caution on the Stack form is about (drizzle's dither samples, the
-  // per-pixel σ κ-σ estimates, min/max's `2k+1` frames per pixel). null on a
-  // single field, where the frame count already is that number. Optional so an
-  // older backend simply leaves every caution worded in frames, as before.
-  panel_depth?: number | null;
+  // per-pixel σ κ-σ estimates, min/max's `2k+1` frames per pixel). Canvas area ÷
+  // frame footprint, the same measure `perPixel.ts` uses after a run. null when
+  // the canvas is no bigger than one frame (a single field, or a mosaic forced
+  // onto the reference canvas), where the frame count already is that number.
+  // Optional so an older backend falls back to `panel_depth`, as before.
+  pixel_depth?: number | null;
   peak_bytes: number;
   peak_gb: number;
   budget_bytes: number;

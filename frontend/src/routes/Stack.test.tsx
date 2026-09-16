@@ -2614,6 +2614,7 @@ describe("StackView — cautions read a mosaic's panel depth, not its total", ()
     n: number,
     panelDepth: number | null,
     frame?: (id: number) => Partial<client.Frame>,
+    pixelDepth?: number | null,
   ) {
     mockSchema(fields);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue(defaults);
@@ -2631,6 +2632,7 @@ describe("StackView — cautions read a mosaic's panel depth, not its total", ()
     vi.spyOn(client.api, "stackEstimate").mockResolvedValue({
       n_frames: n, canvas_w: 1440, canvas_h: 960, output_w: 1440, output_h: 960,
       is_mosaic: panelDepth !== null, panel_depth: panelDepth,
+      pixel_depth: pixelDepth,
       peak_bytes: 3e8, peak_gb: 0.3, budget_bytes: 1.4e9, budget_gb: 1.4,
       would_exceed: false, suggested_drizzle_scale: null,
       suggested_reference_canvas: false, memory_fix: null,
@@ -2746,6 +2748,46 @@ describe("StackView — cautions read a mosaic's panel depth, not its total", ()
     const note = await screen.findByText(/You have 1 streaked frame, and only/);
     expect(note).toHaveTextContent("about 6 subs on each patch of sky");
     expect(note).toHaveTextContent(/Min\/max rejection/);
+  });
+
+  // --- #901: which depth the sentences are worded from ---------------------
+  // `panel_depth` is the *thinnest* pointing cluster. On the owner's mosaics
+  // the pointings are spaced far closer than a frame's footprint, so every
+  // pointing is its own cluster while a pixel is covered by several of them —
+  // measured at ~0.10x the real per-pixel depth on 12 of his 17 mosaics. The
+  // per-pixel truth is `pixel_depth` (canvas area / frame footprint), and these
+  // pin that the form's *sentences* now read it.
+
+  it("stops telling a deep mosaic to turn Drizzle off (observer issue #901)", async () => {
+    // Six of the owner's drizzle runs were told this. The thinnest cluster says
+    // 12 — under the 100-sample bar — while the canvas says 128, above it.
+    mockDepthForm(drizzleFields, { drizzle: true }, 1500, 12, undefined, 128.4);
+
+    renderStack();
+
+    await screen.findByText(/mosaic canvas/);
+    expect(screen.queryByText(/Drizzle is on, but/)).not.toBeInTheDocument();
+  });
+
+  it("words the phrase from the per-pixel depth, not the thinnest cluster", async () => {
+    mockDepthForm(drizzleFields, { drizzle: true }, 1500, 6, undefined, 42.5);
+
+    renderStack();
+
+    const note = await screen.findByText(/Drizzle is on, but you only have/);
+    expect(note).toHaveTextContent("about 42 subs on each patch of sky");
+    expect(note).not.toHaveTextContent("about 6 subs");
+  });
+
+  it("falls back to the thinnest cluster when the backend sends no pixel depth", async () => {
+    // An older backend, or a mosaic forced onto the reference canvas: today's
+    // answer stands rather than silently becoming the target's total.
+    mockDepthForm(drizzleFields, { drizzle: true }, 225, 25, undefined, null);
+
+    renderStack();
+
+    const note = await screen.findByText(/Drizzle is on, but you only have/);
+    expect(note).toHaveTextContent("about 25 subs on each patch of sky");
   });
 });
 
