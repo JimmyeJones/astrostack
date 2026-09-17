@@ -238,11 +238,16 @@ def reprocess_status(request: Request) -> dict[str, Any]:
     the running build — so the UI can *proactively* nudge the user to reprocess
     after an in-place upgrade instead of hoping they remember to. Read-only.
 
-    Returns ``{current_version, outdated, up_to_date, total_targets}``; ``outdated``
+    Returns ``{current_version, outdated, up_to_date, total_targets,
+    finished_pictures, finished_pictures_stale_only}``; ``outdated``
     counts only targets that already have a genuine stack on a different version
     (a never-stacked target is neither), i.e. exactly the images a reprocess would
-    change. FastAPI runs this sync endpoint in a threadpool, so the per-target
-    SQLite reads don't block the event loop.
+    change. The ``finished_pictures*`` counts say how many targets currently
+    *display* a finished (edited) picture that a restack without "also auto-edit"
+    would replace with a flat linear stack — so the confirm dialog can name that
+    consequence instead of letting the wall change silently. FastAPI runs this
+    sync endpoint in a threadpool, so the per-target SQLite reads don't block the
+    event loop.
     """
     from seestack.io.library import Library
 

@@ -587,12 +587,20 @@ export function StackView() {
   // What one *pixel* of this canvas will actually be made of. Every caution
   // below is a statement about samples on a pixel — drizzle's dither phases,
   // κ-σ's per-pixel spread, min/max's `2k+1` per pixel — and on a mosaic the
-  // target's total is an order of magnitude above that. `panel_depth` is the
-  // same depth the estimate's own rejection answers are computed from; it is
-  // null on a single field and on an older backend, where this is the frame
-  // count, exactly as before. See `samplesPerPixel.ts`.
-  const perPixelSamples = samplesPerPixel(solvedAccepted, estimate.data?.panel_depth);
-  const perPixelPhrase = samplesPerPixelPhrase(solvedAccepted, estimate.data?.panel_depth);
+  // target's total is an order of magnitude above that.
+  //
+  // `pixel_depth` is canvas area ÷ frame footprint: what a *typical* pixel has
+  // seen. It is NOT `panel_depth`, which the estimate's rejection answers are
+  // computed from — that is the *thinnest* pointing cluster, the right number
+  // for "can this method bite anywhere?" and ~0.10× the truth for "how many subs
+  // are on each patch of sky?" on the owner's mosaics (observer issue #901).
+  // Falls back to `panel_depth` where area arithmetic has nothing to say (an
+  // older backend, or a mosaic forced onto the reference canvas), and both are
+  // null on a single field, where this is the frame count exactly as before.
+  // See `samplesPerPixel.ts`.
+  const canvasDepth = estimate.data?.pixel_depth ?? estimate.data?.panel_depth;
+  const perPixelSamples = samplesPerPixel(solvedAccepted, canvasDepth);
+  const perPixelPhrase = samplesPerPixelPhrase(solvedAccepted, canvasDepth);
   const excludedFrames = (job?.result?.excluded_frames as string[] | undefined) ?? [];
 
   // "Keep streaked frames" leaves satellite/plane-trailed subs accepted so that

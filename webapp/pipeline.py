@@ -25,6 +25,13 @@ from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
 from webapp import __version__ as APP_VERSION
 from webapp import jobqueue
 from webapp.config import Settings
+# "Is the picture this target is *showing* a finished one?" — one definition,
+# shared with the Library wall's "Not stretched yet" chip and the endpoint
+# behind it, so no two surfaces can disagree about the same target.
+from webapp.finishedpicture import (
+    displayed_picture_run as _displayed_picture_run,
+    run_is_a_finished_picture as _run_is_a_finished_picture,
+)
 from webapp.jobs import Job, JobManager
 from webapp.preview_orient import baked_north_up_deg
 from webapp.schemas import (
@@ -1084,29 +1091,72 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
     "N targets were made with an older version — reprocess" nudge, so it counts
     only images a reprocess would actually change.
 
-    Returns ``{current_version, outdated, up_to_date, total_targets}``.
+    It also counts how many of those targets currently *display* a *finished*
+    picture (:func:`_run_is_a_finished_picture` on the run
+    :func:`_displayed_picture_run` picks). A reprocess writes each restack as a
+    new, unedited run, and the displayed picture is the newest one — so with the
+    batch's "also auto-edit" switch off, every one of these targets goes back to
+    showing a flat linear stack until it is edited or re-run. Nothing is lost
+    (the edits stay on their own runs, reachable in History), but the wall
+    changes, and it used to change silently: the confirm dialog promised
+    "your existing edits are untouched", which is true and answers a different
+    question. ``finished_pictures_stale_only`` is the same count restricted to
+    the targets a ``stale_only`` batch would actually restack, so the dialog can
+    quote the number that matches the scope the user picked.
+
+    Note the two pairs of counters are deliberately **not** the same population.
+    ``outdated``/``up_to_date`` describe *images a reprocess would change*, so a
+    target with no genuine stack is in neither. The finished-picture counters
+    describe *targets the batch will restack*, which is every target —
+    ``stale_only`` skips only those whose newest genuine stack is already on this
+    build, so a target with no genuine stack at all (an editor export and
+    nothing else) is restacked by both modes and counts in both.
+
+    Returns ``{current_version, outdated, up_to_date, total_targets,
+    finished_pictures, finished_pictures_stale_only}``.
     """
     outdated = 0
     up_to_date = 0
     total = 0
+    finished = 0
+    finished_stale_only = 0
     for entry in lib.list_targets():
         total += 1
         proj = lib.open_target(entry.safe_name)
         try:
-            run = _newest_genuine_stack_run(proj)
+            runs = list(proj.iter_stack_runs())  # newest first
+            run = next((r for r in runs
+                        if _stack_options_from_run_json(r.options_json) is not None),
+                       None)
+            shown = _displayed_picture_run(
+                runs, getattr(entry, "cover_stack_run_id", None))
+            is_finished = (shown is not None
+                           and _run_is_a_finished_picture(proj, shown))
         finally:
             proj.close()
-        if run is None:
-            continue  # never stacked — not an out-of-date existing image
-        if run.engine_version == APP_VERSION:
-            up_to_date += 1
-        else:
-            outdated += 1
+        if run is not None:
+            if run.engine_version == APP_VERSION:
+                up_to_date += 1
+            else:
+                outdated += 1
+        if is_finished:
+            finished += 1
+            # What ``stale_only`` actually skips: a target whose newest genuine
+            # stack is already this build (``_last_stack_version_for_target``).
+            # Everything else — including a target with no genuine stack — is
+            # restacked either way.
+            if run is None or run.engine_version != APP_VERSION:
+                finished_stale_only += 1
     return {
         "current_version": APP_VERSION,
         "outdated": outdated,
         "up_to_date": up_to_date,
         "total_targets": total,
+        # How many targets would visibly change if the batch ran without
+        # auto-editing its results — see the docstring. Additive: an older
+        # frontend ignores both keys and behaves exactly as before.
+        "finished_pictures": finished,
+        "finished_pictures_stale_only": finished_stale_only,
     }
 
 

@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Library, expo } from "./Library";
+import { Library, UNSTRETCHED_HINT, expo } from "./Library";
 import * as client from "../api/client";
 import type { Target } from "../api/client";
 
@@ -195,5 +195,71 @@ describe("Library card layout", () => {
 
     const name = await screen.findByText("Sample: Orion Nebula (M42)");
     expect(name).toHaveAttribute("title", "Sample: Orion Nebula (M42)");
+  });
+});
+
+describe("Library — the \"Not stretched yet\" chip", () => {
+  // A stack straight out of the stacker is linear: on a 160px card it is a
+  // dark square, and so is the finished version of the same data. The wall
+  // could not tell them apart and neither can a beginner — observer issue #903
+  // left 44 of the owner's targets in exactly that state at once, with nothing
+  // anywhere saying so.
+
+  it("chips only the targets whose picture is still a flat linear stack", async () => {
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([
+      mk("Orion Nebula", []), mk("Andromeda", []),
+    ]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 1,
+      items: [{ safe: "Andromeda", target_name: "Andromeda", run_id: 7 }],
+    });
+    renderLibrary();
+
+    await waitFor(() =>
+      expect(screen.getByText("Not stretched yet")).toBeInTheDocument());
+    // Exactly one — a "Finished" chip on every other card would be a wall of
+    // badges saying nothing.
+    expect(screen.getAllByText("Not stretched yet")).toHaveLength(1);
+  });
+
+  it("says what to do about it, in plain language", async () => {
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Andromeda", [])]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 1,
+      items: [{ safe: "Andromeda", target_name: "Andromeda", run_id: 7 }],
+    });
+    renderLibrary();
+
+    const chip = await screen.findByText("Not stretched yet");
+    // Mantine's Badge puts the label in a child span, so the tooltip lives on
+    // the badge root the label sits inside.
+    expect(chip.closest("[title]")).toHaveAttribute("title", UNSTRETCHED_HINT);
+    expect(UNSTRETCHED_HINT).toContain("press Auto");
+    expect(UNSTRETCHED_HINT).toContain("reversible");
+  });
+
+  it("shows no chips on a library where every picture is finished", async () => {
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Orion Nebula", [])]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 0, items: [],
+    });
+    renderLibrary();
+
+    await waitFor(() =>
+      expect(screen.getByText("Orion Nebula")).toBeInTheDocument());
+    expect(screen.queryByText("Not stretched yet")).not.toBeInTheDocument();
+  });
+
+  it("renders the wall exactly as before when the endpoint isn't there", async () => {
+    // An older backend, or a failed read: the wall must be the wall, not an
+    // error and not a chip on everything.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Orion Nebula", [])]);
+    vi.spyOn(client.api, "getUnstretchedPictures")
+      .mockRejectedValue(new Error("404 Not Found"));
+    renderLibrary();
+
+    await waitFor(() =>
+      expect(screen.getByText("Orion Nebula")).toBeInTheDocument());
+    expect(screen.queryByText("Not stretched yet")).not.toBeInTheDocument();
   });
 });
