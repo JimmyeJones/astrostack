@@ -343,6 +343,57 @@ describe("FramingVerdictNote — the offer tells the truth", () => {
       + "36 h of shooting.");
   });
 
+  it("says the price is the whole grid when this picture is already a mosaic", async () => {
+    // Read down the card, the three sentences are about what's left, what's
+    // left, and then a figure in hours — which is *not* what's left: the panels
+    // already shot are inside the grid it prices. The owner is a heavy mosaic
+    // user with targets many nights deep, so the unqualified figure can quote a
+    // job mostly done. It states the scope; it subtracts nothing.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "partial",
+        canvas: "mosaic",
+        coverage: 0.4,
+        text: "is bigger than this mosaic — only about 40% of it is in this "
+          + "picture. Adding more panels next session would capture the rest.",
+      }));
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M 42", name: "Orion Nebula", type: "nebula", constellation: "Orion",
+      constellation_abbr: "Ori", ra_deg: 83.822, dec_deg: -5.391,
+      matched_by: "name", size_arcmin: 85,
+      mosaic: { cols: 3, rows: 3, panels: 9,
+        text: "About a 3×3 mosaic (9 panels) covers all of it." },
+    });
+    renderNote();
+
+    expect(await screen.findByTestId("framing-mosaic-cost")).toHaveTextContent(
+      "is about 36 h of shooting — the whole grid from scratch, not counting "
+      + "what this picture already has.");
+  });
+
+  it("leaves the price unqualified on a single-frame picture and an older backend", async () => {
+    // `canvas` is additive: omitted, it read as one frame before this existed
+    // and must keep reading as today's sentence.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "partial", canvas: undefined, coverage: 0.15,
+        text: "is bigger than your frame — only about 15% of it is in this "
+          + "picture. Shoot it in mosaic mode to capture all of it.",
+      }));
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M 42", name: "Orion Nebula", type: "nebula", constellation: "Orion",
+      constellation_abbr: "Ori", ra_deg: 83.822, dec_deg: -5.391,
+      matched_by: "name", size_arcmin: 85,
+      mosaic: { cols: 3, rows: 3, panels: 9,
+        text: "About a 3×3 mosaic (9 panels) covers all of it." },
+    });
+    renderNote();
+
+    const cost = await screen.findByTestId("framing-mosaic-cost");
+    expect(cost).toHaveTextContent("is about 36 h of shooting.");
+    expect(cost.textContent).not.toContain("from scratch");
+  });
+
   it("carries the object's own difficulty into the price", async () => {
     // A curated "easy" verdict halves the per-field goal on the readiness card,
     // so it has to halve this too — otherwise one page prices one field two ways.

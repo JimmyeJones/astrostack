@@ -1,5 +1,51 @@
 # Shipped — the record
 
+## v0.451.1 — 2026-09-17 — the mosaic's price tag says it is pricing the whole grid, not what's left
+
+*(Builder, branch `claude/sweet-babbage-ivepzn`. PRIORITY 3 (friendliness / trust) on the mosaic frontier —
+the disclosure half of the `mosaicEffort` lead filed 2026-09-14 and reproduced twice since; the lead's
+real-data gate is untouched. Frontend-only: one optional argument whose default is today's sentence. No
+config, schema, on-disk, endpoint, API-shape or default change, and no new element on any screen.)*
+
+**What a beginner reads, on a target that is already a mosaic.** Three sentences down the framing card:
+
+    Orion Nebula is bigger than this mosaic — only about 55% of it is in this
+    picture. Adding more panels next session would capture the rest.
+    About a 3x3 mosaic (9 panels) covers all of it.
+    Giving all 9 panels the depth you'd give one field (~2 h each) is about 18 h
+    of shooting.
+
+The first two are about **what is left**. The third is not: the panels already shot are inside the grid it
+prices, so on the owner's real mosaics — 26 of them, some many nights deep — "about 18 h of shooting" can be
+quoting a job mostly done. `mosaicDepthText`'s own docstring defends pricing from scratch, and that defence
+("the subs already on one pointing are a few minutes against a figure in hours") is an argument about a target
+the owner has **not started**, which is exactly the case this sentence is not in.
+
+**What shipped is the assumption, not a number.** `mosaicDepthText` takes `{ alreadyAMosaic }` and ends
+*"— the whole grid from scratch, not counting what this picture already has."* True whether or not the
+existing pointings fall inside the proposed grid, so it needs none of the measurement the lead is gated on —
+and it deliberately does **not** name an hours-remaining figure, because `mosaic_plan` derives its grid from
+the object's size and a 3x3's panel centres are not a superset of a 2x2's. The misreading is closed; the
+subtraction stays filed and gated.
+
+**Where the flag comes from.** `StackFraming.canvas` — the same fact `framingTitle` two functions up already
+switches on, which is why the verdict above it says "adding more panels" rather than "shoot it in mosaic mode".
+One source for "is this picture a mosaic", not a second opinion. Omitted by an older backend, which read as a
+single frame before and reads as today's sentence now. The identity card's copy of the clause is unchanged: it
+is handed no run, so it cannot tell, and a caller that cannot tell must not claim.
+
+**Verified against the running app, not only jsdom.** `scripts/agent-dogfood.sh --mosaic`, then
+`GET /api/targets/Sample_M42_mosaic_2_2/stack-runs/1/framing` →
+`{"level":"partial", …, "canvas":"mosaic"}` — the live state the clause is gated on, on the sample shaped like
+the owner's shooting. That is the third reproduction of the lead and the first time the fix's own gate was
+measured rather than reasoned.
+
+**Tests (+4):** two in `mosaicEffort.test.ts` (the scoped sentence; and that nothing is subtracted while all
+three "cannot tell" shapes — no flag, `{}`, `false` — return the old sentence byte for byte) and two in
+`FramingVerdictNote.test.tsx` (the clause on a `canvas: "mosaic"` partial verdict; no clause, and no "from
+scratch" anywhere, on a single frame and on a backend that omits `canvas`). Two fail before, verified by
+stashing the two production files; the other two pin the unchanged branches.
+
 ## v0.451.0 — 2026-09-17 — the caption you paste under your picture says what the object *is*
 
 *(Builder, branch `claude/sweet-babbage-ivepzn`. The one genuinely missing half of the Scout's 2026-09-17

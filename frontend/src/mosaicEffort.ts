@@ -74,18 +74,36 @@ export function mosaicDepthHours(
  * grid is a *new* way to shoot the object, and the subs already on one pointing
  * are a few minutes against a figure in hours. Being about "next session" rather
  * than "what's left", it deliberately does not try to subtract them.
+ *
+ * **`alreadyAMosaic` says that premise out loud where it stops being obvious.**
+ * On a picture that is *itself* a mosaic the surrounding sentences are about
+ * what is left — the verdict says "adding more panels next session would capture
+ * the rest", the plan says "about a 3x3 covers all of it" — and a figure in
+ * hours read straight after those two reads as the hours remaining. It is not:
+ * the panels already shot are inside the grid it is pricing, and the owner is a
+ * heavy mosaic user with targets many nights deep, so "about 18 h of shooting"
+ * can be quoting a job mostly done. The clause states the assumption rather than
+ * subtracting anything, which is deliberate: whether the existing pointings even
+ * fall inside the proposed grid is not something this arithmetic knows (a 3x3's
+ * panel centres are not a superset of a 2x2's), so naming an hours-remaining
+ * figure here would be a guess. Default false — every caller that cannot tell,
+ * and every unstarted target, gets exactly the sentence it got before.
  */
 export function mosaicDepthText(
   mosaic: MosaicPlan | null | undefined,
   type: string | null | undefined,
   difficulty?: GoalDifficulty,
+  opts?: { alreadyAMosaic?: boolean },
 ): string | null {
   const d = mosaicDepthHours(mosaic, type, difficulty);
   if (!d) return null;
+  const scope = opts?.alreadyAMosaic
+    ? " — the whole grid from scratch, not counting what this picture already has"
+    : "";
   return (
     `Giving all ${d.panels} panels the depth you'd give one field ` +
     `(~${fmtGoal(d.perFieldHours)} h each) is about ` +
-    `${fmtGoal(d.totalHours)} h of shooting.`
+    `${fmtGoal(d.totalHours)} h of shooting${scope}.`
   );
 }
 

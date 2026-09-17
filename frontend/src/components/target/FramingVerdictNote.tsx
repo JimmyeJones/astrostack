@@ -114,8 +114,18 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
   // screens are not, so they say it in the hours the readiness card on the same
   // page is already speaking (`mosaicDepthText`, sharing the planner's clause and
   // its per-field goal so the two are one claim in two currencies).
+  // …and on a picture that is *already* a mosaic, the clause says so, because
+  // everything around it here is about what is left: the verdict above reads
+  // "adding more panels next session would capture the rest" and the plan line
+  // "about a 3x3 covers all of it", so a figure in hours landing third reads as
+  // the hours remaining. It isn't — the panels already shot are inside the grid
+  // being priced. `canvas` is the same fact the title two functions up already
+  // switches on (an owner who shot a mosaic is not told to shoot one); an older
+  // backend omits it, which reads as a single frame and as today's sentence.
   const cost = v?.level === "partial"
-    ? mosaicDepthText(identity.data?.mosaic, identity.data?.type, identity.data?.difficulty)
+    ? mosaicDepthText(
+      identity.data?.mosaic, identity.data?.type, identity.data?.difficulty,
+      { alreadyAMosaic: v?.canvas === "mosaic" })
     : null;
   if (!v) return null;
   const tone = TONE[v.level] ?? TONE.centred;
