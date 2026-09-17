@@ -32,6 +32,22 @@ import { fieldsOfSkyLabel, perPixel, spansMoreThanOneField } from "./perPixel";
 // the stack has barely started averaging the sky down.
 export const THIN_STACK_MAX_FRAMES = 4;
 
+/** The Library wall's chip label for this state. One string, so the wall and any
+ * future surface read identically — the message itself is `thinStackWarning`'s,
+ * which is why there is no second sentence here. */
+export const THIN_PICTURE_LABEL = "Thin — keep shooting";
+
+/** Where the reader can see *why* subs were dropped, which is the first thing to
+ * check before shooting more.
+ *
+ * `"this-page"` — the default, and every surface this warning had before the
+ * Library wall got it — names the "rejected" count sitting above the badge on
+ * the Target, Gallery and Jobs pages. A wall card has no such count on it, and
+ * "see the count above" pointing at nothing is worse than a longer sentence, so
+ * `"open-it"` sends the reader one click in, to the target page that does.
+ */
+export type ThinStackRejectedCountIs = "this-page" | "open-it";
+
 export interface ThinStackWarning {
   level: "single" | "thin";
   /** Subs on one part of the picture — the run's frame count on a single field,
@@ -47,6 +63,10 @@ export function thinStackWarning(
    * surface that doesn't have the figure — the warning is then exactly what it
    * has always been. */
   fieldFulls?: number | null,
+  /** Where the reader can find the "rejected" count — see
+   * `ThinStackRejectedCountIs`. Defaults to the surfaces this warning was
+   * written for, so every existing caller is unchanged word for word. */
+  rejectedCountIs: ThinStackRejectedCountIs = "this-page",
 ): ThinStackWarning | null {
   // Unknown / not-yet-stacked → nothing to warn about.
   if (nFramesUsed == null || !Number.isFinite(nFramesUsed) || nFramesUsed < 0) {
@@ -60,10 +80,13 @@ export function thinStackWarning(
     : nFramesUsed;
   if (depth > THIN_STACK_MAX_FRAMES) return null;
 
+  const where =
+    rejectedCountIs === "open-it"
+      ? 'open it and check the "rejected" count'
+      : 'see the "rejected" count above';
   const next =
-    "Check that your subs plate-solved and weren't over-rejected (see the " +
-    '"rejected" count above), then add more subs — a stack only gets cleaner as ' +
-    "it combines more frames.";
+    `Check that your subs plate-solved and weren't over-rejected (${where}), ` +
+    "then add more subs — a stack only gets cleaner as it combines more frames.";
 
   if (mosaic) {
     // Name both figures. A mosaic owner reading "only 3 subs" under a picture

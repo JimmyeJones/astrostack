@@ -534,3 +534,206 @@ def test_the_reprocess_warning_stops_counting_a_saved_only_edit_as_finished(
 
     status = solved_client.get("/api/reprocess-status").json()
     assert status["finished_pictures"] == 1
+
+
+# --------------------------------------------------------------------------
+# The other half: is the picture on that card deep enough? (v0.450.0)
+#
+# A different question from stretch, and the one the wall was least able to
+# answer for itself: the only number on a Library card is the target's *total*
+# frame count, which on a mosaic says nothing about what one patch of sky got.
+# The Gallery card of the very same run already turns its badge orange.
+
+# Match the ``solved_library`` fixture's seeded frames (tests/webapp/conftest.py).
+FRAME_W, FRAME_H = 480, 320
+
+
+def _seed_sized(proj, *, canvas_w, canvas_h, n_frames_used,
+                basename="master", preview="p.png", options=None):
+    """A run whose canvas and frame count are the two things depth is read
+    from — everything else as ``_seed`` writes it."""
+    proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc="2026-05-01T00:00:00Z",
+        output_basename=basename, fits_path=None, tiff_path=None,
+        preview_path=preview, n_frames_used=n_frames_used,
+        canvas_h=canvas_h, canvas_w=canvas_w,
+        coverage_min=1, coverage_max=n_frames_used,
+        options_json=json.dumps(options or {"method": "sigma"}),
+        engine_version="0.1.0",
+    ))
+    return max(r.id for r in proj.iter_stack_runs())
+
+
+def _thin(client) -> dict:
+    body = client.get("/api/unstretched-pictures").json()
+    return {i["safe"]: i for i in body["thin"]}
+
+
+def test_a_mosaic_whose_total_flatters_it_is_named_thin(
+        solved_client, solved_library):
+    """Thirty subs over a 3x3 raster is three on each patch of sky, and the card
+    says "30 frames". The same thirty on a single field are not thin at all —
+    which is the whole point: it is the denominator, not the count."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        mosaic, field = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(mosaic)
+        try:
+            _seed_sized(proj, canvas_w=FRAME_W * 3, canvas_h=FRAME_H * 3,
+                        n_frames_used=30)
+        finally:
+            proj.close()
+        proj = lib.open_target(field)
+        try:
+            _seed_sized(proj, canvas_w=FRAME_W, canvas_h=FRAME_H,
+                        n_frames_used=30)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = solved_client.get("/api/unstretched-pictures").json()
+    assert [i["safe"] for i in body["thin"]] == [mosaic]
+    assert body["thin_count"] == 1
+
+
+def test_the_wall_gets_both_numbers_its_sentence_names(
+        solved_client, solved_library):
+    """``thinStackWarning`` says "your 30 subs are spread across about 9 fields
+    of sky, so each part …" — it needs the count *and* the scale, not the
+    quotient, or the wall would have to write a second sentence about a picture
+    the Gallery already has one for."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            run_id = _seed_sized(proj, canvas_w=FRAME_W * 3, canvas_h=FRAME_H * 3,
+                                 n_frames_used=30)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    item = _thin(solved_client)[safe]
+    assert item["n_frames_used"] == 30
+    assert item["field_fulls"] == pytest.approx(9.0)
+    assert item["run_id"] == run_id
+    assert item["target_name"]
+
+
+def test_a_deep_picture_is_not_named(solved_client, solved_library):
+    """Five subs on every patch is over the bar, so the card gets no chip — the
+    wall as it was, on the nine cards in ten that are fine."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            _seed_sized(proj, canvas_w=FRAME_W, canvas_h=FRAME_H,
+                        n_frames_used=5)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = solved_client.get("/api/unstretched-pictures").json()
+    assert body["thin"] == []
+    assert body["thin_count"] == 0
+
+
+def test_a_thin_picture_is_named_even_when_it_is_finished(
+        solved_client, solved_library):
+    """Stretch is a decision; depth is a fact about the light. A finished
+    one-sub stack is *the* case worth naming, because it is the one that looks
+    like a picture — so the two lists are not exclusive and neither is a subset
+    of the other."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            _edit(proj, _seed_sized(proj, canvas_w=FRAME_W, canvas_h=FRAME_H,
+                                    n_frames_used=1))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = solved_client.get("/api/unstretched-pictures").json()
+    assert body["count"] == 0                     # finished: no stretch chip
+    assert [i["safe"] for i in body["thin"]] == [safe]
+
+
+def test_a_finished_pictures_crop_does_not_make_it_look_deeper(
+        solved_client, solved_library):
+    """An editor export records the canvas it *wrote*, and Auto trims the
+    border, so measuring a finished mosaic against its own canvas reads it as
+    deeper than its pixels are — the direction that tells a beginner to stop
+    shooting. The depth comes off the stack it was rendered from."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            source = _seed_sized(proj, basename="master",
+                                 canvas_w=FRAME_W * 3, canvas_h=FRAME_H * 3,
+                                 n_frames_used=30)
+            # The export keeps the source's frame count and crops hard enough
+            # that its own canvas is a single field — which would read as 30.
+            _seed_sized(proj, basename="master_edit", preview="edit.png",
+                        canvas_w=FRAME_W, canvas_h=FRAME_H, n_frames_used=30,
+                        options={"editor_recipe": {"ops": _OPS},
+                                 "display_space": True,
+                                 "derived_from": source})
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    item = _thin(solved_client)[safe]
+    assert item["field_fulls"] == pytest.approx(9.0)
+    assert item["n_frames_used"] == 30
+
+
+def test_a_target_with_no_picture_yet_is_not_named_thin(
+        solved_client, solved_library):
+    """Nothing to be thin. "Get some more subs" is the Target page's sentence
+    for a target with nothing stacked — a chip here would be a second voice."""
+    body = solved_client.get("/api/unstretched-pictures").json()
+    assert body["thin"] == []
+    assert body["thin_count"] == 0
+
+
+def test_a_run_with_no_frame_count_is_not_accused_of_being_thin(
+        solved_client, solved_library, monkeypatch):
+    """A count that is absent is not a count of nothing. The schema says
+    ``NOT NULL``, so this is belt-to-braces — but a chip that appeared because a
+    number was *missing* would accuse a whole wall, which is the rule every other
+    field on this endpoint follows."""
+    import webapp.routers.unstretched as mod
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            _seed_sized(proj, canvas_w=FRAME_W, canvas_h=FRAME_H,
+                        n_frames_used=50)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    real = mod.displayed_picture_run
+
+    def blank_count(runs, cover):  # noqa: ANN001, ANN202
+        shown = real(runs, cover)
+        if shown is not None:
+            object.__setattr__(shown, "n_frames_used", None)
+        return shown
+
+    monkeypatch.setattr(mod, "displayed_picture_run", blank_count)
+    body = solved_client.get("/api/unstretched-pictures").json()
+    assert body["thin"] == []
+    assert body["thin_count"] == 0
