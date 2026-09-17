@@ -156,7 +156,10 @@ describe("incomingLagUnreadable", () => {
     expect(got!.all).toBe(true);
     expect(got!.title).toBe("6 subs in your incoming folder can't be read");
     expect(got!.sentence).toContain("a scan won't help");
-    expect(got!.sentence).toContain("Copying them over again");
+    expect(got!.sentence).toContain("copying them over again");
+    // The reassurance the cause sentence would have carried, which stands aside
+    // on this branch — so it is said here exactly once.
+    expect(got!.sentence).toContain("never changes anything in that folder");
   });
 
   it("keeps the delay headline when only some are damaged", () => {
@@ -166,12 +169,15 @@ describe("incomingLagUnreadable", () => {
     // really are waiting.
     expect(got!.title).toBeNull();
     expect(got!.sentence).toMatch(/^3 of these can't be read at all/);
+    // The board has room for two notes; the reassurance directly above this one
+    // already says AstroStack never writes to that folder, so this must not.
+    expect(got!.sentence).not.toContain("never changes anything in that folder");
   });
 
   it("uses singular wording for one damaged file", () => {
     const got = incomingLagUnreadable(1, 1);
     expect(got!.title).toBe("A sub in your incoming folder can't be read");
-    expect(got!.sentence).toContain("Copying it over again");
+    expect(got!.sentence).toContain("copying it over again");
   });
 
   it("can never claim more damaged files than are waiting", () => {

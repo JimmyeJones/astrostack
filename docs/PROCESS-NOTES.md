@@ -18,6 +18,48 @@ is a queue.
 
 ---
 
+## 2026-09-17 — `--incoming-lag` dogfood after v0.452.0/.1: CLEAN, and the pass could not reach the sentence it had just shipped
+
+*(Builder, branch `claude/sweet-babbage-10p2wj`. A QA sweep record, not a task — filed here per the three-file
+rule.)*
+
+**Result: CLEAN**, at 1440 px and 420 px, on two passes — `nothing overflowing, no console errors` both
+times. Page heights inside the shipped standings (phone `/tonight` 3,470 px, the Target page 3,165 px,
+`/life-list` 3,094 px, `/` 2,726 px healthy → **2,921 px** with the new sentence on the lag note, which is
+the note growing by one paragraph and no new element).
+
+**The finding is about the tooling, and it is the same one AGENTS.md §7 keeps re-learning.** Both changes
+this run are about a *fault* state — files in `incoming/` the app cannot read — and `--incoming-lag` seeds
+only *good* unimported subs, so the first pass photographed the healthy branch and the branch I had actually
+written was structurally unreachable. That is the missing-observing-site hole (v0.436.1), the click-only
+Compare modes (v0.440.2) and the empty `incoming/` (v0.442.0) a fourth time, and the rule generalises one
+more step: **a state you can only reach by putting the app into it is a state no flag will photograph unless
+the flag puts it there.** The damaged branch needs *two* things at once — a file that will not parse **and**
+a whole-library scan that has recorded it — which is why seeding a bad file alone would not have been enough
+either. `--incoming-lag` now writes one unreadable sub, scans once, and only then lays down the good waiting
+ones, which leaves the folder in the **mixed** state a real install is in; `DOGFOOD_LAG_SUBS=0` reaches the
+all-damaged one. Both are now photographed.
+
+**What the browser then showed that jsdom could not**, and it is the "read the notice board as one
+paragraph" question rather than a rendering fault: on the mixed note my new sentence ended *"Nothing else is
+affected, and AstroStack never changes anything in that folder"* — two lines under the note's own
+reassurance, *"Nothing is lost — your subs are safe exactly where they are, and AstroStack never writes to
+that folder."* The board keeps two notes inline; spending a paragraph of that saying one thing twice is
+exactly the trio v0.444.3 fixed. The clause moved to the all-damaged branch, where the generic reassurance
+stands aside and it is said once. Shipped as v0.452.2, with the tooling.
+
+**And the thing the sweep was for — the two screens agreeing.** Same scratch install, same one damaged file:
+
+    Jobs      No new frames · 1 sub couldn't be read · waiting on 1 still being shot.
+              "One of your subs couldn't be read … IC 360 — 1 file: damaged_000.fit"
+    Dashboard "A sub in your incoming folder can't be read … a scan won't help, and
+               every scan has already tried."  [ Open Jobs ]
+
+Before this run the second of those read *"A sub in your incoming folder hasn't been imported yet"* over a
+**Scan incoming now** button, and the first said nothing at all.
+
+---
+
 ## 2026-09-17 — `--mosaic` dogfood after v0.451.x: CLEAN, and the third reproduction of the mosaic-effort lead became its fix
 
 *(Builder, branch `claude/sweet-babbage-ivepzn`. A QA sweep record, not a task — filed here per the three-file
