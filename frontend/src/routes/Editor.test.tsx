@@ -166,6 +166,28 @@ function mockEditorQueries() {
     { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
 }
 
+// The two reads the share caption is built from — the run row this editor is
+// editing (`runId=3` in `renderEditor`) and the target's catalogue identity.
+// Both are queries other screens already warm, so the editor is normally
+// reading them out of the cache; a test has to supply them explicitly.
+function mockCaptionSources() {
+  vi.spyOn(client.api, "listStackRuns").mockResolvedValue([{
+    id: 3, timestamp_utc: "2026-01-04T21:00:00Z", output_basename: "M_42_stack",
+    n_frames_used: 152, canvas_w: 1080, canvas_h: 1920,
+    coverage_min: 1, coverage_max: 152,
+    has_fits: true, has_tiff: false, has_preview: true, notes: null,
+    total_exposure_s: 11520,
+    capture_night_start: "2024-11-15", capture_night_end: "2024-11-18",
+    capture_nights: 4,
+  }]);
+  vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+    id: "M42", name: "Orion Nebula", type: "nebula",
+    constellation: "Orion", constellation_abbr: "Ori",
+    ra_deg: 84, dec_deg: -5, matched_by: "name",
+    blurb: "A vast emission nebula in Orion.",
+  });
+}
+
 describe("EditorView", () => {
   it("loads the saved recipe and renders its operations", async () => {
     mockEditorQueries();
@@ -447,6 +469,10 @@ describe("EditorView", () => {
     await waitFor(() => expect(screen.getByText("Rendering — 50%")).toBeInTheDocument());
   });
 
+  // The fallback path: nothing mocks `listStackRuns` here, so the editor cannot
+  // build its own sentence and shows the job result's terse blurb — which is
+  // what an older backend, a failed list read, or a run that isn't in the list
+  // gets, and it must stay a tidy caption rather than nothing.
   it("reveals a copy-friendly caption blurb after the share image renders", async () => {
     mockEditorQueries();
     vi.stubGlobal("fetch", vi.fn(async () => ({
@@ -467,6 +493,72 @@ describe("EditorView", () => {
     await waitFor(() =>
       expect(screen.getByText("M 42 · 3.2 h · 152 subs")).toBeInTheDocument());
     expect(screen.getByLabelText("Copy caption")).toBeInTheDocument();
+  });
+
+  it("captions a shared picture with the same sentence every other surface "
+    + "hands out, not the engine's terse line", async () => {
+    mockEditorQueries();
+    mockCaptionSources();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+    vi.spyOn(client.api, "exportShare").mockResolvedValue({ job_id: "share1" });
+    vi.spyOn(client.api, "getJob").mockResolvedValue({
+      id: "share1", kind: "editor_share", target: "M_42", state: "done",
+      phase: "", done: 1, total: 1, detail: "", created_utc: null,
+      started_utc: null, finished_utc: null, error: null,
+      result: { blurb: "M 42 · 15–18 Nov 2024 · 3.2 h · 152 subs" },
+    });
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Download share image (JPEG)"));
+    // The object, what it is, the work, and the nights — the `postCaption`
+    // sentence, built from the run row and the catalogue identity this page
+    // already holds.
+    const caption = await screen.findByText(/Orion Nebula \(M42\)/);
+    expect(caption.textContent).toContain("a stack of 152 subs");
+    expect(caption.textContent).toContain("over 4 nights");
+    expect(caption.textContent).toContain("A vast emission nebula in Orion.");
+    // ...and not the terse line it used to paste.
+    expect(screen.queryByText("M 42 · 15–18 Nov 2024 · 3.2 h · 152 subs"))
+      .not.toBeInTheDocument();
+    // It never claims how wide the frame is: the editor renders the master
+    // through the user's own recipe, so the run's scale bar would describe a
+    // different rectangle the moment anything crops or rotates.
+    expect(caption.textContent).not.toMatch(/Moon/);
+  });
+
+  it("gives the OS share sheet that sentence as its text, keeping the terse "
+    + "line as the title", async () => {
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    const share = vi.fn(async (_d?: ShareData) => {});
+    nav.share = share;
+    mockEditorQueries();
+    mockCaptionSources();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/jpeg" }),
+    })));
+    vi.spyOn(client.api, "exportShare").mockResolvedValue({ job_id: "share1" });
+    vi.spyOn(client.api, "getJob").mockResolvedValue({
+      id: "share1", kind: "editor_share", target: "M_42", state: "done",
+      phase: "", done: 1, total: 1, detail: "", created_utc: null,
+      started_utc: null, finished_utc: null, error: null,
+      result: { filename: "m42.jpg", blurb: "M 42 · 15–18 Nov 2024 · 3.2 h · 152 subs" },
+    });
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Share to app"));
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    const data = share.mock.calls[0][0] as ShareData;
+    expect(data.title).toBe("M 42 · 15–18 Nov 2024 · 3.2 h · 152 subs");
+    expect(data.text).toContain("Orion Nebula (M42)");
+    expect(data.text).toContain("a stack of 152 subs");
+    expect(data.text).not.toBe(data.title);
+    delete nav.canShare;
+    delete nav.share;
   });
 
   it("threads the caption-bar toggle into the share render (off by default)", async () => {
