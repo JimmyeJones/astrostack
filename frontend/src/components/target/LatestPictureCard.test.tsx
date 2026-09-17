@@ -623,3 +623,109 @@ describe("LatestPictureCard — \"AstroStack finished this one for you\"", () =>
     expect(screen.queryByText(/finished this picture for you/)).toBeNull();
   });
 });
+
+// The hero picture's *other* share path. The "Save / share" menu above this card
+// hands the OS sheet the ready-to-post sentence; clicking the picture and
+// pressing Share in the lightbox used to hand over `sharePictureText`'s name and
+// date instead — the same picture, two captions, on the one page a beginner
+// lands on.
+describe("LatestPictureCard — the caption the big view shares", () => {
+  function stubShare(share: (d?: ShareData) => Promise<void>) {
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    nav.share = share;
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob([new Uint8Array([1])], { type: "image/jpeg" }),
+    })));
+    return () => {
+      delete nav.canShare; delete nav.share; vi.unstubAllGlobals();
+    };
+  }
+
+  const identity = {
+    id: "M42", name: "Orion Nebula", type: "nebula", constellation: "Orion",
+    constellation_abbr: "Ori", ra_deg: 83.82, dec_deg: -5.39,
+    matched_by: "name" as const, blurb: "A vast stellar nursery.",
+  };
+
+  function renderWithIdentity(run: StackRun, ident: client.ObjectInfo | null) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <MemoryRouter>
+            <LatestPictureCard safe="M_42" name="M42" run={run} identity={ident} />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+  }
+
+  const openAndShare = async (share: ReturnType<typeof vi.fn>) => {
+    fireEvent.click((await screen.findByAltText("Latest stacked picture of M42")).parentElement!);
+    await waitFor(() => expect(client.api.stackAnnotations).toHaveBeenCalled());
+    fireEvent.click(await screen.findByLabelText("Share picture"));
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    return (share.mock.calls[0][0] as ShareData).text ?? "";
+  };
+
+  it("hands over the ready-to-post sentence, measured on the stored preview", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations({
+      scale_bar: {
+        moon_comparison: "the whole frame is about 5.4 full Moons wide",
+      },
+    } as Partial<StackAnnotations>));
+    const share = vi.fn(async (_d?: ShareData) => {});
+    const restore = stubShare(share);
+    renderWithIdentity(mkRun({
+      n_frames_used: 240, total_exposure_s: 2400,
+      capture_night_start: "2024-11-15", capture_night_end: "2024-11-15",
+    }), identity as client.ObjectInfo);
+
+    const text = await openAndShare(share);
+
+    expect(text).toContain("Orion Nebula (M42)");
+    expect(text).toContain("a stack of 240 subs (40 min total)");
+    expect(text).toContain("shot on 15 Nov 2024 with a Seestar");
+    expect(text).toContain("A vast stellar nursery.");
+    expect(text).toContain("The whole frame is about 5.4 full Moons wide.");
+    restore();
+  });
+
+  it("drops the scale clause on a picture the canvas bar would overstate", async () => {
+    // A trimmed preview: the canvas bar describes more sky than the bytes being
+    // handed over, so the honest answer is the server's own preview bar — and,
+    // where it hasn't sent one, silence.
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations({
+      scale_bar: {
+        moon_comparison: "the whole frame is about 5.4 full Moons wide",
+      },
+    } as Partial<StackAnnotations>));
+    const share = vi.fn(async (_d?: ShareData) => {});
+    const restore = stubShare(share);
+    renderWithIdentity(mkRun({
+      n_frames_used: 240, total_exposure_s: 2400,
+      preview_crop: { x0: 0.1, y0: 0.1, x1: 0.8, y1: 0.8 },
+    }), identity as client.ObjectInfo);
+
+    const text = await openAndShare(share);
+
+    expect(text).toContain("Orion Nebula (M42)");
+    expect(text).not.toContain("full Moons");
+    restore();
+  });
+
+  it("captions an unidentified target under the name the page shows", async () => {
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue(annotations());
+    const share = vi.fn(async (_d?: ShareData) => {});
+    const restore = stubShare(share);
+    renderWithIdentity(mkRun({ n_frames_used: 12 }), null);
+
+    const text = await openAndShare(share);
+
+    expect(text).toContain("M42 — a stack of 12 subs");
+    expect(text).not.toContain("undefined");
+    restore();
+  });
+});

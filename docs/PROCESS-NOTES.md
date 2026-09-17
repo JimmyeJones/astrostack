@@ -18,6 +18,40 @@ is a queue.
 
 ---
 
+## 2026-09-17 — `--big --editor` dogfood after v0.453.0: CLEAN, and the finding came from a *menu*, not a page
+
+*(Builder, branch `claude/sweet-babbage-f4u6pf`. A QA sweep record, not a task — filed here per the three-file
+rule.)*
+
+**Result: CLEAN**, at 1440 px and 420 px, on both samples — `nothing overflowing, no console errors` — and
+the editor drive on the full-size run came back `editor drive clean` across all 21 ops, plus Undo and Redo.
+The `--big` sample is doing its job: canvas **1693×1150**, `proxy_scale 2`, `[full-size check] available=True`,
+and the loupe's navigator, its `where` line, its split comparison and its window-hugging black box were all
+exercised. Page heights inside the shipped standings (phone `/tonight` 3,639 px, the full-size mosaic Target
+page 3,538 px, its editor 3,323 px, `/` 3,115 px, `/life-list` 3,094 px).
+
+**The two paragraph blocks read clean too, and that is worth recording because it is the method's own test.**
+On the full-size mosaic the coaching card (*"your 4 min is spread across about 4 fields of sky, so each part
+of this picture has 1 min so far"*), the readiness card (*"goal ~7.2 h (about 4 fields of sky) · 4 min of
+~7.2 h"*), the folded panel map (*"a little behind at the top-right: about 30 s there against 1 min on a
+typical panel"*) and the framing verdict (*"Nicely framed"*) are four cards computing four things and saying
+one consistent thing. The single-field sample's two framing sentences say the same 15 % and prescribe the same
+mosaic — which is v0.443.0's deliberate agreement rather than a divergence, and its coverage bar
+(`FRAMING_MAX_COVERAGE`) carries numbers, so it was left alone.
+
+**What the pass did produce was a lead neither block can see: a *menu item* against the menu item beside it.**
+Both blocks read what a page *says*; nothing reads what a page *hands over*, and the two share items in
+`SavePictureMenu` hand over text. That text was `sharePictureText`'s *"M42 — captured 15 Nov 2024"* while
+"Copy caption", two items above it in the same dropdown, copied the full `postCaption` sentence — shipped as
+**v0.453.1**. The generalisation, which is the same one `--editor` and the click-only Compare modes
+(v0.440.2) each taught once: **a claim that only leaves the app — a caption, a filename, the text handed to an
+OS share sheet — is invisible to every probe that reads the DOM.** The probe can photograph a sentence on a
+card; it cannot see the sentence the share sheet is given. The only thing that catches those is reading two
+hand-out paths against each other, which is what the "every download control has now been read on some axis"
+sweep in `IMPROVEMENTS.md` does for *files* — and captions are that same axis with no bytes in it.
+
+---
+
 ## 2026-09-17 — `--incoming-lag` dogfood after v0.452.0/.1: CLEAN, and the pass could not reach the sentence it had just shipped
 
 *(Builder, branch `claude/sweet-babbage-10p2wj`. A QA sweep record, not a task — filed here per the three-file

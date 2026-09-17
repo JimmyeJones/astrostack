@@ -1471,7 +1471,7 @@ export function TargetView() {
       <Grid gutter="xs">
         <Grid.Col span={{ base: 12, md: 7 }}>
           <LatestPictureCard safe={safe} name={target.data?.name} run={pictureRun}
-            pinnedCover={showingOlderCover} />
+            identity={identity.data} pinnedCover={showingOlderCover} />
           {/* Pre-stack reassurance: the sharpest sub, shown until a finished picture
               exists — then the real stack supersedes it. Deliberately *not* in a tab:
               it is the first-run guidance a brand-new target leans on. */}

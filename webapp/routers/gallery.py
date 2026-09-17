@@ -488,6 +488,19 @@ class BestPicture(BaseModel):
     # as they did before.
     object_type: str = ""
     blurb: str = ""
+    # …and the other half of "what am I looking at": the catalogue's designation
+    # ("M42") and its common name ("Orion Nebula"), off the *same* already-resolved
+    # match as the two fields above. They are here for the same reason the type and
+    # the blurb are — a surface showing this picture away from its target page — but
+    # for the surface that *names* it rather than describes it: the wall's viewer
+    # hands the OS share sheet ``postCaption``'s sentence, which opens on the object
+    # ("Orion Nebula (M42) — a stack of …"), and the row carried no way to say so.
+    # Adding them costs nothing: ``identify_object`` is already called per target to
+    # fill ``object_type``/``blurb``, and the alternative was one ``/identify``
+    # request per picture opened. Additive and empty-by-default, like its
+    # neighbours: an unmatched target and an older frontend both read as before.
+    object_id: str = ""
+    object_name: str = ""
     # How many single-frame field-fulls of sky *this picture's* canvas covers
     # (see :mod:`webapp.field_fulls`) — the same per-run figure
     # :class:`GalleryItem` above and ``StackRunOut`` already carry, from the same
@@ -639,6 +652,8 @@ def get_best_pictures(
                     pinned=pinned,
                     object_type=info.type if info is not None else "",
                     blurb=info.blurb if info is not None else "",
+                    object_id=info.id if info is not None else "",
+                    object_name=info.name if info is not None else "",
                     field_fulls=field_fulls,
                 )
                 entries.append(PortfolioEntry(

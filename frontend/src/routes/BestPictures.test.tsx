@@ -150,3 +150,120 @@ describe("BestPicturesView", () => {
     expect(screen.queryByText("Pinned")).not.toBeInTheDocument();
   });
 });
+
+// The last surface of the "one picture, two captions" class (v0.453.0 /
+// v0.453.1). This is the page you open to *show someone your pictures*, and its
+// viewer handed the OS share sheet the target's name and a date while the same
+// picture, shared from the Target page, History or the Gallery, went out with
+// its whole story.
+describe("BestPicturesView — the caption a shared picture carries", () => {
+  function stubShare(share: (d?: ShareData) => Promise<void>) {
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    nav.share = share;
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob([new Uint8Array([1])], { type: "image/jpeg" }),
+    })));
+    return () => {
+      delete nav.canShare; delete nav.share; vi.unstubAllGlobals();
+    };
+  }
+
+  const identified = (over: Partial<BestPicture> = {}) => pic({
+    n_frames_used: 240, total_exposure_s: 2400,
+    capture_night_start: "2024-11-15", capture_night_end: "2024-11-15",
+    object_id: "M42", object_name: "Orion Nebula", object_type: "nebula",
+    blurb: "A vast stellar nursery.", ...over,
+  });
+
+  const openAndShare = async (share: ReturnType<typeof vi.fn>) => {
+    renderWall();
+    const img = await screen.findByRole("img");
+    fireEvent.click(img);
+    await screen.findByRole("dialog");
+    fireEvent.click(await screen.findByLabelText("Share picture"));
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    return (share.mock.calls[0][0] as ShareData).text ?? "";
+  };
+
+  it("shares the ready-to-post sentence, named off the row's own catalog match",
+    async () => {
+      // No per-picture lookup: the wall's endpoint already resolved the match to
+      // fill `object_type`/`blurb`, so the name and designation ride along.
+      mockGallery();
+      vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({
+        items: [identified()],
+      });
+      const identify = vi.spyOn(client.api, "identifyTarget").mockResolvedValue(null);
+      const share = vi.fn(async (_d?: ShareData) => {});
+      const restore = stubShare(share);
+
+      const text = await openAndShare(share);
+
+      expect(text).toContain("Orion Nebula (M42)");
+      expect(text).toContain("a stack of 240 subs (40 min total)");
+      expect(text).toContain("shot on 15 Nov 2024 with a Seestar");
+      expect(text).toContain("A vast stellar nursery.");
+      expect(identify).not.toHaveBeenCalled();
+      restore();
+    });
+
+  it("adds the scale sentence, measured on the picture being handed over",
+    async () => {
+      mockGallery();
+      vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({
+        items: [identified({ has_fits: true })],
+      });
+      vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+        width: 1920, height: 1080, objects: [], north_up_deg: null,
+        scale_bar: { moon_comparison: "the whole frame is about 5.4 full Moons wide" },
+        preview_scale_bar: {
+          moon_comparison: "the whole frame is about 3.8 full Moons wide",
+        },
+      } as never);
+      vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+        preview_crop: { x0: 0.1, y0: 0.1, x1: 0.8, y1: 0.8 },
+      } as never);
+      const share = vi.fn(async (_d?: ShareData) => {});
+      const restore = stubShare(share);
+
+      renderWall();
+      fireEvent.click(await screen.findByRole("img"));
+      await waitFor(() => expect(client.api.stackRunInfo).toHaveBeenCalled());
+      await waitFor(() => expect(client.api.stackAnnotations).toHaveBeenCalled());
+      fireEvent.click(await screen.findByLabelText("Share picture"));
+      await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+
+      const text = (share.mock.calls[0][0] as ShareData).text ?? "";
+      // The trimmed preview's own bar, never the wider canvas's.
+      expect(text).toContain("The whole frame is about 3.8 full Moons wide.");
+      expect(text).not.toContain("5.4");
+      restore();
+    });
+
+  it("captions under the wall's own name against a backend that names no object",
+    async () => {
+      // An older backend sends neither field, and a target the catalog doesn't
+      // know sends both empty — both read as "no identity", which is what this
+      // viewer had for every picture before.
+      mockGallery();
+      vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({
+        items: [pic({
+          target_name: "My backyard field", n_frames_used: 12,
+          total_exposure_s: 300,
+        })],
+      });
+      const info = vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({} as never);
+      const share = vi.fn(async (_d?: ShareData) => {});
+      const restore = stubShare(share);
+
+      const text = await openAndShare(share);
+
+      expect(text).toContain("My backyard field — a stack of 12 subs (5 min total)");
+      expect(text).not.toContain("undefined");
+      // A preview-only run has no FITS behind it, so neither read is made.
+      expect(info).not.toHaveBeenCalled();
+      restore();
+    });
+});
