@@ -874,6 +874,13 @@ def duplicate_sub_base_name_from_name(target_name: str) -> str | None:
     return base if base else None
 
 
+#: How many unreadable file *names* one target keeps alongside its error count.
+#: Enough to recognise the shape of the problem ("all three are from the same
+#: night"), small enough that a folder of thousands of damaged files still
+#: produces a job summary a browser can render.
+UNREADABLE_EXAMPLES_PER_TARGET = 5
+
+
 @dataclass
 class TargetScanResult:
     """What the organise phase did for one target."""
@@ -884,6 +891,13 @@ class TargetScanResult:
     n_frames_added: int = 0
     n_skipped_existing: int = 0
     n_errors: int = 0
+    # File names behind ``n_errors``, so a caller can say *which* subs it could
+    # not read rather than only how many. Capped at
+    # ``UNREADABLE_EXAMPLES_PER_TARGET`` — the count is the fact, the names are
+    # the lead, and a folder whose every file is damaged must not put thousands
+    # of strings into a job summary. Basenames only: the full paths are already
+    # in the log, and a name is what the user looks for on their own disk.
+    unreadable_examples: list[str] = field(default_factory=list)
     # Dedup-skipped frames whose content was refreshed (a mid-copy sub whose
     # source later completed, or a reused path overwritten with a different
     # capture) — their QC was reset, so the target needs re-QC even though no
@@ -1168,6 +1182,8 @@ def _ingest_into_target(
                         tsr.refreshed_frame_ids.append(res.refreshed_frame_id)
             elif res.error is not None:
                 tsr.n_errors += 1
+                if len(tsr.unreadable_examples) < UNREADABLE_EXAMPLES_PER_TARGET:
+                    tsr.unreadable_examples.append(Path(res.source_path).name)
             else:
                 tsr.n_frames_added += 1
         if reject_output_base:

@@ -743,3 +743,84 @@ def test_a_capture_the_user_has_already_opened_stops_being_mentioned(
 
     body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
     assert "video_folders" not in body["result"]
+
+
+# --- The scan says which subs it could not read at all ------------------------
+#
+# A file whose FITS header won't parse never becomes a frame row, so it leaves no
+# trace in the library at all: nothing in the Frames table, no reject reason, no
+# count. The scanner has tallied these since forever (``TargetScanResult
+# .n_errors``) and exactly one surface rendered the tally — the legacy desktop
+# dialog. On the container install this app actually ships as, an unreadable sub
+# was therefore dropped in silence, retried on the next scan, and dropped in
+# silence again (observer issue #914: six subs across five targets, on disk since
+# May, in no ``frames`` table, never once mentioned).
+
+def _drop_an_unreadable_sub(data_root: Path, folder: str, name: str,
+                            *, n_bytes: int = 4_152_960) -> Path:
+    """A file of exactly the right size with no FITS header in it.
+
+    The shape the owner's six damaged subs really have: each is the median size
+    of its own folder — a healthy sub's worth of bytes — with no ``SIMPLE`` card
+    anywhere. So neither the zero-byte "still copying" skip nor any size check
+    catches them; only actually parsing the header does.
+    """
+    d = data_root / "incoming" / folder
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / name
+    p.write_bytes(b"\x00" * n_bytes)
+    return p
+
+
+def test_the_scan_says_which_subs_it_could_not_read(client, data_root):
+    _drop_a_folder(data_root, "M 101_sub", ["Light_M 101_10.0s_IRCUT_0001.fit"])
+    bad = _drop_an_unreadable_sub(
+        data_root, "M 101_sub", "Light_M 101_10.0s_IRCUT_0002.fit")
+    body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+    assert body["state"] == "done", body
+    result = body["result"]
+    assert result["unreadable"] == 1
+    assert result["unreadable_targets"] == [{
+        "target": "M 101", "safe": "M_101", "n": 1,
+        # Named, not just counted: a file name sends the owner to the file, a
+        # count only sends them to the folder.
+        "examples": ["Light_M 101_10.0s_IRCUT_0002.fit"],
+    }]
+    # The good sub beside it still came in — one damaged file costs one file.
+    assert len(client.get("/api/targets/M_101/frames").json()) == 1
+    # Reported, never acted on (AGENTS.md §10): the file is untouched on disk.
+    assert bad.exists() and bad.stat().st_size == 4_152_960
+
+
+def test_an_unreadable_sub_is_still_reported_on_the_next_scan(client, data_root):
+    """It is retried every scan and fails every scan, so the report renews itself
+    for as long as the problem lasts rather than scrolling away once."""
+    _drop_a_folder(data_root, "M 81_sub", ["Light_M 81_10.0s_IRCUT_0001.fit"])
+    _drop_an_unreadable_sub(data_root, "M 81_sub", "Light_M 81_10.0s_IRCUT_0002.fit")
+    for _ in range(2):
+        body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+        assert body["state"] == "done", body
+        assert body["result"]["unreadable"] == 1
+
+
+def test_a_healthy_scan_says_nothing_about_unreadable_subs(client, data_root):
+    """The half that keeps this quiet — on an ordinary night the result carries
+    no note at all, so the alert means something when it does appear."""
+    _drop_a_folder(data_root, "M 42_sub", ["Light_M 42_10.0s_IRCUT_0001.fit"])
+    body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+    assert body["state"] == "done", body
+    assert "unreadable" not in body["result"]
+    assert "unreadable_targets" not in body["result"]
+
+
+def test_a_half_copied_sub_is_not_reported_as_unreadable(client, data_root):
+    """A zero-byte file is a copy in flight, not a damaged sub, and ``ingest``
+    deliberately classes it as a skip so it can't inflate this count. Pinned here
+    because this report is the thing that would make that distinction visible if
+    it ever broke."""
+    _drop_a_folder(data_root, "M 42_sub", ["Light_M 42_10.0s_IRCUT_0001.fit"])
+    _drop_an_unreadable_sub(
+        data_root, "M 42_sub", "Light_M 42_10.0s_IRCUT_0002.fit", n_bytes=0)
+    body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+    assert body["state"] == "done", body
+    assert "unreadable" not in body["result"]

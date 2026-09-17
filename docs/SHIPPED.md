@@ -1,5 +1,77 @@
 # Shipped — the record
 
+## v0.452.0 — 2026-09-17 — a sub the app cannot read is finally said out loud
+
+*(Builder, branch `claude/sweet-babbage-10p2wj`. PRIORITY 3 (friendliness / trust). Verified from observer
+issue [#914](https://github.com/JimmyeJones/astrostack/issues/914) by reading the code and reproducing the
+silence in the test suite. Additive: one engine field, two optional summary keys, one self-hiding alert. No
+config, schema, on-disk, endpoint-shape or default change, and nothing under `incoming/` is touched.)*
+
+**The gap, and why it survived.** A raw sub whose FITS header will not parse never becomes a frame row. There
+is no row to look at in the Frames table, no `reject_reason` to bucket, no count anywhere — the file simply
+is not there, and *"not there"* is indistinguishable from *"you never shot it"*. The scanner has always known
+better: `ingest_files` yields an `IngestResult` with `error` set, `_ingest_into_target` turns that into
+`TargetScanResult.n_errors`, and that tally was rendered in exactly **one** place in the whole codebase —
+
+    seestack/gui/library_dialog.py:119
+        + (f", {tsr.n_errors} unreadable" if tsr.n_errors else "")
+
+— the legacy **desktop** dialog. `webapp/pipeline.py` built its scan summary from `scanned`,
+`device_pictures_skipped`, `skipped_folders` and the video list and never read `n_errors` at all. So on the
+container install this app actually ships as, an unreadable sub was dropped, retried on the next scan, failed
+again, and was silent again, for as long as the file sat there. The desktop build would have said *"3 new,
+1 unreadable"*; the web build said *"Imported 3 new frames."*
+
+The care is already in the code one layer down, which is what makes the omission worth fixing rather than
+worth arguing about: `ingest.py` deliberately classes a **zero-byte** file as a *skip* with a plain-language
+reason rather than an error, with a comment saying it must not *"inflate the scary N errors count a beginner
+sees"*. That judgement was being spent on a count nobody was shown.
+
+**Measured on the owner's library** (observer, 2026-09-17): six subs across five targets, on disk since May,
+in no `frames` table, every one failing with `No SIMPLE card found`. Each is **exactly** the median byte size
+of its own folder — a healthy sub's worth of bytes with no header in them — so neither the zero-byte skip nor
+any size check can see them; only parsing the header does. Sibling frames from the same five folders open
+cleanly, 15 of 15. Six of 60,566 frames is 0.010 %: the reporting gap is the finding, not the volume.
+
+**What shipped.**
+
+- `TargetScanResult.unreadable_examples` — the file *names* behind `n_errors`, basenames only, capped at
+  `UNREADABLE_EXAMPLES_PER_TARGET` (5). The count stays exact; the list stops, so a folder whose every file
+  is damaged cannot put thousands of strings into a job summary. A name is the difference between being sent
+  to a folder and being sent to a file.
+- `summary["unreadable"]` (the total) and `summary["unreadable_targets"]`
+  (`{target, safe, n, examples}` per target), set **only when non-zero** — the same treatment
+  `device_pictures_skipped`, `skipped_folders` and `video_folders` already get.
+- The Jobs page: the count joins the summary line where the desktop dialog always put it
+  (*"Imported 3 new frames · 2 subs couldn't be read."* — because *"Imported 3 new frames"* out of a folder of
+  five otherwise reads as a complete success), and a self-hiding yellow alert names the targets and the files,
+  links to each target, and says what to do: the usual cause is a copy that did not finish, copying it again
+  normally fixes it, and every scan re-tries so the note clears itself.
+
+**Reported, never acted on** — the same rule the neighbouring skips follow, and AGENTS.md §10's floor: the
+files are read and nothing else. Nothing under `incoming/` is deleted, moved, renamed or rewritten, which a
+test asserts by checking the damaged file's size is unchanged after the scan.
+
+**Upgrade-safe (§9):** two additive optional summary keys on an existing job result; an older frontend
+ignores them, and a newer frontend against an older backend simply says nothing (pinned). The engine field is
+a defaulted `list[str]`; the desktop dialog's line is untouched, so the two surfaces now agree instead of one
+of them being empty.
+
+**Tests (+10, six red under a scratch revert).** Engine (`tests/test_scanner.py`): a damaged sub is counted
+*and* named; the names cap while the count does not; a healthy folder names nothing. Webapp
+(`tests/webapp/test_pipeline.py`): the summary names the target, the count and the file, the good sub beside
+it still imports, and the file is untouched on disk; the report **renews itself on the next scan** (it is
+re-tried and re-fails, so it cannot scroll away once); a healthy scan carries neither key; and a **zero-byte**
+half-copied sub is *not* counted here — the distinction `ingest.py` makes on purpose, pinned now that there
+is a surface that would make it visible. Frontend (`Jobs.test.tsx`): the parser is silent on a healthy scan
+and on an empty/zero row, totals from the rows it kept rather than the backend's headline, drops junk rows,
+degrades on an older backend with no safe name or examples, and stops listing past six targets; the line
+helper names files, says "and more" when the sample is short of the count, and falls back to the bare count;
+and three render cases (named + linked, singular wording, silent on a clean scan).
+
+**The damaged files themselves need no handling** — skipping them is correct, and the issue says so. What was
+missing was the sentence.
+
 ## v0.451.1 — 2026-09-17 — the mosaic's price tag says it is pricing the whole grid, not what's left
 
 *(Builder, branch `claude/sweet-babbage-ivepzn`. PRIORITY 3 (friendliness / trust) on the mosaic frontier —
