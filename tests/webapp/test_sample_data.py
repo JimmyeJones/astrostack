@@ -504,3 +504,67 @@ def test_api_loads_the_big_sample_on_request(client):
     gone = client.delete("/api/sample").json()
     assert gone["big_loaded"] is False and gone["big_safe"] is None
     assert client.get(f"/api/targets/{big_safe}").status_code == 404
+
+
+# ---- generated calibration frames (dogfood tooling) ------------------------
+#
+# Nothing in the running app calls these; `scripts/agent-dogfood.sh
+# --calibration` does, to put a scratch install into the one state no pass had
+# ever been in. What the flag is worth depends entirely on the master being a
+# *matching* one, so that is what is pinned here rather than the pixels.
+
+
+def test_the_generated_darks_match_the_sample_lights_acquisition(
+    tmp_path: Path,
+) -> None:
+    """A master whose exposure/gain/temperature/sensor differ from the lights is
+    refused by the registry, which would leave the pass in the very empty state
+    it is trying to escape — silently, and looking exactly like a clean run."""
+    from astropy.io import fits
+
+    from webapp.sample_data import _write_sample_fits
+
+    sample_data.write_sample_calibration_frames(tmp_path / "darks", "dark")
+    _write_sample_fits(tmp_path / "light.fit", index=0, star_shift=(0.0, 0.0))
+
+    light = fits.getheader(tmp_path / "light.fit")
+    dark = fits.getheader(tmp_path / "darks" / "dark_000.fit")
+    for key in ("EXPTIME", "GAIN", "CCD-TEMP", "BAYERPAT"):
+        assert dark[key] == light[key], key
+    assert (dark["NAXIS1"], dark["NAXIS2"]) == (light["NAXIS1"], light["NAXIS2"])
+
+
+def test_every_generated_frame_declares_its_kind(tmp_path: Path) -> None:
+    """``discover`` classifies from ``IMAGETYP`` and from nothing else, so a
+    writer that forgot the card would produce folders the app cannot see."""
+    from seestack.calibrate import discover
+
+    for kind in ("dark", "flat", "bias"):
+        n = sample_data.write_sample_calibration_frames(tmp_path / kind, kind)
+        assert n == 6
+        found = discover.classify_folder(tmp_path / kind)
+        assert found is not None, kind
+        assert found[0] == kind
+
+
+def test_the_darks_hot_pixels_are_a_fixed_pattern(tmp_path: Path) -> None:
+    """Hot pixels that moved between frames would be erased by the median
+    combine, and the defect census — the surface they exist to reach — would
+    find a perfectly clean camera."""
+    import numpy as np
+    from astropy.io import fits
+
+    sample_data.write_sample_calibration_frames(tmp_path / "darks", "dark")
+    a = fits.getdata(tmp_path / "darks" / "dark_000.fit").astype(float)
+    b = fits.getdata(tmp_path / "darks" / "dark_005.fit").astype(float)
+
+    hot_a = set(map(tuple, np.argwhere(a > 5000)))
+    hot_b = set(map(tuple, np.argwhere(b > 5000)))
+    assert hot_a and hot_a == hot_b
+    # …and they are a handful of pixels, not a corrupted frame.
+    assert len(hot_a) < a.size // 100
+
+
+def test_an_unknown_kind_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="dark/flat/bias"):
+        sample_data.write_sample_calibration_frames(tmp_path / "x", "light")
