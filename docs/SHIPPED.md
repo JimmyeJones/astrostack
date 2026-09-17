@@ -1,5 +1,94 @@
 # Shipped — the record
 
+## v0.455.5 — 2026-09-17 — the mixed-pointing guard was O(n²) on a bound that had been removed under it: 15.3 s of frozen tab on the owner's deepest target
+
+*(Builder, branch `claude/sweet-babbage-dmpc84`. Found by asking the previous run's question one more
+time — not "what state has the tooling never been in?" but "what **magnitude**?" — of a surface the
+`--deep` flag cannot reach, because `--deep` is not stacked and this code wants solved pointings.)*
+
+**The bug, in the code's own words.** `frontend/src/components/target/mixedPointings.ts` clusters a
+target's accepted+solved subs to catch "this folder holds two different targets" before a stack wastes
+itself on it. Its linkage loop tested **every pair**, and said so:
+
+> `// (dot ≥ cos(threshold)) share a cluster. O(n²), bounded by the 2000-frame`
+> `// list cap, and only recomputed when the frames data changes.`
+
+That cap does not exist. `api.listFrames` pages until it holds every sub — deliberately, and for a good
+reason its own comment gives: *"one good S30 night is ~2,100 × 10 s subs, so a fixed limit silently hid
+the newest frames from the table, keyboard grading, 'Reject worst' ordering and the Stack pre-flight
+guards."* So the fix for the truncation bug removed the bound this loop was resting on, and nothing here
+noticed. **A comment is not a bound**; this one outlived the thing it described.
+
+**Measured, on this exact code, on a single dithered pointing (dither is arc-minutes, so every pair is
+inside the 3° link distance — the worst case *is* the common case):**
+
+| subs | all-pairs linkage |
+|------|-------------------|
+| 200 | 9 ms |
+| 1,200 | 23 ms |
+| 5,477 | 232–474 ms |
+| 12,000 | 1.4 s |
+| 35,894 | **14.0–15.3 s** |
+
+5,477 and 35,894 are the owner's two deepest targets. And this is not a slow number on a page — it runs
+**synchronously inside a `useMemo` during render**, on `routes/Target.tsx` (the page he opens every
+session) *and* `routes/Stack.tsx`. There is no spinner for it: the tab stops responding. From a phone,
+worse than these figures, which are node on a desktop container.
+
+**The fix is the same partition, found with a spatial grid.** Unit vectors are bucketed into cubes of
+side `chord(3°)/√3`, and two rules do the work:
+
+1. A cube's body diagonal is exactly the link chord, so **any two points sharing a cube are within the
+   link distance by construction** — they are unioned with no distance test at all. That is the case
+   this exists for: all 35,894 subs of one dithered pointing land in one cube.
+2. Cubes offset by 3 or more indices on any axis are at least 2 cells apart — further than the chord —
+   so only the ±2 neighbourhood is visited. A cube pair already in one component is skipped; and because
+   rule 1 leaves every cube internally connected, the **first** linking pair found between two cubes
+   merges both whole, so the scan stops there.
+
+Nothing is approximated and no threshold moved. `LINK_DIST_DEG` (3.0) and `MIN_POINTING_FRAMES` (5) are
+untouched, and the result is the identical partition, hence identical counts, centroids, separation and
+`minorityIds`.
+
+**Measured after:**
+
+| scene | before | after |
+|-------|--------|-------|
+| one pointing, 5,477 subs | 474 ms | 0.3 ms |
+| one pointing, 35,894 subs | 15,305 ms | **3.2 ms** |
+| 25-panel mosaic, 5,477 subs | 291 ms | 2.3 ms |
+| 25-panel mosaic, 35,894 subs | 11,286 ms | **25.4 ms** |
+
+**How it is pinned, and why that is two tests rather than one.**
+
+- **An exhaustive all-pairs oracle**, written out longhand in the test file as a deliberate *copy* rather
+  than an export — an oracle that shares code with the thing it checks checks nothing — run against the
+  real function over **250 random skies** from a seeded PRNG: 1–4 blobs, random sky positions including
+  within a degree of both poles and across the RA=0 seam, and spreads drawn from a set that straddles the
+  link distance on both sides (2.9° and 3.1°), which is where an approximation would show. It compares
+  `pointings`, `majority`, `others` and the full `minorityIds` list. This test passes **both** before and
+  after, which is its job: it is the parity claim, not the defect.
+- **A budget assertion at the owner's scale** — 30,000 subs as one pointing, as two targets, and as a
+  24-panel mosaic, each asserted under **1,500 ms** with the elapsed time in the failure message. Under a
+  scratch revert of the grid these go red at **10,992 / 6,945 / 7,800 ms**; after, they are single-digit
+  milliseconds, so there is ~40× of headroom on a loaded CI box and the reverted code still misses by
+  3–8×. The budget is asserted rather than left to a test timeout so the failure names the number.
+
+**Upgrade-safe (§9):** frontend-only, one pure function's internals. No endpoint, config, schema, on-disk
+layout, API shape or default touched, and no user-visible behaviour change — the warning fires on exactly
+the same batches it fired on before, just without the freeze.
+
+**The transferable part.** The previous run's note narrowed "CLEAN" a third time, to *a measure that a
+container fixes is not a measure of what the container holds*. This is the same lesson pointed at a
+comment: **a stated complexity bound is a claim about a caller, and callers change.** The grep that finds
+the rest of this class is not "find the O(n²) loops" — it is `O(n` in the frontend tree, read against
+what the caller does today. The rest of that list was read this run and is clean: every other pass over
+the full frame list on the Target page (`countQcUncheckable`, `countNewSubsSinceStack`, `needsProcessing`,
+`selectedFrame`, `visible`) and on the Stack form (four `.filter().length`s) is linear, and
+`trailedAccepted` is two sorts, i.e. O(n log n). This was the only superlinear one.
+
+---
+
 ## v0.455.3 — 2026-09-17 — `scripts/agent-dogfood.sh --deep`: no dogfood pass had ever held the owner's *scale*
 
 *(Builder, branch `claude/sweet-babbage-ro1k5s`, shipped beside v0.455.2 — the bug that found this hole,
