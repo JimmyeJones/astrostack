@@ -14,7 +14,7 @@ import { MergeSuggestionsCard } from "../components/MergeSuggestionsCard";
 import { QueryError } from "../components/QueryError";
 import { UploadFits } from "../components/UploadFits";
 import { formatIntegration } from "../format";
-import { UNSTRETCHED_HINT, UNSTRETCHED_LABEL } from "../unstretched";
+import { UNSTRETCHED_HINT, UNSTRETCHED_LABEL, unstretchedHint } from "../unstretched";
 
 // Target-card exposure. Delegates to the app-wide `formatIntegration` so the
 // Library card speaks the same integration-time vocabulary as every other
@@ -88,7 +88,10 @@ function sortTargets(targets: Target[], key: SortKey): Target[] {
 // it was first published and where this route's own tests import it from.
 export { UNSTRETCHED_HINT };
 
-function TargetCard({ t, unstretched }: { t: Target; unstretched?: boolean }) {
+function TargetCard(
+  { t, unstretched, unexportedEdit }:
+  { t: Target; unstretched?: boolean; unexportedEdit?: boolean },
+) {
   return (
     <Card shadow="sm" padding="lg" radius="md" withBorder component={Link} to={`/targets/${t.safe_name}`}>
       <Card.Section>
@@ -120,7 +123,8 @@ function TargetCard({ t, unstretched }: { t: Target; unstretched?: boolean }) {
             nine in ten would be a wall of badges saying nothing — and the
             owner's standing complaint about this app is clutter. */}
         {unstretched ? (
-          <Badge variant="light" color="yellow" title={UNSTRETCHED_HINT}>
+          <Badge variant="light" color="yellow"
+            title={unstretchedHint(unexportedEdit)}>
             {UNSTRETCHED_LABEL}
           </Badge>
         ) : null}
@@ -163,8 +167,12 @@ export function Library() {
     queryFn: api.getUnstretchedPictures,
     staleTime: 300_000,
   });
+  // `safe -> unexported_edit` rather than a bare set: the chip renders on
+  // membership, and the hint it carries depends on *which* kind of unstretched
+  // this card is. One map, so the two cannot be read from different snapshots.
   const unstretchedSafe = useMemo(
-    () => new Set((unstretched.data?.items ?? []).map((i) => i.safe)),
+    () => new Map((unstretched.data?.items ?? [])
+      .map((i) => [i.safe, i.unexported_edit === true] as const)),
     [unstretched.data],
   );
 
@@ -272,7 +280,8 @@ export function Library() {
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}>
           {visible.map((t) => (
             <TargetCard key={t.safe_name} t={t}
-              unstretched={unstretchedSafe.has(t.safe_name)} />
+              unstretched={unstretchedSafe.has(t.safe_name)}
+              unexportedEdit={unstretchedSafe.get(t.safe_name)} />
           ))}
         </SimpleGrid>
       )}
