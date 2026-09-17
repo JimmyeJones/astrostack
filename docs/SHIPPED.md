@@ -1,5 +1,84 @@
 # Shipped — the record
 
+## v0.452.1 — 2026-09-17 — the Dashboard stops offering a scan that can never help
+
+*(Builder, branch `claude/sweet-babbage-10p2wj`, filed and built in the same run as v0.452.0 because that fix
+is what turns this from a wrong sentence into a contradiction. PRIORITY 3 (friendliness / trust). Additive:
+one engine field, one new `library_meta` key, two defaulted response fields, and copy that self-hides. No
+config, schema, on-disk, endpoint-shape or default change.)*
+
+**The bug.** `GET /api/incoming-lag` answers *"are there subs on disk that my library has no frame row
+for?"* by comparing the watcher's listing against the `frames` tables. That is the right question and it is
+blind to *why* a row is missing — and the note it feeds was written for the cause that fixes itself. It
+says, on the Dashboard:
+
+    2,259 subs in your incoming folder haven't been imported yet
+    … AstroStack normally imports new files by itself within a few minutes …
+    so a scan is what picks these up.
+    [ Scan incoming now ]
+
+A file whose FITS header will not parse has no frame row **permanently**. It counts as waiting, it will
+count as waiting after the scan, and it will count as waiting forever. On the owner's own library that is
+**six files across five folders, since May** — a note that has been promising a fix no scan can deliver for
+four months, with a button that cannot deliver it.
+
+v0.452.0 made the Jobs page say plainly that those six could not be read. That is what makes this worth a
+version rather than a note: two of the app's own screens, about the same six files, now disagree about
+whether anything is waiting — the "could a beginner hold both of these at once?" failure AGENTS.md §7 keeps
+finding in the gap *between* two true-sounding claims.
+
+**Why the answer had to be remembered rather than derived.** Deciding whether a file is readable means
+*opening* it, and the lag note's entire design is that nothing it does walks, opens or `stat`s anything under
+`incoming/` (AGENTS.md §10) — it is handed the watcher's existing listing. The scan has already opened every
+one of these files. So the scan writes down what it found, in the registry's existing `library_meta`
+key/value table, exactly as `webapp/skipped_folders.py` remembers its own finding: no schema change, and a
+build that predates the key never asks for it.
+
+**What shipped.**
+
+- `TargetScanResult.unreadable_dirs` — the same files v0.452.0 counted, tallied by the directory they sit in,
+  **uncapped** (bounded by the number of directories, not the number of damaged files), because reconciling
+  disk against library needs an exact per-folder number rather than a sample.
+- New `webapp/unreadablesubs.py`: `folders_from_scan` re-keys those directories to the folder spelling
+  *relative to* `incoming/` that both `PlannedUnit.folder` and `Project.source_folders_under` already use —
+  so the reader joins the third number to the other two with no translation at all — plus the
+  encode/decode/remember/recall pair. **Only a whole-library scan may write it:** it re-tries every file, so
+  its answer is complete and simply replaces the last, which is also how a repaired or deleted file leaves
+  the record. A scoped "bring this one folder in" scan has looked at one folder and would report every other
+  one as clean; a test makes that guard load-bearing.
+- `FolderLag.n_unreadable` and `IncomingLagResponse.n_unreadable`, rolled up by the same prefix rule the
+  imported counts use, and **capped at the waiting count** — the record and the listing are two snapshots
+  taken at different moments.
+- `incomingLagUnreadable` (in `importWaiting.ts`, beside `incomingLagCause`, so one module owns what this
+  note says about causes). Nothing damaged → `null`, and the note is byte-for-byte what it was. Some damaged
+  → the headline stays (most of those files really are waiting) and one sentence is added. **All** damaged →
+  the note stops calling itself a delay: the title becomes *"6 subs in your incoming folder can't be read"*,
+  the "a scan is what picks these up" sentence stands aside, and the **Scan incoming now** button is replaced
+  by **Open Jobs**, where v0.452.0 names the files.
+- The folder lines carry the split (`2,259 of 2,572 not imported (3 unreadable)`) so the two numbers can be
+  seen against each other, and the dismissal signature carries it too — a note dismissed as "waiting" speaks
+  again once the same files turn out to be damage.
+
+**Still counted as waiting, deliberately.** A sub that is not in a picture is a sub that is not in a
+picture; these are *explained*, never subtracted. Going quiet about an unimported sub is the exact failure
+this endpoint exists to prevent, and it would be a worse bug than the one being fixed.
+
+**Upgrade-safe (§9):** two additive defaulted response fields, one new meta key in a table that already
+exists, one defaulted engine field. An older frontend ignores the fields; a newer frontend against an older
+backend, and any install that has not scanned since this shipped, sees `0` — which is what every healthy
+install reports anyway, and is pinned by a test.
+
+**Tests (+18, five red under a scratch revert — and a second revert proving the scoped-scan guard is
+load-bearing rather than decorative).** `tests/webapp/test_unreadable_subs_record.py` (new, 8): the folder
+keying including a nested `MyWorks/M 31_sub` and files loose in the root, a directory outside `incoming/`
+dropped rather than guessed at, two targets over one folder summed (the #878 double-registration reaching
+this side), the encode/decode round trip against six malformed shapes, the biggest-first cap, and the two
+scan shapes' different rights to overwrite. `tests/webapp/test_incoming_lag.py` (+4): all-damaged,
+part-damaged, a healthy library reporting zero in every field, and a repaired sub leaving the record on the
+next scan. Frontend (+9): the pure helper's five cases including the cap and the older-backend silence, and
+four render cases — the withdrawn button, the kept headline, an older backend reading exactly as before, and
+the dismissal speaking again when waiting turns out to be damage.
+
 ## v0.452.0 — 2026-09-17 — a sub the app cannot read is finally said out loud
 
 *(Builder, branch `claude/sweet-babbage-10p2wj`. PRIORITY 3 (friendliness / trust). Verified from observer
