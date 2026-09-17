@@ -52,6 +52,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
+from seestack.stackhealth import readable_transparency_ratio
 from webapp.field_fulls import drizzle_scale_from_options, field_fulls_of_sky
 from webapp.run_options import derived_from_run_id
 
@@ -61,6 +62,16 @@ from webapp.run_options import derived_from_run_id
 #: ``webapp.pipeline._apply_editor_to_run`` and this read-time one can be seen to
 #: be the same set.
 INHERITED_LIGHT_FACTS = ("total_exposure_s", "calstat", "transparency_ratio")
+
+#: How to *read* an inherited fact off the source row, where reading it is more
+#: than an attribute lookup. ``transparency_ratio`` is: its estimator moved in
+#: v0.304.2 and a mosaic figure from before it is on a different scale from the
+#: bar it would be read through, so the source answers ``None`` for one nobody
+#: can date — see :func:`seestack.stackhealth.readable_transparency_ratio`. An
+#: export carries neither ``is_mosaic`` (deliberately, see the module docstring)
+#: nor the source's ``engine_version``, so nothing downstream could make that
+#: judgement for itself; it has to be made here, where the source row is in hand.
+_INHERIT_READERS = {"transparency_ratio": readable_transparency_ratio}
 
 
 def stacking_coverage_max(run: Any) -> int:
@@ -224,6 +235,10 @@ def with_inherited_light_facts[R](runs: Sequence[R]) -> list[R]:
     the row already carries is never overwritten — this only ever answers where
     the row said "unknown". A derived row whose source has been pruned from
     History keeps its blanks, because there is then nothing to answer with.
+
+    A fact the *source* cannot vouch for is not handed over either
+    (:data:`_INHERIT_READERS`): "unknown" is the honest thing to inherit, and an
+    export is the one row that could never re-derive it for itself.
     """
     by_id = {r.id: r for r in runs}
     out: list[R] = []
@@ -232,11 +247,13 @@ def with_inherited_light_facts[R](runs: Sequence[R]) -> list[R]:
         if source is None:
             out.append(run)
             continue
-        missing = {
-            field: getattr(source, field)
-            for field in INHERITED_LIGHT_FACTS
-            if getattr(run, field, None) is None
-            and getattr(source, field, None) is not None
-        }
+        missing: dict[str, Any] = {}
+        for field in INHERITED_LIGHT_FACTS:
+            if getattr(run, field, None) is not None:
+                continue
+            reader = _INHERIT_READERS.get(field)
+            value = reader(source) if reader else getattr(source, field, None)
+            if value is not None:
+                missing[field] = value
         out.append(replace(run, **missing) if missing else run)  # type: ignore[type-var]
     return out

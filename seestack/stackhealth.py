@@ -161,6 +161,35 @@ _SEAM_VISIBLE_RATIO = 1.5
 # it since.
 _SEAM_SCALE_FIXED_IN = (0, 313, 1)
 
+# How far below this target's clear-sky baseline a run's median transparency has
+# to sit before the app calls the night hazy. The badge that draws it used to own
+# this number in TypeScript; it lives here now so the three surfaces that show
+# the chip (History, Gallery, Compare) read one bar, the way the seam's already
+# do.
+HAZY_RATIO = 0.6
+
+# Which generation of the transparency estimator wrote a ``transparency_ratio``.
+#
+# ``transparency_score`` is the median flux of a frame's brightest *stars*, so it
+# is a property of where the scope pointed as much as of the sky. Generation 1
+# (up to v0.304.1) divided a run's median by ONE target-wide ``p90`` baseline,
+# which on a mosaic is set by whichever panel has the richest star field — so
+# every other panel read as haze and a perfectly clear mosaic was stamped "Hazy
+# night". Generation 2 (v0.304.2, ``stacker._panel_transparency_ratios``)
+# compares each panel against its own baseline and combines by median.
+#
+# The fix moved the estimator and re-measured nothing, so a library that has been
+# shooting for a while holds both generations at once. Measured on the three-panel
+# fixture in ``tests/test_transparency_mosaic.py``: one steady sky reads **0.50**
+# on generation 1 and **1.00** on generation 2 — i.e. either side of the 0.6 bar,
+# so the same clear night is a "Hazy night" for ever on the older row.
+TRANSPARENCY_ESTIMATOR_GENERATION = 2
+
+# The release that took the estimator to generation 2. Rows written before the
+# ``transparency_scale`` column existed are dated by their ``engine_version``
+# instead, which dates the stack and so dates its figure too.
+_TRANSPARENCY_SCALE_FIXED_IN = (0, 304, 2)
+
 # How much grainier a thinly-covered region has to measure before the app says
 # so. ``grain_ratio`` is a ratio of two sky σ, so 1.25 is "that part of the
 # picture is a quarter noisier" — which, since grain falls as 1/√depth, is what
@@ -390,6 +419,99 @@ def stored_seam_verdict_for(run: StackRunRow) -> str | None:
     its scale are two columns."""
     return stored_seam_verdict(run.seam_residual, run.seam_scale,
                                run.engine_version)
+
+
+def transparency_scale_is_current(transparency_scale: int | None,
+                                  engine_version: str | None) -> bool:
+    """Was a stored ``transparency_ratio`` written by **today's** estimator?
+
+    Same two-source dating as :func:`seam_scale_is_current`: the generation
+    stamped beside the figure wins outright, and a row without one — every run
+    recorded before the column, which is the only population this question is
+    really about — is dated by the release that stacked it, nothing having
+    re-measured the figure since.
+
+    ``False`` for an unrecorded or unreadable version, for the same reason:
+    that is the only answer that cannot turn a figure nobody can date into a
+    claim about someone's picture.
+    """
+    if transparency_scale is not None:
+        try:
+            return int(transparency_scale) >= TRANSPARENCY_ESTIMATOR_GENERATION
+        except (TypeError, ValueError):
+            return False
+    parsed = _version_tuple(engine_version)
+    if parsed is None:
+        return False
+    return parsed >= _TRANSPARENCY_SCALE_FIXED_IN
+
+
+def readable_transparency_ratio(run: StackRunRow) -> float | None:
+    """This row's ``transparency_ratio``, or ``None`` when its scale cannot be
+    vouched for.
+
+    A **single-field** run's figure is readable whatever wrote it: the panel
+    split is the only thing v0.304.2 changed, and
+    ``stacker._panel_transparency_ratios`` returns ``[]`` — i.e. exactly the old
+    target-wide answer — on a target whose pointings do not split. So this is a
+    no-op for most of a library, and for every run stacked since the fix.
+
+    A **mosaic** run recorded before it is the population this exists for. Its
+    figure was measured against one target-wide ``p90`` baseline, which a mosaic's
+    richest panel sets, so it is on a different scale from the bar it is read
+    through — see :data:`TRANSPARENCY_ESTIMATOR_GENERATION`. Nothing re-measures
+    it (unlike ``seam_residual``, whose input is still sitting beside the master:
+    this figure's input is *which frames the run used*, and no column records
+    that), so the answer is the silence the caller already gives an unmeasured
+    run rather than a number on the wrong scale.
+
+    The stored row is untouched — this is a read-side rule, and the figure is
+    still the best that was ever measured for that run.
+    """
+    if run.transparency_ratio is None:
+        return None
+    if not run.is_mosaic:
+        return float(run.transparency_ratio)
+    if not transparency_scale_is_current(run.transparency_scale,
+                                         run.engine_version):
+        return None
+    return float(run.transparency_ratio)
+
+
+def hazy_verdict(transparency_ratio: float | None) -> str | None:
+    """``"hazy"`` when a run's median transparency sits well below this target's
+    clear-sky baseline, else ``None``.
+
+    The bar lives here rather than in the badge that draws it for the same
+    reason :func:`seam_verdict`'s does: three surfaces show this chip (History,
+    Gallery, Compare) and only one of them should own the number.
+    """
+    if transparency_ratio is None:
+        return None
+    try:
+        ratio = float(transparency_ratio)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(ratio) or ratio <= 0:
+        return None
+    return "hazy" if ratio < HAZY_RATIO else None
+
+
+def stored_hazy_verdict_for(run: StackRunRow) -> str | None:
+    """:func:`hazy_verdict` for a **stored** run, read on the scale its figure
+    was actually written on — the form every caller with a row in hand should
+    use, so no surface has to remember that the figure and its scale are two
+    columns.
+
+    Unlike the seam's, this scale change is **two-sided**, so there is no half of
+    a superseded figure that can be read around. Measured over 300 randomised
+    mosaics (2–4 panels, star fields 2,000–20,000, per-panel transparency
+    0.3–1.0): today's estimator reads *higher* than the stored one on 251 of them
+    (by up to +0.72) and *lower* on 49 (by up to −0.27). A figure that cannot
+    bound today's in either direction can only honestly say nothing, which is
+    what :func:`readable_transparency_ratio` gives it.
+    """
+    return hazy_verdict(readable_transparency_ratio(run))
 
 
 def grain_verdict(grain_ratio: float | None) -> str | None:

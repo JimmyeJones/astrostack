@@ -86,7 +86,8 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     grain_thin_frames INTEGER,
     grain_deep_frames INTEGER,
     grain_thin_share REAL,
-    seam_scale INTEGER
+    seam_scale INTEGER,
+    transparency_scale INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_stack_runs_ts ON stack_runs(timestamp_utc);
@@ -776,6 +777,15 @@ class Project:
         try:
             self._conn.execute(
                 "ALTER TABLE stack_runs ADD COLUMN seam_scale INTEGER")
+        except sqlite3.OperationalError:
+            pass  # already present
+        # …and the same for ``transparency_ratio``, whose estimator moved in
+        # v0.304.2 (one target-wide baseline → one per mosaic panel). Same
+        # un-gated, un-bumped shape and for the same reasons; every existing run
+        # stays NULL, which reads as "dated by ``engine_version``".
+        try:
+            self._conn.execute(
+                "ALTER TABLE stack_runs ADD COLUMN transparency_scale INTEGER")
         except sqlite3.OperationalError:
             pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -1606,9 +1616,9 @@ class Project:
             "  capture_hours_json, coverage_thin_frac, uncovered_frac,"
             "  coverage_shares_version, coverage_median_depth, duration_s,"
             "  grain_ratio, grain_thin_frames, grain_deep_frames, grain_thin_share,"
-            "  seam_scale"
+            "  seam_scale, transparency_scale"
             ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            "         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -1638,6 +1648,8 @@ class Project:
                 (None if run.grain_thin_share is None
                  else float(run.grain_thin_share)),
                 (None if run.seam_scale is None else int(run.seam_scale)),
+                (None if run.transparency_scale is None
+                 else int(run.transparency_scale)),
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -1716,6 +1728,10 @@ class Project:
                 seam_scale=(
                     row["seam_scale"]
                     if "seam_scale" in row.keys() else None
+                ),
+                transparency_scale=(
+                    row["transparency_scale"]
+                    if "transparency_scale" in row.keys() else None
                 ),
                 grain_ratio=(
                     row["grain_ratio"]
@@ -2193,6 +2209,16 @@ class StackRunRow:
     # ``grain_*`` columns): ``_reconcile_table_columns`` adds it on open, so a
     # build that has never heard of it can still open a DB this one wrote.
     seam_scale: int | None = None
+    # Which generation of the transparency estimator wrote
+    # ``transparency_ratio`` — see
+    # :data:`seestack.stackhealth.TRANSPARENCY_ESTIMATOR_GENERATION`. Same story
+    # one metric over: v0.304.2 stopped measuring a mosaic's panels against one
+    # target-wide baseline, so a figure written before it is on a different
+    # scale from the bar it is read through, and the number carries no scale of
+    # its own. None means "not recorded", and readers fall back to
+    # ``engine_version``. Added without a ``SCHEMA_VERSION`` bump, exactly like
+    # ``seam_scale`` above and for the same reason.
+    transparency_scale: int | None = None
 
 
 def _to_db(value: Any) -> Any:

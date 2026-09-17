@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from seestack.io.library import Library
 from seestack.io.project import StackRunRow
 from webapp.derived_light import (
+    _INHERIT_READERS,
     INHERITED_LIGHT_FACTS,
     stacking_coverage_max,
     stacking_field_fulls,
@@ -34,7 +35,14 @@ FRAME_W, FRAME_H = 480, 320
 
 @dataclass
 class _Row:
-    """The three fields the resolver touches, plus the two it navigates by."""
+    """The three fields the resolver touches, plus the two it navigates by.
+
+    ``is_mosaic`` / ``engine_version`` / ``transparency_scale`` are the three the
+    resolver needs in order to *read* one of them: a mosaic's
+    ``transparency_ratio`` from before v0.304.2 is on a superseded scale, and the
+    source row is the only place that fact exists (an export carries neither the
+    flag nor the source's version).
+    """
 
     id: int
     options_json: str
@@ -45,6 +53,9 @@ class _Row:
     canvas_w: int | None = None
     canvas_h: int | None = None
     n_frames_used: int | None = None
+    is_mosaic: bool | None = None
+    engine_version: str | None = "0.453.6"
+    transparency_scale: int | None = None
 
 
 @dataclass
@@ -76,6 +87,40 @@ def test_a_re_render_answers_with_its_stacks_light():
     assert healed.transparency_ratio == 0.91
     # Not a measurement of these pixels — it stays unanswered.
     assert healed.noise_sigma is None
+
+
+def test_a_re_render_does_not_inherit_a_figure_its_stack_cannot_vouch_for():
+    """The one light fact that is not simply copied.
+
+    ``transparency_ratio`` has an estimator behind it and that estimator moved in
+    v0.304.2 (one target-wide baseline → one per mosaic panel), so a mosaic
+    figure from before it reads on the wrong side of the "Hazy night" bar. The
+    export is the row that could never work that out for itself: ``is_mosaic`` is
+    deliberately not carried (the editor reads it behaviourally) and its
+    ``engine_version`` is today's, so a raw copy would arrive looking current.
+    Inheriting "unknown" is the honest answer, and it is what the export already
+    does with every other fact it cannot support.
+    """
+    stale = _stack(1, total_exposure_s=5400.0, calstat="dark+flat",
+                   transparency_ratio=0.50, is_mosaic=True,
+                   engine_version="0.304.1")
+    out = with_inherited_light_facts([_edit(2, 1), stale])
+    healed = next(r for r in out if r.id == 2)
+    assert healed.transparency_ratio is None
+    # The other two are facts about the light with no estimator behind them —
+    # they still travel, so this costs the picture nothing else.
+    assert healed.total_exposure_s == 5400.0
+    assert healed.calstat == "dark+flat"
+    # …and the source row itself is untouched: this is a read-side rule.
+    assert stale.transparency_ratio == 0.50
+
+
+def test_a_re_render_of_a_single_field_stack_inherits_the_figure_as_before():
+    """The withholding is precisely scoped: the panel split is the only thing
+    v0.304.2 changed, so an equally old *single-field* figure still travels."""
+    old_field = _stack(1, transparency_ratio=0.50, engine_version="0.304.1")
+    out = with_inherited_light_facts([_edit(2, 1), old_field])
+    assert next(r for r in out if r.id == 2).transparency_ratio == 0.50
 
 
 def test_an_ordinary_stack_is_returned_untouched():
@@ -126,15 +171,27 @@ def test_a_self_referential_or_looped_chain_terminates():
 def test_the_inherited_set_is_the_one_the_export_writes():
     """Drift guard: the write-time list in ``_apply_editor_to_run`` and this
     read-time one are the same set by construction, and a new column added to
-    one and not the other is exactly how the two would start disagreeing."""
+    one and not the other is exactly how the two would start disagreeing.
+
+    A field with a reader (:data:`_INHERIT_READERS`) must be written *through
+    that same reader*, not copied raw — otherwise the two halves of one rule
+    would disagree about the very row the reader exists for.
+    """
     import inspect
 
     from webapp import pipeline
 
     src = inspect.getsource(pipeline._apply_editor_to_run)
-    written = {f for f in INHERITED_LIGHT_FACTS if f"{f}=run.{f}," in src}
+    written = set()
+    for field in INHERITED_LIGHT_FACTS:
+        reader = _INHERIT_READERS.get(field)
+        spelling = (f"{field}=run.{field}," if reader is None
+                    else f"{field}={reader.__name__}(run),")
+        if spelling in src:
+            written.add(field)
     assert written == set(INHERITED_LIGHT_FACTS), (
-        f"the export does not carry {set(INHERITED_LIGHT_FACTS) - written}")
+        f"the export does not carry {set(INHERITED_LIGHT_FACTS) - written} "
+        "the way this module reads it")
 
 
 # --- The one column a re-render is worse than silent about ------------------

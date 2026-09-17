@@ -120,6 +120,46 @@ def test_the_gallery_does_not_warn_from_a_superseded_seam_scale(
     assert items[healed]["seam_verdict"] == "check"
 
 
+def test_the_gallery_does_not_call_an_old_mosaic_hazy_from_a_superseded_scale(
+        client, solved_library):
+    """The same mixed-scale problem one metric over, and the one the owner sees
+    most: ``transparency_score`` is the median flux of a frame's brightest
+    *stars*, so before v0.304.2 a mosaic's panels were each measured against the
+    richest panel's baseline and read as haze. Measured on the three-panel
+    fixture in ``tests/test_transparency_mosaic.py``, one steady sky scored
+    **0.50** — the wrong side of the 0.6 bar — so every mosaic stacked before
+    that release still wears a "Hazy night" badge telling the owner to reject
+    his haziest subs.
+
+    Nothing is re-measured (this figure's input is *which frames the run used*,
+    which no column records); the old card simply stops claiming what its number
+    cannot support. A single-field run of the same vintage is untouched, because
+    the panel split is the only thing that changed.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    old_mosaic = _register_run(solved_library, safe, {"sigma_clip": True},
+                               is_mosaic=True, transparency_ratio=0.50,
+                               engine_version="0.304.1")
+    old_field = _register_run(solved_library, safe, {"sigma_clip": True},
+                              transparency_ratio=0.50,
+                              engine_version="0.304.1")
+    fresh = _register_run(solved_library, safe, {"sigma_clip": True},
+                          is_mosaic=True, transparency_ratio=0.50)
+    # …and a stamp beside the figure outranks the version that stacked the run.
+    stamped = _register_run(solved_library, safe, {"sigma_clip": True},
+                            is_mosaic=True, transparency_ratio=0.50,
+                            engine_version="0.304.1", transparency_scale=2)
+
+    items = {it["run_id"]: it for it in client.get("/api/gallery").json()["items"]}
+    assert items[old_mosaic]["hazy_verdict"] is None
+    assert items[old_field]["hazy_verdict"] == "hazy"
+    assert items[fresh]["hazy_verdict"] == "hazy"
+    assert items[stamped]["hazy_verdict"] == "hazy"
+    # The stored figure still travels — only the claim about it is withheld, so
+    # nothing that *reports* the number loses it.
+    assert items[old_mosaic]["transparency_ratio"] == 0.50
+
+
 def test_gallery_carries_the_grain_verdict_beside_the_flatness_one(
         client, solved_library):
     """The chip's wording depends on *both*: a mosaic can be perfectly level and

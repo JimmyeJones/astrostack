@@ -42,6 +42,13 @@ SRC = dict(
     is_mosaic=True,
     noise_sigma=0.0041,
     stack_fwhm_px=2.2,
+    # What a real stacker stamps, and load-bearing on a *mosaic* fixture:
+    # ``transparency_ratio`` is read on the scale it was written on, and a
+    # mosaic figure from before v0.304.2 is on a superseded one. Without a
+    # version this run would be *undated*, so the export would correctly decline
+    # to inherit the figure and this test would be about the wrong thing. The
+    # undated case has its own test below.
+    engine_version="0.453.6",
 )
 
 
@@ -55,7 +62,7 @@ def _wait_job(client, job_id, timeout=120.0):
     raise AssertionError("job did not finish in time")
 
 
-def _make_source_run(data_root, safe: str) -> int:
+def _make_source_run(data_root, safe: str, **overrides) -> int:
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -74,7 +81,7 @@ def _make_source_run(data_root, safe: str) -> int:
                 options_json="{}",
                 capture_start_utc="2024-11-15T22:00:00Z",
                 capture_end_utc="2024-11-15T23:30:00Z",
-                **SRC,
+                **{**SRC, **overrides},
             ))
         finally:
             proj.close()
@@ -100,6 +107,30 @@ def _export(client, data_root, safe: str, run_id: int, name: str):
             proj.close()
     finally:
         lib.close()
+
+
+def test_an_export_declines_a_transparency_figure_its_stack_cannot_date(
+    client, solved_library,
+):
+    """The one light fact that is read rather than copied.
+
+    v0.304.2 changed how a mosaic's transparency is measured (one target-wide
+    baseline → one per panel) and re-measured nothing, so a mosaic figure from
+    before it reads on the wrong side of the "Hazy night" bar. An export carries
+    neither ``is_mosaic`` (deliberately — the editor reads it behaviourally) nor
+    its stack's ``engine_version``, so a raw copy would arrive on the new row
+    looking perfectly current, and the badge would outlive the fix by being
+    laundered through an edit. The other two facts have no estimator behind
+    them and still travel.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_source_run(solved_library, safe, engine_version="0.304.1")
+
+    edited = _export(client, solved_library, safe, rid, "stale_light_edit")
+
+    assert edited.transparency_ratio is None
+    assert edited.total_exposure_s == SRC["total_exposure_s"]
+    assert edited.calstat == SRC["calstat"]
 
 
 def test_an_export_keeps_the_exposure_and_calibration_of_the_light(
