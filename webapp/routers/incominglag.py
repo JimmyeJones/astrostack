@@ -29,6 +29,15 @@ folder the scanner skips on purpose, and cannot miss one it would take.
 **It offers; it never acts.** Importing is the app's own job and it retries by
 itself; the only button is the ordinary "Scan incoming", which is the same thing
 the watcher would do on its next poll.
+
+**…except where a scan cannot help, and saying so is the point.** A file the app
+has opened and cannot read has no frame row *permanently*, so it counts as
+waiting forever and the offer above is a promise nothing can keep — on the
+owner's own library, about six files, since May. ``n_unreadable`` carries how
+many of the waiting files are in that state, per folder and in total, read off
+the record the scan leaves behind (:mod:`webapp.unreadablesubs`) rather than by
+opening anything. When it equals ``n_waiting``, nothing is waiting at all and
+the reader must drop the offer.
 """
 
 from __future__ import annotations
@@ -48,6 +57,7 @@ from webapp.incominglag import (
     FolderLag,
     incoming_lag,
 )
+from webapp.unreadablesubs import recall_unreadable
 
 router = APIRouter(tags=["incoming-lag"])
 
@@ -58,6 +68,10 @@ class IncomingLagItem(BaseModel):
     n_on_disk: int = 0
     n_imported: int = 0
     n_waiting: int = 0
+    #: Of ``n_waiting``, how many the last whole-library scan opened and could
+    #: not read. Those are not waiting for anything — see ``n_unreadable`` on the
+    #: response. Additive and defaulted, so an older frontend ignores it.
+    n_unreadable: int = 0
     newest_utc: str = ""
     still_hours: float = 0.0
 
@@ -68,6 +82,13 @@ class IncomingLagResponse(BaseModel):
     n_waiting: int = 0
     #: How many folders those are spread across (exact, likewise).
     n_folders: int = 0
+    #: Of ``n_waiting``, how many the last whole-library scan **opened and could
+    #: not read** — damaged or headerless files that no scan will ever import.
+    #: Zero until a scan has run on this build, and zero on every healthy
+    #: install, so the note reads exactly as it did before. When it equals
+    #: ``n_waiting``, *nothing* is actually waiting and the note must not offer a
+    #: scan. See ``webapp/unreadablesubs.py``.
+    n_unreadable: int = 0
     #: When the listing this is measured against was taken, ISO-8601 UTC. Empty
     #: when there is no usable listing, which is also when ``n_waiting`` is 0 for
     #: a reason other than "nothing is waiting" — see :attr:`checked`.
@@ -132,9 +153,17 @@ def scan_incoming_lag(
     lib = deps.open_library(request)
     try:
         imported = imported_by_folder(lib, prefix)
+        # What the last whole-library scan opened and could not read, off the
+        # registry's own meta table — one keyed read beside the per-target counts
+        # already being made, and still nothing opened under ``incoming/``.
+        try:
+            unreadable = recall_unreadable(lib)
+        except Exception:  # noqa: BLE001 — a side note must not 500 the note
+            unreadable = {}
     finally:
         lib.close()
-    return (incoming_lag(units, imported, now_epoch), polled_at)
+    return (incoming_lag(units, imported, now_epoch, unreadable=unreadable),
+            polled_at)
 
 
 @router.get("/api/incoming-lag", response_model=IncomingLagResponse)
@@ -147,6 +176,7 @@ def get_incoming_lag(request: Request) -> IncomingLagResponse:
     return IncomingLagResponse(
         n_waiting=sum(f.n_waiting for f in found),
         n_folders=len(found),
+        n_unreadable=sum(f.n_unreadable for f in found),
         checked_utc=datetime.fromtimestamp(polled_at, UTC)
         .replace(microsecond=0).isoformat(),
         checked=True,

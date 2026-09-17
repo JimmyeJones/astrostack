@@ -2933,6 +2933,10 @@ export interface IncomingLagItem {
   n_on_disk: number;
   n_imported: number;
   n_waiting: number;
+  /** Of `n_waiting`, how many the last whole-library scan opened and could not
+   *  read. Optional: an older backend omits it and the reader sees 0, which is
+   *  what every healthy folder reports anyway. */
+  n_unreadable?: number;
   newest_utc: string;
   /** How long the folder has sat unchanged — i.e. how long these have waited. */
   still_hours: number;
@@ -2945,6 +2949,11 @@ export interface IncomingLagItem {
 export interface IncomingLagResponse {
   n_waiting: number;
   n_folders: number;
+  /** Of `n_waiting`, how many are files the app has opened and cannot read —
+   *  damaged or headerless, so no scan will ever import them. When this equals
+   *  `n_waiting`, nothing is actually waiting and offering a scan would be a
+   *  promise nothing can keep. Optional, for an older backend. */
+  n_unreadable?: number;
   checked_utc: string;
   checked: boolean;
   items: IncomingLagItem[];

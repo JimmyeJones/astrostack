@@ -154,3 +154,79 @@ export function incomingLagCause(
     reassurance: "",
   };
 }
+
+export interface IncomingLagUnreadable {
+  /** True when *every* waiting file is one the app cannot read — i.e. nothing is
+   *  actually on its way in, and the note must not offer a scan. */
+  all: boolean;
+  /** The note's title, replacing the "haven't been imported yet" one. Null when
+   *  only some of the waiting files are damaged: the rest genuinely are waiting,
+   *  so that title is still the true headline. */
+  title: string | null;
+  /** The sentence that says what these files are and what to do about them. */
+  sentence: string;
+}
+
+/** The damaged-file half of the incoming-lag note.
+ *
+ * The lag note compares files on disk with frame rows, which is exactly the
+ * right question and cannot see *why* a row is missing. It was written for the
+ * cause that fixes itself — a stalled or queued import — and says so: *"haven't
+ * been imported yet"*, with a **Scan incoming now** button. A file the app has
+ * opened and cannot read is missing its row **permanently**, so on that file the
+ * note is promising a fix that no scan can deliver, and goes on promising it for
+ * as long as the file sits there. On the owner's own library that is six files
+ * across five folders, since May.
+ *
+ * Since v0.452.0 the Jobs page says plainly that those files could not be read,
+ * which turns a wrong sentence into a contradiction: two of the app's own
+ * screens, about the same six files, disagreeing about whether anything is
+ * waiting. This is the half that makes them agree.
+ *
+ * Returns null when nothing is damaged — every healthy install, and every
+ * install that has not scanned since the count existed — so the note is byte-for
+ * byte what it was.
+ */
+export function incomingLagUnreadable(
+  nWaiting: number, nUnreadable: number | null | undefined,
+): IncomingLagUnreadable | null {
+  const bad = Math.max(0, Math.min(Number(nUnreadable ?? 0) || 0, nWaiting));
+  if (bad <= 0) return null;
+  const all = bad >= nWaiting;
+  const it = bad === 1 ? "it" : "them";
+  // Said in both branches, because it is the actionable half and a beginner
+  // reading "can't be read" needs to know it is a copy problem and not a verdict
+  // on their night. Deliberately WITHOUT a "nothing else is affected, and
+  // AstroStack never writes there" clause: on the mixed note the reassurance two
+  // lines above has just said exactly that, and a board with room for two notes
+  // must not spend a paragraph saying one thing twice. The all-damaged branch,
+  // where that reassurance stands aside, adds it back below.
+  const advice = "The usual cause is a copy that didn't finish: copying "
+    + it + " over again from your Seestar normally fixes " + it + ", and if not, "
+    + (bad === 1 ? "the file is" : "the files are") + " damaged and safe to delete.";
+  // Where the file names are. Worth saying in both branches — the all-damaged
+  // note has an Open Jobs button and this says what is behind it; the mixed note
+  // has no such button, so this is the only pointer there is.
+  const where = " The last scan's result on the Jobs page names the files.";
+  if (all) {
+    return {
+      all: true,
+      title: nWaiting === 1
+        ? "A sub in your incoming folder can't be read"
+        : `${nWaiting.toLocaleString()} subs in your incoming folder can't be read`,
+      sentence: `AstroStack has opened ${it} and found no picture data inside, so `
+        + (bad === 1 ? "it can't" : "they can't")
+        + " be imported — a scan won't help, and every scan has already tried. "
+        + advice + " Nothing else is affected, and AstroStack never changes "
+        + "anything in that folder." + where,
+    };
+  }
+  return {
+    all: false,
+    // The headline stays as it was: most of these files really are waiting.
+    title: null,
+    sentence: `${bad.toLocaleString()} of these can't be read at all — AstroStack `
+      + `has opened ${it} and found no picture data inside, so no scan will ever `
+      + `import ${it}. ` + advice + where,
+  };
+}
