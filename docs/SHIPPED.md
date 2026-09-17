@@ -63,6 +63,11 @@ opened from the Target page, History or the Gallery, went out as *"Orion Nebula 
 (40 min total), shot on 15 Nov 2024 with a Seestar. A vast stellar nursery. The whole frame is about 5.4 full
 Moons wide."* Three surfaces had been fixed; this was the fourth and last.
 
+> **⚠ "and last" was wrong — there were five; corrected by the run that shipped v0.453.3 the same day.** The
+> editor builds its caption server-side in its own job and calls none of `SavePictureMenu`'s code, so the walk
+> outward from that component — the method behind all three of v0.453.0/.1/.2 — could not reach it. See the
+> v0.453.3 entry above, and `PROCESS-NOTES.md` for why enumerating a class from the *sink* end is what found it.
+
 **The identity comes off the row, not a per-picture lookup — because the endpoint had already done the
 lookup.** `GET /api/gallery/best` calls `identify_object` once per target to fill `object_type` and `blurb`
 (added so the slideshow could caption a picture away from its target page), and then dropped the match's
