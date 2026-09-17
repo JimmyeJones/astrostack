@@ -18,6 +18,112 @@ is a queue.
 
 ---
 
+## 2026-09-17 — Collision #16: three items, two lost, one *reshaped* by the other run's work
+
+*(Builder, branch `claude/sweet-babbage-owmvv3`. Cut from `bf20d9c8`; PR #906 merged at 9dde4ce5 while this run
+was working.)*
+
+The run planned three tasks off the top of the backlog — observer issue **#903** (the reprocess flattening the
+wall), **#901** (the Stack form's "on each patch of sky"), and the Scout's **"finished / not stretched yet" wall
+chip** feature idea. PR #906 shipped **all three** as v0.447.2 / v0.447.3 / v0.448.0. Both runs read the same
+section of the same file and both picked from the top; nothing in the backlog could have prevented it.
+
+**What the timing actually was, because it is the interesting part.** This run fetched at start (`bf20d9c8` was
+tip) and again before task 2, exactly as §11 says. The second fetch is what caught it. But `origin/main` moved
+between those two fetches, so the first task was already written, tested and pushed against a tree that had
+since been superseded — which is precisely the window §11 calls the dangerous one. **The lesson is not "fetch
+more"; it is that a run holding a plan for 3 items is holding 3 chances to be scooped, and the fetch cadence
+bounds how *early* that is found, never whether it happens.** A run that had picked one item and shipped it
+would have collided on one.
+
+**Two were dropped wholesale; the third got *better* from the collision, which is new.** #901 and the wall chip
+were duplicates and were discarded. On #903 the two runs had built **different halves**: #906 shipped option (1)
+— name the consequence in the dialog, with a count (`reprocess_status.finished_pictures`,
+`reprocessPictureWarning`) — and explicitly declined option (3). This run had built option (1) *and* a structural
+half nobody had: carry the finish forward onto the fresh run. So the merge was not "keep mine or keep theirs":
+
+- #906's copy fix is **better** than this branch's `editNote` rewrite (it carries the affected count and renders
+  under the switch as well as in the confirm), so this branch's half was **deleted** and `Settings.tsx` /
+  `Settings.test.tsx` taken from `main` untouched — including deleting the two tests written for it an hour
+  earlier.
+- The surviving half was **rewritten to stand on #906's code**: `_picture_is_auto_finished` now reads #906's
+  `finishedpicture.displayed_picture_run` instead of re-walking the run list, so "which run is the displayed
+  picture" has one definition rather than two.
+- And #906 had, in the open remainder it left behind, *specified* the surviving half as the "cheaper alternative
+  worth costing first" — so the merge turned an accidental duplicate into a filed, sized item with the shipper
+  already holding the implementation.
+
+**The transferable bit:** on a collision, diff the two *fixes*, not the two *items*. Three of the last fifteen
+collision events were logged as "the other run shipped it, work discarded" when the two runs had in fact fixed
+different parts of the same entry. The question to ask of a scooped branch is **"which of my hunks is still not
+on `main`?"** — and then whether the part that *is* on main is better than yours, because it often is, and
+deleting your own tested code is the cheap outcome compared with shipping a second copy of the same sentence.
+
+---
+
+## 2026-09-16 — Builder run (branch `claude/sweet-babbage-oar5bq`, PR #906): three tasks, and a backlog that came out shorter than it went in
+
+**Shipped:** v0.447.2 (observer #903 option 1), v0.447.3 (observer #901), v0.448.0
+(the Scout's card-chip feature, first slice). Baseline was green before any change
+— 6127 passed / 2 skipped — and each commit was re-run to green on its own
+(6134 → 6139 → 6148).
+
+**Picking.** Both #903 and #901 were filed by a `docs:` commit on `main` at 12:39
+UTC the same day, which §11 calls "the hot line in the file" and says to treat as
+claimed-in-spirit for about two hours. The run started at 22:04 UTC, ~9.5 h later,
+so the window was long closed; `git fetch origin main` before each task and again
+before merging showed `origin/main` unmoved at `8be5e3e` throughout. No collision.
+
+**The thing worth carrying forward: the #903 entry offered three fixes and the
+cheapest one was the right one, but only after costing the "robust" one.** Option
+(3) — pin the superseded edited run as the cover — reads like the real structural
+fix, and the entry itself called it that. Sized against the code it is not: a
+cover pin is *permanent*, so the target that stops regressing today stops
+updating tomorrow, silently, the moment the owner's next night stacks. It needs
+an unpin rule, and a manual pin and an auto-pin are the same NULL-or-int in the
+`targets` table today, so §9 forbids the obvious shortcut of repurposing the
+column. That analysis is now in the open entry, which is the point: the next run
+to look at #903 should not have to re-derive it to decline it again.
+
+**And option (1) was worth doing *with a number*.** "Dialog copy names the
+consequence" could have been four sentences of prose. Counting the affected
+targets (`reprocess_status.finished_pictures`) made it a fact about the owner's
+own library instead of a caveat, and — unplanned — the same two helpers turned
+out to be exactly what the Scout's card-chip feature needed three hours later.
+`webapp/finishedpicture.py` exists because the third task would otherwise have
+written a second definition of "finished"; a test now asserts the two surfaces
+partition a library exactly.
+
+**A fixture lesson for anyone testing a mosaic through the webapp.**
+`tests/webapp/test_stack_estimate._repoint` moves only the DB's
+`ra/dec_center_deg`. That is all the *pointing-cluster* arithmetic reads, so it
+is enough for `panel_depth` — but `compute_mosaic_canvas` reads each frame's own
+`wcs_json`, so under `_repoint` the canvas never grows and `is_mosaic` stays
+False however far apart the "panels" are. Every existing `panel_depth` test is
+therefore measuring cluster arithmetic on a single-frame canvas. Anything
+canvas-derived needs the headers moved too: the new `_lay_out_raster` does it
+with `tests.synth.make_synth_wcs_text`. It is the same shape as the
+`--mosaic`/`--big` dogfood gaps — a fixture that cannot exhibit the thing.
+
+**Bookkeeping, done the way §2 actually says rather than the way the file looks.**
+The first pass of this run appended shipped-paragraphs *inside* the open entries
+and long paragraphs under "Shipped", which is what every recent entry in that
+section looks like — and is not what the three-file rule says. Corrected before
+merging: #901 cut whole to [`SHIPPED.md`](SHIPPED.md) (verbatim, inside a
+`<details>`), #903 and the feature idea rewritten down to their *open remainder*,
+and three real one-liners left behind. `IMPROVEMENTS.md` went 4,346 → 4,302
+lines across a run that shipped three items, which is the first time in a while
+it has gone down. Worth doing deliberately: the rule exists because a stale entry
+survives by default and gets re-picked, and the de-facto style in the Shipped
+section is itself the drift the 2026-09-08 cleanup already cut back once.
+
+**Not done, deliberately.** No dogfood pass: this run's three items were all
+traced from code and the observer's measurements, and the `--mosaic --editor`
+tooling is slow enough that a pass would have cost the third task. The next
+Builder run with a thin queue should take one.
+
+---
+
 ## 2026-09-16 (Scout, branch `claude/admiring-brahmagupta-x0cz7c`) — the observer inbox was the run; two new verified bugs filed, one issue closed
 
 **Baseline: GREEN** (suite still running to completion at writeup time; all dots, no failures, ~47%+ when the

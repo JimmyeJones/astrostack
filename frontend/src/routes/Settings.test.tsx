@@ -6,7 +6,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   autoCastSummaryText, autoHighlightSummaryText, dropEmptyFields, HINTS,
-  Maintenance, reprocessNudgeText, SETTINGS_PAGE_SECTIONS, SettingsView,
+  Maintenance, reprocessNudgeText, reprocessPictureWarning,
+  SETTINGS_PAGE_SECTIONS, SettingsView,
   WALK_AWAY_KEYS, walkAwayEnabled, withWalkAway,
 } from "./Settings";
 import { SETTINGS_SECTIONS, settingsLink, type SettingsSection } from "../settingsSections";
@@ -100,6 +101,59 @@ describe("reprocessNudgeText", () => {
     });
     expect(msg).toContain("3 targets were");
     expect(msg).toContain("Reprocess them");
+  });
+});
+
+describe("reprocessPictureWarning", () => {
+  // Observer issue #903: with "also auto-edit" off, every restacked target's
+  // newest (unedited) result becomes the picture on the wall. Nothing in the
+  // dialog said so — every other sentence in it is about what is *kept*.
+  const base = {
+    current_version: "0.447.1", outdated: 3, up_to_date: 1, total_targets: 5,
+    finished_pictures: 4, finished_pictures_stale_only: 2,
+  };
+
+  it("says nothing when the results will be auto-edited anyway", () => {
+    expect(reprocessPictureWarning(base, { staleOnly: true, autoEdit: true }))
+      .toBeNull();
+  });
+
+  it("says nothing when no target displays a finished picture", () => {
+    expect(reprocessPictureWarning(
+      { ...base, finished_pictures: 0, finished_pictures_stale_only: 0 },
+      { staleOnly: false, autoEdit: false },
+    )).toBeNull();
+  });
+
+  it("stays silent on a backend that doesn't send the counts", () => {
+    expect(reprocessPictureWarning(
+      { current_version: "0.1.0", outdated: 3, up_to_date: 1, total_targets: 5 },
+      { staleOnly: false, autoEdit: false },
+    )).toBeNull();
+    expect(reprocessPictureWarning(undefined, { staleOnly: false, autoEdit: false }))
+      .toBeNull();
+  });
+
+  it("quotes the count for the scope the user actually chose", () => {
+    const all = reprocessPictureWarning(base, { staleOnly: false, autoEdit: false });
+    expect(all).toContain("4 of your targets");
+    const stale = reprocessPictureWarning(base, { staleOnly: true, autoEdit: false });
+    expect(stale).toContain("2 of your targets");
+  });
+
+  it("names the consequence and where the edits went, and offers the fix", () => {
+    const msg = reprocessPictureWarning(base, { staleOnly: false, autoEdit: false });
+    expect(msg).toContain("flat, unstretched stack");
+    expect(msg).toContain("History");
+    expect(msg).toContain("Turn this switch on");
+  });
+
+  it("reads naturally for a single target", () => {
+    const msg = reprocessPictureWarning(
+      { ...base, finished_pictures: 1 }, { staleOnly: false, autoEdit: false },
+    );
+    expect(msg).toContain("1 of your targets currently shows");
+    expect(msg).not.toContain("show a finished");
   });
 });
 
@@ -345,6 +399,63 @@ describe("Maintenance — outdated-images nudge", () => {
   });
 });
 
+describe("Maintenance — the wall-picture warning (#903)", () => {
+  // A restack is saved as a new result and the newest result is the picture
+  // every wall shows, so with "also auto-edit" off a finished target goes back
+  // to a flat linear stack. The panel and the confirm dialog both have to say
+  // so — "your existing edits are untouched" is true and about something else.
+  const withFinished = {
+    current_version: "0.81.3", outdated: 3, up_to_date: 0, total_targets: 3,
+    finished_pictures: 3, finished_pictures_stale_only: 2,
+  };
+
+  it("warns in the panel, in the scope the toggle is set to", async () => {
+    vi.spyOn(client.api, "reprocessStatus").mockResolvedValue(withFinished);
+    renderMaintenance();
+    // Outdated-only is the default scope → the stale-only count.
+    await waitFor(() =>
+      expect(screen.getByText(/2 of your targets currently show a finished/))
+        .toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText(/Only targets not already stacked on this version/));
+    await waitFor(() =>
+      expect(screen.getByText(/3 of your targets currently show a finished/))
+        .toBeInTheDocument());
+  });
+
+  it("withdraws the warning once the auto-edit switch is on", async () => {
+    vi.spyOn(client.api, "reprocessStatus").mockResolvedValue(withFinished);
+    renderMaintenance();
+    await waitFor(() =>
+      expect(screen.getByText(/currently show a finished/)).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText(/auto-edit each result into a finished picture/));
+    await waitFor(() =>
+      expect(screen.queryByText(/currently show a finished/)).toBeNull());
+  });
+
+  it("puts the consequence in the confirm dialog too", async () => {
+    vi.spyOn(client.api, "reprocessStatus").mockResolvedValue(withFinished);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderMaintenance();
+    await waitFor(() =>
+      expect(screen.getByText(/currently show a finished/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
+
+    expect(confirm).toHaveBeenCalled();
+    const text = String(confirm.mock.calls[0][0]);
+    expect(text).toContain("flat, unstretched stack");
+    // …and the promises it already made are still there, not replaced.
+    expect(text).toContain("nothing is deleted or overwritten");
+  });
+
+  it("says nothing on a library with no finished pictures", async () => {
+    renderMaintenance();  // the default mock sends no finished_pictures at all
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Reprocess .* targets/ }))
+        .toBeInTheDocument());
+    expect(screen.queryByText(/currently show a finished/)).toBeNull();
+  });
+});
+
 describe("Maintenance — reprocess everything", () => {
   it("does nothing when the confirm is declined", () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
@@ -411,33 +522,6 @@ describe("Maintenance — reprocess everything", () => {
 
     // Still outdated-only by default, now with the auto-edit opted in.
     await waitFor(() => expect(call).toHaveBeenCalledWith(true, false, true));
-  });
-
-  it("names what leaving the auto-edit switch off does to the displayed picture", async () => {
-    // Issue #903: the newest result is the picture the Library, life list and sky
-    // map show, so a batch with this switch off changed every finished picture on
-    // the wall — while the dialog's "nothing is lost" (true: the edits stay on
-    // their own results) read as "nothing changes". The choice has to name it.
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    renderMaintenance();
-    fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
-
-    const text = String(confirm.mock.calls[0][0]);
-    expect(text).toMatch(/flat linear stack/);
-    expect(text).toMatch(/newest result is what your Library/);
-    // …and that the app carries an already-finished picture forward for you.
-    expect(text).toMatch(/don't go flat/);
-  });
-
-  it("drops that warning once the auto-edit switch is on", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    renderMaintenance();
-    fireEvent.click(screen.getByLabelText(/auto-edit each result into a finished picture/));
-    fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
-
-    const text = String(confirm.mock.calls[0][0]);
-    expect(text).toMatch(/opens as a finished picture/);
-    expect(text).not.toMatch(/don't go flat/);
   });
 
   it("surfaces the already-running case", async () => {
