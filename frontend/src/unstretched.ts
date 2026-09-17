@@ -1,0 +1,55 @@
+/** "This picture hasn't been stretched yet" — the copy, shared by both walls.
+ *
+ * A linear master and a finished picture are both a dark-ish rectangle on a
+ * card, and the only difference is that one of them has had its histogram
+ * stretched. v0.448.0 put that on the Library wall; the Gallery is the other
+ * wall, and the one where people actually *look* at pictures rather than
+ * navigate past them.
+ *
+ * The sentences live here rather than in either route so the two surfaces cannot
+ * drift into saying different things about the same picture — the same
+ * arrangement `samplesPerPixel.ts` and `weightingHint.ts` use. `Library.tsx`
+ * re-exports `UNSTRETCHED_HINT` so its own tests keep importing it from there.
+ */
+
+/** The plain-language sentence behind the "Not stretched yet" chip.
+ *
+ * Deliberately says what to *do* — the Library card it was written for already
+ * links to the target, and the one-click Auto is one screen further in.
+ */
+export const UNSTRETCHED_HINT =
+  "This is the stack straight out of the stacker, so almost all of it is "
+  + "squashed into the darkest part of the range. Open it and press Auto to "
+  + "stretch it into a finished picture — it's reversible.";
+
+/** The chip's label. One string, so the two walls read identically. */
+export const UNSTRETCHED_LABEL = "Not stretched yet";
+
+/** The Gallery's variant of the hint, which can name the button that fixes it.
+ *
+ * The Library card has to say the vaguer "open it": the whole card is one
+ * `<Link>` to the target, and the run's editor is a screen further in. A Gallery
+ * card already carries an **Edit image** button straight to that run's editor —
+ * which, since v0.390.0, opens on Auto rather than on a nudge to press it — so
+ * the honest hint here points at the control already on the card.
+ *
+ * That, rather than a clickable chip, is this surface's answer to the "one-click
+ * deep link" the feature's next-slices entry asked for: the one click exists, and
+ * a second link to the same place would be the kind of duplicate surface the
+ * owner's standing clutter complaint is about.
+ */
+export const UNSTRETCHED_GALLERY_HINT =
+  "This is the stack straight out of the stacker, so almost all of it is "
+  + "squashed into the darkest part of the range. Press \"Edit image\" below — "
+  + "the editor starts you off with Auto, and it's reversible.";
+
+/** Should the chip render for this run?
+ *
+ * Only on an explicit `false`. `undefined`/`null` is "the backend didn't say",
+ * which is what an older build serves and what a run the endpoint skipped looks
+ * like — and a chip that appears because a field is *missing* would accuse every
+ * picture on an upgrading install of being unfinished.
+ */
+export function showsUnstretchedChip(finished: boolean | null | undefined): boolean {
+  return finished === false;
+}

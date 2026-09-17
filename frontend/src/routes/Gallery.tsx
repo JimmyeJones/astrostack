@@ -22,6 +22,7 @@ import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
 import { UnexportedEditBadge } from "../components/UnexportedEditBadge";
+import { UnstretchedBadge } from "../components/UnstretchedBadge";
 import { FrameCountBadge } from "../components/target/FrameCountBadge";
 import {
   RejectionBadge, combineMethodKey, COMBINE_METHOD_LABELS, type CombineMethod,
@@ -464,6 +465,11 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
             never-exported edit isn't in it — say so here too, not just on
             History and the Target hero. */}
         <UnexportedEditBadge show={item.unexported_edit} />
+        {/* …and the case *before* an edit exists at all: this run has no finished
+            picture, so the thumbnail is the linear stack's plain auto-stretch.
+            The two are different states and never both true — an unexported edit
+            means a recipe was saved, which is what makes a run finished. */}
+        <UnstretchedBadge finished={item.finished} />
         <FrameCountBadge
           nFramesUsed={item.n_frames_used}
           fieldFulls={item.field_fulls}

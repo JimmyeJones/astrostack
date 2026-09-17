@@ -2482,16 +2482,28 @@ off by default. Don't re-file it.)*
   idea as filed: it chips only the cards that need something, never "Finished"** — a chip on the nine in ten
   that are fine is a wall of badges saying nothing, and clutter is the owner's standing complaint (AGENTS.md
   §1). Don't re-file that half. Full entry in [`SHIPPED.md`](SHIPPED.md).
-  (a) **The same chip on Gallery cards** — the other wall, and the one where people actually *look* at
-  pictures. The endpoint already answers it; this is `Gallery.tsx` reading the same query. Smallest of the
-  three.
+  (a) ~~**The same chip on Gallery cards**~~ — **✅ SHIPPED v0.448.2, and NOT off the same query.** The slice as
+  filed said "`Gallery.tsx` reading the same query", and that would have been wrong: `/api/unstretched-pictures`
+  answers per **target**, about the one run it displays, while the Gallery lists **every run of every target** —
+  so it would have badged each target's displayed run and said nothing at all about the older linear runs beside
+  it, on the page whose whole job is looking at pictures. It is instead a per-run `GalleryItem.finished`, off a
+  new `finishedpicture.run_is_a_finished_picture_from` that takes the recipe row `_gallery_item` had already read
+  for `unexported_edit` (so the field costs no extra DB read on the one endpoint whose meta reads are counted);
+  the `proj`-taking form is now a wrapper over it, and a test asserts the two can never answer differently.
+  Shared copy moved to `frontend/src/unstretched.ts` + `components/UnstretchedBadge.tsx`.
   (b) **The idea's optional "Thin — keep shooting" state.** A genuinely different question (depth, not
   stretch), and it should be worded from the per-pixel depth that landed in v0.447.3 — *not* from
   `panel_depth`, which is the thinnest pointing cluster and reads ~0.10× the truth on this owner's mosaics.
   Check what the Target page's readiness card already says before adding a second voice on the wall.
-  (c) **A one-click deep link from the chip to that run's Auto.** Not done in the first slice because the
-  Library card is already a `<Link>` and an anchor inside an anchor is invalid HTML — it needs the card's
-  click target restructured, which is a bigger change than the chip and should not ride along with it.
+  (c) **A one-click deep link from the chip to that run's Auto** — **answered on the Gallery (v0.448.2) without
+  building it; still open on the Library card only.** On a Gallery card the one click already exists: an **Edit
+  image** button straight to `/targets/<safe>/edit/<run_id>`, which since v0.390.0 opens *on* Auto rather than on
+  a nudge to press it. So that chip's hint names that button instead, and a second link to the same place was
+  declined as exactly the duplicate surface the owner's standing clutter complaint is about. What is left is the
+  **Library** card, where the original blocker stands unchanged: the whole card is one `<Link>` to the target, an
+  anchor inside an anchor is invalid HTML, and the run id is not even on `TargetOut` — so a deep link there needs
+  both the card's click target restructured *and* a run id served. Weigh that against the fact that the card's
+  own link already reaches the target page, one click from the picture.
 
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
@@ -3425,6 +3437,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.448.2** — 🌟 NEW BEGINNER FEATURE (PRIORITY 3), slice (a) of the "finished / not stretched / thin" signal, plus (c) answered for this surface: **the Gallery wall badges the runs whose picture is still a flat linear stack, per *run*.** New `GalleryItem.finished` off new `finishedpicture.run_is_a_finished_picture_from` (fed the recipe row `_gallery_item` already reads, so no extra DB read), rendered by `components/UnstretchedBadge.tsx`; the two walls' copy is now one module, `frontend/src/unstretched.ts`. The filed slice's "read the same query" would have been wrong — that endpoint answers per target and the Gallery lists every run — and the hint names the **Edit image** button already on the card rather than adding a second link to it. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.448.1** — 🟠 BUG (trust — PRIORITY 1-adjacent (the displayed picture) / 3, observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903)): **a reprocess no longer flattens a picture the app itself finished — it *prevents* the regression v0.447.2 announced.** New `pipeline._picture_is_auto_finished` asks, per target and before the restack, whether the run `finishedpicture.displayed_picture_run` picks carries the app's own `editor_auto_baked_look` stamp (and no cover is pinned); where it does, the fresh run gets the same Auto finish, counted apart as `kept_finished` and worded by `reprocessSummary`. This is the open entry's own "cheaper alternative", for the subset where re-deriving Auto is unambiguously right; carrying a **hand-saved** recipe forward stays open there (its crop may not fit the new canvas). No cover semantics touched.
 - **v0.448.0** — 🌟 NEW BEGINNER FEATURE (PRIORITY 3): the Library wall badges the pictures that are still flat linear stacks — `GET /api/unstretched-pictures` + `Library.tsx`'s "Not stretched yet" chip, off one shared definition (`webapp/finishedpicture.py`). From observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903). Full entry, and the three next slices, in [`SHIPPED.md`](SHIPPED.md). (#906)
 - **v0.447.3** — 🟡 BUG (trust, PRIORITY 3): the Stack form's "about N subs on each patch of sky" stops quoting the thinnest pointing cluster — new `pixel_depth` on `/stack-estimate` (`routers/stack._pixel_depth` → `field_fulls_of_sky`); `panel_depth` keeps its meaning for method selection. Observer issue [#901](https://github.com/JimmyeJones/astrostack/issues/901). Full entry in [`SHIPPED.md`](SHIPPED.md). (#906)

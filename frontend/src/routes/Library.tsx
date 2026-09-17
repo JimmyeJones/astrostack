@@ -14,6 +14,7 @@ import { MergeSuggestionsCard } from "../components/MergeSuggestionsCard";
 import { QueryError } from "../components/QueryError";
 import { UploadFits } from "../components/UploadFits";
 import { formatIntegration } from "../format";
+import { UNSTRETCHED_HINT, UNSTRETCHED_LABEL } from "../unstretched";
 
 // Target-card exposure. Delegates to the app-wide `formatIntegration` so the
 // Library card speaks the same integration-time vocabulary as every other
@@ -81,16 +82,11 @@ function sortTargets(targets: Target[], key: SortKey): Target[] {
   }
 }
 
-/** The plain-language sentence behind the "Not stretched yet" chip.
- *
- * Exported so the copy is testable on its own and so no second surface has to
- * re-word it. Deliberately says what to *do* — the chip is on a card that
- * already links to the target, and the one-click Auto is one screen further in.
- */
-export const UNSTRETCHED_HINT =
-  "This is the stack straight out of the stacker, so almost all of it is "
-  + "squashed into the darkest part of the range. Open it and press Auto to "
-  + "stretch it into a finished picture — it's reversible.";
+// The chip's copy moved to `../unstretched` when the Gallery gained the same
+// chip (v0.448.2) — one place, so the two walls cannot drift into saying
+// different things about the same picture. Re-exported here because that is where
+// it was first published and where this route's own tests import it from.
+export { UNSTRETCHED_HINT };
 
 function TargetCard({ t, unstretched }: { t: Target; unstretched?: boolean }) {
   return (
@@ -125,7 +121,7 @@ function TargetCard({ t, unstretched }: { t: Target; unstretched?: boolean }) {
             owner's standing complaint about this app is clutter. */}
         {unstretched ? (
           <Badge variant="light" color="yellow" title={UNSTRETCHED_HINT}>
-            Not stretched yet
+            {UNSTRETCHED_LABEL}
           </Badge>
         ) : null}
       </Group>
