@@ -568,3 +568,132 @@ def test_the_darks_hot_pixels_are_a_fixed_pattern(tmp_path: Path) -> None:
 def test_an_unknown_kind_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="dark/flat/bias"):
         sample_data.write_sample_calibration_frames(tmp_path / "x", "light")
+
+
+# ---- the deep sample (dogfood tooling) ------------------------------------
+#
+# One field shot many hundreds of times. It exists because the owner's library
+# holds 5,477 subs on one target and 35,894 on another while every other sample
+# here is six per pointing — so any surface whose cost scales with the number of
+# subs had only ever been exercised where nothing can go wrong. v0.455.2 (one DOM
+# row per sub) is what that cost, and it had to be found by reading the code.
+#
+# The tests load a deliberately small deep sample: what is pinned is its shape
+# and its arithmetic, and a 1,200-frame load in the suite would buy neither.
+
+
+def test_the_deep_sample_is_many_subs_of_one_solved_pointing(lib):
+    status = sample_data._load_deep_sample(lib, n_subs=40)
+    assert status.loaded is True
+    assert status.n_frames == 40
+
+    from seestack.io.project import Project
+
+    entry = lib.find_target(sample_data.SAMPLE_DEEP_TARGET_NAME)
+    assert entry is not None
+    proj = Project.open(lib.target_dir(entry))
+    try:
+        frames = list(proj.iter_frames())
+    finally:
+        proj.close()
+
+    assert len(frames) == 40
+    # Every sub usable: a deep target whose subs were rejected or unsolved would
+    # be measuring the *rejection* surfaces, not the depth ones.
+    assert all(f.accept for f in frames)
+    assert all(f.wcs_json for f in frames)
+    assert {(f.width_px, f.height_px) for f in frames} == {
+        (sample_data._DEEP_WIDTH, sample_data._DEEP_HEIGHT)
+    }
+    # One pointing, not a mosaic: the dither is sub-pixel, so every sub's centre
+    # lands within a pixel or two of the others.
+    ras = [f.ra_center_deg for f in frames]
+    assert max(ras) - min(ras) < 0.01
+
+    # …and published to the library row, like a scan — or the Library card reads
+    # "0/0 frames" and the page under test is the empty one again.
+    assert entry is not None
+    refreshed = lib.find_target(sample_data.SAMPLE_DEEP_TARGET_NAME)
+    assert refreshed is not None and refreshed.n_frames == 40
+
+
+def test_the_deep_clock_stays_a_valid_time_past_the_field_samples_limit():
+    """The field sample writes ``DATE-OBS`` as ``22:{10 + index:02d}``, which is
+    correct for six subs and would write ``22:60:00`` at sub 50. A deep sample is
+    hundreds of subs, so it does real arithmetic — pinned here because the bug
+    this replaces is silent (astropy would reject the header, per-frame, deep
+    into a two-minute generation)."""
+    from datetime import datetime
+
+    for index in (0, 49, 50, 599, sample_data._DEEP_N_SUBS - 1):
+        stamp = sample_data._deep_date_obs(index)
+        parsed = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S.000")
+        assert parsed >= datetime(2024, 11, 15, sample_data._DEEP_START_HOUR)
+    # Strictly increasing, at the stated cadence, so night/session views read as
+    # one continuous run rather than a heap at one instant.
+    first = sample_data._deep_date_obs(0)
+    later = sample_data._deep_date_obs(30)
+    assert later > first
+    gap = (datetime.strptime(later, "%Y-%m-%dT%H:%M:%S.000")
+           - datetime.strptime(first, "%Y-%m-%dT%H:%M:%S.000"))
+    assert gap.total_seconds() == 30 * sample_data._DEEP_CADENCE_S
+
+
+def test_the_deep_default_is_past_the_frames_tables_own_render_window():
+    """The whole point is to be at a scale the frontend windows.
+
+    ``FRAME_WINDOW_STEP`` lives in TypeScript and this default lives in Python,
+    so nothing but a check like this notices when one of them moves: raise the
+    window to 2,000 and a "deep" pass silently stops measuring anything, while
+    still printing a cheerful count.
+    """
+    import re
+
+    window_src = (Path(__file__).resolve().parents[2]
+                  / "frontend" / "src" / "frameWindow.ts").read_text(encoding="utf-8")
+    m = re.search(r"FRAME_WINDOW_STEP\s*=\s*(\d+)", window_src)
+    assert m is not None, "FRAME_WINDOW_STEP is no longer a literal in frameWindow.ts"
+    step = int(m.group(1))
+    assert sample_data._DEEP_N_SUBS >= 3 * step, (
+        f"the deep sample's {sample_data._DEEP_N_SUBS} subs are no longer "
+        f"comfortably past the frames table's {step}-row window"
+    )
+
+
+def test_the_deep_sample_is_a_fourth_separate_target_and_is_swept_by_one_remove(
+    lib, monkeypatch,
+):
+    monkeypatch.setattr(sample_data, "_DEEP_N_SUBS", 8)
+    field = sample_data.load_sample(lib)
+    deep = sample_data.load_sample(lib, shape="deep")
+    assert deep.safe != field.safe
+    assert deep.n_frames == 8
+
+    # Idempotent, like every other shape: a double-tap returns it unchanged.
+    assert sample_data.load_sample(lib, shape="deep").safe == deep.safe
+
+    dirs = [lib.targets_dir / s.safe for s in (field, deep)]
+    assert all(d.exists() for d in dirs)
+    assert sample_data.remove_sample(lib) is True
+    for shape in ("field", "mosaic", "big", "deep"):
+        assert sample_data.get_sample_status(lib, shape=shape).loaded is False
+    assert not any(d.exists() for d in dirs)
+
+
+def test_api_loads_the_deep_sample_on_request(client, monkeypatch):
+    monkeypatch.setattr(sample_data, "_DEEP_N_SUBS", 6)
+    body = client.post("/api/sample", json={"shape": "deep"}).json()
+    # The other three are untouched — this is a fourth target, not a replacement.
+    assert body["loaded"] is False
+    assert body["mosaic_loaded"] is False
+    assert body["big_loaded"] is False
+    assert body["deep_loaded"] is True
+    assert body["deep_n_frames"] == 6
+    deep_safe = body["deep_safe"]
+    assert client.get(f"/api/targets/{deep_safe}").status_code == 200
+
+    status = client.get("/api/sample").json()
+    assert status["deep_loaded"] is True and status["deep_safe"] == deep_safe
+    gone = client.delete("/api/sample").json()
+    assert gone["deep_loaded"] is False and gone["deep_safe"] is None
+    assert client.get(f"/api/targets/{deep_safe}").status_code == 404

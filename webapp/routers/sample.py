@@ -34,18 +34,25 @@ class SampleStatusOut(BaseModel):
     big_loaded: bool = False
     big_safe: str | None = None
     big_n_frames: int = 0
+    # The fourth, opt-in demo: one field shot many hundreds of times, so a
+    # surface whose cost scales with the *number of subs* is finally exercised
+    # at the owner's magnitude. Additive and defaulted, same as the two above.
+    deep_loaded: bool = False
+    deep_safe: str | None = None
+    deep_n_frames: int = 0
 
 
 class SampleLoadIn(BaseModel):
     """Which demo to build. Absent body → the single field, as before."""
 
-    shape: Literal["field", "mosaic", "big"] = "field"
+    shape: Literal["field", "mosaic", "big", "deep"] = "field"
 
 
 def _to_out(
     status: sample_data.SampleStatus,
     mosaic: sample_data.SampleStatus | None = None,
     big: sample_data.SampleStatus | None = None,
+    deep: sample_data.SampleStatus | None = None,
 ) -> SampleStatusOut:
     return SampleStatusOut(
         loaded=status.loaded, safe=status.safe, n_frames=status.n_frames,
@@ -55,6 +62,9 @@ def _to_out(
         big_loaded=bool(big and big.loaded),
         big_safe=big.safe if big else None,
         big_n_frames=big.n_frames if big else 0,
+        deep_loaded=bool(deep and deep.loaded),
+        deep_safe=deep.safe if deep else None,
+        deep_n_frames=deep.n_frames if deep else 0,
     )
 
 
@@ -66,6 +76,7 @@ def sample_status(request: Request) -> SampleStatusOut:
             sample_data.get_sample_status(lib),
             sample_data.get_sample_status(lib, shape="mosaic"),
             sample_data.get_sample_status(lib, shape="big"),
+            sample_data.get_sample_status(lib, shape="deep"),
         )
     finally:
         lib.close()
@@ -81,6 +92,7 @@ def load_sample(request: Request, body: SampleLoadIn | None = None) -> SampleSta
             sample_data.get_sample_status(lib),
             sample_data.get_sample_status(lib, shape="mosaic"),
             sample_data.get_sample_status(lib, shape="big"),
+            sample_data.get_sample_status(lib, shape="deep"),
         )
     finally:
         lib.close()
@@ -95,6 +107,7 @@ def remove_sample(request: Request) -> SampleStatusOut:
             sample_data.get_sample_status(lib),
             sample_data.get_sample_status(lib, shape="mosaic"),
             sample_data.get_sample_status(lib, shape="big"),
+            sample_data.get_sample_status(lib, shape="deep"),
         )
     finally:
         lib.close()
