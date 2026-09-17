@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { loadDismissedSig, saveDismissedSig } from "../../dismissal";
-import { incomingLagCause, waitedFor } from "../../importWaiting";
+import { incomingLagCause, incomingLagUnreadable, waitedFor } from "../../importWaiting";
 
 const DISMISS_KEY = "astrostack.dashboard.incomingLagDismissed";
 
@@ -59,6 +59,18 @@ const NAMED = 3;
  * disagree — and the note then says what it uniquely knows (how many, which
  * folders, how long) and points at the Jobs page rather than at a scan that
  * would not help.
+ *
+ * **And the other case where a scan would not help: a file that cannot be read.**
+ * Comparing files on disk with frame rows is the right question and is blind to
+ * *why* a row is missing. A damaged or headerless FITS has no row **permanently**,
+ * so it counts as waiting forever and this note has been telling the owner, since
+ * May and about six real files, that they "haven't been imported yet" over a
+ * button that can never import them. `n_unreadable` (v0.452.1) is that count, off
+ * the record the scan leaves behind rather than by opening anything, and it moves
+ * the note by exactly as much as it should: a mixed folder keeps its headline and
+ * gains a sentence, an all-damaged one stops calling itself a delay and withdraws
+ * the scan. The dismissal signature carries the split too, so a note dismissed as
+ * "waiting" speaks again once it turns out to be damage.
  */
 export function IncomingLagNote() {
   const { data } = useQuery({
@@ -96,7 +108,8 @@ export function IncomingLagNote() {
   const items = data.items ?? [];
   // The signature carries the counts, so importing some and leaving others makes
   // the note speak again about what is left rather than staying quiet.
-  const sig = `${waiting}|${items.map((i) => `${i.folder}:${i.n_waiting}`).join(",")}`;
+  const sig = `${waiting}|${data.n_unreadable ?? 0}|`
+    + items.map((i) => `${i.folder}:${i.n_waiting}:${i.n_unreadable ?? 0}`).join(",");
   if (sig === dismissedSig) return null;
 
   const named = items.slice(0, NAMED);
@@ -104,9 +117,18 @@ export function IncomingLagNote() {
     (worst, it) => (it.still_hours > worst ? it.still_hours : worst), 0);
   const sat = waitedFor(longest);
   const cause = incomingLagCause(queue.data?.waiting);
-  const title = waiting === 1
+  // Files the app has opened and cannot read. They count as waiting forever, so
+  // the title and the button above are both wrong about them — and since
+  // v0.452.0 the Jobs page says so out loud, which makes it a contradiction
+  // rather than merely a wrong sentence. When *every* waiting file is one of
+  // these, the note is not about a delay at all and stops pretending to be.
+  const damaged = incomingLagUnreadable(waiting, data.n_unreadable);
+  const title = damaged?.title ?? (waiting === 1
     ? "A sub in your incoming folder hasn't been imported yet"
-    : `${waiting.toLocaleString()} subs in your incoming folder haven't been imported yet`;
+    : `${waiting.toLocaleString()} subs in your incoming folder haven't been imported yet`);
+  // A scan cannot import a file it cannot read, so the offer is withdrawn only
+  // when there is nothing else left for it to pick up.
+  const scanHelps = cause.scanHelps && !damaged?.all;
 
   return (
     <Alert
@@ -121,12 +143,18 @@ export function IncomingLagNote() {
         {data.n_folders > 1 ? `, across ${data.n_folders} folders` : ""}
         {sat ? `, and ${waiting === 1 ? "it has" : "they have"} been there for ${sat}` : ""}.
       </Text>
-      {cause.reassurance ? (
+      {cause.reassurance && !damaged?.all ? (
         <Text size="sm" mt={4}>{cause.reassurance}</Text>
       ) : null}
-      <Text size="sm" mt={4}>{cause.sentence}</Text>
+      {/* On an all-damaged note the cause sentence is simply untrue ("a scan is
+          what picks these up"), so it stands aside for the one that is. On a
+          mixed note both are true and both are said, the delay first. */}
+      {damaged?.all ? null : <Text size="sm" mt={4}>{cause.sentence}</Text>}
+      {damaged ? (
+        <Text size="sm" mt={4}>{damaged.sentence}</Text>
+      ) : null}
       <Group gap="sm" mt="xs" wrap="wrap">
-        {cause.scanHelps ? (
+        {scanHelps ? (
           <Button
             size="compact-xs" variant="light" color="yellow"
             onClick={() => scan.mutate()} loading={scan.isPending}
@@ -144,7 +172,9 @@ export function IncomingLagNote() {
         {named.map((it) => (
           <Text key={it.folder || "(loose files)"} size="xs" c="dimmed">
             {`${it.folder || "loose in the folder"} · ${it.n_waiting.toLocaleString()} of `
-              + `${it.n_on_disk.toLocaleString()} not imported`}
+              + `${it.n_on_disk.toLocaleString()} not imported`
+              + ((it.n_unreadable ?? 0) > 0
+                ? ` (${(it.n_unreadable ?? 0).toLocaleString()} unreadable)` : "")}
           </Text>
         ))}
         {/* Deliberately not a link to a list nobody wrote: no screen in the app

@@ -168,6 +168,28 @@ def _is_same_dir(a: Path, b: Path) -> bool:
         return False
 
 
+def _remember_unreadable_subs(
+    lib: Library, scan: ScanResult, settings: Settings
+) -> None:
+    """Write this scan's unreadable files into the registry, by folder.
+
+    The Dashboard's lag note is handed the watcher's listing and may not open a
+    single file under ``incoming/`` (AGENTS.md §10), so it has no way of its own
+    to tell "not imported yet" from "cannot ever be imported". The scan has just
+    opened every one of them, so the scan says.
+
+    Best-effort by construction, exactly like :func:`_remember_scan_skips`: a
+    scan that ingested the owner's frames must never be reported as failed
+    because a note about it could not be written."""
+    from webapp.unreadablesubs import folders_from_scan, remember_unreadable
+
+    try:
+        remember_unreadable(
+            lib, folders_from_scan(scan, str(settings.resolved_incoming_dir)))
+    except Exception:  # noqa: BLE001 — never fail a scan over a side note
+        log.warning("could not remember this scan's unreadable files", exc_info=True)
+
+
 def _remember_scan_skips(
     lib: Library, scan: ScanResult, *, single_target: bool
 ) -> None:
@@ -291,6 +313,16 @@ def _pipeline_body(
             if unreadable:
                 summary["unreadable"] = sum(int(u["n"]) for u in unreadable)
                 summary["unreadable_targets"] = unreadable
+            # …and remembered, for the same reason the skipped folders below are.
+            # The Dashboard's "some of your subs never made it into your library"
+            # note compares files on disk with frame rows, and a file that cannot
+            # be read is missing a row *permanently* — so without this it reads
+            # as forever-waiting and offers a scan that can never help. Only a
+            # whole-library scan may write the record: it re-tries every file, so
+            # its answer is complete, where a scoped scan has only looked at one
+            # folder. See ``webapp/unreadablesubs.py``.
+            if not single_target:
+                _remember_unreadable_subs(lib, scan, settings)
             # Folders the Seestar convention passed over as "the device's own
             # finished picture" that hold files its naming can't vouch for — i.e.
             # possibly a user's own raw subs sitting in a plainly-named folder
