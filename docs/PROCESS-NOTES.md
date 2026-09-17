@@ -18,6 +18,69 @@ is a queue.
 
 ---
 
+## 2026-09-17 — the caption class had a fifth surface, and the way to find it was to stop following the callers
+
+*(Builder, branch `claude/sweet-babbage-y1a42c`, the run that shipped v0.453.3. A record, not a task.)*
+
+**How the finding was made, because the method is the transferable part.** The previous run's record
+generalised its own finding as *"a claim that only leaves the app — a caption, a filename, the text handed to
+an OS share sheet — is invisible to every probe that reads the DOM."* True, and it is not what hid this one.
+v0.453.0, .1 and .2 were each found by walking `SavePictureMenu`'s callers outward, and that walk **cannot
+reach a surface that does not call it**. The editor builds its share caption server-side, in its own job
+(`pipeline.submit_editor_share` → `seestack.sharecard.share_blurb`), and shows it in its own dimmed line. So
+the closing sentence of v0.453.2's entry — *"the fourth and last"* — was a statement about the four surfaces
+the sweep's own method could see.
+
+**What actually found it:** grepping for the *sinks* rather than the source — every `navigator.share` /
+`navigator.clipboard` / `sharePicture(` call site in the frontend, and every production caller of the Python
+caption builder (`share_blurb` has exactly one). The editor fell out immediately. **The rule worth keeping:
+when you believe you have swept a class, enumerate it from the far end.** A sweep that walks outward from one
+component proves something about that component's callers and nothing about the class.
+
+**Two neighbours were checked and are correctly NOT in this class — recorded so nobody re-picks them.**
+`share.shareStillText` (a Moon/Sun video still: the app never learns when the clip was *shot*, and that
+function exists in order to say so rather than guess) and the two reel cards, which hand out an animation of a
+stack building up, not a picture. `_nameplate_fields` and the keepsake strip bake their own compact text onto
+the pixels and already read the run's `capture_start_utc`/`capture_end_utc` first, with the header card as the
+fallback — the date trap that bit three times is closed there too.
+
+**One divergence was found, measured against the bar, and deliberately left alone.** The editor hands the OS
+share sheet the server's on-disk filename (`M_42_stack_share_20260917_143012.jpg`) where every other surface
+hands `sharePictureText`'s slug (`orion-nebula.jpg`). It is the same shape as the caption divergence one field
+over, and it is **not** the same kind of defect: a caption is a *claim about the picture* and the two claims
+disagreed, whereas a filename is a handle, and neither name is wrong. Changing only the share sheet's would
+also leave the editor's own download — which takes its name from the server's `Content-Disposition` — spelling
+it the other way, i.e. trading one inconsistency for a narrower one. **Decided once, here, rather than
+re-litigated:** below the bar; do not file it as a bug.
+
+**Dogfood: `--mosaic --editor`, page probe CLEAN, editor drive stopped early and deliberately.** The page
+sweep passed on the field sample at 1440 px and 420 px with the changed build in — `nothing overflowing, no
+console errors` — and the editor page itself measured **3,143 px** on a phone, inside the shipped standings
+(`/tonight` 3,635, the Target page 3,287, `/` 3,115, `/life-list` 3,094). Auto's mosaic trim came out at
+**7.9 %**, unchanged, and the mosaic's server-side paragraph read consistently (the panel map's "about 30 s
+behind at the top-right" and the health card's "23 % of the picture has 3 subs where most has 6 … it evens
+out on its own" are the same fact twice, which is v0.406.2's fix holding). The editor drive re-rendered **15
+of 21 ops** with no console error before it was stopped: on this box each op was taking ~2 minutes, and it was
+contending with the release suite for the same four cores. **Stopped on purpose, and the reasoning is the
+honest half of this note** — the drive exercises op previews, and the change under test touches only the
+Export panel's caption line and the share mutation, so the marginal evidence was low and the cost to the gate
+was high. A run that needs the full drive should give it the box to itself.
+
+**The `pytest` / dogfood serialisation rule (AGENTS.md §7) is about the vite build, and it has a second half.**
+The stated hazard — the dogfood's `vite build` emptying `webapp/static` under `create_app()` — is spent once
+the build has run, so a later `pytest` is *correct*. What is not free is the **CPU**: this box has **4 cores**,
+`-n 4` already saturates them, and the editor drive wants one for a browser and one for the app. Running both
+visibly slowed each. Serialise them for throughput, not only for correctness.
+
+**And a trap of my own, recorded because it changed a decision.** I read the two jobs as pathologically slow
+and stopped the editor drive partly on that basis. They were not: `ps -o etime,time` on the `-n 4` workers
+showed ~90–100 % CPU each and an elapsed time entirely consistent with the baseline's 11½ minutes. What was
+wrong was **my** sense of elapsed time — I was polling a background wait rather than waiting on it, so a
+sequence of checks felt like an hour and was not. **Never infer "slow" from how many times you have looked;
+read `etime`/`time` off the process, or the suite's own summary line.** (The stand-down on the drive still
+holds on its own merits — low marginal evidence for this change — but the contention figure is the one number
+in this block that is a judgement rather than a measurement, so it is stated as one.)
+
 ## 2026-09-17 — `--big --editor` dogfood after v0.453.0: CLEAN, and the finding came from a *menu*, not a page
 
 *(Builder, branch `claude/sweet-babbage-f4u6pf`. A QA sweep record, not a task — filed here per the three-file
