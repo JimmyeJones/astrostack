@@ -87,6 +87,39 @@ coverage through `stale_crop`), 21 tests, both gates fail-before. **The premise 
 population the displayed picture was *already* the plain autostretch, because nothing bakes a saved recipe. So
 the feature was not preserving a picture, it was putting a look on the wall that had never been there —
 unprompted, in a batch operation. Dropped rather than shipped.
+## v0.448.3 — 2026-09-17 — the Moon caution stops hiding the half that carries the advice
+
+*(Builder, branch `claude/sweet-babbage-owmvv3` — PRIORITY 3 (friendliness). **Found by a `--mosaic` dogfood
+pass**, on the page a beginner checks on a phone, in the one element on it that warns them. Frontend-only: no
+endpoint, config, schema, on-disk, API-shape or default change, and no new element on a page the owner already
+calls busy.)*
+
+**The bug, as the probe measured it.** `[phone] /tonight: CLIPPED LABEL 79px box vs 166px word — "Moon 92%, up
+part of the night" (scrolling cannot reveal it)`, on both legs of the pass. `PlanWeekCard` rendered the whole
+caution as a single Mantine `Badge`, and a badge truncates — so in the "Point at" column of a four-column table
+at 420 px it came out as **"MOON 92%, UP…"** (confirmed in the screenshot before the fix, and after).
+
+**Why that particular clip is worse than an ordinary one.** The words that went are the words that decide the
+recommendation: *up all night* and *up part of the night* are opposite advice about whether to go out, and
+"up…" is exactly as consistent with either. There was no recovering it — a phone has no hover, and an ellipsis
+does not expand. The page is the week planner, and the device is the one it is read on.
+
+**The fix.** New pure `planweek.weekMoonParts` splits the caution where the table can show both halves: the
+number keeps the yellow badge (it is the caution), and the qualifier goes on its own dimmed line beneath it —
+which is the idiom that column's neighbours already use, "71 min" over "peaks 39°" and "Tonight" over
+"2.2 h left". `weekMoonNote` is now *composed from* the parts rather than spelled a second time, so the one-line
+form — still shown as the row's hover `title` — cannot drift from what is drawn. Nothing removed, nothing new on
+the page, and a free-wrapping `Text` cannot clip.
+
+**Verified in the running app, not only in jsdom.** The same `--mosaic` pass that found it reports
+`nothing overflowing, no console errors` afterwards, and the phone screenshot shows "MOON 92%" over "up part of
+the night".
+
+**Tests.** `planweek.test.ts` **+3** (the split's two arms; that `weekMoonNote` equals the composed parts across
+three inputs including the silent one; both forms silent together). `PlanWeekCard.test.tsx` **+1** regression —
+both nights' qualifiers present in full — and its existing Moon assertion **rewritten with the render, not
+weakened**: it used to assert the whole caution as *one* text node, which is precisely the shape that truncated,
+and now asserts each half is its own node *plus* that the one-line form survives on the `title`.
 
 ## v0.448.2 — 2026-09-17 — the Gallery wall says which pictures aren't finished, per run
 
