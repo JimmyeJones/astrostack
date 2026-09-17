@@ -227,3 +227,89 @@ describe("IncomingLagNote", () => {
     expect(screen.queryByTestId("incoming-lag-note")).not.toBeInTheDocument();
   });
 });
+
+describe("IncomingLagNote — files that can't be read", () => {
+  it("stops calling it a delay when every waiting file is damaged", async () => {
+    quietQueue();
+    vi.spyOn(client.api, "getIncomingLag").mockResolvedValue(answer({
+      n_waiting: 6, n_folders: 5, n_unreadable: 6,
+      items: [item({ folder: "M 101_sub", n_on_disk: 40, n_imported: 38,
+                     n_waiting: 2, n_unreadable: 2 })],
+    }));
+    renderNote();
+    expect(await screen.findByText("6 subs in your incoming folder can't be read"))
+      .toBeInTheDocument();
+    expect(screen.getByText(/found no picture data inside/)).toBeInTheDocument();
+    // The whole point: a scan cannot import a file it cannot read, so the button
+    // that promises one is gone.
+    expect(screen.queryByRole("button", { name: "Scan incoming now" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Jobs" })).toBeInTheDocument();
+    // …and the sentence that says a scan is what picks these up goes with it.
+    expect(screen.queryByText(/a scan is what picks these up/))
+      .not.toBeInTheDocument();
+  });
+
+  it("keeps the delay headline and adds a sentence when only some are damaged",
+    async () => {
+      quietQueue();
+      vi.spyOn(client.api, "getIncomingLag").mockResolvedValue(answer({
+        n_waiting: 2259, n_folders: 1, n_unreadable: 3,
+        items: [item({ n_unreadable: 3 })],
+      }));
+      renderNote();
+      expect(await screen.findByText(
+        "2,259 subs in your incoming folder haven't been imported yet",
+      )).toBeInTheDocument();
+      expect(screen.getByText(/3 of these can't be read at all/)).toBeInTheDocument();
+      // Most of them really are waiting, so the retry stays on offer.
+      expect(screen.getByRole("button", { name: "Scan incoming now" }))
+        .toBeInTheDocument();
+      // And the folder line carries the split, so the two numbers can be seen
+      // against each other rather than taken on trust.
+      expect(screen.getByText(/2,259 of 2,572 not imported \(3 unreadable\)/))
+        .toBeInTheDocument();
+    });
+
+  it("reads exactly as before against a backend that sends no count", async () => {
+    quietQueue();
+    vi.spyOn(client.api, "getIncomingLag").mockResolvedValue(answer({
+      n_waiting: 2259, n_folders: 1, items: [item()],
+    }));
+    renderNote();
+    expect(await screen.findByText(
+      "2,259 subs in your incoming folder haven't been imported yet",
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/can't be read/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scan incoming now" }))
+      .toBeInTheDocument();
+  });
+
+  it("speaks again after a dismissal once waiting turns out to be damage",
+    async () => {
+      quietQueue();
+      const lag = vi.spyOn(client.api, "getIncomingLag").mockResolvedValue(answer({
+        n_waiting: 2, n_folders: 1,
+        items: [item({ n_on_disk: 2, n_imported: 0, n_waiting: 2 })],
+      }));
+      const first = renderNote();
+      expect(await screen.findByText(
+        "2 subs in your incoming folder haven't been imported yet",
+      )).toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText("Not now"));
+      await waitFor(() => expect(
+        screen.queryByTestId("incoming-lag-note")).not.toBeInTheDocument());
+      first.unmount();
+
+      // Same two files, same counts — but the scan has since established that
+      // they cannot be read. That is a different thing to say, so the dismissal
+      // must not carry over.
+      lag.mockResolvedValue(answer({
+        n_waiting: 2, n_folders: 1, n_unreadable: 2,
+        items: [item({ n_on_disk: 2, n_imported: 0, n_waiting: 2, n_unreadable: 2 })],
+      }));
+      renderNote();
+      expect(await screen.findByText("2 subs in your incoming folder can't be read"))
+        .toBeInTheDocument();
+    });
+});

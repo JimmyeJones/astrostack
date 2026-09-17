@@ -1,5 +1,187 @@
 # Shipped — the record
 
+## v0.452.2 — 2026-09-17 — the dogfood pass can reach the note it just changed, and the mixed note stops saying one thing twice
+
+*(Builder, branch `claude/sweet-babbage-10p2wj`, found by actually running v0.452.1 in a browser. Tooling +
+copy only — no engine, endpoint, schema, config or default change.)*
+
+**The tooling half.** Both of this run's changes are about a *fault* state: files in `incoming/` the app has
+opened and cannot read. `scripts/agent-dogfood.sh --incoming-lag` seeds only *good* unimported subs, so the
+first pass photographed the healthy branch and the branch this run had actually written was structurally
+unreachable — the missing-observing-site hole (v0.436.1), the click-only Compare modes (v0.440.2) and the
+empty `incoming/` (v0.442.0) a fourth time. The rule generalises one more step: **a state you can only reach
+by putting the app into it is a state no flag will photograph unless the flag puts it there.** This one needs
+*two* things at once — a file that will not parse **and** a whole-library scan that has recorded it (only a
+whole-library scan may write that record) — so seeding a bad file alone would not have been enough either.
+`--incoming-lag` now writes one unreadable sub, scans once, and only then lays down the good waiting ones,
+which leaves the folder in the **mixed** state a real install is in; `DOGFOOD_LAG_DAMAGED=0` gives the
+pre-v0.452.1 shape back and `DOGFOOD_LAG_SUBS=0` reaches the all-damaged branch. The pass prints
+`N of them cannot be read at all` beside the waiting count, so a seeding that silently failed cannot pass
+for the old state.
+
+**The copy half, which only the browser could show.** On the mixed note the new sentence ended *"Nothing else
+is affected, and AstroStack never changes anything in that folder"* — two lines under the note's own
+reassurance, *"Nothing is lost — your subs are safe exactly where they are, and AstroStack never writes to
+that folder."* The board keeps two notes inline, and spending a paragraph of that saying one thing twice is
+exactly the trio v0.444.3 fixed. The clause moved into the all-damaged branch, where the generic reassurance
+stands aside and it is therefore said exactly once; the advice sentence was tightened to one clause in the
+same pass. Two tests now pin both directions — the all-damaged branch contains it, the mixed branch must not.
+
+**Verified in the running app, both branches.** `nothing overflowing, no console errors` at 1440 px and
+420 px on two passes; phone `/` 2,726 px healthy → 2,921 px with the note's extra paragraph, which is one
+paragraph and no new element. Sweep record in [`PROCESS-NOTES.md`](PROCESS-NOTES.md).
+
+## v0.452.1 — 2026-09-17 — the Dashboard stops offering a scan that can never help
+
+*(Builder, branch `claude/sweet-babbage-10p2wj`, filed and built in the same run as v0.452.0 because that fix
+is what turns this from a wrong sentence into a contradiction. PRIORITY 3 (friendliness / trust). Additive:
+one engine field, one new `library_meta` key, two defaulted response fields, and copy that self-hides. No
+config, schema, on-disk, endpoint-shape or default change.)*
+
+**The bug.** `GET /api/incoming-lag` answers *"are there subs on disk that my library has no frame row
+for?"* by comparing the watcher's listing against the `frames` tables. That is the right question and it is
+blind to *why* a row is missing — and the note it feeds was written for the cause that fixes itself. It
+says, on the Dashboard:
+
+    2,259 subs in your incoming folder haven't been imported yet
+    … AstroStack normally imports new files by itself within a few minutes …
+    so a scan is what picks these up.
+    [ Scan incoming now ]
+
+A file whose FITS header will not parse has no frame row **permanently**. It counts as waiting, it will
+count as waiting after the scan, and it will count as waiting forever. On the owner's own library that is
+**six files across five folders, since May** — a note that has been promising a fix no scan can deliver for
+four months, with a button that cannot deliver it.
+
+v0.452.0 made the Jobs page say plainly that those six could not be read. That is what makes this worth a
+version rather than a note: two of the app's own screens, about the same six files, now disagree about
+whether anything is waiting — the "could a beginner hold both of these at once?" failure AGENTS.md §7 keeps
+finding in the gap *between* two true-sounding claims.
+
+**Why the answer had to be remembered rather than derived.** Deciding whether a file is readable means
+*opening* it, and the lag note's entire design is that nothing it does walks, opens or `stat`s anything under
+`incoming/` (AGENTS.md §10) — it is handed the watcher's existing listing. The scan has already opened every
+one of these files. So the scan writes down what it found, in the registry's existing `library_meta`
+key/value table, exactly as `webapp/skipped_folders.py` remembers its own finding: no schema change, and a
+build that predates the key never asks for it.
+
+**What shipped.**
+
+- `TargetScanResult.unreadable_dirs` — the same files v0.452.0 counted, tallied by the directory they sit in,
+  **uncapped** (bounded by the number of directories, not the number of damaged files), because reconciling
+  disk against library needs an exact per-folder number rather than a sample.
+- New `webapp/unreadablesubs.py`: `folders_from_scan` re-keys those directories to the folder spelling
+  *relative to* `incoming/` that both `PlannedUnit.folder` and `Project.source_folders_under` already use —
+  so the reader joins the third number to the other two with no translation at all — plus the
+  encode/decode/remember/recall pair. **Only a whole-library scan may write it:** it re-tries every file, so
+  its answer is complete and simply replaces the last, which is also how a repaired or deleted file leaves
+  the record. A scoped "bring this one folder in" scan has looked at one folder and would report every other
+  one as clean; a test makes that guard load-bearing.
+- `FolderLag.n_unreadable` and `IncomingLagResponse.n_unreadable`, rolled up by the same prefix rule the
+  imported counts use, and **capped at the waiting count** — the record and the listing are two snapshots
+  taken at different moments.
+- `incomingLagUnreadable` (in `importWaiting.ts`, beside `incomingLagCause`, so one module owns what this
+  note says about causes). Nothing damaged → `null`, and the note is byte-for-byte what it was. Some damaged
+  → the headline stays (most of those files really are waiting) and one sentence is added. **All** damaged →
+  the note stops calling itself a delay: the title becomes *"6 subs in your incoming folder can't be read"*,
+  the "a scan is what picks these up" sentence stands aside, and the **Scan incoming now** button is replaced
+  by **Open Jobs**, where v0.452.0 names the files.
+- The folder lines carry the split (`2,259 of 2,572 not imported (3 unreadable)`) so the two numbers can be
+  seen against each other, and the dismissal signature carries it too — a note dismissed as "waiting" speaks
+  again once the same files turn out to be damage.
+
+**Still counted as waiting, deliberately.** A sub that is not in a picture is a sub that is not in a
+picture; these are *explained*, never subtracted. Going quiet about an unimported sub is the exact failure
+this endpoint exists to prevent, and it would be a worse bug than the one being fixed.
+
+**Upgrade-safe (§9):** two additive defaulted response fields, one new meta key in a table that already
+exists, one defaulted engine field. An older frontend ignores the fields; a newer frontend against an older
+backend, and any install that has not scanned since this shipped, sees `0` — which is what every healthy
+install reports anyway, and is pinned by a test.
+
+**Tests (+18, five red under a scratch revert — and a second revert proving the scoped-scan guard is
+load-bearing rather than decorative).** `tests/webapp/test_unreadable_subs_record.py` (new, 8): the folder
+keying including a nested `MyWorks/M 31_sub` and files loose in the root, a directory outside `incoming/`
+dropped rather than guessed at, two targets over one folder summed (the #878 double-registration reaching
+this side), the encode/decode round trip against six malformed shapes, the biggest-first cap, and the two
+scan shapes' different rights to overwrite. `tests/webapp/test_incoming_lag.py` (+4): all-damaged,
+part-damaged, a healthy library reporting zero in every field, and a repaired sub leaving the record on the
+next scan. Frontend (+9): the pure helper's five cases including the cap and the older-backend silence, and
+four render cases — the withdrawn button, the kept headline, an older backend reading exactly as before, and
+the dismissal speaking again when waiting turns out to be damage.
+
+## v0.452.0 — 2026-09-17 — a sub the app cannot read is finally said out loud
+
+*(Builder, branch `claude/sweet-babbage-10p2wj`. PRIORITY 3 (friendliness / trust). Verified from observer
+issue [#914](https://github.com/JimmyeJones/astrostack/issues/914) by reading the code and reproducing the
+silence in the test suite. Additive: one engine field, two optional summary keys, one self-hiding alert. No
+config, schema, on-disk, endpoint-shape or default change, and nothing under `incoming/` is touched.)*
+
+**The gap, and why it survived.** A raw sub whose FITS header will not parse never becomes a frame row. There
+is no row to look at in the Frames table, no `reject_reason` to bucket, no count anywhere — the file simply
+is not there, and *"not there"* is indistinguishable from *"you never shot it"*. The scanner has always known
+better: `ingest_files` yields an `IngestResult` with `error` set, `_ingest_into_target` turns that into
+`TargetScanResult.n_errors`, and that tally was rendered in exactly **one** place in the whole codebase —
+
+    seestack/gui/library_dialog.py:119
+        + (f", {tsr.n_errors} unreadable" if tsr.n_errors else "")
+
+— the legacy **desktop** dialog. `webapp/pipeline.py` built its scan summary from `scanned`,
+`device_pictures_skipped`, `skipped_folders` and the video list and never read `n_errors` at all. So on the
+container install this app actually ships as, an unreadable sub was dropped, retried on the next scan, failed
+again, and was silent again, for as long as the file sat there. The desktop build would have said *"3 new,
+1 unreadable"*; the web build said *"Imported 3 new frames."*
+
+The care is already in the code one layer down, which is what makes the omission worth fixing rather than
+worth arguing about: `ingest.py` deliberately classes a **zero-byte** file as a *skip* with a plain-language
+reason rather than an error, with a comment saying it must not *"inflate the scary N errors count a beginner
+sees"*. That judgement was being spent on a count nobody was shown.
+
+**Measured on the owner's library** (observer, 2026-09-17): six subs across five targets, on disk since May,
+in no `frames` table, every one failing with `No SIMPLE card found`. Each is **exactly** the median byte size
+of its own folder — a healthy sub's worth of bytes with no header in them — so neither the zero-byte skip nor
+any size check can see them; only parsing the header does. Sibling frames from the same five folders open
+cleanly, 15 of 15. Six of 60,566 frames is 0.010 %: the reporting gap is the finding, not the volume.
+
+**What shipped.**
+
+- `TargetScanResult.unreadable_examples` — the file *names* behind `n_errors`, basenames only, capped at
+  `UNREADABLE_EXAMPLES_PER_TARGET` (5). The count stays exact; the list stops, so a folder whose every file
+  is damaged cannot put thousands of strings into a job summary. A name is the difference between being sent
+  to a folder and being sent to a file.
+- `summary["unreadable"]` (the total) and `summary["unreadable_targets"]`
+  (`{target, safe, n, examples}` per target), set **only when non-zero** — the same treatment
+  `device_pictures_skipped`, `skipped_folders` and `video_folders` already get.
+- The Jobs page: the count joins the summary line where the desktop dialog always put it
+  (*"Imported 3 new frames · 2 subs couldn't be read."* — because *"Imported 3 new frames"* out of a folder of
+  five otherwise reads as a complete success), and a self-hiding yellow alert names the targets and the files,
+  links to each target, and says what to do: the usual cause is a copy that did not finish, copying it again
+  normally fixes it, and every scan re-tries so the note clears itself.
+
+**Reported, never acted on** — the same rule the neighbouring skips follow, and AGENTS.md §10's floor: the
+files are read and nothing else. Nothing under `incoming/` is deleted, moved, renamed or rewritten, which a
+test asserts by checking the damaged file's size is unchanged after the scan.
+
+**Upgrade-safe (§9):** two additive optional summary keys on an existing job result; an older frontend
+ignores them, and a newer frontend against an older backend simply says nothing (pinned). The engine field is
+a defaulted `list[str]`; the desktop dialog's line is untouched, so the two surfaces now agree instead of one
+of them being empty.
+
+**Tests (+10, six red under a scratch revert).** Engine (`tests/test_scanner.py`): a damaged sub is counted
+*and* named; the names cap while the count does not; a healthy folder names nothing. Webapp
+(`tests/webapp/test_pipeline.py`): the summary names the target, the count and the file, the good sub beside
+it still imports, and the file is untouched on disk; the report **renews itself on the next scan** (it is
+re-tried and re-fails, so it cannot scroll away once); a healthy scan carries neither key; and a **zero-byte**
+half-copied sub is *not* counted here — the distinction `ingest.py` makes on purpose, pinned now that there
+is a surface that would make it visible. Frontend (`Jobs.test.tsx`): the parser is silent on a healthy scan
+and on an empty/zero row, totals from the rows it kept rather than the backend's headline, drops junk rows,
+degrades on an older backend with no safe name or examples, and stops listing past six targets; the line
+helper names files, says "and more" when the sample is short of the count, and falls back to the bare count;
+and three render cases (named + linked, singular wording, silent on a clean scan).
+
+**The damaged files themselves need no handling** — skipping them is correct, and the issue says so. What was
+missing was the sentence.
+
 ## v0.451.1 — 2026-09-17 — the mosaic's price tag says it is pricing the whole grid, not what's left
 
 *(Builder, branch `claude/sweet-babbage-ivepzn`. PRIORITY 3 (friendliness / trust) on the mosaic frontier —

@@ -626,6 +626,80 @@ export function skippedFolders(r: Record<string, unknown>): SkippedFolder[] {
   });
 }
 
+/** One target's unreadable subs, as the scan reported them. */
+export type UnreadableSubs = {
+  /** The target's display name, for the sentence. */
+  target: string;
+  /** Its safe name, for the link; "" on an older backend that sent none. */
+  safe: string;
+  /** How many of its files could not be read. */
+  n: number;
+  /** A few of their file names — the scan caps this, so it is a sample of `n`,
+   *  never the whole list. Empty on an older backend. */
+  examples: string[];
+};
+
+/** How many targets the alert names before it stops listing them. A whole
+ *  archive of damaged files must read as one short block, not a wall. */
+const UNREADABLE_TARGETS_NAMED = 6;
+
+/** Subs the scan could not read at all (pure, tested).
+ *
+ * A file whose FITS header won't parse never becomes a frame row, so it leaves
+ * no trace in the library: nothing to look at in the Frames table, no reject
+ * reason, no count. The scanner has always tallied these, and until now the
+ * tally was rendered in exactly one place — the legacy desktop dialog — so on
+ * the container install this app actually ships as, an unreadable sub was
+ * dropped in silence, retried on the next scan, and dropped in silence again,
+ * forever. (Measured on the owner's library, 2026-09-17: six subs across five
+ * targets, on disk since May, in no `frames` table, none of them ever
+ * mentioned.)
+ *
+ * Returns null when the scan read everything — which is every healthy scan, so
+ * this says nothing at all on an ordinary night. Malformed entries are dropped
+ * rather than rendered as "undefined", and a total is recomputed from the rows
+ * so the headline can never disagree with the list under it.
+ */
+export function unreadableSubs(
+  r: Record<string, unknown>,
+): { total: number; targets: UnreadableSubs[]; named: UnreadableSubs[]; rest: number } | null {
+  const raw = Array.isArray(r.unreadable_targets) ? r.unreadable_targets : [];
+  const targets: UnreadableSubs[] = raw.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const e = entry as Record<string, unknown>;
+    const n = Number(e.n ?? 0) || 0;
+    if (n <= 0) return [];
+    const examples = Array.isArray(e.examples)
+      ? e.examples.filter((x): x is string => typeof x === "string" && !!x)
+      : [];
+    return [{
+      target: typeof e.target === "string" ? e.target : "",
+      safe: typeof e.safe === "string" ? e.safe : "",
+      n,
+      examples,
+    }];
+  });
+  if (!targets.length) return null;
+  const named = targets.slice(0, UNREADABLE_TARGETS_NAMED);
+  return {
+    total: targets.reduce((sum, t) => sum + t.n, 0),
+    targets,
+    named,
+    rest: targets.length - named.length,
+  };
+}
+
+/** One target's line inside the unreadable-subs alert (pure, tested). Names the
+ *  files when the backend sent any, because "2 files in M 101_sub" sends someone
+ *  to a folder while a file name sends them to the file. */
+export function unreadableSubsLine(t: UnreadableSubs): string {
+  const files = `${t.n} file${t.n === 1 ? "" : "s"}`;
+  if (!t.examples.length) return ` — ${files}`;
+  const shown = t.examples.join(", ");
+  const more = t.n > t.examples.length ? ", and more" : "";
+  return ` — ${files}: ${shown}${more}`;
+}
+
 /** How many video folders the line names before it just counts them. A whole
  *  archive dropped in at once has to read as one short sentence. */
 const VIDEO_FOLDERS_NAMED = 3;
@@ -867,6 +941,15 @@ export function pipelineSummary(r: Record<string, unknown>): {
   const clauses: string[] = [
     scanned > 0 ? `Imported ${scanned} new frame${scanned === 1 ? "" : "s"}` : "No new frames",
   ];
+  // Right after the import count, which is where the number belongs: "3 new, 1
+  // unreadable" is what the legacy desktop dialog has always said, and the
+  // reason a beginner needs it there is that "Imported 3 new frames" out of a
+  // folder of 4 otherwise reads as a complete success.
+  const unreadable = unreadableSubs(r);
+  if (unreadable) {
+    clauses.push(
+      `${unreadable.total} sub${unreadable.total === 1 ? "" : "s"} couldn't be read`);
+  }
   if (stacked > 0) clauses.push(`auto-stacked ${stacked} target${stacked === 1 ? "" : "s"}`);
   if (autoEdited > 0) {
     clauses.push(`finished ${autoEdited} into ${autoEdited === 1 ? "a picture" : "pictures"}`);
@@ -1011,6 +1094,7 @@ function JobResultActions({ job }: { job: Job }) {
     const skipped = skippedFolders(r);
     const videos = videoFoldersNote(r);
     const scoped = broughtFolderInNote(r);
+    const unreadable = unreadableSubs(r);
     return (
       <Stack gap={4} mt="xs">
         <Text size="sm">{line}</Text>
@@ -1057,6 +1141,52 @@ function JobResultActions({ job }: { job: Job }) {
               {"and any of your Seestar's own finished pictures inside it are "}
               {"left out. Nothing on your disk is renamed or moved."}
             </Text>
+          </Alert>
+        ) : null}
+        {/* Subs the scan couldn't open at all. These leave no frame row, so this
+            alert is the only place in the whole app they exist — everywhere
+            else, a damaged sub simply isn't there. Silent on every healthy scan;
+            it appears the moment one file can't be read, and goes away by
+            itself once the file is fixed or removed, because every scan
+            re-tries them. */}
+        {unreadable ? (
+          <Alert color="yellow" variant="light" p="xs"
+            title={unreadable.total === 1
+              ? "One of your subs couldn't be read"
+              : `${unreadable.total} of your subs couldn't be read`}>
+            <Text size="xs">
+              {unreadable.total === 1
+                ? "This file isn't readable as a picture file, so it was left out "
+                : "These files aren't readable as picture files, so they were left out "}
+              {"— nothing else was affected, and nothing on your disk was changed "}
+              {"or deleted. The usual cause is a copy that didn't finish. Copying "}
+              {unreadable.total === 1 ? "it " : "them "}
+              {"over again from your Seestar normally fixes it; if not, "}
+              {unreadable.total === 1 ? "the sub is " : "the subs are "}
+              {"damaged and safe to delete. Every scan tries again, so this note "}
+              {"disappears on its own once "}
+              {unreadable.total === 1 ? "it's " : "they're "}
+              {"sorted."}
+            </Text>
+            <Stack gap={0} mt={4}>
+              {unreadable.named.map((t) => (
+                <Text size="xs" key={t.safe || t.target}>
+                  {/* A target with unreadable subs may still have plenty of good
+                      ones, so the link is worth having; an older backend that
+                      sent no safe name still gets the name and the file list. */}
+                  {t.safe ? (
+                    <Anchor component={Link} to={`/targets/${t.safe}`}>
+                      {t.target || t.safe}
+                    </Anchor>
+                  ) : (t.target || "One target")}
+                  {unreadableSubsLine(t)}
+                </Text>
+              ))}
+              {unreadable.rest > 0 ? (
+                <Text size="xs" c="dimmed">{`…and ${unreadable.rest} more target`
+                  + `${unreadable.rest === 1 ? "" : "s"}.`}</Text>
+              ) : null}
+            </Stack>
           </Alert>
         ) : null}
         {held.length ? (

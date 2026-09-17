@@ -22,6 +22,8 @@
 #   scripts/agent-dogfood.sh --big           # ALSO a FULL-SIZE mosaic: the editor's preview is decimated
 #   scripts/agent-dogfood.sh --no-site       # leave the scratch install with no observing site
 #   scripts/agent-dogfood.sh --incoming-lag  # ALSO leave subs in incoming/ the library never imported
+#                                           #   (one of them damaged, and scanned, so the
+#                                           #    "these can't be read" note is reachable too)
 #
 # --no-site turns OFF something a normal pass now does by default. Every pass
 # before 2026-09-12 left the scratch install with no site at all: the bundled
@@ -131,6 +133,14 @@ DO_SITE=1; DO_LAG=0
 # small on purpose (this seeds a *state*, not a workload).
 DOGFOOD_LAG_SUBS="${DOGFOOD_LAG_SUBS:-7}"
 DOGFOOD_LAG_DAYS="${DOGFOOD_LAG_DAYS:-11}"
+# …and how many of the seeded files are ones the app CANNOT READ. A sub that
+# will not parse never becomes a frame row, so it waits for ever and the note has
+# to say so instead of offering a scan (v0.452.1). That branch is reachable only
+# by a file that is damaged AND a whole-library scan that has recorded it, so
+# seeding the file alone would leave the new sentence as unphotographable as the
+# empty `incoming/` this flag exists to fix. 0 skips the scan and gives the
+# pre-v0.452.1 shape exactly.
+DOGFOOD_LAG_DAMAGED="${DOGFOOD_LAG_DAMAGED:-1}"
 # Where the scratch install pretends to observe from. A round mid-northern
 # latitude: obviously synthetic, and the band most Seestar owners are in, so the
 # planner's answers are representative rather than polar or equatorial. It is
@@ -348,12 +358,66 @@ fi
 #     (`webapp.incominglag.LAG_MIN_AGE_S`). The quiet period is stretched for the
 #     same reason it is stretched nowhere else: the watcher would otherwise hand
 #     the batch off mid-pass and import the very state this is seeding.
+#
+#     One of the seeded files is deliberately UNREADABLE, and is scanned once
+#     before the rest land. A sub whose FITS header will not parse never becomes
+#     a frame row, so it waits for ever: the note stops being about a delay and
+#     says so instead of offering a scan (v0.452.1). Reaching that sentence needs
+#     BOTH a damaged file and a whole-library scan that has recorded it, so
+#     seeding the file alone would leave the new copy exactly as unphotographable
+#     as the empty `incoming/` this flag exists to fix. Scanning first is what
+#     leaves the folder MIXED — mostly waiting, partly damaged — which is the
+#     state a real install is in and the one where the two sentences have to sit
+#     beside each other and still read as one paragraph. `DOGFOOD_LAG_DAMAGED=0`
+#     gives the pre-v0.452.1 shape back.
 if [ "$DO_LAG" = 1 ]; then
   echo "-- seeding ${DOGFOOD_LAG_SUBS} sub(s) into incoming/ that the library has no row for"
   echo "   (a FAULT state, on purpose — --incoming-lag only; the default pass stays healthy)"
   curl -sf -X PUT "$BASE/api/settings" -H 'Content-Type: application/json' \
        -d '{"watch_poll_interval_s": 5, "watch_quiet_period_s": 900}' >/dev/null \
     || echo "warn: could not retune the watcher — it may import the seeded subs mid-pass"
+  # The damaged sub goes in FIRST and is scanned, because the "these can't be
+  # read" branch needs both halves: a file that will not parse, and a
+  # whole-library scan that has recorded it (only a whole-library scan may write
+  # that record — see webapp/unreadablesubs.py). Doing it before the good subs
+  # land is what leaves the folder in the MIXED state, which is the one a real
+  # install is in: mostly waiting, partly damaged.
+  if [ "$DOGFOOD_LAG_DAMAGED" -gt 0 ] 2>/dev/null; then
+    INCOMING="$DATA/incoming/IC 360_sub" python - "$DOGFOOD_LAG_DAMAGED" "$DOGFOOD_LAG_DAYS" <<'PY'
+import os, pathlib, sys, time
+
+n, days = int(sys.argv[1]), float(sys.argv[2])
+d = pathlib.Path(os.environ["INCOMING"])
+d.mkdir(parents=True, exist_ok=True)
+when = time.time() - days * 86400
+for i in range(n):
+    # The shape the owner's six damaged subs really have: a healthy sub's worth
+    # of bytes with no SIMPLE card in them, so neither the zero-byte
+    # "still copying" skip nor any size check can see it — only parsing can.
+    p = d / f"damaged_{i:03d}.fit"
+    p.write_bytes(b"\x00" * 4_152_960)
+    os.utime(p, (when, when))
+print(f"   wrote {n} UNREADABLE sub(s) into {d} — a file with no FITS header")
+PY
+    # One whole-library scan, so the app actually opens them and writes down what
+    # it found. Bounded and fail-soft: a pass that could not scan should say so
+    # and carry on, not die on a side note.
+    LAG_JOB="$(curl -sf -X POST "$BASE/api/scan" -H 'Content-Type: application/json' \
+                 -d '{}' | python -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' \
+               2>/dev/null || true)"
+    if [ -n "$LAG_JOB" ]; then
+      for _ in $(seq 1 60); do
+        LAG_STATE="$(curl -sf "$BASE/api/jobs/$LAG_JOB" \
+                     | python -c 'import json,sys; print(json.load(sys.stdin).get("state",""))' \
+                     2>/dev/null || true)"
+        case "$LAG_STATE" in done|error|cancelled|interrupted) break ;; esac
+        sleep 2
+      done
+      echo "   scanned them once so the app has read them (job $LAG_STATE)"
+    else
+      echo "   warn: could not start the scan — the damaged subs will read as merely waiting"
+    fi
+  fi
   INCOMING="$DATA/incoming/IC 360_sub" python - "$DOGFOOD_LAG_SUBS" "$DOGFOOD_LAG_DAYS" <<'PY'
 import os, pathlib, sys, time
 from webapp.sample_data import _write_sample_fits
@@ -384,6 +448,11 @@ print("   [incoming-lag] %d sub(s) waiting across %d folder(s): %s"
       % (d.get("n_waiting", 0), d.get("n_folders", 0),
          ", ".join("%s +%d" % (i.get("folder") or "(loose)", i.get("n_waiting", 0))
                    for i in d.get("items", [])) or "none"))
+# Of those, the ones nothing can ever import. A seeded damaged file that reads as
+# 0 here means the record was not written, and the note is back to offering a
+# scan that cannot help — which is the whole thing this seeding exists to show.
+print("   [incoming-lag] %d of them cannot be read at all"
+      % d.get("n_unreadable", 0))
 ' 2>/dev/null || echo "   [incoming-lag] could not read /api/incoming-lag"
 fi
 

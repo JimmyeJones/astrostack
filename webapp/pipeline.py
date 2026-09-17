@@ -168,6 +168,28 @@ def _is_same_dir(a: Path, b: Path) -> bool:
         return False
 
 
+def _remember_unreadable_subs(
+    lib: Library, scan: ScanResult, settings: Settings
+) -> None:
+    """Write this scan's unreadable files into the registry, by folder.
+
+    The Dashboard's lag note is handed the watcher's listing and may not open a
+    single file under ``incoming/`` (AGENTS.md §10), so it has no way of its own
+    to tell "not imported yet" from "cannot ever be imported". The scan has just
+    opened every one of them, so the scan says.
+
+    Best-effort by construction, exactly like :func:`_remember_scan_skips`: a
+    scan that ingested the owner's frames must never be reported as failed
+    because a note about it could not be written."""
+    from webapp.unreadablesubs import folders_from_scan, remember_unreadable
+
+    try:
+        remember_unreadable(
+            lib, folders_from_scan(scan, str(settings.resolved_incoming_dir)))
+    except Exception:  # noqa: BLE001 — never fail a scan over a side note
+        log.warning("could not remember this scan's unreadable files", exc_info=True)
+
+
 def _remember_scan_skips(
     lib: Library, scan: ScanResult, *, single_target: bool
 ) -> None:
@@ -266,6 +288,41 @@ def _pipeline_body(
                     with contextlib.suppress(OSError):
                         invalidate_frame_thumbs(lib.targets_dir / t.safe_name, fid)
             summary["scanned"] = scan.total_added
+            # Subs the scan could not read at all — a file whose FITS header
+            # won't parse yields no frame row, so it leaves no trace anywhere in
+            # the library: no row, no reject reason, no count. The scanner has
+            # always tallied them (``TargetScanResult.n_errors``) and the legacy
+            # desktop dialog has always printed the tally; on a container install
+            # — which is how this app is actually run — nothing read it, so an
+            # unreadable sub was dropped, retried on the next scan, dropped
+            # again, and never mentioned. Reported here, never acted on, exactly
+            # like the skipped folders and the video captures below: the files
+            # themselves are left alone (AGENTS.md §10) and are re-tried every
+            # scan, so the report renews itself for as long as the problem lasts
+            # and goes quiet the moment it is fixed.
+            #
+            # Deliberately *not* folded into the QC/solve error counters below:
+            # those are target-level failures ("this target couldn't finish"),
+            # and a beginner reading "1 couldn't finish" about a whole target
+            # learns nothing about one damaged file among 4,000 good ones.
+            unreadable = [
+                {"target": t.target_name, "safe": t.safe_name, "n": t.n_errors,
+                 "examples": list(t.unreadable_examples)}
+                for t in scan.targets if t.n_errors > 0
+            ]
+            if unreadable:
+                summary["unreadable"] = sum(int(u["n"]) for u in unreadable)
+                summary["unreadable_targets"] = unreadable
+            # …and remembered, for the same reason the skipped folders below are.
+            # The Dashboard's "some of your subs never made it into your library"
+            # note compares files on disk with frame rows, and a file that cannot
+            # be read is missing a row *permanently* — so without this it reads
+            # as forever-waiting and offers a scan that can never help. Only a
+            # whole-library scan may write the record: it re-tries every file, so
+            # its answer is complete, where a scoped scan has only looked at one
+            # folder. See ``webapp/unreadablesubs.py``.
+            if not single_target:
+                _remember_unreadable_subs(lib, scan, settings)
             # Folders the Seestar convention passed over as "the device's own
             # finished picture" that hold files its naming can't vouch for — i.e.
             # possibly a user's own raw subs sitting in a plainly-named folder

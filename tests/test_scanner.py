@@ -14,6 +14,7 @@ from seestack.io.ingest import find_fits_files
 from seestack.io.library import Library
 from seestack.io.project import REJECT_REASON_SEESTAR_OUTPUT, FrameRow, Project
 from seestack.io.scanner import (
+    UNREADABLE_EXAMPLES_PER_TARGET,
     ScanResult,
     SkippedOutputFolder,
     _apply_seestar_convention,
@@ -1891,3 +1892,68 @@ def test_the_sibling_retry_follows_the_use_solve_hints_setting(tmp_path, monkeyp
         assert all(c[1] is None for c in calls)  # blind, as asked
     finally:
         proj.close()
+
+
+# --- Unreadable subs are counted AND named, within a bound --------------------
+
+def _unreadable(path: Path, n_bytes: int = 4096) -> None:
+    """A non-empty file with no FITS header — the shape of the owner's damaged
+    subs (right byte count, no ``SIMPLE`` card), which is what makes them an
+    ingest *error* rather than the zero-byte "still copying" skip."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x00" * n_bytes)
+
+
+def test_an_unreadable_sub_is_counted_and_named(tmp_path):
+    src = tmp_path / "incoming" / "M 101_sub"
+    src.mkdir(parents=True)
+    write_seestar_fits(src / "Light_0001.fit", n_stars=10, seed=1)
+    _unreadable(src / "Light_0002.fit")
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, tmp_path / "incoming")
+        [tsr] = [t for t in result.targets if t.safe_name == "M_101"]
+        assert tsr.n_frames_added == 1
+        assert tsr.n_errors == 1
+        # The count was always here; the names are what lets a caller say which
+        # file to go and look at.
+        assert tsr.unreadable_examples == ["Light_0002.fit"]
+    finally:
+        lib.close()
+
+
+def test_the_unreadable_file_names_are_capped_but_the_count_is_not(tmp_path):
+    """A folder whose every file is damaged must not put thousands of strings
+    into a job summary — the count stays exact, the list stops."""
+    n_bad = UNREADABLE_EXAMPLES_PER_TARGET + 3
+    src = tmp_path / "incoming" / "M 81_sub"
+    src.mkdir(parents=True)
+    write_seestar_fits(src / "Light_0000.fit", n_stars=10, seed=2)
+    for i in range(n_bad):
+        _unreadable(src / f"Light_{i + 1:04d}.fit")
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, tmp_path / "incoming")
+        [tsr] = [t for t in result.targets if t.safe_name == "M_81"]
+        assert tsr.n_errors == n_bad
+        assert len(tsr.unreadable_examples) == UNREADABLE_EXAMPLES_PER_TARGET
+        # Basenames, never the full path: the log already has the path, and a
+        # name is what someone looks for on their own disk.
+        assert all("/" not in name for name in tsr.unreadable_examples)
+    finally:
+        lib.close()
+
+
+def test_a_healthy_folder_names_nothing(tmp_path):
+    src = tmp_path / "incoming" / "M 42_sub"
+    src.mkdir(parents=True)
+    for i in range(2):
+        write_seestar_fits(src / f"Light_{i:04d}.fit", n_stars=10, seed=10 + i)
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, tmp_path / "incoming")
+        [tsr] = [t for t in result.targets if t.safe_name == "M_42"]
+        assert tsr.n_errors == 0
+        assert tsr.unreadable_examples == []
+    finally:
+        lib.close()

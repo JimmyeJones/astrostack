@@ -199,3 +199,110 @@ def test_the_endpoint_and_the_plan_answer_from_the_same_listing(
         incoming, {str(p): p.stat().st_mtime for p in find_fits_files(incoming)})
     assert sorted((u.folder, u.n_files) for u in units) == \
         sorted((u.folder, u.n_files) for u in direct)
+
+
+# --- A file that cannot be read is not "waiting" ------------------------------
+#
+# This endpoint compares files on disk with frame rows, which is the right
+# question and is blind to *why* a row is missing. A damaged or headerless FITS
+# has no row **permanently**, so it counts as waiting forever and the Dashboard
+# note has been saying "haven't been imported yet" over a **Scan incoming now**
+# button that can never import it — on the owner's own library, about six files,
+# since May. The scan is the only thing that opens these files, so the scan
+# writes down what it found (``webapp/unreadablesubs.py``) and this reads it.
+
+def _drop_unreadable(root: Path, folder: str, name: str) -> Path:
+    """A non-empty file with no FITS header, the shape the owner's damaged subs
+    have (right byte count, no ``SIMPLE`` card)."""
+    d = root / "incoming" / folder
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / name
+    p.write_bytes(b"\x00" * 8192)
+    return p
+
+
+def _scan(client) -> None:
+    """A whole-library scan — the only thing that may write the record."""
+    r = client.post("/api/scan", json={})
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+    end = time.monotonic() + 120
+    while time.monotonic() < end:
+        body = client.get(f"/api/jobs/{job_id}").json()
+        if body["state"] in ("done", "error", "cancelled", "interrupted"):
+            assert body["state"] == "done", body
+            return
+        time.sleep(0.1)
+    raise AssertionError("scan did not finish")
+
+
+def test_a_damaged_sub_is_reported_as_unreadable_not_merely_waiting(
+        built_library, client):
+    """Every waiting file in the folder is one nothing can import."""
+    _drop_unreadable(built_library, "IC 360_sub", "frame_000.fit")
+    _scan(client)
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+
+    body = client.get("/api/incoming-lag").json()
+    assert body["n_waiting"] == 1
+    # The fact the note needs to stop offering a scan it cannot deliver on.
+    assert body["n_unreadable"] == 1
+    (item,) = body["items"]
+    assert item["folder"] == "IC 360_sub"
+    assert (item["n_waiting"], item["n_unreadable"]) == (1, 1)
+
+
+def test_a_folder_that_is_part_damaged_reports_both_numbers(built_library, client):
+    """The mixed case, where the headline really is a delay and only some of it
+    is damage — the note keeps its title and gains a sentence."""
+    from tests.synth import write_seestar_fits
+
+    _drop_unreadable(built_library, "IC 360_sub", "frame_000.fit")
+    _scan(client)
+    # Two good subs arriving *after* the scan: never imported, genuinely waiting.
+    d = built_library / "incoming" / "IC 360_sub"
+    for i in (1, 2):
+        write_seestar_fits(d / f"frame_{i:03d}.fit", width=48, height=32,
+                           n_stars=3, seed=300 + i)
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+
+    body = client.get("/api/incoming-lag").json()
+    assert body["n_waiting"] == 3
+    assert body["n_unreadable"] == 1
+    (item,) = body["items"]
+    assert (item["n_waiting"], item["n_unreadable"]) == (3, 1)
+
+
+def test_a_healthy_library_reports_no_unreadable_files(built_library, client):
+    """The silence guard: the ordinary answer is unchanged in every field."""
+    _scan(client)
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+
+    body = client.get("/api/incoming-lag").json()
+    assert body["checked"] is True
+    assert (body["n_waiting"], body["n_unreadable"]) == (0, 0)
+
+
+def test_a_repaired_sub_leaves_the_record_on_the_next_scan(built_library, client):
+    """The record is replaced by each whole-library scan rather than merged, so a
+    file that has been fixed or deleted stops being called unreadable."""
+    bad = _drop_unreadable(built_library, "IC 360_sub", "frame_000.fit")
+    _scan(client)
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+    assert client.get("/api/incoming-lag").json()["n_unreadable"] == 1
+
+    # The owner re-copies the sub; now it reads, and the scan imports it.
+    from tests.synth import write_seestar_fits
+    bad.unlink()
+    write_seestar_fits(bad, width=48, height=32, n_stars=3, seed=400)
+    _scan(client)
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+
+    body = client.get("/api/incoming-lag").json()
+    assert body["n_unreadable"] == 0
+    assert body["n_waiting"] == 0

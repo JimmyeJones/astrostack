@@ -39,6 +39,17 @@ per target off an existing index.
   registered under two targets (the mosaic double-registration of issue #878)
   can only ever make the waiting count *smaller*, never larger.
 
+**And one thing it must never do is under-report: go quiet.** A file this app
+has opened and *cannot read* is missing a frame row permanently — no scan will
+ever import it — so a note that says "haven't been imported yet" and offers a
+scan is promising a fix that will never arrive, which on the owner's library it
+has been doing since May about six files. Those files are still counted as
+waiting, because a sub that is not in a picture is a sub that is not in a
+picture; they are carried separately as :attr:`FolderLag.n_unreadable` so the
+note can *explain* them instead of pretending they are on their way. The fact
+comes from the scan, which opened them, and is remembered in
+:mod:`webapp.unreadablesubs` — nothing here opens anything.
+
 Pure: mappings in, dataclasses out, the clock passed in. No request, no library,
 no filesystem.
 """
@@ -85,6 +96,11 @@ class FolderLag:
     n_imported: int
     #: ``n_on_disk - n_imported``, floored at zero.
     n_waiting: int
+    #: How many of those waiting files the last whole-library scan **opened and
+    #: could not read** — a damaged or headerless FITS, which no scan can ever
+    #: import. Zero on every healthy folder, and zero when nothing has been
+    #: remembered yet, so the note reads exactly as it did before.
+    n_unreadable: int
     #: When the folder last changed, ISO-8601 UTC — i.e. how long these have
     #: been sitting there. Empty when the listing carried no usable mtime.
     newest_utc: str
@@ -92,8 +108,12 @@ class FolderLag:
     still_hours: float
 
 
-def _rollup(imported: Mapping[str, int], folder: str) -> int:
-    """Registered frames belonging to unit ``folder``.
+def _rollup(counts: Mapping[str, int], folder: str) -> int:
+    """Files belonging to unit ``folder``, out of a per-folder tally.
+
+    Used for both tallies this module joins against a unit — the registered
+    frames and the files a scan could not read — because both are keyed the same
+    way, by the *whole* relative directory.
 
     A unit folder is scanned recursively, so a frame at
     ``M 42_sub/night2/x.fit`` belongs to the ``M 42_sub`` unit and is reported by
@@ -104,9 +124,9 @@ def _rollup(imported: Mapping[str, int], folder: str) -> int:
     make the one unit that cannot be nested swallow all the others.
     """
     if not folder:
-        return int(imported.get("", 0))
+        return int(counts.get("", 0))
     prefix = folder + os.sep
-    return sum(int(n) for key, n in imported.items()
+    return sum(int(n) for key, n in counts.items()
                if key == folder or key.startswith(prefix))
 
 
@@ -116,6 +136,7 @@ def incoming_lag(
     now_epoch: float,
     *,
     min_age_s: float = LAG_MIN_AGE_S,
+    unreadable: Mapping[str, int] | None = None,
 ) -> list[FolderLag]:
     """Folders whose files a scan would ingest but the library has no row for,
     most-waiting first.
@@ -124,13 +145,29 @@ def incoming_lag(
     watcher's listing; ``imported`` maps a folder (as
     ``Project.source_folders_under`` spells it) to how many registered frames sit
     in it, summed across every target.
+
+    ``unreadable`` maps a folder the same way to how many of its files the last
+    whole-library scan **opened and could not read**
+    (:mod:`webapp.unreadablesubs`). Those files are waiting for nothing: no scan
+    will ever import them, so a note built on this has to be able to say so
+    rather than offer a scan. They are still counted as waiting — a file the
+    library has no row for is a file the library has no row for — and are only
+    *explained*, because the one thing this module must never do is go quiet
+    about a sub that is not in a picture. Omitted (an install that has not
+    scanned since this existed) reads as zero everywhere, which is the previous
+    behaviour exactly.
     """
+    unreadable = unreadable or {}
     out: list[FolderLag] = []
     for unit in planned:
         n_imported = _rollup(imported, unit.folder)
         waiting = unit.n_files - n_imported
         if waiting <= 0:
             continue
+        # Capped at the waiting count: the record and the listing are two
+        # snapshots taken at different moments, and a folder whose damaged files
+        # have since been deleted must not report more unreadable than waiting.
+        n_unreadable = min(_rollup(unreadable, unit.folder), waiting)
         # A folder that is still growing is not behind — it is being written.
         # An unknown mtime (0.0) is treated as "not old enough to judge" for the
         # same reason: silence is the safe answer when the evidence is missing.
@@ -143,6 +180,7 @@ def incoming_lag(
             n_on_disk=unit.n_files,
             n_imported=n_imported,
             n_waiting=waiting,
+            n_unreadable=n_unreadable,
             newest_utc=datetime.fromtimestamp(unit.newest_mtime, UTC)
             .replace(microsecond=0).isoformat(),
             still_hours=round(still_s / 3600.0, 1),

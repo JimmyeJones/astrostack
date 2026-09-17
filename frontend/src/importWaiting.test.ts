@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ImportWaiting } from "./api/client";
 import {
-  importIsWaiting, importWaitingNote, incomingLagCause, waitedFor,
+  importIsWaiting, importWaitingNote, incomingLagCause, incomingLagUnreadable,
+  waitedFor,
 } from "./importWaiting";
 
 const label = (kind: string) =>
@@ -136,5 +137,55 @@ describe("incomingLagCause", () => {
       // And never claims a wait it cannot see.
       expect(c.sentence).not.toContain("already queued");
     }
+  });
+});
+
+describe("incomingLagUnreadable", () => {
+  it("says nothing at all when nothing is damaged", () => {
+    expect(incomingLagUnreadable(2259, 0)).toBeNull();
+    // An older backend sends no count, and a negative or junk one is not a
+    // finding either — all three read as the previous behaviour exactly.
+    expect(incomingLagUnreadable(2259, undefined)).toBeNull();
+    expect(incomingLagUnreadable(2259, null)).toBeNull();
+    expect(incomingLagUnreadable(2259, -4)).toBeNull();
+  });
+
+  it("drops the delay framing when every waiting file is damaged", () => {
+    const got = incomingLagUnreadable(6, 6);
+    expect(got).not.toBeNull();
+    expect(got!.all).toBe(true);
+    expect(got!.title).toBe("6 subs in your incoming folder can't be read");
+    expect(got!.sentence).toContain("a scan won't help");
+    expect(got!.sentence).toContain("copying them over again");
+    // The reassurance the cause sentence would have carried, which stands aside
+    // on this branch — so it is said here exactly once.
+    expect(got!.sentence).toContain("never changes anything in that folder");
+  });
+
+  it("keeps the delay headline when only some are damaged", () => {
+    const got = incomingLagUnreadable(2259, 3);
+    expect(got!.all).toBe(false);
+    // Null title = the caller's own headline stands, because most of these
+    // really are waiting.
+    expect(got!.title).toBeNull();
+    expect(got!.sentence).toMatch(/^3 of these can't be read at all/);
+    // The board has room for two notes; the reassurance directly above this one
+    // already says AstroStack never writes to that folder, so this must not.
+    expect(got!.sentence).not.toContain("never changes anything in that folder");
+  });
+
+  it("uses singular wording for one damaged file", () => {
+    const got = incomingLagUnreadable(1, 1);
+    expect(got!.title).toBe("A sub in your incoming folder can't be read");
+    expect(got!.sentence).toContain("copying it over again");
+  });
+
+  it("can never claim more damaged files than are waiting", () => {
+    // The record and the listing are two snapshots taken at different moments,
+    // so a folder whose damaged files have since been deleted must not report
+    // more unreadable than waiting — and must still read as "all".
+    const got = incomingLagUnreadable(2, 9);
+    expect(got!.all).toBe(true);
+    expect(got!.title).toBe("2 subs in your incoming folder can't be read");
   });
 });
