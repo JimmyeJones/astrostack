@@ -10,7 +10,7 @@ import {
   IconTargetArrow, IconWand, IconX,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
@@ -71,6 +71,9 @@ import { fieldsOfSkyLabel } from "../components/target/perPixel";
 import { softerThanUsual } from "../components/target/softStars";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { SavePictureMenu } from "../components/SavePictureMenu";
+import {
+  FRAME_WINDOW_STEP, frameWindowForIndex, frameWindowNote, growFrameWindow,
+} from "../frameWindow";
 
 // Re-exported for existing tests that import it from this route module.
 export { describeObject };
@@ -369,6 +372,12 @@ export function TargetView() {
   const [selected, setSelected] = useState<number | null>(null);
   const [bayer, setBayer] = useState<string | undefined>(undefined);
   const [rejectMetric, setRejectMetric] = useState("fwhm_px");
+  // How many frame rows are actually in the DOM. The list itself is always
+  // complete — every badge and outlier test below is computed over all of it —
+  // but a row costs ~22 nodes, and this owner has targets of 5,477 and 35,894
+  // subs. See `../frameWindow` for the measurements and why nothing is removed.
+  const [shown, setShown] = useState(FRAME_WINDOW_STEP);
+  const growSentinel = useRef<HTMLTableRowElement | null>(null);
   const [rejectPct, setRejectPct] = useState(10);
   // Inline editor for the "Is it enough yet?" integration goal (hours).
   const [editingGoal, setEditingGoal] = useState(false);
@@ -719,6 +728,14 @@ export function TargetView() {
   );
 
   const list = frames.data ?? [];
+  // The rows. A re-sort or a different target starts the window at the top
+  // again: the head of the list is what the window means, and carrying a grown
+  // window across a sort change would render 900 rows of a list nobody has
+  // scrolled. `list.length` is deliberately NOT a dependency — the window must
+  // survive a background refetch (accepting a frame invalidates this query).
+  useEffect(() => { setShown(FRAME_WINDOW_STEP); }, [safe, sort, order]);
+  const visible = useMemo(() => list.slice(0, shown), [list, shown]);
+  const windowNote = frameWindowNote(visible.length, list.length);
   // Accepted frames still carrying a streak flag (satellite/plane trail). With
   // "keep streaked frames" on, QC flags rather than rejects these, so per-pixel
   // rejection can clean the trail while keeping the frame's good signal.
@@ -860,8 +877,14 @@ export function TargetView() {
         case "ArrowDown":
         case "j": {
           e.preventDefault();
-          const next = list[Math.min((idx < 0 ? -1 : idx) + 1, list.length - 1)];
-          if (next) setSelected(next.id);
+          const nextIdx = Math.min((idx < 0 ? -1 : idx) + 1, list.length - 1);
+          const next = list[nextIdx];
+          // Walking off the end of the rendered window grows it, so the
+          // selection always has a row (see `frameWindowForIndex`).
+          if (next) {
+            setShown((s) => frameWindowForIndex(s, nextIdx));
+            setSelected(next.id);
+          }
           break;
         }
         case "ArrowUp":
@@ -883,6 +906,26 @@ export function TargetView() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [list, selectedFrame, patch]);
+
+  // Grow the rendered window when its foot scrolls into view, so scrolling the
+  // frames table feels exactly as it did when every row was rendered. `root` is
+  // left null on purpose: intersection is computed against the *viewport*
+  // clipped by every scrolling ancestor, which is precisely the question here
+  // (the foot is inside a `mah="65vh"` scroll container), and it needs no handle
+  // on Mantine's ScrollArea internals. `rootMargin` grows a screen early so the
+  // rows are there before the reader arrives. A browser with no
+  // `IntersectionObserver` simply keeps the button, which reaches every row.
+  useEffect(() => {
+    const node = growSentinel.current;
+    if (!node || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((en) => en.isIntersecting)) {
+        setShown((s) => growFrameWindow(s, list.length));
+      }
+    }, { rootMargin: "600px" });
+    io.observe(node);
+    return () => io.disconnect();
+  }, [list.length, shown]);
 
   const setSortCol = (key: SortKey) => {
     if (sort === key) setOrder(order === "asc" ? "desc" : "asc");
@@ -1652,8 +1695,8 @@ export function TargetView() {
                     <Table.Th w={50}>OK</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
-                <Table.Tbody>
-                  {list.map((f: Frame) => (
+                <Table.Tbody data-testid="frames-table-body">
+                  {visible.map((f: Frame) => (
                     <Table.Tr
                       key={f.id}
                       onClick={() => setSelected(f.id)}
@@ -1714,6 +1757,26 @@ export function TargetView() {
                       </Table.Td>
                     </Table.Tr>
                   ))}
+                  {/* The window's foot. Scrolling here grows it (the observer
+                      below), so the table behaves exactly as if every row had
+                      always been rendered; the button is the guaranteed path for
+                      a browser without `IntersectionObserver` and for anyone who
+                      would rather not scroll. Nothing is unreachable either way
+                      — and the sorting above is server-side, so the worst subs
+                      are a heading-tap away rather than at the bottom. */}
+                  {windowNote ? (
+                    <Table.Tr ref={growSentinel} data-testid="frame-window-foot">
+                      <Table.Td colSpan={cols.length + 2}>
+                        <Group gap="xs" justify="center">
+                          <Text size="xs" c="dimmed">{windowNote}</Text>
+                          <Button size="compact-xs" variant="subtle"
+                            onClick={() => setShown(list.length)}>
+                            Show all {list.length.toLocaleString()}
+                          </Button>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ) : null}
                 </Table.Tbody>
               </Table>
             </Table.ScrollContainer>
